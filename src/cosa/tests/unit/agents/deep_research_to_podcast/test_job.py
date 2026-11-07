@@ -275,11 +275,11 @@ class TestExecute:
                 _run( job._execute() )
 
     def test_dry_run_routes_to_dry_run_helper( self ):
-        # dry_run=True must short-circuit to _execute_dry_run before any agent build.
+        # dry_run=True must short-circuit to _run_chained_dry_run before any agent build.
         job   = _job( dry_run=True )
         graph = _ExecGraph( self._completed_result() )
         with graph.patcher(), patch.object(
-            job, "_execute_dry_run", AsyncMock( return_value="DRY" )
+            job, "_run_chained_dry_run", AsyncMock( return_value="DRY" )
         ) as dry:
             out = _run( job._execute() )
         assert out == "DRY"
@@ -313,7 +313,7 @@ class TestExecuteDryRun:
         job = _job( debug=True )
         voice_io, cosa_interface = self._voice_and_iface()
         with patch( "asyncio.sleep", AsyncMock() ) as slp:
-            out = _run( job._execute_dry_run( voice_io, cosa_interface ) )
+            out = _run( job._run_chained_dry_run( voice_io, cosa_interface ) )
 
         assert out == "Dry run complete. Research and podcast simulation finished."
         assert voice_io.notify.await_count == 11             # 10 breadcrumbs + completion
@@ -336,7 +336,7 @@ class TestExecuteDryRun:
         job = _job( debug=False )
         voice_io, cosa_interface = self._voice_and_iface()
         with patch( "asyncio.sleep", AsyncMock() ):
-            _run( job._execute_dry_run( voice_io, cosa_interface ) )
+            _run( job._run_chained_dry_run( voice_io, cosa_interface ) )
         assert "DRY RUN MODE" not in capsys.readouterr().out
 
 
@@ -395,6 +395,25 @@ class TestRealPathCompletionAbstract:
         completion = [ c for c in graph.voice_io.notify.await_args_list if c.kwargs.get( "abstract" ) ]
         assert len( completion ) == 1
         assert completion[ 0 ].kwargs[ "abstract" ] == abstract
+
+    def test_real_path_names_skipped_topics_in_card_and_speech( self ):
+        """Skipped research topics appear in the card and the spoken completion names how many."""
+        result = ChainedResult(
+            research_path = "/proj/io/dr/r.md",
+            audio_path    = "/proj/io/pod/a.mp3",
+            script_path   = "/proj/io/pod/a.md",
+            total_cost    = 0.5,
+            state         = PipelineState.COMPLETED,
+            dr_artifacts  = { "skipped_topics" : [ { "topic" : "alpha" }, { "topic" : "beta" } ] },
+        )
+        job   = _job()
+        graph = _ExecGraph( result )
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        assert "**Skipped topics (2)**: alpha; beta" in job.artifacts[ "abstract" ]
+        completion = [ c for c in graph.voice_io.notify.await_args_list if c.kwargs.get( "abstract" ) ]
+        assert completion[ 0 ].args[ 0 ].endswith( " 2 topics were skipped; see the card." )
 
     def test_real_path_single_language_fallback( self ):
         """No per-language maps → fall back to the single primary audio/script path."""

@@ -275,18 +275,17 @@ class PresentationGeneratorJob( AgenticJobBase ):
               string) as "not provided" and is not copied, because the prompt
               builders would otherwise inject a bogus "Additional audience context: none" line
         """
-        if self.target_duration_minutes is not None:
-            config.target_duration_minutes = self.target_duration_minutes
-        if self.target_slide_count is not None:
-            config.target_slide_count = self.target_slide_count
-        if self.audience is not None:
-            config.audience = self.audience
-        if self.theme is not None:
-            config.default_theme = self.theme
-        if self.content_model is not None:
-            config.content_model = self.content_model
-        if self.audience_context is not None and self.audience_context.strip().lower() not in ( "", "none" ):
-            config.audience_context = self.audience_context
+        from cosa.agents.presentation_generator.config import apply_job_overrides
+
+        apply_job_overrides(
+            config,
+            target_duration_minutes = self.target_duration_minutes,
+            target_slide_count      = self.target_slide_count,
+            audience                = self.audience,
+            theme                   = self.theme,
+            content_model           = self.content_model,
+            audience_context        = self.audience_context,
+        )
 
     async def _execute( self ) -> str:
         """

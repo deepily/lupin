@@ -23,10 +23,11 @@ from datetime import datetime
 from typing import Optional, List
 
 from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
+from cosa.agents.chained_pipeline_state import ChainedDeepResearchAgent
 from .state import ChainedResult, PipelineState
 
 
-class DeepResearchToPresentationAgent:
+class DeepResearchToPresentationAgent( ChainedDeepResearchAgent ):
     """
     Orchestrates a chained workflow: Deep Research → Presentation Generation.
 
@@ -51,6 +52,8 @@ class DeepResearchToPresentationAgent:
         print( f"Research: {result.research_path}" )
         print( f"Presentation: {result.marp_path}" )
     """
+
+    PIPELINE_STATE = PipelineState
 
     def __init__(
         self,
@@ -249,156 +252,6 @@ class DeepResearchToPresentationAgent:
 
             return self._finalize_result()
 
-    async def _run_deep_research( self ) -> dict:
-        """
-        Execute Deep Research and return results.
-
-        Returns:
-            dict with keys: report_path, abstract, cost, artifacts, cancelled
-        """
-        self.result.state = PipelineState.RUNNING_DEEP_RESEARCH
-
-        # Re-establish DR voice_io binding before DR phase
-        from cosa.agents.deep_research import voice_io as dr_voice_io
-        from cosa.agents.deep_research import cosa_interface as dr_cosa_interface
-        dr_voice_io.reconfigure()
-        dr_cosa_interface.TARGET_USER = self.user_email
-        set_dispatch_context( target_user=self.user_email )
-
-        # Import Deep Research components
-        from cosa.agents.deep_research.config import ResearchConfig
-        from cosa.agents.deep_research.cost_tracker import CostTracker, BudgetExceededError
-        from cosa.agents.deep_research.seed_context import query_with_seed_context
-        from cosa.agents.deep_research.cli import (
-            run_research,
-            generate_abstract_for_cli,
-            save_report_with_frontmatter,
-        )
-        from cosa.config.configuration_manager import ConfigurationManager
-        from cosa.memory.gister import Gister
-        import cosa.utils.util as cu
-
-        # Initialize configuration
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-
-        # Get storage configuration
-        storage_backend = config_mgr.get( "deep research storage backend", default="local" )
-        gcs_bucket = config_mgr.get( "deep research gcs bucket", default=None )
-        output_dir = config_mgr.get( "deep research output directory", default="/io/deep-research" )
-
-        # Build full output path
-        if not output_dir.startswith( "/" ):
-            output_dir = cu.get_project_root() + "/" + output_dir
-        elif not output_dir.startswith( cu.get_project_root() ):
-            output_dir = cu.get_project_root() + output_dir
-
-        # Generate session_name from query using Gister
-        gister = Gister( debug=self.debug )
-        session_name = gister.get_gist(
-            self.query,
-            prompt_key="prompt template for deep research session name"
-        )
-        session_name = session_name.lower().strip() if session_name else "general research query"
-
-        # Derive semantic_topic from session_name
-        semantic_topic = session_name.replace( " ", "-" )
-
-        if self.debug:
-            print( f"[DR] Session name: {session_name}" )
-            print( f"[DR] Semantic topic: {semantic_topic}" )
-            print( f"[DR] Storage backend: {storage_backend}" )
-
-        # Create research configuration
-        config = ResearchConfig(
-            lead_model = self.lead_model if self.lead_model else config_mgr.get(
-                "deep research lead model",
-                default="claude-opus-4-6"
-            ),
-            subagent_model = config_mgr.get(
-                "deep research subagent model",
-                default="claude-sonnet-4-6"
-            ),
-            audience = self.audience or config_mgr.get(
-                "deep research audience",
-                default="academic"
-            ),
-            audience_context = self.audience_context or config_mgr.get(
-                "deep research audience context",
-                default=None
-            ) or None,
-        )
-
-        # Generate unique session ID for this pipeline (needed by CostTracker)
-        import uuid
-        session_id = f"chain-{uuid.uuid4().hex[ :8 ]}"
-
-        # Create cost tracker
-        cost_tracker = CostTracker( session_id=session_id, budget_limit_usd=self.budget )
-
-        try:
-            # Run the research.
-            #
-            # 🔴 THE SEED DOCUMENT ENTERS HERE AND NOWHERE ELSE (row 5726e3c5). It is
-            # deliberately NOT folded into `self.query`, which also feeds the session-name
-            # gist above, the pipeline notifications, and the saved report's frontmatter —
-            # a whole file in any of those is unreadable. One call site, one enrichment.
-            report = await run_research(
-                query        = query_with_seed_context( self.query, self.source_document ),
-                config       = config,
-                cost_tracker = cost_tracker,
-                user_email   = self.user_email,
-                no_confirm   = self.no_confirm,
-                debug        = self.debug,
-                verbose      = self.verbose
-            )
-
-            if report is None:
-                return { "cancelled": True }
-
-            # Generate abstract
-            abstract = await generate_abstract_for_cli(
-                report       = report,
-                config       = config,
-                cost_tracker = cost_tracker,
-                debug        = self.debug
-            )
-
-            # Save report with frontmatter
-            report_path = save_report_with_frontmatter(
-                report          = report,
-                query           = self.query,
-                abstract        = abstract,
-                semantic_topic  = semantic_topic,
-                session_id      = session_id,
-                cost_tracker    = cost_tracker,
-                config          = config,
-                output_dir      = output_dir,
-                user_email      = self.user_email,
-                storage_backend = storage_backend,
-                gcs_bucket      = gcs_bucket,
-                debug           = self.debug
-            )
-
-            # Get cost summary
-            summary = cost_tracker.get_summary()
-
-            return {
-                "report_path" : report_path,
-                "abstract"    : abstract,
-                "cost"        : summary.total_cost_usd,
-                "artifacts"   : {
-                    "report"          : report,
-                    "session_name"    : session_name,
-                    "semantic_topic"  : semantic_topic,
-                    "tokens_used"     : summary.total_input_tokens + summary.total_output_tokens,
-                    "duration_seconds": summary.duration_seconds,
-                },
-                "cancelled"   : False,
-            }
-
-        except BudgetExceededError as e:
-            raise Exception( f"Deep Research budget exceeded: ${e.current_cost:.2f} of ${e.budget_limit:.2f}" )
-
     async def _run_presentation_generator( self, research_path: str ) -> dict:
         """
         Execute Presentation Generator on the research report.
@@ -420,7 +273,7 @@ class DeepResearchToPresentationAgent:
 
         # Import Presentation Generator components
         from cosa.agents.presentation_generator.orchestrator import PresentationOrchestratorAgent
-        from cosa.agents.presentation_generator.config import PresentationConfig
+        from cosa.agents.presentation_generator.config import PresentationConfig, apply_job_overrides
         from cosa.config.configuration_manager import ConfigurationManager
         import cosa.utils.util as cu
 
@@ -439,15 +292,15 @@ class DeepResearchToPresentationAgent:
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         config = PresentationConfig.from_config( config_mgr, debug=self.debug )
 
-        # Apply overrides
-        if self.target_duration_minutes is not None:
-            config.target_duration_minutes = self.target_duration_minutes
-        if self.target_slide_count is not None:
-            config.target_slide_count = self.target_slide_count
-        if self.audience is not None:
-            config.audience = self.audience
-        if self.theme is not None:
-            config.default_theme = self.theme
+        # Apply overrides (the same rule the presentation job uses; this chain has no content_model arg)
+        apply_job_overrides(
+            config,
+            target_duration_minutes = self.target_duration_minutes,
+            target_slide_count      = self.target_slide_count,
+            audience                = self.audience,
+            theme                   = self.theme,
+            audience_context        = self.audience_context,
+        )
 
         # Create orchestrator
         agent = PresentationOrchestratorAgent(

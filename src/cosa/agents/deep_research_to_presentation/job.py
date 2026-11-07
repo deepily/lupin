@@ -21,7 +21,6 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.deep_research.seed_context import normalize_source_document
@@ -52,6 +51,18 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
 
     JOB_TYPE   = "research_to_presentation"
     JOB_PREFIX = "rx"
+
+    CHAIN_TITLE          = "Research→Presentation"
+    CHAIN_NOUN           = "presentation"
+    DRY_RUN_ICON         = ""
+    DRY_RUN_SECOND_STAGE = (
+        "[PRESENTATION] skipping document ingestion",
+        "[PRESENTATION] skipping narrative analysis",
+        "[PRESENTATION] skipping slide outline generation",
+        "[PRESENTATION] skipping slide elaboration",
+        "[PRESENTATION] skipping YAML serialization",
+        "[PRESENTATION] skipping Marp rendering",
+    )
 
     def __init__(
         self,
@@ -185,102 +196,85 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
 
     async def _execute( self ) -> str:
         """
-        Internal async pipeline execution.
-
-        Uses the DeepResearchToPresentationAgent to run the full workflow.
-        When dry_run=True, sends breadcrumb notifications and returns mock results.
+        Run the research→presentation pipeline, or its dry-run simulation when dry_run is set.
 
         Returns:
             str: Conversational summary of pipeline results
         """
-        from cosa.agents.deep_research import voice_io, cosa_interface
+        return await self._run_chained_pipeline()
 
-        # Handle dry-run mode with breadcrumb notifications
-        if self.dry_run:
-            return await self._execute_dry_run( voice_io, cosa_interface )
+    def _chain_pipeline_state( self ):
+        """
+        Return this pipeline's state enum, imported late so a test can fake the module graph.
 
-        # Import pipeline components
-        from cosa.agents.deep_research_to_presentation.agent import DeepResearchToPresentationAgent
+        Ensures:
+            - returns the PipelineState enum of deep_research_to_presentation.state
+        """
         from cosa.agents.deep_research_to_presentation.state import PipelineState
 
-        # Set sender_id and target_user for notifications (use base_id to strip ::user_id scope suffix)
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
+        return PipelineState
 
-        # Set job_id for auto-injection into all downstream notify() calls
-        voice_io.set_job_id( self.id_hash )
+    def _chain_debug_lines( self ) -> list:
+        """
+        Return the job-specific debug lines printed after the shared query and budget lines.
 
-        if self.debug:
-            print( f"[DeepResearchToPresentationJob] Query: {self.query[ :80 ]}..." )
-            print( f"[DeepResearchToPresentationJob] Budget: ${self.budget}" if self.budget else "[DeepResearchToPresentationJob] Budget: unlimited" )
+        Ensures:
+            - returns an empty list
+        """
+        return [ ]
 
-        try:
-            # Notify start
-            await voice_io.notify(
-                f"Starting research→presentation pipeline: {self.query[ :60 ]}...",
-                priority="medium",
-                job_id=self.id_hash,
-                queue_name="run"
-            )
+    def _store_chain_artifacts( self, result ) -> None:
+        """
+        Keep the presentation paths from a finished run on the job and in its artifacts.
 
-            # Create the chained agent
-            agent = self._make_agent()
+        Requires:
+            - result carries research_path, yaml_path, marp_path and slide_count
 
-            # Run the full pipeline
-            result = await agent.run_async()
+        Ensures:
+            - the three paths are job attributes and artifacts entries
+            - the slide count is an artifacts entry
+        """
+        self.research_path = result.research_path
+        self.yaml_path     = result.yaml_path
+        self.marp_path     = result.marp_path
 
-            # Check result state
-            if result.state == PipelineState.CANCELLED:
-                await voice_io.notify( "Pipeline was cancelled.", priority="medium", job_id=self.id_hash, queue_name="run" )
-                return "Research→Presentation pipeline was cancelled by the user."
+        self.artifacts[ "yaml_path" ]   = result.yaml_path
+        self.artifacts[ "marp_path" ]   = result.marp_path
+        self.artifacts[ "slide_count" ] = result.slide_count
 
-            if result.state == PipelineState.FAILED:
-                error_msg = result.error or "Unknown error"
-                await voice_io.notify( f"Pipeline failed: {error_msg[ :80 ]}", priority="urgent", job_id=self.id_hash, queue_name="run" )
-                raise Exception( error_msg )
+    def _chain_return_tail( self ) -> str:
+        """
+        Return the last sentence of the conversational answer.
 
-            # Store results
-            self.research_path = result.research_path
-            self.yaml_path     = result.yaml_path
-            self.marp_path     = result.marp_path
+        Ensures:
+            - returns the presentation path sentence
+        """
+        return f"Presentation: {self.marp_path}"
 
-            # Store artifacts
-            self.artifacts[ "research_path" ]     = result.research_path
-            self.artifacts[ "research_abstract" ] = result.research_abstract
-            self.artifacts[ "yaml_path" ]         = result.yaml_path
-            self.artifacts[ "marp_path" ]         = result.marp_path
-            self.artifacts[ "slide_count" ]       = result.slide_count
+    async def _chain_completion( self, result ) -> tuple:
+        """
+        Build the completion card for a finished run, with clickable links.
 
-            # Build cost summary
-            self.cost_summary = {
-                "dr_cost_usd"    : result.dr_cost,
-                "pg_cost_usd"    : result.pg_cost,
-                "total_cost_usd" : result.total_cost,
-            }
-            self.artifacts[ "cost_summary" ] = self.cost_summary
+        Requires:
+            - result is a completed ChainedResult
 
-            # ── Completion report: build a rich abstract with clickable links so the
-            #    promoted running→done card renders View Presentation WITHOUT a page
-            #    reload. Before this, the real path returned a bare "Pipeline complete!"
-            #    string and stored NO abstract, so _transition_to_done emitted
-            #    abstract=None → blank done card (bug 2da4095a). Mirrors
-            #    PresentationGeneratorJob._execute in presentation_generator/job.py. ──
-            import urllib.parse
-            io_base = cu.get_project_root() + "/io/"
+        Ensures:
+            - returns ( abstract, spoken_suffix ) with an empty suffix
+        """
+        import urllib.parse
+        io_base = cu.get_project_root() + "/io/"
 
-            def _doc_link( path, label ):
-                if path and path.startswith( io_base ):
-                    rel = path.replace( io_base, "" )
-                    return f"[{label}](/app/docs?path={urllib.parse.quote( rel )})"
-                return path
+        def _doc_link( path, label ):
+            if path and path.startswith( io_base ):
+                rel = path.replace( io_base, "" )
+                return f"[{label}](/app/docs?path={urllib.parse.quote( rel )})"
+            return path
 
-            research_link = _doc_link( result.research_path, "📄 View" )
-            yaml_link     = _doc_link( result.yaml_path,     "View YAML" )
-            marp_link     = _doc_link( result.marp_path,     "View Presentation" )
+        research_link = _doc_link( result.research_path, "📄 View" )
+        yaml_link     = _doc_link( result.yaml_path,     "View YAML" )
+        marp_link     = _doc_link( result.marp_path,     "View Presentation" )
 
-            completion_abstract = f"""**Research → Presentation Complete!**
+        completion_abstract = f"""**Research → Presentation Complete!**
 
 **Research Report**: {research_link}
 
@@ -292,114 +286,28 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
 
 **Cost**: ${result.total_cost:.4f}"""
 
-            # Store the abstract in artifacts so it rides the running→done transition
-            # (running_fifo_queue._transition_to_done reads artifacts.get("abstract")).
-            self.artifacts[ "abstract" ] = completion_abstract
+        return completion_abstract, ""
 
-            try:
-                await voice_io.notify(
-                    f"Research to presentation complete. Total cost ${result.total_cost:.4f}.",
-                    priority   = "medium",
-                    abstract   = completion_abstract,
-                    job_id     = self.id_hash,
-                    queue_name = "run",
-                )
-            except Exception as notify_err:
-                print( f"[DeepResearchToPresentationJob] completion notify failed: {notify_err}" )
-
-            # Return conversational answer
-            return f"Pipeline complete! Research report and presentation generated. Total cost: ${result.total_cost:.4f}. Presentation: {self.marp_path}"
-
-        finally:
-            voice_io.clear_job_id()
-
-    async def _execute_dry_run( self, voice_io, cosa_interface ) -> str:
+    def _store_dry_run_results( self ) -> str:
         """
-        Execute dry-run mode with breadcrumb notifications.
+        Store the mock presentation results of a dry run.
 
-        Simulates the full research→presentation pipeline without making API calls.
-        Sends low-priority notifications at each phase and returns mock results.
-
-        Args:
-            voice_io: Voice I/O module for notifications
-            cosa_interface: COSA interface module for sender ID
-
-        Returns:
-            str: Mock conversational summary
+        Ensures:
+            - mock paths are job attributes and artifacts entries
+            - the slide count artifact is 0, because no presentation is built
+            - returns the dry-run completion abstract
         """
-        import asyncio
-
-        # Set sender_id and target_user for notifications (use base_id to strip ::user_id scope suffix)
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
-
-        # Set job_id for auto-injection into all downstream notify() calls
-        voice_io.set_job_id( self.id_hash )
-
-        if self.debug:
-            print( f"[DeepResearchToPresentationJob] DRY RUN MODE for: {self.query[ :50 ]}..." )
-
-        # === Deep Research Phase Breadcrumbs ===
-        await voice_io.notify( f"Dry run: Starting research→presentation simulation", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [RESEARCH] skipping query clarification", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [RESEARCH] skipping research planning", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [RESEARCH] skipping subquery research (5 queries)", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [RESEARCH] skipping report synthesis", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [RESEARCH] skipping report write to disk", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        # === Presentation Generation Phase Breadcrumbs ===
-        await voice_io.notify( "Dry run: [PRESENTATION] skipping document ingestion", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [PRESENTATION] skipping narrative analysis", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [PRESENTATION] skipping slide outline generation", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [PRESENTATION] skipping slide elaboration", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [PRESENTATION] skipping YAML serialization", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        await voice_io.notify( "Dry run: [PRESENTATION] skipping Marp rendering", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
-
-        # Set mock results
         self.research_path = f"/io/deep-research/{self.user_email}/dry-run-{self.id_hash}/report.md"
         self.yaml_path     = f"/io/presentations/{self.user_email}/dry-run-{self.id_hash}/presentation.yaml"
         self.marp_path     = f"/io/presentations/{self.user_email}/dry-run-{self.id_hash}/presentation.md"
 
-        # Store mock artifacts
         self.artifacts[ "research_path" ]     = self.research_path
         self.artifacts[ "research_abstract" ] = "Mock abstract from dry-run mode."
         self.artifacts[ "yaml_path" ]         = self.yaml_path
         self.artifacts[ "marp_path" ]         = self.marp_path
-        self.artifacts[ "slide_count" ]       = 0   # dry-run: no real presentation built
+        self.artifacts[ "slide_count" ]       = 0
 
-        # Mock cost summary
-        self.cost_summary = {
-            "dr_cost_usd"    : 0.0,
-            "pg_cost_usd"    : 0.0,
-            "total_cost_usd" : 0.0,
-        }
-        self.artifacts[ "cost_summary" ] = self.cost_summary
-
-        completion_abstract = f"""**Dry Run Complete!**
+        return f"""**Dry Run Complete!**
 
 **Research Report**: {self.research_path} (mock - not actually created)
 
@@ -408,21 +316,6 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
 **Presentation**: {self.marp_path} (mock - not actually created)
 
 **Stats**: $0.00 total | 0 tokens | 12.0s (simulated)"""
-
-        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
-        self.artifacts[ "abstract" ] = completion_abstract
-
-        # Notify completion
-        await voice_io.notify(
-            "Dry run complete! Pipeline simulation finished.",
-            priority="medium",
-            abstract=completion_abstract,
-            job_id=self.id_hash,
-            queue_name="run"
-        )
-
-        voice_io.clear_job_id()
-        return "Dry run complete. Research and presentation simulation finished."
 
 
 def quick_smoke_test():

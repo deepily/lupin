@@ -169,6 +169,43 @@ class PresentationConfig:
 # Smoke Test
 # =============================================================================
 
+def apply_job_overrides(
+    config,
+    target_duration_minutes = None,
+    target_slide_count      = None,
+    audience                = None,
+    theme                   = None,
+    content_model           = None,
+    audience_context        = None,
+) -> None:
+    """
+    Overlay a job's per-request args onto an INI-loaded presentation config, in place.
+
+    The one copy of the rule, shared by the presentation job and the research-to-presentation agent.
+
+    Requires:
+        - config is a PresentationConfig instance
+
+    Ensures:
+        - Each argument that is not None replaces the matching config field; theme replaces default_theme
+        - audience_context treats the expeditor "none" sentinel and the empty string as "not provided"
+          and is not copied, because the prompt builders would otherwise add a bogus
+          "Additional audience context: none" line
+    """
+    if target_duration_minutes is not None:
+        config.target_duration_minutes = target_duration_minutes
+    if target_slide_count is not None:
+        config.target_slide_count = target_slide_count
+    if audience is not None:
+        config.audience = audience
+    if theme is not None:
+        config.default_theme = theme
+    if content_model is not None:
+        config.content_model = content_model
+    if audience_context is not None and audience_context.strip().lower() not in ( "", "none" ):
+        config.audience_context = audience_context
+
+
 def quick_smoke_test():
     """Quick smoke test for PresentationConfig."""
     import cosa.utils.util as cu

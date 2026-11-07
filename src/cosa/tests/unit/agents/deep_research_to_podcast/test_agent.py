@@ -260,6 +260,26 @@ class TestRunAsync:
         agent._set_modality.assert_called_once()
         agent._run_podcast_generator.assert_awaited_once_with( "/io/dr/report.md" )
 
+    def test_skipped_topics_reach_the_checkpoint_card_and_headline( self ):
+        agent = self._agent()
+        agent._run_deep_research = AsyncMock( return_value={
+            "cancelled"   : False,
+            "report_path" : "/io/dr/report.md",
+            "abstract"    : "abs",
+            "cost"        : 1.0,
+            "artifacts"   : {
+                "tokens_used"      : 10,
+                "duration_seconds" : 5,
+                "skipped_topics"   : [ { "topic" : "alpha" }, { "topic" : "beta" } ],
+            },
+        } )
+        agent._run_podcast_generator = AsyncMock( return_value={ "cancelled": True } )
+        _run( agent.run_async() )
+
+        checkpoint = [ c for c in agent._notify.await_args_list if c.args[ 0 ].startswith( "Deep Research complete" ) ][ 0 ]
+        assert "(2 topics skipped)" in checkpoint.args[ 0 ]
+        assert "**Skipped topics (2)**: alpha; beta" in checkpoint.kwargs[ "abstract" ]
+
     def test_dr_cancelled_sets_cancelled( self ):
         agent = self._agent()
         agent._run_deep_research     = AsyncMock( return_value={ "cancelled": True } )
@@ -443,7 +463,7 @@ class TestRunDeepResearch:
     def test_research_phase_sets_the_per_task_target_user( self ):
         graph = _DRGraph( cfg_values={ "deep research output directory": "io/dr" } )
         with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch( "cosa.agents.deep_research_to_podcast.agent.set_dispatch_context" ) as set_ctx:
+             patch( "cosa.agents.utils.agent_notification_dispatcher.set_dispatch_context" ) as set_ctx:
             _run( self._agent()._run_deep_research() )
         set_ctx.assert_called_once_with( target_user="u@test.com" )
 
