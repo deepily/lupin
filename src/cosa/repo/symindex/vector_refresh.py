@@ -34,6 +34,7 @@ from cosa.repo.symindex.candidates import storage_paths as sp
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates.errors import CandidateError, BUILD_LOCK_HELD
 from cosa.repo.symindex.paths import data_dir
+from lupin_mcp import job_summary_adapters as jsa
 
 CRON_TAG       = "# reuse-vector-refresh"
 CRON_SCHEDULE  = "47 10 * * *"
@@ -302,6 +303,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if not ( enabled_fn or ( lambda: lt.read_enabled( errors=read_errors, key=ENABLED_KEY ) ) )():
         log( f"refresh could not read {ENABLED_KEY}, so it stays off: {read_errors[ 0 ]}" if read_errors else f"refresh is switched off: {ENABLED_KEY} is not true" )
         print( json.dumps( { "ran": False, "reason": "switched off" }, sort_keys=True ), file=out )
+        jsa.record_refresh( folder, { "ran": False, "reason": "switched off" }, EXIT_DISABLED, {}, now, environ )
         return EXIT_DISABLED
     try:
         writer = ( writer_factory or ( lambda a: cb.make_job_writer( root, a.base_url, environ ) ) )( args )
@@ -311,8 +313,13 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     except CandidateError as error:
         print( json.dumps( { "error": error.code, "detail": error.detail } ), file=out )
         return EXIT_NAMED
-    code, summary = run_refresh( root, writer, client if client is not None else cb.vb.EndpointClient(),
-                                 os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, environ=environ )
+    try:
+        code, summary = run_refresh( root, writer, client if client is not None else cb.vb.EndpointClient(),
+                                     os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, environ=environ )
+    except Exception as error:                                         # the job's own record says it failed; the exception still ends the run
+        jsa.record_refresh( folder, { "ran": False, "reason": f"{type( error ).__name__}: {error}" }, EXIT_FAILED, lt.read_state( os.path.join( folder, STATE_NAME ) ), now, environ )
+        raise
+    jsa.record_refresh( folder, summary, code, lt.read_state( os.path.join( folder, STATE_NAME ) ), now, environ )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
 

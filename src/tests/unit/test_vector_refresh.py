@@ -505,3 +505,23 @@ def test_the_wrapper_defaults_the_configuration_manager_args_under_a_bare_enviro
 def test_the_wrapper_keeps_a_callers_own_configuration_manager_args( tmp_path ):
     seen = run_wrapper_bare( tmp_path, { "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/mine.ini" } )
     assert seen[ "env" ][ "LUPIN_CONFIG_MGR_CLI_ARGS" ] == "config_path=/mine.ini"
+
+
+def _summaries( world ):
+    """Ensures: returns every job-summary.json the run left under the test data folder, parsed."""
+    return [ json.loads( p.read_text() ) for p in world[ "data" ].rglob( "job-summary.json" ) ]
+
+
+def test_main_leaves_a_job_summary_for_a_switched_off_run_a_finished_run_and_a_crash( world, monkeypatch ):
+    run_main( world, [], enabled_fn=lambda: False )
+    assert _summaries( world )[ 0 ][ "job" ] == "vector-refresh" and _summaries( world )[ 0 ][ "last_attempt" ][ "outcome" ] == "skipped"
+    monkeypatch.setattr( vr, "run_refresh", lambda *a, **k: ( 0, { "ran": True, "outcome": "built", "rows": 5, "built_at": "2026-11-07T17:16:08+00:00" } ) )
+    run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    got = _summaries( world )[ 0 ]
+    assert got[ "last_attempt" ][ "outcome" ] == "clean" and got[ "scan_debt" ][ "freshness" ] == { "built_at": "2026-11-07T17:16:08+00:00", "stale_after_hours": 36 }
+    def crash( *a, **k ): raise OSError( "disk" )
+    monkeypatch.setattr( vr, "run_refresh", crash )
+    with pytest.raises( OSError ):
+        run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    last = _summaries( world )[ 0 ][ "last_attempt" ]
+    assert last[ "outcome" ] == "failed" and last[ "failure" ] == "OSError: disk" and last[ "stage" ] == "refresh"

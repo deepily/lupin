@@ -29,6 +29,16 @@
 | Interactive testing | [`automated-interactive-testing.md`](../automated-interactive-testing.md) |
 | Frontend architecture | [`lupin-mpa-frontend-architecture.md`](../lupin-mpa-frontend-architecture.md) |
 
+## 30. Background Jobs (`/api/jobs/*`)
+
+One endpoint for every scheduled or looping job. The reader computes health by the rules of the reporting design; the page computes nothing about it.
+Each job's promise is in `src/conf/job-registry.json`. Each run's report is a `job-summary.json` written by the job. Guide: [job-reporting-backend.md](../job-reporting-backend.md).
+
+| Method | Path | Auth | Summary |
+|---|---|---|---|
+| GET | `/api/jobs/summary` | API key or JWT | `jobs-summary/1` plus `caller_is_operator` (true only for the operator login): one entry per registered job (23 today), worst state first, each with state, reasons, debts, schedule, strip, `runnable` and targets |
+| POST | `/api/jobs/{job}/run` | Operator login only | Starts one run with trigger `hand`: 200 started, 403 not the operator, 404 unknown job, 409 run lock held, 422 not runnable |
+
 ## 29. Pair Labelling (`/api/pair-labelling/*`)
 
 A reviewer labels the pairs of a blind `semdup_pair` packet from the page `/app/pair-labelling?reviewer=<name>`. The default reviewer is `rick`.

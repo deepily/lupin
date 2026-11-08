@@ -4,6 +4,7 @@ import datetime
 import pytest
 
 from lupin_mcp import duplicate_check_history as hist
+from lupin_mcp import job_summary as js
 from lupin_mcp import duplicate_check_status as st
 
 TZ  = datetime.timezone( datetime.timedelta( hours=-5 ) )
@@ -184,15 +185,10 @@ def test_the_scan_points_keep_the_newest_fourteen_runs():
     assert len( points ) == 14 and [ p[ "count" ] for p in points ] == list( range( 6, 20 ) ) and points[ 0 ][ "drained" ] == 6
 
 
-ATTEMPT_KEYS = ( "started_at", "finished_at", "trigger", "outcome", "stage", "failure", "evidence", "mode" )       # the fleet reader's list; a record missing one reads as unreadable
-OUTCOMES     = ( "clean", "carried", "failed", "skipped" )
-TRIGGERS     = ( "cron", "boot", "hand" )
-
-
 @pytest.mark.parametrize( "status,trigger,mode", [ ( "ok", "cron", "daily" ), ( "carried", "reboot", "baseline" ), ( "failed", "hand", "daily" ), ( "skipped", "cron", "daily" ) ] )
 def test_every_attempt_carries_every_key_the_fleet_reader_needs_with_values_it_accepts( status, trigger, mode ):
     attempt = st.job_summary( [ row( 8, 9, status=status, trigger=trigger, mode=mode, carried=None if status in ( "failed", "skipped" ) else 1 ) ], NOW )[ "last_attempt" ]
-    assert tuple( attempt ) == ATTEMPT_KEYS and attempt[ "outcome" ] in OUTCOMES and attempt[ "trigger" ] in TRIGGERS and attempt[ "mode" ] == mode and attempt[ "started_at" ]
+    assert tuple( attempt ) == js.ATTEMPT_KEYS and js.check_attempt( attempt ) == attempt and attempt[ "mode" ] == mode        # the shared writer's own check, not a copy of its lists
 
 
 def test_recent_holds_the_last_seven_attempts_oldest_first_with_their_modes():
