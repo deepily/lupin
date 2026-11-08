@@ -35,14 +35,16 @@ def job( name="j", **over ):
 class Deps:
     """Fake inputs: every answer is a field, every call is recorded."""
 
-    def __init__( self, units=None, locks=(), store=None, cron=None ):
-        self.units, self.locks, self.store, self.cron, self.calls = units or {}, set( locks ), store, cron, []
+    def __init__( self, units=None, locks=(), store=None, cron=None, zone=None ):
+        self.units, self.locks, self.store, self.cron, self.zone, self.calls = units or {}, set( locks ), store, cron, zone, []
 
     def boot_time( self ): return datetime.datetime( 2026, 11, 1, 8, 0, tzinfo=NY )
 
     def unit_state( self, unit, health_url=None ): return self.units.get( unit )
 
     def crontab_text( self ): return self.cron
+
+    def host_zone( self ): return self.zone
 
     def lock_held( self, path ):
         self.calls.append( ( "lock", str( path ) ) )
@@ -343,7 +345,7 @@ def test_without_crontab_or_systemctl_the_card_says_unverified_until_a_fresh_hos
     t, u = cards()                                                                          # no snapshot at all
     assert t[ "schedule_unverified" ] is True and u[ "state" ] == "unknown" and "liveness unverified" in u[ "unknown_reason" ]
     now = datetime.datetime.now().astimezone()
-    ( data / hs.SNAPSHOT_FILE ).write_text( json.dumps( { "schema": hs.SCHEMA, "crontab": "7 11 * * * x # t-tag\n", "crontab_at": now.isoformat(), "units": { "u.service": "active" }, "units_at": now.isoformat() } ) )
+    ( data / hs.SNAPSHOT_FILE ).write_text( json.dumps( { "schema": hs.SCHEMA, "crontab": "7 11 * * * x # t-tag\n", "crontab_at": now.isoformat(), "zone": "America/New_York", "units": { "u.service": "active" }, "units_at": now.isoformat() } ) )
     t, u = cards()                                                                          # fresh snapshot: both verified
     assert t[ "schedule_unverified" ] is False and t[ "schedule" ][ "entries" ] == [ "cron 7 11 * * *" ] and u[ "state" ] == "healthy"
     old = ( now - datetime.timedelta( hours=40 ) ).isoformat()
@@ -366,3 +368,27 @@ def test_live_inputs_prefer_the_direct_answer_over_the_snapshot(tmp_path, monkey
     monkeypatch.setattr( svc.hs, "unit_state", lambda unit: "inactive" )
     live = svc.LiveDeps( tmp_path, tmp_path )
     assert live.crontab_text() == "0 1 * * * a # tag\n" and live.unit_state( "x" ) == "inactive"
+
+
+def test_cron_is_read_in_the_hosts_zone_when_the_container_runs_in_another(tmp_path, monkeypatch):
+    from lupin_mcp import host_snapshot as hs
+    monkeypatch.setattr( hs.subprocess, "run", no_binaries )
+    utc  = datetime.timezone.utc
+    tagged = job( "t", cron_tag="t-tag", schedule=[] )
+    root = write_registry( tmp_path, [ tagged ] )
+    now_ny = datetime.datetime( 2026, 11, 7, 22, 42, tzinfo=NY )                              # 22:42 in New York, 03:42 UTC next day
+    summary_file( root, "t", when=datetime.datetime( 2026, 11, 7, 19, 31, tzinfo=NY ) )
+    data = tmp_path / "data"; data.mkdir()
+    def write( zone ):
+        doc = { "schema": hs.SCHEMA, "crontab": "0 10-22 * * * x # t-tag\n", "crontab_at": datetime.datetime.now().astimezone().isoformat(), "units": {}, "units_at": None }
+        if zone: doc[ "zone" ] = zone
+        ( data / hs.SNAPSHOT_FILE ).write_text( json.dumps( doc ) )
+    deps = svc.LiveDeps( root, data )
+    deps.boot_time = lambda: now_ny - datetime.timedelta( days=3 )
+    write( "America/New_York" )
+    got = svc.build_response( root, data, now_ny.astimezone( utc ), deps )[ "jobs" ][ 0 ]
+    assert got[ "state" ] == "silent" and got[ "schedule" ][ "last_due" ] == datetime.datetime( 2026, 11, 7, 22, 0, tzinfo=NY ).isoformat()      # the New York 22:00 slot, not 22:00 UTC
+    write( None )
+    assert svc.build_response( root, data, now_ny.astimezone( utc ), deps )[ "jobs" ][ 0 ][ "schedule_unverified" ] is True                      # a snapshot with no zone is not trusted
+    write( "Not/AZone" )
+    assert svc.build_response( root, data, now_ny.astimezone( utc ), deps )[ "jobs" ][ 0 ][ "schedule_unverified" ] is True

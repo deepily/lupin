@@ -55,3 +55,11 @@ def test_report_returns_none_when_the_folder_cannot_be_written( tmp_path, capsys
     blocker = tmp_path / "f"; blocker.write_text( "x" )
     assert jsa.report( blocker / "sub", "j", NOW, "clean", environ={} ) is None
     assert jsa.aware( NOW ).tzinfo is not None
+
+
+def test_an_adapter_run_leaves_the_container_a_fresh_crontab_copy(tmp_path, monkeypatch):
+    from lupin_mcp import host_snapshot as hs
+    seen = []
+    monkeypatch.setattr( hs, "refresh_best_effort", lambda environ=None, now=None, run=None: seen.append( environ ) or True )
+    jsa.record_behaviour( tmp_path, "clean", NOW, environ={ "K": "v" } )
+    assert seen == [ { "K": "v" } ]

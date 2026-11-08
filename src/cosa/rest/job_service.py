@@ -75,6 +75,7 @@ class LiveDeps:
         """
         self.root = pathlib.Path( root )
         self.data = pathlib.Path( data )
+        self.zone = None
 
     def boot_time( self ):
         """Ensures: returns the machine's boot time."""
@@ -86,10 +87,24 @@ class LiveDeps:
 
         Ensures:
             - returns the text of crontab -l when it can be run (the host), else the copy a host job wrote, if that is fresh
-            - returns None when neither answers: the card then says its schedule is unverified
+            - returns None when neither answers, or the snapshot names no time zone: the card then says its schedule is unverified
         """
         direct = hs.crontab_text()
-        return direct if direct is not None else hs.read_snapshot( self.data, datetime.datetime.now().astimezone() )[ "crontab" ]
+        self.zone = None
+        if direct is not None: return direct
+        snap = hs.read_snapshot( self.data, datetime.datetime.now().astimezone() )
+        self.zone = snap[ "zone" ]
+        return snap[ "crontab" ] if self.zone is not None else None            # hours with no zone cannot be read: schedule unverified
+
+    def host_zone( self ):
+        """
+        Name the zone the crontab's hours are written in.
+
+        Ensures:
+            - returns the host's tzinfo when the crontab came from the snapshot (the container runs in UTC), else None: the clock is already local
+            - answers for the last crontab_text call, so call that first
+        """
+        return self.zone
 
     def unit_state( self, unit, health_url=None ):
         """
@@ -249,9 +264,10 @@ def build_response( root, data, now, deps ):
     Build the GET /api/jobs/summary response.
 
     Requires:
-        - root holds src/conf/job-registry.json; now is aware; deps offers boot_time, crontab_text, unit_state, lock_held and store_counts
+        - root holds src/conf/job-registry.json; now is aware; deps offers boot_time, crontab_text, host_zone, unit_state, lock_held and store_counts
     Ensures:
         - returns { schema, generated_at, jobs }, one entry per registry job, worst state first and then by title
+        - cron times are read in the zone of the crontab, so a UTC container agrees with the host
         - a job with a cron_tag takes the schedule of its installed crontab lines, else the registry's
         - the registry's overrides file is read on this call, so a changed grace or notification interval applies at once
     Raises:
@@ -259,8 +275,10 @@ def build_response( root, data, now, deps ):
     """
     registry  = jr.load_registry( root )
     overrides = jr.load_overrides( root )
-    ctx       = { "root": root, "data": data, "now": now, "deps": deps }
     cron      = deps.crontab_text()
+    zone      = deps.host_zone()
+    if zone is not None: now = now.astimezone( zone )                    # cron hours are in the host's zone, whatever zone this process runs in
+    ctx       = { "root": root, "data": data, "now": now, "deps": deps }
     jobs      = [ assess_job( jr.with_installed_schedule( jr.effective( j, registry[ "defaults" ], overrides ), cron ), registry[ "defaults" ], ctx ) for j in registry[ "jobs" ] ]
     jobs.sort( key=lambda e: ( jh.STATE_ORDER.index( e[ "state" ] ), e[ "title" ] ) )
     return { "schema": SCHEMA, "generated_at": now.isoformat(), "jobs": jobs }

@@ -53,3 +53,11 @@ def test_main_finds_the_job_in_the_registry_and_refuses_an_unknown_job_or_an_emp
     assert jr_mod.main( [ "--job", "j" ], env, fake( 0 ) ) == jr_mod.EXIT_NO_JOB and "no command" in capsys.readouterr().err
     monkeypatch.chdir( tmp_path )
     assert jr_mod.main( [ "--job", "j", "--", "x" ], {}, fake( 0 ) ) == 0
+
+
+def test_a_wrapped_run_leaves_the_container_a_fresh_crontab_copy(tmp_path, monkeypatch):
+    from lupin_mcp import host_snapshot as hs
+    seen = []
+    monkeypatch.setattr( hs, "refresh_best_effort", lambda environ=None, now=None, run=None: seen.append( environ ) or True )
+    jr_mod.run_and_report( tmp_path / "s.json", "j", [ "x" ], environ={ "K": "v" }, runner=fake( 0 ) )
+    assert seen == [ { "K": "v" } ]

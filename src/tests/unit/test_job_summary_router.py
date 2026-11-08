@@ -20,6 +20,7 @@ class Deps:
     def boot_time( self ): return NOW - datetime.timedelta( days=3 )
     def unit_state( self, unit, health_url=None ): return "active"
     def crontab_text( self ): return None
+    def host_zone( self ): return None
     def lock_held( self, path ): return False
     def store_counts( self, key, now, days ): return None
 
