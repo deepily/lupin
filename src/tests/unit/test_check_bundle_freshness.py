@@ -206,7 +206,7 @@ def test_a_changed_emitted_string_is_reported_stale( tmp_path ):
     assert code == mod.EXIT_STALE, out
     assert "STALE" in out
     assert shipped in out, "the report must name the shipped hash it compared against"
-    assert "npm run build" in out, "a STALE line must carry the remedy"
+    assert "Run: bash src/scripts/build-probe.sh" in out, "a STALE line must name the exact driver that rebuilds it"
 
 
 @needs_esbuild
@@ -633,7 +633,7 @@ def test_format_report_prints_a_question_mark_for_an_unknown_source_count():
 def test_format_report_tells_the_reader_what_to_run_when_stale():
     row = { "name": "probe", "status": mod.STALE, "sources": 3, "shipped_hash": "aaa", "rebuilt_hash": "bbb", "reason": None }
     lines = mod.format_report( "/t", [ row ], "abc123" )
-    assert any( "a rebuild WOULD change the delivered bytes. Run: npm run build" in l for l in lines )
+    assert any( "a rebuild WOULD change the delivered bytes. Run: bash src/scripts/build-probe.sh" in l for l in lines )
     assert any( "SCOPE" in l for l in lines )
 
 
@@ -709,3 +709,25 @@ def test_a_crash_exits_three_with_a_traceback_and_never_reads_as_stale( tmp_path
     err  = capsys.readouterr().err
     assert code == mod.EXIT_CRASHED == 3 and code not in ( mod.EXIT_STALE, mod.EXIT_REFUSED, mod.EXIT_FRESH )
     assert "RuntimeError: scanner exploded" in err and "not a STALE verdict" in err
+
+
+def test_remedy_names_the_exact_driver_and_whether_npm_run_build_runs_it( tmp_path ):
+    ( tmp_path / "package.json" ).write_text( json.dumps( { "scripts": { "build": "bash src/scripts/build-a.sh && bash src/scripts/build-b.sh" } } ), encoding="utf-8" )
+    assert mod.remedy( tmp_path, "a" ) == "Run: npm run build (or bash src/scripts/build-a.sh)"
+    assert mod.remedy( tmp_path, "nav" ) == "Run: bash src/scripts/build-nav.sh (`npm run build` does not build it)"
+    assert mod.remedy( str( tmp_path / "missing" ), "nav" ) == "Run: bash src/scripts/build-nav.sh"
+    ( tmp_path / "package.json" ).write_text( "{not json", encoding="utf-8" )
+    assert mod.remedy( tmp_path, "nav" ) == "Run: bash src/scripts/build-nav.sh"
+    ( tmp_path / "package.json" ).write_text( "{}", encoding="utf-8" )
+    assert mod.remedy( tmp_path, "nav" ) == "Run: bash src/scripts/build-nav.sh"
+
+
+def test_every_stale_remedy_in_this_repo_is_honest_about_npm_run_build():
+    """Pin the real drivers and whether the build script runs each one."""
+    drivers = sorted( p.name for p in mod.discover_bundles( REPO_ROOT ) )
+    assert drivers == [ "build-console.sh", "build-diagnostic.sh", "build-doc-podcast.sh", "build-jobs.sh", "build-multiplexer.sh", "build-nav.sh" ]
+    for driver in drivers:
+        name = driver[ len( "build-" ):-len( ".sh" ) ]
+        runs = driver in json.loads( ( REPO_ROOT / "package.json" ).read_text( encoding="utf-8" ) )[ "scripts" ][ "build" ]
+        assert ( "npm run build (or" in mod.remedy( REPO_ROOT, name ) ) == runs, name
+    assert "does not build it" in mod.remedy( REPO_ROOT, "nav" ), "nav is dormant: nothing loads dist/nav, so the build omits it"

@@ -395,6 +395,30 @@ def current_sha( root ):
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
 
 
+def remedy( root, name ):
+    """
+    The exact command that rebuilds one bundle, as a line for the report.
+
+    Requires:
+        - root is the project root, as a Path or a string
+        - name is a bundle name such as `nav`, whose driver is `src/scripts/build-<name>.sh`
+
+    Ensures:
+        - always names the driver, which rebuilds that bundle and no other
+        - names `npm run build` only when package.json's build script runs the driver
+        - says `npm run build` does not build it when package.json is readable and omits the driver
+        - falls back to the driver alone when package.json cannot be read
+    """
+    driver = f"bash src/scripts/build-{name}.sh"
+    try:
+        build = json.loads( ( Path( root ) / "package.json" ).read_text( encoding="utf-8" ) )[ "scripts" ][ "build" ]
+    except ( OSError, ValueError, KeyError ):
+        return f"Run: {driver}"
+    if f"build-{name}.sh" in build:
+        return f"Run: npm run build (or {driver})"
+    return f"Run: {driver} (`npm run build` does not build it)"
+
+
 def format_report( root, results, sha ):
     """
     Render the results as report lines.
@@ -440,7 +464,7 @@ def format_report( root, results, sha ):
         )
         if entry[ "status" ] == STALE:
             lines.append(
-                f"      ↳ a rebuild WOULD change the delivered bytes. Run: npm run build"
+                f"      ↳ a rebuild WOULD change the delivered bytes. {remedy( root, entry[ 'name' ] )}"
             )
 
     judged = [ e for e in results if e[ "status" ] in ( FRESH, STALE ) ]
