@@ -43,7 +43,10 @@ def clock():
 
 
 @router.get( "/summary", summary="Health of every background job", description="One entry per registered job: state, reasons, debts, schedule, evidence. Health is computed here, never by the page." )
-def jobs_summary( _user: Annotated[ str, Depends( require_api_key_or_jwt ) ] ):
+def jobs_summary(
+    _user: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
+):
     """
     Answer with the whole accordion.
 
@@ -51,13 +54,15 @@ def jobs_summary( _user: Annotated[ str, Depends( require_api_key_or_jwt ) ] ):
         - the caller is authenticated (API key or login)
 
     Ensures:
-        - returns the jobs-summary/1 document; 500 with the cause when the registry is unreadable or invalid
+        - returns the jobs-summary/1 document with caller_is_operator, true only for the operator login (the rule Run now enforces)
+        - 500 with the cause when the registry is unreadable or invalid
     """
     root, data, deps = live_deps()
     try:
-        return svc.build_response( root, data, clock(), deps )
+        got = svc.build_response( root, data, clock(), deps )
     except ( OSError, ValueError ) as error:
         raise HTTPException( status_code=500, detail=f"job registry unusable: {error}" )
+    return { **got, "caller_is_operator": caller_is_operator( account_email ) }
 
 
 @router.post( "/{job}/run", summary="Run one job now", description="Starts one run outside the schedule, with trigger hand. Refused while the job's run lock is held. Rick's login only." )

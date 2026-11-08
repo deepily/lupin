@@ -36,7 +36,7 @@ Each job's promise is in `src/conf/job-registry.json`. Each run's report is a `j
 
 | Method | Path | Auth | Summary |
 |---|---|---|---|
-| GET | `/api/jobs/summary` | API key or JWT | `jobs-summary/1`: one entry per registered job (23 today), worst state first, each with state, reasons, debts, schedule, strip, `runnable` and targets |
+| GET | `/api/jobs/summary` | API key or JWT | `jobs-summary/1` plus `caller_is_operator` (true only for the operator login): one entry per registered job (23 today), worst state first, each with state, reasons, debts, schedule, strip, `runnable` and targets |
 | POST | `/api/jobs/{job}/run` | Operator login only | Starts one run with trigger `hand`: 200 started, 403 not the operator, 404 unknown job, 409 run lock held, 422 not runnable |
 
 ## 29. Pair Labelling (`/api/pair-labelling/*`)

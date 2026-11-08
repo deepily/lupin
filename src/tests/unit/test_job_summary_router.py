@@ -47,7 +47,17 @@ def client( tmp_path, monkeypatch ):
 def test_summary_answers_the_whole_accordion_to_any_authenticated_caller( client ):
     c, _ = client
     got = c.get( "/api/jobs/summary" )
+    assert got.json()[ "caller_is_operator" ] is False
     assert got.status_code == 200 and got.json()[ "schema" ] == "jobs-summary/1" and [ j[ "job" ] for j in got.json()[ "jobs" ] ] == [ "r" ] and got.json()[ "jobs" ][ 0 ][ "runnable" ] is True
+
+
+def test_summary_says_whether_the_caller_is_the_operator_by_the_same_rule_as_run_now( client, monkeypatch ):
+    c, app = client
+    monkeypatch.setattr( router, "caller_is_operator", lambda email: email == "rick@example.com" )
+    app.state.email = "rick@example.com"
+    assert c.get( "/api/jobs/summary" ).json()[ "caller_is_operator" ] is True
+    app.state.email = "other@example.com"
+    assert c.get( "/api/jobs/summary" ).json()[ "caller_is_operator" ] is False
 
 
 def test_summary_is_a_500_with_the_cause_when_the_registry_is_unusable( client, tmp_path, monkeypatch ):
