@@ -108,6 +108,9 @@ def test_test_b_two_zero_drains_with_debt_left():
     assert "no_drain" in rules( run( entry( scan_debt=True ), second, at( 6, 11 ) ) )
     third = record( "carried", at( 6, 10 ), scan={ "unit": "u", "count": 50, "drained_last_run": 4 }, previous=first )
     assert "no_drain" not in rules( run( entry( scan_debt=True ), third, at( 6, 11 ) ) )
+    earlier = record( "carried", at( 5, 10 ), scan={ "unit": "u", "count": 50, "drained_last_run": 4 } )
+    only_last = record( "carried", at( 6, 10 ), scan={ "unit": "u", "count": 50, "drained_last_run": 0 }, previous=earlier )
+    assert "no_drain" not in rules( run( entry( scan_debt=True ), only_last, at( 6, 11 ) ) )          # the older of the two drained something
     zero = record( "clean", at( 6, 10 ), scan={ "unit": "u", "count": 0, "drained_last_run": 0 }, previous=first )
     assert "no_drain" not in rules( run( entry( scan_debt=True ), zero, at( 6, 11 ) ) )
     unknown = record( "carried", at( 6, 10 ), scan={ "unit": "u", "count": 5, "drained_last_run": None }, previous=record( "carried", at( 5, 10 ), scan={ "unit": "u", "count": 5 } ) )
@@ -134,6 +137,8 @@ def test_test_d_a_refresh_is_stale_past_its_limit_and_the_age_is_computed_at_rea
         return run( entry( scan_debt=True ), s, at( 7, 11 ) )
     ok = fresh( at( 6, 11 ) )
     assert ok[ "state" ] == "healthy" and ok[ "scan_debt" ][ "freshness" ][ "age_hours" ] == 24.0 and ok[ "scan_debt" ][ "clears_in" ] is None
+    assert fresh( at( 6, 11 ) - datetime.timedelta( hours=12 ) )[ "state" ] == "healthy"             # exactly 36 hours old is not stale
+    assert fresh( at( 6, 11 ) - datetime.timedelta( hours=12, minutes=1 ) )[ "state" ] == "behind"
     stale = fresh( at( 5, 10 ) )
     assert stale[ "state" ] == "behind" and rules( stale ) == [ "stale" ]
     broken = js.build_summary( "j", { "started_at": at( 7, 10 ).isoformat(), "trigger": "cron", "outcome": "clean" }, { "unit": "h", "count": None, "freshness": { "built_at": "garbage", "stale_after_hours": 36 } } )
@@ -213,3 +218,17 @@ def test_output_carries_the_registry_facts_the_page_needs():
     got = run( ent, record(), at( 7, 11 ) )
     assert got[ "audience" ] == [ "rick" ] and got[ "notify_interval_seconds" ] == 2700 and got[ "runnable" ] and got[ "detail_link" ] == "/app/x" and got[ "rows" ][ 0 ][ "title" ] == "T"
     assert got[ "schedule" ][ "entries" ] == [ "cron 0 10 * * * (daily)" ] and got[ "schedule" ][ "next_due" ] == at( 8, 10 ).isoformat() and got[ "applies" ] == { "scan_debt": False, "fix_debt": False }
+
+
+def test_grace_and_lock_age_boundaries_are_inclusive():
+    s = record( when=at( 6, 10 ) )
+    assert run( entry(), s, at( 7, 10, 30 ) )[ "state" ] == "healthy"                      # exactly the grace after the due time
+    assert run( entry(), s, at( 7, 10, 30 ) + datetime.timedelta( seconds=1 ) )[ "state" ] == "silent"
+    assert run( entry(), s, at( 7, 12 ), lock_age=10800 )[ "running" ] and not run( entry(), s, at( 7, 12 ), lock_age=10801 )[ "running" ]
+
+
+def test_the_strip_keeps_only_the_newest_fourteen_entries():
+    first = record( "clean", at( 1, 10 ) )
+    hourly = entry( schedule=[ { "cron": "0 * * * *" } ] )
+    got = run( hourly, record( "clean", at( 5, 10, 1 ), previous=first ), at( 5, 12 ) )
+    assert len( got[ "strip" ] ) == jh.STRIP_MAX == 14 and got[ "strip" ][ -1 ][ "at" ] > got[ "strip" ][ 0 ][ "at" ]

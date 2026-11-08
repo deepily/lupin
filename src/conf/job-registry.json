@@ -14,7 +14,8 @@
       "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
       "DEEPILY_DATA_DIR": "{deepily_data}"
     },
-    "owner_note": "owner_confirmed false means the owner is cheech by default and no open row names another seat (Cheech, 2026-11-07)"
+    "owner_note": "owner_confirmed false means the owner is cheech by default and no open row names another seat (Cheech, 2026-11-07)",
+    "schedule_note": "A job with cron_tag takes its schedule from the installed crontab lines that end with # <tag>; the schedule here is the fallback when none is installed or the crontab cannot be read"
   },
   "jobs": [
     {
@@ -24,16 +25,10 @@
       "owner": "cheech",
       "schedule": [
         {
-          "cron": "0 10 * * *",
-          "mode": "daily"
+          "cron": "0 10-22 * * *"
         },
         {
-          "cron": "7 11 * * *",
-          "mode": "baseline"
-        },
-        {
-          "after_boot_seconds": 300,
-          "mode": "daily"
+          "after_boot_seconds": 300
         }
       ],
       "summary_path": "{root}/io/duplicate-check-daily/job-summary.json",
@@ -79,7 +74,8 @@
           "hand"
         ],
         "env": {}
-      }
+      },
+      "cron_tag": "duplicate-check-daily"
     },
     {
       "job": "wiki-librarian",
@@ -123,7 +119,8 @@
           "cosa.repo.symindex.librarian_tick"
         ],
         "env": {}
-      }
+      },
+      "cron_tag": "wiki-librarian-tick"
     },
     {
       "job": "reuse-behaviour",
@@ -162,7 +159,8 @@
           "--skip-if-saved"
         ],
         "env": {}
-      }
+      },
+      "cron_tag": "reuse-behaviour-weekly"
     },
     {
       "job": "vector-refresh",
@@ -201,7 +199,8 @@
           "REUSE_VECTOR_REFRESH_ENV": "{home}/.lupin/reuse-vector-refresh.env"
         }
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_tag": "reuse-vector-refresh"
     },
     {
       "job": "shadow-audit",
@@ -234,7 +233,8 @@
           "REUSE_SHADOW_AUDIT_PYTHON": "{python}"
         }
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_tag": "reuse-shadow-audit"
     },
     {
       "job": "context-tick",
@@ -275,7 +275,8 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_tag": "doc-parity-tick"
     },
     {
       "job": "worktree-census",
@@ -300,7 +301,8 @@
           "PLANNING_IS_PROMPTING_ROOT": "{pip}"
         }
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_tag": "worktree-hygiene-report"
     },
     {
       "job": "disk-report",
@@ -385,7 +387,8 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_tag": "hook-link-tick"
     },
     {
       "job": "yearly-reminders",

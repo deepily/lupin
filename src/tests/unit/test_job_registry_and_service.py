@@ -35,12 +35,14 @@ def job( name="j", **over ):
 class Deps:
     """Fake inputs: every answer is a field, every call is recorded."""
 
-    def __init__( self, units=None, locks=(), store=None ):
-        self.units, self.locks, self.store, self.calls = units or {}, set( locks ), store, []
+    def __init__( self, units=None, locks=(), store=None, cron=None ):
+        self.units, self.locks, self.store, self.cron, self.calls = units or {}, set( locks ), store, cron, []
 
     def boot_time( self ): return datetime.datetime( 2026, 11, 1, 8, 0, tzinfo=NY )
 
     def unit_state( self, unit ): return self.units.get( unit )
+
+    def crontab_text( self ): return self.cron
 
     def lock_held( self, path ):
         self.calls.append( ( "lock", str( path ) ) )
@@ -64,7 +66,7 @@ def test_the_shipped_registry_loads_and_holds_the_23_jobs_of_the_design_with_sea
     assert len( reg[ "jobs" ] ) == 23 and reg[ "defaults" ][ "grace_minutes" ] == 30 and reg[ "defaults" ][ "notify_interval_minutes" ] == 30
     assert {  j[ "catalog" ] for j in reg[ "jobs" ] if "catalog" in j } >= { "L1", "L2", "L3", "L4", "L5", "P1", "P3", "P4", "L28", "L30" }
     dup = next( j for j in reg[ "jobs" ] if j[ "job" ] == "duplicate-check" )
-    assert dup[ "fix_debt_key" ] == "job:duplicate-check" and len( dup[ "schedule" ] ) == 3
+    assert dup[ "fix_debt_key" ] == "job:duplicate-check" and dup[ "schedule" ] == [ { "cron": "0 10-22 * * *" }, { "after_boot_seconds": 300 } ]
     vec = next( j for j in reg[ "jobs" ] if j[ "job" ] == "vector-refresh" )
     assert "symbol index" in vec[ "title" ]
 
@@ -222,11 +224,11 @@ def test_paths_of_reads_the_environment(monkeypatch):
 class Spawner:
     """Stands in for subprocess.Popen and records the call."""
 
-    def __init__( self ): self.calls = []
+    def __init__( self ): self.calls, self.waited = [], []
 
     def __call__( self, argv, **kw ):
         self.calls.append( ( argv, kw ) )
-        return types.SimpleNamespace( pid=4242 )
+        return types.SimpleNamespace( pid=4242, wait=lambda: self.waited.append( True ) )
 
 
 def test_run_now_starts_a_hand_run_with_the_trigger_in_its_environment_and_logs_its_output(tmp_path):
@@ -258,3 +260,69 @@ def test_a_record_with_the_right_schema_and_a_missing_field_reads_as_unreadable_
     path.write_text( json.dumps( { "schema": "job-summary/1", "job": "bad", "last_attempt": { "started_at": NOW.isoformat(), "outcome": "failed" } } ) )
     got = svc.build_response( root, tmp_path, NOW, Deps() )[ "jobs" ][ 0 ]
     assert got[ "state" ] == "unknown" and got[ "unknown_reason" ] == "unreadable" and got[ "last_attempt" ] is None
+
+
+CRON = """# comment
+0 10 * * * /bin/run --trigger cron # duplicate-check-daily
+7 11 * * * /bin/run --baseline # duplicate-check-daily
+@reboot sleep 300 && /bin/run --trigger reboot # duplicate-check-daily
+@reboot /bin/early # io-sweep
+#0 5 * * * /bin/old # duplicate-check-daily
+0 5 * * * /bin/other # something-else
+30 7 * * * /bin/mention duplicate-check-daily
+bad # duplicate-check-daily
+"""
+
+
+def test_crontab_schedule_reads_cron_and_reboot_lines_and_ignores_comments_and_mentions():
+    assert jr.crontab_schedule( CRON, "duplicate-check-daily" ) == [ { "cron": "0 10 * * *" }, { "cron": "7 11 * * *" }, { "after_boot_seconds": 300 } ]
+    assert jr.crontab_schedule( CRON, "io-sweep" ) == [ { "after_boot_seconds": 0 } ] and jr.crontab_schedule( CRON, "missing" ) == []
+
+
+def test_a_tagged_job_takes_the_installed_schedule_and_falls_back_when_none_is_installed_or_the_crontab_is_unreadable():
+    tagged = job( "t", cron_tag="duplicate-check-daily", schedule=[ { "cron": "0 10-22 * * *" } ] )
+    assert jr.with_installed_schedule( tagged, CRON )[ "schedule" ][ 0 ] == { "cron": "0 10 * * *" }
+    assert jr.with_installed_schedule( tagged, "0 1 * * * x # other\n" ) is tagged           # tag not installed: the registry entry
+    assert jr.with_installed_schedule( tagged, None ) is tagged                              # crontab unreadable: the registry entry
+    plain = job( "p" )
+    assert jr.with_installed_schedule( plain, CRON ) is plain                                # no tag: always the registry entry
+
+
+def test_the_response_uses_the_installed_lines_in_one_crontab_state_and_the_registry_in_the_other(tmp_path):
+    tagged = job( "t", cron_tag="t-tag", schedule=[ { "cron": "0 10-22 * * *" } ] )
+    root = write_registry( tmp_path, [ tagged ] )
+    summary_file( root, "t", when=NOW - datetime.timedelta( minutes=20 ) )                 # ran 11:40
+    old = svc.build_response( root, tmp_path, NOW, Deps( cron="7 11 * * * /x # t-tag\n" ) )[ "jobs" ][ 0 ]
+    assert old[ "schedule" ][ "entries" ] == [ "cron 7 11 * * *" ] and old[ "state" ] == "healthy"
+    none = svc.build_response( root, tmp_path, NOW, Deps( cron=None ) )[ "jobs" ][ 0 ]
+    assert none[ "schedule" ][ "entries" ] == [ "cron 0 10-22 * * *" ] and none[ "state" ] == "healthy"
+    hourly_gap = svc.build_response( root, tmp_path, NOW + datetime.timedelta( hours=2, minutes=45 ), Deps( cron="0 10-22 * * * /x # t-tag\n" ) )[ "jobs" ][ 0 ]
+    assert hourly_gap[ "state" ] == "silent"                                                 # due 14:00 and not run since 11:40
+
+
+def test_live_crontab_text_reads_crontab_l_and_answers_none_on_error_or_missing_binary(tmp_path, monkeypatch):
+    live = svc.LiveDeps( tmp_path, tmp_path )
+    monkeypatch.setattr( svc.subprocess, "run", lambda *a, **k: types.SimpleNamespace( stdout="0 1 * * * x\n", returncode=0 ) )
+    assert live.crontab_text() == "0 1 * * * x\n"
+    monkeypatch.setattr( svc.subprocess, "run", lambda *a, **k: types.SimpleNamespace( stdout="", returncode=1 ) )
+    assert live.crontab_text() is None
+    def boom( *a, **k ): raise FileNotFoundError( "crontab" )
+    monkeypatch.setattr( svc.subprocess, "run", boom )
+    assert live.crontab_text() is None
+
+
+def test_run_now_reaps_its_child_and_the_lock_probe_does_not_block_a_shared_holder(tmp_path):
+    root = write_registry( tmp_path, [ job( "r", run={ "argv": [ "x" ] } ) ] )
+    spawn = Spawner()
+    import threading
+    seen = []
+    real = threading.Thread
+    threading.Thread = lambda target, daemon: types.SimpleNamespace( start=lambda: seen.append( ( target, daemon ) ) )
+    try: svc.run_now( root, tmp_path, "r", None, Deps(), NOW, spawn )
+    finally: threading.Thread = real
+    assert seen[ 0 ][ 1 ] is True and seen[ 0 ][ 0 ]() is None and spawn.waited == [ True ]
+    import fcntl
+    lock = tmp_path / "shared.lock"
+    with open( lock, "a" ) as other:
+        fcntl.flock( other, fcntl.LOCK_SH )
+        assert svc.LiveDeps( tmp_path, tmp_path ).lock_held( lock ) is False               # a shared holder must not read as a held run lock

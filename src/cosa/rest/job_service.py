@@ -10,6 +10,7 @@ import fcntl
 import os
 import pathlib
 import subprocess
+import threading
 
 import cosa.rest.job_health as jh
 import cosa.rest.job_registry as jr
@@ -77,6 +78,19 @@ class LiveDeps:
     def boot_time( self ):
         """Ensures: returns the machine's boot time."""
         return boot_time_from( pathlib.Path( "/proc/stat" ).read_text() )
+
+    def crontab_text( self ):
+        """
+        Read the installed crontab.
+
+        Ensures:
+            - returns the text of crontab -l, or None when it cannot be run or answers an error (no crontab included)
+        """
+        try:
+            done = subprocess.run( [ "crontab", "-l" ], capture_output=True, text=True, timeout=10 )
+        except ( OSError, subprocess.TimeoutExpired ):
+            return None
+        return done.stdout if done.returncode == 0 else None
 
     def unit_state( self, unit ):
         """
@@ -237,9 +251,10 @@ def build_response( root, data, now, deps ):
     Build the GET /api/jobs/summary response.
 
     Requires:
-        - root holds src/conf/job-registry.json; now is aware; deps offers boot_time, unit_state, lock_held and store_counts
+        - root holds src/conf/job-registry.json; now is aware; deps offers boot_time, crontab_text, unit_state, lock_held and store_counts
     Ensures:
         - returns { schema, generated_at, jobs }, one entry per registry job, worst state first and then by title
+        - a job with a cron_tag takes the schedule of its installed crontab lines, else the registry's
         - the registry's overrides file is read on this call, so a changed grace or notification interval applies at once
     Raises:
         - ValueError or OSError when the registry itself is unreadable or invalid: the page cannot say anything honest then
@@ -247,7 +262,8 @@ def build_response( root, data, now, deps ):
     registry  = jr.load_registry( root )
     overrides = jr.load_overrides( root )
     ctx       = { "root": root, "data": data, "now": now, "deps": deps }
-    jobs      = [ assess_job( jr.effective( j, registry[ "defaults" ], overrides ), registry[ "defaults" ], ctx ) for j in registry[ "jobs" ] ]
+    cron      = deps.crontab_text()
+    jobs      = [ assess_job( jr.with_installed_schedule( jr.effective( j, registry[ "defaults" ], overrides ), cron ), registry[ "defaults" ], ctx ) for j in registry[ "jobs" ] ]
     jobs.sort( key=lambda e: ( jh.STATE_ORDER.index( e[ "state" ] ), e[ "title" ] ) )
     return { "schema": SCHEMA, "generated_at": now.isoformat(), "jobs": jobs }
 
@@ -279,4 +295,5 @@ def run_now( root, data, job, target, deps, now, spawn=subprocess.Popen ):
     log.parent.mkdir( parents=True, exist_ok=True )
     with open( log, "a" ) as sink:
         proc = spawn( argv, env=env, cwd=str( root ), stdout=sink, stderr=sink, stdin=subprocess.DEVNULL, start_new_session=True )
+    threading.Thread( target=proc.wait, daemon=True ).start()           # reap the child when it ends, so Run now leaves no zombie
     return 200, { "job": job, "target": target, "status": "started", "trigger": "hand", "pid": proc.pid, "started_at": now.isoformat() }

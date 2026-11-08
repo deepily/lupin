@@ -86,6 +86,45 @@ def effective( job, defaults, overrides ):
     return out
 
 
+def crontab_schedule( text, tag ):
+    """
+    Read a job's schedule off the installed crontab.
+
+    Requires:
+        - text is the output of crontab -l; tag is the marker comment a job's lines end with
+    Ensures:
+        - returns one entry per line that ends with "# <tag>": { cron } for a five-field line, { after_boot_seconds } for an @reboot line (its leading sleep, else 0)
+        - returns [] when no line carries the tag, so the caller falls back to the registry
+        - a commented-out line and a line that merely mentions the tag are ignored
+    """
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith( "#" ) or not line.endswith( f"# {tag}" ): continue
+        if line.startswith( "@reboot" ):
+            m = re.match( r"@reboot\s+sleep\s+(\d+)\b", line )
+            out.append( { "after_boot_seconds": int( m.group( 1 ) ) if m else 0 } )
+        else:
+            fields = line.split( None, 5 )
+            if len( fields ) == 6: out.append( { "cron": " ".join( fields[ :5 ] ) } )
+    return out
+
+
+def with_installed_schedule( job, crontab_text ):
+    """
+    Replace a tagged job's schedule with the installed one.
+
+    Requires:
+        - job is an effective registry entry; crontab_text is the crontab, or None when it could not be read
+    Ensures:
+        - returns job unchanged when it has no cron_tag, the crontab is unreadable, or no installed line carries the tag
+        - otherwise returns a copy whose schedule is the installed lines
+    """
+    if not job.get( "cron_tag" ) or crontab_text is None: return job
+    installed = crontab_schedule( crontab_text, job[ "cron_tag" ] )
+    return { **job, "schedule": installed } if installed else job
+
+
 def resolve_path( template, root, data ):
     """
     Turn a registry path into a real one.
