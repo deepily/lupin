@@ -1,0 +1,1770 @@
+{
+  "schema": "jobs-summary/1",
+  "generated_at": "2026-11-07T20:30:00-05:00",
+  "caller_is_operator": true,
+  "jobs": [
+    {
+      "target": null,
+      "audience": [
+        "cheech"
+      ],
+      "notify_interval_seconds": 3600,
+      "state": "failing",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [
+        {
+          "state": "failing",
+          "rule": "failing",
+          "text": "The last run failed at branch_guard (stale_branch); 1 failure in a row."
+        },
+        {
+          "state": "behind",
+          "rule": "A",
+          "text": "Scan debt grew 1,030 \u2192 2,124 definitions in 3.3 days."
+        },
+        {
+          "state": "behind",
+          "rule": "C",
+          "text": "Open rows are piling up: 45 opened in the window, 0 closed."
+        }
+      ],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": true
+      },
+      "last_attempt": {
+        "started_at": "2026-11-07T19:31:02-05:00",
+        "finished_at": "2026-11-07T19:31:02-05:00",
+        "trigger": "cron",
+        "outcome": "failed",
+        "stage": "branch_guard",
+        "failure": "stale_branch",
+        "evidence": "io/duplicate-check-daily/runs.jsonl:9"
+      },
+      "last_finished": {
+        "started_at": "2026-11-06T19:06:59-05:00",
+        "outcome": "carried",
+        "evidence": "io/duplicate-check-daily/runs.jsonl:8"
+      },
+      "consecutive_failures": 1,
+      "work_found_last_run": 153,
+      "strip": [
+        {
+          "at": "2026-11-03T11:12:18-05:00",
+          "outcome": "carried"
+        },
+        {
+          "at": "2026-11-04T10:00:00-05:00",
+          "outcome": "carried"
+        },
+        {
+          "at": "2026-11-05T10:00:00-05:00",
+          "outcome": "missed"
+        },
+        {
+          "at": "2026-11-06T19:06:59-05:00",
+          "outcome": "carried"
+        },
+        {
+          "at": "2026-11-07T19:31:02-05:00",
+          "outcome": "failed"
+        }
+      ],
+      "scan_debt": {
+        "unit": "definitions",
+        "count": 2124,
+        "never_checked": null,
+        "drained_last_run": 304,
+        "arrived_last_interval": null,
+        "as_of": "2026-11-06T19:26:00-05:00",
+        "freshness": null,
+        "points": [
+          {
+            "at": "2026-11-03T10:00:00-05:00",
+            "value": 1030
+          },
+          {
+            "at": "2026-11-04T10:00:00-05:00",
+            "value": 1500
+          },
+          {
+            "at": "2026-11-05T10:00:00-05:00",
+            "value": 1820
+          },
+          {
+            "at": "2026-11-06T10:00:00-05:00",
+            "value": 2124
+          }
+        ],
+        "clears_in": {
+          "kind": "never_at_this_rate",
+          "days": null
+        }
+      },
+      "fix_debt": {
+        "kind": "rows",
+        "own_mark": "job:duplicate-check",
+        "unfiled": 107,
+        "filed_total": 73,
+        "open_now": 68,
+        "closed_in_window": 5,
+        "open_reported": null,
+        "points": [
+          {
+            "at": "2026-11-03T10:00:00-05:00",
+            "value": 28
+          },
+          {
+            "at": "2026-11-04T10:00:00-05:00",
+            "value": 40
+          },
+          {
+            "at": "2026-11-05T10:00:00-05:00",
+            "value": 55
+          },
+          {
+            "at": "2026-11-06T10:00:00-05:00",
+            "value": 73
+          }
+        ],
+        "store_href": "/app/tasks?correlation_key=job:duplicate-check"
+      },
+      "schedule": {
+        "entries": [
+          "0 10 * * * (daily)",
+          "7 11 * * * (baseline)",
+          "300 s after boot (daily)"
+        ],
+        "last_due": "2026-11-07T19:30:00-05:00",
+        "next_due": "2026-11-08T10:00:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [
+        {
+          "label": "Ledger line",
+          "path": "io/duplicate-check-daily/runs.jsonl:9",
+          "href": "/app/docs?path=lupin/io/duplicate-check-daily/runs.jsonl"
+        }
+      ],
+      "rows": [
+        {
+          "id": "350d43c8-0000-4000-8000-000000000001",
+          "title": "350d43c8 Duplicate check daily run",
+          "href": "/app/tasks/view?row=350d43c8-0000-4000-8000-000000000001"
+        },
+        {
+          "id": "0d23e394-0000-4000-8000-000000000002",
+          "title": "0d23e394 Duplicate-check status page",
+          "href": "/app/tasks/view?row=0d23e394-0000-4000-8000-000000000002"
+        }
+      ],
+      "detail_link": "/app/duplicate-check",
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "duplicate-check",
+      "title": "Duplicate check",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "failing",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [
+        {
+          "state": "failing",
+          "rule": "failing",
+          "text": "The last run failed at export (export 200)."
+        }
+      ],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": true
+      },
+      "last_attempt": {
+        "started_at": "2026-11-07T12:12:00-05:00",
+        "finished_at": "2026-11-07T12:12:00-05:00",
+        "trigger": "cron",
+        "outcome": "failed",
+        "stage": null,
+        "failure": "export 200",
+        "evidence": null
+      },
+      "last_finished": {
+        "started_at": "2026-10-20T10:17:00-05:00",
+        "outcome": "carried",
+        "evidence": null
+      },
+      "consecutive_failures": 3,
+      "work_found_last_run": null,
+      "strip": [
+        {
+          "at": "2026-11-05T10:17:00-05:00",
+          "outcome": "failed"
+        },
+        {
+          "at": "2026-11-06T10:17:00-05:00",
+          "outcome": "failed"
+        },
+        {
+          "at": "2026-11-07T12:12:00-05:00",
+          "outcome": "failed"
+        }
+      ],
+      "scan_debt": {
+        "unit": "findings",
+        "count": 526,
+        "never_checked": null,
+        "drained_last_run": null,
+        "arrived_last_interval": null,
+        "as_of": "2026-11-06T19:26:00-05:00",
+        "freshness": null,
+        "points": [
+          {
+            "at": "2026-11-03T10:00:00-05:00",
+            "value": 526
+          }
+        ],
+        "clears_in": {
+          "kind": "not_enough_runs",
+          "days": null
+        }
+      },
+      "fix_debt": {
+        "kind": "rows",
+        "own_mark": null,
+        "unfiled": 10,
+        "filed_total": null,
+        "open_now": null,
+        "closed_in_window": null,
+        "open_reported": null,
+        "points": [],
+        "store_href": null
+      },
+      "schedule": {
+        "entries": [
+          "17 10 * * *",
+          "120 s after boot"
+        ],
+        "last_due": "2026-11-07T10:17:00-05:00",
+        "next_due": "2026-11-08T10:17:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [
+        {
+          "label": "Tick state",
+          "path": "projects-data/lupin/reuse-review/librarian/tick-state.json",
+          "href": null
+        }
+      ],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "wiki-librarian",
+      "title": "Wiki librarian",
+      "owner": "krishna"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "failing",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [
+        {
+          "state": "failing",
+          "rule": "failing",
+          "text": "The last run refused (config)."
+        }
+      ],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": {
+        "started_at": "2026-11-07T18:00:00-05:00",
+        "finished_at": "2026-11-07T18:00:00-05:00",
+        "trigger": "cron",
+        "outcome": "failed",
+        "stage": null,
+        "failure": "config",
+        "evidence": null
+      },
+      "last_finished": null,
+      "consecutive_failures": 2,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "0 18 * * *",
+          "360 s after boot"
+        ],
+        "last_due": "2026-11-07T18:00:00-05:00",
+        "next_due": "2026-11-08T18:00:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "reuse-behaviour",
+      "title": "Reuse-behaviour",
+      "owner": "rachel"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": false
+      },
+      "last_attempt": {
+        "started_at": "2026-11-07T12:13:00-05:00",
+        "finished_at": "2026-11-07T12:13:00-05:00",
+        "trigger": "cron",
+        "outcome": "clean",
+        "stage": null,
+        "failure": null,
+        "evidence": null
+      },
+      "last_finished": {
+        "started_at": "2026-11-07T12:13:00-05:00",
+        "outcome": "clean",
+        "evidence": null
+      },
+      "consecutive_failures": 0,
+      "work_found_last_run": 1,
+      "strip": [
+        {
+          "at": "2026-11-05T10:47:00-05:00",
+          "outcome": "clean"
+        },
+        {
+          "at": "2026-11-06T10:47:00-05:00",
+          "outcome": "clean"
+        },
+        {
+          "at": "2026-11-07T12:13:00-05:00",
+          "outcome": "clean"
+        }
+      ],
+      "scan_debt": {
+        "unit": null,
+        "count": null,
+        "never_checked": null,
+        "drained_last_run": null,
+        "arrived_last_interval": null,
+        "as_of": "2026-11-07T12:16:00-05:00",
+        "freshness": {
+          "built_at": "2026-11-07T12:16:08-05:00",
+          "stale_after_hours": 36,
+          "age_hours": 2.2
+        },
+        "points": [],
+        "clears_in": null
+      },
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "47 10 * * *",
+          "240 s after boot"
+        ],
+        "last_due": "2026-11-07T10:47:00-05:00",
+        "next_due": "2026-11-08T10:47:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "vector-refresh",
+      "title": "Vector refresh",
+      "owner": "krishna"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": false
+      },
+      "last_attempt": {
+        "started_at": "2026-11-07T11:37:00-05:00",
+        "finished_at": "2026-11-07T11:37:00-05:00",
+        "trigger": "cron",
+        "outcome": "clean",
+        "stage": null,
+        "failure": null,
+        "evidence": null
+      },
+      "last_finished": {
+        "started_at": "2026-11-07T11:37:00-05:00",
+        "outcome": "clean",
+        "evidence": null
+      },
+      "consecutive_failures": 0,
+      "work_found_last_run": 12,
+      "strip": [
+        {
+          "at": "2026-11-06T11:37:00-05:00",
+          "outcome": "clean"
+        },
+        {
+          "at": "2026-11-07T11:37:00-05:00",
+          "outcome": "clean"
+        }
+      ],
+      "scan_debt": {
+        "unit": "lookups",
+        "count": null,
+        "never_checked": null,
+        "drained_last_run": 12,
+        "arrived_last_interval": null,
+        "as_of": "2026-11-06T19:26:00-05:00",
+        "freshness": null,
+        "points": [],
+        "clears_in": {
+          "kind": "not_enough_runs",
+          "days": null
+        }
+      },
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "37 11 * * *",
+          "300 s after boot"
+        ],
+        "last_due": "2026-11-07T11:37:00-05:00",
+        "next_due": "2026-11-08T11:37:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "shadow-audit",
+      "title": "Shadow audit",
+      "owner": "tiffany"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": true
+      },
+      "last_attempt": {
+        "started_at": "2026-11-02T09:00:00-05:00",
+        "finished_at": "2026-11-02T09:00:00-05:00",
+        "trigger": "cron",
+        "outcome": "clean",
+        "stage": null,
+        "failure": null,
+        "evidence": null
+      },
+      "last_finished": {
+        "started_at": "2026-11-02T09:00:00-05:00",
+        "outcome": "clean",
+        "evidence": null
+      },
+      "consecutive_failures": 0,
+      "work_found_last_run": 20,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": {
+        "kind": "reported",
+        "own_mark": null,
+        "unfiled": null,
+        "filed_total": null,
+        "open_now": null,
+        "closed_in_window": null,
+        "open_reported": 20,
+        "points": [],
+        "store_href": null
+      },
+      "schedule": {
+        "entries": [
+          "0 9 * * 1"
+        ],
+        "last_due": "2026-11-02T09:00:00-05:00",
+        "next_due": "2026-11-09T09:00:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [
+        {
+          "target": "lupin",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "healthy",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": true
+          },
+          "last_attempt": {
+            "started_at": "2026-11-02T09:00:00-05:00",
+            "finished_at": "2026-11-02T09:00:00-05:00",
+            "trigger": "cron",
+            "outcome": "clean",
+            "stage": null,
+            "failure": null,
+            "evidence": null
+          },
+          "last_finished": {
+            "started_at": "2026-11-02T09:00:00-05:00",
+            "outcome": "clean",
+            "evidence": null
+          },
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": {
+            "kind": "reported",
+            "own_mark": null,
+            "unfiled": null,
+            "filed_total": null,
+            "open_now": null,
+            "closed_in_window": null,
+            "open_reported": 17,
+            "points": [],
+            "store_href": null
+          },
+          "schedule": null,
+          "liveness": null,
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": true,
+          "unknown_reason": null,
+          "targets": [],
+          "job": "worktree-census",
+          "title": "Worktree census",
+          "owner": "cheech"
+        },
+        {
+          "target": "planning-is-prompting",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "healthy",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": true
+          },
+          "last_attempt": {
+            "started_at": "2026-11-02T09:00:00-05:00",
+            "finished_at": "2026-11-02T09:00:00-05:00",
+            "trigger": "cron",
+            "outcome": "clean",
+            "stage": null,
+            "failure": null,
+            "evidence": null
+          },
+          "last_finished": {
+            "started_at": "2026-11-02T09:00:00-05:00",
+            "outcome": "clean",
+            "evidence": null
+          },
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": {
+            "kind": "reported",
+            "own_mark": null,
+            "unfiled": null,
+            "filed_total": null,
+            "open_now": null,
+            "closed_in_window": null,
+            "open_reported": 2,
+            "points": [],
+            "store_href": null
+          },
+          "schedule": null,
+          "liveness": null,
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": true,
+          "unknown_reason": null,
+          "targets": [],
+          "job": "worktree-census",
+          "title": "Worktree census",
+          "owner": "cheech"
+        },
+        {
+          "target": "cosa-voice",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "healthy",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": true
+          },
+          "last_attempt": {
+            "started_at": "2026-11-02T09:00:00-05:00",
+            "finished_at": "2026-11-02T09:00:00-05:00",
+            "trigger": "cron",
+            "outcome": "clean",
+            "stage": null,
+            "failure": null,
+            "evidence": null
+          },
+          "last_finished": {
+            "started_at": "2026-11-02T09:00:00-05:00",
+            "outcome": "clean",
+            "evidence": null
+          },
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": {
+            "kind": "reported",
+            "own_mark": null,
+            "unfiled": null,
+            "filed_total": null,
+            "open_now": null,
+            "closed_in_window": null,
+            "open_reported": 1,
+            "points": [],
+            "store_href": null
+          },
+          "schedule": null,
+          "liveness": null,
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": true,
+          "unknown_reason": null,
+          "targets": [],
+          "job": "worktree-census",
+          "title": "Worktree census",
+          "owner": "cheech"
+        }
+      ],
+      "job": "worktree-census",
+      "title": "Worktree census",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": true
+      },
+      "last_attempt": {
+        "started_at": "2026-11-01T19:00:00-04:00",
+        "finished_at": "2026-11-01T19:00:00-04:00",
+        "trigger": "cron",
+        "outcome": "clean",
+        "stage": null,
+        "failure": null,
+        "evidence": null
+      },
+      "last_finished": {
+        "started_at": "2026-11-01T19:00:00-04:00",
+        "outcome": "clean",
+        "evidence": null
+      },
+      "consecutive_failures": 0,
+      "work_found_last_run": 20,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": {
+        "kind": "reported",
+        "own_mark": null,
+        "unfiled": null,
+        "filed_total": null,
+        "open_now": null,
+        "closed_in_window": null,
+        "open_reported": 20,
+        "points": [],
+        "store_href": null
+      },
+      "schedule": {
+        "entries": [
+          "0 19 * * 0"
+        ],
+        "last_due": "2026-11-01T19:00:00-04:00",
+        "next_due": "2026-11-08T19:00:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "disk-report",
+      "title": "Disk report",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": false
+      },
+      "last_attempt": {
+        "started_at": "2026-11-01T19:30:00-04:00",
+        "finished_at": "2026-11-01T19:30:00-04:00",
+        "trigger": "cron",
+        "outcome": "clean",
+        "stage": null,
+        "failure": null,
+        "evidence": null
+      },
+      "last_finished": {
+        "started_at": "2026-11-01T19:30:00-04:00",
+        "outcome": "clean",
+        "evidence": null
+      },
+      "consecutive_failures": 0,
+      "work_found_last_run": 61278,
+      "strip": [],
+      "scan_debt": {
+        "unit": "files",
+        "count": 3,
+        "never_checked": null,
+        "drained_last_run": 61275,
+        "arrived_last_interval": null,
+        "as_of": "2026-11-06T19:26:00-05:00",
+        "freshness": null,
+        "points": [
+          {
+            "at": "2026-11-03T10:00:00-05:00",
+            "value": 61278
+          },
+          {
+            "at": "2026-11-04T10:00:00-05:00",
+            "value": 3
+          }
+        ],
+        "clears_in": {
+          "kind": "days",
+          "days": 1
+        }
+      },
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "30 19 * * 0"
+        ],
+        "last_due": "2026-11-01T19:30:00-04:00",
+        "next_due": "2026-11-08T19:30:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "hook-log-sweep",
+      "title": "Hook-log sweep",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": false
+      },
+      "last_attempt": {
+        "started_at": "2026-11-07T19:00:00-05:00",
+        "finished_at": "2026-11-07T19:00:00-05:00",
+        "trigger": "cron",
+        "outcome": "clean",
+        "stage": null,
+        "failure": null,
+        "evidence": null
+      },
+      "last_finished": {
+        "started_at": "2026-11-07T19:00:00-05:00",
+        "outcome": "clean",
+        "evidence": null
+      },
+      "consecutive_failures": 0,
+      "work_found_last_run": 0,
+      "strip": [],
+      "scan_debt": {
+        "unit": "files",
+        "count": 0,
+        "never_checked": null,
+        "drained_last_run": 0,
+        "arrived_last_interval": null,
+        "as_of": "2026-11-06T19:26:00-05:00",
+        "freshness": null,
+        "points": [
+          {
+            "at": "2026-11-03T10:00:00-05:00",
+            "value": 0
+          },
+          {
+            "at": "2026-11-04T10:00:00-05:00",
+            "value": 0
+          }
+        ],
+        "clears_in": {
+          "kind": "not_enough_runs",
+          "days": null
+        }
+      },
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "0 19 * * *",
+          "boot"
+        ],
+        "last_due": "2026-11-07T19:00:00-05:00",
+        "next_due": "2026-11-08T19:00:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "io-tmp-sweep",
+      "title": "io/tmp sweep",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [
+        "cheech",
+        "maria"
+      ],
+      "notify_interval_seconds": 600,
+      "state": "silent",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": true,
+      "reasons": [
+        {
+          "state": "silent",
+          "rule": "silent",
+          "text": "Due 20:10, nothing since; the grace of 30 minutes has passed."
+        },
+        {
+          "state": "silent",
+          "rule": "off",
+          "text": "The machine was off when it was due."
+        }
+      ],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": true
+      },
+      "last_attempt": {
+        "started_at": "2026-11-07T08:00:00-05:00",
+        "finished_at": "2026-11-07T08:00:00-05:00",
+        "trigger": "cron",
+        "outcome": "clean",
+        "stage": null,
+        "failure": null,
+        "evidence": null
+      },
+      "last_finished": {
+        "started_at": "2026-11-07T08:00:00-05:00",
+        "outcome": "clean",
+        "evidence": null
+      },
+      "consecutive_failures": 0,
+      "work_found_last_run": 0,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": {
+        "kind": "reported",
+        "own_mark": null,
+        "unfiled": null,
+        "filed_total": null,
+        "open_now": null,
+        "closed_in_window": null,
+        "open_reported": null,
+        "points": [],
+        "store_href": null
+      },
+      "schedule": {
+        "entries": [
+          "*/10 * * * *"
+        ],
+        "last_due": "2026-11-07T20:10:00-05:00",
+        "next_due": "2026-11-07T20:40:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "context-tick",
+      "title": "Context tick",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "30 7 * * *"
+        ],
+        "last_due": "2026-11-07T07:30:00-05:00",
+        "next_due": "2026-11-08T07:30:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": "Never reported: the log is empty because a clean run prints nothing.",
+      "targets": [],
+      "job": "doc-parity-tick",
+      "title": "Doc-parity tick",
+      "owner": "john"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": true,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "*/10 * * * *"
+        ],
+        "last_due": "2026-11-07T20:20:00-05:00",
+        "next_due": "2026-11-07T20:30:00-05:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": true,
+      "unknown_reason": "Never reported: the log is empty because a clean run prints nothing.",
+      "targets": [],
+      "job": "hook-link-tick",
+      "title": "Hook-link tick",
+      "owner": "john"
+    },
+    {
+      "target": null,
+      "audience": [
+        "rick"
+      ],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "0 21 17 8 *",
+          "0 22 17 8 *"
+        ],
+        "last_due": null,
+        "next_due": "2027-08-17T21:00:00-04:00",
+        "grace_minutes": 30,
+        "grace_seconds": null
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": "Never reported: the reminder logs were not read.",
+      "targets": [],
+      "job": "yearly-reminders",
+      "title": "Yearly reminders",
+      "owner": "rick"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 900,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "every 60 s"
+        ],
+        "last_due": null,
+        "next_due": null,
+        "grace_minutes": null,
+        "grace_seconds": 120
+      },
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service",
+        "up": true
+      },
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "fleet-arbiter",
+      "title": "Fleet arbiter",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "every 60 s"
+        ],
+        "last_due": null,
+        "next_due": null,
+        "grace_minutes": null,
+        "grace_seconds": 120
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": "Never reported: no record of a sweep yet.",
+      "targets": [
+        {
+          "target": "lupin",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "unknown",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": false
+          },
+          "last_attempt": null,
+          "last_finished": null,
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": null,
+          "schedule": null,
+          "liveness": null,
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": false,
+          "unknown_reason": "Never reported for this repo.",
+          "targets": [],
+          "job": "worktree-janitor",
+          "title": "Worktree janitor",
+          "owner": "cheech"
+        },
+        {
+          "target": "planning-is-prompting",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "unknown",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": false
+          },
+          "last_attempt": null,
+          "last_finished": null,
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": null,
+          "schedule": null,
+          "liveness": null,
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": false,
+          "unknown_reason": "Never reported for this repo.",
+          "targets": [],
+          "job": "worktree-janitor",
+          "title": "Worktree janitor",
+          "owner": "cheech"
+        },
+        {
+          "target": "cosa-voice",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "unknown",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": false
+          },
+          "last_attempt": null,
+          "last_finished": null,
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": null,
+          "schedule": null,
+          "liveness": null,
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": false,
+          "unknown_reason": "Never reported for this repo.",
+          "targets": [],
+          "job": "worktree-janitor",
+          "title": "Worktree janitor",
+          "owner": "cheech"
+        }
+      ],
+      "job": "worktree-janitor",
+      "title": "Worktree janitor",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "every 60 s"
+        ],
+        "last_due": null,
+        "next_due": null,
+        "grace_minutes": null,
+        "grace_seconds": 120
+      },
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service",
+        "up": true
+      },
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "context-pressure-writer",
+      "title": "Context-pressure writer",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "healthy",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "every 30 s"
+        ],
+        "last_due": null,
+        "next_due": null,
+        "grace_minutes": null,
+        "grace_seconds": 60
+      },
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service",
+        "up": true
+      },
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": null,
+      "targets": [],
+      "job": "health-watcher",
+      "title": "Health watcher",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "every 300 s"
+        ],
+        "last_due": null,
+        "next_due": null,
+        "grace_minutes": null,
+        "grace_seconds": 600
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": "Never reported: no summary exists yet.",
+      "targets": [],
+      "job": "notification-expiry",
+      "title": "Notification expiry",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "every 3600 s"
+        ],
+        "last_due": null,
+        "next_due": null,
+        "grace_minutes": null,
+        "grace_seconds": 600
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": "Never reported: no summary exists yet.",
+      "targets": [],
+      "job": "commons-archival",
+      "title": "Commons archival",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": true,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "every 30 s"
+        ],
+        "last_due": null,
+        "next_due": null,
+        "grace_minutes": null,
+        "grace_seconds": 60
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": "Never reported: no summary exists yet.",
+      "targets": [],
+      "job": "notify-outbox",
+      "title": "Notify outbox",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": {
+        "entries": [
+          "every 30 s",
+          "every 3600 s"
+        ],
+        "last_due": null,
+        "next_due": null,
+        "grace_minutes": null,
+        "grace_seconds": 120
+      },
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": "Never reported: two cadences in one entry.",
+      "targets": [],
+      "job": "socket-housekeeping",
+      "title": "Socket heartbeat, cleanup, transcript tailer",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "silent",
+      "running": false,
+      "unscheduled": false,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [
+        {
+          "state": "silent",
+          "rule": "liveness",
+          "text": "lupin-credential-watcher is down."
+        }
+      ],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": null,
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-bounce-watcher.service",
+        "up": true
+      },
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": null,
+      "targets": [
+        {
+          "target": "bounce-watcher",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "healthy",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": false
+          },
+          "last_attempt": null,
+          "last_finished": null,
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": null,
+          "schedule": null,
+          "liveness": {
+            "kind": "systemd",
+            "unit": "lupin-bounce-watcher.service",
+            "up": true
+          },
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": false,
+          "unknown_reason": null,
+          "targets": [],
+          "job": "side-services",
+          "title": "Bounce watcher",
+          "owner": "cheech"
+        },
+        {
+          "target": "cc-memory-watch",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "healthy",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": false
+          },
+          "last_attempt": null,
+          "last_finished": null,
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": null,
+          "schedule": null,
+          "liveness": {
+            "kind": "systemd",
+            "unit": "lupin-cc-memory-watch.service",
+            "up": true
+          },
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": false,
+          "unknown_reason": null,
+          "targets": [],
+          "job": "side-services",
+          "title": "CC memory watch",
+          "owner": "cheech"
+        },
+        {
+          "target": "credential-watcher",
+          "audience": [],
+          "notify_interval_seconds": 86400,
+          "state": "unknown",
+          "running": false,
+          "unscheduled": false,
+          "schedule_unverified": false,
+          "machine_was_off": false,
+          "reasons": [],
+          "applies": {
+            "scan_debt": false,
+            "fix_debt": false
+          },
+          "last_attempt": null,
+          "last_finished": null,
+          "consecutive_failures": 0,
+          "work_found_last_run": null,
+          "strip": [],
+          "scan_debt": null,
+          "fix_debt": null,
+          "schedule": null,
+          "liveness": {
+            "kind": "systemd",
+            "unit": "lupin-credential-watcher.service",
+            "up": null
+          },
+          "evidence": [],
+          "rows": [],
+          "detail_link": null,
+          "runnable": false,
+          "unknown_reason": "Not loaded: no systemd unit by this name.",
+          "targets": [],
+          "job": "side-services",
+          "title": "Credential watcher",
+          "owner": "cheech"
+        }
+      ],
+      "job": "side-services",
+      "title": "Side services",
+      "owner": "cheech"
+    },
+    {
+      "target": null,
+      "audience": [],
+      "notify_interval_seconds": 86400,
+      "state": "unknown",
+      "running": false,
+      "unscheduled": true,
+      "schedule_unverified": false,
+      "machine_was_off": false,
+      "reasons": [],
+      "applies": {
+        "scan_debt": false,
+        "fix_debt": false
+      },
+      "last_attempt": null,
+      "last_finished": null,
+      "consecutive_failures": 0,
+      "work_found_last_run": null,
+      "strip": [],
+      "scan_debt": null,
+      "fix_debt": null,
+      "schedule": null,
+      "liveness": null,
+      "evidence": [],
+      "rows": [],
+      "detail_link": null,
+      "runnable": false,
+      "unknown_reason": "Provisional: cadence not read.",
+      "targets": [],
+      "job": "pokes",
+      "title": "Pokes",
+      "owner": "cheech"
+    }
+  ]
+}
