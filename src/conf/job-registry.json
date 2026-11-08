@@ -13,7 +13,8 @@
       "PYTHONPATH": "{root}/src",
       "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
       "DEEPILY_DATA_DIR": "{deepily_data}"
-    }
+    },
+    "owner_note": "owner_confirmed false means the owner is cheech by default and no open row names another seat (Cheech, 2026-11-07)"
   },
   "jobs": [
     {
@@ -199,7 +200,8 @@
           "REUSE_VECTOR_REFRESH_PYTHON": "{python}",
           "REUSE_VECTOR_REFRESH_ENV": "{home}/.lupin/reuse-vector-refresh.env"
         }
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "shadow-audit",
@@ -231,7 +233,8 @@
           "LUPIN_REUSE_JEV_PACK_SIZE": "50",
           "REUSE_SHADOW_AUDIT_PYTHON": "{python}"
         }
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "context-tick",
@@ -252,7 +255,8 @@
           "{pip}/workflow/scripts/context-pressure-tick.sh"
         ],
         "env": {}
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "doc-parity-tick",
@@ -270,7 +274,8 @@
           "{pip}/workflow/scripts/doc-parity-tick.sh"
         ],
         "env": {}
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "worktree-census",
@@ -294,7 +299,8 @@
         "env": {
           "PLANNING_IS_PROMPTING_ROOT": "{pip}"
         }
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "disk-report",
@@ -314,7 +320,8 @@
           "{root}/src/scripts/disk-hygiene-report.sh"
         ],
         "env": {}
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "hook-log-sweep",
@@ -334,7 +341,8 @@
           "--apply"
         ],
         "env": {}
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "io-tmp-sweep",
@@ -357,7 +365,8 @@
           "--apply"
         ],
         "env": {}
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "hook-link-tick",
@@ -375,7 +384,8 @@
           "{root}/src/scripts/hook-link-tick.sh"
         ],
         "env": {}
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "yearly-reminders",
@@ -405,7 +415,8 @@
       "liveness": {
         "kind": "systemd",
         "unit": "lupin-arbiter-app.service"
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "context-pressure-writer",
@@ -417,7 +428,8 @@
       "liveness": {
         "kind": "systemd",
         "unit": "lupin-arbiter-app.service"
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "health-watcher",
@@ -429,7 +441,8 @@
       "liveness": {
         "kind": "systemd",
         "unit": "lupin-arbiter-app.service"
-      }
+      },
+      "owner_confirmed": false
     },
     {
       "job": "worktree-janitor",
@@ -454,7 +467,8 @@
         {
           "target": "cosa-voice"
         }
-      ]
+      ],
+      "owner_confirmed": false
     },
     {
       "job": "notification-expiry",
@@ -467,7 +481,8 @@
         }
       ],
       "summary_path": "{root}/io/jobs/notification-expiry/job-summary.json",
-      "grace_seconds": 300
+      "grace_seconds": 300,
+      "owner_confirmed": false
     },
     {
       "job": "commons-archival",
@@ -480,7 +495,8 @@
         }
       ],
       "summary_path": "{root}/io/jobs/commons-archival/job-summary.json",
-      "grace_seconds": 600
+      "grace_seconds": 600,
+      "owner_confirmed": false
     },
     {
       "job": "notify-outbox",
@@ -494,7 +510,8 @@
       ],
       "summary_path": "{root}/io/jobs/notify-outbox/job-summary.json",
       "grace_seconds": 60,
-      "scan_debt": true
+      "scan_debt": true,
+      "owner_confirmed": false
     },
     {
       "job": "socket-housekeeping",
@@ -512,7 +529,8 @@
         }
       ],
       "summary_path": "{root}/io/jobs/socket-housekeeping/job-summary.json",
-      "grace_seconds": 120
+      "grace_seconds": 120,
+      "owner_confirmed": false
     },
     {
       "job": "side-services",
@@ -543,7 +561,8 @@
             "unit": "lupin-credential-watcher.service"
           }
         }
-      ]
+      ],
+      "owner_confirmed": false
     },
     {
       "job": "pokes",
@@ -551,7 +570,8 @@
       "title": "Pokes (when started)",
       "owner": "cheech",
       "schedule": [],
-      "summary_path": "{root}/io/jobs/pokes/job-summary.json"
+      "summary_path": "{root}/io/jobs/pokes/job-summary.json",
+      "owner_confirmed": false
     }
   ]
 }

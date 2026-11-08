@@ -157,6 +157,28 @@ def paths_of( root, data ):
     return root, data, home, pip, os.environ.get( "DEEPILY_DATA_DIR", str( pathlib.Path( data ).parents[ 1 ] ) )
 
 
+def assess_read( merged, target, summary, defaults, ctx ):
+    """
+    Ask the live inputs what one summary needs, then assess it.
+
+    Requires:
+        - merged is the effective entry with the target's own keys; summary is a record or None
+    Ensures:
+        - the run lock is probed only for a job that has reported, and the store only for a job with a mark that has reported
+        - returns the JobEntry dict from job_health.assess
+    Raises:
+        - KeyError, TypeError, ValueError or AttributeError when the record is missing a field or holds a wrong type
+    """
+    root, data, now, deps = ctx[ "root" ], ctx[ "data" ], ctx[ "now" ], ctx[ "deps" ]
+    live = merged.get( "liveness" )
+    lock = None
+    if merged.get( "lock_path" ) and summary is not None and deps.lock_held( jr.resolve_path( merged[ "lock_path" ], root, data ) ):
+        lock = ( now - jh.parse_time( summary[ "last_attempt" ][ "started_at" ] ) ).total_seconds()
+    store = deps.store_counts( merged[ "fix_debt_key" ], now, defaults[ "window_days" ] ) if merged.get( "fix_debt" ) and merged.get( "fix_debt_key" ) and summary is not None else None
+    return jh.assess( merged, summary, now, deps.boot_time(), defaults, store=store, lock_age=lock,
+                      unit_state=deps.unit_state( live[ "unit" ] ) if live else None, target=target[ "target" ] if target else None )
+
+
 def assess_target( ent, target, defaults, ctx ):
     """
     Assess one job, or one target of a job.
@@ -169,19 +191,17 @@ def assess_target( ent, target, defaults, ctx ):
         - a target without its own summary_path reads <job summary folder>/<target>/job-summary.json
         - an unreadable or foreign-schema summary file reads as unknown, with its own reason
     """
-    root, data, now, deps = ctx[ "root" ], ctx[ "data" ], ctx[ "now" ], ctx[ "deps" ]
+    root, data = ctx[ "root" ], ctx[ "data" ]
     merged = { **ent, **( { k: v for k, v in target.items() if k != "target" } if target else {} ) }
     path   = jr.resolve_path( merged[ "summary_path" ], root, data )
     if target and "summary_path" not in target: path = path.parent / target[ "target" ] / path.name
     summary = js.read_summary( path )
-    live    = merged.get( "liveness" )
-    lock    = None
-    if merged.get( "lock_path" ) and summary is not None and deps.lock_held( jr.resolve_path( merged[ "lock_path" ], root, data ) ):
-        lock = ( now - jh.parse_time( summary[ "last_attempt" ][ "started_at" ] ) ).total_seconds()
-    store   = deps.store_counts( merged[ "fix_debt_key" ], now, defaults[ "window_days" ] ) if merged.get( "fix_debt") and merged.get( "fix_debt_key" ) and summary is not None else None
-    got = jh.assess( merged, summary, now, deps.boot_time(), defaults, store=store, lock_age=lock,
-                     unit_state=deps.unit_state( live[ "unit" ] ) if live else None, target=target[ "target" ] if target else None )
-    if summary is None and not live and path.exists(): got[ "unknown_reason" ] = "unreadable"
+    try:
+        got = assess_read( merged, target, summary, defaults, ctx )
+    except ( KeyError, TypeError, ValueError, AttributeError ):          # a record with the right schema but a missing or wrong-typed field
+        got, summary = assess_read( merged, target, None, defaults, ctx ), None
+        got[ "unknown_reason" ] = "unreadable"
+    if summary is None and not merged.get( "liveness" ) and path.exists(): got[ "unknown_reason" ] = "unreadable"
     return got
 
 

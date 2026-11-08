@@ -47,6 +47,7 @@ This page is an index. The reference itself is in the parts below, in document o
 - [27. CC Transcript Console (`/api/cc-transcript/*`)](rest-api-reference/08-task-store-and-cc-transcript.md#27-cc-transcript-console-apicc-transcript)
 - [28. Reuse Candidate Search (`/api/reuse-candidates/*`)](rest-api-reference/08-task-store-and-cc-transcript.md#28-reuse-candidate-search-apireuse-candidates)
 - [29. Pair Labelling (`/api/pair-labelling/*`)](rest-api-reference/09-job-ids-and-cross-reference.md#29-pair-labelling-apipair-labelling)
+- [30. Background Jobs (`/api/jobs/*`)](rest-api-reference/09-job-ids-and-cross-reference.md#30-background-jobs-apijobs)
 - [Job ID Prefixes](rest-api-reference/09-job-ids-and-cross-reference.md#job-id-prefixes)
 - [Cross-Reference: Deep-Dive Documentation](rest-api-reference/09-job-ids-and-cross-reference.md#cross-reference-deep-dive-documentation)
 

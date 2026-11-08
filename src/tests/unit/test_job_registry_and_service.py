@@ -249,3 +249,12 @@ def test_run_now_refuses_unknown_unrunnable_and_locked_jobs_and_starts_nothing(t
     assert spawn.calls == []
     root2 = write_registry( tmp_path / "b", [ job( "p", run={ "argv": [ "x" ] } ) ] )
     assert svc.run_now( root2, tmp_path, "p", "t1", Deps(), NOW, spawn )[ 0 ] == 200 and spawn.calls[ 0 ][ 0 ] == [ "x" ]
+
+
+def test_a_record_with_the_right_schema_and_a_missing_field_reads_as_unreadable_not_a_500(tmp_path):
+    root = write_registry( tmp_path, [ job( "bad" ) ] )
+    path = pathlib.Path( root ) / "s" / "bad.json"
+    path.parent.mkdir( parents=True )
+    path.write_text( json.dumps( { "schema": "job-summary/1", "job": "bad", "last_attempt": { "started_at": NOW.isoformat(), "outcome": "failed" } } ) )
+    got = svc.build_response( root, tmp_path, NOW, Deps() )[ "jobs" ][ 0 ]
+    assert got[ "state" ] == "unknown" and got[ "unknown_reason" ] == "unreadable" and got[ "last_attempt" ] is None
