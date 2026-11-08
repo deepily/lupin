@@ -134,27 +134,67 @@ def spawn_registry_manager( persona: str ) -> Optional[ str ]:
         - each live bridge whose voice persona is `persona` is resolved by manager_resolver.resolve_manager,
           which reads the bridge's spawned_by and frozen spawned_by_persona, then the spawn manifests
         - returns the store-shaped manager when every worker that resolves names the same one, else None
+        - returns the persona itself when it is live and every live seat of it has no lineage at all (SOURCE_UNRESOLVED):
+          a manager has no spawner, so its own branches are its own
         - returns None when two live workers of that persona name different managers; never raises
     """
     try:
-        from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager, SOURCE_LINEAGE
+        from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager, SOURCE_LINEAGE, SOURCE_UNRESOLVED
         from lupin_cli.claude_code.hooks.lib.session_bridge import iter_live_bridges
-        key, found = _manager_words( persona ), set()
+        key, found, sources = _manager_words( persona ), set(), []
         for _, data, _ in iter_live_bridges():
             voice = data.get( "voice_persona" )
             name  = voice.get( "name" ) if isinstance( voice, dict ) else None
             sid   = data.get( "session_id" )
             if not ( isinstance( name, str ) and sid and _manager_words( name ) == key ): continue
             lineage = resolve_manager( sid )
+            sources.append( lineage[ "source" ] )
             if lineage[ "source" ] == SOURCE_LINEAGE and lineage[ "manager_persona" ]: found.add( _manager_words( lineage[ "manager_persona" ] ) )
+        if sources and not found and all( x == SOURCE_UNRESOLVED for x in sources ): return key
         return found.pop() if len( found ) == 1 else None
     except Exception:
         return None
 
 
+def registered_persona_slugs() -> list:
+    """
+    The fleet's persona names, read from the key that allocates them.
+
+    Ensures:
+        - returns the names in `cc session voice persona pool` as written, e.g. ["maria", "mr radio", ...]
+        - returns [] when the config cannot be read, which leaves the first-word fallback in charge; never raises
+    """
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        pool = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( "cc session voice persona pool", default="", silent=True )
+        return [ n.strip() for n in ( pool or "" ).split( "," ) if n.strip() ]
+    except Exception:
+        return []
+
+
+def leading_persona( name: str, personas: list ) -> Optional[ str ]:
+    """
+    Find the persona a tree or branch name begins with.
+
+    Requires:
+        - name is a tree name or a branch name minus its rescue stamp
+        - personas is a list of registered persona names; a space or hyphen inside one is allowed
+
+    Ensures:
+        - returns the longest persona whose slug ("mr radio" gives "mr-radio") is the whole name or is followed by a "-" in it
+        - the match is case-insensitive and is judged on whole hyphen-delimited words, so "mr" never matches "mrs-x"
+        - returns None when no persona matches
+    """
+    low = name.lower()
+    for persona in sorted( personas, key=len, reverse=True ):
+        slug = persona.strip().lower().replace( " ", "-" )
+        if slug and ( low == slug or low.startswith( slug + "-" ) ): return persona.strip().lower().replace( "-", " " )
+    return None
+
+
 def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Optional[ str ] = None,
                      run: Optional[ Callable ] = None, registry_fn: Optional[ Callable ] = None,
-                     tree_path: Optional[ str ] = None ) -> dict:
+                     tree_path: Optional[ str ] = None, personas: Optional[ list ] = None ) -> dict:
     """
     Find the manager a tree or branch belongs to, trying each lookup in order.
 
@@ -163,10 +203,11 @@ def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Op
         - branch and project_root, when both are given, enable the stamp lookup
         - project_root, with tree_path or branch, enables the creator ledger lookup
         - registry_fn is None (spawn_registry_manager) or takes a persona and returns a manager or None
+        - personas is None (registered_persona_slugs) or the registered persona names the name may begin with
 
     Ensures:
         - tries, in order: the branch stamp, the creator ledger, a seat tree's own name, the spawn lineage of
-          a live worker named by the first segment of `name`
+          a live worker whose persona `name` begins with (longest registered persona first)
         - returns { manager, source, tried } where source is "branch stamp", "creator ledger", "seat tree name"
           or "spawn registry" for the lookup that answered, and manager is None with source None when none did
         - tried lists every lookup attempted, so a row can say what was looked up; never raises
@@ -188,7 +229,8 @@ def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Op
     tried.append( "seat tree name" )
     m = SEAT_TREE_RE.match( name )
     if m: return { "manager": m.group( "manager" ).replace( "-", " " ), "source": "seat tree name", "tried": tried }
-    first = name.split( "-" )[ 0 ]
+    persona = leading_persona( name, personas if personas is not None else registered_persona_slugs() )
+    first   = persona or name.split( "-" )[ 0 ]
     tried.append( f"spawn registry for '{first}'" )
     try:
         manager = registry_fn( first ) if first else None

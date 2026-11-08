@@ -99,6 +99,74 @@ def test_a_straggler_tree_named_after_a_worker_routes_the_same_way( live_registr
     assert ( row[ "owner" ], row[ "accountable" ] ) == ( "mr radio", "mr radio" )
 
 
+# ── a persona whose slug holds a hyphen ─────────────────────────────────────
+
+POOL = [ "maria", "mr radio", "mr", "Rio" ]
+REAL = "wt-rescue/mr-radio-8f3aa058-20261107T234724Z"
+
+
+def test_a_hyphenated_persona_branch_goes_to_that_persona_not_its_first_word( repo, live_registry, monkeypatch ):
+    monkeypatch.setattr( st, "registered_persona_slugs", lambda: POOL )
+    seen = []
+    monkeypatch.setattr( st, "spawn_registry_manager", lambda persona: seen.append( persona ) or ( "mr radio" if persona == "mr radio" else None ) )
+    row = st.compose_archive_row( _outcome( REAL, str( repo ) ) )
+    assert ( row[ "owner" ], row[ "accountable" ] ) == ( "mr radio", "mr radio" )
+    assert seen == [ "mr radio" ]                                          # the registry was asked for the whole persona, never "mr"
+
+
+def test_the_longest_persona_wins_and_a_worker_still_routes_to_its_spawner():
+    assert st.leading_persona( "mr-radio-x", POOL ) == "mr radio"
+    assert st.leading_persona( "mr-x", POOL ) == "mr"
+    assert st.leading_persona( "mr-radio", POOL ) == "mr radio"
+    assert st.leading_persona( "RIO-x", POOL ) == "rio"
+    assert st.leading_persona( "mrs-x", POOL ) is None and st.leading_persona( "mr radiox", POOL ) is None
+    assert st.resolve_creator( "mr-radio-x", registry_fn=lambda p: { "mr radio": "mr radio" }.get( p ), personas=[ "mr radio", "arnold" ] )[ "manager" ] == "mr radio"
+    assert st.resolve_creator( "arnold-x", registry_fn=registry, personas=[ "arnold" ] )[ "manager" ] == "mr radio"
+
+
+def _bridges( monkeypatch, sources, manager_persona=None ):
+    import cosa.agents.heartbeat_arbiter.manager_resolver as mr
+    import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+    seats = [ ( "p", { "voice_persona": { "name": "mr radio" }, "session_id": f"s{i}" }, "x" ) for i, _ in enumerate( sources ) ]
+    seats.append( ( "p", { "voice_persona": "none", "session_id": "o" }, "x" ) )
+    seats.append( ( "p", { "voice_persona": { "name": "maya" }, "session_id": "m" }, "x" ) )
+    monkeypatch.setattr( sb, "iter_live_bridges", lambda: iter( seats ) )
+    by_sid = { f"s{i}": src for i, src in enumerate( sources ) }
+    monkeypatch.setattr( mr, "resolve_manager", lambda sid: { "source": by_sid.get( sid, mr.SOURCE_LINEAGE ), "manager_persona": manager_persona if by_sid.get( sid, "l" ) == mr.SOURCE_LINEAGE or sid == "m" else None } )
+
+
+def test_a_live_manager_with_no_spawner_owns_its_own_branches( monkeypatch ):
+    _bridges( monkeypatch, [ "unresolved" ] )
+    assert st.spawn_registry_manager( "mr radio" ) == "mr radio"
+    assert st.spawn_registry_manager( "nobody" ) is None                    # not live: still triage
+
+
+def test_a_live_worker_with_a_spawner_or_a_mixed_set_is_not_taken_for_a_manager( monkeypatch ):
+    _bridges( monkeypatch, [ "lineage" ], manager_persona="Tiberius" )
+    assert st.spawn_registry_manager( "mr radio" ) == "tiberius"
+    _bridges( monkeypatch, [ "unresolved", "declared" ] )
+    assert st.spawn_registry_manager( "mr radio" ) is None
+
+
+def test_an_unknown_prefix_falls_back_as_before( repo, live_registry, monkeypatch ):
+    monkeypatch.setattr( st, "registered_persona_slugs", lambda: POOL )
+    row = st.compose_archive_row( _outcome( "wt-rescue/zed-review-ab12cd3" + STAMPS, str( repo ) ) )
+    assert row[ "owner" ] == st.NO_CREATOR_OWNER and "spawn registry for 'zed'" in row[ "body" ]
+
+
+def test_the_pool_is_read_from_config_and_an_unreadable_config_gives_none( monkeypatch, tmp_path ):
+    import cosa.config.configuration_manager as cm
+    class Fake:
+        def __init__( self, env_var_name ): pass
+        def get( self, key, default="", silent=False ): return " maria, mr radio ,,"
+    monkeypatch.setattr( cm, "ConfigurationManager", Fake )
+    assert st.registered_persona_slugs() == [ "maria", "mr radio" ]
+    class Boom:
+        def __init__( self, env_var_name ): raise RuntimeError( "no config" )
+    monkeypatch.setattr( cm, "ConfigurationManager", Boom )
+    assert st.registered_persona_slugs() == []
+
+
 # ── the pieces ──────────────────────────────────────────────────────────────
 
 def test_a_registry_that_raises_or_is_silent_gives_no_creator():
@@ -212,9 +280,9 @@ def test_the_pid_check_runs_inside_a_container_too( sessions, monkeypatch ):
     assert [ data[ "session_id" ] for _, data, _ in sb.iter_live_bridges() ] == [ "mgr-1111" ]
 
 
-def test_an_unspawned_or_unknown_persona_resolves_to_nobody( sessions ):
+def test_an_unspawned_live_persona_is_its_own_manager_and_an_unknown_one_resolves_to_nobody( sessions ):
     sessions.bridge( "maria", "mgr-1111", None )
-    assert st.spawn_registry_manager( "maria" ) is None and st.spawn_registry_manager( "nobody" ) is None
+    assert st.spawn_registry_manager( "maria" ) == "maria" and st.spawn_registry_manager( "nobody" ) is None
 
 
 def test_a_broken_bridge_reader_resolves_to_nobody( monkeypatch ):
