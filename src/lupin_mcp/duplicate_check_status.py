@@ -215,7 +215,7 @@ def _points( key, finished ):
     return [ { "at": at, key: value } for at, value in finished if value is not None ][ -POINTS: ]
 
 
-def job_summary( lines, now ):
+def job_summary( lines, now, rows=None ):
     """
     Build the job's summary record in the fleet's job-summary/1 format.
 
@@ -226,6 +226,8 @@ def job_summary( lines, now ):
         - last_attempt is the newest line; outcome maps ok to clean; stage and failure are the two halves of the failure text before and after its first ": "; a boot trigger is named boot
         - last_finished is the newest line that finished (clean or carried); consecutive_failures counts failed lines after it
         - scan_debt.count is the last measured daily carried count, never_checked the baseline remainder (None until a baseline run measured it), arrived_last_interval the owed count of the newest measured daily run less the carried count of the one before
+        - rows, when given, is { found, open } counted in the store by the created_by mark; the summary then holds found_by_mark, open_by_mark and gap, the ledger's filed total less found
+        - without rows those three are None, and a gap is never reported as 0 when the store was not read
         - fix_debt.unfiled and opened_in_run are the newest finished line's queued_for_retry and filed counts, own_mark the created_by the filer stamps on its rows; open and closed counts are the reader's, from the store
         - target is None for this job, fix_debt.kind is rows; there is no health field, the reader computes it
     """
@@ -253,10 +255,11 @@ def job_summary( lines, now ):
                             "drained_last_run": fin[ 1 ][ "judged" ] if fin else None, "arrived_last_interval": arrived, "as_of": ended( fin[ 1 ] ) or fin[ 1 ][ "started_at" ] if fin else None,
                             "freshness": None, "points": _points( "count", [ ( l[ "started_at" ], l[ "carried" ] ) for l in daily ] ) },
              "fix_debt": { "unit": "rows", "kind": "rows", "own_mark": OWN_MARK, "unfiled": fin[ 1 ][ "queued_for_retry" ] if fin else None, "opened_in_run": fin[ 1 ][ "filed" ] if fin else None,
-                           "points": _points( "opened_total", fix_pts ) } }
+                           "filed_in_ledger": opened, "found_by_mark": rows[ "found" ] if rows else None, "open_by_mark": rows[ "open" ] if rows else None,
+                           "gap": opened - rows[ "found" ] if rows else None, "points": _points( "opened_total", fix_pts ) } }
 
 
-def write_job_summary( folder, now ):
+def write_job_summary( folder, now, rows=None ):
     """
     Write the summary record beside the ledger, whole, by rename.
 
@@ -266,7 +269,7 @@ def write_job_summary( folder, now ):
     """
     path = pathlib.Path( folder ) / SUMMARY_FILE
     tmp  = path.with_name( f".{SUMMARY_FILE}.{os.getpid()}.tmp" )
-    tmp.write_text( json.dumps( job_summary( history.read_lines( folder ), now ), indent=2, sort_keys=True ), encoding="utf-8" )
+    tmp.write_text( json.dumps( job_summary( history.read_lines( folder ), now, rows ), indent=2, sort_keys=True ), encoding="utf-8" )
     os.replace( tmp, path )
     return path
 

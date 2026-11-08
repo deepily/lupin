@@ -64,6 +64,9 @@ MIN_BASELINE_CALLS = 20               # the baseline gets what the daily work le
 ADAPTIVE_RISE_LIMIT = 6               # hourly runs in a row with a larger carried count before Rick is told
 BACKOFF_SECONDS   = 5400              # after a rate limit the next slot is skipped: no run starts until this long has passed
 SKIPPED           = "skipped"
+ALL_FAILED_CALLS  = 20                # a run that made this many calls and judged none is a broken run, not a quiet one
+ROW_SCAN_LIMIT    = 50000             # rows the store count reads before it gives up and reports nothing
+TERMINAL          = ( "done", "dropped", "wont_fix" )
 BASELINE_SCHEDULE = "7 11 * * *"      # 11:07, an hour after the daily run and 30 minutes before the 11:37 shadow audit drain; a morning slot, never after last call
 RISE_LIMIT        = 3                 # daily runs in a row with a larger carried count before Rick is told
 INSTALLED_LINES   = ( 2, 3 )          # the daily slot and the reboot line, with the baseline line when it was asked for
@@ -76,6 +79,9 @@ LOCK_OWNER        = "duplicate-check-daily"
 STALE_DAYS        = 3                 # a pinned branch whose tip is this old, with a newer branch beside it, is refused
 STALE_BRANCH      = "stale_branch"
 MISSING_BRANCH    = "missing_branch"
+BRANCH_CHANGED    = "branch_changed"      # the recorded progress belongs to another branch than the one chosen now
+COMMIT_NOT_ON_BRANCH = "commit_not_on_branch"
+CONTINUITY        = ( BRANCH_CHANGED, COMMIT_NOT_ON_BRANCH )
 STAGE_GUARD       = "branch_guard"
 STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
@@ -156,9 +162,16 @@ def backoff_until( folder, now ):
     return None
 
 
-def usage_since( before, after ):
-    """Ensures: returns the difference of two usage tallies, the cost rounded to 4 places."""
-    return { k: round( after[ k ] - before[ k ], 4 ) if k == "cost_usd" else after[ k ] - before[ k ] for k in after }
+def usage_since( before, after, calls=0 ):
+    """
+    Work out what the calls between two usage tallies used.
+
+    Ensures:
+        - returns the difference of the tallies, the cost rounded to 4 places
+        - returns None when calls were made and the SDK reported none of them, as under the agy transport: the tokens are unknown, not zero
+    """
+    used = { k: round( after[ k ] - before[ k ], 4 ) if k == "cost_usd" else after[ k ] - before[ k ] for k in after }
+    return None if calls and not used[ "calls" ] else used
 
 
 def window_of( root, last, now, branch=BRANCH, hours=WINDOW_HOURS ):
@@ -375,15 +388,13 @@ def record( folder, stem, doc, now ):
         - doc is the result document; stem is the file name without its extension; now is the run's start time
     Ensures:
         - the document gains schema_version and started_at, and None for each measure the run did not reach, so a failed run has the keys of a successful one
-        - writes <folder>/<stem>.json, appends one line to runs.jsonl, then rewrites job-summary.json; a failure of that write is printed and changes nothing
+        - writes <folder>/<stem>.json, appends one line to runs.jsonl
         - returns the document
     """
     doc.update( schema_version=history.SCHEMA_VERSION, started_at=now.isoformat() )
     for key in UNREACHED: doc.setdefault( key, None )
     write_json( folder / f"{stem}.json", doc )
     history.append_line( folder, history.line_of( doc, f"{stem}.json" ) )
-    try: status_mod.write_job_summary( folder, now )
-    except Exception as exc: print( f"duplicate-check-daily: the job summary was not written: {type( exc ).__name__}: {exc}", file=sys.stderr )       # a write failure never fails the job
     return doc
 
 
@@ -457,6 +468,24 @@ def branch_guard( root, branch, now, days=STALE_DAYS ):
     return None
 
 
+def continuity_guard( root, branch, previous, commit ):
+    """
+    Refuse a run that would carry another branch's progress onto this one.
+
+    Requires:
+        - previous is the branch the last run recorded, or None for a record written before branches were kept; commit is the last judged commit, or None
+    Ensures:
+        - returns None when there is no record, or the branch is the recorded one and the commit is an ancestor of its tip
+        - returns { refusal: branch_changed, branch, previous, newest: None } when the recorded branch differs from this one
+        - returns { refusal: commit_not_on_branch, branch, previous, newest: None } when the commit is not an ancestor of the branch tip
+    """
+    if previous is not None and previous != branch: return { "refusal": BRANCH_CHANGED, "branch": branch, "previous": previous, "newest": None }
+    if commit is None: return None
+    try: git( root, "merge-base", "--is-ancestor", commit, branch )
+    except RuntimeError: return { "refusal": COMMIT_NOT_ON_BRANCH, "branch": branch, "previous": previous, "newest": None }
+    return None
+
+
 def limit_flag( cap, ceiling ):
     """Ensures: returns --ceiling and its number when a ceiling is given, else --cap and the cap."""
     return f"--ceiling {ceiling}" if ceiling is not None else f"--cap {cap}"
@@ -476,6 +505,10 @@ def refusal_message( refusal, command ):
         - returns ( spoken, abstract ): spoken is short and holds no path; abstract names the branch and carries the reinstall command, or says no other branch exists
     """
     name = refusal[ "branch" ]
+    if refusal[ "refusal" ] in CONTINUITY:
+        what = f"it last judged `{refusal['previous']}` and now chooses `{name}`" if refusal[ "refusal" ] == BRANCH_CHANGED else f"its last judged commit is not on `{name}`"
+        return ( f"The duplicate check refused to run: {what.replace('`', '')}.",
+                 f"Progress is recorded per branch, and {what}.\n\nTo keep going on the old branch, reinstall with `--branch {refusal['previous']}`. To start `{name}` fresh, delete last-success.json and baseline.json in the check's folder." )
     if refusal[ "refusal" ] == STALE_BRANCH: spoken, why = f"The daily duplicate check refused to run: its branch {name} has been idle {refusal[ 'idle_days' ]} days.", f"Pinned branch `{name}` has not moved in {refusal[ 'idle_days' ]} days and `{refusal[ 'newest' ]}` has a newer commit ({refusal[ 'newest_at' ]})."
     else:                                      spoken, why = f"The daily duplicate check refused to run: its branch {name} no longer exists.", f"Pinned branch `{name}` does not resolve to a commit."
     fix = f"Reinstall for the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
@@ -540,7 +573,8 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     Ensures:
         - writes <data_dir>/duplicate-check-daily/<date>-<time>-<trigger>.json: the verdicts' clusters, the window, the judge calls and elapsed_seconds
         - a judge ledger written under another Claude Code version is renamed aside first and a new one started; the result holds ledger_rotated { from, to, old_version, new_version }
-        - before anything else, branch_guard runs: a pinned branch that is stale or gone writes that file with status failed, stage branch_guard, the refusal, the reinstall command and notified (the notifier hook's answer, False without one); nothing else changes and last-success does not move
+        - before anything else, continuity_guard refuses a branch other than the one last-success.json or baseline.json recorded, or a recorded commit that is not on the branch: that file gets status failed, stage branch_guard and the refusal, and the urgent hook is told
+        - then branch_guard runs: a pinned branch that is stale or gone writes that file with status failed, stage branch_guard, the refusal, the reinstall command and notified (the notifier hook's answer, False without one); nothing else changes and last-success does not move
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - an exception while reading the frozen configuration, choosing the window or making the worktree writes that file with status failed, stage setup and the error, removes a worktree it began, and moves nothing
@@ -559,13 +593,16 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     folder  = pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER )
     stem    = f"{now.date().isoformat()}-{now.strftime( '%H%M%S' )}-{trigger}"
     base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap, "ceiling": ceiling, "mode": history.MODE_BASELINE if baseline else history.MODE_DAILY, "branch": branch }
-    refused = branch_guard( root, branch, now )
+    last    = read_last_success( folder )
+    marked  = read_baseline( folder ) if baseline else None
+    refused = branch_guard( root, branch, now ) or ( continuity_guard( root, branch, marked.get( "branch" ), None ) if marked else continuity_guard( root, branch, last.get( "branch" ), last[ "commit" ] ) if last and not baseline else None )
     if refused is not None:
         again   = baseline or ( "cron_has_baseline" in parts and parts[ "cron_has_baseline" ]() )       # the reinstall replaces every tagged line, so it must name the baseline line
         command = reinstall_command( root, sys.executable, cap, cli_path, refused[ "newest" ], ceiling, again ) if refused[ "newest" ] is not None else None
         sent    = False
-        if "notifier" in parts:
-            try: sent = parts[ "notifier" ]( *refusal_message( refused, command ) )
+        hook    = "urgent" if refused[ "refusal" ] in CONTINUITY else "notifier"
+        if hook in parts:
+            try: sent = parts[ hook ]( *refusal_message( refused, command ) )
             except Exception: sent = False       # a broken notifier must not hide the refusal: the file and the exit code still say it
         doc = { **base, "status": "failed", "stage": STAGE_GUARD, **refused, "reinstall": command, "notified": sent, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
         return record( folder, stem, doc, now )
@@ -581,7 +618,6 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     doc, target = base, None
     try:
         cfg    = parts[ "verify" ]()
-        last   = read_last_success( folder )
         window = baseline_window( root, branch ) if baseline else window_of( root, last, now, branch )
         doc    = { **base, "window": { "start": window[ "start" ], "end": window[ "end" ], "commits": len( window[ "commits" ] ) } }
         target = pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}"
@@ -606,14 +642,14 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
             wiring = { **proof_cli.base_wiring( folder / VECTORS_DIR, parts[ "structural" ]( tree, cfg ), parallel, parts[ "client" ] ), "backend": count, "ledger": ledger }
             out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap, skip_breaching=True )
     except Exception as exc:               # the pool build, the embeddings or the judge failed: leave a record and change nothing else
-        doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, usage=usage_since( used0, spend() ), rate_limited=count.limited, elapsed_seconds=round( clock() - started, 3 ) )
+        doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, usage=usage_since( used0, spend(), count.calls ), rate_limited=count.limited, elapsed_seconds=round( clock() - started, 3 ) )
         return record( folder, stem, doc, now )
     finally:
         release( root, tree )
     ids    = [ d[ "id" ] for d in [ *fresh[ "defs" ], *pool ] if d[ "id" ] not in set( out[ "dropped" ][ "ids" ] ) ]
     groups = [ g for g in cluster.clusters( ids, cluster.join_pairs( out[ "verdicts" ] ) ) if len( g ) > 1 ]
     moved  = progress( fresh[ "defs" ], fresh[ "commit_of" ], out[ "unjudged" ], window )
-    doc.update( usage=usage_since( used0, spend() ), rate_limited=count.limited, backoff_until=( now + datetime.timedelta( seconds=BACKOFF_SECONDS ) ).isoformat() if count.limited else None )
+    doc.update( usage=usage_since( used0, spend(), count.calls ), rate_limited=count.limited, backoff_until=( now + datetime.timedelta( seconds=BACKOFF_SECONDS ) ).isoformat() if count.limited else None )
     doc.update( status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
@@ -624,9 +660,9 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         if hook not in parts: continue
         try: doc[ key ] = parts[ hook ]( found, folder )
         except Exception as e: doc[ key ] = { "error": f"{type( e ).__name__}: {e}" }       # a broken store client or config must not stop last-success, or the next run re-judges and re-spends the cap
-    if baseline: write_json( folder / BASELINE, { "status": BASELINE_OPEN if moved[ "carried" ] else BASELINE_DONE, "end": window[ "end" ], "carried": len( moved[ "carried" ] ), "at": now.isoformat() } )
+    if baseline: write_json( folder / BASELINE, { "status": BASELINE_OPEN if moved[ "carried" ] else BASELINE_DONE, "end": window[ "end" ], "carried": len( moved[ "carried" ] ), "at": now.isoformat(), "branch": branch } )
     else:
-        write_json( folder / LAST_SUCCESS, { "commit": moved[ "advanced_to" ], "at": now.isoformat() } )
+        write_json( folder / LAST_SUCCESS, { "commit": moved[ "advanced_to" ], "at": now.isoformat(), "branch": branch } )
         rising = rising_guard( folder, doc, now, rise_limit, parts.get( "notifier" ) )
         if rising is not None: doc[ "rising" ] = rising
     doc[ "cap" ] = cap
@@ -654,6 +690,7 @@ def announce( parts, folder, docs, now, zero_before ):
         - docs are the result documents the run wrote; zero_before is the projected zero date before the run, or None
     Ensures:
         - a failed run gets one urgent alert naming its failure, unless the branch guard already sent its own
+        - a run that hit the rate limit, or made twenty calls and judged none, gets an urgent alert; a skipped slot's note says it is backing off and until when
         - a projected zero date that moved later by more than a day gets one urgent alert
         - a run that did something, or left a backlog, gets one low-priority note; a quiet run gets none
         - a missing hook sends nothing and a hook that raises is ignored, so a broken notifier never changes a run's outcome
@@ -665,7 +702,9 @@ def announce( parts, folder, docs, now, zero_before ):
     for doc in docs:
         line = history.line_of( doc, "" )
         if line[ "failure" ] is not None and "refusal" not in doc: todo.append( ( "urgent", f"The duplicate check {line[ 'mode' ]} run failed: {line[ 'failure' ]}.", link ) )
-        note = status_mod.note_of( line, snap )
+        if line[ "rate_limited" ]: todo.append( ( "urgent", f"The duplicate check {line[ 'mode' ]} run hit the rate limit; it is backing off until {line[ 'backoff_until' ]}.", link ) )
+        elif ( line[ "judge_calls" ] or 0 ) >= ALL_FAILED_CALLS and not line[ "judged" ]: todo.append( ( "urgent", f"The duplicate check {line[ 'mode' ]} run made {line[ 'judge_calls' ]} calls and judged none.", link ) )
+        note = f"Duplicate check slot skipped: {doc[ 'note' ]}." if line[ "status" ] == SKIPPED else status_mod.note_of( line, snap )
         if note is not None: todo.append( ( "noter", note, link ) )
     if status_mod.slipped( zero_before, snap[ "projected_zero" ] ): todo.append( ( "urgent", f"The duplicate check backlog now reaches zero on {snap[ 'projected_zero' ]}, after {zero_before}.", link ) )
     for hook, spoken, abstract in todo:
@@ -697,6 +736,49 @@ def adaptive_run( root, now, trigger, cli_path, parts, branch, parallel, ceiling
         docs.append( run( root, later, trigger, None, cli_path, parts, branch, parallel, clock, ceiling=left, baseline=True ) )
     announce( parts, folder, docs, now + datetime.timedelta( seconds=1 ), before )
     return docs
+
+
+def live_rows_by_mark( settings=None, api_key=None, client=None, max_rows=ROW_SCAN_LIMIT ):
+    """
+    Count the rows in the store that carry the job's mark.
+
+    Requires:
+        - the mark is created_by equal to the filer's fixed name
+    Ensures:
+        - returns { found, open }: found counts every row the mark names, held ones included; open those not done, dropped or wont_fix
+        - returns None when the store cannot be read in full: any failed read or a board longer than max_rows is no answer, never a short count
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib import task_store_client as client_mod, task_store_settings
+        client   = client or client_mod
+        settings = settings or task_store_settings.load_task_store_settings()
+        token    = client.read_api_key() if api_key is None else api_key
+        board, cut = client.fetch_board( settings, token, max_rows )
+        held, offset = [], 0
+        while True:
+            ok, status, page = client.query_tasks( settings, token, { "status": "not_approved", "project": filing.PROJECT, "limit": 500, "offset": offset } )
+            if not ok: return None
+            held.extend( page[ "tasks" ] )
+            offset += len( page[ "tasks" ] )
+            if not page.get( "has_more" ) or not page[ "tasks" ]: break
+    except Exception: return None
+    if cut: return None
+    mine = { r[ "id" ]: r for r in [ *board, *held ] if r[ "created_by" ] == filing.CREATED_BY }
+    return { "found": len( mine ), "open": sum( 1 for r in mine.values() if r[ "status" ] not in TERMINAL ) }
+
+
+def finish( parts, folder, now ):
+    """
+    Rewrite the job summary after a run.
+
+    Ensures:
+        - the rows hook, when parts has one, supplies the store count; a hook that raises gives no count
+        - a failed write is printed and changes nothing, so a summary problem never fails the job
+    """
+    try: rows = parts[ "rows_by_mark" ]() if "rows_by_mark" in parts else None
+    except Exception: rows = None
+    try: status_mod.write_job_summary( folder, now, rows )
+    except Exception as exc: print( f"duplicate-check-daily: the job summary was not written: {type( exc ).__name__}: {exc}", file=sys.stderr )
 
 
 def exit_code( docs ):
@@ -786,7 +868,7 @@ def live_parts():
     return { "client": base[ "client" ], "backend": base[ "backend" ], "data_dir": base[ "data_dir" ], "version_fn": model_transport.cli_version,
              "verify": lambda: cfg_mod.verify_frozen( base[ "frozen_path" ], base[ "live" ] ),
              "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor, "notifier": live_notifier,
-             "urgent": live_urgent, "noter": live_noter, "cron_has_baseline": baseline_installed }
+             "urgent": live_urgent, "noter": live_noter, "rows_by_mark": live_rows_by_mark, "cron_has_baseline": baseline_installed }
 
 
 def live_filer( findings, folder ):
@@ -862,6 +944,7 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     Ensures:
         - prints the result document as JSON (a list of them, daily first, with --adaptive) and returns 0, REFUSED_EXIT (3) when the branch guard refused, or 1 when anything else failed
         - the cron modes never run the check
+        - after a run the job summary is rewritten beside the ledger, with the count of store rows that carry the job's mark
         - a run takes run_lock first; when another run holds it, prints a skipped document and returns 0 without running anything, so a boot near 10:00 that starts the cron line and the reboot line together runs the check once
     """
     ap = argparse.ArgumentParser( description="Judge the day's new definitions for duplicates." )
@@ -895,8 +978,9 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
                 return 0
             branch = resolve_branch( root, args.branch )
             when   = now or datetime.datetime.now().astimezone()
-            if args.adaptive: docs = adaptive_run( root, when, args.trigger, args.claude_cli_path, parts, branch, args.parallel, args.ceiling, args.rise_limit or ADAPTIVE_RISE_LIMIT )
-            else:             docs = [ run( root, when, args.trigger, args.cap, args.claude_cli_path, parts, branch, args.parallel, ceiling=args.ceiling, baseline=args.baseline, rise_limit=args.rise_limit or RISE_LIMIT ) ]
+            if args.adaptive: docs = adaptive_run( root, when, args.trigger, args.claude_cli_path, parts, branch, args.parallel, args.ceiling, ADAPTIVE_RISE_LIMIT if args.rise_limit is None else args.rise_limit )
+            else:             docs = [ run( root, when, args.trigger, args.cap, args.claude_cli_path, parts, branch, args.parallel, ceiling=args.ceiling, baseline=args.baseline, rise_limit=RISE_LIMIT if args.rise_limit is None else args.rise_limit ) ]
+    finish( parts, pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER ), when )
     out( json.dumps( docs if args.adaptive else docs[ 0 ], indent=2, sort_keys=True ) )
     return exit_code( docs )
 

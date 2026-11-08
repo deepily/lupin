@@ -296,7 +296,7 @@ def test_git_names_the_command_when_it_fails( tmp_path ):
 
 def test_the_live_parts_are_built_without_a_call():
     parts = dd.live_parts()
-    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier", "urgent", "noter", "cron_has_baseline" } and callable( parts[ "structural" ] )
+    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier", "urgent", "noter", "rows_by_mark", "cron_has_baseline" } and callable( parts[ "structural" ] )
 
 
 def lines_of( **over ):
@@ -801,7 +801,7 @@ def test_a_baseline_that_the_cap_cuts_short_stays_in_progress_and_later_runs_fin
     parts  = parts_of( tmp_path )
     one    = dd.run( repo, NOW, "hand", 2, "/bin/claude", parts, baseline=True )
     assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 2 and len( one[ "carried" ] ) == 3
-    assert dd.read_baseline( folder ) == { "status": dd.BASELINE_OPEN, "end": git( repo, "rev-parse", "main" ), "carried": 3, "at": NOW.isoformat() }
+    assert dd.read_baseline( folder ) == { "status": dd.BASELINE_OPEN, "end": git( repo, "rev-parse", "main" ), "carried": 3, "at": NOW.isoformat(), "branch": "main" }
     two    = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts, baseline=True )
     assert two[ "judge_calls" ] == 3 and two[ "status" ] == "ok" and dd.read_baseline( folder )[ "status" ] == dd.BASELINE_DONE
     calls = parts[ "backend" ].calls
