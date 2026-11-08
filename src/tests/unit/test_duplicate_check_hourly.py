@@ -307,7 +307,7 @@ def test_a_rate_limited_slot_sends_an_urgent_alert_and_the_next_skipped_slot_say
     docs = dd.adaptive_run( repo, NOW, "cron", "/bin/claude", parts, "main", 4, 100 )
     assert len( docs ) == 1 and docs[ 0 ][ "status" ] == "carried", "a limited daily run is not followed by a baseline run, though most of the chunk is left"
     urgent = [ s for s in hooks.sent if s[ 0 ] == "urgent" ]
-    assert len( urgent ) == 1 and "hit the rate limit" in urgent[ 0 ][ 1 ] and docs[ 0 ][ "backoff_until" ] in urgent[ 0 ][ 1 ]
+    assert len( urgent ) == 1 and "hit the rate limit" in urgent[ 0 ][ 1 ] and datetime.datetime.fromisoformat( docs[ 0 ][ "backoff_until" ] ).strftime( "%H:%M" ) in urgent[ 0 ][ 1 ]
     hooks.sent.clear()
     skipped = dd.adaptive_run( repo, NOW + datetime.timedelta( hours=1 ), "cron", "/bin/claude", parts, "main", 4, 100 )
     assert len( skipped ) == 1 and skipped[ 0 ][ "status" ] == "skipped", "a skipped slot is not followed by a baseline run"
@@ -390,3 +390,33 @@ def test_a_baseline_recorded_on_another_branch_is_refused_without_an_urgent_hook
     dd.write_json( folder / dd.BASELINE, { "status": dd.BASELINE_OPEN, "branch": "wip-a", "carried": 5 } )
     doc = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path ), branch="wip-b", ceiling=10, baseline=True )
     assert doc[ "refusal" ] == "branch_changed" and doc[ "notified" ] is False
+
+
+def test_exactly_twenty_calls_that_judged_none_is_urgent( tmp_path ):
+    parts, hooks = hooked( tmp_path )
+    dd.announce( parts, tmp_path / "io" / "duplicate-check-daily", [ doc_of( 20, 0 ) ], NOW, None )
+    assert [ s[ 0 ] for s in hooks.sent ].count( "urgent" ) == 1
+
+
+def test_a_wont_fix_row_is_not_open_and_the_held_read_is_limited_to_the_project():
+    board = Board( [ row( "a", "wont_fix" ), row( "b", "dropped" ), row( "c", "done" ), row( "d", "in_progress" ) ], [ ] )
+    assert dd.live_rows_by_mark( { }, "k", board ) == { "found": 4, "open": 1 }
+    assert board.asked[ 0 ][ "project" ] == "lupin"
+
+
+def test_the_rate_limit_alert_speaks_the_time_not_the_iso_string( tmp_path ):
+    parts, hooks = hooked( tmp_path )
+    dd.announce( parts, tmp_path / "io" / "duplicate-check-daily", [ doc_of( 5, 0, rate_limited=1, backoff_until="2026-11-03T13:30:00+00:00" ) ], NOW, None )
+    assert "backing off until 13:30." in hooks.sent[ 0 ][ 1 ] and "2026-11-03" not in hooks.sent[ 0 ][ 1 ]
+
+
+def test_the_same_continuity_refusal_alerts_once_and_not_again_every_slot( repo, tmp_path ):
+    history( repo )
+    git( repo, "branch", "wip-a" )
+    git( repo, "branch", "wip-b" )
+    parts, hooks = hooked( tmp_path )
+    dd.run( repo, NOW, "cron", 10, "/bin/claude", parts, branch="wip-a" )
+    first  = dd.run( repo, NOW + datetime.timedelta( hours=1 ), "cron", 10, "/bin/claude", parts, branch="wip-b" )
+    second = dd.run( repo, NOW + datetime.timedelta( hours=2 ), "cron", 10, "/bin/claude", parts, branch="wip-b" )
+    assert ( first[ "repeat" ], first[ "notified" ], second[ "repeat" ], second[ "notified" ] ) == ( False, True, True, False )
+    assert [ s[ 0 ] for s in hooks.sent ].count( "urgent" ) == 1
