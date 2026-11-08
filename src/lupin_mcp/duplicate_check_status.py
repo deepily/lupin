@@ -25,6 +25,7 @@ SUMMARY_SCHEMA  = "job-summary/1"       # section 1.1 of the fleet's background 
 SUMMARY_FILE    = "job-summary.json"
 OWN_MARK        = "created_by:duplicate-check-daily"       # filing.CREATED_BY: every row the filer mints carries it
 POINTS          = 14
+RECENT_ATTEMPTS = 7
 INFLOW_DAYS     = 7                     # days of history the arrival rate averages over
 DRAIN_DAYS      = 3                     # days of history the clearing rate averages over
 SLIP_DAYS       = 1                     # a projected zero date this many days later than the last one is a slip
@@ -230,6 +231,7 @@ def job_summary( lines, now, rows=None ):
         - without rows those three are None, and a gap is never reported as 0 when the store was not read
         - fix_debt.unfiled and opened_in_run are the newest finished line's queued_for_retry and filed counts, own_mark the created_by the filer stamps on its rows; open and closed counts are the reader's, from the store
         - target is None for this job, fix_debt.kind is rows; there is no health field, the reader computes it
+        - last_attempt also names the mode; recent holds the last seven attempts as { at, outcome, mode }, oldest first; scan_debt.points are { at, count, drained }
     """
     last      = lines[ -1 ] if lines else None
     finished  = [ ( i, l ) for i, l in enumerate( lines ) if l[ "status" ] in history.MEASURED ]
@@ -247,16 +249,17 @@ def job_summary( lines, now, rows=None ):
     return { "schema": SUMMARY_SCHEMA, "job": JOB, "target": None, "written_at": now.isoformat(),
              "last_attempt": None if last is None else { "started_at": last[ "started_at" ], "finished_at": ended( last ), "trigger": SHAPE_TRIGGER.get( last[ "trigger" ], last[ "trigger" ] ),
                                                          "outcome": OUTCOME.get( last[ "status" ], last[ "status" ] ), "stage": stage or None, "failure": failure or None,
-                                                         "evidence": _evidence( lines, len( lines ) - 1 ) },
+                                                         "evidence": _evidence( lines, len( lines ) - 1 ), "mode": last[ "mode" ] },
              "last_finished": None if fin is None else { "started_at": fin[ 1 ][ "started_at" ], "outcome": OUTCOME[ fin[ 1 ][ "status" ] ], "evidence": _evidence( lines, fin[ 0 ] ) },
              "consecutive_failures": sum( 1 for l in after if l[ "status" ] == "failed" ),
              "work_found_last_run": fin[ 1 ][ "findings" ] if fin else None,
              "scan_debt": { "unit": "definitions", "count": daily[ -1 ][ "carried" ] if daily else None, "never_checked": baseline_remaining( lines ),
                             "drained_last_run": fin[ 1 ][ "judged" ] if fin else None, "arrived_last_interval": arrived, "as_of": ended( fin[ 1 ] ) or fin[ 1 ][ "started_at" ] if fin else None,
-                            "freshness": None, "points": _points( "count", [ ( l[ "started_at" ], l[ "carried" ] ) for l in daily ] ) },
+                            "freshness": None, "points": [ { "at": l[ "started_at" ], "count": l[ "carried" ], "drained": l[ "judged" ] } for l in daily ][ -POINTS: ] },
              "fix_debt": { "unit": "rows", "kind": "rows", "own_mark": OWN_MARK, "unfiled": fin[ 1 ][ "queued_for_retry" ] if fin else None, "opened_in_run": fin[ 1 ][ "filed" ] if fin else None,
-                           "filed_in_ledger": opened, "found_by_mark": rows[ "found" ] if rows else None, "open_by_mark": rows[ "open" ] if rows else None,
-                           "gap": opened - rows[ "found" ] if rows else None, "points": _points( "opened_total", fix_pts ) } }
+                           "filed_in_ledger": opened, "found_by_mark": rows[ "found" ] if rows else None, "open_by_mark": rows[ "open" ] if rows else None, "open_reported": rows[ "open" ] if rows else None,
+                           "gap": opened - rows[ "found" ] if rows else None, "points": _points( "opened_total", fix_pts ) },
+             "recent": [ { "at": l[ "started_at" ], "outcome": OUTCOME.get( l[ "status" ], l[ "status" ] ), "mode": l[ "mode" ] } for l in lines[ -RECENT_ATTEMPTS: ] ] }
 
 
 def write_job_summary( folder, now, rows=None ):

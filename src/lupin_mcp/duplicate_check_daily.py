@@ -574,6 +574,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - writes <data_dir>/duplicate-check-daily/<date>-<time>-<trigger>.json: the verdicts' clusters, the window, the judge calls and elapsed_seconds
         - a judge ledger written under another Claude Code version is renamed aside first and a new one started; the result holds ledger_rotated { from, to, old_version, new_version }
         - before anything else, continuity_guard refuses a branch other than the one last-success.json or baseline.json recorded, or a recorded commit that is not on the branch: that file gets status failed, stage branch_guard and the refusal, and the urgent hook is told
+        - a continuity refusal that repeats the previous run's is recorded with repeat true and sends no second alert, until a run ends differently
         - then branch_guard runs: a pinned branch that is stale or gone writes that file with status failed, stage branch_guard, the refusal, the reinstall command and notified (the notifier hook's answer, False without one); nothing else changes and last-success does not move
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
@@ -601,10 +602,12 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         command = reinstall_command( root, sys.executable, cap, cli_path, refused[ "newest" ], ceiling, again ) if refused[ "newest" ] is not None else None
         sent    = False
         hook    = "urgent" if refused[ "refusal" ] in CONTINUITY else "notifier"
-        if hook in parts:
+        before  = ( history.read_lines( folder ) or [ { "failure": None } ] )[ -1 ][ "failure" ]
+        repeated = refused[ "refusal" ] in CONTINUITY and before == f"{STAGE_GUARD}: {refused[ 'refusal' ]}"       # the same refusal as the last slot's: Rick was told then
+        if hook in parts and not repeated:
             try: sent = parts[ hook ]( *refusal_message( refused, command ) )
             except Exception: sent = False       # a broken notifier must not hide the refusal: the file and the exit code still say it
-        doc = { **base, "status": "failed", "stage": STAGE_GUARD, **refused, "reinstall": command, "notified": sent, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
+        doc = { **base, "status": "failed", "stage": STAGE_GUARD, **refused, "reinstall": command, "notified": sent, "repeat": repeated, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
         return record( folder, stem, doc, now )
     if baseline and ( read_baseline( folder ) or { } ).get( "status" ) == BASELINE_DONE:
         return record( folder, stem, { **base, "status": "ok", "note": "baseline complete", "judged": 0, "judge_calls": 0, "carried": [], "elapsed_seconds": round( clock() - started, 3 ) }, now )
@@ -702,7 +705,7 @@ def announce( parts, folder, docs, now, zero_before ):
     for doc in docs:
         line = history.line_of( doc, "" )
         if line[ "failure" ] is not None and "refusal" not in doc: todo.append( ( "urgent", f"The duplicate check {line[ 'mode' ]} run failed: {line[ 'failure' ]}.", link ) )
-        if line[ "rate_limited" ]: todo.append( ( "urgent", f"The duplicate check {line[ 'mode' ]} run hit the rate limit; it is backing off until {line[ 'backoff_until' ]}.", link ) )
+        if line[ "rate_limited" ]: todo.append( ( "urgent", f"The duplicate check {line[ 'mode' ]} run hit the rate limit; it is backing off until {datetime.datetime.fromisoformat( line[ 'backoff_until' ] ).strftime( '%H:%M' )}.", link ) )
         elif ( line[ "judge_calls" ] or 0 ) >= ALL_FAILED_CALLS and not line[ "judged" ]: todo.append( ( "urgent", f"The duplicate check {line[ 'mode' ]} run made {line[ 'judge_calls' ]} calls and judged none.", link ) )
         note = f"Duplicate check slot skipped: {doc[ 'note' ]}." if line[ "status" ] == SKIPPED else status_mod.note_of( line, snap )
         if note is not None: todo.append( ( "noter", note, link ) )
