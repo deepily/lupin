@@ -244,7 +244,7 @@ def backfill( root, data, home, force=False, dry_run=False, now=None, duplicate_
             rows.append( ( job, "would-write" if dry_run else "written", "from runs.jsonl" ) )
             continue
         try: steps = todo[ job ]()
-        except ( OSError, ValueError, KeyError, TypeError ) as error:                                # one bad record must not stop the others
+        except ( OSError, ValueError, KeyError, TypeError, AttributeError ) as error:                                # one bad record must not stop the others
             rows.append( ( job, "no-record", f"unreadable: {type( error ).__name__}: {error}"[ :120 ] ) )
             continue
         if steps is None: rows.append( ( job, "no-record", "no usable record" ) )

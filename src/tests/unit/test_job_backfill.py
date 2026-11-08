@@ -232,3 +232,21 @@ def test_one_corrupt_record_is_reported_and_the_others_still_run(tmp_path):
     got = { j: ( s, d ) for j, s, d in bf.backfill( root, data, home ) }
     assert got[ "vector-refresh" ][ 0 ] == "no-record" and got[ "vector-refresh" ][ 1 ].startswith( "unreadable: JSONDecodeError" ) and got[ "wiki-librarian" ][ 0 ] == "no-record"
     assert got[ "shadow-audit" ][ 0 ] == "written" and got[ "io-tmp-sweep" ][ 0 ] == "written"
+
+
+def test_a_refresh_state_with_no_attempt_time_is_dated_by_the_file(tmp_path):
+    put( tmp_path / "refresh" / "refresh-state.json", json.dumps( { "last_outcome": "built", "built_at": "2026-11-07T17:16:08+00:00" } ), T )
+    assert bf.refresh_steps( tmp_path )[ 0 ][ "attempt" ][ "started_at" ] == T.astimezone().replace( microsecond=0 ).isoformat()
+
+
+def test_a_failed_report_has_the_report_stage(tmp_path):
+    assert bf.report_steps( put( tmp_path / "e.log", "Traceback x\n", T ) )[ 0 ][ "attempt" ][ "stage" ] == "report"
+
+
+def test_records_of_the_wrong_type_are_reported_not_raised(tmp_path):
+    root, data, home = build_world( tmp_path )
+    put( data / "refresh/refresh-state.json", json.dumps( { "last_outcome": "built", "last_attempt_at": 5 } ) )              # a number where a time belongs: TypeError
+    put( data / "librarian/tick-state.json", "[1]" )                                                                            # a list where an object belongs: AttributeError
+    put( data / "librarian/librarian.log", '{"ran": false, "reason": "x"}\n', T )
+    got = { j: d for j, s, d in bf.backfill( root, data, home ) }
+    assert got[ "vector-refresh" ].startswith( "unreadable: TypeError" ) and got[ "wiki-librarian" ].startswith( "unreadable: AttributeError" )
