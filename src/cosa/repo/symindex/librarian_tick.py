@@ -41,6 +41,7 @@ from cosa.repo.symindex import paths
 from cosa.repo.symindex.librarian_queue import CORRELATION_KEY, MOBILE_CORRELATION_KEY, MOBILE_ROLLUP_PREFIX, Librarian
 from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
 from cosa.repo.symindex.wiki_lint import queue
+from lupin_mcp import job_summary_adapters as jsa
 
 CRON_TAG         = "# wiki-librarian-tick"
 CRON_SCHEDULE    = "17 10 * * *"
@@ -639,6 +640,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if not ( enabled_fn or ( lambda: read_enabled( errors=read_errors ) ) )():
         log( f"tick could not read {ENABLED_KEY}, so it stays off: {read_errors[ 0 ]}" if read_errors else f"tick is switched off: {ENABLED_KEY} is not true" )
         print( json.dumps( { "ran": False, "reason": "switched off" }, sort_keys=True ), file=out )
+        jsa.record_librarian( folder, { "ran": False, "reason": "switched off" }, EXIT_DISABLED, now, environ )
         return EXIT_DISABLED
     pending   = os.path.join( folder, PENDING_NAME )
     wiki_dir  = os.path.join( root, "src", "docs", "wiki" )
@@ -651,8 +653,13 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     else:
         mobile_librarian = ( make_mobile_librarian or _live_mobile_librarian )( corpus, environ, os.path.join( folder, MOBILE_PENDING_NAME ), log )
         mobile           = lambda: run_mobile( corpus, mobile_librarian, log )
-    code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), args.misses_out or os.path.join( folder, MISSES_NAME ),
-                              os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, vector_check=check, mobile=mobile )
+    try:
+        code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), args.misses_out or os.path.join( folder, MISSES_NAME ),
+                                  os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, vector_check=check, mobile=mobile )
+    except Exception as error:                                         # the job's own record says it failed; the exception still ends the run
+        jsa.record_librarian( folder, { "ran": False, "reason": f"{type( error ).__name__}: {error}" }, 1, now, environ )
+        raise
+    jsa.record_librarian( folder, summary, code, now, environ )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
 

@@ -819,3 +819,25 @@ def test_status_text_takes_the_number_or_numbers_of_lines_that_count_as_a_full_i
     three = "\n".join( f"{n} {lt.CRON_TAG}" for n in range( 3 ) )
     assert lt.status_text( three, lt.CRON_TAG, 3 ) == "installed: 3 lines" and lt.status_text( three ) == "partly installed: 3 lines"
     assert lt.status_text( three, lt.CRON_TAG, ( 3, 4 ) ) == "installed: 3 lines" and lt.status_text( three, lt.CRON_TAG, ( 4, 5 ) ) == "partly installed: 3 lines"
+
+
+def _summaries( tmp_path ):
+    """Ensures: returns every job-summary.json the run left under the test data folder, parsed."""
+    return [ json.loads( p.read_text() ) for p in ( tmp_path / "data" ).rglob( "job-summary.json" ) ]
+
+
+def test_main_leaves_a_job_summary_of_a_finished_tick_and_of_a_switched_off_one( cron, tmp_path, monkeypatch, pipeline ):
+    run_main( [], cron, tmp_path, monkeypatch, make_librarian=lambda env, pending, log: FakeLibrarian(), export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
+    got = _summaries( tmp_path )[ 0 ]
+    assert got[ "job" ] == "wiki-librarian" and got[ "last_attempt" ][ "outcome" ] == "clean" and got[ "scan_debt" ][ "unit" ] == "findings"
+    run_main( [], cron, tmp_path, monkeypatch, enabled_fn=lambda: False )
+    assert _summaries( tmp_path )[ 0 ][ "last_attempt" ][ "outcome" ] == "skipped" and _summaries( tmp_path )[ 0 ][ "last_attempt" ][ "failure" ] == "switched off"
+
+
+def test_main_records_a_crashed_tick_as_failed_and_still_raises( cron, tmp_path, monkeypatch ):
+    def crash( *a, **k ): raise RuntimeError( "boom" )
+    monkeypatch.setattr( lt, "run_tick", crash )
+    with pytest.raises( RuntimeError, match="boom" ):
+        run_main( [], cron, tmp_path, monkeypatch, make_librarian=lambda env, pending, log: FakeLibrarian(), export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
+    last = _summaries( tmp_path )[ 0 ][ "last_attempt" ]
+    assert last[ "outcome" ] == "failed" and last[ "failure" ] == "RuntimeError: boom" and last[ "stage" ] == "tick"

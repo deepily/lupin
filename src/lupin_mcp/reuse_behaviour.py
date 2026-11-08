@@ -32,6 +32,7 @@ from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import shadow_audit as sa
 from cosa.repo.symindex.candidates.errors import CandidateError
 from lupin_mcp import duplicate_check_filing as ff
+from lupin_mcp import job_summary_adapters as jsa
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_outcome as ro
 from lupin_mcp import reuse_refusals as rr
@@ -458,6 +459,8 @@ def main( argv=None, out=None, store=None, environ=None ):
             return EXIT_NOT_MADE
         print( "\n".join( cron_lines( root, a.python, a.log_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) } ) ), file=out )
         return 0
+    started = datetime.datetime.now()
+    folder  = pathlib.Path( environ.get( "LUPIN_JOB_SUMMARY_DIR" ) or pathlib.Path( root ) / "io" / "jobs" ) / "reuse-behaviour"       # not under the data folder: a config refusal happens before the data folder is known
     try:
         end   = a.end if a.end is not None else last_complete_week_end( datetime.datetime.now().astimezone().date() ).isoformat()
         end   = week_of( end )[ 1 ].isoformat()
@@ -465,6 +468,7 @@ def main( argv=None, out=None, store=None, environ=None ):
         saved = data / PAGE_FOLDER / f"reuse-behaviour-{end}.txt"
         if a.skip_if_saved and saved.is_file() and saved.stat().st_size > 0:
             print( f"SKIPPED: the page for {end} is already saved at {saved}.", file=out )
+            jsa.record_behaviour( folder, "skipped", started, environ=environ )
             return 0
         records, _bad = eg.merge_call_logs( a.log_dir or data / "call-log" )
         page  = weekly_report( records, read_refusals( data ), sa.load_receipts( data ), end, check_dir=a.check_dir or data / CHECK_FOLDER, store=store if store is not None else ff.LiveStore() )
@@ -473,8 +477,10 @@ def main( argv=None, out=None, store=None, environ=None ):
             saved.write_text( page + "\n", encoding="utf-8" )
     except ( OSError, ValueError, CandidateError ) as e:
         print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was made.", file=out )
+        jsa.record_behaviour( folder, "failed", started, f"{type( e ).__name__}: {e}", environ )
         return EXIT_NOT_MADE
     print( page, file=out )
+    jsa.record_behaviour( folder, "clean", started, environ=environ )
     return 0
 
 

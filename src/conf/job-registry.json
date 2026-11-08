@@ -1,0 +1,557 @@
+{
+  "schema": "job-registry/1",
+  "defaults": {
+    "grace_minutes": 30,
+    "notify_interval_minutes": 30,
+    "window_days": 7,
+    "growth_min_items": 5,
+    "growth_min_percent": 5,
+    "lock_stale_seconds": 10800,
+    "summary_every_seconds": 60,
+    "run_env": {
+      "LUPIN_ROOT": "{root}",
+      "PYTHONPATH": "{root}/src",
+      "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
+      "DEEPILY_DATA_DIR": "{deepily_data}"
+    }
+  },
+  "jobs": [
+    {
+      "job": "duplicate-check",
+      "catalog": "L5",
+      "title": "Duplicate check",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 10 * * *",
+          "mode": "daily"
+        },
+        {
+          "cron": "7 11 * * *",
+          "mode": "baseline"
+        },
+        {
+          "after_boot_seconds": 300,
+          "mode": "daily"
+        }
+      ],
+      "summary_path": "{root}/io/duplicate-check-daily/job-summary.json",
+      "scan_debt": true,
+      "fix_debt": true,
+      "fix_debt_key": "job:duplicate-check",
+      "detail_link": "/app/duplicate-check",
+      "lock_path": "{root}/io/duplicate-check-daily/run.lock",
+      "rows": [
+        {
+          "id": "350d43c8",
+          "title": "Duplicate check run lock",
+          "href": null
+        },
+        {
+          "id": "0d23e394",
+          "title": "Duplicate-check status page",
+          "href": null
+        }
+      ],
+      "evidence": [
+        {
+          "label": "Run ledger",
+          "path": "io/duplicate-check-daily/runs.jsonl",
+          "href": null
+        },
+        {
+          "label": "Daily log",
+          "path": "io/duplicate-check-daily/daily.log",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.duplicate_check_daily",
+          "--ceiling",
+          "1500",
+          "--claude-cli-path",
+          "{home}/.local/bin/claude",
+          "--trigger",
+          "hand"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "wiki-librarian",
+      "catalog": "L1",
+      "title": "Wiki librarian",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "17 10 * * *"
+        },
+        {
+          "after_boot_seconds": 120
+        }
+      ],
+      "summary_path": "{data}/librarian/job-summary.json",
+      "scan_debt": true,
+      "fix_debt": true,
+      "rows": [
+        {
+          "id": "791bf720",
+          "title": "Wiki librarian export fix",
+          "href": null
+        }
+      ],
+      "evidence": [
+        {
+          "label": "Log",
+          "path": "librarian/librarian.log",
+          "href": null
+        },
+        {
+          "label": "Tick state",
+          "path": "librarian/tick-state.json",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "cosa.repo.symindex.librarian_tick"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "reuse-behaviour",
+      "catalog": "L4",
+      "title": "Reuse-behaviour page",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 18 * * *"
+        },
+        {
+          "after_boot_seconds": 360
+        }
+      ],
+      "summary_path": "{root}/io/jobs/reuse-behaviour/job-summary.json",
+      "rows": [
+        {
+          "id": "804838d4",
+          "title": "Reuse-behaviour cron fix",
+          "href": null
+        }
+      ],
+      "evidence": [
+        {
+          "label": "Log",
+          "path": "behaviour/weekly.log",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.reuse_behaviour",
+          "--write",
+          "--skip-if-saved"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "vector-refresh",
+      "catalog": "L2",
+      "title": "Vector refresh (also rebuilds the symbol index)",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "47 10 * * *"
+        },
+        {
+          "after_boot_seconds": 240
+        }
+      ],
+      "summary_path": "{data}/refresh/job-summary.json",
+      "scan_debt": true,
+      "lock_path": "{data}/vector-build.lock",
+      "evidence": [
+        {
+          "label": "Log",
+          "path": "refresh/refresh.log",
+          "href": null
+        },
+        {
+          "label": "State",
+          "path": "refresh/refresh-state.json",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{root}/src/scripts/reuse-vector-refresh.sh"
+        ],
+        "env": {
+          "REUSE_VECTOR_REFRESH_PYTHON": "{python}",
+          "REUSE_VECTOR_REFRESH_ENV": "{home}/.lupin/reuse-vector-refresh.env"
+        }
+      }
+    },
+    {
+      "job": "shadow-audit",
+      "catalog": "L3",
+      "title": "Shadow audit",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "37 11 * * *"
+        },
+        {
+          "after_boot_seconds": 300
+        }
+      ],
+      "summary_path": "{data}/shadow-audit/job-summary.json",
+      "scan_debt": true,
+      "evidence": [
+        {
+          "label": "Log",
+          "path": "shadow-audit/shadow-audit.log",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{root}/src/scripts/reuse-shadow-audit.sh"
+        ],
+        "env": {
+          "LUPIN_REUSE_JEV_PACK_SIZE": "50",
+          "REUSE_SHADOW_AUDIT_PYTHON": "{python}"
+        }
+      }
+    },
+    {
+      "job": "context-tick",
+      "catalog": "P1",
+      "title": "Context-pressure tick (fleet)",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "9,19,29,39,49,59 * * * *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/context-tick/job-summary.json",
+      "audience": [
+        "managers"
+      ],
+      "run": {
+        "argv": [
+          "{pip}/workflow/scripts/context-pressure-tick.sh"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "doc-parity-tick",
+      "catalog": "P3",
+      "title": "Doc-parity tick",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "30 7 * * *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/doc-parity-tick/job-summary.json",
+      "run": {
+        "argv": [
+          "{pip}/workflow/scripts/doc-parity-tick.sh"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "worktree-census",
+      "catalog": "P4",
+      "title": "Worktree census",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 9 * * 1"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/worktree-census/job-summary.json",
+      "fix_debt": true,
+      "fix_kind": "reported",
+      "run": {
+        "argv": [
+          "{python}",
+          "{pip}/workflow/scripts/worktree_hygiene_report.py",
+          "--notify"
+        ],
+        "env": {
+          "PLANNING_IS_PROMPTING_ROOT": "{pip}"
+        }
+      }
+    },
+    {
+      "job": "disk-report",
+      "catalog": "L6",
+      "title": "Disk report",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 19 * * 0"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/disk-report/job-summary.json",
+      "fix_debt": true,
+      "fix_kind": "reported",
+      "run": {
+        "argv": [
+          "{root}/src/scripts/disk-hygiene-report.sh"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "hook-log-sweep",
+      "catalog": "L7",
+      "title": "Hook-log sweep",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "30 19 * * 0"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/hook-log-sweep/job-summary.json",
+      "scan_debt": true,
+      "run": {
+        "argv": [
+          "{root}/src/scripts/sweep-hook-logs.sh",
+          "--apply"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "io-tmp-sweep",
+      "catalog": "L8",
+      "title": "io/tmp sweep",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 19 * * *"
+        },
+        {
+          "after_boot_seconds": 0
+        }
+      ],
+      "summary_path": "{root}/io/jobs/io-tmp-sweep/job-summary.json",
+      "scan_debt": true,
+      "run": {
+        "argv": [
+          "{root}/src/scripts/sweep-io-tmp.sh",
+          "--apply"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "hook-link-tick",
+      "catalog": "L9",
+      "title": "Hook-link tick",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "2,12,22,32,42,52 * * * *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/hook-link-tick/job-summary.json",
+      "run": {
+        "argv": [
+          "{root}/src/scripts/hook-link-tick.sh"
+        ],
+        "env": {}
+      }
+    },
+    {
+      "job": "yearly-reminders",
+      "catalog": "L10",
+      "title": "Yearly reminders (password rotation, LoRA review)",
+      "owner": "rick",
+      "schedule": [
+        {
+          "cron": "0 21 17 8 *"
+        },
+        {
+          "cron": "0 22 17 8 *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/yearly-reminders/job-summary.json",
+      "audience": [
+        "rick"
+      ]
+    },
+    {
+      "job": "fleet-arbiter",
+      "catalog": "L11",
+      "title": "Fleet arbiter (:8001)",
+      "owner": "cheech",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/fleet-arbiter/job-summary.json",
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service"
+      }
+    },
+    {
+      "job": "context-pressure-writer",
+      "catalog": "L13",
+      "title": "Context-pressure writer",
+      "owner": "cheech",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/context-pressure-writer/job-summary.json",
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service"
+      }
+    },
+    {
+      "job": "health-watcher",
+      "catalog": "L14",
+      "title": "Health watcher",
+      "owner": "cheech",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/health-watcher/job-summary.json",
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service"
+      }
+    },
+    {
+      "job": "worktree-janitor",
+      "catalog": "L12",
+      "title": "Worktree janitor",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "every_seconds": 60
+        }
+      ],
+      "summary_path": "{root}/io/jobs/worktree-janitor/job-summary.json",
+      "grace_seconds": 120,
+      "summary_every_seconds": 60,
+      "targets": [
+        {
+          "target": "lupin"
+        },
+        {
+          "target": "planning-is-prompting"
+        },
+        {
+          "target": "cosa-voice"
+        }
+      ]
+    },
+    {
+      "job": "notification-expiry",
+      "catalog": "L18",
+      "title": "Notification expiry",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "every_seconds": 300
+        }
+      ],
+      "summary_path": "{root}/io/jobs/notification-expiry/job-summary.json",
+      "grace_seconds": 300
+    },
+    {
+      "job": "commons-archival",
+      "catalog": "L19",
+      "title": "Commons archival",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "every_seconds": 3600
+        }
+      ],
+      "summary_path": "{root}/io/jobs/commons-archival/job-summary.json",
+      "grace_seconds": 600
+    },
+    {
+      "job": "notify-outbox",
+      "catalog": "L20",
+      "title": "Notify outbox flush",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "every_seconds": 30
+        }
+      ],
+      "summary_path": "{root}/io/jobs/notify-outbox/job-summary.json",
+      "grace_seconds": 60,
+      "scan_debt": true
+    },
+    {
+      "job": "socket-housekeeping",
+      "catalog": "L22",
+      "title": "Socket heartbeat, cleanup and transcript tailer",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "every_seconds": 30,
+          "mode": "heartbeat"
+        },
+        {
+          "every_seconds": 3600,
+          "mode": "cleanup"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/socket-housekeeping/job-summary.json",
+      "grace_seconds": 120
+    },
+    {
+      "job": "side-services",
+      "catalog": "L28",
+      "title": "Side services",
+      "owner": "cheech",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/side-services/job-summary.json",
+      "targets": [
+        {
+          "target": "lupin-bounce-watcher",
+          "liveness": {
+            "kind": "systemd",
+            "unit": "lupin-bounce-watcher.service"
+          }
+        },
+        {
+          "target": "lupin-cc-memory-watch",
+          "liveness": {
+            "kind": "systemd",
+            "unit": "lupin-cc-memory-watch.service"
+          }
+        },
+        {
+          "target": "lupin-credential-watcher",
+          "liveness": {
+            "kind": "systemd",
+            "unit": "lupin-credential-watcher.service"
+          }
+        }
+      ]
+    },
+    {
+      "job": "pokes",
+      "catalog": "L30",
+      "title": "Pokes (when started)",
+      "owner": "cheech",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/pokes/job-summary.json"
+    }
+  ]
+}

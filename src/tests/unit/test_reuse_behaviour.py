@@ -446,3 +446,19 @@ def test_skip_if_saved_skips_only_the_week_that_is_saved( tmp_path, utc ):
 def test_skip_if_saved_without_write_is_refused_as_a_usage_error( tmp_path ):
     with pytest.raises( SystemExit ) as stop: rb.main( [ "--data-dir", str( tmp_path ), "--skip-if-saved" ], out=io.StringIO() )
     assert stop.value.code == 2 and not ( tmp_path / rb.PAGE_FOLDER ).exists()
+
+
+def test_main_leaves_a_job_summary_for_a_page_made_a_page_skipped_and_a_refusal( tmp_path, monkeypatch ):
+    folder = tmp_path / "summaries"
+    monkeypatch.setenv( "LUPIN_JOB_SUMMARY_DIR", str( folder ) )
+    path = folder / "reuse-behaviour" / "job-summary.json"
+    read = lambda: json.loads( path.read_text() )[ "last_attempt" ]
+    assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02", "--write" ], out=io.StringIO() ) == 0 and read()[ "outcome" ] == "clean"
+    assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02", "--write", "--skip-if-saved" ], out=io.StringIO() ) == 0 and read()[ "outcome" ] == "skipped"
+    assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "tomorrow" ], out=io.StringIO() ) == 3
+    got = read()
+    assert got[ "outcome" ] == "failed" and "ValueError" in got[ "failure" ] and got[ "stage" ] == "page"
+    monkeypatch.delenv( "LUPIN_JOB_SUMMARY_DIR" )
+    monkeypatch.setattr( rb.cu, "get_project_root", lambda: str( tmp_path / "root" ) )
+    assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02" ], out=io.StringIO() ) == 0
+    assert ( tmp_path / "root" / "io" / "jobs" / "reuse-behaviour" / "job-summary.json" ).exists()

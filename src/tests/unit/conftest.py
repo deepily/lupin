@@ -451,3 +451,14 @@ def _no_unit_test_writes_a_real_proxy_decision_row():
     from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
     with patch.object( SweTeamOrchestrator, "_persist_proxy_decision" ):
         yield
+
+
+@pytest.fixture( autouse=True )
+def _no_unit_test_writes_a_real_job_summary( tmp_path_factory, monkeypatch ):
+    """
+    Keep the reuse-behaviour job's summary out of the repository's io/jobs folder.
+
+    Ensures:
+        - LUPIN_JOB_SUMMARY_DIR names a throwaway folder for every test under src/tests/unit, so main() cannot leave a record in the tree
+    """
+    monkeypatch.setenv( "LUPIN_JOB_SUMMARY_DIR", str( tmp_path_factory.mktemp( "job-summaries" ) ) )
