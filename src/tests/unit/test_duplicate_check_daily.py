@@ -68,7 +68,7 @@ def worktrees( repo ): return [ l for l in git( repo, "worktree", "list" ).split
 
 def results( tmp_path ):
     folder = tmp_path / "io" / "duplicate-check-daily"
-    return sorted( p for p in folder.glob( "*.json" ) if p.name != dd.LAST_SUCCESS )
+    return sorted( p for p in folder.glob( "*.json" ) if p.name not in ( dd.LAST_SUCCESS, "job-summary.json" ) )
 
 
 def test_a_first_run_judges_the_last_24_hours_once_clusters_the_duplicates_and_advances_last_success( repo, tmp_path ):
@@ -296,7 +296,7 @@ def test_git_names_the_command_when_it_fails( tmp_path ):
 
 def test_the_live_parts_are_built_without_a_call():
     parts = dd.live_parts()
-    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier", "cron_has_baseline" } and callable( parts[ "structural" ] )
+    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier", "urgent", "noter", "cron_has_baseline" } and callable( parts[ "structural" ] )
 
 
 def lines_of( **over ):

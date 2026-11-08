@@ -12,6 +12,7 @@ import contextlib
 import datetime
 import fcntl
 import json
+import math
 import os
 import pathlib
 import shlex
@@ -30,6 +31,7 @@ from cosa.repo.symindex.candidates import vector_build
 from lupin_mcp import duplicate_check_audit as audit
 from lupin_mcp import duplicate_check_filing as filing
 from lupin_mcp import duplicate_check_history as history
+from lupin_mcp import duplicate_check_status as status_mod
 from lupin_mcp import reuse_behaviour as behaviour
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_tie as tie_mod
@@ -43,6 +45,8 @@ VECTORS_DIR       = "vectors"
 WORKTREE_PREFIX   = "duplicate-check-daily-"
 WINDOW_HOURS      = 24
 BRANCH            = "main"
+BRANCH_AUTO       = "auto"            # --branch auto: the newest local branch matching the glob below, else main
+WORKING_GLOB      = "wip-*"
 TRIGGERS          = ( "cron", "reboot", "hand" )
 CARRIED_CODES     = ( err.JUDGE_CAP_REACHED, err.JUDGE_CALL_FAILED )
 PREREQ_EMBEDDINGS = "embedding_endpoint"
@@ -52,6 +56,14 @@ STAGE_JUDGING     = "judging"                                   # the stage name
 UNREADABLE        = "unreadable"
 CRON_TAG          = "# duplicate-check-daily"
 CRON_SCHEDULE     = "0 10 * * *"      # 10:00 every day, weekends included; nothing runs after last call, when the server is turned off
+HOURLY_SCHEDULE   = "0 10-22 * * *"   # the adaptive slots: every hour from 10:00 to 22:00, while the host is on
+HOUR_SECONDS      = 3600
+HOUR_FILL         = 0.8               # share of an hour a chunk of judge calls is sized to fill, so a run ends before the next slot
+SECONDS_PER_CALL  = 3.5               # wall-clock seconds a judge call took on 6 Nov at parallel 4, until the history gives a better figure
+MIN_BASELINE_CALLS = 20               # the baseline gets what the daily work leaves of the chunk only when that is at least this many calls
+ADAPTIVE_RISE_LIMIT = 6               # hourly runs in a row with a larger carried count before Rick is told
+BACKOFF_SECONDS   = 5400              # after a rate limit the next slot is skipped: no run starts until this long has passed
+SKIPPED           = "skipped"
 BASELINE_SCHEDULE = "7 11 * * *"      # 11:07, an hour after the daily run and 30 minutes before the 11:37 shadow audit drain; a morning slot, never after last call
 RISE_LIMIT        = 3                 # daily runs in a row with a larger carried count before Rick is told
 INSTALLED_LINES   = ( 2, 3 )          # the daily slot and the reboot line, with the baseline line when it was asked for
@@ -67,7 +79,7 @@ MISSING_BRANCH    = "missing_branch"
 STAGE_GUARD       = "branch_guard"
 STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
-UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
+UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable", "owed", "usage", "rate_limited", "backoff_until" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
 CARRIED           = behaviour.CARRIED     # names copied into the cron lines from the installer's environment
 
 
@@ -75,13 +87,23 @@ class Counting:
     """A judge backend that counts the calls made through it."""
 
     def __init__( self, backend ):
-        self.backend, self.calls = backend, 0
-        self.server_label        = backend.server_label
+        self.backend, self.calls, self.limited = backend, 0, 0
+        self.server_label                      = backend.server_label
 
     async def complete( self, model, system_prompt, user_prompt ):
-        """Ensures: counts the call, then returns what the real backend answers."""
+        """
+        Count the call and return the backend's answer.
+
+        Ensures:
+            - a call the service refuses for a rate or usage limit is counted in limited and raised again
+            - every later call of the run raises at once without reaching the service
+        """
+        if self.limited: raise model_transport.ModelRateLimited( "the service rate-limited an earlier call of this run; no further call is made" )
         self.calls += 1
-        return await self.backend.complete( model, system_prompt, user_prompt )
+        try: return await self.backend.complete( model, system_prompt, user_prompt )
+        except model_transport.ModelRateLimited:
+            self.limited += 1
+            raise
 
 
 def git( root, *args ):
@@ -103,6 +125,40 @@ def read_last_success( folder ):
     """Ensures: returns the parsed last-success.json of the folder, or None when there is none."""
     path = pathlib.Path( folder ) / LAST_SUCCESS
     return json.loads( path.read_text( encoding="utf-8" ) ) if path.exists() else None
+
+
+def resolve_branch( root, name ):
+    """
+    Turn the --branch argument into a branch name.
+
+    Ensures:
+        - returns name unchanged unless it is auto
+        - for auto returns the local branch matching the working glob whose tip commit is newest, ties by name, else main
+    """
+    if name != BRANCH_AUTO: return name
+    listed = git( root, "for-each-ref", "--format=%(refname:short) %(committerdate:unix)", f"refs/heads/{WORKING_GLOB}" )
+    rows   = sorted( ( ( line.split()[ 0 ], int( line.split()[ 1 ] ) ) for line in listed.splitlines() ), key=lambda row: ( -row[ 1 ], row[ 0 ] ) )
+    return rows[ 0 ][ 0 ] if rows else BRANCH
+
+
+def backoff_until( folder, now ):
+    """
+    Say whether a rate limit still holds the check back.
+
+    Ensures:
+        - looks at the newest run that was not itself skipped
+        - returns its backoff_until, an ISO time, when that is later than now; None otherwise or with no history
+    """
+    for line in reversed( history.read_lines( folder ) ):
+        if line[ "status" ] == SKIPPED: continue
+        until = line.get( "backoff_until" )
+        return until if until is not None and datetime.datetime.fromisoformat( until ) > now else None
+    return None
+
+
+def usage_since( before, after ):
+    """Ensures: returns the difference of two usage tallies, the cost rounded to 4 places."""
+    return { k: round( after[ k ] - before[ k ], 4 ) if k == "cost_usd" else after[ k ] - before[ k ] for k in after }
 
 
 def window_of( root, last, now, branch=BRANCH, hours=WINDOW_HOURS ):
@@ -319,7 +375,7 @@ def record( folder, stem, doc, now ):
         - doc is the result document; stem is the file name without its extension; now is the run's start time
     Ensures:
         - the document gains schema_version and started_at, and None for each measure the run did not reach, so a failed run has the keys of a successful one
-        - writes <folder>/<stem>.json, then appends one line to runs.jsonl
+        - writes <folder>/<stem>.json, appends one line to runs.jsonl
         - returns the document
     """
     doc.update( schema_version=history.SCHEMA_VERSION, started_at=now.isoformat() )
@@ -439,9 +495,9 @@ def baseline_installed( cmd=None ):
     return read.returncode == 0 and any( line.rstrip().endswith( CRON_TAG ) and " --baseline" in line for line in read.stdout.splitlines() )
 
 
-def live_notifier( message, abstract, environ=None, query=None, api_key=None, target_of=None ):
+def live_notifier( message, abstract, environ=None, query=None, api_key=None, target_of=None, priority="high", kind="alert" ):
     """
-    Send Rick one high-priority alert.
+    Send Rick one notification, a high-priority alert unless told otherwise.
 
     Requires:
         - query is a callable ( base, key, path, params ) returning ( status, text ), or None for the live one; api_key and target_of likewise
@@ -455,9 +511,19 @@ def live_notifier( message, abstract, environ=None, query=None, api_key=None, ta
     try: key, target = ( api_key or hlt._api_key )(), ( target_of or hlt._notify_target )( environ )
     except Exception: return False
     if not target: return False
-    status, _ = ( query or hlt.post_query )( base, key, "/api/notify", { "message": message, "type": "alert", "priority": "high", "target_user": target, "abstract": abstract,
+    status, _ = ( query or hlt.post_query )( base, key, "/api/notify", { "message": message, "type": kind, "priority": priority, "target_user": target, "abstract": abstract,
                                                                          "sender_id": "claude.code@lupin.deepily.ai#duplicate-check-daily", "idempotency_key": str( uuid.uuid4() ) } )
     return status == 200
+
+
+def live_urgent( message, abstract, **kwargs ):
+    """Ensures: sends the message as an urgent alert, with live_notifier's answer."""
+    return live_notifier( message, abstract, priority="urgent", **kwargs )
+
+
+def live_noter( message, abstract, **kwargs ):
+    """Ensures: sends the message as a low-priority progress note, with live_notifier's answer."""
+    return live_notifier( message, abstract, priority="low", kind="progress", **kwargs )
 
 
 def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof_cli.DEFAULT_PARALLEL, clock=time.monotonic, ceiling=None, baseline=False, rise_limit=RISE_LIMIT ):
@@ -490,7 +556,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     started = clock()
     folder  = pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER )
     stem    = f"{now.date().isoformat()}-{now.strftime( '%H%M%S' )}-{trigger}"
-    base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap, "ceiling": ceiling, "mode": history.MODE_BASELINE if baseline else history.MODE_DAILY }
+    base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap, "ceiling": ceiling, "mode": history.MODE_BASELINE if baseline else history.MODE_DAILY, "branch": branch }
     refused = branch_guard( root, branch, now )
     if refused is not None:
         again   = baseline or ( "cron_has_baseline" in parts and parts[ "cron_has_baseline" ]() )       # the reinstall replaces every tagged line, so it must name the baseline line
@@ -503,6 +569,9 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         return record( folder, stem, doc, now )
     if baseline and ( read_baseline( folder ) or { } ).get( "status" ) == BASELINE_DONE:
         return record( folder, stem, { **base, "status": "ok", "note": "baseline complete", "judged": 0, "judge_calls": 0, "carried": [], "elapsed_seconds": round( clock() - started, 3 ) }, now )
+    until    = backoff_until( folder, now )
+    if until is not None:
+        return record( folder, stem, { **base, "status": SKIPPED, "note": f"backing off after a rate limit until {until}", "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }, now )
     miss    = failed_prerequisite( parts[ "client" ], cli_path, parts[ "verify" ], parts[ "version_fn" ] )
     if miss is not None:
         doc = { **base, "status": "failed", **miss, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
@@ -520,8 +589,11 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         doc = { **doc, "status": "failed", "stage": STAGE_SETUP, "error": f"{type( exc ).__name__}: {exc}", "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
         return record( folder, stem, doc, now )
     count = Counting( parts[ "backend" ] )
+    spend = parts.get( "usage", model_transport.claude_usage_summary )
+    used0 = spend()
     try:
         fresh = baseline_definitions( tree, window ) if baseline else new_definitions( tree, root, window )
+        doc[ "owed" ] = len( fresh[ "defs" ] )
         pool  = pool_without_earlier_versions( tree, fresh[ "defs" ] )
         if ceiling is not None: cap = min( ceiling, len( fresh[ "defs" ] ) )
         out   = { "verdicts": [], "unjudged": [], "dropped": { "count": 0, "ids": [] } }
@@ -532,13 +604,14 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
             wiring = { **proof_cli.base_wiring( folder / VECTORS_DIR, parts[ "structural" ]( tree, cfg ), parallel, parts[ "client" ] ), "backend": count, "ledger": ledger }
             out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap, skip_breaching=True )
     except Exception as exc:               # the pool build, the embeddings or the judge failed: leave a record and change nothing else
-        doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, elapsed_seconds=round( clock() - started, 3 ) )
+        doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, usage=usage_since( used0, spend() ), rate_limited=count.limited, elapsed_seconds=round( clock() - started, 3 ) )
         return record( folder, stem, doc, now )
     finally:
         release( root, tree )
     ids    = [ d[ "id" ] for d in [ *fresh[ "defs" ], *pool ] if d[ "id" ] not in set( out[ "dropped" ][ "ids" ] ) ]
     groups = [ g for g in cluster.clusters( ids, cluster.join_pairs( out[ "verdicts" ] ) ) if len( g ) > 1 ]
     moved  = progress( fresh[ "defs" ], fresh[ "commit_of" ], out[ "unjudged" ], window )
+    doc.update( usage=usage_since( used0, spend() ), rate_limited=count.limited, backoff_until=( now + datetime.timedelta( seconds=BACKOFF_SECONDS ) ).isoformat() if count.limited else None )
     doc.update( status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
@@ -558,7 +631,78 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     return record( folder, stem, doc, now )
 
 
-def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRANCH, ceiling=None, baseline=False ):
+def chunk_for( folder, ceiling, fill=HOUR_FILL ):
+    """
+    Size one hourly run's judge calls.
+
+    Requires:
+        - ceiling is the most calls a run may make, at least 1
+    Ensures:
+        - returns the number of calls that fill fill of an hour at the seconds a call took on the latest sizeable runs (SECONDS_PER_CALL without such a run), at least 1 and at most ceiling
+    """
+    per = status_mod.median_seconds_per_call( history.read_lines( folder ) ) or SECONDS_PER_CALL
+    return max( 1, min( ceiling, int( HOUR_SECONDS * fill / per ) ) )
+
+
+def announce( parts, folder, docs, now, zero_before ):
+    """
+    Tell Rick what the hourly run did.
+
+    Requires:
+        - docs are the result documents the run wrote; zero_before is the projected zero date before the run, or None
+    Ensures:
+        - a failed run gets one urgent alert naming its failure, unless the branch guard already sent its own
+        - a projected zero date that moved later by more than a day gets one urgent alert
+        - a run that did something, or left a backlog, gets one low-priority note; a quiet run gets none
+        - a missing hook sends nothing and a hook that raises is ignored, so a broken notifier never changes a run's outcome
+    """
+    snap = status_mod.snapshot( folder, now )
+    send = lambda hook, spoken, abstract: parts[ hook ]( spoken, abstract ) if hook in parts else None
+    link = f"[Open the status page](/app/duplicate-check)\n\n{snap[ 'backlog' ][ 'total' ]} definitions left; health {snap[ 'health' ]}."
+    todo = []
+    for doc in docs:
+        line = history.line_of( doc, "" )
+        if line[ "failure" ] is not None and "refusal" not in doc: todo.append( ( "urgent", f"The duplicate check {line[ 'mode' ]} run failed: {line[ 'failure' ]}.", link ) )
+        note = status_mod.note_of( line, snap )
+        if note is not None: todo.append( ( "noter", note, link ) )
+    if status_mod.slipped( zero_before, snap[ "projected_zero" ] ): todo.append( ( "urgent", f"The duplicate check backlog now reaches zero on {snap[ 'projected_zero' ]}, after {zero_before}.", link ) )
+    for hook, spoken, abstract in todo:
+        try: send( hook, spoken, abstract )
+        except Exception: pass       # a broken notifier must not change what the run recorded
+
+
+def adaptive_run( root, now, trigger, cli_path, parts, branch, parallel, ceiling, rise_limit=ADAPTIVE_RISE_LIMIT, clock=time.monotonic ):
+    """
+    Run one hourly slot, the day's owed work first and then the baseline.
+
+    Requires:
+        - ceiling is the most judge calls the slot may make, at least 1; the other arguments are run's
+    Ensures:
+        - the chunk is chunk_for( ceiling ): what fits in the hour at the measured speed
+        - a daily run takes the chunk; when it finishes everything owed (status ok) and the baseline is not complete, a baseline run takes what the daily run left, if at least MIN_BASELINE_CALLS
+        - with nothing owed the daily run exits in seconds without a judge call
+        - a daily run that was backed off, failed or carried definitions is not followed by a baseline run
+        - announce is called once, after both runs
+        - returns the result documents, daily first
+    """
+    folder = pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER )
+    before = status_mod.snapshot( folder, now )[ "projected_zero" ]
+    chunk  = chunk_for( folder, ceiling )
+    docs   = [ run( root, now, trigger, None, cli_path, parts, branch, parallel, clock, ceiling=chunk, rise_limit=rise_limit ) ]
+    left   = chunk - ( docs[ 0 ][ "judge_calls" ] or 0 )
+    if docs[ 0 ][ "status" ] == "ok" and left >= MIN_BASELINE_CALLS and ( read_baseline( folder ) or { } ).get( "status" ) != BASELINE_DONE:
+        later = now + datetime.timedelta( seconds=max( 1, math.ceil( docs[ 0 ][ "elapsed_seconds" ] ) ) )       # a distinct second, so the two result files have distinct names
+        docs.append( run( root, later, trigger, None, cli_path, parts, branch, parallel, clock, ceiling=left, baseline=True ) )
+    announce( parts, folder, docs, now + datetime.timedelta( seconds=1 ), before )
+    return docs
+
+
+def exit_code( docs ):
+    """Ensures: returns 3 for a refusal, else 1 when any run failed, else 0."""
+    return REFUSED_EXIT if any( "refusal" in d for d in docs ) else 1 if any( d[ "status" ] == "failed" for d in docs ) else 0
+
+
+def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRANCH, ceiling=None, baseline=False, adaptive=False ):
     """
     Build the cron lines of the daily check.
 
@@ -569,6 +713,7 @@ def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRAN
         - branch is the branch the check judges
     Ensures:
         - returns [ daily line, reboot line ], plus a baseline line before the reboot line when baseline is set; each ends with CRON_TAG
+        - with adaptive, returns [ hourly line, reboot line ] only: both run with --adaptive, the hourly one at HOURLY_SCHEDULE, and the baseline drains inside the slots, so baseline adds nothing
         - the daily line runs at CRON_SCHEDULE (10:00, every day) with trigger cron, the baseline line at BASELINE_SCHEDULE (11:07) with --baseline, the reboot line BOOT_DELAY seconds after a boot with trigger reboot; no line runs after last call
         - the reboot line is the catch-up: it reads the window from the last successful run, so a day the host was off is covered at the next boot
         - every line runs from root with LUPIN_ROOT and PYTHONPATH set, appends to log_path, and carries the limit (--cap, or --ceiling when given) and the binary
@@ -582,6 +727,7 @@ def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRAN
         return ( f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {extra}{python} -m lupin_mcp.duplicate_check_daily "
                  f"{limit_flag( cap, ceiling )} --claude-cli-path {cli_path} --trigger {trigger}{more}{named} >> {log_path} 2>&1 {CRON_TAG}" )
 
+    if adaptive: return [ lt.cron_lines_for( run( "cron", " --adaptive" ), HOURLY_SCHEDULE, BOOT_DELAY )[ 0 ], lt.cron_lines_for( run( "reboot", " --adaptive" ), HOURLY_SCHEDULE, BOOT_DELAY )[ 1 ] ]
     lines = [ lt.cron_lines_for( run( "cron" ), CRON_SCHEDULE, BOOT_DELAY )[ 0 ] ]
     if baseline: lines.append( lt.cron_lines_for( run( "cron", " --baseline" ), BASELINE_SCHEDULE, BOOT_DELAY )[ 0 ] )
     return [ *lines, lt.cron_lines_for( run( "reboot" ), CRON_SCHEDULE, BOOT_DELAY )[ 1 ] ]
@@ -610,7 +756,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
             lt.edit_crontab( [], environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
             out( "uninstalled" )
             return 0
-        lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) }, args.branch, args.ceiling, args.with_baseline )
+        lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) }, args.branch, args.ceiling, args.with_baseline, args.adaptive )
         if args.print_install:
             out( "\n".join( lines ) )
             return 0
@@ -630,7 +776,7 @@ def live_parts():
         - returns the embedding client, the Claude Code backend, the staged structural source, verify_frozen over the live file, cli_version, the data root and the filer
         - the filer files the run's one triage row over HTTP; it builds its store client, reads the roster and the configured manager only when it is called
         - the auditor queues known-miss audits in the lookup tool's data folder, reading it only when it is called
-        - the notifier sends the branch guard's alert, only when it is called
+        - the notifier sends the branch guard's alert, urgent the failure and slip alerts and noter the note after a run, each only when it is called
         - cron_has_baseline reads the crontab, only when a branch guard refusal needs the reinstall command
         - writes nothing and makes no call
     """
@@ -638,7 +784,7 @@ def live_parts():
     return { "client": base[ "client" ], "backend": base[ "backend" ], "data_dir": base[ "data_dir" ], "version_fn": model_transport.cli_version,
              "verify": lambda: cfg_mod.verify_frozen( base[ "frozen_path" ], base[ "live" ] ),
              "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor, "notifier": live_notifier,
-             "cron_has_baseline": baseline_installed }
+             "urgent": live_urgent, "noter": live_noter, "cron_has_baseline": baseline_installed }
 
 
 def live_filer( findings, folder ):
@@ -707,10 +853,12 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
 
     Requires:
         - argv holds one of --cap ( a fixed number of judge calls ) and --ceiling ( the most judge calls an adaptive run may make ), neither with a default, needed to run or to print or install the cron lines
+        - --adaptive ( with --ceiling ) runs the hourly slot: the day's owed definitions, then the baseline with the rest of the chunk, then a note to Rick
+        - --branch auto judges the newest local wip-* branch
         - argv also holds --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch, --parallel, --baseline ( judge every definition of the tree ), --rise-limit ( default RISE_LIMIT ) and, with the cron modes, --with-baseline ( add the baseline line )
         - one of --print-install, --install, --uninstall or --status, with --python, works on the cron lines instead of running
     Ensures:
-        - prints the result document as JSON and returns 0, REFUSED_EXIT (3) when the branch guard refused, or 1 when anything else failed
+        - prints the result document as JSON (a list of them, daily first, with --adaptive) and returns 0, REFUSED_EXIT (3) when the branch guard refused, or 1 when anything else failed
         - the cron modes never run the check
         - a run takes run_lock first; when another run holds it, prints a skipped document and returns 0 without running anything, so a boot near 10:00 that starts the cron line and the reboot line together runs the check once
     """
@@ -720,7 +868,8 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     limit.add_argument( "--ceiling", type=int, default=None )
     ap.add_argument( "--baseline", action="store_true" )
     ap.add_argument( "--with-baseline", action="store_true" )
-    ap.add_argument( "--rise-limit", type=int, default=RISE_LIMIT )
+    ap.add_argument( "--adaptive", action="store_true" )
+    ap.add_argument( "--rise-limit", type=int, default=None )
     ap.add_argument( "--claude-cli-path", default=None )
     ap.add_argument( "--root", default=None )
     ap.add_argument( "--trigger", default="hand", choices=TRIGGERS )
@@ -731,6 +880,7 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     for flag in ( "--install", "--uninstall", "--status", "--print-install" ): mode.add_argument( flag, action="store_true" )
     args = ap.parse_args( argv )
     cron = args.install or args.uninstall or args.status or args.print_install
+    if args.adaptive and ( args.ceiling is None or args.baseline ) and not ( args.uninstall or args.status ): ap.error( "--adaptive needs --ceiling and cannot be combined with --baseline: the slot drains the baseline itself" )
     if args.cap is None and args.ceiling is None and not ( args.uninstall or args.status ): ap.error( "--cap or --ceiling is required: the daily check has no default limit" )
     if cron: return install_mode( args, os.environ if environ is None else environ, now or datetime.datetime.now(), out, err or ( lambda line: print( line, file=sys.stderr ) ), crontab_cmd )
     model_transport.configure( args.claude_cli_path )
@@ -741,9 +891,12 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
             if not held:
                 out( json.dumps( { "status": "skipped", "trigger": args.trigger, "note": "another run holds the run lock" }, indent=2, sort_keys=True ) )
                 return 0
-            doc = run( root, now or datetime.datetime.now().astimezone(), args.trigger, args.cap, args.claude_cli_path, parts, args.branch, args.parallel, ceiling=args.ceiling, baseline=args.baseline, rise_limit=args.rise_limit )
-    out( json.dumps( doc, indent=2, sort_keys=True ) )
-    return REFUSED_EXIT if "refusal" in doc else 1 if doc[ "status" ] == "failed" else 0
+            branch = resolve_branch( root, args.branch )
+            when   = now or datetime.datetime.now().astimezone()
+            if args.adaptive: docs = adaptive_run( root, when, args.trigger, args.claude_cli_path, parts, branch, args.parallel, args.ceiling, args.rise_limit or ADAPTIVE_RISE_LIMIT )
+            else:             docs = [ run( root, when, args.trigger, args.cap, args.claude_cli_path, parts, branch, args.parallel, ceiling=args.ceiling, baseline=args.baseline, rise_limit=args.rise_limit or RISE_LIMIT ) ]
+    out( json.dumps( docs if args.adaptive else docs[ 0 ], indent=2, sort_keys=True ) )
+    return exit_code( docs )
 
 
 if __name__ == "__main__":  # pragma: no cover - the entry only calls main

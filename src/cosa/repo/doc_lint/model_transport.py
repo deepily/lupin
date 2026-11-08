@@ -145,6 +145,10 @@ AGY_USAGE_FIELDS = ( "input_tokens", "output_tokens", "thinking_tokens", "cache_
 
 # Tokens agy reported, summed per model id for this process. Calls run in worker threads.
 AGY_USAGE         = {}
+CLAUDE_USAGE_FIELDS = ( "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens" )
+CLAUDE_USAGE        = dict( { field: 0 for field in CLAUDE_USAGE_FIELDS }, calls=0, cost_usd=0.0 )      # what finished Claude Code calls reported, since the process began
+_CLAUDE_USAGE_LOCK  = threading.Lock()
+RATE_LIMIT_MARKERS  = ( "rate limit", "rate_limit", "usage limit", "429", "too many requests", "overloaded" )
 _AGY_USAGE_LOCK   = threading.Lock()
 _AGY_SCRATCH_LOCK = threading.Lock()
 
@@ -196,6 +200,14 @@ def record_calls( plan=( ( "call", "default" ), ) ):
 
 class ModelCallError( Exception ):
     """A model call returned nothing usable or raised."""
+
+
+class ModelRateLimited( ModelCallError ):
+    """
+    The service refused the call for a rate or usage limit.
+
+    A caller that sees it should stop calling for a while.
+    """
 
 
 class ModelUnavailableError( ModelCallError ):
@@ -432,6 +444,40 @@ def _require_pinned_binary():
             now = None
         if now != AGY_PIN: AGY_STOP = f"agy binary changed since the run began: pinned {AGY_PIN}, now {now}"
     if AGY_STOP is not None: raise agy_runtime.AgyBinaryChanged( AGY_STOP )
+
+
+def claude_usage_summary():
+    """
+    Return the usage the Claude Code SDK reported for finished calls.
+
+    A run takes it before and after its calls and keeps the difference.
+
+    Ensures:
+        - returns { calls, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cost_usd }
+        - cost_usd is the SDK's notional list-price figure, not a charge
+        - the result is a copy, so a caller cannot change the tally
+    """
+    with _CLAUDE_USAGE_LOCK: return dict( CLAUDE_USAGE )
+
+
+def _note_claude_usage( message ):
+    """
+    Add one finished call's reported usage to the tally.
+
+    Requires:
+        - message is a ResultMessage
+
+    Ensures:
+        - counts the call, then adds each usage field that is a whole number and the cost when it is a number; a field the SDK leaves out adds nothing
+    """
+    usage = message.usage or {}
+    with _CLAUDE_USAGE_LOCK:
+        CLAUDE_USAGE[ "calls" ] += 1
+        for field in CLAUDE_USAGE_FIELDS:
+            count = usage.get( field )
+            if isinstance( count, int ) and not isinstance( count, bool ): CLAUDE_USAGE[ field ] += count
+        cost = message.total_cost_usd
+        if isinstance( cost, ( int, float ) ) and not isinstance( cost, bool ): CLAUDE_USAGE[ "cost_usd" ] += cost
 
 
 def agy_usage_summary():
@@ -765,8 +811,12 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         async for message in query_fn( prompt=user_prompt, options=options ):
             if isinstance( message, AssistantMessage ):
                 parts.extend( block.text for block in message.content if isinstance( block, TextBlock ) )
-            elif isinstance( message, ResultMessage ) and message.is_error:
-                raise ModelCallError( f"model call to {model} ended in an error result: {message.subtype}: {str( message.result )[ :300 ]}" )
+            elif isinstance( message, ResultMessage ):
+                _note_claude_usage( message )
+                if message.is_error:
+                    detail = f"{message.subtype}: {str( message.result )[ :300 ]}"
+                    limited = any( marker in detail.lower() for marker in RATE_LIMIT_MARKERS )
+                    raise ( ModelRateLimited if limited else ModelCallError )( f"model call to {model} ended in an error result: {detail}" )
 
     try:
         await asyncio.wait_for( collect(), timeout_seconds )

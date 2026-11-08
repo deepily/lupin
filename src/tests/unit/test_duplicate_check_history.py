@@ -24,10 +24,25 @@ def line( carried, mode="daily", status="carried" ):
 
 def test_a_successful_run_flattens_to_one_line_with_counts_group_sizes_and_findings_by_commit():
     got = hist.line_of( ok_doc(), "2026-11-06-190659-cron.json" )
-    assert got == { "schema_version": 1, "run_file": "2026-11-06-190659-cron.json", "started_at": "2026-11-06T19:06:59-05:00", "elapsed_seconds": 1040.589, "trigger": "cron",
+    assert got == { "schema_version": 2, "run_file": "2026-11-06-190659-cron.json", "started_at": "2026-11-06T19:06:59-05:00", "elapsed_seconds": 1040.589, "trigger": "cron",
                     "mode": "daily", "status": "carried", "failure": None, "window_start": "aaa", "window_end": "bbb", "commits": 65, "judged": 304, "carried": 2, "cap": 300,
                     "ceiling": None, "judge_calls": 300, "findings": 3, "groups": 2, "group_sizes": [ 2, 3 ], "findings_by_commit": { "c1": 2, "unknown": 1 },
-                    "filed": 2, "already_filed": 0, "queued_for_retry": 1, "refused": 0, "unreadable": 1, "backfilled": False }
+                    "filed": 2, "already_filed": 0, "queued_for_retry": 1, "refused": 0, "unreadable": 1, "backfilled": False,
+                    "branch": None, "owed": None, "rate_limited": None, "backoff_until": None, "input_tokens": None, "output_tokens": None, "cache_creation_tokens": None,
+                    "cache_read_tokens": None, "cost_usd": None, "usage_calls": None, "calls_per_hour": 1038 }
+
+
+def test_a_run_that_recorded_usage_carries_the_branch_the_tokens_and_the_calls_an_hour():
+    doc = { **ok_doc(), "branch": "wip-x", "owed": 310, "rate_limited": 1, "backoff_until": "2026-11-07T21:00:00-05:00",
+            "usage": { "calls": 300, "input_tokens": 600, "output_tokens": 1200, "cache_creation_input_tokens": 65460, "cache_read_input_tokens": 11382, "cost_usd": 3.9 } }
+    got = hist.line_of( doc, "f.json" )
+    assert ( got[ "branch" ], got[ "owed" ], got[ "rate_limited" ], got[ "backoff_until" ] ) == ( "wip-x", 310, 1, "2026-11-07T21:00:00-05:00" )
+    assert ( got[ "input_tokens" ], got[ "output_tokens" ], got[ "cache_creation_tokens" ], got[ "cache_read_tokens" ], got[ "cost_usd" ], got[ "usage_calls" ] ) == ( 600, 1200, 65460, 11382, 3.9, 300 )
+
+
+def test_a_run_with_no_calls_or_no_time_has_no_calls_an_hour():
+    assert hist.line_of( { **ok_doc(), "judge_calls": 0 }, "f.json" )[ "calls_per_hour" ] is None
+    assert hist.line_of( { **ok_doc(), "elapsed_seconds": None }, "f.json" )[ "calls_per_hour" ] is None
 
 
 def test_a_failed_run_has_the_same_keys_and_none_for_what_it_never_measured():
