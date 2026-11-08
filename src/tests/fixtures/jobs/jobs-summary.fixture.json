@@ -1546,7 +1546,7 @@
       "runnable": false,
       "unknown_reason": "Never reported: two cadences in one entry.",
       "targets": [],
-      "job": "socket-heartbeat",
+      "job": "socket-housekeeping",
       "title": "Socket heartbeat, cleanup, transcript tailer",
       "owner": "cheech"
     },
