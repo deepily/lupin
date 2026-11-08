@@ -45,10 +45,11 @@ def attempt( when, outcome, evidence, failure=None, stage=None ):
     Build a backfilled attempt.
 
     Ensures:
-        - the attempt started and finished at when, has trigger cron, and names its source as evidence
+        - the attempt started and finished at when and names its source as evidence
+        - the trigger is cron, the only value the schedules support, and the evidence says the trigger was not recorded
     """
     return { "started_at": js.iso_now( when ), "finished_at": js.iso_now( when ), "trigger": "cron", "outcome": outcome, "stage": stage, "failure": failure,
-             "evidence": evidence, "mode": None }
+             "evidence": f"{evidence}; trigger not recorded", "mode": None }
 
 
 def step( att, scan=None, fix=None, work=None ):
@@ -174,11 +175,15 @@ def report_steps( log ):
     Read a report log.
 
     Ensures:
-        - returns one clean step dated by the log's last write
+        - returns one step dated by the log's last write: failed when the log shows a traceback, an error word or a non-2xx notify, else clean
         - returns None for a missing or empty log, because an empty log's time is not a run time
     """
     if not is_file( log ) or log.stat().st_size == 0: return None
-    return [ step( attempt( mtime_of( log ), "clean", f"{log.name} (dated by the file's last write)" ) ) ]
+    text = log.read_text( errors="replace" )
+    bad  = re.search( r"Traceback|notify: HTTP (?!2)\d+|\berror\b", text, re.IGNORECASE )
+    src  = f"{log.name} (dated by the file's last write)"
+    if bad: return [ step( attempt( mtime_of( log ), "failed", src, f"the log mentions: {bad.group( 0 )}", "report" ) ) ]
+    return [ step( attempt( mtime_of( log ), "clean", src ) ) ]
 
 
 def sources( root, data, home ):
@@ -216,6 +221,7 @@ def backfill( root, data, home, force=False, dry_run=False, now=None, duplicate_
     Ensures:
         - returns [ ( job, status, detail ) ] with status written, would-write, skipped (already has a summary), or no-record
         - starts no job and touches no store row; with dry_run nothing is written
+        - a source whose record cannot be read is reported as no-record with the reason, and the others still run
         - the duplicate check is written by its own status writer from runs.jsonl, when that folder has a ledger
     """
     registry = jr.load_registry( root )
@@ -237,7 +243,10 @@ def backfill( root, data, home, force=False, dry_run=False, now=None, duplicate_
             if not dry_run: ( duplicate_writer or st.write_job_summary )( folder, now or datetime.datetime.now().astimezone() )
             rows.append( ( job, "would-write" if dry_run else "written", "from runs.jsonl" ) )
             continue
-        steps = todo[ job ]()
+        try: steps = todo[ job ]()
+        except ( OSError, ValueError, KeyError, TypeError ) as error:                                # one bad record must not stop the others
+            rows.append( ( job, "no-record", f"unreadable: {type( error ).__name__}: {error}"[ :120 ] ) )
+            continue
         if steps is None: rows.append( ( job, "no-record", "no usable record" ) )
         elif dry_run: rows.append( ( job, "would-write", steps[ -1 ][ "attempt" ][ "outcome" ] + " at " + steps[ -1 ][ "attempt" ][ "started_at" ] ) )
         else:

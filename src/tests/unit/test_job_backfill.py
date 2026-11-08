@@ -189,8 +189,8 @@ def test_the_failed_librarian_names_both_sources_in_its_evidence(tmp_path):
     put( tmp_path / "librarian" / "librarian.log", '{"ran": false, "reason": "boom"}\n', T )
     put( tmp_path / "librarian" / "tick-state.json", json.dumps( { "last_run_date": "2026-10-20", "findings": 1 } ) )
     good, failed = bf.librarian_steps( tmp_path )
-    assert good[ "attempt" ][ "evidence" ] == "tick-state.json last_run_date (midnight)"
-    assert failed[ "attempt" ][ "evidence" ] == "librarian.log (dated by the file's last write)"
+    assert good[ "attempt" ][ "evidence" ] == "tick-state.json last_run_date (midnight); trigger not recorded"
+    assert failed[ "attempt" ][ "evidence" ] == "librarian.log (dated by the file's last write); trigger not recorded"
 
 
 def test_a_dry_run_never_calls_the_duplicate_check_writer(tmp_path):
@@ -214,3 +214,21 @@ def test_a_naive_time_is_the_hosts_local_time_not_utc(tmp_path):
     put( tmp_path / "librarian" / "librarian.log", '{"ran": false, "reason": "x"}\n', T )
     put( tmp_path / "librarian" / "tick-state.json", json.dumps( { "last_run_date": "2026-10-20" } ) )
     assert bf.librarian_steps( tmp_path )[ 0 ][ "attempt" ][ "started_at" ] == naive.astimezone().replace( microsecond=0 ).isoformat()
+
+
+def test_a_report_log_that_shows_an_error_reads_as_failed(tmp_path):
+    for text, outcome in ( ( "fine\nnotify: HTTP 200\n", "clean" ), ( "Traceback (most recent call last)\n", "failed" ), ( "notify: HTTP 503\n", "failed" ), ( "An Error happened\n", "failed" ), ( "terror\n", "clean" ) ):
+        got = bf.report_steps( put( tmp_path / "r.log", text, T ) )[ 0 ][ "attempt" ]
+        assert got[ "outcome" ] == outcome
+    assert bf.report_steps( tmp_path / "r.log" )[ 0 ][ "attempt" ][ "outcome" ] == "clean" and got[ "stage" ] is None
+    assert "the log mentions: " in bf.report_steps( put( tmp_path / "e.log", "Traceback x\n", T ) )[ 0 ][ "attempt" ][ "failure" ]
+
+
+def test_one_corrupt_record_is_reported_and_the_others_still_run(tmp_path):
+    root, data, home = build_world( tmp_path )
+    put( data / "refresh/refresh-state.json", "{corrupt" )
+    put( data / "librarian/tick-state.json", "{corrupt" )
+    put( data / "librarian/librarian.log", '{"ran": false, "reason": "x"}\n', T )
+    got = { j: ( s, d ) for j, s, d in bf.backfill( root, data, home ) }
+    assert got[ "vector-refresh" ][ 0 ] == "no-record" and got[ "vector-refresh" ][ 1 ].startswith( "unreadable: JSONDecodeError" ) and got[ "wiki-librarian" ][ 0 ] == "no-record"
+    assert got[ "shadow-audit" ][ 0 ] == "written" and got[ "io-tmp-sweep" ][ 0 ] == "written"
