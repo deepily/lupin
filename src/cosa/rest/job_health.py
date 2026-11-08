@@ -286,12 +286,12 @@ def assess( entry, summary, now, boot_time, tune, store=None, lock_age=None, uni
              "machine_was_off": False, "reasons": [], "applies": { "scan_debt": bool( entry.get( "scan_debt" ) ), "fix_debt": bool( entry.get( "fix_debt" ) ) },
              "last_attempt": None, "last_finished": None, "consecutive_failures": None, "work_found_last_run": None, "strip": [], "scan_debt": None, "fix_debt": None,
              "schedule": None, "liveness": None, "evidence": entry.get( "evidence", [] ), "rows": entry.get( "rows", [] ), "detail_link": entry.get( "detail_link" ),
-             "unknown_reason": None, "targets": [], "runnable": bool( entry.get( "run" ) ), "state": "unknown" }
+             "unknown_reason": None, "targets": [], "schedule_unverified": bool( entry.get( "schedule_unverified" ) ), "runnable": bool( entry.get( "run" ) ), "state": "unknown" }
     if entry.get( "liveness" ):
         up = { "active": True, "inactive": False }.get( unit_state )
         base[ "liveness" ] = { "kind": entry[ "liveness" ][ "kind" ], "unit": entry[ "liveness" ][ "unit" ], "up": up }
         base[ "running" ] = bool( up )
-        if up is None: base[ "unknown_reason" ] = f"unit {entry[ 'liveness' ][ 'unit' ]} is not loaded"
+        if up is None: base[ "unknown_reason" ] = f"unit {entry[ 'liveness' ][ 'unit' ]} is not loaded" if unit_state == "not-loaded" else "liveness unverified: no fresh answer from systemd, the host snapshot or the health endpoint"
         else: base[ "state" ] = "healthy" if up else "silent"
         if up is False: base[ "reasons" ].append( { "state": "silent", "rule": "silent", "text": f"Unit {entry[ 'liveness' ][ 'unit' ]} is not running." } )
         return base

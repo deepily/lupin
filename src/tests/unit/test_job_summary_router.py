@@ -18,7 +18,7 @@ NOW = datetime.datetime( 2026, 11, 7, 12, 0, tzinfo=zoneinfo.ZoneInfo( "America/
 class Deps:
     """Fake inputs."""
     def boot_time( self ): return NOW - datetime.timedelta( days=3 )
-    def unit_state( self, unit ): return "active"
+    def unit_state( self, unit, health_url=None ): return "active"
     def crontab_text( self ): return None
     def lock_held( self, path ): return False
     def store_counts( self, key, now, days ): return None
@@ -90,6 +90,9 @@ def test_live_deps_and_clock_are_the_real_ones( monkeypatch, tmp_path ):
     monkeypatch.setattr( router.cu, "get_project_root", lambda: str( tmp_path ) )
     import cosa.repo.symindex.paths as paths
     monkeypatch.setattr( paths, "data_dir", lambda root: tmp_path / "d" )
+    monkeypatch.delenv( "LUPIN_REUSE_REVIEW_DATA_ROOT" )
     root, data, deps = router.live_deps()
     assert str( root ) == str( tmp_path ) and data == tmp_path / "d" and isinstance( deps, svc.LiveDeps )
+    monkeypatch.setenv( "LUPIN_REUSE_REVIEW_DATA_ROOT", str( tmp_path / "mounted" ) )                  # the container's own variable wins
+    assert router.live_deps()[ 1 ] == str( tmp_path / "mounted" )
     assert router.clock().tzinfo is not None

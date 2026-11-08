@@ -15,7 +15,7 @@
       "DEEPILY_DATA_DIR": "{deepily_data}"
     },
     "owner_note": "owner_confirmed false means the owner is cheech by default and no open row names another seat (Cheech, 2026-11-07)",
-    "schedule_note": "A job with cron_tag takes its schedule from the installed crontab lines that end with # <tag>; the schedule here is the fallback when none is installed or the crontab cannot be read"
+    "schedule_note": "A job with cron_tag takes its schedule from the installed crontab lines that end with # <tag>; the schedule here is the fallback when none is installed or the crontab cannot be read; the duplicate-check fallback is the three lines installed on 2026-11-07, which any hourly run also covers"
   },
   "jobs": [
     {
@@ -25,7 +25,10 @@
       "owner": "cheech",
       "schedule": [
         {
-          "cron": "0 10-22 * * *"
+          "cron": "0 10 * * *"
+        },
+        {
+          "cron": "7 11 * * *"
         },
         {
           "after_boot_seconds": 300
@@ -417,7 +420,8 @@
       "summary_path": "{root}/io/jobs/fleet-arbiter/job-summary.json",
       "liveness": {
         "kind": "systemd",
-        "unit": "lupin-arbiter-app.service"
+        "unit": "lupin-arbiter-app.service",
+        "health_url": "http://host.docker.internal:8001/health"
       },
       "owner_confirmed": false
     },
@@ -430,7 +434,8 @@
       "summary_path": "{root}/io/jobs/context-pressure-writer/job-summary.json",
       "liveness": {
         "kind": "systemd",
-        "unit": "lupin-arbiter-app.service"
+        "unit": "lupin-arbiter-app.service",
+        "health_url": "http://host.docker.internal:8001/health"
       },
       "owner_confirmed": false
     },
@@ -443,7 +448,8 @@
       "summary_path": "{root}/io/jobs/health-watcher/job-summary.json",
       "liveness": {
         "kind": "systemd",
-        "unit": "lupin-arbiter-app.service"
+        "unit": "lupin-arbiter-app.service",
+        "health_url": "http://host.docker.internal:8001/health"
       },
       "owner_confirmed": false
     },

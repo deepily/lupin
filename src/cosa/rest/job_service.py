@@ -14,6 +14,7 @@ import threading
 
 import cosa.rest.job_health as jh
 import cosa.rest.job_registry as jr
+from lupin_mcp import host_snapshot as hs
 from lupin_mcp import job_summary as js
 
 SCHEMA          = "jobs-summary/1"
@@ -81,32 +82,29 @@ class LiveDeps:
 
     def crontab_text( self ):
         """
-        Read the installed crontab.
+        Read the installed crontab, from the host snapshot when this process cannot ask.
 
         Ensures:
-            - returns the text of crontab -l, or None when it cannot be run or answers an error (no crontab included)
+            - returns the text of crontab -l when it can be run (the host), else the copy a host job wrote, if that is fresh
+            - returns None when neither answers: the card then says its schedule is unverified
         """
-        try:
-            done = subprocess.run( [ "crontab", "-l" ], capture_output=True, text=True, timeout=10 )
-        except ( OSError, subprocess.TimeoutExpired ):
-            return None
-        return done.stdout if done.returncode == 0 else None
+        direct = hs.crontab_text()
+        return direct if direct is not None else hs.read_snapshot( self.data, datetime.datetime.now().astimezone() )[ "crontab" ]
 
-    def unit_state( self, unit ):
+    def unit_state( self, unit, health_url=None ):
         """
-        Ask systemd about a user unit.
+        Say whether a service is up.
+
+        The sources are systemd, then the host tick's snapshot, then the service's health endpoint.
 
         Ensures:
-            - returns "active", "inactive" or "not-loaded"; None when systemctl cannot be run or answers nothing usable
+            - returns "active", "inactive" or "not-loaded"; None when no source answers (the container has no systemctl)
         """
-        try:
-            loaded = subprocess.run( [ "systemctl", "--user", "show", unit, "--property=LoadState,ActiveState" ], capture_output=True, text=True, timeout=10 )
-        except ( OSError, subprocess.TimeoutExpired ):
-            return None
-        facts = dict( line.split( "=", 1 ) for line in loaded.stdout.splitlines() if "=" in line )
-        if facts.get( "LoadState" ) == "not-found": return "not-loaded"
-        if facts.get( "ActiveState" ) is None: return None
-        return "active" if facts[ "ActiveState" ] == "active" else "inactive"
+        direct = hs.unit_state( unit )
+        if direct is not None: return direct
+        units = hs.read_snapshot( self.data, datetime.datetime.now().astimezone() )[ "units" ]
+        if units is not None and units.get( unit ) is not None: return units[ unit ]
+        return hs.health_ok( health_url ) if health_url else None
 
     def lock_held( self, path ):
         """
@@ -190,7 +188,7 @@ def assess_read( merged, target, summary, defaults, ctx ):
         lock = ( now - jh.parse_time( summary[ "last_attempt" ][ "started_at" ] ) ).total_seconds()
     store = deps.store_counts( merged[ "fix_debt_key" ], now, defaults[ "window_days" ] ) if merged.get( "fix_debt" ) and merged.get( "fix_debt_key" ) and summary is not None else None
     return jh.assess( merged, summary, now, deps.boot_time(), defaults, store=store, lock_age=lock,
-                      unit_state=deps.unit_state( live[ "unit" ] ) if live else None, target=target[ "target" ] if target else None )
+                      unit_state=deps.unit_state( live[ "unit" ], live.get( "health_url" ) ) if live else None, target=target[ "target" ] if target else None )
 
 
 def assess_target( ent, target, defaults, ctx ):

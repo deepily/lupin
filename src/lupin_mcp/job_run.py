@@ -15,6 +15,7 @@ import subprocess
 import sys
 
 import cosa.rest.job_registry as jr
+from lupin_mcp import host_snapshot as hs
 from lupin_mcp import job_summary as js
 
 EXIT_NO_JOB = 64
@@ -60,6 +61,7 @@ def run_and_report( summary_path, job, command, mode=None, count_re=None, draine
     count, drained = last_int( count_re, out + err ), last_int( drained_re, out + err )
     scan = { "unit": "items", "count": count, "drained_last_run": drained } if count is not None else None
     js.write_summary( summary_path, job, attempt, scan, None, count )
+    hs.refresh_best_effort( environ )                                  # leave the container a fresh copy of the crontab
     return code
 
 

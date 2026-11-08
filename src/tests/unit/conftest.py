@@ -462,3 +462,4 @@ def _no_unit_test_writes_a_real_job_summary( tmp_path_factory, monkeypatch ):
         - LUPIN_JOB_SUMMARY_DIR names a throwaway folder for every test under src/tests/unit, so main() cannot leave a record in the tree
     """
     monkeypatch.setenv( "LUPIN_JOB_SUMMARY_DIR", str( tmp_path_factory.mktemp( "job-summaries" ) ) )
+    monkeypatch.setenv( "LUPIN_REUSE_REVIEW_DATA_ROOT", str( tmp_path_factory.mktemp( "job-data" ) ) )         # host jobs leave a crontab copy here

@@ -24,6 +24,15 @@ How the jobs report, how health is computed, and where each piece lives. The des
 - A looping job uses `every_seconds` with `grace_seconds`. A systemd service uses `liveness` and shows up or down only. A job over several targets lists them under one line.
 - Run now is the only management action. It is refused for any login but the operator's, refused while the job's run lock is held, and records trigger `hand` through `LUPIN_JOB_TRIGGER`.
 
+## Reading the host from inside the container
+
+The :7999 server runs in a container with no `crontab` and no `systemctl`. So host jobs leave a copy for it in `job-host-snapshot.json`, in the reuse-review data folder, which the container mounts.
+
+- Every run of a job that uses the adapters or `job_run` refreshes the crontab part. That part is trusted for 36 hours.
+- A host tick refreshes the systemd unit states too: `python -m lupin_mcp.host_snapshot`, every five minutes. A person installs that cron line. The unit part is trusted for 30 minutes.
+- A service with a `health_url` in the registry is asked over HTTP when systemd and the snapshot cannot answer.
+- A tagged job whose installed lines cannot be read keeps the registry's schedule and its card says "schedule unverified" (`schedule_unverified` true). A service with no fresh answer reads unknown with "liveness unverified". Neither falls back silently.
+
 ## What rebuilds the symbol index
 
 The vector refresh does. `vector_refresh.run_refresh` calls `build.ensure`, which rebuilds the index when it is stale. So one run refreshes both the index and the vectors, by cron at 10:47 daily and 240 seconds after boot. The wiki librarian tick also calls `build.ensure` before it syncs. There is no separate index job, so the `vector-refresh` entry covers both.

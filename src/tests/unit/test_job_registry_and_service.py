@@ -40,7 +40,7 @@ class Deps:
 
     def boot_time( self ): return datetime.datetime( 2026, 11, 1, 8, 0, tzinfo=NY )
 
-    def unit_state( self, unit ): return self.units.get( unit )
+    def unit_state( self, unit, health_url=None ): return self.units.get( unit )
 
     def crontab_text( self ): return self.cron
 
@@ -66,7 +66,7 @@ def test_the_shipped_registry_loads_and_holds_the_23_jobs_of_the_design_with_sea
     assert len( reg[ "jobs" ] ) == 23 and reg[ "defaults" ][ "grace_minutes" ] == 30 and reg[ "defaults" ][ "notify_interval_minutes" ] == 30
     assert {  j[ "catalog" ] for j in reg[ "jobs" ] if "catalog" in j } >= { "L1", "L2", "L3", "L4", "L5", "P1", "P3", "P4", "L28", "L30" }
     dup = next( j for j in reg[ "jobs" ] if j[ "job" ] == "duplicate-check" )
-    assert dup[ "fix_debt_key" ] == "job:duplicate-check" and dup[ "schedule" ] == [ { "cron": "0 10-22 * * *" }, { "after_boot_seconds": 300 } ]
+    assert dup[ "fix_debt_key" ] == "job:duplicate-check" and dup[ "schedule" ] == [ { "cron": "0 10 * * *" }, { "cron": "7 11 * * *" }, { "after_boot_seconds": 300 } ] and dup[ "cron_tag" ] == "duplicate-check-daily"
     vec = next( j for j in reg[ "jobs" ] if j[ "job" ] == "vector-refresh" )
     assert "symbol index" in vec[ "title" ]
 
@@ -281,9 +281,11 @@ def test_crontab_schedule_reads_cron_and_reboot_lines_and_ignores_comments_and_m
 
 def test_a_tagged_job_takes_the_installed_schedule_and_falls_back_when_none_is_installed_or_the_crontab_is_unreadable():
     tagged = job( "t", cron_tag="duplicate-check-daily", schedule=[ { "cron": "0 10-22 * * *" } ] )
-    assert jr.with_installed_schedule( tagged, CRON )[ "schedule" ][ 0 ] == { "cron": "0 10 * * *" }
-    assert jr.with_installed_schedule( tagged, "0 1 * * * x # other\n" ) is tagged           # tag not installed: the registry entry
-    assert jr.with_installed_schedule( tagged, None ) is tagged                              # crontab unreadable: the registry entry
+    got = jr.with_installed_schedule( tagged, CRON )
+    assert got[ "schedule" ][ 0 ] == { "cron": "0 10 * * *" } and got[ "schedule_unverified" ] is False
+    for text in ( "0 1 * * * x # other\n", None ):                                          # tag not installed, or crontab unreadable
+        fallback = jr.with_installed_schedule( tagged, text )
+        assert fallback[ "schedule" ] == tagged[ "schedule" ] and fallback[ "schedule_unverified" ] is True
     plain = job( "p" )
     assert jr.with_installed_schedule( plain, CRON ) is plain                                # no tag: always the registry entry
 
@@ -296,19 +298,9 @@ def test_the_response_uses_the_installed_lines_in_one_crontab_state_and_the_regi
     assert old[ "schedule" ][ "entries" ] == [ "cron 7 11 * * *" ] and old[ "state" ] == "healthy"
     none = svc.build_response( root, tmp_path, NOW, Deps( cron=None ) )[ "jobs" ][ 0 ]
     assert none[ "schedule" ][ "entries" ] == [ "cron 0 10-22 * * *" ] and none[ "state" ] == "healthy"
+    assert none[ "schedule_unverified" ] is True and old[ "schedule_unverified" ] is False
     hourly_gap = svc.build_response( root, tmp_path, NOW + datetime.timedelta( hours=2, minutes=45 ), Deps( cron="0 10-22 * * * /x # t-tag\n" ) )[ "jobs" ][ 0 ]
     assert hourly_gap[ "state" ] == "silent"                                                 # due 14:00 and not run since 11:40
-
-
-def test_live_crontab_text_reads_crontab_l_and_answers_none_on_error_or_missing_binary(tmp_path, monkeypatch):
-    live = svc.LiveDeps( tmp_path, tmp_path )
-    monkeypatch.setattr( svc.subprocess, "run", lambda *a, **k: types.SimpleNamespace( stdout="0 1 * * * x\n", returncode=0 ) )
-    assert live.crontab_text() == "0 1 * * * x\n"
-    monkeypatch.setattr( svc.subprocess, "run", lambda *a, **k: types.SimpleNamespace( stdout="", returncode=1 ) )
-    assert live.crontab_text() is None
-    def boom( *a, **k ): raise FileNotFoundError( "crontab" )
-    monkeypatch.setattr( svc.subprocess, "run", boom )
-    assert live.crontab_text() is None
 
 
 def test_run_now_reaps_its_child_and_the_lock_probe_does_not_block_a_shared_holder(tmp_path):
@@ -326,3 +318,51 @@ def test_run_now_reaps_its_child_and_the_lock_probe_does_not_block_a_shared_hold
     with open( lock, "a" ) as other:
         fcntl.flock( other, fcntl.LOCK_SH )
         assert svc.LiveDeps( tmp_path, tmp_path ).lock_held( lock ) is False               # a shared holder must not read as a held run lock
+
+
+def no_binaries( *a, **k ):
+    """Stands in for a container that has neither crontab nor systemctl."""
+    raise FileNotFoundError( a[ 0 ][ 0 ] )
+
+
+def test_without_crontab_or_systemctl_the_card_says_unverified_until_a_fresh_host_snapshot_arrives(tmp_path, monkeypatch):
+    import cosa.rest.job_cron
+    from lupin_mcp import host_snapshot as hs
+    monkeypatch.setattr( hs.subprocess, "run", no_binaries )
+    tagged = job( "t", cron_tag="t-tag", schedule=[ { "cron": "0 10-22 * * *" } ] )
+    live   = job( "u", schedule=[], liveness={ "kind": "systemd", "unit": "u.service" } )
+    root   = write_registry( tmp_path, [ tagged, live ] )
+    summary_file( root, "t", when=NOW - datetime.timedelta( minutes=20 ) )
+    data   = tmp_path / "data"; data.mkdir()
+    deps   = svc.LiveDeps( root, data )
+    deps.boot_time = lambda: NOW - datetime.timedelta( days=3 )
+    deps.store_counts = lambda *a: None
+    def cards():
+        got = { j[ "job" ]: j for j in svc.build_response( root, data, datetime.datetime.now().astimezone(), deps )[ "jobs" ] }
+        return got[ "t" ], got[ "u" ]
+    t, u = cards()                                                                          # no snapshot at all
+    assert t[ "schedule_unverified" ] is True and u[ "state" ] == "unknown" and "liveness unverified" in u[ "unknown_reason" ]
+    now = datetime.datetime.now().astimezone()
+    ( data / hs.SNAPSHOT_FILE ).write_text( json.dumps( { "schema": hs.SCHEMA, "crontab": "7 11 * * * x # t-tag\n", "crontab_at": now.isoformat(), "units": { "u.service": "active" }, "units_at": now.isoformat() } ) )
+    t, u = cards()                                                                          # fresh snapshot: both verified
+    assert t[ "schedule_unverified" ] is False and t[ "schedule" ][ "entries" ] == [ "cron 7 11 * * *" ] and u[ "state" ] == "healthy"
+    old = ( now - datetime.timedelta( hours=40 ) ).isoformat()
+    ( data / hs.SNAPSHOT_FILE ).write_text( json.dumps( { "schema": hs.SCHEMA, "crontab": "7 11 * * * x # t-tag\n", "crontab_at": old, "units": { "u.service": "active" }, "units_at": old } ) )
+    t, u = cards()                                                                          # stale: never trusted
+    assert t[ "schedule_unverified" ] is True and u[ "state" ] == "unknown"
+
+
+def test_a_health_endpoint_answers_for_a_service_when_systemd_and_the_snapshot_cannot(tmp_path, monkeypatch):
+    from lupin_mcp import host_snapshot as hs
+    monkeypatch.setattr( hs.subprocess, "run", no_binaries )
+    monkeypatch.setattr( svc.hs, "health_ok", lambda url: "active" if url == "http://x/health" else "inactive" )
+    live = svc.LiveDeps( tmp_path, tmp_path )
+    assert live.unit_state( "a.service", "http://x/health" ) == "active" and live.unit_state( "a.service", "http://y/health" ) == "inactive" and live.unit_state( "a.service" ) is None
+
+
+def test_live_inputs_prefer_the_direct_answer_over_the_snapshot(tmp_path, monkeypatch):
+    from lupin_mcp import host_snapshot as hs
+    monkeypatch.setattr( svc.hs, "crontab_text", lambda: "0 1 * * * a # tag\n" )
+    monkeypatch.setattr( svc.hs, "unit_state", lambda unit: "inactive" )
+    live = svc.LiveDeps( tmp_path, tmp_path )
+    assert live.crontab_text() == "0 1 * * * a # tag\n" and live.unit_state( "x" ) == "inactive"

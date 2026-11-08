@@ -117,12 +117,13 @@ def with_installed_schedule( job, crontab_text ):
     Requires:
         - job is an effective registry entry; crontab_text is the crontab, or None when it could not be read
     Ensures:
-        - returns job unchanged when it has no cron_tag, the crontab is unreadable, or no installed line carries the tag
-        - otherwise returns a copy whose schedule is the installed lines
+        - returns job unchanged when it has no cron_tag
+        - a tagged job whose crontab is unreadable or has no line with its tag keeps the registry schedule and gets schedule_unverified true
+        - otherwise returns a copy whose schedule is the installed lines and schedule_unverified false
     """
-    if not job.get( "cron_tag" ) or crontab_text is None: return job
-    installed = crontab_schedule( crontab_text, job[ "cron_tag" ] )
-    return { **job, "schedule": installed } if installed else job
+    if not job.get( "cron_tag" ): return job
+    installed = [] if crontab_text is None else crontab_schedule( crontab_text, job[ "cron_tag" ] )
+    return { **job, "schedule": installed, "schedule_unverified": False } if installed else { **job, "schedule_unverified": True }
 
 
 def resolve_path( template, root, data ):

@@ -10,6 +10,7 @@ build.ensure), so the vector-refresh record covers it.
 import datetime
 import os
 
+from lupin_mcp import host_snapshot as hs
 from lupin_mcp import job_summary as js
 
 FILE_NAME         = "job-summary.json"
@@ -50,7 +51,9 @@ def report( folder, job, now, outcome, failure=None, stage=None, mode=None, scan
     """
     attempt = { "started_at": js.iso_now( aware( now ) ), "finished_at": js.iso_now(), "trigger": js.trigger_from_env( "cron", environ ),
                 "outcome": outcome, "stage": stage, "failure": failure, "evidence": None, "mode": mode }
-    return js.write_summary( os.path.join( folder, FILE_NAME ), job, attempt, scan, fix, work )
+    written = js.write_summary( os.path.join( folder, FILE_NAME ), job, attempt, scan, fix, work )
+    hs.refresh_best_effort( environ )                                  # the container cannot read the crontab; this host run leaves a copy for it
+    return written
 
 
 def record_librarian( folder, summary, code, now, environ=None ):
