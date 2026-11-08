@@ -134,24 +134,48 @@ def spawn_registry_manager( persona: str ) -> Optional[ str ]:
         - each live bridge whose voice persona is `persona` is resolved by manager_resolver.resolve_manager,
           which reads the bridge's spawned_by and frozen spawned_by_persona, then the spawn manifests
         - returns the store-shaped manager when every worker that resolves names the same one, else None
-        - returns the persona itself when it is live and every live seat of it has no lineage at all (SOURCE_UNRESOLVED):
-          a manager has no spawner, so its own branches are its own
         - returns None when two live workers of that persona name different managers; never raises
     """
     try:
-        from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager, SOURCE_LINEAGE, SOURCE_UNRESOLVED
+        from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager, SOURCE_LINEAGE
         from lupin_cli.claude_code.hooks.lib.session_bridge import iter_live_bridges
-        key, found, sources = _manager_words( persona ), set(), []
+        key, found = _manager_words( persona ), set()
         for _, data, _ in iter_live_bridges():
             voice = data.get( "voice_persona" )
             name  = voice.get( "name" ) if isinstance( voice, dict ) else None
             sid   = data.get( "session_id" )
             if not ( isinstance( name, str ) and sid and _manager_words( name ) == key ): continue
             lineage = resolve_manager( sid )
-            sources.append( lineage[ "source" ] )
             if lineage[ "source" ] == SOURCE_LINEAGE and lineage[ "manager_persona" ]: found.add( _manager_words( lineage[ "manager_persona" ] ) )
-        if sources and not found and all( x == SOURCE_UNRESOLVED for x in sources ): return key
         return found.pop() if len( found ) == 1 else None
+    except Exception:
+        return None
+
+
+def live_unspawned_persona( persona: str ) -> Optional[ str ]:
+    """
+    Say whether a persona is held by a live seat that nobody spawned, which is a manager.
+
+    Requires:
+        - persona is a persona name in any spelling
+
+    Ensures:
+        - returns the store-shaped persona when at least one live bridge holds it, no live bridge of it
+          carries a `spawned_by`, and resolve_manager finds no lineage for any of them
+        - returns None when no live seat holds it, or any live seat of it was spawned (a worker whose
+          lineage is merely unreadable is not a manager); never raises
+    """
+    try:
+        from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager, SOURCE_UNRESOLVED
+        from lupin_cli.claude_code.hooks.lib.session_bridge import iter_live_bridges
+        key, seats = _manager_words( persona ), []
+        for _, data, _ in iter_live_bridges():
+            voice = data.get( "voice_persona" )
+            name  = voice.get( "name" ) if isinstance( voice, dict ) else None
+            sid   = data.get( "session_id" )
+            if not ( isinstance( name, str ) and sid and _manager_words( name ) == key ): continue
+            seats.append( not data.get( "spawned_by" ) and resolve_manager( sid )[ "source" ] == SOURCE_UNRESOLVED )
+        return key if seats and all( seats ) else None
     except Exception:
         return None
 
@@ -194,7 +218,7 @@ def leading_persona( name: str, personas: list ) -> Optional[ str ]:
 
 def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Optional[ str ] = None,
                      run: Optional[ Callable ] = None, registry_fn: Optional[ Callable ] = None,
-                     tree_path: Optional[ str ] = None, personas: Optional[ list ] = None ) -> dict:
+                     tree_path: Optional[ str ] = None, personas: Optional[ list ] = None, unspawned_fn: Optional[ Callable ] = None ) -> dict:
     """
     Find the manager a tree or branch belongs to, trying each lookup in order.
 
@@ -203,17 +227,21 @@ def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Op
         - branch and project_root, when both are given, enable the stamp lookup
         - project_root, with tree_path or branch, enables the creator ledger lookup
         - registry_fn is None (spawn_registry_manager) or takes a persona and returns a manager or None
+        - unspawned_fn is None (live_unspawned_persona) or takes a persona and returns the manager that owns it or None
         - personas is None (registered_persona_slugs) or the registered persona names the name may begin with
 
     Ensures:
         - tries, in order: the branch stamp, the creator ledger, a seat tree's own name, the spawn lineage of
-          a live worker whose persona `name` begins with (longest registered persona first)
-        - returns { manager, source, tried } where source is "branch stamp", "creator ledger", "seat tree name"
-          or "spawn registry" for the lookup that answered, and manager is None with source None when none did
+          a live worker whose persona `name` begins with (longest registered persona first), then, for a registered
+          persona the registry did not place, whether a live unspawned seat holds it (a manager owns its own branches)
+        - returns { manager, source, tried } where source is "branch stamp", "creator ledger", "seat tree name",
+          "spawn registry" or "live unspawned persona" for the lookup that answered, and manager is None with
+          source None when none did
         - tried lists every lookup attempted, so a row can say what was looked up; never raises
     """
-    registry_fn = registry_fn if registry_fn is not None else spawn_registry_manager
-    tried       = []
+    registry_fn  = registry_fn if registry_fn is not None else spawn_registry_manager
+    unspawned_fn = unspawned_fn if unspawned_fn is not None else live_unspawned_persona
+    tried        = []
     if branch and project_root:
         tried.append( "branch stamp" )
         stamp = read_stamp( project_root, branch, run )
@@ -237,6 +265,13 @@ def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Op
     except Exception:
         manager = None
     if manager: return { "manager": manager, "source": "spawn registry", "tried": tried }
+    if persona:
+        tried.append( f"live unspawned persona '{persona}'" )
+        try:
+            manager = unspawned_fn( persona )
+        except Exception:
+            manager = None
+        if manager: return { "manager": manager, "source": "live unspawned persona", "tried": tried }
     return { "manager": None, "source": None, "tried": tried }
 
 

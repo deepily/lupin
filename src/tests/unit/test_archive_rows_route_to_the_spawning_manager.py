@@ -31,6 +31,7 @@ def _outcome( branch, root=None ):
 @pytest.fixture
 def live_registry( monkeypatch ):
     monkeypatch.setattr( st, "spawn_registry_manager", registry )
+    monkeypatch.setattr( st, "live_unspawned_persona", lambda persona: None )
 
 
 def _g( cwd, *args ):
@@ -105,13 +106,12 @@ POOL = [ "maria", "mr radio", "mr", "Rio" ]
 REAL = "wt-rescue/mr-radio-8f3aa058-20261107T234724Z"
 
 
-def test_a_hyphenated_persona_branch_goes_to_that_persona_not_its_first_word( repo, live_registry, monkeypatch ):
+def test_a_hyphenated_persona_branch_goes_to_that_persona_not_its_first_word( repo, sessions, monkeypatch ):
     monkeypatch.setattr( st, "registered_persona_slugs", lambda: POOL )
-    seen = []
-    monkeypatch.setattr( st, "spawn_registry_manager", lambda persona: seen.append( persona ) or ( "mr radio" if persona == "mr radio" else None ) )
+    sessions.bridge( "mr radio", "mgr-1111", None )                         # a live manager: nobody spawned it
     row = st.compose_archive_row( _outcome( REAL, str( repo ) ) )
     assert ( row[ "owner" ], row[ "accountable" ] ) == ( "mr radio", "mr radio" )
-    assert seen == [ "mr radio" ]                                          # the registry was asked for the whole persona, never "mr"
+    assert "Creator: mr radio, from the live unspawned persona." in row[ "body" ]
 
 
 def test_the_longest_persona_wins_and_a_worker_still_routes_to_its_spawner():
@@ -120,32 +120,33 @@ def test_the_longest_persona_wins_and_a_worker_still_routes_to_its_spawner():
     assert st.leading_persona( "mr-radio", POOL ) == "mr radio"
     assert st.leading_persona( "RIO-x", POOL ) == "rio"
     assert st.leading_persona( "mrs-x", POOL ) is None and st.leading_persona( "mr radiox", POOL ) is None
-    assert st.resolve_creator( "mr-radio-x", registry_fn=lambda p: { "mr radio": "mr radio" }.get( p ), personas=[ "mr radio", "arnold" ] )[ "manager" ] == "mr radio"
     assert st.resolve_creator( "arnold-x", registry_fn=registry, personas=[ "arnold" ] )[ "manager" ] == "mr radio"
 
 
-def _bridges( monkeypatch, sources, manager_persona=None ):
-    import cosa.agents.heartbeat_arbiter.manager_resolver as mr
+def test_a_registered_persona_the_registry_cannot_place_goes_to_the_unspawned_lookup_and_a_throw_means_triage():
+    got = st.resolve_creator( "mr-radio-x", registry_fn=lambda p: None, unspawned_fn=lambda p: p, personas=POOL )
+    assert ( got[ "manager" ], got[ "source" ], got[ "tried" ][ -1 ] ) == ( "mr radio", "live unspawned persona", "live unspawned persona 'mr radio'" )
+    def boom( persona ): raise RuntimeError( "bridges down" )
+    assert st.resolve_creator( "mr-radio-x", registry_fn=lambda p: None, unspawned_fn=boom, personas=POOL )[ "manager" ] is None
+    assert st.resolve_creator( "zed-x", registry_fn=lambda p: None, unspawned_fn=lambda p: "nope", personas=POOL )[ "tried" ][ -1 ] == "spawn registry for 'zed'"
+
+
+def test_only_a_live_seat_nobody_spawned_is_a_manager( sessions ):
+    sessions.bridge( "mr radio", "mgr-1111", None )
+    assert st.live_unspawned_persona( "Mr. Radio" ) == "mr radio"
+    assert st.live_unspawned_persona( "nobody" ) is None                    # not live: still triage
+    sessions.bridge( "arnold", "w-1", "mgr-1111", frozen="mr radio" )
+    assert st.live_unspawned_persona( "arnold" ) is None                    # spawned, lineage readable
+    sessions.bridge( "clayton", "w-2", "mgr-gone" )
+    assert st.live_unspawned_persona( "clayton" ) is None                   # spawned, lineage unreadable: not a manager
+    sessions.bridge( "mr radio", "mgr-2222", "mgr-1111" )
+    assert st.live_unspawned_persona( "mr radio" ) is None                  # one seat of the persona was spawned
+
+
+def test_a_broken_bridge_reader_means_no_unspawned_persona( monkeypatch ):
     import lupin_cli.claude_code.hooks.lib.session_bridge as sb
-    seats = [ ( "p", { "voice_persona": { "name": "mr radio" }, "session_id": f"s{i}" }, "x" ) for i, _ in enumerate( sources ) ]
-    seats.append( ( "p", { "voice_persona": "none", "session_id": "o" }, "x" ) )
-    seats.append( ( "p", { "voice_persona": { "name": "maya" }, "session_id": "m" }, "x" ) )
-    monkeypatch.setattr( sb, "iter_live_bridges", lambda: iter( seats ) )
-    by_sid = { f"s{i}": src for i, src in enumerate( sources ) }
-    monkeypatch.setattr( mr, "resolve_manager", lambda sid: { "source": by_sid.get( sid, mr.SOURCE_LINEAGE ), "manager_persona": manager_persona if by_sid.get( sid, "l" ) == mr.SOURCE_LINEAGE or sid == "m" else None } )
-
-
-def test_a_live_manager_with_no_spawner_owns_its_own_branches( monkeypatch ):
-    _bridges( monkeypatch, [ "unresolved" ] )
-    assert st.spawn_registry_manager( "mr radio" ) == "mr radio"
-    assert st.spawn_registry_manager( "nobody" ) is None                    # not live: still triage
-
-
-def test_a_live_worker_with_a_spawner_or_a_mixed_set_is_not_taken_for_a_manager( monkeypatch ):
-    _bridges( monkeypatch, [ "lineage" ], manager_persona="Tiberius" )
-    assert st.spawn_registry_manager( "mr radio" ) == "tiberius"
-    _bridges( monkeypatch, [ "unresolved", "declared" ] )
-    assert st.spawn_registry_manager( "mr radio" ) is None
+    monkeypatch.setattr( sb, "iter_live_bridges", lambda: ( _ for _ in () ).throw( OSError( "gone" ) ) )
+    assert st.live_unspawned_persona( "mr radio" ) is None
 
 
 def test_an_unknown_prefix_falls_back_as_before( repo, live_registry, monkeypatch ):
@@ -280,9 +281,9 @@ def test_the_pid_check_runs_inside_a_container_too( sessions, monkeypatch ):
     assert [ data[ "session_id" ] for _, data, _ in sb.iter_live_bridges() ] == [ "mgr-1111" ]
 
 
-def test_an_unspawned_live_persona_is_its_own_manager_and_an_unknown_one_resolves_to_nobody( sessions ):
+def test_an_unspawned_or_unknown_persona_resolves_to_nobody( sessions ):
     sessions.bridge( "maria", "mgr-1111", None )
-    assert st.spawn_registry_manager( "maria" ) == "maria" and st.spawn_registry_manager( "nobody" ) is None
+    assert st.spawn_registry_manager( "maria" ) is None and st.spawn_registry_manager( "nobody" ) is None
 
 
 def test_a_broken_bridge_reader_resolves_to_nobody( monkeypatch ):
