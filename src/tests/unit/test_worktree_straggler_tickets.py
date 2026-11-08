@@ -26,6 +26,7 @@ def _no_live_spawn_registry( monkeypatch ):
     A first name segment that is a real persona would otherwise resolve.
     """
     monkeypatch.setattr( st, "spawn_registry_manager", lambda persona: None )
+    monkeypatch.setattr( st, "live_unspawned_persona", lambda persona: None )
 
 
 class MemStore:
