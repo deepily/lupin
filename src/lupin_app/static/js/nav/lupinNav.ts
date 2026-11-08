@@ -95,6 +95,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     { label : "Home",          url : "/app",                       icon : "home",   auth : false, admin : false, testid : "nav-home-link"           },
     { label : "Notifications", url : "/app/notifications",         icon : "bell",   auth : true,  admin : false, testid : "nav-notifications-link"  },
     { label : "Profile",       url : "/app/auth/profile",          icon : "user",   auth : true,  admin : false, testid : "nav-profile-link"        },
+    { label : "Jobs",          url : "/app/jobs",                  icon : "chart",  auth : true,  admin : false, testid : "nav-jobs-link"           },
     { label : "Admin",         url : "/app/admin",                 icon : "shield", auth : true,  admin : true,  testid : "nav-admin-link"          },
     { label : "Users",         url : "/app/admin/users",           icon : "users",  auth : true,  admin : true,  testid : "nav-admin-users-link"    },
     { label : "Snapshots",     url : "/app/admin/snapshots",       icon : "camera", auth : true,  admin : true,  testid : "nav-admin-snapshots-link"},

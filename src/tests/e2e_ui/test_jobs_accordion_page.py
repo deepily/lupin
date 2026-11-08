@@ -113,3 +113,26 @@ def test_a_job_that_cannot_run_by_hand_offers_no_run_now_button( logged_in_page 
     arbiter.get_by_test_id( "jobs-panel" ).wait_for( state="visible", timeout=5_000 )
     assert arbiter.get_by_test_id( "jobs-run-now" ).count() == 0
     assert arbiter.get_by_test_id( "jobs-last-run" ).inner_text() == "up (lupin-arbiter-app.service)"
+
+
+def test_the_legacy_client_nav_opens_the_accordion( notifications_page ):
+    page = notifications_page
+    _stub( page )
+    link = page.get_by_test_id( "nav-jobs-link" )
+    link.wait_for( state="visible", timeout=10_000 )
+    assert link.get_attribute( "href" ) == "/app/jobs"
+    link.click()
+    page.get_by_test_id( "jobs-item" ).first.wait_for( state="visible", timeout=15_000 )
+    assert page.locator( "[data-testid=jobs-accordion] > [data-testid=jobs-item]" ).count() == 23
+
+
+def test_the_multiplexer_nav_opens_the_accordion( logged_in_page ):
+    page = logged_in_page
+    _stub( page )
+    page.goto( f"{BASE_URL}/app/multiplexer" )
+    link = page.get_by_test_id( "nav-jobs-link" )
+    link.wait_for( state="visible", timeout=15_000 )
+    assert link.get_attribute( "href" ) == "/app/jobs"
+    link.click()
+    page.get_by_test_id( "jobs-item" ).first.wait_for( state="visible", timeout=15_000 )
+    assert page.locator( "[data-testid=jobs-accordion] > [data-testid=jobs-item]" ).count() == 23
