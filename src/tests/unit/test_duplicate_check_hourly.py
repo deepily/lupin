@@ -271,11 +271,13 @@ def test_the_store_count_finds_the_rows_that_carry_the_mark_held_ones_included_a
     assert set( other.keys ) == { "own" }, "no key given: the client's own key is read once and used for every read"
 
 
-def test_the_store_count_is_none_when_the_store_cannot_be_read_in_full():
+def test_the_store_count_is_none_when_the_store_cannot_be_read_in_full( monkeypatch ):
     assert dd.live_rows_by_mark( { }, "k", Board( [ ], [ ], cut=True ) ) is None, "a truncated board is no answer"
     assert dd.live_rows_by_mark( { }, "k", Board( [ ], [ ], held_ok=False ) ) is None
     assert dd.live_rows_by_mark( { }, "k", Board( [ ], [ ], boom=True ) ) is None
-    assert dd.live_rows_by_mark( ) is None, "no settings or key in the test environment"
+    from lupin_cli.claude_code.hooks.lib import task_store_settings
+    monkeypatch.setattr( task_store_settings, "load_task_store_settings", lambda: { } )
+    assert dd.live_rows_by_mark( None, None, Board( [ ], [ ], boom=True ) ) is None, "settings are loaded when none are given, and a failing read gives no count"
 
 
 def test_the_job_summary_is_rewritten_after_each_invocation_with_the_store_count_and_a_failed_write_is_printed( repo, tmp_path, monkeypatch, capsys ):
