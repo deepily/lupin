@@ -175,6 +175,13 @@ def test_the_store_count_sits_beside_the_filed_total_and_the_gap_is_their_differ
     fix = st.job_summary( lines, NOW, { "found": 3, "open": 1 } )[ "fix_debt" ]
     assert ( fix[ "filed_in_ledger" ], fix[ "found_by_mark" ], fix[ "open_by_mark" ], fix[ "gap" ] ) == ( 4, 3, 1, 1 )
     assert st.job_summary( lines, NOW, { "found": 4, "open": 0 } )[ "fix_debt" ][ "gap" ] == 0
+    assert st.job_summary( lines, NOW, { "found": 3, "open": 1 } )[ "fix_debt" ][ "open_reported" ] == 1 and st.job_summary( lines, NOW )[ "fix_debt" ][ "open_reported" ] is None
+
+
+def test_the_scan_points_keep_the_newest_fourteen_runs():
+    lines = [ row( 1 + n // 12, 10 + n % 12, carried=n, owed=n, judged=n ) for n in range( 20 ) ]
+    points = st.job_summary( lines, NOW )[ "scan_debt" ][ "points" ]
+    assert len( points ) == 14 and [ p[ "count" ] for p in points ] == list( range( 6, 20 ) ) and points[ 0 ][ "drained" ] == 6
 
 
 ATTEMPT_KEYS = ( "started_at", "finished_at", "trigger", "outcome", "stage", "failure", "evidence", "mode" )       # the fleet reader's list; a record missing one reads as unreadable
