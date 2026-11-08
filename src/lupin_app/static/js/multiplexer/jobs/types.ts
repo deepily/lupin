@@ -165,5 +165,7 @@ export interface JobEntry {
 export interface JobsSummary {
   schema       : "jobs-summary/1";
   generated_at : string;
+  /** True only when the caller may run jobs by hand: the operator's login. */
+  caller_is_operator : boolean;
   jobs         : JobEntry[];
 }

@@ -15,6 +15,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** What the page lets a rendered job do. Only Run now exists. */
 export interface JobsActions {
+  /** False hides every Run now button: the caller is not the operator. */
+  canRun : boolean;
   runNow( job: JobEntry ): Promise<string>;
 }
 
@@ -222,7 +224,7 @@ function notReportedBlock( doc: Document, job: JobEntry ): HTMLElement {
 }
 
 function runNowBlock( doc: Document, job: JobEntry, actions: JobsActions ): HTMLElement | null {
-  if ( !job.runnable ) return null;
+  if ( !actions.canRun || !job.runnable ) return null;
   const wrap   = el( doc, "div", "jobs-actions", null, null );
   const button = doc.createElement( "button" );
   button.type = "button";

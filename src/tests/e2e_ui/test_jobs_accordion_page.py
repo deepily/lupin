@@ -24,10 +24,11 @@ FIXTURE = json.loads( ( Path( __file__ ).resolve().parents[1] / "fixtures" / "jo
 STARTED = { "job": "duplicate-check", "target": None, "status": "started", "trigger": "hand", "pid": 4242, "started_at": "2026-11-07T20:31:00-05:00" }
 
 
-def _stub( page, run_status=200, run_body=None ):
+def _stub( page, run_status=200, run_body=None, operator=True ):
     """Stub the summary door and the Run now door, and return the recorded run requests."""
     runs = [ ]
-    page.route( "**/api/jobs/summary*", lambda r: r.fulfill( status=200, content_type="application/json", body=json.dumps( FIXTURE ) ) )
+    summary = { **FIXTURE, "caller_is_operator": operator }
+    page.route( "**/api/jobs/summary*", lambda r: r.fulfill( status=200, content_type="application/json", body=json.dumps( summary ) ) )
 
     def _run( route ):
         runs.append( { "url": route.request.url, "method": route.request.method, "auth": route.request.headers.get( "authorization", "" ) } )
@@ -102,6 +103,18 @@ def test_a_refused_run_says_why_and_leaves_the_button_usable( logged_in_page ):
     item.get_by_test_id( "jobs-run-status" ).filter( has_text="run lock is held" ).wait_for( timeout=5_000 )
     assert button.is_enabled()
     assert len( runs ) == 1
+
+
+def test_a_login_that_is_not_the_operator_sees_no_run_now_button( logged_in_page ):
+    page = logged_in_page
+    runs = _stub( page, operator=False )
+    _open_jobs_page( page )
+    assert page.locator( "[data-testid=jobs-accordion] > [data-testid=jobs-item]" ).count() == 23
+    item = page.locator( "[data-testid=jobs-item][data-job=duplicate-check]" )
+    item.get_by_test_id( "jobs-line" ).click()
+    item.get_by_test_id( "jobs-panel" ).wait_for( state="visible", timeout=5_000 )
+    assert page.get_by_test_id( "jobs-run-now" ).count() == 0
+    assert runs == [ ]
 
 
 def test_a_job_that_cannot_run_by_hand_offers_no_run_now_button( logged_in_page ):

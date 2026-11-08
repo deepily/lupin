@@ -118,7 +118,8 @@ export function bootJobsPage( deps: JobsPageDeps ): JobsPageResult {
   bounceToLoginOnDeadSession( deps.bus, deps.storage, target );
 
   const api = deps.connect();
-  const actions: JobsActions = {
+  const makeActions = ( canRun: boolean ): JobsActions => ( {
+    canRun,
     async runNow( job ) {
       try {
         const started = await api.post<JobRunStarted>( runNowPath( job ), undefined );
@@ -127,12 +128,12 @@ export function bootJobsPage( deps: JobsPageDeps ): JobsPageResult {
         return runNowFailureText( err );
       }
     },
-  };
+  } );
 
   const refresh = async (): Promise<void> => {
     try {
       const summary = await api.get<JobsSummary>( JOBS_SUMMARY_PATH );
-      renderAccordion( deps.doc, mountEl, summary, actions );
+      renderAccordion( deps.doc, mountEl, summary, makeActions( summary.caller_is_operator ) );
       headerEl.textContent = headerLine( summary.jobs );
       errorEl.hidden = true;
     } catch ( err ) {

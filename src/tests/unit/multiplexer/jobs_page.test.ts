@@ -39,7 +39,7 @@ const flush = () => new Promise( ( r ) => setImmediate( r ) );
 const byId  = ( id: string ) => document.getElementById( id ) as HTMLElement;
 const clone = <T,>( v: T ): T => JSON.parse( JSON.stringify( v ) ) as T;
 const find  = ( name: string ): JobEntry => clone( FIXTURE.jobs.find( ( j ) => j.job === name ) as JobEntry );
-const NO_ACTIONS = { runNow : async () => "ok" };
+const NO_ACTIONS = { canRun : true, runNow : async () => "ok" };
 
 // ── the fixture itself ──────────────────────────────────────────────────────
 
@@ -387,10 +387,21 @@ test( "sparkline draws nothing under two points and a level line for a flat seri
   assert.equal( up.getAttribute( "aria-label" ), "up: 0, 10" );
 } );
 
+test( "a caller who is not the operator sees no Run now button anywhere, nested targets included", () => {
+  const item = renderJob( document, find( "worktree-census" ), TODAY, { canRun : false, runNow : async () => "ok" } );
+  assert.equal( item.querySelectorAll( "[data-testid=jobs-run-now]" ).length, 0 );
+  assert.equal( item.querySelectorAll( "[data-testid=jobs-item]" ).length, 3, "its three targets are still drawn" );
+  const mount = byId( "jobs-accordion" );
+  renderAccordion( document, mount, { ...clone( FIXTURE ), caller_is_operator : false }, { canRun : false, runNow : async () => "ok" } );
+  assert.equal( mount.querySelectorAll( "[data-testid=jobs-run-now]" ).length, 0 );
+  renderAccordion( document, mount, FIXTURE, NO_ACTIONS );
+  assert.equal( mount.querySelectorAll( "[data-testid=jobs-run-now]" ).length > 0, true, "positive control: the operator does see buttons" );
+} );
+
 test( "Run now disables the button while it runs, prints the outcome, and reports a rejected promise", async () => {
   let release!: ( s: string ) => void;
   const calls: string[] = [];
-  const actions = { runNow : ( job: JobEntry ) => { calls.push( job.job ); return new Promise<string>( ( r ) => { release = r; } ); } };
+  const actions = { canRun : true, runNow : ( job: JobEntry ) => { calls.push( job.job ); return new Promise<string>( ( r ) => { release = r; } ); } };
   const item = renderJob( document, find( "duplicate-check" ), TODAY, actions );
   const btn  = item.querySelector( "[data-testid=jobs-run-now]" ) as HTMLButtonElement;
   const out  = item.querySelector( "[data-testid=jobs-run-status]" ) as HTMLElement;
@@ -398,7 +409,7 @@ test( "Run now disables the button while it runs, prints the outcome, and report
   assert.deepEqual( [ btn.disabled, out.textContent, calls ], [ true, "Starting…", [ "duplicate-check" ] ] );
   release( "Started." ); await flush();
   assert.deepEqual( [ btn.disabled, out.textContent ], [ false, "Started." ] );
-  const bad  = renderJob( document, find( "duplicate-check" ), TODAY, { runNow : () => Promise.reject( new Error( "boom" ) ) } );
+  const bad  = renderJob( document, find( "duplicate-check" ), TODAY, { canRun : true, runNow : () => Promise.reject( new Error( "boom" ) ) } );
   const btn2 = bad.querySelector( "[data-testid=jobs-run-now]" ) as HTMLButtonElement;
   btn2.click(); await flush();
   assert.deepEqual( [ btn2.disabled, ( bad.querySelector( "[data-testid=jobs-run-status]" ) as HTMLElement ).textContent ], [ false, "Run now failed: Error: boom" ] );
@@ -462,6 +473,13 @@ test( "a signed-in visit loads the summary once, draws 23 jobs and the header, a
   assert.equal( byId( "jobs-accordion" ).children.length, 23 );
   assert.match( byId( "jobs-header" ).textContent as string, /^23 jobs: 9 unknown, 2 silent, 3 failing, 9 healthy$/ );
   assert.equal( byId( "jobs-error" ).hidden, true );
+} );
+
+test( "the page hides Run now when the summary says the caller is not the operator", async () => {
+  const h = harness( { api : { get : async <T,>(): Promise<T> => ( { ...clone( FIXTURE ), caller_is_operator : false } ) as unknown as T } } );
+  await ( bootJobsPage( h.deps ) as { loaded: Promise<void> } ).loaded;
+  assert.equal( byId( "jobs-accordion" ).children.length, 23 );
+  assert.equal( byId( "jobs-accordion" ).querySelectorAll( "[data-testid=jobs-run-now]" ).length, 0 );
 } );
 
 test( "Refresh reloads; a failed reload shows the reason and keeps the last good accordion", async () => {
