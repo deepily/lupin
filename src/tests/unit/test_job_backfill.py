@@ -183,3 +183,34 @@ def test_a_folder_this_process_may_not_enter_reads_as_no_file(tmp_path, monkeypa
     def denied( self ): raise PermissionError( "no" )
     monkeypatch.setattr( pathlib.Path, "is_file", denied )
     assert bf.is_file( tmp_path / "x" ) is False
+
+
+def test_the_failed_librarian_names_both_sources_in_its_evidence(tmp_path):
+    put( tmp_path / "librarian" / "librarian.log", '{"ran": false, "reason": "boom"}\n', T )
+    put( tmp_path / "librarian" / "tick-state.json", json.dumps( { "last_run_date": "2026-10-20", "findings": 1 } ) )
+    good, failed = bf.librarian_steps( tmp_path )
+    assert good[ "attempt" ][ "evidence" ] == "tick-state.json last_run_date (midnight)"
+    assert failed[ "attempt" ][ "evidence" ] == "librarian.log (dated by the file's last write)"
+
+
+def test_a_dry_run_never_calls_the_duplicate_check_writer(tmp_path):
+    root, data, home = build_world( tmp_path )
+    put( root / "s" / "runs.jsonl", "" )
+    calls = []
+    bf.backfill( root, data, home, dry_run=True, duplicate_writer=lambda folder, now: calls.append( folder ) )
+    assert calls == []
+
+
+def test_a_sweep_log_with_several_runs_uses_the_last_one_and_never_goes_below_zero(tmp_path):
+    sweep = put( tmp_path / "sweep.log", "eligible : 100\nreclaimed: 90\n\neligible : 4\nreclaimed: 3\n", T )
+    assert bf.sweep_steps( sweep )[ 0 ][ "scan" ] == { "unit": "files", "count": 1, "drained_last_run": 3 }
+    put( sweep, "eligible : 3\nreclaimed: 5\n", T )
+    assert bf.sweep_steps( sweep )[ 0 ][ "scan" ][ "count" ] == 0
+
+
+def test_a_naive_time_is_the_hosts_local_time_not_utc(tmp_path):
+    naive = datetime.datetime( 2026, 10, 20 )
+    assert bf.aware( naive ).isoformat() == naive.astimezone().isoformat() and bf.aware( naive ).utcoffset() == naive.astimezone().utcoffset()
+    put( tmp_path / "librarian" / "librarian.log", '{"ran": false, "reason": "x"}\n', T )
+    put( tmp_path / "librarian" / "tick-state.json", json.dumps( { "last_run_date": "2026-10-20" } ) )
+    assert bf.librarian_steps( tmp_path )[ 0 ][ "attempt" ][ "started_at" ] == naive.astimezone().replace( microsecond=0 ).isoformat()
