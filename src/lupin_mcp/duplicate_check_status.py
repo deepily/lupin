@@ -227,7 +227,7 @@ def job_summary( lines, now ):
         - last_finished is the newest line that finished (clean or carried); consecutive_failures counts failed lines after it
         - scan_debt.count is the last measured daily carried count, never_checked the baseline remainder (None until a baseline run measured it), arrived_last_interval the owed count of the newest measured daily run less the carried count of the one before
         - fix_debt.unfiled and opened_in_run are the newest finished line's queued_for_retry and filed counts, own_mark the created_by the filer stamps on its rows; open and closed counts are the reader's, from the store
-        - there is no health field: the reader computes it
+        - target is None for this job, fix_debt.kind is rows; there is no health field, the reader computes it
     """
     last      = lines[ -1 ] if lines else None
     finished  = [ ( i, l ) for i, l in enumerate( lines ) if l[ "status" ] in history.MEASURED ]
@@ -242,7 +242,7 @@ def job_summary( lines, now ):
     for _, l in finished:
         opened += l.get( "filed" ) or 0
         fix_pts.append( ( l[ "started_at" ], opened ) )
-    return { "schema": SUMMARY_SCHEMA, "job": JOB, "written_at": now.isoformat(),
+    return { "schema": SUMMARY_SCHEMA, "job": JOB, "target": None, "written_at": now.isoformat(),
              "last_attempt": None if last is None else { "started_at": last[ "started_at" ], "finished_at": ended( last ), "trigger": SHAPE_TRIGGER.get( last[ "trigger" ], last[ "trigger" ] ),
                                                          "outcome": OUTCOME.get( last[ "status" ], last[ "status" ] ), "stage": stage or None, "failure": failure or None,
                                                          "evidence": _evidence( lines, len( lines ) - 1 ) },
@@ -252,7 +252,7 @@ def job_summary( lines, now ):
              "scan_debt": { "unit": "definitions", "count": daily[ -1 ][ "carried" ] if daily else None, "never_checked": baseline_remaining( lines ),
                             "drained_last_run": fin[ 1 ][ "judged" ] if fin else None, "arrived_last_interval": arrived, "as_of": ended( fin[ 1 ] ) or fin[ 1 ][ "started_at" ] if fin else None,
                             "freshness": None, "points": _points( "count", [ ( l[ "started_at" ], l[ "carried" ] ) for l in daily ] ) },
-             "fix_debt": { "unit": "rows", "own_mark": OWN_MARK, "unfiled": fin[ 1 ][ "queued_for_retry" ] if fin else None, "opened_in_run": fin[ 1 ][ "filed" ] if fin else None,
+             "fix_debt": { "unit": "rows", "kind": "rows", "own_mark": OWN_MARK, "unfiled": fin[ 1 ][ "queued_for_retry" ] if fin else None, "opened_in_run": fin[ 1 ][ "filed" ] if fin else None,
                            "points": _points( "opened_total", fix_pts ) } }
 
 

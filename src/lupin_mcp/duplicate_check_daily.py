@@ -375,13 +375,15 @@ def record( folder, stem, doc, now ):
         - doc is the result document; stem is the file name without its extension; now is the run's start time
     Ensures:
         - the document gains schema_version and started_at, and None for each measure the run did not reach, so a failed run has the keys of a successful one
-        - writes <folder>/<stem>.json, appends one line to runs.jsonl
+        - writes <folder>/<stem>.json, appends one line to runs.jsonl, then rewrites job-summary.json; a failure of that write is printed and changes nothing
         - returns the document
     """
     doc.update( schema_version=history.SCHEMA_VERSION, started_at=now.isoformat() )
     for key in UNREACHED: doc.setdefault( key, None )
     write_json( folder / f"{stem}.json", doc )
     history.append_line( folder, history.line_of( doc, f"{stem}.json" ) )
+    try: status_mod.write_job_summary( folder, now )
+    except Exception as exc: print( f"duplicate-check-daily: the job summary was not written: {type( exc ).__name__}: {exc}", file=sys.stderr )       # a write failure never fails the job
     return doc
 
 

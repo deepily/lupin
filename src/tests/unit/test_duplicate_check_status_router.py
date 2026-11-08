@@ -28,6 +28,11 @@ def test_the_status_endpoint_answers_the_snapshot( client ):
     assert body[ "backlog" ][ "carried" ] == 3 and body[ "runs" ][ 0 ][ "branch" ] == "wip-x" and body[ "as_of" ] == NOW.isoformat()
 
 
+def test_the_job_summary_endpoint_answers_the_v1_record( client ):
+    body = client.get( "/api/duplicate-check/job-summary" ).json()
+    assert body[ "schema" ] == "job-summary/1" and body[ "scan_debt" ][ "count" ] == 3 and "health" not in body and body[ "target" ] is None
+
+
 def test_the_page_is_html_that_browsers_revalidate( client ):
     page = client.get( "/app/duplicate-check" )
     assert page.status_code == 200 and page.headers[ "content-type" ].startswith( "text/html" ) and page.headers[ "cache-control" ] == "no-cache"

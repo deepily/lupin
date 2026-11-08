@@ -237,3 +237,13 @@ def test_main_runs_the_hourly_slot_on_the_resolved_branch_and_prints_every_docum
     assert dd.main( [ "--ceiling", "10", "--adaptive", "--root", str( repo ), "--claude-cli-path", "/bin/claude" ], parts=parts_of( tmp_path ), now=NOW, out=out.append ) == 1
     assert json.loads( out[ 1 ] ) == [ { "status": "failed" } ]
 
+
+
+def test_every_run_rewrites_the_job_summary_and_a_failed_write_is_printed_and_changes_nothing( repo, tmp_path, monkeypatch, capsys ):
+    history( repo )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    assert dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )[ "status" ] == "ok"
+    assert json.loads( ( folder / "job-summary.json" ).read_text() )[ "last_attempt" ][ "outcome" ] == "clean"
+    monkeypatch.setattr( dd.status_mod, "write_job_summary", lambda f, n: ( _ for _ in () ).throw( OSError( "disk full" ) ) )
+    assert dd.run( repo, NOW + datetime.timedelta( hours=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path ) )[ "status" ] == "ok"
+    assert "the job summary was not written: OSError: disk full" in capsys.readouterr().err
