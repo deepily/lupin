@@ -106,6 +106,8 @@ test( "badgeText names the first state, any other state a reason names, and UNSC
   assert.equal( F.badgeText( j ), "UNKNOWN · UNSCHEDULED" );
   j.reasons = [ { state : "healthy", rule : "x", text : "t" } ];
   assert.equal( F.badgeText( j ), "UNKNOWN · UNSCHEDULED", "a healthy reason adds no label" );
+  j.schedule_unverified = true;
+  assert.equal( F.badgeText( j ), "UNKNOWN · UNSCHEDULED · schedule unverified" );
 } );
 
 test( "lastRunText covers liveness, silent, no attempt, failed, skipped, quiet and carried", () => {
@@ -302,6 +304,15 @@ test( "the duplicate check's expanded panel carries every block of design 6", ()
   assert.equal( q( "jobs-fix-store-link" ).getAttribute( "href" ), "/app/tasks?correlation_key=job:duplicate-check" );
   assert.match( q( "jobs-not-reported-names" ).textContent as string, /never checked/ );
   assert.equal( q( "jobs-run-now" ).textContent, "Run now" );
+} );
+
+test( "a job whose installed schedule could not be read says so on its line and in its panel", () => {
+  const item = renderJob( document, find( "hook-link-tick" ), TODAY, NO_ACTIONS );
+  assert.equal( item.querySelector( "[data-testid=jobs-badge]" )!.textContent, "UNKNOWN · schedule unverified" );
+  assert.match( item.querySelector( "[data-testid=jobs-schedule-unverified]" )!.textContent as string, /could not be read/ );
+  const other = renderJob( document, find( "doc-parity-tick" ), TODAY, NO_ACTIONS );
+  assert.equal( other.querySelector( "[data-testid=jobs-schedule-unverified]" ), null );
+  assert.equal( FIXTURE.jobs.filter( ( j ) => j.schedule_unverified ).length, 1 );
 } );
 
 test( "a scan count with no unit prints the bare number", () => {

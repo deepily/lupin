@@ -170,6 +170,7 @@ function scheduleBlock( doc: Document, job: JobEntry, todayIso: string ): HTMLEl
   if ( job.liveness !== null ) {
     addRow( doc, dl, "Liveness", `${ job.liveness.kind } unit ${ job.liveness.unit }`, "jobs-liveness" );
   }
+  if ( job.schedule_unverified ) addRow( doc, dl, "Check", "schedule unverified: the installed schedule could not be read", "jobs-schedule-unverified" );
   addRow( doc, dl, "Runs", s === null || s.entries.length === 0 ? "unscheduled" : s.entries.join( "; " ), "jobs-schedule-entries" );
   addRow( doc, dl, "Last due", s === null ? NOT_REPORTED : formatWhen( s.last_due, todayIso ), "jobs-schedule-last-due" );
   addRow( doc, dl, "Next due", s === null ? NOT_REPORTED : formatWhen( s.next_due, todayIso ), "jobs-schedule-next-due" );

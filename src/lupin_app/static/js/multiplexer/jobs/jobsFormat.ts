@@ -90,6 +90,7 @@ export function badgeText( job: JobEntry ): string {
   }
   const labels = states.map( ( s ) => STATE_LABEL[ s ] );
   if ( job.unscheduled ) labels.push( "UNSCHEDULED" );
+  if ( job.schedule_unverified ) labels.push( "schedule unverified" );
   return labels.join( " · " );
 }
 

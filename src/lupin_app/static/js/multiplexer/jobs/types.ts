@@ -141,6 +141,8 @@ export interface JobEntry {
   state                     : JobState;
   running                   : boolean;
   unscheduled               : boolean;
+  /** True when the job's installed schedule could not be read. */
+  schedule_unverified       : boolean;
   machine_was_off           : boolean;
   reasons                   : JobReason[];
   applies                   : { scan_debt: boolean; fix_debt: boolean };
