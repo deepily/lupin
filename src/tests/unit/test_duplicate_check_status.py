@@ -7,8 +7,10 @@ from lupin_mcp import duplicate_check_history as hist
 from lupin_mcp import job_summary as js
 from lupin_mcp import duplicate_check_status as st
 
-TZ  = datetime.timezone( datetime.timedelta( hours=-5 ) )
-NOW = datetime.datetime( 2026, 11, 8, 12, 5, tzinfo=TZ )
+TZ     = datetime.timezone( datetime.timedelta( hours=-5 ) )
+NOW    = datetime.datetime( 2026, 11, 8, 12, 5, tzinfo=TZ )
+HOURLY = [ "0 10-22 * * *" ]
+DAILY  = [ "0 10 * * *" ]
 
 
 def at( day, hour, minute=0 ): return datetime.datetime( 2026, 11, day, hour, minute, tzinfo=TZ ).isoformat()
@@ -61,7 +63,25 @@ def test_a_projection_slips_when_it_moves_more_than_a_day_later_or_disappears( b
 
 @pytest.mark.parametrize( "last,want", [ ( at( 8, 12, 5 ), at( 8, 13, 30 ) ), ( at( 8, 22, 5 ), at( 9, 10, 30 ) ), ( at( 8, 3, 0 ), at( 8, 10, 30 ) ), ( None, at( 8, 13, 30 ) ) ] )
 def test_the_next_run_is_expected_at_the_next_hourly_slot_with_half_an_hour_of_grace( last, want ):
-    assert st.expected_by( datetime.datetime.fromisoformat( last ) if last else None, NOW ) == want
+    assert st.expected_by( datetime.datetime.fromisoformat( last ) if last else None, NOW, HOURLY ) == want
+
+
+@pytest.mark.parametrize( "last,want", [ ( at( 8, 10, 0 ), at( 9, 10, 30 ) ), ( at( 8, 9, 59 ), at( 8, 10, 30 ) ), ( at( 8, 12, 5 ), at( 9, 10, 30 ) ), ( None, at( 9, 10, 30 ) ) ] )
+def test_with_a_daily_schedule_the_next_run_is_expected_at_the_next_morning_slot_with_half_an_hour_of_grace( last, want ):
+    assert st.expected_by( datetime.datetime.fromisoformat( last ) if last else None, NOW, DAILY ) == want
+
+
+def test_the_earliest_of_several_schedules_decides_and_no_schedule_means_no_lateness_can_be_worked_out():
+    assert st.expected_by( datetime.datetime.fromisoformat( at( 8, 10, 0 ) ), NOW, [ "7 11 * * *", *DAILY ] ) == at( 8, 11, 37 )
+    assert st.expected_by( NOW, NOW, [] ) is None
+    assert st.expected_by( NOW, NOW, [ "0 10 31 2 *" ] ) is None, "a schedule that never fires in a month is unknown, not due"
+
+
+def test_the_installed_crons_are_the_tagged_five_field_lines_and_nothing_else():
+    tab = ( "0 10 * * * cd /x && run >> /log 2>&1 # duplicate-check-daily\n@reboot sleep 300 && cd /x && run # duplicate-check-daily\n7 11 * * * other # a-different-job\n"
+            "# 0 9 * * * cd /x && commented # duplicate-check-daily\n" )
+    assert st.installed_crons( tab ) == [ "0 10 * * *" ] and st.installed_crons( None ) == [] and st.installed_crons( "" ) == []
+    assert st.installed_crons( "@reboot sleep 300 && run # duplicate-check-daily\n" ) == []
 
 
 def test_the_days_total_the_calls_and_tokens_and_leave_none_where_nothing_was_recorded():
@@ -74,11 +94,25 @@ def test_the_days_total_the_calls_and_tokens_and_leave_none_where_nothing_was_re
 
 def test_the_health_is_silent_failing_falling_behind_or_healthy_in_that_order():
     ok = row( 8, 11 )
-    assert st.health_of( [], 0, None, None, NOW ) == st.SILENT
-    assert st.health_of( [ row( 8, 9 ) ], 0, None, None, NOW ) == st.SILENT, "the 10:00 slot was due by 10:30"
-    assert st.health_of( [ row( 8, 11, status="failed", carried=None ) ], 5, 1, 9, NOW ) == st.FAILING
-    assert st.health_of( [ ok ], 5, 100, 100, NOW ) == st.FALLING_BEHIND and st.health_of( [ ok ], 5, 100, None, NOW ) == st.HEALTHY
-    assert st.health_of( [ ok ], 0, 0, 5, NOW ) == st.HEALTHY and st.health_of( [ ok ], 5, None, None, NOW ) == st.HEALTHY
+    assert st.health_of( [], 0, None, None, NOW, HOURLY ) == st.SILENT
+    assert st.health_of( [ row( 8, 9 ) ], 0, None, None, NOW, HOURLY ) == st.SILENT, "the 10:00 slot was due by 10:30"
+    assert st.health_of( [ row( 8, 11, status="failed", carried=None ) ], 5, 1, 9, NOW, HOURLY ) == st.FAILING
+    assert st.health_of( [ ok ], 5, 100, 100, NOW, HOURLY ) == st.FALLING_BEHIND and st.health_of( [ ok ], 5, 100, None, NOW, HOURLY ) == st.HEALTHY
+    assert st.health_of( [ ok ], 0, 0, 5, NOW, HOURLY ) == st.HEALTHY and st.health_of( [ ok ], 5, None, None, NOW, HOURLY ) == st.HEALTHY
+
+
+def test_a_daily_run_this_morning_is_not_silent_at_noon_on_a_daily_schedule_and_would_have_been_on_an_hourly_one():
+    morning = row( 8, 10 )
+    assert st.health_of( [ morning ], 0, None, None, NOW, DAILY ) == st.HEALTHY
+    assert st.health_of( [ morning ], 0, None, None, NOW, HOURLY ) == st.SILENT, "the assumption this row removed"
+
+
+def test_with_no_known_schedule_a_late_run_is_not_called_silent_and_the_snapshot_says_the_schedule_is_unverified( tmp_path ):
+    old = row( 6, 10 )
+    assert st.health_of( [ old ], 0, None, None, NOW, [] ) == st.HEALTHY and st.health_of( [], 0, None, None, NOW, [] ) == st.SILENT
+    snap = st.snapshot( folder_with( tmp_path, old ), NOW )
+    assert snap[ "schedule" ] == { "cron": [], "verified": False } and snap[ "health" ] == st.HEALTHY
+    assert "unknown, so lateness is not judged" in st.render_html( snap )
 
 
 def test_the_median_seconds_a_call_takes_uses_the_latest_sizeable_runs_that_did_not_fail():
@@ -196,3 +230,19 @@ def test_recent_holds_the_last_seven_attempts_oldest_first_with_their_modes():
     recent = st.job_summary( lines, NOW )[ "recent" ]
     assert [ r[ "at" ] for r in recent ] == [ at( 7, h ) for h in range( 7, 14 ) ]
     assert recent[ 5 ] == { "at": at( 7, 12 ), "outcome": "failed", "mode": "daily" } and recent[ 0 ][ "mode" ] == "baseline" and recent[ 1 ][ "outcome" ] == "clean"
+
+
+def test_a_snapshot_reads_the_schedule_off_the_crontab_it_is_given_and_the_page_names_it( tmp_path ):
+    tab  = "0 10 * * * cd /x && run >> /log 2>&1 # duplicate-check-daily\n"
+    snap = st.snapshot( folder_with( tmp_path, row( 8, 10 ) ), NOW, tab )
+    assert snap[ "schedule" ] == { "cron": [ "0 10 * * *" ], "verified": True } and snap[ "health" ] == st.HEALTHY
+    assert "Schedule read from the crontab: 0 10 * * *." in st.render_html( snap )
+
+
+def test_the_pages_schedule_agrees_with_the_cron_lines_the_installer_writes_for_each_mode():
+    from lupin_mcp import duplicate_check_daily as dd
+    common = ( "/repo", "/py", "/log", None, "/claude" )
+    for kwargs, want in ( ( {}, [ dd.CRON_SCHEDULE ] ), ( { "baseline": True }, [ dd.CRON_SCHEDULE, dd.BASELINE_SCHEDULE ] ), ( { "adaptive": True }, [ dd.HOURLY_SCHEDULE ] ) ):
+        lines = dd.cron_lines( *common, ceiling=1500, **kwargs )
+        assert st.installed_crons( "\n".join( lines ) + "\n" ) == want, f"the installer's {kwargs or 'daily'} lines and the page's reading differ"
+    assert dd.CRON_TAG == f"# {st.CRON_JOB_TAG}", "the page looks for the tag the installer writes"

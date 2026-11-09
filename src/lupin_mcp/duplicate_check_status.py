@@ -13,13 +13,14 @@ import os
 import pathlib
 import statistics
 
+from cosa.rest import job_cron
+from cosa.rest import job_registry
 from lupin_mcp import duplicate_check_history as history
 
 JOB             = "duplicate-check"
 REPO            = "lupin"
 UNIT            = "functions"
-FIRST_HOUR      = 10                    # the hourly slots run from 10:00 ...
-LAST_HOUR       = 22                    # ... to 22:00, while the host is on
+CRON_JOB_TAG    = "duplicate-check-daily"   # the marker comment the installer ends each crontab line with (duplicate_check_daily.CRON_TAG, without its "# ")
 GRACE_MINUTES   = 30                    # a run is late when it has not started this long after its slot
 SUMMARY_SCHEMA  = "job-summary/1"       # section 1.1 of the fleet's background job reporting format
 SUMMARY_FILE    = "job-summary.json"
@@ -30,7 +31,6 @@ INFLOW_DAYS     = 7                     # days of history the arrival rate avera
 DRAIN_DAYS      = 3                     # days of history the clearing rate averages over
 SLIP_DAYS       = 1                     # a projected zero date this many days later than the last one is a slip
 RECENT_RUNS     = 12                    # runs shown on the page
-SCHEDULE        = [ "0 10-22 * * *", "@reboot +5m" ]
 HEALTHY         = "healthy"
 FALLING_BEHIND  = "falling_behind"
 FAILING         = "failing"
@@ -128,20 +128,35 @@ def slipped( before, after, days=SLIP_DAYS ):
     return ( datetime.date.fromisoformat( after ) - datetime.date.fromisoformat( before ) ).days > days
 
 
-def expected_by( last, now ):
+def installed_crons( crontab_text ):
+    """
+    Read the job's five-field schedules off the installed crontab.
+
+    Requires:
+        - crontab_text is the text of crontab -l, or None when it could not be read
+    Ensures:
+        - returns the cron expressions of the lines that end with this job's tag, in crontab order
+        - an @reboot line adds none, since its time is not on a clock
+        - returns [] for None, for a crontab with no tagged line, and for one with only @reboot lines
+    """
+    found = [] if crontab_text is None else job_registry.crontab_schedule( crontab_text, CRON_JOB_TAG )
+    return [ entry[ "cron" ] for entry in found if "cron" in entry ]
+
+
+def expected_by( last, now, crons ):
     """
     Name the time by which the next run should have started.
 
     Requires:
         - last is the datetime of the newest run, or None; now is timezone-aware
+        - crons are the installed five-field schedules, installed_crons' answer
     Ensures:
-        - the next slot is the next top of the hour after the newest run (or after now with no run) between FIRST_HOUR and LAST_HOUR, the next morning's first slot past the last, plus GRACE_MINUTES
+        - returns None when crons is empty or none fires within a month, because the schedule is then unknown and no lateness can be worked out
+        - otherwise the earliest firing of any cron after the newest run (or after now with no run), plus GRACE_MINUTES
     """
-    base = ( last or now ).astimezone( now.tzinfo )
-    slot = base.replace( minute=0, second=0, microsecond=0 ) + datetime.timedelta( hours=1 )
-    if slot.hour > LAST_HOUR: slot = ( slot + datetime.timedelta( days=1 ) ).replace( hour=FIRST_HOUR )
-    elif slot.hour < FIRST_HOUR: slot = slot.replace( hour=FIRST_HOUR )
-    return ( slot + datetime.timedelta( minutes=GRACE_MINUTES ) ).isoformat()
+    base  = ( last or now ).astimezone( now.tzinfo )
+    slots = [ t for t in ( job_cron.cron_next( c, base ) for c in crons ) if t is not None ]
+    return ( min( slots ) + datetime.timedelta( minutes=GRACE_MINUTES ) ).isoformat() if slots else None
 
 
 def per_day_usage( lines ):
@@ -161,30 +176,34 @@ def per_day_usage( lines ):
     return [ days[ d ] for d in sorted( days ) ]
 
 
-def health_of( lines, backlog, drain, inflow, now ):
+def health_of( lines, backlog, drain, inflow, now, crons ):
     """
     Judge the job's health.
 
     Ensures:
         - silent when there is no run, or none has started by expected_by of the newest run
+        - with no known schedule (crons empty) a run's lateness is not judged, so the health is never silent for a late run
         - failing when the newest run failed, falling_behind when the backlog is above 0 and the net clearing rate is not above 0, else healthy
     """
     if not lines: return SILENT
     last = lines[ -1 ]
-    if datetime.datetime.fromisoformat( expected_by( _when( last ), now ) ) < now: return SILENT
+    due  = expected_by( _when( last ), now, crons )
+    if due is not None and datetime.datetime.fromisoformat( due ) < now: return SILENT
     if last[ "status" ] == "failed": return FAILING
     if backlog and drain is not None and drain - ( inflow or 0 ) <= 0: return FALLING_BEHIND
     return HEALTHY
 
 
-def snapshot( folder, now ):
+def snapshot( folder, now, crontab_text=None ):
     """
     Work out everything the page, the note and the accordion show.
 
     Requires:
-        - folder holds runs.jsonl; now is a timezone-aware datetime
+        - folder holds runs.jsonl; now is a timezone-aware datetime in the zone the crontab's hours are written in
+        - crontab_text is the installed crontab's text, or None when it could not be read
     Ensures:
-        - returns { job, as_of, backlog { carried, baseline_remaining, total, inflow_per_day }, drain { judged_per_day }, projected_zero, health, runs, days, summary, unreadable_lines }
+        - returns { job, as_of, backlog { carried, baseline_remaining, total, inflow_per_day }, drain { judged_per_day }, projected_zero, health, schedule { cron, verified }, runs, days, summary, unreadable_lines }
+        - schedule.cron is installed_crons' answer and schedule.verified is False when it is empty, so the page says the schedule is unknown rather than showing one that is not installed
         - runs are the last RECENT_RUNS lines, newest first, each with its drained count (judged), calls, tokens, calls an hour and the branch it judged
         - summary is job_summary's record, the fleet's job-summary/1 format
     """
@@ -197,12 +216,13 @@ def snapshot( folder, now ):
     inflow  = inflow_per_day( lines, now )
     drain   = judged_per_day( lines, now )
     zero    = projected_zero( total, drain, inflow, now.date() )
-    health  = health_of( lines, total, drain, inflow, now )
+    crons   = installed_crons( crontab_text )
+    health  = health_of( lines, total, drain, inflow, now, crons )
     last    = lines[ -1 ] if lines else None
     runs    = [ { **{ k: l.get( k ) for k in ( "started_at", "mode", "trigger", "status", "branch", "owed", "judged", "carried", "judge_calls", "elapsed_seconds", "calls_per_hour",
                                               "rate_limited", "cost_usd", *TOKEN_FIELDS ) }, "failure": l.get( "failure" ) } for l in reversed( lines[ -RECENT_RUNS: ] ) ]
     return { "job": JOB, "as_of": now.isoformat(), "backlog": { "carried": carried, "baseline_remaining": remains, "total": total, "inflow_per_day": inflow },
-             "drain": { "judged_per_day": drain }, "projected_zero": zero, "health": health, "runs": runs, "days": per_day_usage( lines )[ -INFLOW_DAYS: ], "summary": job_summary( lines, now ),
+             "drain": { "judged_per_day": drain }, "projected_zero": zero, "health": health, "schedule": { "cron": crons, "verified": bool( crons ) }, "runs": runs, "days": per_day_usage( lines )[ -INFLOW_DAYS: ], "summary": job_summary( lines, now ),
              "unreadable_lines": read[ "bad" ] }
 
 
@@ -304,7 +324,7 @@ def render_html( snap ):
     Lay the snapshot out as a small self-contained page.
 
     Ensures:
-        - returns one HTML document with no script and no outside file: backlog by kind, the projected zero date, the recent runs and the tokens by day
+        - returns one HTML document with no script and no outside file: backlog by kind, the projected zero date, the recent runs, the tokens by day and the installed schedule or that it is unknown
         - every value from the history is escaped
     """
     b, esc = snap[ "backlog" ], html.escape
@@ -322,6 +342,7 @@ def render_html( snap ):
              f"<td>{number( b[ 'total' ] )}</td><td>{number( b[ 'inflow_per_day' ] )}</td><td>{number( snap[ 'drain' ][ 'judged_per_day' ] )}</td></tr></table>"
              f"<h2>Recent runs</h2><table><tr>{head}</tr>{runs}</table>"
              f"<h2>By day</h2><table><tr><th>day</th><th>runs</th><th>calls</th><th>in</th><th>out</th><th>cache write</th><th>cache read</th><th>notional USD</th></tr>{days}</table>"
+             f"<p>Schedule read from the crontab: {esc( ', '.join( snap[ 'schedule' ][ 'cron' ] ) if snap[ 'schedule' ][ 'verified' ] else 'unknown, so lateness is not judged' )}.</p>"
              f"<p>As of {esc( snap[ 'as_of' ] )}. Tokens are what the Claude Code SDK reported; USD is its list-price figure, not a charge.</p></body></html>" )
 
 

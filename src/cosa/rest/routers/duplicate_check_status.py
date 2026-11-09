@@ -24,6 +24,32 @@ def runs_folder():
     return status.folder_of( cu.get_project_root() )
 
 
+def installed_crontab():
+    """
+    Read the installed crontab the way the job cards do.
+
+    Ensures:
+        - returns ( text, zone ): the text of crontab -l or the host's fresh snapshot of it, and the host's tzinfo when the text came from the snapshot, else None
+        - returns ( None, None ) when neither answers, so the page says its schedule is unknown
+    """
+    from cosa.rest.routers import job_summary
+    _root, _data, deps = job_summary.live_deps()
+    return deps.crontab_text(), deps.host_zone()
+
+
+def snapshot_now():
+    """
+    Work out the snapshot as of now, with the installed schedule.
+
+    Ensures:
+        - returns status.snapshot over the run history, given the crontab text from installed_crontab
+        - the time is in the zone the crontab's hours are written in, so a host snapshot read in a UTC container still lines up
+    """
+    text, zone = installed_crontab()
+    moment     = now()
+    return status.snapshot( runs_folder(), moment if zone is None else moment.astimezone( zone ), text )
+
+
 def now():
     """Ensures: returns the present time as a timezone-aware datetime."""
     return datetime.datetime.now().astimezone()
@@ -32,7 +58,7 @@ def now():
 @router.get( "/api/duplicate-check/status" )
 def get_status():
     """Ensures: returns status.snapshot of the run history as of now."""
-    return status.snapshot( runs_folder(), now() )
+    return snapshot_now()
 
 
 @router.get( "/api/duplicate-check/job-summary" )
@@ -44,4 +70,4 @@ def get_job_summary():
 @router.get( "/app/duplicate-check", include_in_schema=False )
 def get_page():
     """Ensures: returns the status page as text/html that browsers revalidate each load."""
-    return HTMLResponse( status.render_html( status.snapshot( runs_folder(), now() ) ), headers={ "Cache-Control": "no-cache" } )
+    return HTMLResponse( status.render_html( snapshot_now() ), headers={ "Cache-Control": "no-cache" } )
