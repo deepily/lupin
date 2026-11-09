@@ -1415,6 +1415,7 @@ export interface BootCompletePayload {
     // Adding a renderer means editing THREE places, and only two of them redden.
     holdingAreaRenderer?         : string;
     epicBoardRenderer?           : string;
+    backgroundJobsRenderer?      : string;
     // Row 470b7509 — Finished Tasks, and it walked into the trap the comment
     // above predicts: the mount + the payload literal were both edited, both
     // guards stayed green, and `tsc` is what named this file. That is still

@@ -363,6 +363,7 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 # were wrong the same way.
                 "[multiplexer] holdingAreaRenderer:mounted",
                 "[multiplexer] epicBoardRenderer:mounted",
+                "[multiplexer] backgroundJobsRenderer:mounted",
                 "[multiplexer] sectionToolbarRenderer:mounted",
                 # Parity B-4 (Time Saved) mounts last of the panes, in the
                 # pre-allocated slot block below the toolbar.

@@ -1,8 +1,8 @@
-// Tests for the jobs accordion at full coverage.
+// Tests for the jobs accordion and its multiplexer pane, at full coverage.
 //
-// The page is driven through its real markup and the committed 23-job fixture. The DOM is parsed
-// out of html/jobs.html. The data is src/tests/fixtures/jobs/jobs-summary.fixture.json, the file
-// the Playwright test serves. Only the HTTP client is faked. The job count is pinned to the
+// The accordion is driven with the committed 23-job fixture; the pane (BackgroundJobsRenderer) is
+// mounted into the real #background-jobs-pane section parsed out of multiplexer.html. The data is
+// src/tests/fixtures/jobs/jobs-summary.fixture.json, the file the Playwright tests serve. Only the HTTP client is faked. The job count is pinned to the
 // literal 23, not derived from the fixture, so a dropped job reddens a test.
 
 import { test, before, beforeEach } from "node:test";
@@ -12,17 +12,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
-import { createStorageServiceForTesting } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import { ApiError } from "../../../lupin_app/static/js/multiplexer/api/ApiClient";
 import * as F from "../../../lupin_app/static/js/multiplexer/jobs/jobsFormat";
 import { renderAccordion, renderJob, sparkline } from "../../../lupin_app/static/js/multiplexer/jobs/jobsRender";
-import { bootJobsPage, redirectTarget, runNowFailureText, runNowPath } from "../../../lupin_app/static/js/multiplexer/jobs/jobsPage";
-import type { JobsApi, JobsPageDeps } from "../../../lupin_app/static/js/multiplexer/jobs/jobsPage";
+import { createBackgroundJobsRenderer, runNowFailureText, runNowPath, JOBS_POLL_MS } from "../../../lupin_app/static/js/multiplexer/render/BackgroundJobsRenderer";
+import type { BackgroundJobsApi } from "../../../lupin_app/static/js/multiplexer/render/BackgroundJobsRenderer";
 import type { JobEntry, JobsSummary } from "../../../lupin_app/static/js/multiplexer/jobs/types";
 
 const HERE         = dirname( fileURLToPath( import.meta.url ) );
-const HTML_PATH    = resolve( HERE, "../../../lupin_app/static/html/jobs.html" );
+const HTML_PATH    = resolve( HERE, "../../../lupin_app/static/html/multiplexer.html" );
 const FIXTURE_PATH = resolve( HERE, "../../fixtures/jobs/jobs-summary.fixture.json" );
 const FIXTURE      = JSON.parse( readFileSync( FIXTURE_PATH, "utf8" ) ) as JobsSummary;
 const TODAY        = FIXTURE.generated_at;
@@ -30,9 +28,7 @@ const TODAY        = FIXTURE.generated_at;
 before( () => { if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register(); } );
 
 beforeEach( () => {
-  const html = readFileSync( HTML_PATH, "utf8" );
-  const body = ( html.match( /<body[^>]*>([\s\S]*)<\/body>/ ) as RegExpMatchArray )[ 1 ] as string;
-  document.body.innerHTML = body.replace( /<script[\s\S]*?<\/script>/g, "" );
+  document.body.innerHTML = `<div id="jobs-accordion"></div>`;
 } );
 
 const flush = () => new Promise( ( r ) => setImmediate( r ) );
@@ -436,85 +432,122 @@ test( "targets draw as nested items with ids that cannot collide", () => {
   assert.equal( lupin.querySelector( "[data-testid=jobs-title]" )!.textContent, "Worktree census (lupin)" );
 } );
 
-// ── jobsPage ────────────────────────────────────────────────────────────────
+// ── BackgroundJobsRenderer ──────────────────────────────────────────────────
 
-interface Harness { deps: JobsPageDeps; gets: string[]; posts: string[]; location: { pathname: string; search: string; href: string }; connects: number }
+interface Harness { api: BackgroundJobsApi; gets: string[]; posts: string[]; timers: Array<() => void>; cleared: number[] }
 
-function harness( opts: { token?: boolean; api?: Partial<JobsApi> } = {} ): Harness {
-  const bus     = createEventBusForTesting();
-  const storage = createStorageServiceForTesting( bus );
-  if ( opts.token ?? true ) storage.setTokens( "access", "refresh" );
-  const h: Harness = { deps : undefined as unknown as JobsPageDeps, gets : [], posts : [], location : { pathname : "/app/jobs", search : "?x=1", href : "/app/jobs?x=1" }, connects : 0 };
-  h.deps = {
-    doc : document, location : h.location, storage, bus,
-    connect : () => {
-      h.connects += 1;
-      return {
-        get  : opts.api?.get  ?? ( async <T,>( p: string ): Promise<T> => { h.gets.push( p ); return clone( FIXTURE ) as unknown as T; } ),
-        post : opts.api?.post ?? ( async <T,>( p: string ): Promise<T> => { h.posts.push( p ); return { job : "x", target : null, status : "started", trigger : "hand", pid : 4242, started_at : "2026-11-07T20:31:00-05:00" } as unknown as T; } ),
-      };
-    },
+function harness( api: Partial<BackgroundJobsApi> = {} ): Harness {
+  const h: Harness = { api : undefined as unknown as BackgroundJobsApi, gets : [], posts : [], timers : [], cleared : [] };
+  h.api = {
+    get  : api.get  ?? ( async <T,>( p: string ): Promise<T> => { h.gets.push( p ); return clone( FIXTURE ) as unknown as T; } ),
+    post : api.post ?? ( async <T,>( p: string ): Promise<T> => { h.posts.push( p ); return { job : "x", target : null, status : "started", trigger : "hand", pid : 4242, started_at : "2026-11-07T20:31:00-05:00" } as unknown as T; } ),
   };
   return h;
 }
 
-test( "redirectTarget reads pathname with the query and writes href through to the location", () => {
-  const loc = { pathname : "/app/jobs", search : "?a=1", href : "/app/jobs?a=1" };
-  const t   = redirectTarget( loc );
-  assert.equal( t.pathname, "/app/jobs?a=1" );
-  assert.equal( t.href, "/app/jobs?a=1" );
-  t.href = "/elsewhere";
-  assert.equal( loc.href, "/elsewhere" );
+/** The real section from multiplexer.html, so the pane meets its own markup. */
+function paneFromPage(): HTMLElement {
+  const html = readFileSync( HTML_PATH, "utf8" );
+  const tag  = ( html.match( /<section id="background-jobs-pane"[^>]*><\/section>/ ) as RegExpMatchArray )[ 0 ] as string;
+  document.body.innerHTML = tag;
+  return byId( "background-jobs-pane" );
+}
+
+function build( h: Harness ) {
+  return createBackgroundJobsRenderer( {
+    api : h.api,
+    setIntervalFn : ( fn, ms ) => { assert.equal( ms, JOBS_POLL_MS ); h.timers.push( fn ); return h.timers.length; },
+    clearIntervalFn : ( id ) => { h.cleared.push( id ); },
+  } );
+}
+
+const mounted = async ( h: Harness ) => {
+  const root = paneFromPage();
+  const r    = build( h );
+  r.mount( root );
+  await flush();
+  return { root, r };
+};
+
+test( "the page declares #background-jobs-pane right after the epic board pane, and the toolbar names it", () => {
+  const html = readFileSync( HTML_PATH, "utf8" );
+  assert.ok( html.indexOf( 'id="epic-board-pane"' ) < html.indexOf( 'id="background-jobs-pane"' ) );
+  assert.ok( html.indexOf( 'id="background-jobs-pane"' ) < html.indexOf( 'id="jobs-pane"' ) );
 } );
 
-test( "no access token redirects to login keeping the query, and connects nothing", () => {
-  const h = harness( { token : false } );
-  const r = bootJobsPage( h.deps );
-  assert.equal( r.status, "redirected" );
-  assert.equal( h.location.href, "/app/auth/login?redirect=%2Fapp%2Fjobs%3Fx%3D1" );
-  assert.equal( h.connects, 0 );
-} );
-
-test( "a signed-in visit loads the summary once, draws 23 jobs and the header, and leaves no error", async () => {
+test( "mounted: loads the summary once, draws 23 jobs, counts them, titles the header with the state line, and polls", async () => {
   const h = harness();
-  const r = bootJobsPage( h.deps );
-  assert.equal( r.status, "started" );
-  await ( r as { loaded: Promise<void> } ).loaded;
+  const { root } = await mounted( h );
   assert.deepEqual( h.gets, [ "/api/jobs/summary" ] );
-  assert.equal( byId( "jobs-accordion" ).children.length, 23 );
-  assert.match( byId( "jobs-header" ).textContent as string, /^23 jobs: 9 unknown, 2 silent, 3 failing, 9 healthy$/ );
-  assert.equal( byId( "jobs-error" ).hidden, true );
+  assert.equal( root.querySelectorAll( "[data-testid=jobs-accordion] > [data-testid=jobs-item]" ).length, 23 );
+  assert.equal( root.querySelector( "[data-testid=multiplexer-background-jobs-count]" )!.textContent, "23" );
+  assert.match( root.querySelector( "[data-testid=multiplexer-background-jobs-header]" )!.getAttribute( "title" ) as string, /^23 jobs: 9 unknown, 2 silent, 3 failing, 9 healthy$/ );
+  assert.equal( ( root.querySelector( "[data-testid=jobs-error]" ) as HTMLElement ).hidden, true );
+  assert.equal( h.timers.length, 1 );
+  h.timers[ 0 ]!(); await flush();
+  assert.equal( h.gets.length, 2 );
 } );
 
-test( "the page hides Run now when the summary says the caller is not the operator", async () => {
-  const h = harness( { api : { get : async <T,>(): Promise<T> => ( { ...clone( FIXTURE ), caller_is_operator : false } ) as unknown as T } } );
-  await ( bootJobsPage( h.deps ) as { loaded: Promise<void> } ).loaded;
-  assert.equal( byId( "jobs-accordion" ).children.length, 23 );
-  assert.equal( byId( "jobs-accordion" ).querySelectorAll( "[data-testid=jobs-run-now]" ).length, 0 );
+test( "the header chevron collapses the section", async () => {
+  const { root } = await mounted( harness() );
+  ( root.querySelector( ".toggle-button" ) as HTMLElement ).click();
+  assert.equal( root.getAttribute( "data-collapsed" ), "true" );
 } );
 
-test( "Refresh reloads; a failed reload shows the reason and keeps the last good accordion", async () => {
+test( "a second mount without unmount throws; unmount stops the poll, clears the root, and is idempotent", async () => {
+  const h = harness();
+  const { root, r } = await mounted( h );
+  assert.throws( () => r.mount( root ), /already mounted/ );
+  r.unmount();
+  assert.deepEqual( h.cleared, [ 1 ] );
+  assert.equal( root.children.length, 0 );
+  r.unmount();
+  assert.deepEqual( h.cleared, [ 1 ] );
+  await r.refresh();                                          // unmounted: nothing to paint, nothing thrown
+  assert.equal( h.gets.length, 1 );
+  r.mount( root ); await flush();                             // and it can mount again
+  assert.equal( h.gets.length, 2 );
+} );
+
+test( "the pane uses the ambient document and timers when none are injected, and a reply landing after unmount is dropped", async () => {
+  paneFromPage();
+  let release: ( v: JobsSummary ) => void = () => {};
+  const api = { get : <T,>() => new Promise<T>( ( res ) => { release = res as unknown as ( v: JobsSummary ) => void; } ), post : async () => ( {} as never ) };
+  const r = createBackgroundJobsRenderer( { api } );
+  r.mount( byId( "background-jobs-pane" ) );
+  r.unmount();
+  release( clone( FIXTURE ) ); await flush();
+  assert.equal( byId( "background-jobs-pane" ).children.length, 0 );
+} );
+
+test( "hides Run now when the summary says the caller is not the operator", async () => {
+  const { root } = await mounted( harness( { get : async <T,>(): Promise<T> => ( { ...clone( FIXTURE ), caller_is_operator : false } ) as unknown as T } ) );
+  assert.equal( root.querySelectorAll( "[data-testid=jobs-item]" ).length >= 23, true );
+  assert.equal( root.querySelectorAll( "[data-testid=jobs-run-now]" ).length, 0 );
+} );
+
+test( "the refresh button reloads; a failed reload shows the reason and keeps the last good accordion", async () => {
   let fail: unknown = null;
-  const h = harness( { api : { get : async <T,>(): Promise<T> => { if ( fail !== null ) throw fail; return clone( FIXTURE ) as unknown as T; } } } );
-  const r = bootJobsPage( h.deps ) as { loaded: Promise<void> };
-  await r.loaded;
+  const { root } = await mounted( harness( { get : async <T,>(): Promise<T> => { if ( fail !== null ) throw fail; return clone( FIXTURE ) as unknown as T; } } ) );
+  const btn = root.querySelector( "[data-testid=multiplexer-background-jobs-refresh]" ) as HTMLElement;
+  const err = root.querySelector( "[data-testid=jobs-error]" ) as HTMLElement;
   fail = new ApiError( 503, "/api/jobs/summary", "down" );
-  byId( "jobs-refresh" ).click(); await flush();
-  assert.equal( byId( "jobs-error" ).hidden, false );
-  assert.equal( byId( "jobs-error" ).textContent, "Could not load the jobs: HTTP 503" );
-  assert.equal( byId( "jobs-accordion" ).children.length, 23 );
+  btn.click(); await flush();
+  assert.equal( err.hidden, false );
+  assert.equal( err.textContent, "Could not load the jobs: HTTP 503" );
+  assert.equal( root.querySelectorAll( "[data-testid=jobs-accordion] > [data-testid=jobs-item]" ).length, 23 );
   fail = new Error( "network down" );
-  byId( "jobs-refresh" ).click(); await flush();
-  assert.equal( byId( "jobs-error" ).textContent, "Could not load the jobs: Error: network down" );
+  btn.click(); await flush();
+  assert.equal( err.textContent, "Could not load the jobs: Error: network down" );
   fail = null;
-  byId( "jobs-refresh" ).click(); await flush();
-  assert.equal( byId( "jobs-error" ).hidden, true );
+  btn.click(); await flush();
+  assert.equal( err.hidden, true );
 } );
 
 test( "Run now posts to the job's own door, with ?target= for a target, and prints the outcome", async () => {
   const h = harness();
-  await ( bootJobsPage( h.deps ) as { loaded: Promise<void> } ).loaded;
-  const dup = byId( "jobs-accordion" ).querySelector( "[data-job=duplicate-check]" ) as HTMLElement;
+  const { root } = await mounted( h );
+  const dup = root.querySelector( "[data-job=duplicate-check]" ) as HTMLElement;
   ( dup.querySelector( "[data-testid=jobs-run-now]" ) as HTMLElement ).click(); await flush();
   assert.deepEqual( h.posts, [ "/api/jobs/duplicate-check/run" ] );
   assert.equal( ( dup.querySelector( "[data-testid=jobs-run-status]" ) as HTMLElement ).textContent, "Started at 2026-11-07T20:31:00-05:00 (pid 4242)." );
@@ -529,14 +562,8 @@ test( "each Run now refusal gets its own plain sentence", async () => {
   assert.match( runNowFailureText( err( 422 ) ), /cannot be run by hand/ );
   assert.equal( runNowFailureText( err( 500 ) ), "Run now failed (HTTP 500)." );
   assert.equal( runNowFailureText( new Error( "x" ) ), "Run now failed: Error: x" );
-  const h = harness( { api : { post : async () => { throw err( 409 ); } } } );
-  await ( bootJobsPage( h.deps ) as { loaded: Promise<void> } ).loaded;
-  const dup = byId( "jobs-accordion" ).querySelector( "[data-job=duplicate-check]" ) as HTMLElement;
+  const { root } = await mounted( harness( { post : async () => { throw err( 409 ); } } ) );
+  const dup = root.querySelector( "[data-job=duplicate-check]" ) as HTMLElement;
   ( dup.querySelector( "[data-testid=jobs-run-now]" ) as HTMLElement ).click(); await flush();
   assert.match( ( dup.querySelector( "[data-testid=jobs-run-status]" ) as HTMLElement ).textContent as string, /run lock is held/ );
-} );
-
-test( "a page missing a required element fails loudly, naming it", () => {
-  byId( "jobs-refresh" ).remove();
-  assert.throws( () => bootJobsPage( harness().deps ), /#jobs-refresh not found/ );
 } );

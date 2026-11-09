@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=1faeb24503c1">
     <link rel="stylesheet" href="/static/css/task-list.css?v=e130f2059619">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=864498666830">
+    <link rel="stylesheet" href="/static/css/background-jobs-legacy.css?v=7149305e1813">
 </head>
 <body>
     <!-- Master-detail two-pane shell (2026-05-21 — see
@@ -59,6 +60,7 @@
         <button class="toolbar-btn active" data-section="section-fleet-status" data-testid="fleet-status-toolbar-btn" title="Fleet Status">🛰️</button>
         <button class="toolbar-btn active" data-section="section-task-list" data-testid="task-list-toolbar-btn" title="Task List">🗒️</button>
         <button class="toolbar-btn active" data-section="section-epic-board" data-testid="epic-board-toolbar-btn" title="Epic Board">🗂️</button>
+        <button class="toolbar-btn active" data-section="section-background-jobs" data-testid="background-jobs-toolbar-btn" title="Background Jobs">🗓️</button>
         <!-- Holding Area toggle. Rick by voice, 2026-09-02: "we need a toggle button in the
              Notifications Client Toolbar that hides and unhides the holding area, it needs its
              own toggle button."
@@ -1185,6 +1187,24 @@
             </div>
         </div>
 
+        <!-- Background Jobs (row d540113f, Rick 2026-11-09): every background job in one accordion,
+             reading GET /api/jobs/summary. Part of this client, right after the Epic Board; the
+             multiplexer carries its own independent copy. Wired by js/background-jobs.js. -->
+        <div class="collapsible-section" id="section-background-jobs">
+            <div class="section-header" onclick="toggleSection('background-jobs-section')">
+                <h3>🗓️ Background Jobs: <span id="background-jobs-count" data-testid="background-jobs-count">…</span>
+                    <span id="background-jobs-summary" class="task-list-updated" data-testid="background-jobs-summary"></span></h3>
+                <button class="refresh-btn" id="background-jobs-refresh"
+                        data-testid="background-jobs-refresh-btn" type="button"
+                        title="Refresh now">⟳</button>
+                <button class="toggle-button" id="background-jobs-toggle">▼</button>
+            </div>
+            <div class="section-content" id="background-jobs-section">
+                <p id="background-jobs-error" class="jobs-error" role="alert" data-testid="background-jobs-error" hidden></p>
+                <div id="background-jobs-container" class="jobs-accordion" data-testid="background-jobs-container"></div>
+            </div>
+        </div>
+
         <!-- Queue Filter Settings (Admin Only) -->
         <div class="collapsible-section" id="filter-settings-section" style="display: none;">
             <div class="section-header" onclick="toggleSection('filter-section')">
@@ -1594,6 +1614,8 @@
     <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
     <script src="/static/js/broadcast-panel.js?v=02bdb607cf2a"></script>
+    <!-- background-jobs.js: row d540113f. Token = first 12 hex of the file's sha256; bump it whenever the bytes change. -->
+    <script src="/static/js/background-jobs.js?v=8768a8bd1005"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
         // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md

@@ -75,6 +75,7 @@ import {
   createDirectTtsRenderer,
   createHoldingAreaRenderer,
   createEpicBoardRenderer,
+  createBackgroundJobsRenderer,
   createSectionToolbarRenderer,
   createNavBarRenderer,
   type TtsPreviewSliderRenderer,
@@ -1081,6 +1082,13 @@ function bootMultiplexer(): void {
   // load simply now has a consumer.
   void epicStoriesLoaded.then( () => epicBoardRenderer.repaint() );
 
+  // Background jobs (row d540113f): Rick's ruling puts the accordion in this client, right after
+  // the Epic Board. It takes its own fetch of GET /api/jobs/summary (no store feeds it) and its own poll.
+  const backgroundJobsRenderer = createBackgroundJobsRenderer({ api: apiClient });
+  const backgroundJobsMountEl = document.getElementById("background-jobs-pane");
+  if (backgroundJobsMountEl === null) throw new Error("multiplexer: #background-jobs-pane not found");
+  backgroundJobsRenderer.mount(backgroundJobsMountEl);
+
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
   // carbon-copy of the legacy floating #section-toolbar: per-section visibility
   // toggles + collapse-all/expand-all. Drives the ViewStateStore (persisted);
@@ -1296,6 +1304,7 @@ function bootMultiplexer(): void {
       debugPanelRenderer          : "mounted",
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
+      backgroundJobsRenderer      : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
       sectionToolbarRenderer      : "mounted",
       // Lane L4 (v0.1.9) — top nav / logout bar.
@@ -1341,6 +1350,7 @@ function bootMultiplexer(): void {
   // phase6c smoke test asserts (an ORDERED equality, not a set).
   console.log("[multiplexer] holdingAreaRenderer:mounted");
   console.log("[multiplexer] epicBoardRenderer:mounted");
+  console.log("[multiplexer] backgroundJobsRenderer:mounted");
   console.log("[multiplexer] sectionToolbarRenderer:mounted");
   // Parity B-4 — Time Saved mounts LAST of all the panes, in the pre-allocated
   // slot block below the toolbar, so its handshake sits after the toolbar's.

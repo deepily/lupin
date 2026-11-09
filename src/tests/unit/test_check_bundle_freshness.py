@@ -725,7 +725,7 @@ def test_remedy_names_the_exact_driver_and_whether_npm_run_build_runs_it( tmp_pa
 def test_every_stale_remedy_in_this_repo_is_honest_about_npm_run_build():
     """Pin the real drivers and whether the build script runs each one."""
     drivers = sorted( p.name for p in mod.discover_bundles( REPO_ROOT ) )
-    assert drivers == [ "build-console.sh", "build-diagnostic.sh", "build-doc-podcast.sh", "build-jobs.sh", "build-multiplexer.sh", "build-nav.sh" ]
+    assert drivers == [ "build-console.sh", "build-diagnostic.sh", "build-doc-podcast.sh", "build-multiplexer.sh", "build-nav.sh" ]
     for driver in drivers:
         name = driver[ len( "build-" ):-len( ".sh" ) ]
         runs = driver in json.loads( ( REPO_ROOT / "package.json" ).read_text( encoding="utf-8" ) )[ "scripts" ][ "build" ]

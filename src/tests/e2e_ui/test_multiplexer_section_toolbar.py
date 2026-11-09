@@ -52,6 +52,7 @@ EXPECTED_SECTION_TOGGLES = [
     "task-list-pane",
     "holding-area-pane",
     "epic-board-pane",
+    "background-jobs-pane",
     # Phase B pre-allocation (3b5d48dd, row f0e00f01) — the seven mounts, copied
     # by hand like the ten above (Mr. Radio's ruling 2026-09-18: a list derived
     # from SECTION_TOGGLES would compare the list to itself).

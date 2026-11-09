@@ -220,6 +220,11 @@ export {
   type EpicBoardRendererOptions,
   type EpicBoardTaskStoreLike,
 } from "./EpicBoardRenderer";
+export {
+  createBackgroundJobsRenderer,
+  type BackgroundJobsRenderer,
+  type BackgroundJobsRendererOptions,
+} from "./BackgroundJobsRenderer";
 // Section-toolbar + accordion-collapse parity (2026-06-23).
 export {
   createSectionToolbarRenderer,

@@ -1,21 +1,5 @@
-/* Row efe188bf — the background-jobs accordion, /app/jobs. State is colour AND text (the badge),
-   so colour alone never carries it. */
-.jobs-main {
-    max-width : 78rem;
-    margin    : 1.5rem auto;
-    padding   : 0 1rem;
-}
-
-.jobs-top {
-    display     : flex;
-    align-items : baseline;
-    gap         : 1rem;
-}
-
-.jobs-header {
-    flex   : 1 1 auto;
-    margin : 0;
-}
+/* Rows efe188bf and d540113f — the background-jobs accordion inside the multiplexer's
+   #background-jobs-pane. State is colour AND text (the badge), so colour alone never carries it. */
 
 .jobs-error {
     padding    : 0.5rem 0.75rem;

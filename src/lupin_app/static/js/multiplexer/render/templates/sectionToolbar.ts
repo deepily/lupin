@@ -128,6 +128,8 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   // holding area, it needs its own toggle button." Glyphs match legacy's.
   { sectionId: "holding-area-pane",      icon: "🗃️", title: "Holding Area",    testid: "multiplexer-section-toolbar-holding-area" },
   { sectionId: "epic-board-pane",        icon: "🗂️", title: "Epic Board",      testid: "multiplexer-section-toolbar-epic-board" },
+  // The background-jobs accordion, right after the Epic Board (row d540113f, Rick's ruling).
+  { sectionId: "background-jobs-pane",   icon: "🗓️", title: "Background Jobs", testid: "multiplexer-section-toolbar-background-jobs" },
   // ---------------------------------------------------------------------
   // Phase B pre-allocation (register item 7, row f0e00f01, 2026-09-17).
   //

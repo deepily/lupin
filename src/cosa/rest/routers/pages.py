@@ -42,7 +42,6 @@ _ROUTE_TABLE = {
     "/app/tasks/approve"         : "html/task-approve.html",
     "/app/tasks/view"            : "html/task-view.html",
     "/app/pair-labelling"        : "html/pair-labelling.html",
-    "/app/jobs"                  : "html/jobs.html",
 }
 
 
@@ -220,19 +219,3 @@ async def page_pair_labelling():
     The page reads `?reviewer=` client-side and defaults to rick.
     """
     return _serve_file( _ROUTE_TABLE[ "/app/pair-labelling" ] )
-
-@router.get( "/app/jobs", include_in_schema=False )
-async def page_jobs():
-    """
-    Serve the background-jobs accordion page.
-
-    Requires:
-        - html/jobs.html exists under the static directory
-
-    Ensures:
-        - Returns the page shell with the no-cache revalidation header
-        - Changes nothing: the page fetches GET /api/jobs/summary client-side and computes no health
-
-    One accordion holds every background job. The one action on it is Run now.
-    """
-    return _serve_file( _ROUTE_TABLE[ "/app/jobs" ] )

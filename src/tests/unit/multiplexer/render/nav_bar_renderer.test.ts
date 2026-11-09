@@ -81,12 +81,12 @@ function noopHandlers() {
 // Template — renderNavBar
 // ===========================================================================
 
-test("template: authenticated + email renders 4 items, the email, and the Logout button", () => {
+test("template: authenticated + email renders 3 items, the email, and the Logout button", () => {
   const nav = renderNavBar(
     { authenticated: true, email: "a@b.com", activePath: "/app" },
     noopHandlers(),
   );
-  assert.equal(nav.querySelectorAll(".lupin-nav-link").length, 4);
+  assert.equal(nav.querySelectorAll(".lupin-nav-link").length, 3);
   assert.equal(nav.querySelector('[data-testid="nav-user-email"]')?.textContent, "a@b.com");
   assert.ok(nav.querySelector(".lupin-nav-logout"));
   assert.ok( nav.querySelector(".lupin-nav-login") === null );
@@ -118,7 +118,7 @@ test("template: authenticated but email===null renders the Login link, no throw 
   assert.ok(nav.querySelector(".lupin-nav-login"));
   assert.ok( nav.querySelector(".lupin-nav-logout") === null );
   // Auth-gated items still show (authenticated === true).
-  assert.equal(nav.querySelectorAll(".lupin-nav-link").length, 4);
+  assert.equal(nav.querySelectorAll(".lupin-nav-link").length, 3);
 });
 
 test("template: /app/ (trailing slash) marks Home active (second === operand)", () => {
@@ -137,16 +137,6 @@ test("template: a deeper path marks that item active via startsWith, Home inacti
   assert.ok(nav.querySelector('[data-testid="nav-notifications-link"]')?.classList.contains("lupin-nav-active"));
   assert.equal(nav.querySelector('[data-testid="nav-home-link"]')?.classList.contains("lupin-nav-active"), false);
   assert.equal(nav.querySelector('[data-testid="nav-profile-link"]')?.classList.contains("lupin-nav-active"), false);
-});
-
-test("template: the Jobs link points at /app/jobs, shows only when authenticated, and is active on that path", () => {
-  const anon = renderNavBar({ authenticated: false, email: null, activePath: "/app" }, noopHandlers());
-  assert.equal(anon.querySelector('[data-testid="nav-jobs-link"]'), null);
-  const nav = renderNavBar({ authenticated: true, email: "a@b.com", activePath: "/app/jobs" }, noopHandlers());
-  const jobs = nav.querySelector('[data-testid="nav-jobs-link"]');
-  assert.equal(jobs?.getAttribute("href"), "/app/jobs");
-  assert.ok(jobs?.classList.contains("lupin-nav-active"));
-  assert.equal(nav.querySelector('[data-testid="nav-notifications-link"]')?.classList.contains("lupin-nav-active"), false);
 });
 
 test("template: Logout button click invokes onLogout", () => {

@@ -171,7 +171,7 @@ test( "visibleNavItems hides auth items for anonymous users", () => {
 
 test( "visibleNavItems shows non-admin items for an authenticated non-admin", () => {
     const visible = visibleNavItems( NAV_ITEMS, state( { authenticated: true, admin: false } ) );
-    assert.deepEqual( visible.map( ( i ) => i.label ), [ "Home", "Notifications", "Profile", "Jobs" ] );
+    assert.deepEqual( visible.map( ( i ) => i.label ), [ "Home", "Notifications", "Profile" ] );
 } );
 
 test( "visibleNavItems shows every item for an authenticated admin", () => {

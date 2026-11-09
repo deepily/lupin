@@ -1,4 +1,4 @@
-// The /app/jobs page's view of GET /api/jobs/summary. Type-only: no runtime statements.
+// The jobs pane's view of GET /api/jobs/summary. Type-only: no runtime statements.
 //
 // The shape follows the background-job reporting design (planning-is-prompting,
 // src/rnd/2026.11.07-background-job-reporting-format.md): summary, registry, health, page and

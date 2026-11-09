@@ -77,8 +77,8 @@ DOCKER  = DOCKERFILE.read_text( encoding="utf-8" )
 
 def test_the_discovery_found_what_it_is_meant_to_find():
     """Pin the floor: a loop over nothing passes every assertion in it."""
-    assert { "multiplexer", "console", "doc-podcast", "jobs" } <= dist_dirs_loaded_by_pages()
-    assert { "build-multiplexer.sh", "build-console.sh", "build-doc-podcast.sh", "build-jobs.sh" } <= set( drivers_run_by_build( PACKAGE ) )
+    assert { "multiplexer", "console", "doc-podcast" } <= dist_dirs_loaded_by_pages()
+    assert { "build-multiplexer.sh", "build-console.sh", "build-doc-podcast.sh" } <= set( drivers_run_by_build( PACKAGE ) )
 
 
 def test_every_dist_dir_a_page_loads_is_built_by_npm_run_build():
