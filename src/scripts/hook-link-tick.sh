@@ -37,7 +37,7 @@
 #   HOOK_LINK_RESEND_HOURS  quiet window, default 6
 #   HOOK_LINK_DELIVER       0 prints the report, delivers nothing and exits 5
 #   HOOK_LINK_PATH          replaces PATH outright (tests; cron's bare PATH is the default)
-#   HOOK_LINK_SCHEDULE, HOOK_LINK_LOG, HOOK_LINK_CRONTAB_CMD   install settings
+#   HOOK_LINK_SCHEDULE, HOOK_LINK_LOG, HOOK_LINK_CRONTAB_CMD   install settings (LUPIN_CRONTAB overrides the crontab command for every tool)
 set -uo pipefail
 
 # Cron's environment is bare. Nothing below relies on the profile.
@@ -50,7 +50,7 @@ SELF_ROOT="$( cd "$HERE/../.." && pwd )"
 CRON_TAG="# hook-link-tick"
 CRON_SCHEDULE="${HOOK_LINK_SCHEDULE:-2,12,22,32,42,52 * * * *}"
 CRON_LOG="${HOOK_LINK_LOG:-$HOME/.lupin/logs/hook-link-tick.log}"
-CRONTAB_CMD="${HOOK_LINK_CRONTAB_CMD:-crontab}"
+CRONTAB_CMD="${LUPIN_CRONTAB:-${HOOK_LINK_CRONTAB_CMD:-crontab}}"      # LUPIN_CRONTAB is the one scratch-crontab override every installer honors
 REF_MARKER="branch-guard: reference-transaction hook"
 
 # Git calls without the variables that would move the repository under us.

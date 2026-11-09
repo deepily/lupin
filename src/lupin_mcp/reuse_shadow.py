@@ -351,7 +351,7 @@ def main( argv=None, environ=None, now=None, out=None, err=None, crontab_cmd=Non
     data    = reuse_tools.data_dir( root )
     log_dir = os.path.join( str( data ), "shadow-audit" )
     lines   = cron_lines( root, args.python, os.path.join( log_dir, LOG_NAME ), { name: environ[ name ] for name in ( "DEEPILY_DATA_DIR", reuse_tools.PACK_SIZE_VARIABLE ) if environ.get( name ) } )
-    cmd     = crontab_cmd or [ environ.get( "REUSE_SHADOW_AUDIT_CRONTAB", "crontab" ) ]
+    cmd     = crontab_cmd or lt.crontab_command( environ, "REUSE_SHADOW_AUDIT_CRONTAB" )
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return EXIT_OK

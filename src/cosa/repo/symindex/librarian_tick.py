@@ -425,6 +425,39 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
     return ( 2 if held else 0 ), summary
 
 
+CRONTAB_OVERRIDE    = "LUPIN_CRONTAB"                              # one variable every crontab writer honors, so a scratch crontab is safe for all of them
+GENERATED_BLOCK_TAG = "# lupin-cron-generated"                      # ends the header comment of the block lupin_mcp.cron_generate writes
+
+
+def crontab_command( environ, own_variable=None ):
+    """
+    Pick the crontab command a tool reads and writes through.
+
+    Requires:
+        - environ maps names to values; own_variable names the tool's older override, or is None
+    Ensures:
+        - returns [ environ[ LUPIN_CRONTAB ] ] when that is set and not empty, so one scratch crontab covers every tool
+        - else returns [ the tool's own variable ] when it is set, else [ "crontab" ]
+    """
+    if environ.get( CRONTAB_OVERRIDE ): return [ environ[ CRONTAB_OVERRIDE ] ]
+    return [ environ.get( own_variable, "crontab" ) ] if own_variable else [ "crontab" ]
+
+
+def holds_generated_block( cmd ):
+    """
+    Say whether a crontab already holds the block cron_generate writes.
+
+    Requires:
+        - cmd is the crontab command as a list
+    Ensures:
+        - returns True when a line ends with GENERATED_BLOCK_TAG
+        - returns False when there is no crontab, it cannot be read, or no line carries the tag
+    """
+    try: read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
+    except OSError: return False
+    return read.returncode == 0 and any( line.rstrip().endswith( GENERATED_BLOCK_TAG ) for line in read.stdout.splitlines() )
+
+
 def install_moved_text( root ):
     """
     Say where the cron installer went.
@@ -635,7 +668,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     args    = parser.parse_args( argv )
     root    = args.root or os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
     folder  = data_dir( root )
-    cmd     = crontab_cmd or [ environ.get( "WIKI_LIBRARIAN_CRONTAB", "crontab" ) ]
+    cmd     = crontab_cmd or crontab_command( environ, "WIKI_LIBRARIAN_CRONTAB" )
     lines   = cron_lines( root, args.python, os.path.join( folder, LOG_NAME ) )
     if args.print_install:
         print( "\n".join( lines ), file=out )

@@ -41,9 +41,14 @@ def test_only_managed_jobs_are_picked_and_a_managed_job_needs_a_tag( tree ):
     registry = jr.load_registry( str( tree ) )
     assert [ j[ "job" ] for j in cg.managed_jobs( registry ) ] == [ "alpha", "beta", "gamma" ]
     registry[ "jobs" ][ 3 ].pop( "cron_exclusion_reason" )
-    with pytest.raises( ValueError, match="delta runs or has a cron_tag but is neither cron_managed nor given a cron_exclusion_reason" ): cg.managed_jobs( registry )
+    with pytest.raises( ValueError, match="delta runs, has a cron_tag or is scheduled but is neither cron_managed nor given a cron_exclusion_reason" ): cg.managed_jobs( registry )
     registry[ "jobs" ][ 3 ][ "cron_exclusion_reason" ] = "   "
     with pytest.raises( ValueError, match="delta runs" ): cg.managed_jobs( registry )
+    registry[ "jobs" ][ 3 ].pop( "run" ); registry[ "jobs" ][ 3 ].pop( "cron_tag" )
+    with pytest.raises( ValueError, match="delta runs" ): cg.managed_jobs( registry )                      # a cron schedule alone still needs a reason
+    registry[ "jobs" ][ 3 ][ "schedule" ] = [ { "every_seconds": 60 } ]
+    assert [ j[ "job" ] for j in cg.managed_jobs( registry ) ] == [ "alpha", "beta", "gamma" ], "a job with no cron-form schedule, run or tag needs no reason"
+    registry = jr.load_registry( str( tree ) )
     registry[ "jobs" ][ 3 ][ "cron_exclusion_reason" ] = "another tool owns this line"
     registry[ "jobs" ][ 0 ].pop( "cron_tag" )
     with pytest.raises( ValueError, match="alpha is cron_managed but has no cron_tag" ): cg.managed_jobs( registry )
@@ -380,11 +385,14 @@ def test_main_reads_clean_exit_codes_from_the_registry_entry( tree, monkeypatch 
 
 def test_every_registry_job_that_runs_or_has_a_cron_tag_is_managed_or_says_why_not():
     jobs     = jr.load_registry( REAL_ROOT )[ "jobs" ]
-    runnable = [ j for j in jobs if j.get( "run" ) or j.get( "cron_tag" ) ]
+    runnable = [ j for j in jobs if j.get( "run" ) or j.get( "cron_tag" ) or any( "cron" in e or "after_boot_seconds" in e for e in j.get( "schedule", [] ) ) ]
     managed  = [ j for j in runnable if j.get( "cron_managed" ) ]
     excluded = [ j for j in runnable if not j.get( "cron_managed" ) ]
-    assert len( managed ) >= 9 and len( excluded ) >= 2, "the loop below sees both populations"
+    assert len( managed ) >= 9 and len( excluded ) >= 3, "the loop below sees both populations"
+    assert "yearly-reminders" in { j[ "job" ] for j in excluded }
     assert "worktree-census" in { j[ "job" ] for j in managed }
+    census = next( j for j in managed if j[ "job" ] == "worktree-census" )
+    assert census[ "clean_exit_codes" ] == [ 0, 1 ], "it exits 1 whenever it has findings, which is its report, not a failure"
     for j in excluded: assert ( j.get( "cron_exclusion_reason" ) or "" ).strip(), f"{j[ 'job' ]} runs or has a cron tag but is neither managed nor excluded with a reason"
     for j in managed: assert not j.get( "cron_exclusion_reason" ), f"{j[ 'job' ]} is managed, so it carries no exclusion reason"
 
@@ -431,3 +439,70 @@ def test_recorded_since_reads_the_finish_time_and_refuses_what_it_cannot_read( t
     for bad in ( { **base, "last_attempt": { "finished_at": "2026-11-09T11:59:59+00:00" } }, { **base, "last_attempt": {} }, { **base, "last_attempt": { "finished_at": "not a time" } }, { **base, "last_attempt": { "finished_at": "2026-11-09T12:00:01" } } ):
         path.write_text( json.dumps( bad ) )
         assert jrun.recorded_since( path, started ) is False
+
+
+# ---- one scratch-crontab override for every tool --------------------------------------------------------------
+
+def test_crontab_command_prefers_the_shared_override_then_the_tools_own_variable_then_crontab():
+    assert lt.crontab_command( { "LUPIN_CRONTAB": "/scratch", "X": "/own" }, "X" ) == [ "/scratch" ]
+    assert lt.crontab_command( { "X": "/own" }, "X" ) == [ "/own" ] and lt.crontab_command( { "LUPIN_CRONTAB": "" , "X": "/own" }, "X" ) == [ "/own" ]
+    assert lt.crontab_command( {}, "X" ) == [ "crontab" ] and lt.crontab_command( {} ) == [ "crontab" ] and lt.crontab_command( { "LUPIN_CRONTAB": "/s" } ) == [ "/s" ]
+
+
+def test_holds_generated_block_reads_the_crontab_for_the_header_tag( cron ):
+    assert lt.holds_generated_block( cron[ "cmd" ] ) is False, "no crontab"
+    cron[ "file" ].write_text( "0 * * * * x\n" )
+    assert lt.holds_generated_block( cron[ "cmd" ] ) is False
+    cron[ "file" ].write_text( f"0 * * * * x\n{cg.HEADER}\n" )
+    assert lt.holds_generated_block( cron[ "cmd" ] ) is True
+    assert lt.holds_generated_block( [ "/no/such/crontab-binary" ] ) is False
+
+
+def test_the_kept_vector_refresh_install_refuses_on_a_host_crontab_that_holds_the_generated_block_and_still_works_elsewhere( cron, tmp_path, monkeypatch ):
+    from cosa.repo.symindex import vector_refresh as vr
+    import io
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    def install():
+        out, err = io.StringIO(), io.StringIO()
+        code = vr.main( [ "--install", "--root", str( tmp_path / "repo" ), "--python", "/py" ], environ=cron[ "env" ], now=cg.datetime.datetime( 2026, 11, 9, 12, 0 ), out=out, err=err, crontab_cmd=cron[ "cmd" ] )
+        return code, out.getvalue(), err.getvalue()
+    cron[ "file" ].write_text( f"0 * * * * x\n{cg.HEADER}\n" )
+    before = cron[ "file" ].read_text()
+    code, out, err = install()
+    assert code == 1 and "lupin_mcp.cron_generate --install" in err and cron[ "file" ].read_text() == before, "refused: the host crontab is cron_generate's"
+    cron[ "file" ].write_text( "0 * * * * x\n" )
+    code, out, err = install()
+    assert code == 0 and out.strip() == "installed: 2 lines" and err == "", "the VM's crontab has no generated block, so the installer works"
+
+
+def test_with_the_shared_override_set_no_tool_touches_the_real_crontab( cron, tmp_path, monkeypatch ):
+    """Ensures: each writer, given only LUPIN_CRONTAB, uses the scratch crontab."""
+    import io
+    poison = tmp_path / "poison"
+    poison.mkdir()
+    ( poison / "crontab" ).write_text( f"#!/bin/sh\necho \"$@\" >> {tmp_path}/real-crontab-calls\nexit 1\n" )
+    ( poison / "crontab" ).chmod( 0o755 )
+    monkeypatch.setenv( "PATH", f"{poison}:{os.environ[ 'PATH' ]}" )
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    ( tmp_path / "repo" ).mkdir()
+    env = dict( cron[ "env" ] )
+    scratch = tmp_path / "scratch-crontab"
+    scratch.write_text( "#!/bin/sh\nexec " + " ".join( cron[ "cmd" ] ) + ' "$@"\n' )
+    scratch.chmod( 0o755 )
+    env[ "LUPIN_CRONTAB" ] = str( scratch )
+    cron[ "file" ].write_text( f"0 * * * * x\n1 1 * * * a {lt.CRON_TAG}\n" )
+    from cosa.repo.symindex import vector_refresh as vr
+    from lupin_mcp import host_snapshot as hs, reuse_shadow as rs, duplicate_check_daily as dd
+    now = cg.datetime.datetime( 2026, 11, 9, 12, 0 )
+    root = str( tmp_path / "repo" )
+    sink = lambda text: None
+    results = [ cg.main( [ "--root", REAL_ROOT, "--install" ], environ=env, now=now, out=sink, err=sink ),
+                vr.main( [ "--install", "--root", root ], environ=env, now=now, out=io.StringIO(), err=io.StringIO() ),
+                lt.main( [ "--uninstall", "--root", root ], environ=env, now=now, out=io.StringIO(), err=io.StringIO() ),
+                rs.main( [ "--uninstall", "--root", root ], environ=env, now=now, out=io.StringIO(), err=io.StringIO() ),
+                dd.main( [ "--uninstall", "--root", root ], environ=env, now=now, out=sink, err=sink ),
+                hs.main( [ "--uninstall", "--root", root ], environ=env, now=now, out=sink, err=sink ) ]
+    assert results == [ 0, 1, 0, 0, 0, 0 ], results                     # the kept vector-refresh install refuses: the scratch crontab now holds cron_generate's block, which it read through the override
+    assert not ( tmp_path / "real-crontab-calls" ).exists(), "the crontab on PATH was never run"
+    assert cron[ "log" ].read_text().count( "lock-enter" ) >= 5, "every writer went through the scratch crontab's lock path"
+    assert cg.HEADER in cron[ "file" ].read_text() and "0 * * * * x" in cron[ "file" ].read_text()

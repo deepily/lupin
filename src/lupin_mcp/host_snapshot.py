@@ -217,7 +217,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     """
     from cosa.repo.symindex import librarian_tick as lt
     root = args.root or environ.get( "LUPIN_ROOT" ) or os.getcwd()
-    cmd  = crontab_cmd or [ "crontab" ]
+    cmd  = crontab_cmd or lt.crontab_command( environ )
     logs = f"{root}/io/jobs"
     if args.install:
         err( lt.install_moved_text( root ) )

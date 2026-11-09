@@ -531,12 +531,12 @@ def baseline_installed( cmd=None ):
     Say whether the crontab holds this job's baseline line.
 
     Requires:
-        - cmd is the crontab command as a list, or None for the DUPLICATE_CHECK_DAILY_CRONTAB variable or crontab
+        - cmd is the crontab command as a list, or None for LUPIN_CRONTAB, the DUPLICATE_CHECK_DAILY_CRONTAB variable or crontab
     Ensures:
         - returns True when a line ending with CRON_TAG runs with --baseline
         - returns False when there is no crontab or the command cannot run
     """
-    try: read = subprocess.run( [ *( cmd or [ os.environ.get( "DUPLICATE_CHECK_DAILY_CRONTAB", "crontab" ) ] ), "-l" ], capture_output=True, text=True )
+    try: read = subprocess.run( [ *( cmd or lt.crontab_command( os.environ, "DUPLICATE_CHECK_DAILY_CRONTAB" ) ), "-l" ], capture_output=True, text=True )
     except OSError: return False
     return read.returncode == 0 and any( line.rstrip().endswith( CRON_TAG ) and " --baseline" in line for line in read.stdout.splitlines() )
 
@@ -846,7 +846,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     """
     root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
     log_dir = f"{root}{proof_cli.DATA_RELATIVE}/{FOLDER[ 0 ]}"
-    cmd     = crontab_cmd or [ environ.get( "DUPLICATE_CHECK_DAILY_CRONTAB", "crontab" ) ]
+    cmd     = crontab_cmd or lt.crontab_command( environ, "DUPLICATE_CHECK_DAILY_CRONTAB" )
     if args.install:
         err( lt.install_moved_text( root ) )
         return 1

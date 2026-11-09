@@ -322,7 +322,11 @@
       "owner_confirmed": false,
       "cron_tag": "worktree-hygiene-report",
       "cron_managed": true,
-      "cron_log": "{home}/.lupin/logs/worktree-hygiene-report.log"
+      "cron_log": "{home}/.lupin/logs/worktree-hygiene-report.log",
+      "clean_exit_codes": [
+        0,
+        1
+      ]
     },
     {
       "job": "disk-report",
@@ -475,7 +479,8 @@
       "summary_path": "{root}/io/jobs/yearly-reminders/job-summary.json",
       "audience": [
         "rick"
-      ]
+      ],
+      "cron_exclusion_reason": "one-shot personal reminders for Rick, run by their own script lines; not a Lupin background job"
     },
     {
       "job": "fleet-arbiter",
