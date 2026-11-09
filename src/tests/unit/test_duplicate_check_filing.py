@@ -399,3 +399,52 @@ def test_the_spool_is_written_by_temporary_file_and_rename_so_a_reader_never_see
     target = str( tmp_path / ff.PENDING_FILE )
     assert seen == [ ( target + ".tmp", target, '{"a": 1}\n' ) ]
     assert not ( tmp_path / ( ff.PENDING_FILE + ".tmp" ) ).exists() and ff.read_pending( tmp_path ) == [ { "a": 1 } ]
+
+
+def test_a_body_within_the_limit_is_unchanged_and_one_over_it_is_cut_at_a_line_and_says_how_much_went():
+    assert ff.fit_body( "a\nb", 3 ) == "a\nb" and ff.fit_body( "", 3 ) == ""
+    body = "\n".join( f"- line {i:03d}" for i in range( 50 ) )
+    cut  = ff.fit_body( body, 300 )
+    assert len( cut ) <= 300 and cut.startswith( "- line 000\n" ) and "characters left out" in cut.splitlines()[ -1 ]
+    kept = cut.splitlines()[ :-1 ]
+    assert kept == body.splitlines()[ :len( kept ) ] and f"- body cut: {len( body ) - len( chr( 10 ).join( kept ) )} characters left out" in cut
+
+
+def test_a_body_with_no_line_break_in_the_room_is_cut_by_characters():
+    cut = ff.fit_body( "x" * 500, 200 )
+    assert len( cut ) <= 200 and cut.startswith( "xxx" ) and "characters left out" in cut
+
+
+def test_a_row_listing_two_hundred_findings_with_forty_twins_each_fits_the_limit_and_keeps_every_key():
+    twins = [ { "id": f"d-t{i}", "name": f"twin_{i}", "file": f"server/area/twin_{i}.py" } for i in range( 40 ) ]
+    found = [ finding( f"d-{i}", f"f{i}", f"def f{i}(): pass", others=twins ) for i in range( 936 ) ]
+    row   = ff.triage_payload( found, { "owner": "cheech", "note": "n" }, DAY )
+    line  = [ l for l in row[ "body" ].splitlines() if l.startswith( "- f0 (" ) ][ 0 ]
+    assert line.count( " in server/" ) == ff.OTHERS_LIMIT and line.endswith( f"; and {40 - ff.OTHERS_LIMIT} more" )
+    sent  = ff.fit_body( row[ "body" ] )
+    assert len( row[ "body" ] ) > ff.BODY_LIMIT >= len( sent ) and len( row[ "finding_keys" ] ) == 936
+
+
+def test_a_spooled_row_with_a_body_over_the_limit_is_cut_when_it_is_sent_and_the_spool_keeps_its_original( tmp_path ):
+    big   = { "item_class": "task", "title": "t", "project": "lupin", "created_by": "duplicate-check-daily", "owner_persona": "cheech", "accountable_manager": "cheech",
+              "priority": "P5", "correlation_key": "epic:dupcheck-run-1", "body": "\n".join( "- x" * 40 for _ in range( 5000 ) ), "finding_keys": [ "k1" ] }
+    ff.write_pending( tmp_path, [ big ] )
+    store = Store()
+    out   = ff.file_findings( [], tmp_path, store, "Cheech", [ "Cheech" ], DAY )
+    assert len( out[ ff.FILED ] ) == 1 and len( store.created[ 0 ][ "body" ] ) <= ff.BODY_LIMIT and len( big[ "body" ] ) > ff.BODY_LIMIT
+    assert ff.read_triaged( tmp_path ) == { "k1" }
+
+
+def test_a_row_without_a_body_is_sent_as_it_is():
+    store = Store()
+    ff.send_row( { "correlation_key": "epic:dupcheck-x", "body": None }, store )
+    ff.send_row( { "correlation_key": "epic:dupcheck-y" }, store )
+    assert [ p.get( "body", "absent" ) for p in store.created ] == [ None, "absent" ]
+
+
+def test_a_queued_outcome_keeps_the_stores_answer_as_detail_so_the_cause_is_on_record():
+    gated_body = store_422( gated_text() )
+    got = ff.send_row( { "correlation_key": "epic:dupcheck-x", "body": "b" }, Store( create=( False, 422, gated_body ) ) )
+    assert got[ "outcome" ] == ff.QUEUED and ff.GATED_PHRASE in got[ "detail" ] and len( got[ "detail" ] ) <= ff.DETAIL_LIMIT
+    probe = ff.send_row( { "correlation_key": "epic:dupcheck-x", "body": "b" }, Store( query=( False, 503, { "error": "down" } ) ) )
+    assert probe == { "outcome": ff.QUEUED, "status": 503, "detail": "{'error': 'down'}" }

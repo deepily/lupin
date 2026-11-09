@@ -29,6 +29,9 @@ GATED_PHRASE   = "New tickets are gated"          # how the store's ratio gate o
 RUN_KEY_PREFIX = "epic:dupcheck-run-"
 TRIAGED_FILE   = "triaged.jsonl"
 LIST_LIMIT     = 200                              # findings named in a row's body; the rest are named by count and result file
+OTHERS_LIMIT   = 5                                # definitions named after "repeats:" on one finding; the rest are counted
+BODY_LIMIT     = 30000                            # characters a row's body may carry; the store sets no limit (body is a Text column), so this is our own, chosen to keep the row readable
+DETAIL_LIMIT   = 300                              # characters of the store's answer kept on a refused or queued outcome
 FILED          = "filed"
 ALREADY        = "already_filed"
 QUEUED         = "queued_for_retry"
@@ -104,6 +107,7 @@ def triage_payload( findings, owner, day ):
         - returns a TaskCreateIn payload at P5 with no status, so the store's holding default applies and a manager raises it
         - the title starts with the project tag, names the check, the day and the question to answer
         - the body says why the row exists, what to do, the owner and the first LIST_LIMIT findings with the definitions they repeat
+        - each finding names at most OTHERS_LIMIT of the definitions it repeats and counts the rest
         - the rest are counted in a last line naming the result file, the first finding's run_file; the title counts every finding
         - finding_keys always lists every finding, so none is lost from the triaged file
         - created_by is "<owner persona> (<job name>)", so the row is filed by a persona; it carries no session id, so the store reads the caller as a worker, not a manager
@@ -112,7 +116,8 @@ def triage_payload( findings, owner, day ):
     """
     keys  = [ f[ "correlation_key" ] if "correlation_key" in f else correlation_key( f[ "id" ], f[ "text" ] ) for f in findings ]
     count = len( findings )
-    lines = [ f"- {f['name']} ({f['file']}:{f['line']}, {f['id']}) repeats: " + "; ".join( f"{o['name']} in {o['file']}" for o in f[ "others" ] ) for f in findings[ :LIST_LIMIT ] ]
+    lines = [ f"- {f['name']} ({f['file']}:{f['line']}, {f['id']}) repeats: " + "; ".join( f"{o['name']} in {o['file']}" for o in f[ "others" ][ :OTHERS_LIMIT ] )
+              + ( f"; and {len( f[ 'others' ] ) - OTHERS_LIMIT} more" if len( f[ "others" ] ) > OTHERS_LIMIT else "" ) for f in findings[ :LIST_LIMIT ] ]
     if count > LIST_LIMIT: lines.append( f"- and {count - LIST_LIMIT} more in {findings[ 0 ].get( 'run_file', 'the result file' )}" )
     key   = run_key( keys )
     body  = ( f"Why this row exists: the daily duplicate check found {count} new function(s) that repeat code the tree already has.\n"
@@ -150,6 +155,24 @@ def gated( body ):
     return any( GATED_PHRASE in str( body.get( key, "" ) ) for key in ( "detail", "error" ) )
 
 
+def fit_body( body, limit=BODY_LIMIT ):
+    """
+    Cut a row's body to a character limit at a line boundary, and say so.
+
+    Requires:
+        - body is a string; limit is a positive integer
+    Ensures:
+        - returns body unchanged when it holds no more than limit characters
+        - otherwise returns whole lines of the body, then a last line that counts the omitted characters and names the result file as the place for the rest
+        - the returned text is never longer than limit characters
+    """
+    if len( body ) <= limit: return body
+    note = "\n- body cut: {n} characters left out; the full list is in the run's result file"
+    room = limit - len( note.format( n=len( body ) ) )
+    kept = body[ :room ].rsplit( "\n", 1 )[ 0 ] if "\n" in body[ :room ] else body[ :room ]
+    return kept + note.format( n=len( body ) - len( kept ) )
+
+
 def send_row( payload, store ):
     """
     Put one row in the store unless its key is already there.
@@ -159,14 +182,17 @@ def send_row( payload, store ):
     Ensures:
         - returns { outcome, status }: already_filed when the key has a row, filed on a 201, queued_for_retry on a transport failure or a ratio gate refusal (see gated), refused on any other verdict
         - a probe that did not answer ok, whatever the cause, queues the row, because a row filed twice is worse than one filed late
+        - the body sent never exceeds BODY_LIMIT characters, whether the payload is new or was spooled by an earlier run
+        - a queued or refused outcome keeps the first DETAIL_LIMIT characters of the store's answer as detail, so the cause is on record
     """
+    payload = { **payload, "body": fit_body( payload[ "body" ] ) } if "body" in payload and payload[ "body" ] is not None else payload
     ok, status, body = store.query( payload[ "correlation_key" ] )
-    if not ok: return { "outcome": QUEUED, "status": status }
+    if not ok: return { "outcome": QUEUED, "status": status, "detail": str( body )[ :DETAIL_LIMIT ] }
     if body.get( "count", 0 ) > 0: return { "outcome": ALREADY, "status": status }
     ok, status, body = store.create( payload )
     if ok: return { "outcome": FILED, "status": status }
-    if status is None or ( status == 422 and gated( body ) ): return { "outcome": QUEUED, "status": status }
-    return { "outcome": REFUSED, "status": status, "detail": str( body )[ :300 ] }
+    if status is None or ( status == 422 and gated( body ) ): return { "outcome": QUEUED, "status": status, "detail": str( body )[ :DETAIL_LIMIT ] }
+    return { "outcome": REFUSED, "status": status, "detail": str( body )[ :DETAIL_LIMIT ] }
 
 
 def read_triaged( folder ):
