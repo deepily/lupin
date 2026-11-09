@@ -71,7 +71,7 @@ def test_refiling_a_failed_day_files_every_finding_once_in_the_folder_of_the_fil
     assert len( store.created ) == 1 and folders == [ path.parent ], "three findings, one row, and the spool folder is the file's own"
     keys = [ f[ "correlation_key" ] for f in json.loads( path.read_text() )[ "findings" ] ]
     assert store.created[ 0 ][ "correlation_key" ] == ff.run_key( keys ) and all( f[ "name" ] in store.created[ 0 ][ "body" ] for f in json.loads( path.read_text() )[ "findings" ] )
-    assert store.created[ 0 ][ "created_by" ] == ff.CREATED_BY and store.created[ 0 ][ "priority" ] == ff.PRIORITY and store.created[ 0 ][ "owner_persona" ] == "cheech"
+    assert store.created[ 0 ][ "created_by" ] == ff.filer_created_by( "cheech", ff.CREATED_BY ) and store.created[ 0 ][ "priority" ] == ff.PRIORITY and store.created[ 0 ][ "owner_persona" ] == "cheech"
 
 
 def test_refiling_again_files_nothing_more_and_adds_a_second_record( repo, tmp_path ):
