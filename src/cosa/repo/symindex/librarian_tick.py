@@ -456,19 +456,20 @@ def cron_lines( root, python, log_path ):
     return cron_lines_for( run, CRON_SCHEDULE, 120 )
 
 
-def merge_lines( current, lines, tag=CRON_TAG ):
+def merge_lines( current, lines, tag=CRON_TAG, legacy=() ):
     """
     Replace every tagged line of a crontab text with lines.
 
     Requires:
         - current is the crontab text; lines is the list from cron_lines or an empty list
-        - tag is the comment that ends each line of one tool; the default is the librarian's
+        - tag is the comment that ends each line of one tool, or a tuple of such comments; the default is the librarian's
+        - legacy is a tuple of substrings: an old line holding one of them, whatever its ending, is a hand-written copy of a line being replaced
 
     Ensures:
-        - lines that do not carry the tag keep their text and order
+        - lines that do not carry the tag, and hold no legacy substring, keep their text and order
         - the tagged lines end the text, once each
     """
-    kept = [ line for line in current.splitlines() if not line.rstrip().endswith( tag ) ]
+    kept = [ line for line in current.splitlines() if not line.rstrip().endswith( tag ) and not any( word in line for word in legacy ) ]
     return "\n".join( kept + list( lines ) ) + "\n"
 
 
@@ -493,7 +494,7 @@ def load_crontab_lock( environ ):
     return module.crontab_lock
 
 
-def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG ):
+def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG, legacy=() ):
     """
     Do the read, backup and write of one crontab edit; the caller holds the lock.
 
@@ -508,20 +509,21 @@ def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG ):
         os.makedirs( backup_dir, exist_ok=True )
         with open( os.path.join( backup_dir, f"crontab-{now.strftime( '%Y%m%d-%H%M%S' )}.txt" ), "w", encoding="utf-8" ) as handle: handle.write( old )
     except OSError as error: return None, f"no backup, so no write: {error}"
-    new   = merge_lines( old, lines, tag )
+    new   = merge_lines( old, lines, tag, legacy )
     write = subprocess.run( [ *crontab_cmd, "-" ], input=new, capture_output=True, text=True )
     if write.returncode != 0: return None, f"crontab write failed: {write.stderr.strip()}"
     return new, None
 
 
-def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, owner="wiki-librarian-tick" ):
+def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, owner="wiki-librarian-tick", legacy=() ):
     """
     Read, back up and rewrite the crontab under the shared lock.
 
     Requires:
         - lines is the list to install, or an empty list to remove ours
         - crontab_cmd is the command list, for example [ "crontab" ]
-        - tag and owner name the tool: its line tag and the owner the lock records; the defaults are the librarian's
+        - tag and owner name the tool: its line tag (or a tuple of tags) and the owner the lock records; the defaults are the librarian's
+        - legacy is passed to merge_lines
 
     Ensures:
         - the whole read and write sit inside the lock
@@ -531,7 +533,7 @@ def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, ow
     """
     lock = load_crontab_lock( environ )
     with lock( owner=owner ):
-        new, failure = _rewrite( lines, crontab_cmd, backup_dir, now, tag )
+        new, failure = _rewrite( lines, crontab_cmd, backup_dir, now, tag, legacy )
     if failure is not None: raise RuntimeError( failure )
     return new
 

@@ -63,12 +63,12 @@ def summary_file( root, name, outcome="clean", when=None, **kw ):
     return path
 
 
-def test_the_shipped_registry_loads_and_holds_the_23_jobs_of_the_design_with_seat_owners():
+def test_the_shipped_registry_loads_and_holds_the_24_jobs_of_the_design_with_seat_owners():
     reg = jr.load_registry( REAL_ROOT )
-    assert len( reg[ "jobs" ] ) == 23 and reg[ "defaults" ][ "grace_minutes" ] == 30 and reg[ "defaults" ][ "notify_interval_minutes" ] == 30
+    assert len( reg[ "jobs" ] ) == 24 and reg[ "defaults" ][ "grace_minutes" ] == 30 and reg[ "defaults" ][ "notify_interval_minutes" ] == 30
     assert {  j[ "catalog" ] for j in reg[ "jobs" ] if "catalog" in j } >= { "L1", "L2", "L3", "L4", "L5", "P1", "P3", "P4", "L28", "L30" }
     dup = next( j for j in reg[ "jobs" ] if j[ "job" ] == "duplicate-check" )
-    assert dup[ "fix_debt_key" ] == "prefix:epic:dupcheck-" and dup[ "schedule" ] == [ { "cron": "0 10 * * *" }, { "cron": "7 11 * * *" }, { "after_boot_seconds": 300 } ] and dup[ "cron_tag" ] == "duplicate-check-daily"
+    assert dup[ "fix_debt_key" ] == "prefix:epic:dupcheck-" and dup[ "schedule" ] == [ { "cron": "0 10-22 * * *" }, { "after_boot_seconds": 300 } ] and dup[ "cron_tag" ] == "duplicate-check-daily"
     vec = next( j for j in reg[ "jobs" ] if j[ "job" ] == "vector-refresh" )
     assert "symbol index" in vec[ "title" ]
 

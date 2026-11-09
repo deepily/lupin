@@ -11,10 +11,11 @@
       "LUPIN_ROOT": "{root}",
       "PYTHONPATH": "{root}/src",
       "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
-      "DEEPILY_DATA_DIR": "{deepily_data}"
+      "DEEPILY_DATA_DIR": "{deepily_data}",
+      "COSA_VOICE_MANAGERS__LUPIN": "Tiberius, Mr. Radio"
     },
     "owner_note": "owner_confirmed false means the owner is cheech by default and no open row names another seat (Cheech, 2026-11-07)",
-    "schedule_note": "A job with cron_tag takes its schedule from the installed crontab lines that end with # <tag>; the schedule here is the fallback when none is installed or the crontab cannot be read; the duplicate-check fallback is the three lines installed on 2026-11-07, which any hourly run also covers"
+    "schedule_note": "A job with cron_tag takes its schedule from the installed crontab lines that end with # <tag>; the schedule here is the fallback when none is installed or the crontab cannot be read; the duplicate-check fallback is the three lines installed on 2026-11-07, which any hourly run also covers; a job with cron_managed true has its lines written by lupin_mcp.cron_generate from this entry, and cron_replaces names hand-written lines its install removes"
   },
   "jobs": [
     {
@@ -24,10 +25,7 @@
       "owner": "cheech",
       "schedule": [
         {
-          "cron": "0 10 * * *"
-        },
-        {
-          "cron": "7 11 * * *"
+          "cron": "0 10-22 * * *"
         },
         {
           "after_boot_seconds": 300
@@ -68,8 +66,11 @@
           "{python}",
           "-m",
           "lupin_mcp.duplicate_check_daily",
+          "--adaptive",
           "--ceiling",
-          "1500",
+          "800",
+          "--branch",
+          "auto",
           "--claude-cli-path",
           "{home}/.local/bin/claude",
           "--trigger",
@@ -77,7 +78,10 @@
         ],
         "env": {}
       },
-      "cron_tag": "duplicate-check-daily"
+      "cron_tag": "duplicate-check-daily",
+      "cron_managed": true,
+      "cron_log": "{root}/io/duplicate-check-daily/daily.log",
+      "cron_enabled": false
     },
     {
       "job": "wiki-librarian",
@@ -122,7 +126,9 @@
         ],
         "env": {}
       },
-      "cron_tag": "wiki-librarian-tick"
+      "cron_tag": "wiki-librarian-tick",
+      "cron_managed": true,
+      "cron_log": "{data}/librarian/librarian.log"
     },
     {
       "job": "reuse-behaviour",
@@ -162,7 +168,9 @@
         ],
         "env": {}
       },
-      "cron_tag": "reuse-behaviour-weekly"
+      "cron_tag": "reuse-behaviour-weekly",
+      "cron_managed": true,
+      "cron_log": "{data}/behaviour/weekly.log"
     },
     {
       "job": "vector-refresh",
@@ -202,7 +210,9 @@
         }
       },
       "owner_confirmed": false,
-      "cron_tag": "reuse-vector-refresh"
+      "cron_tag": "reuse-vector-refresh",
+      "cron_managed": true,
+      "cron_log": "{data}/refresh/refresh.log"
     },
     {
       "job": "shadow-audit",
@@ -236,7 +246,9 @@
         }
       },
       "owner_confirmed": false,
-      "cron_tag": "reuse-shadow-audit"
+      "cron_tag": "reuse-shadow-audit",
+      "cron_managed": true,
+      "cron_log": "{data}/shadow-audit/shadow-audit.log"
     },
     {
       "job": "context-tick",
@@ -323,7 +335,13 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{root}/io/claude_code_hooks/logs/disk-hygiene-report.log",
+      "cron_replaces": [
+        "disk-hygiene-report.sh"
+      ],
+      "cron_tag": "disk-report"
     },
     {
       "job": "hook-log-sweep",
@@ -344,7 +362,13 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{root}/io/claude_code_hooks/logs/disk-hygiene-sweep.log",
+      "cron_replaces": [
+        "sweep-hook-logs.sh"
+      ],
+      "cron_tag": "hook-log-sweep"
     },
     {
       "job": "io-tmp-sweep",
@@ -368,7 +392,37 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{root}/io/claude_code_hooks/logs/io-tmp-sweep.log",
+      "cron_replaces": [
+        "sweep-io-tmp.sh"
+      ],
+      "cron_tag": "io-tmp-sweep"
+    },
+    {
+      "job": "host-snapshot",
+      "catalog": "L15",
+      "title": "Host snapshot (crontab and units, for the container)",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "*/5 * * * *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/host-snapshot/job-summary.json",
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.host_snapshot"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_tag": "job-host-snapshot",
+      "cron_managed": true,
+      "cron_log": "{root}/io/jobs/host-snapshot/cron.log"
     },
     {
       "job": "hook-link-tick",
