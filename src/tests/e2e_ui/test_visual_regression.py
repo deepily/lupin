@@ -387,6 +387,93 @@ def freeze_live_feeds( browser_page, page_name ):
     return report
 
 
+# ---------------------------------------------------------------------------
+# Clear-and-inject: the admin USERS table (row b72bb412)
+# ---------------------------------------------------------------------------
+#
+# The admin-users snapshot captured whatever users the test database held, so any
+# test or job that added, removed or verified a user reddened it. Measured 2026-11-07,
+# e2e_b run ts-1941b715: 565 passed, 0 failed, 1 error, the error being this snapshot,
+# differing in the user rows (about y 360 to 670).
+#
+# Same ruling as the commons feed above: no mask, because a mask stops watching the
+# table. The page's OWN renderUsersTable() is called with fixed users, so the real row
+# markup, badges and pagination text stay in frame and stay under test.
+#
+# ── COVERAGE LEDGER ─────────────────────────────────────────────────────────────
+#   NO LONGER MONITORED: which users the database holds, and the /admin/users
+#   response itself (the E2E tests in test_admin_users.py cover that).
+#   STILL MONITORED: the table chrome and every row's rendering for an admin, an
+#   active user, an inactive user and a not-verified user, plus the pager text.
+
+_FREEZE_USERS_TABLE_JS = """
+( users ) => {
+    const tbody = document.getElementById( "users-tbody" );
+    if ( !tbody ) return { container: false, injected: 0 };
+
+    renderUsersTable( users );
+    totalUsers  = users.length;
+    currentPage = 1;
+    updatePagination();
+
+    return { container: true, injected: tbody.children.length };
+}
+"""
+
+# Fixed content. Dates are old, so formatDate() takes its absolute branch, and the
+# column normalizer pins them anyway.
+_FROZEN_USERS = (
+    { "id": "frozen-1", "email": "frozen-admin@example.test", "roles": [ "admin" ],
+      "is_active": True,  "email_verified": True,  "created_at": "2026-01-01T12:00:00Z",
+      "last_login_at": "2026-01-01T12:00:00Z" },
+    { "id": "frozen-2", "email": "frozen-user@example.test", "roles": [ "user" ],
+      "is_active": True,  "email_verified": True,  "created_at": "2026-01-01T12:00:00Z",
+      "last_login_at": None },
+    { "id": "frozen-3", "email": "frozen-inactive@example.test", "roles": [ "user" ],
+      "is_active": False, "email_verified": True,  "created_at": "2026-01-01T12:00:00Z",
+      "last_login_at": None },
+    { "id": "frozen-4", "email": "frozen-unverified@example.test", "roles": [ "user" ],
+      "is_active": True,  "email_verified": False, "created_at": "2026-01-01T12:00:00Z",
+      "last_login_at": None },
+)
+
+_USERS_TABLE_PAGES = ( "admin-users", )
+
+
+def freeze_users_table( browser_page, page_name ):
+    """
+    Replace the live users table with fixed users, keeping the table in frame.
+
+    Requires:
+        - browser_page is navigated and settled (the table renders from a fetch)
+        - page_name is a key in PAGE_URLS
+
+    Ensures:
+        - pages outside _USERS_TABLE_PAGES are skipped, not failed
+        - a missing #users-tbody fails rather than returning a quiet zero
+        - the injected row count equals the number of frozen users
+        - returns the report dict
+
+    Raises:
+        - AssertionError if the tbody is absent, or the wrong row count landed
+    """
+    if page_name not in _USERS_TABLE_PAGES:
+        return {}
+
+    report = browser_page.evaluate( _FREEZE_USERS_TABLE_JS, list( _FROZEN_USERS ) )
+
+    assert report[ "container" ], (
+        f"{page_name}: #users-tbody is ABSENT. Either the table moved — fix the id "
+        f"here — or this page no longer carries it, in which case drop it from "
+        f"_USERS_TABLE_PAGES. An unfrozen users table goes straight into the snapshot."
+    )
+    assert report[ "injected" ] == len( _FROZEN_USERS ), (
+        f"{page_name}: injected {report[ 'injected' ]} rows, expected {len( _FROZEN_USERS )}"
+    )
+
+    return report
+
+
 def normalize_dynamic_content( browser_page, page_name ):
     """
     Normalize this page's dynamic text to stable placeholders before capture.
@@ -449,6 +536,7 @@ def prepare_page_for_capture( browser_page, page_name ):
           yields no rows, or a selector's count moved between the two passes
     """
     freeze_live_feeds( browser_page, page_name )
+    freeze_users_table( browser_page, page_name )
 
     first = normalize_dynamic_content( browser_page, page_name )
 
@@ -1362,6 +1450,59 @@ def test_freeze_live_feeds_fails_on_a_short_injection():
 
     with pytest.raises( AssertionError ):
         freeze_live_feeds( page, "notifications" )
+
+
+def test_freeze_users_table_fails_when_the_tbody_is_absent():
+    """
+    A missing users tbody fails, naming the id and both repairs.
+
+    Ensures:
+        - AssertionError names #users-tbody and _USERS_TABLE_PAGES
+    """
+    page = _StubPage( {} )
+    page.evaluate = lambda js, users=None: { "container": False, "injected": 0 }
+
+    with pytest.raises( AssertionError ) as exc:
+        freeze_users_table( page, "admin-users" )
+
+    message = str( exc.value )
+    assert "#users-tbody" in message, f"tbody not named: {message}"
+    assert "_USERS_TABLE_PAGES" in message, f"the second repair is not named: {message}"
+
+
+def test_freeze_users_table_fails_on_a_short_injection():
+    """
+    Injecting fewer rows than frozen users fails rather than passing quietly.
+
+    Ensures:
+        - AssertionError when the reported count does not match
+    """
+    page = _StubPage( {} )
+    page.evaluate = lambda js, users=None: { "container": True, "injected": 0 }
+
+    with pytest.raises( AssertionError ):
+        freeze_users_table( page, "admin-users" )
+
+
+def test_freeze_users_table_hands_the_browser_the_frozen_users_and_skips_other_pages():
+    """
+    The browser receives the frozen users and no others on admin-users, and nothing elsewhere.
+
+    Ensures:
+        - the payload equals _FROZEN_USERS, with 4 users covering admin, inactive,
+          not-verified and never-logged-in
+        - a page outside _USERS_TABLE_PAGES never reaches evaluate()
+    """
+    seen = []
+    page = _StubPage( {} )
+    page.evaluate = lambda js, users=None: seen.append( users ) or { "container": True, "injected": len( users ) }
+
+    assert freeze_users_table( page, "admin-users" ) == { "container": True, "injected": 4 }
+    assert seen == [ list( _FROZEN_USERS ) ]
+    assert len( _FROZEN_USERS ) == 4
+
+    assert freeze_users_table( page, "login" ) == {}
+    assert len( seen ) == 1, "evaluated on a page with no users table"
 
 
 def test_freeze_live_feeds_skips_a_page_that_has_no_feed():
