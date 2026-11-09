@@ -37,7 +37,7 @@
       "summary_path": "{root}/io/duplicate-check-daily/job-summary.json",
       "scan_debt": true,
       "fix_debt": true,
-      "fix_debt_key": "job:duplicate-check",
+      "fix_debt_key": "prefix:epic:dupcheck-",
       "detail_link": "/app/duplicate-check",
       "lock_path": "{root}/io/duplicate-check-daily/run.lock",
       "rows": [

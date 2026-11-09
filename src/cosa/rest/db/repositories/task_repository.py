@@ -888,6 +888,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         now                 : Optional[datetime] = None,
         updated_since       : Optional[datetime] = None,
         updated_until       : Optional[datetime] = None,
+        correlation_key_prefix : Optional[str] = None,
     ) -> List[TaskItem]:
         """
         The deterministic owed-work query, identical for every caller.
@@ -963,7 +964,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             query, owner_persona, status, gate_class, urgency,
             accountable_manager, project, item_class, correlation_key, id_prefix,
             updated_since=updated_since, updated_until=updated_until,
-            blocked_by_persona=blocked_by_persona
+            blocked_by_persona=blocked_by_persona, correlation_key_prefix=correlation_key_prefix
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -973,7 +974,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
     def _apply_scalar_filters( query, owner_persona, status, gate_class, urgency,
                                accountable_manager, project, item_class, correlation_key,
                                id_prefix, updated_since=None, updated_until=None,
-                               blocked_by_persona=None ):
+                               blocked_by_persona=None, correlation_key_prefix=None ):
         """
         Apply the exact-match filters in one place, shared by every count and page query.
 
@@ -984,6 +985,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Requires:
             - query is a TaskItem query; every filter is None or an exact value
             - blocked_by_persona, when present, is the canonical persona name a row's blocked_by names
+            - correlation_key_prefix, when present, is literal text a row's correlation_key must start with (matched as a prefix, its wildcard characters escaped)
             - id_prefix, when present, is compact lowercase hex (hyphens stripped) exactly as
               `classify_task_ref` returns it; this method does not re-validate caller text,
               because a `LIKE` built from arbitrary input turns an id lookup into a search surface
@@ -1004,6 +1006,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
         if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
+        if correlation_key_prefix is not None: query = query.filter( TaskItem.correlation_key.startswith( correlation_key_prefix, autoescape=True ) )
         if id_prefix is not None:
             hyphened = hyphenate_compact_prefix( id_prefix )
             query    = query.filter( cast( TaskItem.id, String ).like( f"{hyphened}%" ) )

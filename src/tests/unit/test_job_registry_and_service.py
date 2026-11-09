@@ -68,7 +68,7 @@ def test_the_shipped_registry_loads_and_holds_the_23_jobs_of_the_design_with_sea
     assert len( reg[ "jobs" ] ) == 23 and reg[ "defaults" ][ "grace_minutes" ] == 30 and reg[ "defaults" ][ "notify_interval_minutes" ] == 30
     assert {  j[ "catalog" ] for j in reg[ "jobs" ] if "catalog" in j } >= { "L1", "L2", "L3", "L4", "L5", "P1", "P3", "P4", "L28", "L30" }
     dup = next( j for j in reg[ "jobs" ] if j[ "job" ] == "duplicate-check" )
-    assert dup[ "fix_debt_key" ] == "job:duplicate-check" and dup[ "schedule" ] == [ { "cron": "0 10 * * *" }, { "cron": "7 11 * * *" }, { "after_boot_seconds": 300 } ] and dup[ "cron_tag" ] == "duplicate-check-daily"
+    assert dup[ "fix_debt_key" ] == "prefix:epic:dupcheck-" and dup[ "schedule" ] == [ { "cron": "0 10 * * *" }, { "cron": "7 11 * * *" }, { "after_boot_seconds": 300 } ] and dup[ "cron_tag" ] == "duplicate-check-daily"
     vec = next( j for j in reg[ "jobs" ] if j[ "job" ] == "vector-refresh" )
     assert "symbol index" in vec[ "title" ]
 
@@ -200,14 +200,23 @@ def test_live_store_counts_wraps_the_repository_and_answers_none_when_the_store_
     def fake_db():
         yield "S"
     monkeypatch.setattr( database, "get_db", fake_db ); monkeypatch.setattr( repo_mod, "TaskRepository", Repo )
-    got = svc.LiveDeps( tmp_path, tmp_path ).store_counts( "job:x", NOW, 7 )
-    assert got[ "open_now" ] == 1 and seen[ "kw" ] == { "correlation_key": "job:x", "include_terminal": True, "limit": 500 }
+    got = svc.LiveDeps( tmp_path, tmp_path ).store_counts( "prefix:x", NOW, 7 )
+    assert got[ "open_now" ] == 1 and seen[ "kw" ] == { "project": "lupin", "correlation_key_prefix": "x", "include_terminal": True, "limit": 500 }
     @contextlib.contextmanager
     def down():
         raise RuntimeError( "db down" )
         yield
     monkeypatch.setattr( database, "get_db", down )
-    assert svc.LiveDeps( tmp_path, tmp_path ).store_counts( "job:x", NOW, 7 ) is None
+    assert svc.LiveDeps( tmp_path, tmp_path ).store_counts( "prefix:x", NOW, 7 ) is None
+    monkeypatch.setattr( database, "get_db", fake_db )
+    assert svc.LiveDeps( tmp_path, tmp_path ).store_counts( "job:x", NOW, 7 ) is None      # a key without the prefix: form is "not reported", never a zero
+
+
+def test_the_registry_mark_for_duplicate_check_is_the_key_prefix_the_filer_writes():
+    from lupin_mcp import duplicate_check_filing as filing
+    dup = next( j for j in jr.load_registry( REAL_ROOT )[ "jobs" ] if j[ "job" ] == "duplicate-check" )
+    assert dup[ "fix_debt_key" ] == svc.MARK_PREFIX + filing.KEY_PREFIX
+    assert filing.RUN_KEY_PREFIX.startswith( filing.KEY_PREFIX ) and filing.correlation_key( "d", "t" ).startswith( filing.KEY_PREFIX )
 
 
 def test_expand_fills_every_placeholder_inside_strings_lists_and_dicts():

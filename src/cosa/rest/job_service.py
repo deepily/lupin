@@ -19,6 +19,8 @@ from lupin_mcp import job_summary as js
 
 SCHEMA          = "jobs-summary/1"
 TERMINAL        = ( "done", "dropped" )
+MARK_PREFIX     = "prefix:"
+MARK_PROJECT    = "lupin"
 RUN_NOW_LOG     = "io/jobs/run-now.log"
 NOT_RUNNABLE    = "not_runnable"
 LOCK_HELD       = "lock_held"
@@ -142,7 +144,11 @@ class LiveDeps:
         """
         Count the rows that carry a job's own mark.
 
+        Requires:
+            - key is "prefix:<text>": every row the job files has a correlation_key starting with <text> (the key is per finding or per run, so only its start names the job)
+
         Ensures:
+            - reads only rows in project lupin whose correlation_key starts with <text>
             - returns the store_counts_from_rows dict, terminal rows included
             - returns None when the store cannot be reached: the page then says "open rows: not reported", never zero
         """
@@ -150,7 +156,7 @@ class LiveDeps:
             from cosa.rest.db.database import get_db
             from cosa.rest.db.repositories.task_repository import TaskRepository
             with get_db() as session:
-                rows = TaskRepository( session ).query_tasks( correlation_key=key, include_terminal=True, limit=500 )
+                rows = TaskRepository( session ).query_tasks( project=MARK_PROJECT, correlation_key_prefix=key.split( MARK_PREFIX, 1 )[ 1 ], include_terminal=True, limit=500 )
                 return store_counts_from_rows( rows, now, days )
         except Exception:                                              # the store is an outside service; any failure is "not reported"
             return None
