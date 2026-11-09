@@ -178,3 +178,10 @@ def test_an_arm_label_is_still_refused_when_tool_names_are_replaced_and_breachin
     with pytest.raises( err.DuplicateCheckError ): bl.blind_definition( arm, SCRUB, redact_tools=True )
     assert bl.breaching_ids( [ tool, arm ], SCRUB ) == sorted( [ tool[ "id" ], arm[ "id" ] ] )
     assert bl.breaching_ids( [ tool, arm ], SCRUB, redact_tools=True ) == [ arm[ "id" ] ]
+
+
+def test_a_tool_name_that_holds_another_is_replaced_whole_because_the_longest_goes_first( monkeypatch ):
+    monkeypatch.setattr( bl, "REUSE_TOOL_TOKENS", ( "check", "check_exists" ) )
+    scrub = [ "check", "check_exists" ]
+    assert bl.redact_tool_names( "x = check_exists( y ) + check( z )", scrub ) == f"x = {bl.PLACEHOLDER}( y ) + {bl.PLACEHOLDER}( z )"
+    assert "_exists" not in bl.redact_tool_names( "check_exists", scrub ), "the shorter token first would leave a fragment"
