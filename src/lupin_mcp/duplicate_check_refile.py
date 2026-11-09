@@ -9,7 +9,7 @@ So a finding already on a triage row is not listed again, and a finding already 
 It asks the store before the create, as the daily check does.
 Each run adds a record of its answer to the result file under "refilings".
 
-Exit 0 means every finding is filed or was already. Exit 1 means some are still queued or were refused.
+Exit 0 means every finding is filed or was already. Exit 1 means some are still queued or were refused, or a retired-shape or oversize row is left in the spool.
 Exit 3 means it could not finish. The file cannot be read, it holds no findings, or the filing raised.
 It also means the rows were filed and the record could not be written; the answer is printed first.
 """
@@ -126,7 +126,7 @@ def main( argv=None, out=None, filer=None, now=None ):
 
     Ensures:
         - prints the filing's answer as JSON
-        - returns 0 when nothing is left queued or refused, 1 when something is, 3 with the reason printed when nothing could be done
+        - returns 0 when nothing is left queued, refused, retired-shape or oversize, 1 when something is, 3 with the reason printed when nothing could be done
     """
     ap = argparse.ArgumentParser( description="File again the findings of a saved daily-check result file." )
     ap.add_argument( "result", help="a result file under <data dir>/duplicate-check-daily/" )
@@ -144,7 +144,7 @@ def main( argv=None, out=None, filer=None, now=None ):
         print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was filed.", file=out )
         return EXIT_NONE
     print( json.dumps( answer, indent=2, sort_keys=True ), file=out )
-    return EXIT_LEFT if answer[ filing.QUEUED ] or answer[ filing.REFUSED ] else 0
+    return EXIT_LEFT if any( answer[ k ] for k in ( filing.QUEUED, filing.REFUSED, filing.RETIRED, filing.OVERSIZE ) ) else 0
 
 
 if __name__ == "__main__":  # pragma: no cover - the entry only calls main

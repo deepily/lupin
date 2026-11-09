@@ -168,7 +168,7 @@ def test_the_command_defaults_to_the_live_filer_and_the_present_time( tmp_path, 
     path = tmp_path / "r.json"
     path.write_text( json.dumps( { "findings": [] } ), encoding="utf-8" )
     seen = []
-    monkeypatch.setattr( rf.daily, "live_filer", lambda findings, folder: seen.append( ( findings, folder ) ) or { ff.FILED: [], ff.ALREADY: [], ff.QUEUED: [], ff.REFUSED: [] } )
+    monkeypatch.setattr( rf.daily, "live_filer", lambda findings, folder: seen.append( ( findings, folder ) ) or { ff.FILED: [], ff.ALREADY: [], ff.QUEUED: [], ff.REFUSED: [], ff.RETIRED: [], ff.OVERSIZE: [] } )
     assert rf.main( [ str( path ) ] ) == 0 and seen == [ ( [], tmp_path ) ]
     assert datetime.datetime.fromisoformat( json.loads( path.read_text() )[ rf.REFILINGS ][ 0 ][ "at" ] ).tzinfo is not None
     assert '"filed": []' in capsys.readouterr().out
@@ -266,3 +266,12 @@ def test_regroup_without_clusters_drops_only_settled_findings_and_keeps_one_in_n
     assert rf.regroup( [ f( "a", "k1" ), f( "b", "k2" ) ], None, { "k2" } ) == [ f( "a", "k1" ) ]
     got = rf.regroup( [ f( "a", "k1" ), f( "b", "k2" ), f( "c", "k3" ), f( "d", "k4" ) ], [ [ "b", "a" ], [ "x", "y" ] ], { "k4" } )
     assert [ x[ "id" ] for x in got ] == [ "a", "c" ], "a cluster with no finding gives none; c is in no cluster and kept; d is in none and settled"
+
+
+@pytest.mark.parametrize( "left", [ ff.RETIRED, ff.OVERSIZE ] )
+def test_a_retired_shape_or_oversize_row_left_in_the_spool_makes_the_exit_non_zero( repo, tmp_path, left ):
+    path   = a_day_whose_filing_failed( repo, tmp_path )
+    answer = { ff.FILED: [], ff.ALREADY: [], ff.QUEUED: [], ff.REFUSED: [], ff.RETIRED: [], ff.OVERSIZE: [] }
+    answer[ left ] = [ { "key": "epic:dupcheck-x" } ]
+    out = io.StringIO()
+    assert rf.main( [ str( path ) ], out=out, filer=lambda findings, folder: answer, now=LATER ) == rf.EXIT_LEFT
