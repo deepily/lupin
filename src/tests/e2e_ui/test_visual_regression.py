@@ -416,6 +416,12 @@ _FREEZE_USERS_TABLE_JS = """
     currentPage = 1;
     updatePagination();
 
+    // A live fetch that returned no users leaves the table hidden and shows the
+    // empty-state panel, so the freeze must not depend on the database having users.
+    hideElement( "loading" );
+    hideElement( "no-results" );
+    showElement( "users-table-container" );
+
     return { container: true, injected: tbody.children.length };
 }
 """
@@ -1503,6 +1509,35 @@ def test_freeze_users_table_hands_the_browser_the_frozen_users_and_skips_other_p
 
     assert freeze_users_table( page, "login" ) == {}
     assert len( seen ) == 1, "evaluated on a page with no users table"
+
+
+def test_prepare_page_for_capture_freezes_the_users_table_on_admin_users():
+    """
+    The capture path hands the frozen users to the browser, before the column pins.
+
+    Without this, deleting the freeze call from prepare_page_for_capture leaves every
+    helper-level test green while the snapshot goes back to live users.
+
+    Ensures:
+        - evaluate() receives the users-freeze script with the frozen users
+        - that call comes before the table-column normalizer's call
+    """
+    calls = []
+
+    class _CapturePage:
+        def evaluate( self, js, payload=None ):
+            calls.append( ( js, payload ) )
+            if js == _FREEZE_USERS_TABLE_JS: return { "container": True, "injected": len( payload ) }
+            if js == _NORMALIZE_TABLE_JS:    return { spec[ "sel" ]: 4 for spec in payload }
+            if js == _NORMALIZE_JS:          return { spec[ "sel" ]: 1 for spec in payload }
+            return None
+
+    prepare_page_for_capture( _CapturePage(), "admin-users" )
+
+    scripts = [ js for js, _ in calls ]
+    assert _FREEZE_USERS_TABLE_JS in scripts, "the capture path never froze the users table"
+    assert dict( calls )[ _FREEZE_USERS_TABLE_JS ] == list( _FROZEN_USERS )
+    assert scripts.index( _FREEZE_USERS_TABLE_JS ) < scripts.index( _NORMALIZE_TABLE_JS )
 
 
 def test_freeze_live_feeds_skips_a_page_that_has_no_feed():
