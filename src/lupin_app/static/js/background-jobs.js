@@ -22,7 +22,7 @@
     const POLL_MS       = 60 * 1000;
     const SVG_NS        = "http://www.w3.org/2000/svg";
     const NOT_REPORTED  = "not reported";
-    const STATE_ORDER   = [ "unknown", "silent", "failing", "behind", "healthy" ];
+    const STATE_ORDER   = [ "healthy", "behind", "failing", "silent", "unknown" ];   // active first (Rick, 9 Nov, row 300af681); a running job goes above all of them
     const STATE_LABEL   = { unknown : "UNKNOWN", silent : "SILENT", failing : "FAILING", behind : "BEHIND", healthy : "healthy" };
 
     // ─── Text rules (no DOM, no clock) ─────────────────────────────────
@@ -35,7 +35,7 @@
         return todayIso.startsWith( day ) ? match[ 4 ] : match[ 2 ] + "-" + match[ 3 ] + " " + match[ 4 ];
     }
 
-    function formatCount( n ) { return n === null ? NOT_REPORTED : n.toLocaleString( "en-US" ); }
+    function formatCount( n ) { return n === null ? NOT_REPORTED : String( n ).replace( /\B(?=(\d{3})+(?!\d))/g, "," ); }   // thousands commas without the locale API: a count carries no time zone
 
     function trendArrow( points ) {
         if ( points.length < 2 ) return "";
@@ -45,10 +45,13 @@
         return last < first ? "▼" : "=";
     }
 
+    // Active first: running now, then healthy, behind, failing, silent, never reported. Inside one rank the most recent
+    // attempt comes first (a job with none, last), then title, then target. Never mutates its input.
     function sortJobs( jobs ) {
-        const rank = ( j ) => STATE_ORDER.indexOf( j.state );
+        const rank    = ( j ) => j.running ? -1 : STATE_ORDER.indexOf( j.state );
+        const attempt = ( j ) => j.last_attempt === null ? -1 : ( Date.parse( j.last_attempt.started_at ) || -1 );
         return [ ...jobs ].sort( ( a, b ) =>
-            rank( a ) - rank( b ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) );
+            rank( a ) - rank( b ) || attempt( b ) - attempt( a ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) );
     }
 
     function headerLine( jobs ) {
@@ -454,6 +457,13 @@
     function renderAccordion( mount, summary, actions ) {
         mount.replaceChildren();
         for ( const job of sortJobs( summary.jobs ) ) mount.appendChild( renderJob( job, summary.generated_at, actions ) );
+        if ( summary.reporting_off_line ) {                      // row 4aa0ba1b: the server drops a switched-off job and says how many
+            const line = document.createElement( "p" );
+            line.className = "jobs-off-line";
+            line.setAttribute( "data-testid", "background-jobs-off-line" );
+            line.textContent = summary.reporting_off_line;
+            mount.appendChild( line );
+        }
     }
 
     // ─── Network + wiring ──────────────────────────────────────────────

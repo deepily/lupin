@@ -319,7 +319,7 @@ export function renderJob( doc: Document, job: JobEntry, todayIso: string, actio
 }
 
 /**
- * Replace the accordion's children with one item per job, worst state first.
+ * Replace the accordion's children with one item per job, active first.
  *
  * Ensures:
  *   - the same job id with two targets stays two items; nothing is merged or dropped
@@ -328,4 +328,11 @@ export function renderJob( doc: Document, job: JobEntry, todayIso: string, actio
 export function renderAccordion( doc: Document, mount: HTMLElement, summary: JobsSummary, actions: JobsActions ): void {
   mount.replaceChildren();
   for ( const job of sortJobs( summary.jobs ) ) mount.appendChild( renderJob( doc, job, summary.generated_at, actions ) );
+  if ( summary.reporting_off_line ) {                        // row 4aa0ba1b: the server drops a switched-off job and says how many
+    const line = doc.createElement( "p" );
+    line.className = "jobs-off-line";
+    line.setAttribute( "data-testid", "background-jobs-off-line" );
+    line.textContent = summary.reporting_off_line;
+    mount.appendChild( line );
+  }
 }

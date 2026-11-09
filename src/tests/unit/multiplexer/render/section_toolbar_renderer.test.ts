@@ -585,7 +585,7 @@ test( "the Background Jobs toggle sits right after the Epic Board and names the 
   assert.equal( ids[ epic + 1 ], "background-jobs-pane" );
   assert.deepEqual( SECTION_TOGGLES[ epic + 1 ], {
     sectionId : "background-jobs-pane",
-    icon      : "🗓️",
+    icon      : "🔁",
     title     : "Background Jobs",
     testid    : "multiplexer-section-toolbar-background-jobs",
   } );

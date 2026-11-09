@@ -60,7 +60,7 @@
         <button class="toolbar-btn active" data-section="section-fleet-status" data-testid="fleet-status-toolbar-btn" title="Fleet Status">🛰️</button>
         <button class="toolbar-btn active" data-section="section-task-list" data-testid="task-list-toolbar-btn" title="Task List">🗒️</button>
         <button class="toolbar-btn active" data-section="section-epic-board" data-testid="epic-board-toolbar-btn" title="Epic Board">🗂️</button>
-        <button class="toolbar-btn active" data-section="section-background-jobs" data-testid="background-jobs-toolbar-btn" title="Background Jobs">🗓️</button>
+        <button class="toolbar-btn active" data-section="section-background-jobs" data-testid="background-jobs-toolbar-btn" title="Background Jobs">🔁</button>
         <!-- Holding Area toggle. Rick by voice, 2026-09-02: "we need a toggle button in the
              Notifications Client Toolbar that hides and unhides the holding area, it needs its
              own toggle button."
@@ -1192,7 +1192,7 @@
              multiplexer carries its own independent copy. Wired by js/background-jobs.js. -->
         <div class="collapsible-section" id="section-background-jobs">
             <div class="section-header" onclick="toggleSection('background-jobs-section')">
-                <h3>🗓️ Background Jobs: <span id="background-jobs-count" data-testid="background-jobs-count">…</span>
+                <h3>🔁 Background Jobs: <span id="background-jobs-count" data-testid="background-jobs-count">…</span>
                     <span id="background-jobs-summary" class="task-list-updated" data-testid="background-jobs-summary"></span></h3>
                 <button class="refresh-btn" id="background-jobs-refresh"
                         data-testid="background-jobs-refresh-btn" type="button"
@@ -1615,7 +1615,7 @@
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
     <script src="/static/js/broadcast-panel.js?v=02bdb607cf2a"></script>
     <!-- background-jobs.js: row d540113f. Token = first 12 hex of the file's sha256; bump it whenever the bytes change. -->
-    <script src="/static/js/background-jobs.js?v=8768a8bd1005"></script>
+    <script src="/static/js/background-jobs.js?v=74214a78359f"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
         // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md

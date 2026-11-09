@@ -95,7 +95,7 @@ test( "on load it fetches /api/jobs/summary with the bearer token, draws 23 jobs
   assert.deepEqual( net.urls, [ "/api/jobs/summary" ] );
   assert.equal( byId( "background-jobs-container" ).querySelectorAll( ":scope > [data-testid=jobs-item]" ).length, 23 );
   assert.equal( byId( "background-jobs-count" ).textContent, "23" );
-  assert.match( byId( "background-jobs-summary" ).textContent as string, /^23 jobs: 9 unknown, 2 silent, 3 failing, 9 healthy$/ );
+  assert.match( byId( "background-jobs-summary" ).textContent as string, /^23 jobs: 9 healthy, 3 failing, 2 silent, 9 unknown$/ );
   assert.equal( byId( "background-jobs-error" ).hidden, true );
   assert.equal( timers.length, 1 );
   timers[ 0 ]!(); await flush();
@@ -236,4 +236,44 @@ test( "the legacy copy and the multiplexer's copy DRAW THE SAME THING for all 23
   assert.equal( api.formatWhen( "2026-11-07T19:31:02-05:00", FIXTURE.generated_at ), "19:31" );
   assert.equal( api.formatWhen( null, "" ), "not reported" );
   assert.equal( api.formatWhen( "soon", "" ), "soon" );
+} );
+
+test( "the legacy toolbar button and section header both carry 🔁, and no other toolbar button does (row 288165d6)", () => {
+  const buttons = [ ...HTML.matchAll( /<button class="toolbar-btn[^>]*>([^<]*)<\/button>/g ) ].map( ( m ) => m[ 0 ] );
+  assert.ok( buttons.length > 15, "the toolbar buttons were not found: the uniqueness check would prove nothing" );
+  const mine = buttons.filter( ( b ) => b.includes( 'data-testid="background-jobs-toolbar-btn"' ) );
+  assert.equal( mine.length, 1 );
+  assert.ok( mine[ 0 ]!.endsWith( ">🔁</button>" ) );
+  assert.deepEqual( buttons.filter( ( b ) => b !== mine[ 0 ] && b.includes( ">🔁<" ) ), [] );
+  document.body.innerHTML = sectionMarkup();
+  assert.ok( ( document.querySelector( "#section-background-jobs h3" )!.textContent as string ).startsWith( "🔁 Background Jobs" ) );
+} );
+
+test( "the legacy sort goes active first: running, healthy, behind, failing, silent, unknown, newest attempt first, none last (row 300af681)", async () => {
+  const api = await load();
+  const base = FIXTURE.jobs[ 0 ]!;
+  const mk = ( name: string, state: string, at: string | null, running = false ) =>
+    ( { ...clone( base ), job : name, title : name, target : null, state, running, last_attempt : at === null ? null : { ...clone( base.last_attempt! ), started_at : at } } );
+  const jobs = [
+    mk( "u", "unknown", null ), mk( "s", "silent", "2026-11-09T10:00:00-05:00" ), mk( "f", "failing", "2026-11-09T10:00:00-05:00" ),
+    mk( "b", "behind", "2026-11-09T10:00:00-05:00" ), mk( "h-old", "healthy", "2026-11-08T10:00:00-05:00" ), mk( "h-new", "healthy", "2026-11-09T09:00:00-05:00" ),
+    mk( "h-none", "healthy", null ), mk( "h-bad", "healthy", "not a time" ), mk( "z-run", "failing", "2026-11-01T10:00:00-05:00", true ),
+    mk( "h-utc", "healthy", "2026-11-09T14:30:00+00:00" ),
+  ];
+  const before = jobs.map( ( j ) => j.job );
+  assert.deepEqual( api.sortJobs( jobs ).map( ( j: { job: string } ) => j.job ), [ "z-run", "h-utc", "h-new", "h-old", "h-bad", "h-none", "b", "f", "s", "u" ] );
+  assert.deepEqual( jobs.map( ( j ) => j.job ), before, "sortJobs must not touch its input" );
+  assert.equal( api.headerLine( jobs.filter( ( j ) => [ "u", "f", "h-old" ].includes( j.job ) ) ), "3 jobs: 1 healthy, 1 failing, 1 unknown" );
+} );
+
+test( "the legacy accordion ends with the switched-off line when the server sends one (row 4aa0ba1b)", async () => {
+  const api = await load();
+  const mount = byId( "background-jobs-container" );
+  api.renderAccordion( mount, clone( FIXTURE ), { canRun : false, runNow : async () => "" } );
+  assert.equal( mount.querySelector( "[data-testid=background-jobs-off-line]" ), null );
+  api.renderAccordion( mount, { ...clone( FIXTURE ), reporting_off_line : "8 jobs have reporting switched off" }, { canRun : false, runNow : async () => "" } );
+  const last = mount.lastElementChild as HTMLElement;
+  assert.equal( last.getAttribute( "data-testid" ), "background-jobs-off-line" );
+  assert.equal( last.textContent, "8 jobs have reporting switched off" );
+  assert.equal( mount.children.length, 24 );
 } );

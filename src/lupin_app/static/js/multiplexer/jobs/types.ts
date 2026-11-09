@@ -170,4 +170,8 @@ export interface JobsSummary {
   /** True only when the caller may run jobs by hand: the operator's login. */
   caller_is_operator : boolean;
   jobs         : JobEntry[];
+  /** How many registered jobs have reporting switched off; they are not in `jobs`. */
+  reporting_off? : number;
+  /** One sentence for that count, or null. */
+  reporting_off_line? : string | null;
 }

@@ -102,7 +102,7 @@ class BackgroundJobsRendererImpl implements BackgroundJobsRenderer {
     refreshBtn.addEventListener( "click", () => { void this.refresh(); } );
 
     this.header = renderSectionHeader( {
-      icon    : "🗓️",
+      icon    : "🔁",
       title   : "Background Jobs",
       testid  : "multiplexer-background-jobs-header",
       actions : [ refreshBtn ],

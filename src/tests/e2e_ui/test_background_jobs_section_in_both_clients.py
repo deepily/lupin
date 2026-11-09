@@ -69,7 +69,7 @@ def _dup( accordion ):
     return accordion.locator( "[data-testid=jobs-item][data-job=duplicate-check]" )
 
 
-def test_the_section_shows_all_23_jobs_worst_state_first_each_collapsed( logged_in_page, client ):
+def test_the_section_shows_all_23_jobs_active_state_first_each_collapsed( logged_in_page, client ):
     page = logged_in_page
     _, summaries = _stub( page )
     accordion = _open( page, client )
@@ -77,7 +77,7 @@ def test_the_section_shows_all_23_jobs_worst_state_first_each_collapsed( logged_
     assert items.count() == 23
     assert page.get_by_test_id( client[ "count" ] ).inner_text() == "23"
     states = [ items.nth( i ).get_attribute( "data-state" ) for i in range( 23 ) ]
-    assert states == sorted( states, key=[ "unknown", "silent", "failing", "behind", "healthy" ].index )
+    assert states == sorted( states, key=[ "healthy", "behind", "failing", "silent", "unknown" ].index )
     assert accordion.locator( "[data-testid=jobs-line][aria-expanded=true]" ).count() == 0
     assert accordion.locator( ":scope > [data-testid=jobs-item] > [data-testid=jobs-panel]:visible" ).count() == 0
     assert summaries and all( a.startswith( "Bearer " ) for a in summaries ), "the summary request must carry the login token"

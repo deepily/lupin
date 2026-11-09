@@ -17,6 +17,7 @@ import * as F from "../../../lupin_app/static/js/multiplexer/jobs/jobsFormat";
 import { renderAccordion, renderJob, sparkline } from "../../../lupin_app/static/js/multiplexer/jobs/jobsRender";
 import { createBackgroundJobsRenderer, runNowFailureText, runNowPath, JOBS_POLL_MS } from "../../../lupin_app/static/js/multiplexer/render/BackgroundJobsRenderer";
 import type { BackgroundJobsApi } from "../../../lupin_app/static/js/multiplexer/render/BackgroundJobsRenderer";
+import { SECTION_TOGGLES } from "../../../lupin_app/static/js/multiplexer/render/templates/sectionToolbar";
 import type { JobEntry, JobsSummary } from "../../../lupin_app/static/js/multiplexer/jobs/types";
 
 const HERE         = dirname( fileURLToPath( import.meta.url ) );
@@ -74,7 +75,7 @@ test( "trendArrow compares the first and last point", () => {
   assert.equal( F.trendArrow( p( 4, 9, 4 ) ), "=" );
 } );
 
-test( "sortJobs puts the worst state first, then title, then target, without touching its input", () => {
+test( "sortJobs goes active first (running, healthy, behind, failing, silent, unknown), then latest attempt, then title, then target, without touching its input", () => {
   const a = { ...find( "duplicate-check" ), state : "healthy" as const, title : "B" };
   const b = { ...find( "duplicate-check" ), state : "failing" as const, title : "Z" };
   const c = { ...find( "duplicate-check" ), state : "healthy" as const, title : "A", target : "y" };
@@ -82,17 +83,34 @@ test( "sortJobs puts the worst state first, then title, then target, without tou
   const e = { ...find( "duplicate-check" ), state : "healthy" as const, title : "A", target : "x" };
   const input = [ a, b, c, d, e ];
   const out   = F.sortJobs( input );
-  assert.deepEqual( out.map( ( j ) => `${ j.state }/${ j.title }/${ j.target }` ), [ "failing/Z/null", "healthy/A/null", "healthy/A/x", "healthy/A/y", "healthy/B/null" ] );
+  assert.deepEqual( out.map( ( j ) => `${ j.state }/${ j.title }/${ j.target }` ), [ "healthy/A/null", "healthy/A/x", "healthy/A/y", "healthy/B/null", "failing/Z/null" ] );
   assert.equal( input[ 0 ], a );
   const real = F.sortJobs( FIXTURE.jobs ).map( ( j ) => j.state );
   assert.deepEqual( real, [ ...real ].sort( ( x, y ) => F.STATE_ORDER.indexOf( x ) - F.STATE_ORDER.indexOf( y ) ) );
 } );
 
-test( "headerLine counts the states in worst-first order", () => {
+test( "sortJobs ranks one job of each state and a running job above them all, ties broken by the newest attempt and a job with none last (row 300af681)", () => {
+  const mk = ( name: string, state: JobEntry[ "state" ], at: string | null, running = false ): JobEntry => {
+    const base = find( "duplicate-check" );
+    const attempt = at === null ? null : { ...( base.last_attempt as NonNullable<JobEntry[ "last_attempt" ]> ), started_at : at };
+    return { ...base, job : name, title : name, target : null, state, running, last_attempt : attempt };
+  };
+  const jobs = [
+    mk( "u", "unknown", null ), mk( "s", "silent", "2026-11-09T10:00:00-05:00" ), mk( "f", "failing", "2026-11-09T10:00:00-05:00" ),
+    mk( "b", "behind", "2026-11-09T10:00:00-05:00" ), mk( "h-old", "healthy", "2026-11-08T10:00:00-05:00" ), mk( "h-new", "healthy", "2026-11-09T09:00:00-05:00" ),
+    mk( "h-none", "healthy", null ), mk( "h-bad", "healthy", "not a time" ), mk( "z-run", "failing", "2026-11-01T10:00:00-05:00", true ),
+    mk( "h-utc", "healthy", "2026-11-09T14:30:00+00:00" ),
+  ];
+  assert.deepEqual( F.sortJobs( jobs ).map( ( j ) => j.job ),
+    [ "z-run", "h-utc", "h-new", "h-old", "h-bad", "h-none", "b", "f", "s", "u" ] );     // 14:30Z is 09:30 in New York: newer than h-new at 09:00 there, so the zone is compared, not the text
+  assert.deepEqual( F.STATE_ORDER, [ "healthy", "behind", "failing", "silent", "unknown" ] );
+} );
+
+test( "headerLine counts the states in active-first order", () => {
   assert.equal( F.headerLine( [] ), "0 jobs" );
   assert.equal( F.headerLine( [ find( "wiki-librarian" ) ] ), "1 job: 1 failing" );
   const mixed = [ "failing", "failing", "behind", "healthy" ].map( ( state ) => ( { ...find( "wiki-librarian" ), state } as JobEntry ) );
-  assert.equal( F.headerLine( mixed ), "4 jobs: 2 failing, 1 behind, 1 healthy" );
+  assert.equal( F.headerLine( mixed ), "4 jobs: 1 healthy, 1 behind, 2 failing" );
 } );
 
 test( "badgeText names the first state, any other state a reason names, and UNSCHEDULED", () => {
@@ -244,7 +262,7 @@ function drawAll( summary: JobsSummary = FIXTURE ): HTMLElement {
   return byId( "jobs-accordion" );
 }
 
-test( "the accordion draws all 23 jobs (plus nested targets) worst state first, each collapsed", () => {
+test( "the accordion draws all 23 jobs (plus nested targets) active first, each collapsed", () => {
   const mount = drawAll();
   const top   = [ ...mount.children ] as HTMLElement[];
   assert.equal( top.length, 23 );
@@ -481,7 +499,7 @@ test( "mounted: loads the summary once, draws 23 jobs, counts them, titles the h
   assert.deepEqual( h.gets, [ "/api/jobs/summary" ] );
   assert.equal( root.querySelectorAll( "[data-testid=jobs-accordion] > [data-testid=jobs-item]" ).length, 23 );
   assert.equal( root.querySelector( "[data-testid=multiplexer-background-jobs-count]" )!.textContent, "23" );
-  assert.match( root.querySelector( "[data-testid=multiplexer-background-jobs-header]" )!.getAttribute( "title" ) as string, /^23 jobs: 9 unknown, 2 silent, 3 failing, 9 healthy$/ );
+  assert.match( root.querySelector( "[data-testid=multiplexer-background-jobs-header]" )!.getAttribute( "title" ) as string, /^23 jobs: 9 healthy, 3 failing, 2 silent, 9 unknown$/ );
   assert.equal( ( root.querySelector( "[data-testid=jobs-error]" ) as HTMLElement ).hidden, true );
   assert.equal( h.timers.length, 1 );
   h.timers[ 0 ]!(); await flush();
@@ -566,4 +584,26 @@ test( "each Run now refusal gets its own plain sentence", async () => {
   const dup = root.querySelector( "[data-job=duplicate-check]" ) as HTMLElement;
   ( dup.querySelector( "[data-testid=jobs-run-now]" ) as HTMLElement ).click(); await flush();
   assert.match( ( dup.querySelector( "[data-testid=jobs-run-status]" ) as HTMLElement ).textContent as string, /run lock is held/ );
+} );
+
+test( "the Background Jobs toolbar icon is 🔁, is used by no other toggle, and the section header shows the same icon (row 288165d6)", async () => {
+  const mine   = SECTION_TOGGLES.find( ( t ) => t.sectionId === "background-jobs-pane" );
+  assert.equal( mine?.icon, "🔁" );
+  const others = SECTION_TOGGLES.filter( ( t ) => t.sectionId !== "background-jobs-pane" );
+  assert.ok( others.length > 15, "the other toggles were not found: the uniqueness check would prove nothing" );
+  assert.deepEqual( others.filter( ( t ) => t.icon === mine?.icon ), [] );
+  const { root } = await mounted( harness() );
+  assert.ok( ( root.querySelector( "[data-testid=multiplexer-background-jobs-header]" )!.textContent as string ).startsWith( "🔁" ) );
+} );
+
+test( "the accordion ends with the switched-off line when the server sends one, and with nothing extra when it does not (row 4aa0ba1b)", () => {
+  const plain = drawAll();
+  assert.equal( plain.querySelector( "[data-testid=background-jobs-off-line]" ), null );
+  const off = drawAll( { ...clone( FIXTURE ), reporting_off : 8, reporting_off_line : "8 jobs have reporting switched off" } );
+  const last = off.lastElementChild as HTMLElement;
+  assert.equal( last.getAttribute( "data-testid" ), "background-jobs-off-line" );
+  assert.equal( last.textContent, "8 jobs have reporting switched off" );
+  assert.equal( off.children.length, 24 );
+  const none = drawAll( { ...clone( FIXTURE ), reporting_off : 0, reporting_off_line : null } );
+  assert.equal( none.children.length, 23 );
 } );

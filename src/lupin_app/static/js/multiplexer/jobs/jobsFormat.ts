@@ -8,7 +8,7 @@
 import type { JobEntry, JobPoint, JobScanDebt, JobState } from "./types";
 
 /** The states, worst first. The accordion sorts by this order. */
-export const STATE_ORDER: readonly JobState[] = [ "unknown", "silent", "failing", "behind", "healthy" ];
+export const STATE_ORDER: readonly JobState[] = [ "healthy", "behind", "failing", "silent", "unknown" ];   // active first (Rick, 9 Nov, row 300af681); a running job goes above all of them
 
 const STATE_LABEL: Record<JobState, string> = {
   unknown : "UNKNOWN",
@@ -40,7 +40,7 @@ export function formatWhen( iso: string | null, todayIso: string ): string {
 
 /** A count with thousands separators, or "not reported". */
 export function formatCount( n: number | null ): string {
-  return n === null ? NOT_REPORTED : n.toLocaleString( "en-US" );
+  return n === null ? NOT_REPORTED : String( n ).replace( /\B(?=(\d{3})+(?!\d))/g, "," );   // thousands commas without the locale API: a count carries no time zone
 }
 
 /**
@@ -58,14 +58,20 @@ export function trendArrow( points: readonly JobPoint[] ): string {
   return last < first ? "▼" : "=";
 }
 
-/** Sort worst state first, then title, then target. Never mutates its input. */
+/**
+ * Sort active first.
+ *
+ * Order is running now, healthy, behind, failing, silent, never reported. Inside one rank
+ * the newest attempt comes first (none last), then title, then target. The input is not changed.
+ */
 export function sortJobs( jobs: readonly JobEntry[] ): JobEntry[] {
-  const rank = ( j: JobEntry ): number => STATE_ORDER.indexOf( j.state );
+  const rank    = ( j: JobEntry ): number => j.running ? -1 : STATE_ORDER.indexOf( j.state );
+  const attempt = ( j: JobEntry ): number => j.last_attempt === null ? -1 : ( Date.parse( j.last_attempt.started_at ) || -1 );
   return [ ...jobs ].sort( ( a, b ) =>
-    rank( a ) - rank( b ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) );
+    rank( a ) - rank( b ) || attempt( b ) - attempt( a ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) );
 }
 
-/** The header line, such as "5 jobs: 3 failing, 1 healthy". Empty states are left out. */
+/** The header line, such as "5 jobs: 1 healthy, 3 failing". Empty states are left out. */
 export function headerLine( jobs: readonly JobEntry[] ): string {
   const parts: string[] = [];
   for ( const state of STATE_ORDER ) {
