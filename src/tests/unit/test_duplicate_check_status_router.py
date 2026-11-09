@@ -68,3 +68,8 @@ def test_installed_crontab_asks_the_job_cards_live_inputs_for_the_text_and_the_z
         def host_zone( self ): return "zone"
     monkeypatch.setattr( job_summary, "live_deps", lambda: ( "root", "data", Deps() ) )
     assert dcs.installed_crontab() == ( "tab", "zone" )
+
+
+def test_the_page_carries_the_installed_schedule_so_a_snapshot_without_it_reddens( client ):
+    page = client.get( "/app/duplicate-check" ).text
+    assert "Schedule read from the crontab: 0 10 * * *." in page and "lateness is not judged" not in page
