@@ -264,6 +264,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
         - --install, --uninstall and --status go through the librarian's locked crontab editor with this job's tag
         - an InstallRefused or a RuntimeError prints one line to err and returns 1
         - a worktree root or a missing credential prints the named error as JSON and returns EXIT_NAMED
+        - after every run that returns, whatever its outcome, writes vector-status.json beside the state file and files no row; a check that fails is logged and leaves the exit code alone
     """
     environ = os.environ if environ is None else environ
     now     = now or datetime.datetime.now()
@@ -320,6 +321,9 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
         jsa.record_refresh( folder, { "ran": False, "reason": f"{type( error ).__name__}: {error}" }, EXIT_FAILED, lt.read_state( os.path.join( folder, STATE_NAME ) ), now, environ )
         raise
     jsa.record_refresh( folder, summary, code, lt.read_state( os.path.join( folder, STATE_NAME ) ), now, environ )
+    from cosa.repo.symindex import vector_status                       # imported here because vector_status imports this module
+    try: vector_status.check( root, now, environ=environ, log=log )   # no librarian: writes vector-status.json and files no row
+    except ( OSError, ValueError, CandidateError ) as error: log( f"vector status check failed: {error}" )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
 

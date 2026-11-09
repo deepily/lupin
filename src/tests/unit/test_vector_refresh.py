@@ -350,7 +350,7 @@ def test_the_switch_is_read_from_this_jobs_own_key( world, monkeypatch ):
     seen = []
     monkeypatch.setattr( lt, "read_value", lambda key, reader=None, errors=None: seen.append( key ) or "true" )
     rc, _, _ = run_main( world, [], writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
-    assert rc == 0 and seen == [ vr.ENABLED_KEY ] and vr.ENABLED_KEY != lt.ENABLED_KEY
+    assert rc == 0 and seen[ 0 ] == vr.ENABLED_KEY and lt.ENABLED_KEY not in seen and vr.ENABLED_KEY != lt.ENABLED_KEY, "the switch comes first; the status check after the run reads only its own stale-hours key"
 
 
 def test_a_switched_on_run_builds_and_prints_the_summary( world, monkeypatch ):
@@ -510,6 +510,37 @@ def test_the_wrapper_keeps_a_callers_own_configuration_manager_args( tmp_path ):
 def _summaries( world ):
     """Ensures: returns every job-summary.json the run left under the test data folder, parsed."""
     return [ json.loads( p.read_text() ) for p in world[ "data" ].rglob( "job-summary.json" ) ]
+
+
+def test_every_run_that_returns_writes_the_status_file_and_files_no_row( world, monkeypatch ):
+    from cosa.repo.symindex import vector_status as vs
+    seen = []
+    monkeypatch.setattr( vs, "check", lambda root, now, **kw: seen.append( ( root, now, kw ) ) )
+    for code, summary in ( ( 0, { "ran": True, "outcome": "built" } ), ( 1, { "ran": False, "outcome": "failed", "reason": "boom" } ), ( 0, { "ran": False, "reason": "not due" } ) ):
+        monkeypatch.setattr( vr, "run_refresh", lambda *a, code=code, summary=summary, **k: ( code, summary ) )
+        assert run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )[ 0 ] == code
+    assert len( seen ) == 3, "built, failed and not-due runs each leave a status"
+    assert all( kw.get( "librarian" ) is None for _, _, kw in seen ), "no librarian is passed, so no store row can be filed"
+    assert all( now == NOON and root == str( world[ "root" ] ) for root, now, _ in seen )
+
+
+def test_the_status_file_really_lands_in_the_refresh_folder_after_a_run( world, monkeypatch ):
+    monkeypatch.setattr( vr, "run_refresh", lambda *a, **k: ( 0, { "ran": False, "reason": "not due" } ) )
+    path = world[ "data" ] / "refresh" / "vector-status.json"
+    assert not path.exists()
+    run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    assert json.loads( path.read_text() )[ "checked_at" ] == NOON.isoformat( timespec="seconds" )
+
+
+@pytest.mark.parametrize( "error", [ OSError( "disk" ), ValueError( "bad" ), vr.CandidateError( "X", "detail" ) ] )
+def test_a_failing_status_check_is_logged_and_never_changes_the_exit_code( world, monkeypatch, error ):
+    from cosa.repo.symindex import vector_status as vs
+    def broken( *a, **k ): raise error
+    monkeypatch.setattr( vs, "check", broken )
+    monkeypatch.setattr( vr, "run_refresh", lambda *a, **k: ( 0, { "ran": False, "reason": "not due" } ) )
+    rc, out, _ = run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    assert rc == 0 and json.loads( out )[ "reason" ] == "not due"
+    assert "vector status check failed" in ( world[ "data" ] / "refresh" / vr.LOG_NAME ).read_text()
 
 
 def test_main_leaves_a_job_summary_for_a_switched_off_run_a_finished_run_and_a_crash( world, monkeypatch ):
