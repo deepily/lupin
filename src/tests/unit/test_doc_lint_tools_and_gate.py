@@ -1349,6 +1349,15 @@ def test_gate_allows_the_commit_and_says_so_loudly_when_it_crashes( repo, monkey
     assert sent == [ ( "ValueError", "injected crash", str( repo ) ) ], "one crash, one notification"
 
 
+REAL_NOTIFY_CRASH = gate.notify_crash
+
+
+@pytest.fixture( autouse=True )
+def _no_real_crash_alert( monkeypatch ):
+    """Stub notify_crash so no unit run alerts anyone."""
+    monkeypatch.setattr( gate, "notify_crash", lambda exc, root, err: False )
+
+
 def _crash_sink():
     """A stand-in for the notify call that records what it was sent."""
     calls = []
@@ -1362,7 +1371,7 @@ def test_a_forced_crash_exits_zero_and_calls_the_real_notifier_once_with_the_exc
     def boom( root ): raise ValueError( "injected crash" )
     monkeypatch.setattr( gate, "collect", boom )
     calls, query = _crash_sink()
-    real = gate.notify_crash
+    real = REAL_NOTIFY_CRASH
     monkeypatch.setattr( gate, "notify_crash", lambda exc, root, err: real( exc, root, err, query=query, api_key=lambda: "k", target_of=lambda env: "rick@example.test" ) )
     _stage( repo, { "docs/a.md": "clean\n" } )
     _git( repo, "commit", "-q", "-m", "base" )
@@ -1380,14 +1389,14 @@ def test_notify_crash_reports_true_on_http_200_and_names_the_exception_type_and_
     calls, query = _crash_sink()
     err = io.StringIO()
     try: raise KeyError( "k1" )
-    except KeyError as exc: assert gate.notify_crash( exc, str( repo ), err, query=query, api_key=lambda: "key", target_of=lambda env: "who" ) is True
+    except KeyError as exc: assert REAL_NOTIFY_CRASH( exc, str( repo ), err, query=query, api_key=lambda: "key", target_of=lambda env: "who" ) is True
     assert err.getvalue() == "" and "KeyError: 'k1'" in calls[ 0 ][ 3 ][ "message" ]
 
 
 def test_notify_crash_cuts_a_long_exception_text_to_the_limit( repo ):
     calls, query = _crash_sink()
     exc = ValueError( "x" * 1000 )
-    gate.notify_crash( exc, str( repo ), io.StringIO(), query=query, api_key=lambda: "key", target_of=lambda env: "who" )
+    REAL_NOTIFY_CRASH( exc, str( repo ), io.StringIO(), query=query, api_key=lambda: "key", target_of=lambda env: "who" )
     assert "x" * gate.CRASH_TEXT_LIMIT in calls[ 0 ][ 3 ][ "message" ] and "x" * ( gate.CRASH_TEXT_LIMIT + 1 ) not in calls[ 0 ][ 3 ][ "message" ]
 
 
@@ -1396,14 +1405,14 @@ def test_notify_crash_prints_one_line_and_returns_false_when_it_cannot_send( rep
     calls, query = _crash_sink()
     def no_key(): raise RuntimeError( "key unreadable" )
     err = io.StringIO()
-    result = gate.notify_crash( ValueError( "e" ), str( repo ), err, query=query, api_key=no_key if target == "boom" else ( lambda: "k" ), target_of=lambda env: None if target is None else "who" )
+    result = REAL_NOTIFY_CRASH( ValueError( "e" ), str( repo ), err, query=query, api_key=no_key if target == "boom" else ( lambda: "k" ), target_of=lambda env: None if target is None else "who" )
     assert result is False and not calls
     assert err.getvalue().count( "\n" ) == 1 and expect in err.getvalue()
 
 
 def test_notify_crash_prints_one_line_and_returns_false_on_a_non_200_answer( repo ):
     err = io.StringIO()
-    result = gate.notify_crash( ValueError( "e" ), str( repo ), err, query=lambda *a: ( 503, "down" ), api_key=lambda: "k", target_of=lambda env: "who" )
+    result = REAL_NOTIFY_CRASH( ValueError( "e" ), str( repo ), err, query=lambda *a: ( 503, "down" ), api_key=lambda: "k", target_of=lambda env: "who" )
     assert result is False and err.getvalue() == "[doc-lint] crash notification not sent: HTTP 503 down\n"
 
 

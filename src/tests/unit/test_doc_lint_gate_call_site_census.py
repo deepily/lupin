@@ -125,6 +125,12 @@ EXPECTED = {
     "range_gate.main:shutil.rmtree#0"                        : RANGE,
 }
 
+@pytest.fixture( autouse=True )
+def _no_real_crash_alert( monkeypatch ):
+    """Stub notify_crash so the injected crashes alert no one."""
+    monkeypatch.setattr( gate, "notify_crash", lambda exc, root, err: False )
+
+
 ERRORS = ( OSError( 13, "injected for the census" ), UnicodeDecodeError( "utf-8", b"\xff", 0, 1, "injected for the census" ) )
 
 
