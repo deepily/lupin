@@ -34,7 +34,8 @@ _claude_login_verdict() {
 #
 # Requires:  $1 = container name; run_cmd, say_ok, say_fail and remedy defined by the caller
 # Ensures:   calls say_ok for a valid login, or for one that a single renewing call made valid; say_fail plus
-#            remedy for an expired one that stays expired and for an unreadable one; returns 0
+#            remedy for an expired one that stays expired (including a renewing call that hangs past
+#            CLAUDE_LOGIN_RENEW_TIMEOUT seconds, default 60) and for an unreadable one; returns 0
 #            always, so a caller that exits on error is never ended by an expired login
 #            an unreadable expiry is never renewed: only a lapsed one is
 probe_claude_login() {
@@ -43,7 +44,7 @@ probe_claude_login() {
     status="${verdict%% *}"
     detail="${verdict#* }"
     if [ "$status" = "expired" ]; then
-        run_cmd docker exec "${container}" claude -p "Reply with the single word ok" --max-turns 1 >/dev/null 2>&1 || true
+        run_cmd timeout "${CLAUDE_LOGIN_RENEW_TIMEOUT:-60}" docker exec "${container}" claude -p "Reply with the single word ok" --max-turns 1 >/dev/null 2>&1 || true
         verdict="$( _claude_login_verdict "${container}" )"
         status="${verdict%% *}"
         detail="${verdict#* }"

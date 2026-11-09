@@ -86,7 +86,7 @@ def _fake_docker( tmp_path ):
         'esac\n'
         'case "$*" in\n'
         '  *"test -f /home/rruiz/.claude/.credentials.json"*) exit 0 ;;\n'
-        '  *"claude -p"*) touch "$FAKE_DOCKER_LOG.renewed"; exit 0 ;;\n'
+        '  *"claude -p"*) if [ -n "${FAKE_RENEW_HANG:-}" ]; then exec sleep 30; fi; touch "$FAKE_DOCKER_LOG.renewed"; exit 0 ;;\n'
         '  *expiresAt*) if [ -n "${FAKE_EXPIRES_FAIL:-}" ]; then echo "KeyError" >&2; exit 1; fi; if [ -n "${FAKE_EXPIRES_AFTER:-}" ] && [ -e "$FAKE_DOCKER_LOG.renewed" ]; then echo "$FAKE_EXPIRES_AFTER"; else echo "$FAKE_EXPIRES"; fi; exit 0 ;;\n'
         'esac\n'
         'exit 1\n' )
@@ -156,3 +156,21 @@ def test_a_lapsed_expiry_that_the_call_does_not_move_still_fails_with_the_remedy
 def test_an_unreadable_expiry_is_never_renewed( tmp_path ):
     _, log = _preflight( tmp_path, fail=True )
     assert "claude -p" not in log, log
+
+
+def test_a_renewing_call_that_hangs_is_cut_off_and_reads_as_not_renewed( tmp_path, monkeypatch ):
+    import time
+    monkeypatch.setenv( "FAKE_RENEW_HANG", "1" )
+    monkeypatch.setenv( "CLAUDE_LOGIN_RENEW_TIMEOUT", "1" )
+    start = time.monotonic()
+    out, log = _preflight( tmp_path, expires=EXPIRED, after=FAR_AHEAD )
+    assert time.monotonic() - start < 20, "the 30-second hang was cut off by the timeout"
+    line = _login_line( out )
+    assert "[FAIL]" in line and "expired" in line and "renewed from the refresh token" not in line, out
+    assert "docker exec -it fake-test claude /login" in out, out
+    assert len( [ l for l in log.splitlines() if "claude -p" in l ] ) == 1, log
+
+
+def test_the_renewing_call_runs_under_a_sixty_second_timeout_by_default( ):
+    text = open( os.path.join( ROOT, "src/scripts/lib/claude-login-probe.sh" ) ).read()
+    assert 'timeout "${CLAUDE_LOGIN_RENEW_TIMEOUT:-60}" docker exec' in text
