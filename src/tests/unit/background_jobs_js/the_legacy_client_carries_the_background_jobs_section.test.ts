@@ -214,10 +214,10 @@ test( "unsafe hrefs are drawn as text, never as links, and writer text is never 
   job.evidence[ 0 ]!.href = "//evil/x";
   job.detail_link = "http://evil/x";
   const item = api.renderJob( job, FIXTURE.generated_at, { canRun : false, runNow : async () => "" } ) as HTMLElement;
-  assert.equal( item.querySelector( "img" ), null );
+  assert.ok( item.querySelector( "img" ) === null, "item has no img" );
   assert.equal( item.querySelector( "[data-testid=jobs-row-title]" )!.textContent, "<img src=x onerror=alert(1)>" );
   assert.equal( item.querySelector( "[data-testid=jobs-evidence-path]" ) !== null, true );
-  assert.equal( item.querySelector( "[data-testid=jobs-detail-link]" ), null );
+  assert.ok( item.querySelector( "[data-testid=jobs-detail-link]" ) === null, "item has no [data-testid=jobs-detail-link]" );
 } );
 
 test( "the legacy copy and the multiplexer's copy DRAW THE SAME THING for all 23 fixture jobs (two copies, no shared code)", async () => {

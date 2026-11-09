@@ -307,7 +307,7 @@ test( "a job whose installed schedule could not be read says so on its line and 
   assert.equal( item.querySelector( "[data-testid=jobs-badge]" )!.textContent, "UNKNOWN · schedule unverified" );
   assert.match( item.querySelector( "[data-testid=jobs-schedule-unverified]" )!.textContent as string, /could not be read/ );
   const other = renderJob( document, find( "doc-parity-tick" ), TODAY, NO_ACTIONS );
-  assert.equal( other.querySelector( "[data-testid=jobs-schedule-unverified]" ), null );
+  assert.ok( other.querySelector( "[data-testid=jobs-schedule-unverified]" ) === null, "other has no [data-testid=jobs-schedule-unverified]" );
   assert.equal( FIXTURE.jobs.filter( ( j ) => j.schedule_unverified ).length, 1 );
 } );
 
@@ -319,8 +319,8 @@ test( "a scan count with no unit prints the bare number", () => {
 
 test( "debts that do not apply are absent; debts that apply but are null say not reported", () => {
   const reuse = renderJob( document, find( "reuse-behaviour" ), TODAY, NO_ACTIONS );
-  assert.equal( reuse.querySelector( "[data-testid=jobs-scan]" ), null );
-  assert.equal( reuse.querySelector( "[data-testid=jobs-fix]" ), null );
+  assert.ok( reuse.querySelector( "[data-testid=jobs-scan]" ) === null, "reuse has no [data-testid=jobs-scan]" );
+  assert.ok( reuse.querySelector( "[data-testid=jobs-fix]" ) === null, "reuse has no [data-testid=jobs-fix]" );
   const j = find( "duplicate-check" ); j.scan_debt = null; j.fix_debt = null; j.strip = [];
   const item = renderJob( document, j, TODAY, NO_ACTIONS );
   assert.equal( item.querySelector( "[data-testid=jobs-scan] p" )!.textContent, "not reported" );
@@ -331,10 +331,10 @@ test( "debts that do not apply are absent; debts that apply but are null say not
 test( "a liveness job shows up or down and no strip, scan or run history", () => {
   const item = renderJob( document, find( "fleet-arbiter" ), TODAY, NO_ACTIONS );
   assert.equal( item.querySelector( "[data-testid=jobs-liveness]" )!.textContent, "systemd unit lupin-arbiter-app.service" );
-  assert.equal( item.querySelector( "[data-testid=jobs-strip]" ), null );
-  assert.equal( item.querySelector( "[data-testid=jobs-scan]" ), null );
+  assert.ok( item.querySelector( "[data-testid=jobs-strip]" ) === null, "item has no [data-testid=jobs-strip]" );
+  assert.ok( item.querySelector( "[data-testid=jobs-scan]" ) === null, "item has no [data-testid=jobs-scan]" );
   assert.equal( item.querySelector( "[data-testid=jobs-last-finished]" )!.textContent, "" );
-  assert.equal( item.querySelector( "[data-testid=jobs-run-now]" ), null, "runnable false hides Run now" );
+  assert.ok( item.querySelector( "[data-testid=jobs-run-now]" ) === null, "runnable false hides Run now" );
 } );
 
 test( "reasons: the empty case, an unknown reason, and the machine-was-off clause", () => {
@@ -366,8 +366,8 @@ test( "unsafe hrefs are drawn as text, never as links", () => {
   j.rows[ 0 ]!.href = "//evil.example/y";
   j.fix_debt!.store_href = "javascript:void(0)";
   const item = renderJob( document, j, TODAY, NO_ACTIONS );
-  assert.equal( item.querySelector( "[data-testid=jobs-detail-link]" ), null );
-  assert.equal( item.querySelector( "[data-testid=jobs-fix-store-link]" ), null );
+  assert.ok( item.querySelector( "[data-testid=jobs-detail-link]" ) === null, "item has no [data-testid=jobs-detail-link]" );
+  assert.ok( item.querySelector( "[data-testid=jobs-fix-store-link]" ) === null, "item has no [data-testid=jobs-fix-store-link]" );
   assert.equal( item.querySelectorAll( "[data-testid=jobs-evidence-link]" ).length, 0 );
   assert.equal( item.querySelectorAll( "[data-testid=jobs-row-link]" ).length, 1 );
   assert.equal( item.querySelector( "[data-testid=jobs-evidence-path]" )!.textContent, "Ledger line: io/duplicate-check-daily/runs.jsonl:9" );
