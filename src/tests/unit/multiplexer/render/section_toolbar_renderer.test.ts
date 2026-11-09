@@ -577,3 +577,16 @@ test( "the RECONCILE reads the persist key too — a preference that saves must 
   assert.ok( header.hidden, "the reconcile restored the pane but not the header region" );
   r.unmount();
 } );
+
+test( "the Background Jobs toggle sits right after the Epic Board and names the pane the page declares (row d540113f)", () => {
+  const ids   = SECTION_TOGGLES.map( ( t ) => t.sectionId );
+  const epic  = ids.indexOf( "epic-board-pane" );
+  assert.ok( epic >= 0, "the Epic Board entry is missing: the order check below would prove nothing" );
+  assert.equal( ids[ epic + 1 ], "background-jobs-pane" );
+  assert.deepEqual( SECTION_TOGGLES[ epic + 1 ], {
+    sectionId : "background-jobs-pane",
+    icon      : "🗓️",
+    title     : "Background Jobs",
+    testid    : "multiplexer-section-toolbar-background-jobs",
+  } );
+} );
