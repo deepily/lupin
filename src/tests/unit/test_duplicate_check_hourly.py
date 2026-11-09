@@ -435,3 +435,23 @@ def test_the_same_continuity_refusal_alerts_once_and_not_again_every_slot( repo,
     second = dd.run( repo, NOW + datetime.timedelta( hours=2 ), "cron", 10, "/bin/claude", parts, branch="wip-b" )
     assert ( first[ "repeat" ], first[ "notified" ], second[ "repeat" ], second[ "notified" ] ) == ( False, True, True, False )
     assert [ s[ 0 ] for s in hooks.sent ].count( "urgent" ) == 1
+
+
+def test_a_run_through_the_real_transport_records_the_tokens_the_sdk_reported_in_the_run_file_and_the_history_row( repo, tmp_path ):
+    from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+    from cosa.repo.duplicate_check import judge
+    answers = FakeBackend()
+
+    async def query( prompt, options ):
+        """Ensures: answers as the SDK would, with a text reply and then a result that reports usage."""
+        yield AssistantMessage( content=[ TextBlock( answers.answer( prompt ) ) ], model=options.model )
+        yield ResultMessage( subtype="success", duration_ms=5, duration_api_ms=4, is_error=False, num_turns=1, session_id="s", total_cost_usd=0.25,
+                             usage={ "input_tokens": 11, "output_tokens": 13, "cache_creation_input_tokens": 17, "cache_read_input_tokens": 19 }, result="ok" )
+
+    history( repo )
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, backend=judge.MaxPlanBackend( query_fn=query ) ), branch="main" )
+    calls = doc[ "judge_calls" ]
+    assert calls == 3 and doc[ "usage" ] == { "calls": 3, "input_tokens": 33, "output_tokens": 39, "cache_creation_input_tokens": 51, "cache_read_input_tokens": 57, "cost_usd": 0.75 }
+    row = hist.read_lines( tmp_path / "io" / "duplicate-check-daily" )[ 0 ]
+    assert ( row[ "input_tokens" ], row[ "output_tokens" ], row[ "cache_creation_tokens" ], row[ "cache_read_tokens" ], row[ "usage_calls" ], row[ "cost_usd" ] ) == ( 33, 39, 51, 57, 3, 0.75 )
+    assert row[ "calls_per_hour" ] is not None
