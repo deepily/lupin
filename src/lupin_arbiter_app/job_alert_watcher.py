@@ -22,12 +22,14 @@ import os
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from cosa.agents.heartbeat_arbiter.arbiter_journal import DELIVERED_OUTCOMES
 from lupin_arbiter_app.poll_loop import run_poll_loop
 from lupin_arbiter_app.health_watcher import SystemClock
 
 BAD_STATES    = ( "failing", "silent", "behind" )
 STATE_FILE    = "io/jobs/alert-state.json"
 MAX_MESSAGE   = 300
+DELIVERED     = frozenset( DELIVERED_OUTCOMES | { "posted" } )                 # the live channel's delivered outcomes, and the durable post
 
 
 def flatten( jobs: List[ dict ] ) -> List[ dict ]:
@@ -86,15 +88,15 @@ def _due( last_iso: Optional[ str ], now: datetime.datetime, interval_seconds: i
     return ( now - last ).total_seconds() >= interval_seconds
 
 
-def decide( jobs: List[ dict ], state: Dict[ str, str ], now: datetime.datetime ) -> Tuple[ List[ str ], Dict[ str, str ] ]:
+def due_alerts( jobs: List[ dict ], state: Dict[ str, str ], now: datetime.datetime ) -> Tuple[ List[ Tuple[ str, str ] ], Dict[ str, str ] ]:
     """
-    Pick the alerts due now and work out the state to keep.
+    Pick the alerts due now and work out the state to keep if every one is delivered.
 
     Requires:
         - jobs is the list from the jobs summary; state maps alert keys to the ISO time of the last alert; now is aware
 
     Ensures:
-        - returns ( messages, new_state )
+        - returns ( alerts, new_state ), where alerts is a list of ( key, message )
         - only failing, silent and behind entries are alerted: unknown and healthy never are
         - an entry with no stored time, or whose interval has passed, gets one message and the stored time becomes now
         - an entry alerted less than its interval ago keeps its stored time and gets no message
@@ -107,11 +109,36 @@ def decide( jobs: List[ dict ], state: Dict[ str, str ], now: datetime.datetime 
         key  = alert_key( entry )
         last = state.get( key )
         if _due( last, now, entry[ "notify_interval_seconds" ] ):
-            messages.append( alert_message( entry ) )
+            messages.append( ( key, alert_message( entry ) ) )
             new_state[ key ] = now.isoformat()
         else:
             new_state[ key ] = last
     return messages, new_state
+
+
+def decide( jobs: List[ dict ], state: Dict[ str, str ], now: datetime.datetime ) -> Tuple[ List[ str ], Dict[ str, str ] ]:
+    """
+    Pick the messages due now and the state to keep, assuming each is delivered.
+
+    Ensures:
+        - returns ( messages, new_state ) as due_alerts does, with the messages alone and not their keys
+    """
+    alerts, new_state = due_alerts( jobs, state, now )
+    return [ message for _, message in alerts ], new_state
+
+
+def delivered( outcomes: Any ) -> bool:
+    """
+    Say whether a send reached anyone.
+
+    Requires:
+        - outcomes is what the escalation sink returns: a list of { channel, outcome } dicts
+
+    Ensures:
+        - True when at least one channel's outcome is a delivered outcome (the live channel's, or the durable post)
+        - False for anything else, including a result that is not a list
+    """
+    return isinstance( outcomes, list ) and any( isinstance( o, dict ) and o.get( "outcome" ) in DELIVERED for o in outcomes )
 
 
 def read_state( path: str ) -> Dict[ str, str ]:
@@ -182,7 +209,7 @@ class JobAlertLoop:
         Hold the seams.
 
         Requires:
-            - summary_fn returns the jobs list; notify_fn( message ) never raises
+            - summary_fn returns the jobs list; notify_fn( message ) returns the sink's list of outcome dicts
             - interval_seconds is a positive int; clock has now() and sleep( seconds )
         """
         self.summary_fn       = summary_fn
@@ -201,18 +228,25 @@ class JobAlertLoop:
         Run one poll.
 
         Ensures:
-            - sends each due alert, then saves the new state; the state is saved only after the sends, so a crash re-alerts and never loses one
+            - sends each due alert, then saves the state; the state is saved only after the sends, so a crash re-alerts and never loses one
+            - an alert that reached no channel is logged as job_alert_undelivered and its key keeps its old state, so the next poll tries it again
             - logs one job_alert event per message sent
-            - returns the number of alerts sent
-            - raises what summary_fn raises
+            - returns the number of alerts delivered
+            - raises what summary_fn or notify_fn raises, before anything is saved
         """
         state                 = self.read_state_fn( self.state_path )
-        messages, new_state   = decide( self.summary_fn(), state, self.clock.now() )
-        for message in messages:
+        alerts, new_state     = due_alerts( self.summary_fn(), state, self.clock.now() )
+        sent                  = 0
+        for key, message in alerts:
             self.log_fn( "job_alert", message=message )
-            self.notify_fn( message )
+            if delivered( self.notify_fn( message ) ):
+                sent += 1
+                continue
+            self.log_fn( "job_alert_undelivered", message=message )
+            if key in state: new_state[ key ] = state[ key ]
+            else: del new_state[ key ]
         if new_state != state: self.write_state_fn( self.state_path, new_state )
-        return len( messages )
+        return sent
 
     def start( self ) -> None:                                  # pragma: no cover - thread spawn boundary
         """Ensures: the poll loop runs on a daemon thread until stop() is called."""

@@ -82,10 +82,19 @@ def test_the_message_names_the_state_and_handles_no_reason_and_long_reasons():
     assert len( long ) == jaw.MAX_MESSAGE and long.endswith( "…" )
 
 
+OK = [ { "channel": "durable", "outcome": "posted" } ]
+
+
+def sender( sent, outcomes=OK ):
+    """A notify_fn that records the message and answers like the escalation sink."""
+    def send( message ): sent.append( message ); return outcomes
+    return send
+
+
 def test_the_loop_sends_each_due_alert_then_saves_the_state_and_alerts_again_only_after_the_interval(tmp_path):
     clock, sent, logged = Clock(), [ ], [ ]
     jobs = [ entry( interval=600 ), entry( job="b", state="healthy" ) ]
-    loop = jaw.JobAlertLoop( lambda: jobs, sent.append, str( tmp_path / "sub" / "state.json" ), lambda event, **kw: logged.append( ( event, kw ) ), clock=clock )
+    loop = jaw.JobAlertLoop( lambda: jobs, sender( sent ), str( tmp_path / "sub" / "state.json" ), lambda event, **kw: logged.append( ( event, kw ) ), clock=clock )
     assert loop.poll_once() == 1 and len( sent ) == 1
     assert json.loads( ( tmp_path / "sub" / "state.json" ).read_text() ) == { "dup": T0.isoformat() }
     clock.advance( 300 ); assert loop.poll_once() == 0
@@ -96,9 +105,50 @@ def test_the_loop_sends_each_due_alert_then_saves_the_state_and_alerts_again_onl
 def test_a_new_loop_reads_the_saved_state_so_a_restart_does_not_repeat_an_alert(tmp_path):
     path, sent = str( tmp_path / "state.json" ), [ ]
     jobs = [ entry( interval=86400 ) ]
-    jaw.JobAlertLoop( lambda: jobs, sent.append, path, lambda e, **k: None, clock=Clock() ).poll_once()
-    jaw.JobAlertLoop( lambda: jobs, sent.append, path, lambda e, **k: None, clock=Clock( T0 + datetime.timedelta( seconds=60 ) ) ).poll_once()
+    jaw.JobAlertLoop( lambda: jobs, sender( sent ), path, lambda e, **k: None, clock=Clock() ).poll_once()
+    jaw.JobAlertLoop( lambda: jobs, sender( sent ), path, lambda e, **k: None, clock=Clock( T0 + datetime.timedelta( seconds=60 ) ) ).poll_once()
     assert len( sent ) == 1
+
+
+def test_an_alert_that_reached_no_channel_is_not_saved_and_is_tried_again_at_the_next_poll(tmp_path):
+    path, sent, logged, clock = str( tmp_path / "state.json" ), [ ], [ ], Clock()
+    failed = [ { "channel": "durable", "outcome": "post_error" }, { "channel": "live", "outcome": "user_not_available" } ]
+    jobs   = [ entry( interval=86400 ) ]
+    loop   = jaw.JobAlertLoop( lambda: jobs, sender( sent, failed ), path, lambda e, **k: logged.append( e ), clock=clock )
+    assert loop.poll_once() == 0 and jaw.read_state( path ) == { }, "nothing delivered: nothing remembered"
+    assert "job_alert_undelivered" in logged
+    clock.advance( 60 )
+    loop.notify_fn = sender( sent, OK )
+    assert loop.poll_once() == 1 and len( sent ) == 2, "the very next poll tries again, long before the 86400 second interval"
+    assert list( jaw.read_state( path ) ) == [ "dup" ]
+
+
+def test_a_failed_repeat_keeps_the_old_time_so_the_interval_still_counts_from_the_last_delivery(tmp_path):
+    path, clock = str( tmp_path / "state.json" ), Clock()
+    jobs = [ entry( interval=600 ) ]
+    loop = jaw.JobAlertLoop( lambda: jobs, sender( [ ] ), path, lambda e, **k: None, clock=clock )
+    loop.poll_once()
+    first = jaw.read_state( path )
+    clock.advance( 600 )
+    loop.notify_fn = sender( [ ], [ { "channel": "live", "outcome": "http_error" } ] )
+    assert loop.poll_once() == 0 and jaw.read_state( path ) == first
+
+
+def test_one_delivered_channel_is_enough_and_a_live_delivery_counts():
+    assert jaw.delivered( [ { "channel": "durable", "outcome": "post_error" }, { "channel": "live", "outcome": "queued" } ] )
+    assert jaw.delivered( [ { "channel": "live", "outcome": "delivered_via_listener" } ] )
+    assert not jaw.delivered( [ ] ) and not jaw.delivered( None ) and not jaw.delivered( [ "posted" ] )
+    assert not jaw.delivered( [ { "channel": "live", "outcome": "deduped" }, { "channel": "live", "outcome": "disabled" } ] )
+
+
+def test_a_send_that_raises_leaves_the_state_file_untouched(tmp_path):
+    path = str( tmp_path / "state.json" )
+    jaw.write_state( path, { "old": T0.isoformat() } )
+    before = ( tmp_path / "state.json" ).read_text()
+    def boom( message ): raise RuntimeError( "sink down" )
+    loop = jaw.JobAlertLoop( lambda: [ entry() ], boom, path, lambda e, **k: None, clock=Clock() )
+    with pytest.raises( RuntimeError ): loop.poll_once()
+    assert ( tmp_path / "state.json" ).read_text() == before, "the state is written only after the sends"
 
 
 def test_a_poll_that_changes_nothing_writes_nothing():

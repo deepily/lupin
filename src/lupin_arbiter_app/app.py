@@ -292,7 +292,7 @@ def _build_context_pressure_loop( cfg, store, *, clock=None, log_fn=None ):
 
 def _build_job_alert_loop( cfg, gateway, live_notify_fn, *, log_fn, clock=None ):
     """
-    Build the job alert watcher, gated on `arbiter job alert enabled`.
+    Build the job alert watcher, gated on `arbiter job alert enabled` (ships false).
 
     Alerts go to Rick only, as a durable post plus a best-effort live push, through the shared
     escalation sink. There is no manager fanout.
@@ -305,7 +305,7 @@ def _build_job_alert_loop( cfg, gateway, live_notify_fn, *, log_fn, clock=None )
         - returns a JobAlertLoop when enabled
         - returns None and logs job_alert_watcher_disabled when disabled, importing nothing from the job service
     """
-    if not cfg.get( "arbiter job alert enabled", default=True, return_type="boolean" ):
+    if not cfg.get( "arbiter job alert enabled", default=False, return_type="boolean" ):
         log_fn( "job_alert_watcher_disabled", reason="arbiter job alert enabled = false" )
         return None
 
