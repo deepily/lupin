@@ -125,10 +125,35 @@ def triage_payload( findings, owner, day ):
               f"What to do: for each function below, rule duplicate (reuse the existing one), extend (change the existing one) or distinct (keep both). "
               f"Write one DUPCHECK-VERDICT line per function with lupin_mcp.duplicate_check_verdicts; it amends this row.\n"
               f"Window: {findings[ 0 ][ 'window' ][ 'start' ]}..{findings[ 0 ][ 'window' ][ 'end' ]}. Owner: {owner[ 'owner' ]} ({owner[ 'note' ]}).\n"
-              f"Correlation: one row per run, key {key}; a function already on an earlier row is not listed again.\n\n" + "\n".join( lines ) )
+              f"Correlation: one row per batch of findings, key {key}; a function already on an earlier row is not listed again.\n\n" + "\n".join( lines ) )
     return { "item_class": ITEM_CLASS, "title": f"[LUPIN] Duplicate check {day.day} {day.strftime( '%b' )}: decide whether {count} new function(s) should reuse existing ones",
              "project": PROJECT, "created_by": filer_created_by( owner[ "owner" ], CREATED_BY ), "body": body, "owner_persona": owner[ "owner" ], "accountable_manager": owner[ "owner" ],
              "priority": PRIORITY, "correlation_key": key, "finding_keys": keys }
+
+
+def triage_payloads( findings, owner, day ):
+    """
+    Build the rows of a run, each small enough to list all of its findings.
+
+    Requires:
+        - findings and owner are triage_payload's; there is at least one finding
+    Ensures:
+        - returns a list of triage_payload rows, in the findings' order, each listing every one of its findings, with a body of at most BODY_LIMIT characters and at most LIST_LIMIT findings
+        - every finding is in exactly one row, and a row's finding_keys are the keys of its own findings only
+        - a finding whose line alone passes the limit has a row of its own, which send_row then cuts
+        - with more than one row each title ends with its part and the count of parts
+    """
+    parts, chunk = [], []
+    for f in findings:
+        if chunk and ( len( chunk ) + 1 > LIST_LIMIT or len( triage_payload( [ *chunk, f ], owner, day )[ "body" ] ) > BODY_LIMIT ):
+            parts.append( chunk )
+            chunk = []
+        chunk.append( f )
+    parts.append( chunk )
+    rows = [ triage_payload( c, owner, day ) for c in parts ]
+    if len( rows ) > 1:
+        for n, row in enumerate( rows, 1 ): row[ "title" ] += f" (part {n} of {len( rows )})"
+    return rows
 
 
 def read_pending( folder ):
@@ -212,17 +237,18 @@ def append_triaged( folder, keys, row_key, day ):
 
 def file_findings( findings, folder, store, declared, roster, day=None ):
     """
-    File the run's one triage row, the spooled row first.
+    File the run's triage rows, the spooled rows first.
 
     Requires:
         - findings are triage_payload's findings; folder is the daily check's record folder
         - day is the date for the title; None takes the first finding's day field, an ISO date, else today
     Ensures:
-        - returns { filed, already_filed, queued_for_retry, refused, retired_shape } as lists of { key, ... }, at most one entry for this run's row and one for each spooled row
+        - returns { filed, already_filed, queued_for_retry, refused, retired_shape } as lists of { key, ... }, one entry for each row this run builds and one for each spooled row
         - a spooled payload with no finding_keys is in the retired one-row-per-definition shape: it is never sent, it is listed under retired_shape with its key and owner, and it stays in the spool for a person to remove
         - a finding already on an earlier triage row, or on a spooled one, is left out; with none left no row is filed
-        - a spooled row is tried before the new one; the spool afterwards holds only the rows still queued
-        - the findings of a row the store took, or already held, are written to the triaged file, so no later run lists them again
+        - the findings go in as many rows as it takes for each row to list all of its findings under the body limit
+        - a spooled row is tried before the new ones; the spool afterwards holds only the rows still queued
+        - only the findings of a row the store took, or already held, are written to the triaged file; the findings of a queued row stay unmarked in its spooled payload
     Raises:
         - NoTriageOwner when there are findings to file and the roster is empty, before anything is sent
     """
@@ -235,7 +261,7 @@ def file_findings( findings, folder, store, declared, roster, day=None ):
     spooled = [ p for p in spooled if "finding_keys" in p ]
     seen    = read_triaged( folder ) | { k for p in spooled for k in p.get( "finding_keys", [] ) }
     fresh   = [ f for f in findings if ( f[ "correlation_key" ] if "correlation_key" in f else correlation_key( f[ "id" ], f[ "text" ] ) ) not in seen ]
-    todo    = [ *spooled, *( [ triage_payload( fresh, triage_owner( declared, roster ), day ) ] if fresh else [] ) ]
+    todo    = [ *spooled, *( triage_payloads( fresh, triage_owner( declared, roster ), day ) if fresh else [] ) ]
     for payload in todo:
         keys = payload.get( "finding_keys", [] )
         sent = send_row( { k: v for k, v in payload.items() if k != "finding_keys" }, store )

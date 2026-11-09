@@ -463,3 +463,58 @@ def test_a_queued_outcome_keeps_the_stores_answer_as_detail_so_the_cause_is_on_r
     assert got[ "outcome" ] == ff.QUEUED and ff.GATED_PHRASE in got[ "detail" ] and len( got[ "detail" ] ) <= ff.DETAIL_LIMIT
     probe = ff.send_row( { "correlation_key": "epic:dupcheck-x", "body": "b" }, Store( query=( False, 503, { "error": "down" } ) ) )
     assert probe == { "outcome": ff.QUEUED, "status": 503, "detail": "{'error': 'down'}" }
+
+
+def wide_findings( n ):
+    """Ensures: returns n findings that each repeat five twins, with long lines."""
+    twins = [ { "id": f"d-t{i}", "name": f"twin_{i}", "file": f"server/area/twin_{i}.py" } for i in range( 5 ) ]
+    return [ finding( f"d-{i:04d}", f"function_number_{i}", f"def function_number_{i}(): pass", others=twins ) for i in range( n ) ]
+
+
+def test_320_findings_go_in_several_rows_each_under_the_cap_and_every_finding_is_in_exactly_one( tmp_path ):
+    found = wide_findings( 320 )
+    store = Store()
+    got   = run_once( tmp_path, found, store )
+    assert len( store.created ) == len( got[ ff.FILED ] ) and len( store.created ) > 1
+    assert all( len( p[ "body" ] ) <= ff.BODY_LIMIT and "body cut" not in p[ "body" ] for p in store.created ), "no row was cut"
+    for f in found: assert sum( 1 for p in store.created if f"({f['file']}:{f['line']}, {f['id']})" in p[ "body" ] ) == 1, f"{f['id']} is in exactly one row"
+    assert [ p[ "title" ].rsplit( " (part ", 1 )[ 1 ] for p in store.created ] == [ f"{n} of {len( store.created )})" for n in range( 1, len( store.created ) + 1 ) ]
+    assert len( { p[ "correlation_key" ] for p in store.created } ) == len( store.created )
+    triaged = ff.read_triaged( tmp_path )
+    assert triaged == { ff.correlation_key( f[ "id" ], f[ "text" ] ) for f in found }, "all marked, because all are named in a filed row"
+
+
+def test_a_row_the_gate_refused_leaves_its_findings_unmarked_and_in_the_spool_while_the_filed_rows_findings_are_marked( tmp_path ):
+    class GateOpensOnce( Store ):
+        """Ensures: takes the first create and answers the next ones with the real gated 422."""
+        def create( self, payload ):
+            if self.created: return False, 422, store_422( gated_text() )
+            return super().create( payload )
+
+    found = wide_findings( 320 )
+    store = GateOpensOnce()
+    got   = run_once( tmp_path, found, store )
+    first = ff.correlation_key( found[ 0 ][ "id" ], found[ 0 ][ "text" ] )
+    last  = ff.correlation_key( found[ -1 ][ "id" ], found[ -1 ][ "text" ] )
+    rows  = len( ff.triage_payloads( found, { "owner": "cheech", "note": "n" }, DAY ) )
+    assert rows > 1 and len( got[ ff.FILED ] ) == 1 and len( got[ ff.QUEUED ] ) == rows - 1 and len( ff.read_pending( tmp_path ) ) == rows - 1
+    spooled = ff.read_pending( tmp_path )
+    kept    = ff.read_triaged( tmp_path )
+    assert first in kept and last not in kept, "a finding is marked only when a filed row names it"
+    assert last in { k for p in spooled for k in p[ "finding_keys" ] } and not ( kept & { k for p in spooled for k in p[ "finding_keys" ] } )
+
+
+def test_one_finding_whose_line_alone_passes_the_cap_has_its_own_row_and_is_cut_there( tmp_path ):
+    huge  = finding( "d-huge", "h", "def h(): pass", others=[ { "id": f"d-t{i}", "name": "n" * 400, "file": "f" * 400 } for i in range( ff.OTHERS_LIMIT ) ] )
+    huge[ "name" ] = "x" * ( ff.BODY_LIMIT + 10 )
+    store = Store()
+    run_once( tmp_path, [ finding( "d-a", "a", "def a(): pass" ), huge, finding( "d-b", "b", "def b(): pass" ) ], store )
+    assert len( store.created ) == 3 and all( len( p[ "body" ] ) <= ff.BODY_LIMIT for p in store.created ) and "body cut" in store.created[ 1 ][ "body" ]
+
+
+def test_a_single_row_has_no_part_suffix_and_the_split_keeps_the_findings_order():
+    rows = ff.triage_payloads( wide_findings( 3 ), { "owner": "cheech", "note": "n" }, DAY )
+    assert len( rows ) == 1 and "(part" not in rows[ 0 ][ "title" ]
+    many = ff.triage_payloads( wide_findings( 320 ), { "owner": "cheech", "note": "n" }, DAY )
+    keys = [ k for r in many for k in r[ "finding_keys" ] ]
+    assert keys == [ ff.correlation_key( f[ "id" ], f[ "text" ] ) for f in wide_findings( 320 ) ]
