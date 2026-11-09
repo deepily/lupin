@@ -212,3 +212,57 @@ def test_a_refile_passes_the_files_name_to_the_filer_and_a_run_saves_its_own_fil
     seen.clear()
     rf.refile( path, filer=lambda findings, folder: seen.extend( findings ) or { }, now=NOW )
     assert {f[ "run_file" ] for f in seen} == { path.name }, "a file written before run_file existed gets its own name"
+
+
+def a_result_in_the_old_shape( repo, tmp_path ):
+    """
+    Ensures: returns ( path, ids ) of a real run's file rewritten to the old shape.
+
+    The real run's one finding is the base. Two copies get their own ids and keys.
+    One is the other side of the base's cluster. The other is the member of a second cluster.
+    """
+    path = a_day_whose_filing_failed( repo, tmp_path )
+    doc  = json.loads( path.read_text() )
+    base = doc[ "findings" ][ 0 ]
+    twin = { **base, "id": "d-zz-twin", "correlation_key": "epic:dupcheck-00000000000000aa", "name": "twin" }
+    solo = { **base, "id": "d-zz-solo", "correlation_key": "epic:dupcheck-00000000000000bb", "name": "solo" }
+    doc[ "findings" ] = [ base, twin, solo ]
+    doc[ "clusters" ]  = [ [ base[ "id" ], "d-zz-twin" ], [ "d-zz-solo", "d-zz-other" ] ]
+    path.write_text( json.dumps( doc ) )
+    return path, ( base[ "id" ], "d-zz-twin", "d-zz-solo" )
+
+
+def test_refiling_an_old_shape_file_files_one_finding_per_cluster_and_records_how_many_it_dropped( repo, tmp_path ):
+    path, ids = a_result_in_the_old_shape( repo, tmp_path )
+    store = Store()
+    rf.refile( path, working_filer( store ), LATER )
+    row   = store.created[ 0 ]
+    listed = [ l for l in row[ "body" ].splitlines() if l.startswith( "- " ) ]
+    assert len( store.created ) == 1 and len( listed ) == 2 and ids[ 1 ] not in row[ "body" ] and any( ids[ 0 ] in l for l in listed ) and any( ids[ 2 ] in l for l in listed )
+    note = json.loads( path.read_text() )[ rf.REFILINGS ][ -1 ]
+    assert ( note[ "findings_in_file" ], note[ "findings_filed" ] ) == ( 3, 2 )
+
+
+def test_refiling_leaves_out_a_cluster_with_a_verdict_on_either_side( repo, tmp_path ):
+    path, ids = a_result_in_the_old_shape( repo, tmp_path )
+    ( tmp_path / "io" / "duplicate-check-daily" / "verdicts.jsonl" ).write_text( json.dumps( { "run": path.stem, "finding": ids[ 1 ], "verdict": "DISTINCT", "class": "c", "by": "x", "ts": "2026-11-09T15:00:00Z" } ) + "\n" )
+    store = Store()
+    rf.refile( path, working_filer( store ), LATER )
+    row   = store.created[ 0 ]
+    assert len( store.created ) == 1 and ids[ 2 ] in row[ "body" ] and ids[ 0 ] not in row[ "body" ] and ids[ 1 ] not in row[ "body" ], "the twin's verdict settled the pair, the other cluster is filed"
+    assert json.loads( path.read_text() )[ rf.REFILINGS ][ -1 ][ "findings_filed" ] == 1
+
+
+def test_a_damaged_verdicts_file_stops_a_refile_before_anything_is_filed( repo, tmp_path ):
+    path, _ = a_result_in_the_old_shape( repo, tmp_path )
+    ( tmp_path / "io" / "duplicate-check-daily" / "verdicts.jsonl" ).write_text( "garbage\n" )
+    store = Store()
+    out   = io.StringIO()
+    assert rf.main( [ str( path ) ], out=out, filer=working_filer( store ), now=LATER ) == rf.EXIT_NONE and store.created == [] and "not a verdict record" in out.getvalue()
+
+
+def test_regroup_without_clusters_drops_only_settled_findings_and_keeps_one_in_no_cluster_unless_settled():
+    f = lambda i, k: { "id": i, "correlation_key": k }
+    assert rf.regroup( [ f( "a", "k1" ), f( "b", "k2" ) ], None, { "k2" } ) == [ f( "a", "k1" ) ]
+    got = rf.regroup( [ f( "a", "k1" ), f( "b", "k2" ), f( "c", "k3" ), f( "d", "k4" ) ], [ [ "b", "a" ], [ "x", "y" ] ], { "k4" } )
+    assert [ x[ "id" ] for x in got ] == [ "a", "c" ], "a cluster with no finding gives none; c is in no cluster and kept; d is in none and settled"
