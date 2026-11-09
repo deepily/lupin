@@ -416,7 +416,7 @@ def test_the_default_err_goes_to_standard_error_and_the_default_cron_command_is_
 
 
 
-def test_findings_are_one_per_new_definition_with_the_rest_of_the_cluster_and_no_session_without_session_of():
+def test_findings_are_one_per_cluster_with_the_rest_of_the_cluster_and_no_session_without_session_of():
     fresh = [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta" } ]
     pool  = [ { "id": "p1", "name": "b", "file": "f2.py", "line": 2, "text": "tb" } ]
     win   = { "start": "s", "end": "e", "commits": 1 }
@@ -434,9 +434,9 @@ def test_a_run_with_a_filer_files_the_findings_and_records_the_answer_and_withou
         calls.append( ( findings, folder ) )
         return { "filed": len( findings ) }
     doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, filer=filer ) )
-    assert doc[ "filing" ] == { "filed": 3 } and len( calls ) == 1 and len( calls[ 0 ][ 0 ] ) == 3
+    assert doc[ "filing" ] == { "filed": 1 } and len( calls ) == 1 and len( calls[ 0 ][ 0 ] ) == 1
     assert calls[ 0 ][ 1 ] == tmp_path / "io" / "duplicate-check-daily"
-    assert json.loads( results( tmp_path )[ 0 ].read_text() )[ "filing" ] == { "filed": 3 }
+    assert json.loads( results( tmp_path )[ 0 ].read_text() )[ "filing" ] == { "filed": 1 }
     plain = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", 10, "/bin/claude", parts_of( tmp_path ) )
     assert "filing" not in plain
 
@@ -445,7 +445,7 @@ def test_a_run_with_no_filer_still_writes_every_finding_with_the_eight_fields_th
     history( repo )
     doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
     saved = json.loads( results( tmp_path )[ 0 ].read_text() )
-    assert "filing" not in saved and len( saved[ "findings" ] ) == 3 and saved[ "findings" ] == doc[ "findings" ]
+    assert "filing" not in saved and len( saved[ "findings" ] ) == 1 and saved[ "findings" ] == doc[ "findings" ]
     for f in saved[ "findings" ]:
         assert all( k in f for k in ( "id", "name", "file", "line", "others", "window", "correlation_key" ) )
         assert f[ "correlation_key" ].startswith( "epic:dupcheck-" ) and "text" not in f
@@ -510,7 +510,7 @@ def test_a_run_with_an_auditor_records_its_answer_and_a_raising_auditor_is_recor
         seen.append( ( [ f[ "commit" ] for f in findings ], folder ) )
         return { "queued": len( findings ) }
     doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, auditor=auditor ) )
-    assert doc[ "audit" ] == { "queued": 3 } and "filing" not in doc and sorted( seen[ 0 ][ 0 ] ) == sorted( [ c2, c2, c3 ] )
+    assert doc[ "audit" ] == { "queued": 1 } and "filing" not in doc and len( seen[ 0 ][ 0 ] ) == 1 and seen[ 0 ][ 0 ][ 0 ] in ( c2, c3 )
     def broken( findings, folder ): raise OSError( "disk full" )
     bad = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path, auditor=broken, filer=lambda f, d: { "filed": 0 } ) )
     assert bad[ "audit" ] == { "error": "OSError: disk full" } and bad[ "filing" ] == { "filed": 0 } and bad[ "status" ] == "ok"
@@ -1091,17 +1091,17 @@ def rule_on( tmp_path, run_stem, finding_ids, verdict="DISTINCT" ):
         for fid in finding_ids: f.write( json.dumps( { "run": run_stem, "finding": fid, "verdict": verdict, "class": "pins-a-different-case", "by": "cheech", "ts": "2026-11-09T15:00:00Z" } ) + "\n" )
 
 
-def test_a_finding_with_a_verdict_line_is_left_out_of_the_next_run_and_a_changed_text_is_not( repo, tmp_path ):
+def test_a_finding_with_a_verdict_line_is_left_out_of_the_next_run_and_the_filer_gets_none( repo, tmp_path ):
     history( repo )
     first  = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
     stem   = results( tmp_path )[ 0 ].stem
     ids    = [ f[ "id" ] for f in first[ "findings" ] ]
-    assert len( ids ) == 3
-    rule_on( tmp_path, stem, ids[ :2 ], "EXTEND" )
+    assert len( ids ) == 1
+    rule_on( tmp_path, stem, ids, "EXTEND" )
     ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).unlink()
     filed  = []
     second = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path, filer=lambda found, folder: filed.append( found ) or {} ) )
-    assert [ f[ "id" ] for f in second[ "findings" ] ] == ids[ 2: ] and [ f[ "id" ] for f in filed[ 0 ] ] == ids[ 2: ] and "settled_error" not in second
+    assert second[ "findings" ] == [] and filed == [ [] ] and "settled_error" not in second
 
 
 def test_a_damaged_verdicts_file_leaves_nothing_out_and_the_record_says_why( repo, tmp_path ):
@@ -1110,4 +1110,16 @@ def test_a_damaged_verdicts_file_leaves_nothing_out_and_the_record_says_why( rep
     ( tmp_path / "io" / "duplicate-check-daily" / "verdicts.jsonl" ).write_text( "not json\n" )
     ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).unlink()
     second = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path ) )
-    assert len( second[ "findings" ] ) == 3 and "verdicts.jsonl line 1 is not a verdict record" in second[ "settled_error" ]
+    assert len( second[ "findings" ] ) == 1 and "verdicts.jsonl line 1 is not a verdict record" in second[ "settled_error" ]
+
+
+def test_two_new_definitions_that_repeat_each_other_are_one_finding_the_lowest_id_whichever_side_was_judged():
+    fresh = [ { "id": "n2", "name": "b", "file": "f2.py", "line": 2, "text": "tb" }, { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta" } ]
+    pool  = [ { "id": "p1", "name": "c", "file": "f3.py", "line": 3, "text": "tc" } ]
+    win   = { "start": "s", "end": "e", "commits": 1 }
+    for group in ( [ "n1", "n2" ], [ "n2", "n1" ] ):
+        got = dd.findings_of( [ group ], fresh, pool, win, {} )
+        assert [ f[ "id" ] for f in got ] == [ "n1" ] and got[ 0 ][ "others" ] == [ { "id": "n2", "name": "b", "file": "f2.py" } ]
+    three = dd.findings_of( [ [ "n1", "n2", "p1" ] ], fresh, pool, win, {} )
+    assert [ f[ "id" ] for f in three ] == [ "n1" ] and [ o[ "id" ] for o in three[ 0 ][ "others" ] ] == [ "n2", "p1" ]
+    assert dd.findings_of( [ [ "p1", "q" ], [ "n2", "p1" ] ], fresh, pool, win, {} )[ 0 ][ "id" ] == "n2", "a cluster of pool members alone gives none, the next gives its new one"

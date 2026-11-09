@@ -43,9 +43,9 @@ def a_day_whose_filing_failed( repo, tmp_path ):
 def test_the_daily_run_keeps_its_findings_without_their_text_and_with_their_store_keys( repo, tmp_path ):
     path = a_day_whose_filing_failed( repo, tmp_path )
     kept = json.loads( path.read_text() )[ "findings" ]
-    assert len( kept ) == 3 and all( "text" not in f for f in kept ), "three findings, none holding source text"
+    assert len( kept ) == 1 and all( "text" not in f for f in kept ), "one finding for the one cluster, none holding source text"
     assert all( f[ "correlation_key" ].startswith( ff.KEY_PREFIX ) and len( f[ "correlation_key" ] ) == len( ff.KEY_PREFIX ) + ff.KEY_HEX for f in kept )
-    assert len( { f[ "correlation_key" ] for f in kept } ) == 3 and all( set( rf.NEEDED ) <= set( f ) for f in kept )
+    assert len( { f[ "correlation_key" ] for f in kept } ) == 1 and all( set( rf.NEEDED ) <= set( f ) for f in kept )
 
 
 def test_a_file_with_no_findings_list_cannot_be_refiled_and_a_run_with_no_filer_now_keeps_them( repo, tmp_path ):
@@ -53,7 +53,7 @@ def test_a_file_with_no_findings_list_cannot_be_refiled_and_a_run_with_no_filer_
     dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
     path = results( tmp_path )[ 0 ]
     doc  = json.loads( path.read_text() )
-    assert len( doc[ "findings" ] ) == 3, "a run with no filer keeps its findings"
+    assert len( doc[ "findings" ] ) == 1, "a run with no filer keeps its findings"
     del doc[ "findings" ]
     path.write_text( json.dumps( doc ) )
     out = io.StringIO()

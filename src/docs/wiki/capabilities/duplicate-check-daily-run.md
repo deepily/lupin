@@ -22,7 +22,7 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 ## What it does
 - `failed_prerequisite` checks, in order, that the embedding endpoint answers, the Claude binary reports a version and the frozen configuration matches the live one. It returns None or `{ prerequisite, detail }` for the first that fails.
 - `Counting` wraps the judge backend and counts the calls made through it.
-- `findings_of` makes one finding per new definition that sits in a cluster. `others` is the rest of the cluster. Without `session_of` the session is None.
+- `findings_of` makes one finding per cluster that holds a new definition. The finding is the new definition with the lowest id, so two new definitions that repeat each other are one finding. `others` is the rest of the cluster. Without `session_of` the session is None.
 - `run( root, now, trigger, cap, cli_path, parts, ... )` first runs the branch guard of [[duplicate-check-branch-guard]]. Then it writes `<date>-<time>-<trigger>.json` under `duplicate-check-daily` in the data folder. A trigger other than `cron`, `reboot` or `hand` raises `ValueError`.
 - Before judging, a judge ledger written under another Claude Code version is renamed aside (see `rotate_ledger_for_new_cli` in [[duplicate-check-proof-command]]) and a new one started. The result then holds `ledger_rotated`. A failed prerequisite writes that file with status `failed` and changes nothing else.
 - An error while reading the frozen configuration, choosing the window or making the worktree writes status `failed`, stage `setup`. An error while building the pool, embedding or judging writes stage `judging`. `last-success.json` does not move.

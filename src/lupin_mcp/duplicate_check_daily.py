@@ -400,14 +400,16 @@ def record( folder, stem, doc, now ):
 
 def findings_of( groups, fresh, pool, window, parts, commit_of=None ):
     """
-    Turn the duplicate clusters into one finding per new definition.
+    Turn the duplicate clusters into one finding per cluster that holds a new definition.
 
     Requires:
         - groups are the clusters of more than one definition; fresh and pool are the definitions of the run
         - parts may hold session_of, a function from a definition to the writing seat's session id or None
         - commit_of, when given, maps a definition id to the commit that added it
     Ensures:
-        - returns { id, name, file, line, text, session_id, commit, others, window } for each new definition in a cluster, others being the rest of its cluster
+        - returns { id, name, file, line, text, session_id, commit, others, window } for each cluster that holds a new definition, in the order of the groups
+        - the finding is the cluster's new definition with the lowest id, whichever side the judge ruled from, so a pair of new definitions that repeat each other is one finding
+        - others is the rest of the cluster, the other new definitions included
         - without session_of the session is None, so the finding is unresolved to a seat
     """
     by_id  = { d[ "id" ]: d for d in [ *fresh, *pool ] }
@@ -415,7 +417,7 @@ def findings_of( groups, fresh, pool, window, parts, commit_of=None ):
     return [ { "id": i, "name": by_id[ i ][ "name" ], "file": by_id[ i ][ "file" ], "line": by_id[ i ][ "line" ], "text": by_id[ i ][ "text" ],
                "session_id": parts[ "session_of" ]( by_id[ i ] ) if "session_of" in parts else None, "commit": commit_of[ i ] if commit_of is not None else None, "window": window,
                "others": [ { "id": o, "name": by_id[ o ][ "name" ], "file": by_id[ o ][ "file" ] } for o in g if o != i ] }
-             for g in groups for i in g if i in new ]
+             for g in groups for i in [ min( [ m for m in g if m in new ], default=None ) ] if i is not None ]
 
 
 def failed_prerequisite( client, cli_path, verify, version_fn ):
