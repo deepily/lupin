@@ -67,7 +67,7 @@ def stream_run( command, env=None, **_ignored ):
     return types.SimpleNamespace( returncode=proc.wait(), stdout="".join( kept[ "out" ] ), stderr="".join( kept[ "err" ] ) )
 
 
-def run_and_report( summary_path, job, command, mode=None, count_re=None, drained_re=None, environ=None, runner=stream_run ):
+def run_and_report( summary_path, job, command, mode=None, count_re=None, drained_re=None, environ=None, runner=stream_run, write_record=True ):
     """
     Run a command and write the record of the run.
 
@@ -77,6 +77,7 @@ def run_and_report( summary_path, job, command, mode=None, count_re=None, draine
         - returns the command's exit code, and passes its stdout and stderr through
         - exit 0 is clean, any other code is failed with the code as the failure; a command that cannot start is failed with exit 127
         - the scan debt and drained figures come from the patterns, when they match
+        - with write_record false (a job that writes its own record) nothing is written to summary_path
     """
     started = datetime.datetime.now().astimezone()
     try:
@@ -89,7 +90,7 @@ def run_and_report( summary_path, job, command, mode=None, count_re=None, draine
                 "stage": None if code == 0 else "command", "failure": None if code == 0 else f"exit {code}", "evidence": None, "mode": mode }
     count, drained = last_int( count_re, out + err ), last_int( drained_re, out + err )
     scan = { "unit": "items", "count": count, "drained_last_run": drained } if count is not None else None
-    js.write_summary( summary_path, job, attempt, scan, None, count )
+    if write_record: js.write_summary( summary_path, job, attempt, scan, None, count )
     hs.refresh_best_effort( environ )                                  # leave the container a fresh copy of the crontab
     return code
 
@@ -133,18 +134,20 @@ def main( argv=None, environ=None, runner=stream_run ):
     args    = parser.parse_args( argv )
     command = args.command[ 1: ] if args.command[ :1 ] == [ "--" ] else args.command
     root    = environ.get( "LUPIN_ROOT" ) or os.getcwd()
-    entry   = next( ( j for j in jr.load_registry( root )[ "jobs" ] if j[ "job" ] == args.job ), None )
-    if entry is not None and args.from_registry and entry.get( "run" ) and not command:
-        from cosa.rest.job_service import run_command
-        from cosa.repo.symindex.paths import data_dir
-        command, environ = run_command( jr.load_registry( root ), entry, root, data_dir( root ), args.trigger, environ )
-        command = with_trigger( command, args.trigger )
-    if entry is None or not command:
+    registry = jr.load_registry( root )
+    entry    = next( ( j for j in registry[ "jobs" ] if j[ "job" ] == args.job ), None )
+    if entry is None or not ( command or ( args.from_registry and entry.get( "run" ) ) ):
         print( f"job_run: {'no job ' + args.job + ' in the registry' if entry is None else 'no command given'}", file=sys.stderr )
         return EXIT_NO_JOB
+    from cosa.rest.job_service import bootstrap_env, run_command
     from cosa.repo.symindex.paths import data_dir
-    path = jr.resolve_path( entry[ "summary_path" ], root, data_dir( root ) )
-    return run_and_report( path, args.job, command, args.mode, args.count_re, args.drained_re, environ, runner )
+    if args.from_registry and not command: environ.update( bootstrap_env( registry, root ) )    # data_dir reads the configuration manager's settings, so they come first
+    data = data_dir( root )
+    if args.from_registry and not command:
+        command, environ = run_command( registry, entry, root, data, args.trigger, environ )
+        command = with_trigger( command, args.trigger )
+    path = jr.resolve_path( entry[ "summary_path" ], root, data )
+    return run_and_report( path, args.job, command, args.mode, args.count_re, args.drained_re, environ, runner, write_record=not entry.get( "own_summary" ) )
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point

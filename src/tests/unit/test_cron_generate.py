@@ -1,5 +1,7 @@
 """The cron generator, the cron entry script's registry path, and the streaming runner."""
 import json
+import os
+import pathlib
 import subprocess
 import sys
 
@@ -167,7 +169,8 @@ def test_the_real_registry_generates_a_line_set_with_the_gates_demands():
     assert registry[ "defaults" ][ "run_env" ][ "LUPIN_CONFIG_MGR_CLI_ARGS" ] and registry[ "defaults" ][ "run_env" ][ "COSA_VOICE_MANAGERS__LUPIN" ]
     dup = managed[ "duplicate-check" ][ "run" ][ "argv" ]
     assert dup[ dup.index( "--ceiling" ) + 1 ] == "800" and "--adaptive" in dup and dup[ dup.index( "--branch" ) + 1 ] == "auto"
-    assert managed[ "duplicate-check" ].get( "cron_enabled" ) is False, "Rick's ruling of 9 Nov: the hourly adaptive line ships disabled until filing fixes D3 and D4 land"
+    assert managed[ "duplicate-check" ].get( "cron_enabled", True ) is True, "filing fixes D3 and D4 merged on 9 Nov, so the hourly adaptive line ships enabled"
+    assert managed[ "duplicate-check" ][ "schedule" ] == [ { "cron": "0 10-22 * * *" }, { "after_boot_seconds": 300 } ]
     assert managed[ "host-snapshot" ][ "schedule" ] == [ { "cron": "*/5 * * * *" } ]
     for j in managed.values(): assert j[ "cron_tag" ] and j[ "schedule" ], f"{j[ 'job' ]} has no tag or schedule"
     assert len( { j[ "cron_tag" ] for j in managed.values() } ) == len( managed ), "tags are unique, so a tag-replace never removes another job's line"
@@ -254,3 +257,84 @@ def test_a_disabled_job_still_clears_its_old_lines_and_one_flag_flip_turns_it_on
     ( tree / "src/conf/job-registry.json" ).write_text( json.dumps( doc ) )
     run_main( tree, [ "--install" ], cron )
     assert "cron-job.sh gamma cron" in cron[ "file" ].read_text()
+
+
+# ---- the bare-cron path, end to end -----------------------------------------------------------------------------
+
+def test_the_registry_settings_that_data_dir_needs_come_before_it_runs( tree, monkeypatch ):
+    registry = jr.load_registry( str( tree ) )
+    got      = js_service.bootstrap_env( registry, str( tree ) )
+    assert got == { "LUPIN_ROOT": str( tree ) }, "an entry that names {deepily_data} waits until the data folder is known"
+    seen = {}
+    monkeypatch.setattr( paths, "data_dir", lambda root: seen.update( at_data_dir=os.environ.get( "LUPIN_ROOT" ) ) or tree / "data" )
+    monkeypatch.setattr( os, "environ", { "LUPIN_ROOT": str( tree ) } )
+    registry[ "defaults" ][ "run_env" ][ "LUPIN_ROOT" ] = "{root}/boot"
+    ( tree / "src/conf/job-registry.json" ).write_text( json.dumps( { "schema": "job-registry/1", "defaults": registry[ "defaults" ], "jobs": registry[ "jobs" ] } ) )
+    monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
+    jrun.main( [ "--job", "alpha", "--from-registry" ], None, lambda command, **kw: type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )() )
+    assert seen[ "at_data_dir" ] == f"{tree}/boot", "data_dir saw the registry's setting, not the bare environment's"
+
+
+def test_cron_job_sh_under_env_i_gets_past_environment_loading_and_runs_the_job( tmp_path ):
+    """Ensures: the script, run with cron's empty environment, reaches the job's own code."""
+    real = pathlib.Path( REAL_ROOT )
+    tree = tmp_path / "tree"
+    ( tree / "src" / "conf" ).mkdir( parents=True )
+    for child in ( real / "src" ).iterdir():
+        if child.name != "conf": ( tree / "src" / child.name ).symlink_to( child )
+    for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ): ( tree / "src" / "conf" / name ).symlink_to( real / "src" / "conf" / name )
+    ( tree / ".venv" ).symlink_to( sys.prefix )
+    shipped = jr.load_registry( REAL_ROOT )
+    probe   = { "job": "probe", "title": "probe", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
+                "run": { "argv": [ "{python}", "-c", "import os; print( 'ran', os.environ[ 'COSA_VOICE_MANAGERS__LUPIN' ] )" ], "env": {} } }
+    ( tree / "src" / "conf" / "job-registry.json" ).write_text( json.dumps( { "schema": "job-registry/1", "defaults": shipped[ "defaults" ], "jobs": [ probe ] } ) )
+    done = subprocess.run( [ "env", "-i", f"HOME={tmp_path}", f"DEEPILY_DATA_DIR={tmp_path / 'data'}", f"LUPIN_ROOT={tree}", str( real / "src/scripts/cron-job.sh" ), "probe", "cron" ],
+                           capture_output=True, text=True, cwd=str( tmp_path ), timeout=120 )
+    assert done.returncode == 0, done.stderr[ -600: ]
+    assert "ran Tiberius, Mr. Radio" in done.stdout, "the registry's settings reached the job"
+    record = json.loads( ( tree / "io" / "jobs" / "probe" / "job-summary.json" ).read_text() )
+    assert record[ "last_attempt" ][ "outcome" ] == "clean" and record[ "last_attempt" ][ "trigger" ] == "cron"
+
+
+def test_cron_job_sh_with_no_job_or_no_interpreter_or_an_unreadable_secrets_file_says_so( tmp_path ):
+    script = str( pathlib.Path( REAL_ROOT ) / "src/scripts/cron-job.sh" )
+    bare   = lambda *args, **env: subprocess.run( [ "env", "-i", f"HOME={tmp_path}", *[ f"{k}={v}" for k, v in env.items() ], script, *args ], capture_output=True, text=True, timeout=60 )
+    none   = bare()
+    assert none.returncode == 64 and "usage" in none.stderr
+    gone   = bare( "x", LUPIN_ROOT=tmp_path )
+    assert gone.returncode == 1 and "no interpreter" in gone.stderr
+    ( tmp_path / ".venv" / "bin" ).mkdir( parents=True )
+    ( tmp_path / ".venv" / "bin" / "python" ).write_text( "#!/bin/sh\necho ran \"$@\"\n" )
+    ( tmp_path / ".venv" / "bin" / "python" ).chmod( 0o755 )
+    secret = tmp_path / "locked.env"
+    secret.write_text( "A=1\n" )
+    secret.chmod( 0 )
+    if os.geteuid() != 0:
+        locked = bare( "x", LUPIN_ROOT=tmp_path, LUPIN_CRON_ENV=secret )
+        assert locked.returncode == 1 and "cannot read" in locked.stderr
+    secret.chmod( 0o600 )
+    ok = bare( "x", "boot", LUPIN_ROOT=tmp_path, LUPIN_CRON_ENV=secret )
+    assert ok.returncode == 0 and "--job x --from-registry --trigger boot" in ok.stdout
+    absent = bare( "x", LUPIN_ROOT=tmp_path, LUPIN_CRON_ENV=tmp_path / "nope.env" )
+    assert absent.returncode == 0 and "--trigger cron" in absent.stdout, "a missing secrets file is fine"
+
+
+def test_a_job_that_writes_its_own_record_is_not_overwritten_by_job_run( tmp_path, monkeypatch ):
+    monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
+    path = tmp_path / "s.json"
+    assert jrun.run_and_report( path, "j", [ "x" ], runner=lambda command, **kw: type( "R", (), { "returncode": 4, "stdout": "", "stderr": "" } )(), write_record=False ) == 4
+    assert not path.exists()
+
+
+def test_main_passes_own_summary_through_as_no_record_written( tree, monkeypatch ):
+    doc = json.loads( ( tree / "src/conf/job-registry.json" ).read_text() )
+    doc[ "jobs" ][ 0 ][ "own_summary" ] = True
+    ( tree / "src/conf/job-registry.json" ).write_text( json.dumps( doc ) )
+    monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
+    code = jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda command, **kw: type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )() )
+    assert code == 0 and not ( tree / "io" / "jobs" / "alpha" / "job-summary.json" ).exists()
+
+
+def test_the_four_jobs_that_write_their_own_record_are_marked_so_in_the_shipped_registry():
+    own = { j[ "job" ] for j in jr.load_registry( REAL_ROOT )[ "jobs" ] if j.get( "own_summary" ) }
+    assert own == { "duplicate-check", "wiki-librarian", "vector-refresh", "reuse-behaviour" }

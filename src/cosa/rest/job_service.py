@@ -305,6 +305,21 @@ def run_command( registry, ent, root, data, trigger, base_env=None ):
     return expand( ent[ "run" ][ "argv" ], *values ), env
 
 
+def bootstrap_env( registry, root ):
+    """
+    Pick the registry settings a process needs before it can find the data folder.
+
+    Requires:
+        - registry is the dict load_registry returns; root is the Lupin root
+    Ensures:
+        - returns the defaults.run_env entries whose value names neither {data} nor {deepily_data}, expanded with the root, home and planning-is-prompting paths
+        - these are the settings (for example LUPIN_CONFIG_MGR_CLI_ARGS) the configuration manager reads when data_dir runs, so cron needs no copy of them in the shell
+    """
+    home   = os.environ.get( "HOME", "/root" )
+    pip    = os.environ.get( "PLANNING_IS_PROMPTING_ROOT", f"{pathlib.Path( root ).parent}/planning-is-prompting" )
+    return { name: expand( value, root, "", home, pip, "" ) for name, value in registry[ "defaults" ][ "run_env" ].items() if "{data}" not in value and "{deepily_data}" not in value }
+
+
 def run_now( root, data, job, target, deps, now, spawn=subprocess.Popen ):
     """
     Start one run of a job outside its schedule.

@@ -81,7 +81,7 @@
       "cron_tag": "duplicate-check-daily",
       "cron_managed": true,
       "cron_log": "{root}/io/duplicate-check-daily/daily.log",
-      "cron_enabled": false
+      "own_summary": true
     },
     {
       "job": "wiki-librarian",
@@ -128,7 +128,8 @@
       },
       "cron_tag": "wiki-librarian-tick",
       "cron_managed": true,
-      "cron_log": "{data}/librarian/librarian.log"
+      "cron_log": "{data}/librarian/librarian.log",
+      "own_summary": true
     },
     {
       "job": "reuse-behaviour",
@@ -170,7 +171,8 @@
       },
       "cron_tag": "reuse-behaviour-weekly",
       "cron_managed": true,
-      "cron_log": "{data}/behaviour/weekly.log"
+      "cron_log": "{data}/behaviour/weekly.log",
+      "own_summary": true
     },
     {
       "job": "vector-refresh",
@@ -212,7 +214,8 @@
       "owner_confirmed": false,
       "cron_tag": "reuse-vector-refresh",
       "cron_managed": true,
-      "cron_log": "{data}/refresh/refresh.log"
+      "cron_log": "{data}/refresh/refresh.log",
+      "own_summary": true
     },
     {
       "job": "shadow-audit",
