@@ -24,16 +24,18 @@ CRONTAB_MAX_AGE = 36 * 3600                                           # the cron
 UNITS_MAX_AGE   = 1800                                                # a host tick refreshes the units every five minutes
 
 
-def crontab_text( run=None ):
+def crontab_text( run=None, cmd=None ):
     """
     Read the installed crontab.
 
+    Requires:
+        - cmd is the crontab command as a list, or None for [ "crontab" ]
     Ensures:
         - returns the text of crontab -l, or None when it cannot be run or answers an error (no crontab included)
     """
     run = subprocess.run if run is None else run
     try:
-        done = run( [ "crontab", "-l" ], capture_output=True, text=True, timeout=10 )
+        done = run( [ *( cmd or [ "crontab" ] ), "-l" ], capture_output=True, text=True, timeout=10 )
     except ( OSError, subprocess.TimeoutExpired ):
         return None
     return done.stdout if done.returncode == 0 else None
@@ -209,14 +211,17 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
         - args holds root, python and one of print_install, install, uninstall, status
     Ensures:
         - --print-install prints the line and changes nothing
-        - --install and --uninstall go through the librarian's locked crontab editor with this job's tag and owner, after a timestamped backup
+        - --uninstall goes through the librarian's locked crontab editor with this job's tag and owner, after a timestamped backup; --install is retired: it prints where the installer went on err and returns 1
         - --status says whether the line is present
         - returns 0, or 1 with the reason on err when the install is refused or the crontab call fails
     """
     from cosa.repo.symindex import librarian_tick as lt
     root = args.root or environ.get( "LUPIN_ROOT" ) or os.getcwd()
-    cmd  = crontab_cmd or [ "crontab" ]
+    cmd  = crontab_cmd or lt.crontab_command( environ )
     logs = f"{root}/io/jobs"
+    if args.install:
+        err( lt.install_moved_text( root ) )
+        return 1
     try:
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
@@ -226,12 +231,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
             lt.edit_crontab( [], environ, cmd, f"{logs}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
             out( "uninstalled" )
             return 0
-        line = cron_line( root, args.python, f"{logs}/host-snapshot.log", environ )
-        if args.print_install:
-            out( line )
-            return 0
-        lt.edit_crontab( [ line ], environ, cmd, f"{logs}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
-        out( "installed: 1 line" )
+        out( cron_line( root, args.python, f"{logs}/host-snapshot.log", environ ) )    # the one mode left is --print-install
         return 0
     except ( lt.InstallRefused, RuntimeError ) as error:
         err( f"job-host-snapshot: {error}" )

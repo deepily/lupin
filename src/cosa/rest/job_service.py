@@ -178,6 +178,11 @@ def expand( value, root, data, home, pip, deepily_data ):
     return value
 
 
+def home_and_pip( root ):
+    """Ensures: returns ( home, planning-is-prompting root ) from the environment, with defaults."""
+    return os.environ.get( "HOME", "/root" ), os.environ.get( "PLANNING_IS_PROMPTING_ROOT", f"{pathlib.Path( root ).parent}/planning-is-prompting" )
+
+
 def paths_of( root, data ):
     """
     Work out the placeholder values for run commands.
@@ -185,8 +190,7 @@ def paths_of( root, data ):
     Ensures:
         - home, the planning-is-prompting root and the deepily data folder come from the environment
     """
-    home = os.environ.get( "HOME", "/root" )
-    pip  = os.environ.get( "PLANNING_IS_PROMPTING_ROOT", f"{pathlib.Path( root ).parent}/planning-is-prompting" )
+    home, pip = home_and_pip( root )
     return root, data, home, pip, os.environ.get( "DEEPILY_DATA_DIR", str( pathlib.Path( data ).parents[ 1 ] ) )
 
 
@@ -290,6 +294,35 @@ def build_response( root, data, now, deps ):
     return { "schema": SCHEMA, "generated_at": now.isoformat(), "jobs": jobs }
 
 
+def run_command( registry, ent, root, data, trigger, base_env=None ):
+    """
+    Build the argv and the environment of one run of a registry job.
+
+    Requires:
+        - ent is a registry job with a run block; trigger is cron, boot or hand
+    Ensures:
+        - returns ( argv, env ): argv is run.argv expanded; env is base_env (default os.environ), then the registry's run_env, then the job's run.env, then LUPIN_JOB_TRIGGER set to trigger
+        - this is the one place Run now and the cron entry script both read a job's command from
+    """
+    values = paths_of( root, data )
+    env    = { **( os.environ if base_env is None else base_env ), **expand( registry[ "defaults" ][ "run_env" ], *values ), **expand( ent[ "run" ].get( "env", {} ), *values ), js.TRIGGER_ENV: trigger }
+    return expand( ent[ "run" ][ "argv" ], *values ), env
+
+
+def bootstrap_env( registry, root ):
+    """
+    Pick the registry settings a process needs before it can find the data folder.
+
+    Requires:
+        - registry is the dict load_registry returns; root is the Lupin root
+    Ensures:
+        - returns the defaults.run_env entries whose value names neither {data} nor {deepily_data}, expanded with the root, home and planning-is-prompting paths
+        - these are the settings (for example LUPIN_CONFIG_MGR_CLI_ARGS) the configuration manager reads when data_dir runs, so cron needs no copy of them in the shell
+    """
+    home, pip = home_and_pip( root )
+    return { name: expand( value, root, "", home, pip, "" ) for name, value in registry[ "defaults" ][ "run_env" ].items() if "{data}" not in value and "{deepily_data}" not in value }
+
+
 def run_now( root, data, job, target, deps, now, spawn=subprocess.Popen ):
     """
     Start one run of a job outside its schedule.
@@ -310,9 +343,7 @@ def run_now( root, data, job, target, deps, now, spawn=subprocess.Popen ):
     if ent is None: return 404, { "status": "refused", "reason": UNKNOWN_JOB }
     if not ent.get( "run" ): return 422, { "status": "refused", "reason": NOT_RUNNABLE }
     if ent.get( "lock_path" ) and deps.lock_held( jr.resolve_path( ent[ "lock_path" ], root, data ) ): return 409, { "status": "refused", "reason": LOCK_HELD }
-    values = paths_of( root, data )
-    env    = { **os.environ, **expand( registry[ "defaults" ][ "run_env" ], *values ), **expand( ent[ "run" ].get( "env", {} ), *values ), js.TRIGGER_ENV: "hand" }
-    argv   = expand( ent[ "run" ][ "argv" ], *values )
+    argv, env = run_command( registry, ent, root, data, "hand" )
     log    = pathlib.Path( root ) / RUN_NOW_LOG
     log.parent.mkdir( parents=True, exist_ok=True )
     with open( log, "a" ) as sink:

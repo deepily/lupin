@@ -593,3 +593,13 @@ def test_main_leaves_a_job_summary_for_a_switched_off_run_a_finished_run_and_a_c
         run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
     last = _summaries( world )[ 0 ][ "last_attempt" ]
     assert last[ "outcome" ] == "failed" and last[ "failure" ] == "OSError: disk" and last[ "stage" ] == "refresh"
+
+
+def test_install_is_the_one_verb_kept_for_the_vm_and_lupin_vm_sh_install_refresh_cron_is_its_only_caller( world, cron ):
+    import subprocess
+    root  = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    named = subprocess.run( [ "git", "-C", str( root ), "grep", "-lF", "reuse-vector-refresh.sh --install", "--", "src/scripts" ], capture_output=True, text=True ).stdout.split()
+    assert "src/scripts/lupin-vm.sh" in named, "lupin-vm.sh install-refresh-cron still calls the verb"
+    assert set( named ) <= { "src/scripts/lupin-vm.sh", "src/scripts/reuse-vector-refresh.sh" }, "no other script calls it"
+    rc, out, _ = run_main( world, [ "--install", "--python", "/py" ], environ=cron[ "env" ], crontab_cmd=cron[ "cmd" ] )
+    assert ( rc, out.strip() ) == ( 0, "installed: 2 lines" ), "so the verb keeps working here, unlike the host installers"

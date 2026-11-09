@@ -36,5 +36,5 @@ pins:
 
 ## Command and cron
 - `cron_lines` builds a daily line at 11:37 and a reboot line, both running `src/scripts/reuse-shadow-audit.sh` and ending with the tag `# reuse-shadow-audit`.
-- `main` drains once by default. `--print-install` shows the lines. `--install`, `--uninstall` and `--status` use the librarian's locked crontab editor.
+- `main` drains once by default. `--print-install` shows the lines. `--install` is retired and prints the `cron_generate` command; `--uninstall` and `--status` use the librarian's locked crontab editor.
 - Exit 0 means the drain ran or an install worked. Exit 1 means it failed or an install was refused. Exit 2 means a named error, such as a missing ceiling or a drain that would pass the lifetime limit. Exit 3 means the job is switched off.

@@ -363,18 +363,23 @@ def test_main_print_install_prints_the_lines_and_touches_no_crontab( cron, tmp_p
     assert not cron[ "file" ].exists() and not cron[ "log" ].exists()
 
 
-def test_main_install_status_and_uninstall_walk_through_the_fake_crontab( cron, tmp_path, monkeypatch ):
+def test_main_install_is_retired_and_writes_nothing( cron, tmp_path, monkeypatch ):
+    code, out, err = run_main( [ "--install" ], cron, tmp_path, monkeypatch )
+    assert code == 1 and "lupin_mcp.cron_generate --install" in err and not cron[ "file" ].exists()
+
+
+def test_main_status_and_uninstall_walk_through_the_fake_crontab( cron, tmp_path, monkeypatch ):
     assert run_main( [ "--status" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "not installed"
-    assert run_main( [ "--install" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "installed: 2 lines"
+    cron[ "file" ].write_text( f"0 10 * * * a {lt.CRON_TAG}\n@reboot b {lt.CRON_TAG}\n" )
     assert run_main( [ "--status" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "installed: 2 lines"
     assert run_main( [ "--uninstall" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "uninstalled"
     assert run_main( [ "--status" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "not installed"
 
 
-def test_main_install_without_the_lock_prints_one_line_and_returns_one( cron, tmp_path, monkeypatch ):
+def test_main_uninstall_without_the_lock_prints_one_line_and_returns_one( cron, tmp_path, monkeypatch ):
     monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
     out, err = io.StringIO(), io.StringIO()
-    code = lt.main( [ "--install", "--root", str( tmp_path ) ], environ={}, now=NOON, out=out, err=err, crontab_cmd=cron[ "cmd" ] )
+    code = lt.main( [ "--uninstall", "--root", str( tmp_path ) ], environ={}, now=NOON, out=out, err=err, crontab_cmd=cron[ "cmd" ] )
     assert code == 1 and "shared crontab lock" in err.getvalue() and not cron[ "file" ].exists()
 
 

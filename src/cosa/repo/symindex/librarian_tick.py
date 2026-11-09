@@ -425,6 +425,52 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
     return ( 2 if held else 0 ), summary
 
 
+CRONTAB_OVERRIDE    = "LUPIN_CRONTAB"                              # one variable every crontab writer honors, so a scratch crontab is safe for all of them
+GENERATED_BLOCK_TAG = "# lupin-cron-generated"                      # ends the header comment of the block lupin_mcp.cron_generate writes
+
+
+def crontab_command( environ, own_variable=None ):
+    """
+    Pick the crontab command a tool reads and writes through.
+
+    Requires:
+        - environ maps names to values; own_variable names the tool's older override, or is None
+    Ensures:
+        - returns [ environ[ LUPIN_CRONTAB ] ] when that is set and not empty, so one scratch crontab covers every tool
+        - else returns [ the tool's own variable ] when it is set, else [ "crontab" ]
+    """
+    if environ.get( CRONTAB_OVERRIDE ): return [ environ[ CRONTAB_OVERRIDE ] ]
+    return [ environ.get( own_variable, "crontab" ) ] if own_variable else [ "crontab" ]
+
+
+def holds_generated_block( cmd ):
+    """
+    Say whether a crontab already holds the block cron_generate writes.
+
+    Requires:
+        - cmd is the crontab command as a list
+    Ensures:
+        - returns True when a line ends with GENERATED_BLOCK_TAG
+        - returns False when there is no crontab, it cannot be read, or no line carries the tag
+    """
+    try: read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
+    except OSError: return False
+    return read.returncode == 0 and any( line.rstrip().endswith( GENERATED_BLOCK_TAG ) for line in read.stdout.splitlines() )
+
+
+def install_moved_text( root ):
+    """
+    Say where the cron installer went.
+
+    Requires:
+        - root is the main checkout path
+    Ensures:
+        - returns the text a retired --install prints: one tool writes every cron line, and the exact command that runs it
+    """
+    return ( "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:\n"
+             f"  cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+
+
 def cron_lines_for( run, schedule, boot_delay_seconds ):
     """
     Pair a daily cron line with a slow-start reboot line for one command.
@@ -456,19 +502,20 @@ def cron_lines( root, python, log_path ):
     return cron_lines_for( run, CRON_SCHEDULE, 120 )
 
 
-def merge_lines( current, lines, tag=CRON_TAG ):
+def merge_lines( current, lines, tag=CRON_TAG, legacy=() ):
     """
     Replace every tagged line of a crontab text with lines.
 
     Requires:
         - current is the crontab text; lines is the list from cron_lines or an empty list
-        - tag is the comment that ends each line of one tool; the default is the librarian's
+        - tag is the comment that ends each line of one tool, or a tuple of such comments; the default is the librarian's
+        - legacy is a tuple of substrings: an old line holding one of them, whatever its ending, is a hand-written copy of a line being replaced
 
     Ensures:
-        - lines that do not carry the tag keep their text and order
+        - lines that do not carry the tag, and hold no legacy substring, keep their text and order
         - the tagged lines end the text, once each
     """
-    kept = [ line for line in current.splitlines() if not line.rstrip().endswith( tag ) ]
+    kept = [ line for line in current.splitlines() if not line.rstrip().endswith( tag ) and not any( word in line for word in legacy ) ]
     return "\n".join( kept + list( lines ) ) + "\n"
 
 
@@ -493,7 +540,7 @@ def load_crontab_lock( environ ):
     return module.crontab_lock
 
 
-def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG ):
+def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG, legacy=() ):
     """
     Do the read, backup and write of one crontab edit; the caller holds the lock.
 
@@ -508,20 +555,21 @@ def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG ):
         os.makedirs( backup_dir, exist_ok=True )
         with open( os.path.join( backup_dir, f"crontab-{now.strftime( '%Y%m%d-%H%M%S' )}.txt" ), "w", encoding="utf-8" ) as handle: handle.write( old )
     except OSError as error: return None, f"no backup, so no write: {error}"
-    new   = merge_lines( old, lines, tag )
+    new   = merge_lines( old, lines, tag, legacy )
     write = subprocess.run( [ *crontab_cmd, "-" ], input=new, capture_output=True, text=True )
     if write.returncode != 0: return None, f"crontab write failed: {write.stderr.strip()}"
     return new, None
 
 
-def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, owner="wiki-librarian-tick" ):
+def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, owner="wiki-librarian-tick", legacy=() ):
     """
     Read, back up and rewrite the crontab under the shared lock.
 
     Requires:
         - lines is the list to install, or an empty list to remove ours
         - crontab_cmd is the command list, for example [ "crontab" ]
-        - tag and owner name the tool: its line tag and the owner the lock records; the defaults are the librarian's
+        - tag and owner name the tool: its line tag (or a tuple of tags) and the owner the lock records; the defaults are the librarian's
+        - legacy is passed to merge_lines
 
     Ensures:
         - the whole read and write sit inside the lock
@@ -531,7 +579,7 @@ def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, ow
     """
     lock = load_crontab_lock( environ )
     with lock( owner=owner ):
-        new, failure = _rewrite( lines, crontab_cmd, backup_dir, now, tag )
+        new, failure = _rewrite( lines, crontab_cmd, backup_dir, now, tag, legacy )
     if failure is not None: raise RuntimeError( failure )
     return new
 
@@ -620,15 +668,18 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     args    = parser.parse_args( argv )
     root    = args.root or os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
     folder  = data_dir( root )
-    cmd     = crontab_cmd or [ environ.get( "WIKI_LIBRARIAN_CRONTAB", "crontab" ) ]
+    cmd     = crontab_cmd or crontab_command( environ, "WIKI_LIBRARIAN_CRONTAB" )
     lines   = cron_lines( root, args.python, os.path.join( folder, LOG_NAME ) )
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return 0
+    if args.install:
+        print( install_moved_text( root ), file=err )
+        return 1
     try:
-        if args.install or args.uninstall:
-            edit_crontab( [] if args.uninstall else lines, environ, cmd, os.path.join( folder, "crontab-backups" ), now )
-            print( "uninstalled" if args.uninstall else "installed: 2 lines", file=out )
+        if args.uninstall:
+            edit_crontab( [], environ, cmd, os.path.join( folder, "crontab-backups" ), now )
+            print( "uninstalled", file=out )
             return 0
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )

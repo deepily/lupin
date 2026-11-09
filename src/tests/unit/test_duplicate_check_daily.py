@@ -333,12 +333,12 @@ def test_a_branch_name_with_shell_characters_is_quoted_in_both_cron_lines():
         assert "--branch 'feature/a b;rm -rf x' >> /log/daily.log" in line
 
 
-def test_print_install_and_install_carry_the_branch_given_on_the_command_line( tmp_path, cron ):
+def test_print_install_carries_the_branch_given_on_the_command_line_and_install_is_retired( tmp_path, cron ):
     base = [ "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py", "--branch", "wip-x" ]
     code, out, _ = cron_main( tmp_path, [ "--print-install", *base ], cron )
     assert code == 0 and out[ 0 ].count( "--branch wip-x >> " ) == 2
-    assert cron_main( tmp_path, [ "--install", *base ], cron, cron[ "env" ] )[ 0 ] == 0
-    assert cron[ "file" ].read_text().count( "--branch wip-x >> " ) == 2
+    code, out, err = cron_main( tmp_path, [ "--install", *base ], cron, cron[ "env" ] )
+    assert code == 1 and out == [] and "lupin_mcp.cron_generate --install" in err[ 0 ] and not cron[ "file" ].exists(), "nothing is written"
     plain = cron_main( tmp_path, [ "--print-install", *base[ :-2 ] ], cron )[ 1 ][ 0 ]
     assert "--branch" not in plain
 
@@ -364,16 +364,13 @@ def test_print_install_prints_the_lines_and_changes_nothing( tmp_path, cron ):
     assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 2 and "LUPIN_CONFIG_MGR_CLI_ARGS='a b'" in out[ 0 ] and not cron[ "file" ].exists()
 
 
-def test_install_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron ):
-    cron[ "file" ].write_text( "0 * * * * other\n" )
-    argv = [ "--install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ]
-    assert cron_main( tmp_path, argv, cron, cron[ "env" ] )[ :2 ] == ( 0, [ "installed: 2 lines" ] )
-    assert "lock-enter " + dd.LOCK_OWNER in cron[ "log" ].read_text()
+def test_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron ):
+    cron[ "file" ].write_text( f"0 * * * * other\n0 10 * * * a {dd.CRON_TAG}\n@reboot b {dd.CRON_TAG}\n" )
     assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 2 lines" ]
     assert cron_main( tmp_path, [ "--uninstall" ], cron, cron[ "env" ] )[ 1 ] == [ "uninstalled" ]
     entered = [ line for line in cron[ "log" ].read_text().splitlines() if line.startswith( "lock-enter" ) ]
-    assert entered == [ "lock-enter " + dd.LOCK_OWNER ] * 2, "the install and the uninstall each take the lock as this job, and nothing else enters it"
-    assert cron[ "log" ].read_text().count( "lock-exit" ) == 2, "and each lets it go"
+    assert entered == [ "lock-enter " + dd.LOCK_OWNER ], "the uninstall takes the lock as this job, and nothing else enters it"
+    assert cron[ "log" ].read_text().count( "lock-exit" ) == 1, "and lets it go"
     text = cron[ "file" ].read_text()
     assert text.strip() == "0 * * * * other", "only the other line is left, and nothing was added"
     assert list( ( tmp_path / "io" / "duplicate-check-daily" / "crontab-backups" ).iterdir() ), "a backup is written before each change"
@@ -383,8 +380,8 @@ def test_status_says_not_installed_when_there_is_no_crontab( tmp_path, cron ):
     assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "not installed" ]
 
 
-def test_an_install_without_the_shared_lock_is_refused_with_one_and_the_reason( tmp_path, cron ):
-    code, out, err = cron_main( tmp_path, [ "--install", "--cap", "40", "--claude-cli-path", "/bin/claude" ], cron, { } )
+def test_an_uninstall_without_the_shared_lock_is_refused_with_one_and_the_reason( tmp_path, cron ):
+    code, out, err = cron_main( tmp_path, [ "--uninstall" ], cron, { } )
     assert code == 1 and err[ 0 ].startswith( "duplicate-check-daily:" ) and out == [ ] and not cron[ "file" ].exists()
 
 
@@ -411,7 +408,7 @@ def test_the_default_err_goes_to_standard_error_and_the_default_cron_command_is_
     monkeypatch.setattr( dd.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess( cmd, 0, stdout="", stderr="" ) if cmd[ 0 ] == "crontab" else pytest.fail( cmd ) )
     out = []
     assert dd.main( [ "--status" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append ) == 0 and out == [ "not installed" ]
-    assert dd.main( [ "--install", "--cap", "1", "--claude-cli-path", "/b" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append, crontab_cmd=cron[ "cmd" ] ) == 1
+    assert dd.main( [ "--uninstall" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append, crontab_cmd=cron[ "cmd" ] ) == 1
     assert "duplicate-check-daily:" in capsys.readouterr().err
 
 
@@ -630,7 +627,7 @@ def test_a_pinned_branch_idle_three_days_with_a_newer_branch_beside_it_is_refuse
     doc      = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path, notifier=notifier ), branch="wip-old" )
     assert doc[ "status" ] == "failed" and doc[ "stage" ] == dd.STAGE_GUARD and doc[ "refusal" ] == dd.STALE_BRANCH, "a stale branch is a failed day, never a clean one"
     assert doc[ "branch" ] == "wip-old" and doc[ "newest" ] == "wip-new" and doc[ "idle_days" ] == 4.2 and doc[ "judge_calls" ] == 0 and doc[ "notified" ] is True
-    assert "--branch wip-new" in doc[ "reinstall" ] and "--cap 300" in doc[ "reinstall" ] and "--claude-cli-path /bin/claude" in doc[ "reinstall" ] and f"cd {repo} " in doc[ "reinstall" ]
+    assert 'set "--branch" to wip-new' in doc[ "reinstall" ] and f"{repo}/src/conf/job-registry.json" in doc[ "reinstall" ] and f"cd {repo} " in doc[ "reinstall" ] and "--install" in doc[ "reinstall" ].split( "\n" )[ 1 ]
     assert len( notifier.sent ) == 1 and "wip-old" in notifier.sent[ 0 ][ 0 ] and "wip-old" in notifier.sent[ 0 ][ 1 ] and doc[ "reinstall" ] in notifier.sent[ 0 ][ 1 ]
     assert "/" not in notifier.sent[ 0 ][ 0 ], "the spoken line holds no path"
     assert len( results( tmp_path ) ) == 1 and json.loads( results( tmp_path )[ 0 ].read_text() )[ "refusal" ] == dd.STALE_BRANCH
@@ -670,7 +667,7 @@ def test_a_pinned_branch_that_does_not_exist_is_refused_and_the_newest_other_bra
     stale_repo( repo )
     notifier = Notifier()
     doc      = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path, notifier=notifier ), branch="gone" )
-    assert doc[ "refusal" ] == dd.MISSING_BRANCH and doc[ "status" ] == "failed" and doc[ "newest" ] == "wip-new" and "--branch wip-new" in doc[ "reinstall" ]
+    assert doc[ "refusal" ] == dd.MISSING_BRANCH and doc[ "status" ] == "failed" and doc[ "newest" ] == "wip-new" and 'set "--branch" to wip-new' in doc[ "reinstall" ]
     assert "no longer exists" in notifier.sent[ 0 ][ 0 ] and "does not resolve" in notifier.sent[ 0 ][ 1 ]
 
 
@@ -740,7 +737,7 @@ def test_the_live_notifier_falls_back_to_the_live_post_key_recipient_and_environ
 
 def test_the_reinstall_command_quotes_the_branch_for_the_shell():
     command = dd.reinstall_command( "/main", "/py", 300, "/bin/claude", "wip; rm -rf x" )
-    assert command.endswith( "--branch 'wip; rm -rf x'" ) and command.startswith( "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --install --cap 300" )
+    assert "set \"--branch\" to 'wip; rm -rf x' in the duplicate-check entry" in command
 
 
 def test_an_idle_pinned_branch_with_only_older_branches_beside_it_is_not_refused( repo, tmp_path ):
@@ -891,12 +888,6 @@ def test_the_cron_lines_with_a_ceiling_carry_ceiling_and_not_cap_and_a_baseline_
     assert not any( "--baseline" in l for l in plain )
 
 
-def test_the_reinstall_command_keeps_the_ceiling_a_run_was_given( repo, tmp_path ):
-    stale_repo( repo )
-    doc = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path ), branch="wip-old", ceiling=1500 )
-    assert "--ceiling 1500" in doc[ "reinstall" ] and "--cap" not in doc[ "reinstall" ] and doc[ "ceiling" ] == 1500
-
-
 def test_the_status_reads_none_partly_and_fully_installed_with_or_without_the_baseline_line():
     tag = dd.CRON_TAG
     status = lambda text: dd.lt.status_text( text, tag, dd.INSTALLED_LINES )
@@ -905,11 +896,10 @@ def test_the_status_reads_none_partly_and_fully_installed_with_or_without_the_ba
     assert status( f"a {tag}\n" * 5 ) == "partly installed: 5 lines"
 
 
-def test_main_takes_a_ceiling_or_a_cap_but_not_both_and_installs_the_baseline_line_when_asked( tmp_path, cron ):
+def test_main_takes_a_ceiling_or_a_cap_but_not_both_and_prints_the_baseline_line_when_asked( tmp_path, cron ):
     with pytest.raises( SystemExit ): dd.main( [ "--cap", "1", "--ceiling", "2", "--root", "." ] )
     code, out, _ = cron_main( tmp_path, [ "--print-install", "--ceiling", "1500", "--with-baseline", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron )
     assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 3 and "--ceiling 1500" in out[ 0 ] and "--baseline" in out[ 0 ]
-    assert cron_main( tmp_path, [ "--install", "--ceiling", "1500", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 2 lines" ]
 
 
 def test_main_passes_the_ceiling_the_baseline_flag_and_the_rise_limit_to_the_run( repo, tmp_path, monkeypatch ):
@@ -1040,13 +1030,16 @@ def test_a_baseline_finding_carries_the_end_commit_in_its_history_line( repo, tm
     assert set( line[ "findings_by_commit" ] ) == { git( repo, "rev-parse", "main" ) } and line[ "findings" ] == sum( line[ "findings_by_commit" ].values() )
 
 
-def test_the_reinstall_command_names_the_baseline_line_when_a_baseline_run_refused_or_the_crontab_holds_one( repo, tmp_path ):
+def test_the_reinstall_text_is_the_same_whatever_the_baseline_or_limit_a_run_had( repo, tmp_path ):
     stale_repo( repo )
     plain = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path ), branch="wip-old", ceiling=1500 )
     held  = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: True ), branch="wip-old", ceiling=1500 )
     asked = dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: False ), branch="wip-old", ceiling=1500, baseline=True )
-    assert "--with-baseline" not in plain[ "reinstall" ] and held[ "reinstall" ].endswith( " --with-baseline" ) and asked[ "reinstall" ].endswith( " --with-baseline" )
-    assert dd.reinstall_command( "/m", "/py", 40, "/c", "b" ) == "cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src /py -m lupin_mcp.duplicate_check_daily --install --cap 40 --claude-cli-path /c --branch b"
+    assert plain[ "reinstall" ] == held[ "reinstall" ] == asked[ "reinstall" ], "the registry holds the limit, the binary and the baseline, so the text does not carry them"
+    text = dd.reinstall_command( "/m", "/py", 40, "/c", "b" )
+    first, second = text.split( "\n" )
+    assert first == "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time."
+    assert second.startswith( "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src " ) and second.endswith( " -m lupin_mcp.cron_generate --install" )
 
 
 def test_the_crontab_reader_finds_a_tagged_baseline_line_and_nothing_else( cron ):

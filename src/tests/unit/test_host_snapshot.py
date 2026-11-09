@@ -139,17 +139,17 @@ def test_the_cron_line_runs_every_five_minutes_carries_the_environment_quoted_an
     assert "LUPIN_CONFIG_MGR_CLI_ARGS='" + hs.DEFAULT_CLI + "'" in plain and "DEEPILY_DATA_DIR" not in plain
 
 
-def test_print_install_changes_nothing_and_install_and_uninstall_use_the_locked_editor_with_this_tag(monkeypatch):
+def test_print_install_changes_nothing_install_is_retired_and_uninstall_uses_the_locked_editor_with_this_tag(monkeypatch):
     from cosa.repo.symindex import librarian_tick as lt
     calls, said = [], []
     monkeypatch.setattr( lt, "edit_crontab", lambda lines, environ, cmd, backups, now, tag, owner: calls.append( ( lines, backups, tag, owner ) ) )
     assert hs.install_mode( args( print_install=True ), ENV, NOW, said.append, said.append, None ) == 0 and calls == [] and said[ 0 ].endswith( "# job-host-snapshot" )
-    assert hs.install_mode( args( install=True ), ENV, NOW, said.append, said.append, None ) == 0 and said[ -1 ] == "installed: 1 line"
-    assert calls[ 0 ][ 0 ] == [ hs.cron_line( "/r", "/py", "/r/io/jobs/host-snapshot.log", ENV ) ] and calls[ 0 ][ 1:] == ( "/r/io/jobs/crontab-backups", "# job-host-snapshot", "job-host-snapshot" )
-    assert hs.install_mode( args( uninstall=True ), ENV, NOW, said.append, said.append, None ) == 0 and calls[ 1 ][ 0 ] == [] and said[ -1 ] == "uninstalled"
+    assert hs.install_mode( args( install=True ), ENV, NOW, said.append, said.append, None ) == 1 and calls == [] and "lupin_mcp.cron_generate --install" in said[ -1 ]
+    assert hs.install_mode( args( uninstall=True ), ENV, NOW, said.append, said.append, None ) == 0 and calls[ 0 ][ 0 ] == [] and said[ -1 ] == "uninstalled"
+    assert calls[ 0 ][ 1: ] == ( "/r/io/jobs/crontab-backups", "# job-host-snapshot", "job-host-snapshot" )
 
 
-def test_status_reports_the_line_and_a_refused_install_prints_one_line_and_returns_one(monkeypatch):
+def test_status_reports_the_line_and_a_refused_uninstall_prints_one_line_and_returns_one(monkeypatch):
     import sys
     from cosa.repo.symindex import librarian_tick as lt
     said = []
@@ -159,10 +159,10 @@ def test_status_reports_the_line_and_a_refused_install_prints_one_line_and_retur
     assert hs.install_mode( args( status=True ), {}, NOW, said.append, said.append, none ) == 0 and said[ -1 ] == "not installed"
     def refuse( *a, **k ): raise lt.InstallRefused( "no lock" )
     monkeypatch.setattr( lt, "edit_crontab", refuse )
-    assert hs.install_mode( args( install=True ), ENV, NOW, said.append, said.append, None ) == 1 and said[ -1 ] == "job-host-snapshot: no lock"
-    assert hs.install_mode( args( install=True, root=None ), { "LUPIN_ROOT": "/e" }, NOW, said.append, said.append, None ) == 1
+    assert hs.install_mode( args( uninstall=True ), ENV, NOW, said.append, said.append, None ) == 1 and said[ -1 ] == "job-host-snapshot: no lock"
+    assert hs.install_mode( args( uninstall=True, root=None ), { "LUPIN_ROOT": "/e" }, NOW, said.append, said.append, None ) == 1
     monkeypatch.chdir( "/" )
-    assert hs.install_mode( args( install=True, root=None ), {}, NOW, said.append, said.append, None ) == 1
+    assert hs.install_mode( args( uninstall=True, root=None ), {}, NOW, said.append, said.append, None ) == 1
 
 
 def test_main_dispatches_the_verbs_to_install_mode_and_defaults_to_writing_the_snapshot(tmp_path, monkeypatch, capsys):

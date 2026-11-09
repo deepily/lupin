@@ -294,7 +294,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     parser.add_argument( "--base-url", default=environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" ) )
     args    = parser.parse_args( argv )
     root    = args.root or environ.get( "LUPIN_ROOT" ) or os.getcwd()
-    cmd     = crontab_cmd or [ environ.get( "REUSE_VECTOR_REFRESH_CRONTAB", "crontab" ) ]
+    cmd     = crontab_cmd or lt.crontab_command( environ, "REUSE_VECTOR_REFRESH_CRONTAB" )
     try:
         folder = refresh_dir( root )
     except CandidateError as e:
@@ -304,7 +304,12 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return EXIT_OK
+    if args.install and lt.holds_generated_block( cmd ):
+        print( lt.install_moved_text( root ), file=err )                # the host crontab is cron_generate's now; this installer is for the VM
+        return 1
     try:
+        # The one --install kept (Mr. Radio, 9 Nov 2026): the test VM has no .venv, so cron-job.sh cannot serve it.
+        # Its only caller is `lupin-vm.sh install-refresh-cron`; every host line is written by lupin_mcp.cron_generate.
         if args.install or args.uninstall:
             lt.edit_crontab( [] if args.uninstall else lines, environ, cmd, os.path.join( folder, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
             print( "uninstalled" if args.uninstall else "installed: 2 lines", file=out )

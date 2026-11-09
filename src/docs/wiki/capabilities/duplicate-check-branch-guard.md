@@ -23,7 +23,7 @@ When a new working branch starts, the pinned one goes quiet and a plain run woul
 - An old pin with nothing newer beside it is not refused. `main` is never named as the branch to move to, and a pin of `main` is judged like any other.
 - A refusal writes the result file with status `failed`, stage `branch_guard`, the refusal, the branch, the newest branch and its time, `reinstall` and `notified`. `reinstall` is None when no other branch exists.
 - Nothing is judged and `last-success.json` does not move. `main` exits 3, which differs from 1 (failed) and 2 (usage).
-- `reinstall_command` builds the `--install` command for the newest branch, to be run from the main checkout with the run's cap and binary.
+- `reinstall_command` builds the text that moves the check to the newest branch. It names a registry edit of `--branch` in the duplicate-check entry. It adds the `cron_generate --install` command for a changed schedule. The cron lines read the registry when they run.
 - `refusal_message` makes the spoken line and the card text.
 - `live_notifier` sends one high priority alert through `/api/notify` and returns True on HTTP 200. It never raises.
 - A missing or raising notifier leaves `notified` False. The file and the exit code still say it.

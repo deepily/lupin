@@ -7,7 +7,7 @@
 #
 # Usage:  wiki-librarian-tick.sh [--force] [--install | --uninstall | --status | --print-install]
 #   --print-install  print the two cron lines and change nothing
-#   --install        write the lines through the shared crontab lock; refused without that lock
+#   --install        retired: exits 1 and prints the python -m lupin_mcp.cron_generate command that writes every cron line
 #   --uninstall      remove only the lines this tool wrote
 #   --status         say whether the lines are present
 #

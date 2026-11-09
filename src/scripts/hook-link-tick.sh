@@ -28,7 +28,7 @@
 #   4  findings, every channel unchanged since its last delivery and inside the quiet window
 #   5  findings, and delivery is switched off (HOOK_LINK_DELIVER=0): printed only, nothing sent
 #
-# Usage:  hook-link-tick.sh [--install | --uninstall | --status | --print-install]
+# Usage:  hook-link-tick.sh [--install (retired: prints the cron_generate command) | --uninstall | --status | --print-install]
 # Environment (all optional):
 #   HOOK_LINK_REPO          the checkout to look at (tests); setting it marks every message a drill
 #   HOOK_LINK_DM            persona to direct-message
@@ -37,7 +37,7 @@
 #   HOOK_LINK_RESEND_HOURS  quiet window, default 6
 #   HOOK_LINK_DELIVER       0 prints the report, delivers nothing and exits 5
 #   HOOK_LINK_PATH          replaces PATH outright (tests; cron's bare PATH is the default)
-#   HOOK_LINK_SCHEDULE, HOOK_LINK_LOG, HOOK_LINK_CRONTAB_CMD   install settings
+#   HOOK_LINK_SCHEDULE, HOOK_LINK_LOG, HOOK_LINK_CRONTAB_CMD   install settings (LUPIN_CRONTAB overrides the crontab command for every tool)
 set -uo pipefail
 
 # Cron's environment is bare. Nothing below relies on the profile.
@@ -50,7 +50,7 @@ SELF_ROOT="$( cd "$HERE/../.." && pwd )"
 CRON_TAG="# hook-link-tick"
 CRON_SCHEDULE="${HOOK_LINK_SCHEDULE:-2,12,22,32,42,52 * * * *}"
 CRON_LOG="${HOOK_LINK_LOG:-$HOME/.lupin/logs/hook-link-tick.log}"
-CRONTAB_CMD="${HOOK_LINK_CRONTAB_CMD:-crontab}"
+CRONTAB_CMD="${LUPIN_CRONTAB:-${HOOK_LINK_CRONTAB_CMD:-crontab}}"      # LUPIN_CRONTAB is the one scratch-crontab override every installer honors
 REF_MARKER="branch-guard: reference-transaction hook"
 
 # Git calls without the variables that would move the repository under us.
@@ -100,20 +100,13 @@ do_status() {
 }
 
 do_install() {
-    local main existing backup
+    local main
     main="$( main_for_install )" || exit $?
-    existing="$( $CRONTAB_CMD -l 2>/dev/null )"
-    if printf '%s\n' "$existing" | grep -Fq "$CRON_TAG"; then
-        echo "already installed, leaving the existing line exactly as it is:"; printf '%s\n' "$existing" | grep -F "$CRON_TAG"; return 0
-    fi
-    mkdir -p "$( dirname "$CRON_LOG" )" 2>/dev/null
-    # Back up before any write: a crontab is one file with no history, and no backup means no write.
-    backup="$HOME/.claude/crontab-backup-$( date +%Y%m%d-%H%M%S ).txt"
-    mkdir -p "$( dirname "$backup" )" 2>/dev/null
-    printf '%s\n' "$existing" > "$backup" || { echo "INSTALL ABORTED: could not write backup $backup" >&2; return 1; }
-    { [ -n "$existing" ] && printf '%s\n' "$existing"; cron_line "$main"; } | $CRONTAB_CMD - \
-        || { echo "INSTALL FAILED: crontab refused the write (backup at $backup)" >&2; return 1; }
-    echo "installed (backup at $backup):"; cron_line "$main"
+    {
+        echo "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:"
+        echo "  cd $main && LUPIN_ROOT=$main PYTHONPATH=$main/src .venv/bin/python -m lupin_mcp.cron_generate --install"
+    } >&2
+    return 1
 }
 
 do_uninstall() {

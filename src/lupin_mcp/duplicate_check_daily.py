@@ -497,9 +497,15 @@ def limit_flag( cap, ceiling ):
 
 
 def reinstall_command( root, python, cap, cli_path, branch, ceiling=None, with_baseline=False ):
-    """Ensures: returns the reinstall command, keeping the branch, limit and baseline line."""
-    more = " --with-baseline" if with_baseline else ""
-    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {python} -m lupin_mcp.duplicate_check_daily --install {limit_flag( cap, ceiling )} --claude-cli-path {cli_path} --branch {shlex.quote( branch )}{more}"
+    """
+    Say how to move the check to another branch.
+
+    Ensures:
+        - returns the registry edit and the generator command; the limit, binary and baseline arguments are kept so callers need no change, because the registry now holds them
+        - the cron lines read the registry's duplicate-check entry when they run, so the branch edit needs no reinstall; the generator command is for a changed schedule
+    """
+    return ( f"In {root}/src/conf/job-registry.json, set \"--branch\" to {shlex.quote( branch )} in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
+             f"If the schedule changed too, run: cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
 
 
 def refusal_message( refusal, command ):
@@ -507,16 +513,16 @@ def refusal_message( refusal, command ):
     Say what a refusal means and what to run.
 
     Ensures:
-        - returns ( spoken, abstract ): spoken is short and holds no path; abstract names the branch and carries the reinstall command, or says no other branch exists
+        - returns ( spoken, abstract ): spoken is short and holds no path; abstract names the branch and carries the registry edit, or says no other branch exists
     """
     name = refusal[ "branch" ]
     if refusal[ "refusal" ] in CONTINUITY:
         what = f"it last judged `{refusal['previous']}` and now chooses `{name}`" if refusal[ "refusal" ] == BRANCH_CHANGED else f"its last judged commit is not on `{name}`"
         return ( f"The duplicate check refused to run: {what.replace('`', '')}.",
-                 f"Progress is recorded per branch, and {what}.\n\nTo keep going on the old branch, reinstall with `--branch {refusal['previous']}`. To start `{name}` fresh, delete last-success.json and baseline.json in the check's folder." )
+                 f"Progress is recorded per branch, and {what}.\n\nTo keep going on the old branch, set `--branch {refusal['previous']}` on the duplicate-check entry in src/conf/job-registry.json. To start `{name}` fresh, delete last-success.json and baseline.json in the check's folder." )
     if refusal[ "refusal" ] == STALE_BRANCH: spoken, why = f"The daily duplicate check refused to run: its branch {name} has been idle {refusal[ 'idle_days' ]} days.", f"Pinned branch `{name}` has not moved in {refusal[ 'idle_days' ]} days and `{refusal[ 'newest' ]}` has a newer commit ({refusal[ 'newest_at' ]})."
     else:                                      spoken, why = f"The daily duplicate check refused to run: its branch {name} no longer exists.", f"Pinned branch `{name}` does not resolve to a commit."
-    fix = f"Reinstall for the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
+    fix = f"Move the check to the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
     return spoken, f"{why}\n\n{fix}"
 
 
@@ -525,12 +531,12 @@ def baseline_installed( cmd=None ):
     Say whether the crontab holds this job's baseline line.
 
     Requires:
-        - cmd is the crontab command as a list, or None for the DUPLICATE_CHECK_DAILY_CRONTAB variable or crontab
+        - cmd is the crontab command as a list, or None for LUPIN_CRONTAB, the DUPLICATE_CHECK_DAILY_CRONTAB variable or crontab
     Ensures:
         - returns True when a line ending with CRON_TAG runs with --baseline
         - returns False when there is no crontab or the command cannot run
     """
-    try: read = subprocess.run( [ *( cmd or [ os.environ.get( "DUPLICATE_CHECK_DAILY_CRONTAB", "crontab" ) ] ), "-l" ], capture_output=True, text=True )
+    try: read = subprocess.run( [ *( cmd or lt.crontab_command( os.environ, "DUPLICATE_CHECK_DAILY_CRONTAB" ) ), "-l" ], capture_output=True, text=True )
     except OSError: return False
     return read.returncode == 0 and any( line.rstrip().endswith( CRON_TAG ) and " --baseline" in line for line in read.stdout.splitlines() )
 
@@ -834,13 +840,16 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     Requires:
         - args holds the parsed flags; exactly one of print_install, install, uninstall or status is set; out and err take one line of text
     Ensures:
-        - --print-install prints the lines and changes nothing; --install and --uninstall go through the librarian's locked crontab editor with this job's tag and owner
+        - --print-install prints the lines and changes nothing; --uninstall goes through the librarian's locked crontab editor with this job's tag and owner; --install is retired: it prints where the installer went on err and returns 1
         - --status says whether the lines are present
         - returns 0, or 1 with the reason on err when the install is refused or the crontab call fails
     """
     root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
     log_dir = f"{root}{proof_cli.DATA_RELATIVE}/{FOLDER[ 0 ]}"
-    cmd     = crontab_cmd or [ environ.get( "DUPLICATE_CHECK_DAILY_CRONTAB", "crontab" ) ]
+    cmd     = crontab_cmd or lt.crontab_command( environ, "DUPLICATE_CHECK_DAILY_CRONTAB" )
+    if args.install:
+        err( lt.install_moved_text( root ) )
+        return 1
     try:
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
@@ -851,11 +860,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
             out( "uninstalled" )
             return 0
         lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) }, args.branch, args.ceiling, args.with_baseline, args.adaptive )
-        if args.print_install:
-            out( "\n".join( lines ) )
-            return 0
-        lt.edit_crontab( lines, environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
-        out( f"installed: {len( lines )} lines" )
+        out( "\n".join( lines ) )                                    # the one mode left is --print-install
         return 0
     except ( lt.InstallRefused, RuntimeError ) as e:
         err( f"duplicate-check-daily: {e}" )
