@@ -284,3 +284,22 @@ def test_the_weekly_command_refuses_with_exit_3_when_the_verdict_file_is_corrupt
 def test_the_verdict_file_name_is_the_one_the_writer_appends_to_and_it_sits_beside_the_result_files( folder ):
     dv.write_verdict( LINE_OK, folder, ROW, Amender() )
     assert rb.VERDICTS_FILE == "verdicts.jsonl" and ( folder / rb.VERDICTS_FILE ).is_file() and ( folder / "2026-11-03-111218-hand.json" ).is_file()
+
+
+def test_settled_keys_are_the_keys_of_the_findings_a_line_rules_on_whatever_the_verdict_and_nothing_else( folder ):
+    ( folder / "verdicts.jsonl" ).write_text( "\n".join( json.dumps( { "run": "2026-11-03-111218-hand", "finding": fid, "verdict": v, "class": "c", "by": "x", "ts": "t" } )
+                                                         for fid, v in ( ( "d-a1", "DISTINCT" ), ( "d-a3", "DUPLICATE" ) ) ) + "\n" )
+    assert rb.settled_keys( folder ) == { "epic:dupcheck-d-a1", "epic:dupcheck-d-a3" }
+
+
+def test_a_line_for_a_run_with_no_readable_file_or_a_finding_without_a_key_settles_nothing_and_no_file_is_empty( folder, tmp_path ):
+    assert rb.settled_keys( folder ) == set()
+    ( folder / "2026-11-05-090000-cron.json" ).write_text( json.dumps( { "date": "2026-11-05", "trigger": "cron", "judge_calls": 1, "elapsed_seconds": 1.0, "findings": [ { "id": "d-k" } ] } ) )
+    ( folder / "verdicts.jsonl" ).write_text( "\n".join( json.dumps( { "run": r, "finding": f, "verdict": "EXTEND", "class": "c", "by": "x", "ts": "t" } )
+                                                         for r, f in ( ( "2026-11-09-000000-hand", "d-gone" ), ( "2026-11-05-090000-cron", "d-k" ) ) ) + "\n" )
+    assert rb.settled_keys( folder ) == set()
+
+
+def test_a_damaged_verdicts_line_is_raised_by_settled_keys_as_read_verdicts_raises_it( folder ):
+    ( folder / "verdicts.jsonl" ).write_text( "garbage\n" )
+    with pytest.raises( ValueError, match="line 1 is not a verdict record" ): rb.settled_keys( folder )

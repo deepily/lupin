@@ -657,7 +657,9 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
     found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ] )
-    found = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json" } for f in found ]       # the row names the run's day and the file that lists every finding
+    try: settled = behaviour.settled_keys( folder )                    # a finding the triage seat already ruled on stays out of the record and the row until its code changes
+    except ValueError as e: settled, doc[ "settled_error" ] = set(), str( e )       # a damaged verdicts file must not lose the judged run, so nothing is left out and the record says why
+    found   = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json" } for f in found if filing.correlation_key( f[ "id" ], f[ "text" ] ) not in settled ]       # the row names the run's day and the file that lists every finding
     doc[ "findings" ] = [ filing.for_record( f ) for f in found ]       # kept on every run, filer or not: the weekly page counts them, and duplicate_check_refile files them again after a filing error
     for hook, key in ( ( "filer", "filing" ), ( "auditor", "audit" ) ):
         if hook not in parts: continue

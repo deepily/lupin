@@ -1082,3 +1082,32 @@ def test_baseline_definitions_include_the_client_script_files_under_the_pools_cl
     got = dd.baseline_definitions( repo, dd.baseline_window( repo ) )
     mine = [ d for d in got[ "defs" ] if d[ "file" ] == f"{dd.label_prep.CLIENT_DIR}/widget.js" ]
     assert [ d[ "name" ] for d in mine ] == [ "widgetTotal" ] and mine[ 0 ][ "origin" ] == "new" and mine[ 0 ][ "id" ] in got[ "commit_of" ]
+
+
+def rule_on( tmp_path, run_stem, finding_ids, verdict="DISTINCT" ):
+    """Ensures: appends one verdict line per finding id to the folder's verdicts file."""
+    path = tmp_path / "io" / "duplicate-check-daily" / "verdicts.jsonl"
+    with path.open( "a" ) as f:
+        for fid in finding_ids: f.write( json.dumps( { "run": run_stem, "finding": fid, "verdict": verdict, "class": "pins-a-different-case", "by": "cheech", "ts": "2026-11-09T15:00:00Z" } ) + "\n" )
+
+
+def test_a_finding_with_a_verdict_line_is_left_out_of_the_next_run_and_a_changed_text_is_not( repo, tmp_path ):
+    history( repo )
+    first  = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    stem   = results( tmp_path )[ 0 ].stem
+    ids    = [ f[ "id" ] for f in first[ "findings" ] ]
+    assert len( ids ) == 3
+    rule_on( tmp_path, stem, ids[ :2 ], "EXTEND" )
+    ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).unlink()
+    filed  = []
+    second = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path, filer=lambda found, folder: filed.append( found ) or {} ) )
+    assert [ f[ "id" ] for f in second[ "findings" ] ] == ids[ 2: ] and [ f[ "id" ] for f in filed[ 0 ] ] == ids[ 2: ] and "settled_error" not in second
+
+
+def test_a_damaged_verdicts_file_leaves_nothing_out_and_the_record_says_why( repo, tmp_path ):
+    history( repo )
+    dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    ( tmp_path / "io" / "duplicate-check-daily" / "verdicts.jsonl" ).write_text( "not json\n" )
+    ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).unlink()
+    second = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert len( second[ "findings" ] ) == 3 and "verdicts.jsonl line 1 is not a verdict record" in second[ "settled_error" ]

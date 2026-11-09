@@ -298,6 +298,30 @@ def read_verdicts( folder ):
     return got
 
 
+def settled_keys( folder ):
+    """
+    Collect the correlation keys of findings that already have a verdict line.
+
+    Requires:
+        - folder is the check's result folder, holding VERDICTS_FILE and the result files the lines name
+    Ensures:
+        - returns the set of correlation keys of the findings a line rules on, whatever the verdict word, found by the line's run and finding id in that run's result file
+        - a key holds the definition's text hash, so changed code is a new key and is not in the set
+        - a line whose run file cannot be read, or whose finding has no key there, adds nothing
+        - a missing verdicts file gives an empty set
+    Raises:
+        - ValueError from read_verdicts for a line that is not a verdict record
+    """
+    folder  = pathlib.Path( folder )
+    wanted  = read_verdicts( folder )
+    keys    = set()
+    for run in sorted( { run for run, _finding in wanted } ):
+        got = read_check_run( folder / f"{run}.json" )
+        if got is None: continue
+        keys |= { key for _verdict, key, fid in got[ "findings" ] if key is not None and ( run, fid ) in wanted }
+    return keys
+
+
 def verdict_of( field, key, store, logged=None ):
     """
     Name the crew's verdict on one finding.
