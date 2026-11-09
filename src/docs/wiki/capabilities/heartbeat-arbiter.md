@@ -30,7 +30,7 @@ The arbiter polls the fleet's heartbeat events and tells Rick or the managers wh
 - Mostly it notifies and sends DMs. Its auto-poke can inject into tmux panes, the worktree janitor removes worktrees, and the hold-file sweep deletes prunable hold files.
 
 ## Separate loops
-- The context-pressure writer, the turn-age watchdog, the self-respin observer thread and the container health watcher run beside the poll, each behind its own enable key. The observer's own flag ships `false`, but its thread still runs for the stale-MCP check.
+- The context-pressure writer, the turn-age watchdog, the self-respin observer thread and the container health watcher run beside the poll, each behind its own enable key. The observer's own flag ships `false`, but its thread still runs for the stale-MCP check. The job alert watcher (`arbiter job alert enabled`) tells Rick once about a failing, silent or behind job. It repeats at most once per that job's interval. Its state is `io/jobs/alert-state.json`.
 - `get_context_pressure` reports `over_budget` when the last prompt exceeds the budget line: half of a 1,000,000 token window or any unlisted size, three quarters of 200,000.
 
 ## REST routes

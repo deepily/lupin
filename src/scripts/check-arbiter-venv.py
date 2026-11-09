@@ -48,6 +48,9 @@ ALWAYS_REQUIRED = [
     "lupin_arbiter_app.app",
     "lupin_arbiter_app.fleet_arbiter_loop",
     "lupin_arbiter_app.health_watcher",
+    "lupin_arbiter_app.job_alert_watcher",
+    "cosa.rest.job_service",                       # the job alert watcher reads the job summary in-process; stdlib and the Lupin tree only
+    "cosa.repo.symindex.paths",
     "lupin_arbiter_app.context_pressure_writer",
     "cosa.config.configuration_manager",
     "cosa.agents.heartbeat_arbiter.arbiter_job",

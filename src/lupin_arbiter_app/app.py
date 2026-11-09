@@ -43,6 +43,7 @@ def create_app(
     context_pressure_loop : Optional[ Any ]                = None,
     turn_age_watchdog_loop : Optional[ Any ]               = None,
     self_respin_observer_loop : Optional[ Any ]            = None,
+    job_alert_loop        : Optional[ Any ]                = None,
 ) -> FastAPI:
     """
     Build the lupin-arbiter-app FastAPI app.
@@ -69,11 +70,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan( _app: FastAPI ):
-        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop, turn_age_watchdog_loop, self_respin_observer_loop ):
+        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop, turn_age_watchdog_loop, self_respin_observer_loop, job_alert_loop ):
             if lp is not None:
                 lp.start()
         yield
-        for lp in ( self_respin_observer_loop, turn_age_watchdog_loop, context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
+        for lp in ( job_alert_loop, self_respin_observer_loop, turn_age_watchdog_loop, context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
             if lp is not None:
                 lp.stop()
 
@@ -85,6 +86,7 @@ def create_app(
     app.state.context_pressure_loop  = context_pressure_loop
     app.state.turn_age_watchdog_loop = turn_age_watchdog_loop
     app.state.self_respin_observer_loop = self_respin_observer_loop
+    app.state.job_alert_loop            = job_alert_loop
 
     def _loop_liveness() -> dict:
         """
@@ -104,7 +106,8 @@ def create_app(
                           ( "fleet_arbiter",           fleet_arbiter_loop ),
                           ( "context_pressure_writer", context_pressure_loop ),
                           ( "turn_age_watchdog",       turn_age_watchdog_loop ),
-                          ( "self_respin_observer",    self_respin_observer_loop ) ):
+                          ( "self_respin_observer",    self_respin_observer_loop ),
+                          ( "job_alert_watcher",       job_alert_loop ) ):
             if lp is None: continue
             try:
                 thread = getattr( lp, "_thread", None )
@@ -287,6 +290,40 @@ def _build_context_pressure_loop( cfg, store, *, clock=None, log_fn=None ):
     )
 
 
+def _build_job_alert_loop( cfg, gateway, live_notify_fn, *, log_fn, clock=None ):
+    """
+    Build the job alert watcher, gated on `arbiter job alert enabled`.
+
+    Alerts go to Rick only, as a durable post plus a best-effort live push, through the shared
+    escalation sink. There is no manager fanout.
+
+    Requires:
+        - cfg exposes .get( key, default, return_type ) (real or fake)
+        - log_fn is the already-resolved structured logger
+
+    Ensures:
+        - returns a JobAlertLoop when enabled
+        - returns None and logs job_alert_watcher_disabled when disabled, importing nothing from the job service
+    """
+    if not cfg.get( "arbiter job alert enabled", default=True, return_type="boolean" ):
+        log_fn( "job_alert_watcher_disabled", reason="arbiter job alert enabled = false" )
+        return None
+
+    import cosa.utils.util as cu
+    from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn
+    from lupin_arbiter_app.job_alert_watcher import JobAlertLoop, STATE_FILE, make_live_summary_fn
+
+    root = cu.get_project_root()
+    return JobAlertLoop(
+        summary_fn       = make_live_summary_fn( root ),
+        notify_fn        = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn ),
+        state_path       = root + "/" + STATE_FILE,
+        log_fn           = log_fn,
+        interval_seconds = int( cfg.get( "arbiter job alert interval seconds", default=300, return_type="int" ) ),
+        clock            = clock,
+    )
+
+
 def assemble_app(
     cfg,
     gateway,
@@ -350,8 +387,9 @@ def assemble_app(
         arbiter_log_fn = make_log_fn( loop="fleet_arbiter",           tz_name=tz_name )
         health_log_fn  = make_log_fn( loop="health_watcher",          tz_name=tz_name )
         cp_log_fn      = make_log_fn( loop="context_pressure_writer", tz_name=tz_name )
+        job_log_fn     = make_log_fn( loop="job_alert_watcher",       tz_name=tz_name )
     else:
-        wiring_log_fn = arbiter_log_fn = health_log_fn = cp_log_fn = log_fn
+        wiring_log_fn = arbiter_log_fn = health_log_fn = cp_log_fn = job_log_fn = log_fn
     log_fn = wiring_log_fn
 
     # ── declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, Rick 2026-06-11):
@@ -549,13 +587,16 @@ def assemble_app(
         log_fn( "self_respin_observer_disabled", reason="arbiter self respin observer enabled = false and stale mcp check delivery enabled = false" )
         self_respin_observer_loop = None
 
+    # ── job alert watcher: tells Rick when a background job goes bad (gated on its own enable) ──
+    job_alert_loop = _build_job_alert_loop( cfg, gateway, live_notify_fn, log_fn=job_log_fn, clock=clock )
+
     # ── health watcher (L2): gated on the master enable ──
     if not cfg.get( "arbiter health watch enabled", default=True, return_type="boolean" ):
         log_fn( "health_watcher_disabled", reason="arbiter health watch enabled = false" )
         return create_app( snapshot_store=store, health_loop=None, fleet_arbiter_loop=fleet_arbiter_loop,
                            context_pressure_loop=context_pressure_loop,
                            turn_age_watchdog_loop=turn_age_watchdog_loop,
-                           self_respin_observer_loop=self_respin_observer_loop )
+                           self_respin_observer_loop=self_respin_observer_loop, job_alert_loop=job_alert_loop )
 
     def _csv( key, default ):
         raw = cfg.get( key, default=default ) or default
@@ -594,7 +635,7 @@ def assemble_app(
     return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop,
                        context_pressure_loop=context_pressure_loop,
                        turn_age_watchdog_loop=turn_age_watchdog_loop,
-                       self_respin_observer_loop=self_respin_observer_loop )
+                       self_respin_observer_loop=self_respin_observer_loop, job_alert_loop=job_alert_loop )
 
 
 def _pending_ledger_path( cfg ):
