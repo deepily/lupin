@@ -746,7 +746,7 @@ def live_rows_by_mark( settings=None, api_key=None, client=None, max_rows=ROW_SC
     Count the rows in the store that carry the job's mark.
 
     Requires:
-        - the mark is created_by equal to the filer's fixed name
+        - the mark is a correlation_key starting with the filer's KEY_PREFIX; the creator is "<persona> (duplicate-check-daily)"
     Ensures:
         - returns { found, open }: found counts every row the mark names, held ones included; open those not done, dropped or wont_fix
         - returns None when the store cannot be read in full: any failed read or a board longer than max_rows is no answer, never a short count
@@ -766,7 +766,7 @@ def live_rows_by_mark( settings=None, api_key=None, client=None, max_rows=ROW_SC
             if not page.get( "has_more" ) or not page[ "tasks" ]: break
     except Exception: return None
     if cut: return None
-    mine = { r[ "id" ]: r for r in [ *board, *held ] if r[ "created_by" ] == filing.CREATED_BY }
+    mine = { r[ "id" ]: r for r in [ *board, *held ] if ( r[ "correlation_key" ] or "" ).startswith( filing.KEY_PREFIX ) }
     return { "found": len( mine ), "open": sum( 1 for r in mine.values() if r[ "status" ] not in TERMINAL ) }
 
 

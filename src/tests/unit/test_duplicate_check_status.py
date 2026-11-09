@@ -111,7 +111,7 @@ def test_the_summary_is_the_fleets_v1_record_with_a_null_for_what_the_ledger_can
     assert s[ "scan_debt" ][ "count" ] == 0 and s[ "scan_debt" ][ "never_checked" ] == 700 and s[ "scan_debt" ][ "drained_last_run" ] == 300 and s[ "scan_debt" ][ "arrived_last_interval" ] == 150
     assert s[ "scan_debt" ][ "unit" ] == "definitions" and s[ "scan_debt" ][ "freshness" ] is None and s[ "scan_debt" ][ "as_of" ] == s[ "last_attempt" ][ "finished_at" ]
     assert s[ "scan_debt" ][ "points" ] == [ { "at": at( 7, 10 ), "count": 800, "drained": 0 }, { "at": at( 7, 11 ), "count": 300, "drained": 500 }, { "at": at( 8, 10 ), "count": 0, "drained": 300 } ]
-    assert s[ "fix_debt" ] == { "unit": "rows", "kind": "rows", "own_mark": "created_by:duplicate-check-daily", "unfiled": None, "opened_in_run": None, "filed_in_ledger": 0, "found_by_mark": None, "open_by_mark": None, "open_reported": None, "gap": None, "points": [ { "at": l, "opened_total": 0 } for l in ( at( 7, 10 ), at( 7, 11 ), at( 7, 12 ), at( 8, 10 ), at( 8, 11 ) ) ] }
+    assert s[ "fix_debt" ] == { "unit": "rows", "kind": "rows", "own_mark": "prefix:epic:dupcheck-", "unfiled": None, "opened_in_run": None, "filed_in_ledger": 0, "found_by_mark": None, "open_by_mark": None, "open_reported": None, "gap": None, "points": [ { "at": l, "opened_total": 0 } for l in ( at( 7, 10 ), at( 7, 11 ), at( 7, 12 ), at( 8, 10 ), at( 8, 11 ) ) ] }
     assert s[ "work_found_last_run" ] is None, "the fixture's runs recorded no findings"
 
 

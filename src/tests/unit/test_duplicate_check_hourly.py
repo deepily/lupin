@@ -7,6 +7,7 @@ import pytest
 
 from cosa.repo.doc_lint import model_transport as mt
 from lupin_mcp import duplicate_check_daily as dd
+from lupin_mcp import duplicate_check_filing as ff
 from lupin_mcp import duplicate_check_history as hist
 from tests.unit.test_duplicate_check_daily import NOW, commit, git, history, parts_of, repo   # noqa: F401  (repo is a fixture)
 from tests.unit.test_duplicate_check_score_run import FakeBackend
@@ -258,12 +259,14 @@ class Board:
         return self.held_ok, 200, { "tasks": self.held if not params[ "offset" ] else [], "has_more": len( self.held ) > 0 and not params[ "offset" ] }
 
 
-def row( rid, status, by="duplicate-check-daily" ): return { "id": rid, "status": status, "created_by": by }
+def row( rid, status, key="epic:dupcheck-run-0123456789abcdef", by="cheech (duplicate-check-daily)" ):
+    return { "id": rid, "status": status, "created_by": by, "correlation_key": key }
 
 
 def test_the_store_count_finds_the_rows_that_carry_the_mark_held_ones_included_and_counts_the_open_ones():
-    board = Board( [ row( "a", "done" ), row( "b", "queued" ), row( "c", "queued", by="Cheech 1" ) ], [ row( "d", "not_approved" ), row( "b", "queued" ) ] )
-    assert dd.live_rows_by_mark( { }, "k", board ) == { "found": 3, "open": 2 }, "a row on both lists counts once"
+    board = Board( [ row( "a", "done" ), row( "b", "queued" ), row( "c", "queued", key="epic:wiki-librarian", by="Cheech 1" ), row( "e", "queued", key=None ) ],
+                   [ row( "d", "not_approved", key="epic:dupcheck-3cb0a1e7dd0eb7e4", by="duplicate-check-daily" ), row( "b", "queued" ) ] )
+    assert dd.live_rows_by_mark( { }, "k", board ) == { "found": 3, "open": 2 }, "a row on both lists counts once; another job's key and no key are not counted"
     assert board.asked[ 0 ][ "status" ] == "not_approved" and board.asked[ -1 ][ "offset" ] == 2
     assert set( board.keys ) == { "k" }, "every read carries the key it was given"
     other = Board( [ ], [ ] )
@@ -398,6 +401,16 @@ def test_exactly_twenty_calls_that_judged_none_is_urgent( tmp_path ):
     parts, hooks = hooked( tmp_path )
     dd.announce( parts, tmp_path / "io" / "duplicate-check-daily", [ doc_of( 20, 0 ) ], NOW, None )
     assert [ s[ 0 ] for s in hooks.sent ].count( "urgent" ) == 1
+
+
+def test_the_mark_is_the_filers_key_prefix_so_a_persona_stamped_row_still_counts():
+    # The filer now stamps "<persona> (duplicate-check-daily)", so the mark cannot be the creator.
+    import lupin_mcp.duplicate_check_status as ds
+    assert ds.OWN_MARK == "prefix:" + ff.KEY_PREFIX == "prefix:epic:dupcheck-"
+    stamped = ff.triage_payload( [ { "id": "d-1", "name": "a1", "file": "a.py", "line": 3, "text": "def a1(): pass", "others": [ ],
+                                     "window": { "start": "aaa", "end": "bbb" } } ], { "owner": "cheech", "note": "n" }, datetime.date( 2026, 11, 9 ) )
+    board = Board( [ { "id": "x", "status": "queued", "created_by": stamped[ "created_by" ], "correlation_key": stamped[ "correlation_key" ] } ], [ ] )
+    assert dd.live_rows_by_mark( { }, "k", board ) == { "found": 1, "open": 1 }
 
 
 def test_a_wont_fix_row_is_not_open_and_the_held_read_is_limited_to_the_project():

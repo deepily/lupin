@@ -92,6 +92,14 @@ def test_a_seat_with_a_session_id_is_never_refused_even_off_roster():
     assert rules.creator_refusal( "ziggy 5a1f17f8", known_keys=ROSTER ) is None
 
 
+def test_the_hook_mirrors_unknown_persona_passes_only_while_its_session_id_is_hex():
+    # task_store_mirror._identity sends "<persona> <first 8 of the session id>", with persona
+    # "unknown" when the bridge has none. A real session id is a hex uuid, so that row lands and is
+    # soft-flagged downstream. A non-hex id has no session tail, so it is judged and refused.
+    assert rules.creator_refusal( "unknown 8db4923d", known_keys=ROSTER ) is None
+    assert rules.creator_refusal( "unknown test-ses", known_keys=ROSTER ) is not None
+
+
 def test_with_no_roster_given_the_configured_pool_is_used( monkeypatch ):
     monkeypatch.setattr( rules, "_KNOWN_PERSONA_KEYS", { "cheech" } )
     assert rules.creator_refusal( "cheech (wiki-librarian tick)" ) is None

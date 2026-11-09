@@ -23,7 +23,7 @@ LAST_HOUR       = 22                    # ... to 22:00, while the host is on
 GRACE_MINUTES   = 30                    # a run is late when it has not started this long after its slot
 SUMMARY_SCHEMA  = "job-summary/1"       # section 1.1 of the fleet's background job reporting format
 SUMMARY_FILE    = "job-summary.json"
-OWN_MARK        = "created_by:duplicate-check-daily"       # filing.CREATED_BY: every row the filer mints carries it
+OWN_MARK        = "prefix:epic:dupcheck-"                  # filing.KEY_PREFIX: every row the filer mints has a correlation_key starting with it; the creator is "<persona> (duplicate-check-daily)"
 POINTS          = 14
 RECENT_ATTEMPTS = 7
 INFLOW_DAYS     = 7                     # days of history the arrival rate averages over
@@ -229,7 +229,7 @@ def job_summary( lines, now, rows=None ):
         - scan_debt.count is the last measured daily carried count, never_checked the baseline remainder (None until a baseline run measured it), arrived_last_interval the owed count of the newest measured daily run less the carried count of the one before
         - rows, when given, is { found, open } counted in the store by the created_by mark; the summary then holds found_by_mark, open_by_mark and gap, the ledger's filed total less found
         - without rows those three are None, and a gap is never reported as 0 when the store was not read
-        - fix_debt.unfiled and opened_in_run are the newest finished line's queued_for_retry and filed counts, own_mark the created_by the filer stamps on its rows; open and closed counts are the reader's, from the store
+        - fix_debt.unfiled and opened_in_run are the newest finished line's queued_for_retry and filed counts, own_mark the correlation_key prefix every row the filer mints starts with; open and closed counts are the reader's, from the store
         - target is None for this job, fix_debt.kind is rows; there is no health field, the reader computes it
         - last_attempt also names the mode; recent holds the last seven attempts as { at, outcome, mode }, oldest first; scan_debt.points are { at, count, drained }
     """
