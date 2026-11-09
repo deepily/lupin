@@ -13,6 +13,7 @@ import pathlib
 
 from cosa.repo.symindex import librarian_queue as lq
 from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
+from cosa.rest.task_store_rules import filer_created_by
 from cosa.utils import secret_drift
 from lupin_mcp.persona_normalization import canonical_persona_key
 
@@ -105,7 +106,7 @@ def triage_payload( findings, owner, day ):
         - the body says why the row exists, what to do, the owner and the first LIST_LIMIT findings with the definitions they repeat
         - the rest are counted in a last line naming the result file, the first finding's run_file; the title counts every finding
         - finding_keys always lists every finding, so none is lost from the triaged file
-        - created_by is the job's fixed name and carries no session id, so the store reads the caller as a worker, not a manager
+        - created_by is "<owner persona> (<job name>)", so the row is filed by a persona; it carries no session id, so the store reads the caller as a worker, not a manager
         - owner_persona and accountable_manager are the owner's persona key
         - finding_keys lists the findings' keys so the filer can mark them triaged; send_row's caller removes it before the create
     """
@@ -120,7 +121,7 @@ def triage_payload( findings, owner, day ):
               f"Window: {findings[ 0 ][ 'window' ][ 'start' ]}..{findings[ 0 ][ 'window' ][ 'end' ]}. Owner: {owner[ 'owner' ]} ({owner[ 'note' ]}).\n"
               f"Correlation: one row per run, key {key}; a function already on an earlier row is not listed again.\n\n" + "\n".join( lines ) )
     return { "item_class": ITEM_CLASS, "title": f"[LUPIN] Duplicate check {day.day} {day.strftime( '%b' )}: decide whether {count} new function(s) should reuse existing ones",
-             "project": PROJECT, "created_by": CREATED_BY, "body": body, "owner_persona": owner[ "owner" ], "accountable_manager": owner[ "owner" ],
+             "project": PROJECT, "created_by": filer_created_by( owner[ "owner" ], CREATED_BY ), "body": body, "owner_persona": owner[ "owner" ], "accountable_manager": owner[ "owner" ],
              "priority": PRIORITY, "correlation_key": key, "finding_keys": keys }
 
 

@@ -77,10 +77,10 @@ def test_the_run_key_is_the_sorted_finding_keys_hashed_so_the_same_set_has_the_s
     assert ff.run_key( [ "a", "b" ] ) == "epic:dupcheck-run-" + hashlib.sha256( b"a\nb" ).hexdigest()[ :16 ]
 
 
-def test_the_row_is_p5_with_no_status_a_fixed_creator_with_no_session_and_the_persona_as_owner_and_accountable():
+def test_the_row_is_p5_with_no_status_filed_by_the_owner_persona_with_no_session_and_the_persona_as_owner_and_accountable():
     f   = finding()
     row = ff.triage_payload( [ f ], { "owner": "cheech", "note": "n" }, DAY )
-    assert row[ "priority" ] == "P5" and "status" not in row and row[ "created_by" ] == ff.CREATED_BY and row[ "item_class" ] == "task"
+    assert row[ "priority" ] == "P5" and "status" not in row and row[ "created_by" ] == "cheech (duplicate-check-daily)" and row[ "item_class" ] == "task"
     assert not re.search( r"[0-9a-f]{8}-[0-9a-f]{4}", row[ "created_by" ] ), "no session id: the store must read the caller as a worker"
     assert row[ "owner_persona" ] == row[ "accountable_manager" ] == "cheech" and row[ "finding_keys" ] == [ ff.correlation_key( "d-1", f[ "text" ] ) ]
     assert row[ "correlation_key" ] == ff.run_key( row[ "finding_keys" ] )

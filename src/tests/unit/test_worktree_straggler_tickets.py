@@ -268,7 +268,7 @@ def test_create_mints_a_live_row_with_canonical_personas( fake_db ):
     assert st.RepositoryStragglerStore().create( **row ) == "new-id"
     kw = fake_db.calls[ 0 ][ 1 ]
     assert kw[ "status" ] == "queued" and kw[ "authority" ] == "standing"
-    assert kw[ "created_by" ] == st.ARBITER_ACTOR and kw[ "priority" ] == "P3"
+    assert kw[ "created_by" ] == "mr radio (heartbeat-arbiter@lupin.deepily.ai)" and kw[ "priority" ] == "P3"
     assert kw[ "owner_persona" ] == "mr radio" and kw[ "accountable_manager" ] == "mr radio"
     assert kw[ "correlation_key" ] == "worktree:" + SEAT
 

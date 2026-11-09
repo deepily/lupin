@@ -28,13 +28,13 @@ def test_the_base_adds_nothing_to_a_create_or_an_amend():
 
 def test_the_tick_stamps_its_actor_on_both_calls_and_the_filing_stamps_its_reason_on_the_amend_only():
     tick, filing = Recorder(), Recorder()
-    lt.LiveStore( { }, "k", tick ).create( { "title": "t" } )
+    lt.LiveStore( { }, "k", tick ).create( { "title": "t", "accountable_manager": "cheech" } )
     lt.LiveStore( { }, "k", tick ).amend( "id-1", "n" )
     store = ff.LiveStore( settings={ }, api_key="k" )
     store.client = filing
     store.create( { "title": "t" } )
     store.amend( "id-1", "n" )
-    assert tick.calls[ 0 ][ 3 ] == { "title": "t", "created_by": lt.ACTOR, "authority": "standing" }
+    assert tick.calls[ 0 ][ 3 ] == { "title": "t", "accountable_manager": "cheech", "created_by": "cheech (wiki-librarian tick)", "authority": "standing" }
     assert tick.calls[ 1 ][ 4 ] == { "note": "n", "actor": lt.ACTOR, "authority": "standing" }
     assert filing.calls[ 0 ][ 3 ] == { "title": "t" }
     assert filing.calls[ 1 ][ 4 ] == { "note": "n", "reason": ff.AMEND_REASON, "authority": "standing" }
@@ -42,7 +42,7 @@ def test_the_tick_stamps_its_actor_on_both_calls_and_the_filing_stamps_its_reaso
 
 
 def test_a_stamped_field_beats_the_callers_own_and_the_callers_payload_is_left_alone():
-    tick, payload = Recorder(), { "title": "t", "created_by": "someone else", "authority": "user_direct" }
+    tick, payload = Recorder(), { "title": "t", "owner_persona": "Mr Radio", "created_by": "someone else", "authority": "user_direct" }
     lt.LiveStore( { }, "k", tick ).create( payload )
-    assert tick.calls[ 0 ][ 3 ] == { "title": "t", "created_by": lt.ACTOR, "authority": "standing" }
-    assert payload == { "title": "t", "created_by": "someone else", "authority": "user_direct" }
+    assert tick.calls[ 0 ][ 3 ] == { "title": "t", "owner_persona": "Mr Radio", "created_by": "mr radio (wiki-librarian tick)", "authority": "standing" }
+    assert payload == { "title": "t", "owner_persona": "Mr Radio", "created_by": "someone else", "authority": "user_direct" }

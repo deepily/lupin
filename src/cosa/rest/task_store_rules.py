@@ -1290,6 +1290,64 @@ _KNOWN_PERSONA_KEYS: Optional[set] = None  # lazy singleton — None means "not 
 # and stripped off the persona.
 _SESSION_ID_TAIL_PATTERN = re.compile( r"[0-9a-f]{6,}" )
 
+# A note after the persona: "<persona> (<tool>)" from an automated filer, or a login's
+# "<identity> (<declared>)" (task_actor_identity.recorded_actor). One trailing group only.
+_TRAILING_NOTE_PATTERN = re.compile( r"\s*\([^()]*\)\s*$" )
+
+
+def filer_created_by( persona, tool ):
+    """
+    The created_by stamp for a row that a tool files on a persona's behalf.
+
+    Rick ruled on 9 Nov 2026 that every row is filed by a persona. A cron job has no session.
+    So it names the persona it works for and keeps its own name in brackets.
+    A login's rows already carry that shape.
+
+    Requires:
+        - persona is the persona name the tool files for, e.g. "cheech" or "Mr Radio"
+        - tool is the tool's own name, e.g. "wiki-librarian tick"
+
+    Ensures:
+        - returns "<canonical persona key> (<tool>)", e.g. "cheech (wiki-librarian tick)"
+        - persona_from_created_by( result ) is the canonical persona key
+
+    Raises:
+        - ValueError when persona canonicalizes to nothing, or tool is blank or holds a bracket
+    """
+    key = canonical_persona_key( persona )
+    if not key: raise ValueError( f"a filer needs a persona to file as, got {persona!r}" )
+    if not isinstance( tool, str ) or not tool.strip() or "(" in tool or ")" in tool:
+        raise ValueError( f"a filer needs a plain tool name without brackets, got {tool!r}" )
+    return f"{key} ({tool.strip()})"
+
+
+def creator_refusal( created_by, known_keys=None, approver_keys=None ):
+    """
+    Why a row's creator is not a persona, or None when it is.
+
+    Requires:
+        - created_by is the declared creator string of an API-key caller
+        - known_keys is the persona roster to test against, or None for the configured pool
+        - approver_keys is the set of approver persona keys, or None for none
+
+    Ensures:
+        - returns None for a seat's "<name> <session id>", whatever the name: an off-roster seat is
+          soft-flagged, never refused (policy 1 above; a new persona's founding row must land)
+        - with no session id, returns None when persona_from_created_by( created_by ) is on the roster
+          or is an approver
+        - otherwise returns a one-paragraph refusal naming the value, the persona it read and the
+          two accepted shapes, "<persona> <session id>" and "<persona> (<tool>)"
+        - never raises
+    """
+    if session_id_from_created_by( created_by ) is not None: return None
+    roster    = known_keys if known_keys is not None else _get_known_persona_keys()
+    approvers = approver_keys or set()
+    persona   = persona_from_created_by( created_by )
+    if persona and ( persona in roster or persona in approvers ): return None
+    return ( f"created_by {created_by!r} does not name a persona (read as {persona!r}). Every row is filed "
+             f"by a persona: a seat sends \"<persona> <session id>\", and a tool filing for a persona sends "
+             f"\"<persona> (<tool>)\" (task_store_rules.filer_created_by). Rick, 9 Nov 2026, row 1c56470f." )
+
 
 def _get_known_persona_keys() -> set:
     """
@@ -1350,9 +1408,12 @@ def persona_from_created_by( created_by ) -> str:
           (persona "mr radio" plus a session id -> "mr radio")
         - a value with no session-id-shaped tail -> canonical_persona_key( whole )
           ("krishna" -> "krishna")
+        - a trailing parenthesised note is dropped first, so a tool's stamp
+          "cheech (wiki-librarian tick)" and a login's "rick (rick)" give "cheech" and "rick"
     """
     if not created_by or not isinstance( created_by, str ):
         return ""
+    created_by = _TRAILING_NOTE_PATTERN.sub( "", created_by )
     parts = created_by.rsplit( " ", 1 )
     if len( parts ) == 2 and _SESSION_ID_TAIL_PATTERN.fullmatch( parts[ 1 ] ):
         candidate = parts[ 0 ]

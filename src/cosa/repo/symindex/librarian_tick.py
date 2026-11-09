@@ -253,10 +253,12 @@ class LiveStore( TaskStoreAdapter ):
         - client is the task_store_client module, or a stand-in with the same functions
 
     Ensures:
-        - a create is stamped with the tick as its actor and the standing authority; an amend with the same actor and authority
+        - a create is filed by the row's manager persona with the tick named in brackets, "cheech (wiki-librarian tick)",
+          under the standing authority; an amend carries the tick as its actor and the same authority
     """
 
-    create_extra = { "created_by": ACTOR, "authority": "standing" }
+    create_extra = { "authority": "standing" }
+    filer_tool   = ACTOR
     amend_extra  = { "actor": ACTOR, "authority": "standing" }
 
     def _pages( self, correlation_key, extra ):

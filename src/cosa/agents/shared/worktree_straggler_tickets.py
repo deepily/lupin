@@ -642,12 +642,14 @@ class RepositoryStragglerStore:
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.task_repository import TaskRepository
         from lupin_mcp.persona_normalization import canonical_persona_key
+        from cosa.rest.task_store_rules import filer_created_by
         with get_db() as session:
             item = TaskRepository( session ).create_item(
                 item_class          = "task",
                 title               = title,
                 project             = project,
-                created_by          = ARBITER_ACTOR,
+                # Filed by a persona, the row's chaser, with the arbiter named in brackets (row 1c56470f).
+                created_by          = filer_created_by( accountable or owner, ARBITER_ACTOR ),
                 authority           = "standing",
                 body                = body,
                 owner_persona       = canonical_persona_key( owner ) or owner,

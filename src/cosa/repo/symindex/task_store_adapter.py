@@ -16,6 +16,7 @@ class TaskStoreAdapter:
         - api_key is the outbound key string
         - client is the task_store_client module, or a stand-in with create_task and amend_task
         - a subclass sets create_extra and amend_extra to the fields it adds to each call
+        - a subclass that files rows sets filer_tool to its own name, so each row is filed by a persona
 
     Ensures:
         - create and amend return ( ok, status, body ) as the client does
@@ -23,6 +24,7 @@ class TaskStoreAdapter:
 
     create_extra = { }
     amend_extra  = { }
+    filer_tool   = None
 
     def __init__( self, settings, api_key, client ):
         """Keep the three collaborators."""
@@ -31,8 +33,26 @@ class TaskStoreAdapter:
         self.client   = client
 
     def create( self, payload ):
-        """Ensures: returns ( ok, status, body ) for one create, the payload plus create_extra."""
-        return self.client.create_task( self.settings, self.api_key, { **payload, **self.create_extra } )
+        """
+        Send one create: the payload, create_extra and, with filer_tool set, the persona stamp.
+
+        Requires:
+            - payload names accountable_manager or owner_persona when filer_tool is set
+
+        Ensures:
+            - returns ( ok, status, body ) for the create
+            - with filer_tool set, created_by is "<persona> (<filer_tool>)" for the payload's accountable
+              manager, or its owner when it names no manager (task_store_rules.filer_created_by)
+
+        Raises:
+            - ValueError when filer_tool is set and the payload names no persona to file as
+        """
+        stamp = { }
+        if self.filer_tool is not None:
+            from cosa.rest.task_store_rules import filer_created_by
+            persona = payload.get( "accountable_manager" ) or payload.get( "owner_persona" )
+            stamp   = { "created_by": filer_created_by( persona, self.filer_tool ) }
+        return self.client.create_task( self.settings, self.api_key, { **payload, **self.create_extra, **stamp } )
 
     def amend( self, row_id, note ):
         """Ensures: returns ( ok, status, body ) for one amendment, the note plus amend_extra."""

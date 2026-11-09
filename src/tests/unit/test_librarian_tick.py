@@ -128,9 +128,9 @@ def row( n ): return { "id": f"id-{n}", "title": f"t{n}", "body": "" }
 def test_the_live_store_stamps_the_actor_and_maps_create_and_amend_to_the_client():
     client = Client()
     store  = lt.LiveStore( { "api_base_url": "x" }, "key", client )
-    store.create( { "title": "t" } )
+    store.create( { "title": "t", "accountable_manager": "cheech" } )
     store.amend( "id-1", "note" )
-    assert client.calls[ 0 ][ 1 ] == { "title": "t", "created_by": lt.ACTOR, "authority": "standing" }
+    assert client.calls[ 0 ][ 1 ] == { "title": "t", "accountable_manager": "cheech", "created_by": "cheech (wiki-librarian tick)", "authority": "standing" }
     assert client.calls[ 1 ] == ( "amend", "id-1", { "note": "note", "actor": lt.ACTOR, "authority": "standing" } )
     assert not hasattr( store, "close" )
 
