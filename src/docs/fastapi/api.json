@@ -13829,6 +13829,46 @@
                 }
             }
         },
+        "/api/duplicate-check/status": {
+            "get": {
+                "tags": [
+                    "duplicate-check"
+                ],
+                "summary": "Get Status",
+                "description": "Ensures: returns status.snapshot of the run history as of now.",
+                "operationId": "get_status_api_duplicate_check_status_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/duplicate-check/job-summary": {
+            "get": {
+                "tags": [
+                    "duplicate-check"
+                ],
+                "summary": "Get Job Summary",
+                "description": "Ensures: returns the job-summary/1 record of the run history as of now.",
+                "operationId": "get_job_summary_api_duplicate_check_job_summary_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/pair-labelling/state": {
             "get": {
                 "tags": [
@@ -14038,6 +14078,159 @@
                         }
                     }
                 },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/jobs/summary": {
+            "get": {
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Health of every background job",
+                "description": "One entry per registered job: state, reasons, debts, schedule, evidence. Health is computed here, never by the page.",
+                "operationId": "jobs_summary_api_jobs_summary_get",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/jobs/{job}/run": {
+            "post": {
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Run one job now",
+                "description": "Starts one run outside the schedule, with trigger hand. Refused while the job's run lock is held. Rick's login only.",
+                "operationId": "run_job_now_api_jobs__job__run_post",
+                "parameters": [
+                    {
+                        "name": "job",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Job"
+                        }
+                    },
+                    {
+                        "name": "target",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Target"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "Successful Response",

@@ -4895,6 +4895,36 @@ object
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/duplicate-check/status`
+
+> **Get Status**
+
+Ensures: returns status.snapshot of the run history as of now.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+## GET `/api/duplicate-check/job-summary`
+
+> **Get Job Summary**
+
+Ensures: returns the job-summary/1 record of the run history as of now.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
 ## GET `/api/pair-labelling/state`
 
 > **Progress of one reviewer**
@@ -4976,6 +5006,52 @@ Raises:
 ### 📦 Request Body 
 
 [LabelUpload](#labelupload)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/jobs/summary`
+
+> **Health of every background job**
+
+One entry per registered job: state, reasons, debts, schedule, evidence. Health is computed here, never by the page.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/jobs/{job}/run`
+
+> **Run one job now**
+
+Starts one run outside the schedule, with trigger hand. Refused while the job's run lock is held. Rick's login only.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| job | string | True |  |
+| target |  | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
 
 ### ✅ Responses
 
