@@ -7,7 +7,6 @@
     "growth_min_items": 5,
     "growth_min_percent": 5,
     "lock_stale_seconds": 10800,
-    "summary_every_seconds": 60,
     "run_env": {
       "LUPIN_ROOT": "{root}",
       "PYTHONPATH": "{root}/src",
@@ -465,7 +464,6 @@
       ],
       "summary_path": "{root}/io/jobs/worktree-janitor/job-summary.json",
       "grace_seconds": 120,
-      "summary_every_seconds": 60,
       "targets": [
         {
           "target": "lupin"
