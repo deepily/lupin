@@ -398,7 +398,7 @@ def record( folder, stem, doc, now ):
     return doc
 
 
-def findings_of( groups, fresh, pool, window, parts, commit_of=None ):
+def findings_of( groups, fresh, pool, window, parts, commit_of=None, settled=() ):
     """
     Turn the duplicate clusters into one finding per cluster that holds a new definition.
 
@@ -406,18 +406,21 @@ def findings_of( groups, fresh, pool, window, parts, commit_of=None ):
         - groups are the clusters of more than one definition; fresh and pool are the definitions of the run
         - parts may hold session_of, a function from a definition to the writing seat's session id or None
         - commit_of, when given, maps a definition id to the commit that added it
+        - settled is the set of correlation keys that already have a verdict line, settled_keys' answer
     Ensures:
         - returns { id, name, file, line, text, session_id, commit, others, window } for each cluster that holds a new definition, in the order of the groups
+        - a cluster is left out when the correlation key of any of its new definitions is settled, so a verdict on either side of a pair settles the pair
         - the finding is the cluster's new definition with the lowest id, whichever side the judge ruled from, so a pair of new definitions that repeat each other is one finding
         - others is the rest of the cluster, the other new definitions included
         - without session_of the session is None, so the finding is unresolved to a seat
     """
     by_id  = { d[ "id" ]: d for d in [ *fresh, *pool ] }
     new    = { d[ "id" ] for d in fresh }
+    keyed  = { i: filing.correlation_key( i, by_id[ i ][ "text" ] ) for i in new }
     return [ { "id": i, "name": by_id[ i ][ "name" ], "file": by_id[ i ][ "file" ], "line": by_id[ i ][ "line" ], "text": by_id[ i ][ "text" ],
                "session_id": parts[ "session_of" ]( by_id[ i ] ) if "session_of" in parts else None, "commit": commit_of[ i ] if commit_of is not None else None, "window": window,
                "others": [ { "id": o, "name": by_id[ o ][ "name" ], "file": by_id[ o ][ "file" ] } for o in g if o != i ] }
-             for g in groups for i in [ min( [ m for m in g if m in new ], default=None ) ] if i is not None ]
+             for g in groups for i in [ min( [ m for m in g if m in new ], default=None ) ] if i is not None and not any( keyed[ m ] in settled for m in g if m in new ) ]
 
 
 def failed_prerequisite( client, cli_path, verify, version_fn ):
@@ -658,10 +661,10 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     doc.update( status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
-    found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ] )
-    try: settled = behaviour.settled_keys( folder )                    # a finding the triage seat already ruled on stays out of the record and the row until its code changes
+    try: settled = behaviour.settled_keys( folder )                    # a cluster the triage seat already ruled on, from either side, stays out of the record and the row until its code changes
     except ValueError as e: settled, doc[ "settled_error" ] = set(), str( e )       # a damaged verdicts file must not lose the judged run, so nothing is left out and the record says why
-    found   = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json" } for f in found if filing.correlation_key( f[ "id" ], f[ "text" ] ) not in settled ]       # the row names the run's day and the file that lists every finding
+    found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ], settled )
+    found = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json" } for f in found ]       # the row names the run's day and the file that lists every finding
     doc[ "findings" ] = [ filing.for_record( f ) for f in found ]       # kept on every run, filer or not: the weekly page counts them, and duplicate_check_refile files them again after a filing error
     for hook, key in ( ( "filer", "filing" ), ( "auditor", "audit" ) ):
         if hook not in parts: continue

@@ -1131,3 +1131,16 @@ def test_two_new_definitions_that_repeat_each_other_are_one_finding_the_lowest_i
     three = dd.findings_of( [ [ "n1", "n2", "p1" ] ], fresh, pool, win, {} )
     assert [ f[ "id" ] for f in three ] == [ "n1" ] and [ o[ "id" ] for o in three[ 0 ][ "others" ] ] == [ "n2", "p1" ]
     assert dd.findings_of( [ [ "p1", "q" ], [ "n2", "p1" ] ], fresh, pool, win, {} )[ 0 ][ "id" ] == "n2", "a cluster of pool members alone gives none, the next gives its new one"
+
+
+def test_a_verdict_on_either_new_definition_of_a_cluster_settles_the_whole_cluster():
+    fresh = [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta" }, { "id": "n2", "name": "b", "file": "f2.py", "line": 2, "text": "tb" } ]
+    pool  = [ { "id": "p1", "name": "c", "file": "f3.py", "line": 3, "text": "tc" } ]
+    win   = { "start": "s", "end": "e", "commits": 1 }
+    key   = lambda i, t: dd.filing.correlation_key( i, t )
+    group = [ [ "n1", "n2", "p1" ] ]
+    assert [ f[ "id" ] for f in dd.findings_of( group, fresh, pool, win, {} ) ] == [ "n1" ]
+    assert dd.findings_of( group, fresh, pool, win, {}, None, { key( "n1", "ta" ) } ) == [], "the lowest id's verdict settles it"
+    assert dd.findings_of( group, fresh, pool, win, {}, None, { key( "n2", "tb" ) } ) == [], "the other side's verdict settles it too"
+    assert dd.findings_of( group, fresh, pool, win, {}, None, { key( "n2", "changed" ) } ) != [], "a verdict on other text is not this cluster's"
+    assert len( dd.findings_of( [ [ "n1", "p1" ], [ "n2", "p1" ] ], fresh, pool, win, {}, None, { key( "n2", "tb" ) } ) ) == 1, "only the settled cluster is left out"
