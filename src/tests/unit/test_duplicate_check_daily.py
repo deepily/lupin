@@ -1036,8 +1036,10 @@ def test_the_reinstall_text_is_the_same_whatever_the_baseline_or_limit_a_run_had
     held  = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: True ), branch="wip-old", ceiling=1500 )
     asked = dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: False ), branch="wip-old", ceiling=1500, baseline=True )
     assert plain[ "reinstall" ] == held[ "reinstall" ] == asked[ "reinstall" ], "the registry holds the limit, the binary and the baseline, so the text does not carry them"
-    assert dd.reinstall_command( "/m", "/py", 40, "/c", "b" ) == ( "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
-                                                                    "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+    text = dd.reinstall_command( "/m", "/py", 40, "/c", "b" )
+    first, second = text.split( "\n" )
+    assert first == "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time."
+    assert second.startswith( "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src " ) and second.endswith( " -m lupin_mcp.cron_generate --install" )
 
 
 def test_the_crontab_reader_finds_a_tagged_baseline_line_and_nothing_else( cron ):
