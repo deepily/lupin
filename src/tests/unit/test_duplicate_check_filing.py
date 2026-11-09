@@ -107,14 +107,14 @@ def test_a_run_with_many_findings_files_one_row_and_a_second_run_and_the_next_da
     assert "finding_keys" not in store.created[ 0 ], "the store is sent the payload without the filer's own bookkeeping"
     for _ in range(2):                                                                     # the same day, then the next
         again = run_once( tmp_path, many, store )
-        assert again == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [] }, "every finding is already on the first row: no row, no probe"
+        assert again == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [], "oversize_body": [] }, "every finding is already on the first row: no row, no probe"
     assert len( store.created ) == 1 and len( store.probes ) == 1
     assert len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == 3
 
 
 def test_a_run_with_no_findings_files_no_row_and_asks_for_no_owner( tmp_path ):
     got = ff.file_findings( [], tmp_path, Store(), "x", [], DAY )
-    assert got == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [] } and not ( tmp_path / ff.TRIAGED_FILE ).exists()
+    assert got == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [], "oversize_body": [] } and not ( tmp_path / ff.TRIAGED_FILE ).exists()
 
 
 def test_a_run_with_findings_and_an_empty_roster_raises_before_anything_is_sent( tmp_path ):
@@ -395,7 +395,7 @@ def test_every_key_of_a_long_row_is_triaged_once_it_is_filed_so_the_unlisted_one
     found = many_findings( ff.LIST_LIMIT + 3 )
     run_once( tmp_path, found, store )
     assert len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == ff.LIST_LIMIT + 3
-    assert run_once( tmp_path, found, store ) == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [] }
+    assert run_once( tmp_path, found, store ) == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [], "oversize_body": [] }
 
 
 def test_one_finding_past_the_limit_lists_the_limit_and_counts_exactly_one_more():
@@ -438,16 +438,6 @@ def test_a_row_listing_two_hundred_findings_with_forty_twins_each_fits_the_limit
     assert line.count( " in server/" ) == ff.OTHERS_LIMIT and line.endswith( f"; and {40 - ff.OTHERS_LIMIT} more" )
     sent  = ff.fit_body( row[ "body" ] )
     assert len( row[ "body" ] ) > ff.BODY_LIMIT >= len( sent ) and len( row[ "finding_keys" ] ) == 936
-
-
-def test_a_spooled_row_with_a_body_over_the_limit_is_cut_when_it_is_sent_and_the_spool_keeps_its_original( tmp_path ):
-    big   = { "item_class": "task", "title": "t", "project": "lupin", "created_by": "duplicate-check-daily", "owner_persona": "cheech", "accountable_manager": "cheech",
-              "priority": "P5", "correlation_key": "epic:dupcheck-run-1", "body": "\n".join( "- x" * 40 for _ in range( 5000 ) ), "finding_keys": [ "k1" ] }
-    ff.write_pending( tmp_path, [ big ] )
-    store = Store()
-    out   = ff.file_findings( [], tmp_path, store, "Cheech", [ "Cheech" ], DAY )
-    assert len( out[ ff.FILED ] ) == 1 and len( store.created[ 0 ][ "body" ] ) <= ff.BODY_LIMIT and len( big[ "body" ] ) > ff.BODY_LIMIT
-    assert ff.read_triaged( tmp_path ) == { "k1" }
 
 
 def test_a_row_without_a_body_is_sent_as_it_is():
@@ -518,3 +508,30 @@ def test_a_single_row_has_no_part_suffix_and_the_split_keeps_the_findings_order(
     many = ff.triage_payloads( wide_findings( 320 ), { "owner": "cheech", "note": "n" }, DAY )
     keys = [ k for r in many for k in r[ "finding_keys" ] ]
     assert keys == [ ff.correlation_key( f[ "id" ], f[ "text" ] ) for f in wide_findings( 320 ) ]
+
+
+def test_201_short_findings_make_two_rows_of_200_and_1_so_the_per_row_limit_is_watched( tmp_path ):
+    found = [ finding( f"d-{i:04d}", f"f{i}", f"def f{i}(): pass", others=[ { "id": "d-t", "name": "t", "file": "t.py" } ] ) for i in range( ff.LIST_LIMIT + 1 ) ]
+    store = Store()
+    run_once( tmp_path, found, store )
+    sizes = [ len( [ l for l in p[ "body" ].splitlines() if l.startswith( "- f" ) ] ) for p in store.created ]
+    assert all( len( p[ "body" ] ) < ff.BODY_LIMIT for p in store.created ), "the body cap was not what split them"
+    assert sizes == [ ff.LIST_LIMIT, 1 ] and not any( "more in" in p[ "body" ] for p in store.created ) and len( ff.read_triaged( tmp_path ) ) == ff.LIST_LIMIT + 1
+
+
+def test_a_spooled_row_over_the_cap_is_not_sent_and_marks_nothing_and_a_run_given_its_findings_files_them_in_rows_under_it( tmp_path ):
+    found = wide_findings( 320 )
+    keys  = [ ff.correlation_key( f[ "id" ], f[ "text" ] ) for f in found ]
+    big   = { "item_class": "task", "title": "t", "project": "lupin", "created_by": "cheech (duplicate-check-daily)", "owner_persona": "cheech", "accountable_manager": "cheech",
+              "priority": "P5", "correlation_key": "epic:dupcheck-run-old", "body": "x" * ( ff.BODY_LIMIT + 1 ), "finding_keys": keys }
+    ff.write_pending( tmp_path, [ big ] )
+    store = Store()
+    got   = run_once( tmp_path, [], store )
+    assert got[ ff.OVERSIZE ] == [ { "key": "epic:dupcheck-run-old", "characters": ff.BODY_LIMIT + 1, "findings": 320 } ] and store.created == [] and ff.read_triaged( tmp_path ) == set()
+    assert ff.read_pending( tmp_path ) == [ big ], "kept for a person to remove"
+    again = run_once( tmp_path, found, store )
+    assert len( again[ ff.FILED ] ) > 1 and all( len( p[ "body" ] ) <= ff.BODY_LIMIT and "body cut" not in p[ "body" ] for p in store.created )
+    assert ff.read_triaged( tmp_path ) == set( keys ) and ff.read_pending( tmp_path ) == [ big ]
+    exact = { **big, "correlation_key": "epic:dupcheck-run-exact", "body": "y" * ff.BODY_LIMIT }
+    ff.write_pending( tmp_path, [ exact ] )
+    assert run_once( tmp_path, [], Store() )[ ff.OVERSIZE ] == [], "a body exactly at the limit is sent"
