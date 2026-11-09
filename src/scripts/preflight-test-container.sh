@@ -121,8 +121,8 @@ fi
 # in the container fails, and the only cause the SDK reports is the word "success" (measured 2026-10-07:
 # the file was last written 2026-08-26 and its token ran out 2026-08-27). Section 5 above checks that the
 # file exists and nothing more. This reads the expiry field and nothing else: the one-line python in the
-# container prints that number, never a token, and no Claude Code CLI call is made, because a call would
-# refresh the login and hide the cause.
+# container prints that number, never a token. A lapsed expiry gets one renewing `claude -p` call and a second
+# read before it is called expired (see lib/claude-login-probe.sh).
 # shellcheck source=lib/claude-login-probe.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/claude-login-probe.sh"
 probe_claude_login "${CONTAINER}"

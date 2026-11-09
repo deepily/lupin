@@ -4,7 +4,7 @@ Unit tests for the preflight check on the test container's Claude Code login.
 
 An expired login makes every Claude Code job in the container fail with the word "success".
 The preflight used to check only that the credentials file exists.
-It now reads the expiry field alone, never a token and never a CLI call.
+It now reads the expiry field alone, never a token. A CLI call is made only for a lapsed expiry, to renew it.
 It fails with the remedy in words when the expiry is past or cannot be read.
 
 The helper is tested directly, then the whole script runs against a stand-in docker command.
@@ -86,17 +86,19 @@ def _fake_docker( tmp_path ):
         'esac\n'
         'case "$*" in\n'
         '  *"test -f /home/rruiz/.claude/.credentials.json"*) exit 0 ;;\n'
-        '  *expiresAt*) if [ -n "${FAKE_EXPIRES_FAIL:-}" ]; then echo "KeyError" >&2; exit 1; fi; echo "$FAKE_EXPIRES"; exit 0 ;;\n'
+        '  *"claude -p"*) touch "$FAKE_DOCKER_LOG.renewed"; exit 0 ;;\n'
+        '  *expiresAt*) if [ -n "${FAKE_EXPIRES_FAIL:-}" ]; then echo "KeyError" >&2; exit 1; fi; if [ -n "${FAKE_EXPIRES_AFTER:-}" ] && [ -e "$FAKE_DOCKER_LOG.renewed" ]; then echo "$FAKE_EXPIRES_AFTER"; else echo "$FAKE_EXPIRES"; fi; exit 0 ;;\n'
         'esac\n'
         'exit 1\n' )
     path.chmod( path.stat().st_mode | stat.S_IXUSR )
     return bin_dir
 
 
-def _preflight( tmp_path, expires="", fail=False ):
+def _preflight( tmp_path, expires="", fail=False, after=None ):
     env = dict( os.environ, PATH=f"{_fake_docker( tmp_path )}:{os.environ[ 'PATH' ]}", FAKE_CONTAINER="fake-test",
                 PREFLIGHT_CONTAINER="fake-test", FAKE_EXPIRES=str( expires ), FAKE_DOCKER_LOG=str( tmp_path / "docker.log" ) )
     if fail: env[ "FAKE_EXPIRES_FAIL" ] = "1"
+    if after is not None: env[ "FAKE_EXPIRES_AFTER" ] = str( after )
     done = subprocess.run( [ "bash", PREFLIGHT ], capture_output=True, text=True, env=env, cwd=ROOT )
     log  = ( tmp_path / "docker.log" ).read_text() if ( tmp_path / "docker.log" ).exists() else ""
     return done.stdout, log
@@ -132,3 +134,25 @@ def test_the_check_reads_the_expiry_field_and_never_a_token_or_the_cli( tmp_path
     assert len( asked ) == 1, log
     for forbidden in ( "accessToken", "refreshToken", "claude -p", "claude --" ):
         assert forbidden not in log, log
+
+
+def test_a_lapsed_expiry_that_one_call_renews_passes_without_a_login( tmp_path ):
+    out, log = _preflight( tmp_path, expires=EXPIRED, after=FAR_AHEAD )
+    line = _login_line( out )
+    assert "[OK]" in line and _iso( FAR_AHEAD ) in line and "renewed from the refresh token" in line, out
+    assert "claude /login" not in out, "no remedy for a login that was never lost"
+    assert len( [ l for l in log.splitlines() if "claude -p" in l ] ) == 1, log
+    assert len( [ l for l in log.splitlines() if "expiresAt" in l ] ) == 2, "one read before the call, one after"
+
+
+def test_a_lapsed_expiry_that_the_call_does_not_move_still_fails_with_the_remedy( tmp_path ):
+    out, log = _preflight( tmp_path, expires=EXPIRED, after=EXPIRED )
+    line = _login_line( out )
+    assert "[FAIL]" in line and "expired" in line and _iso( EXPIRED ) in line, out
+    assert "docker exec -it fake-test claude /login" in out, out
+    assert len( [ l for l in log.splitlines() if "claude -p" in l ] ) == 1, log
+
+
+def test_an_unreadable_expiry_is_never_renewed( tmp_path ):
+    _, log = _preflight( tmp_path, fail=True )
+    assert "claude -p" not in log, log
