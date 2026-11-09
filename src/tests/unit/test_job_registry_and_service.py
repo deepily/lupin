@@ -138,6 +138,32 @@ def test_the_response_has_one_entry_per_job_worst_first_with_a_target_job_taking
     assert tar_entry[ "unknown_reason" ] is None
 
 
+def test_a_job_with_reporting_off_is_absent_from_the_list_and_counted_on_one_closing_line_while_on_and_missing_stay_in(tmp_path):
+    root = write_registry( tmp_path, [ job( "on1", reporting="on" ), job( "missing" ), job( "off1", reporting="off", reporting_off_reason="runs once a year" ), job( "off2", reporting="off", reporting_off_reason="no schedule" ) ] )
+    got  = svc.build_response( root, tmp_path / "data", NOW, Deps() )
+    assert sorted( j[ "job" ] for j in got[ "jobs" ] ) == [ "missing", "on1" ]                        # the on job and the job with no field both stay
+    assert got[ "reporting_off" ] == 2 and got[ "reporting_off_line" ] == "2 jobs have reporting switched off"
+    one = svc.build_response( write_registry( tmp_path / "b", [ job( "a" ), job( "x", reporting="off", reporting_off_reason="r" ) ] ), tmp_path, NOW, Deps() )
+    assert one[ "reporting_off_line" ] == "1 job has reporting switched off" and [ j[ "job" ] for j in one[ "jobs" ] ] == [ "a" ]
+    none = svc.build_response( write_registry( tmp_path / "c", [ job( "a" ) ] ), tmp_path, NOW, Deps() )
+    assert none[ "reporting_off" ] == 0 and none[ "reporting_off_line" ] is None
+
+
+def test_the_registry_refuses_a_bad_reporting_value_and_an_off_job_without_a_reason_and_reporting_on_reads_the_field(tmp_path):
+    with pytest.raises( ValueError, match="reporting must be" ): jr.load_registry( write_registry( tmp_path / "a", [ job( "a", reporting="maybe" ) ] ) )
+    with pytest.raises( ValueError, match="needs a reporting_off_reason" ): jr.load_registry( write_registry( tmp_path / "b", [ job( "a", reporting="off" ) ] ) )
+    with pytest.raises( ValueError, match="needs a reporting_off_reason" ): jr.load_registry( write_registry( tmp_path / "c", [ job( "a", reporting="off", reporting_off_reason="  " ) ] ) )
+    assert jr.reporting_on( { "job": "a" } ) is True and jr.reporting_on( { "reporting": "on" } ) is True and jr.reporting_on( { "reporting": "off" } ) is False
+
+
+def test_the_shipped_registry_switches_off_exactly_the_eight_jobs_rick_ruled_each_with_its_reason():
+    reg = jr.load_registry( REAL_ROOT )
+    off = { j[ "job" ]: j[ "reporting_off_reason" ] for j in reg[ "jobs" ] if not jr.reporting_on( j ) }
+    assert sorted( off ) == sorted( [ "yearly-reminders", "worktree-janitor", "notification-expiry", "commons-archival", "notify-outbox", "socket-housekeeping", "side-services", "pokes" ] )
+    assert set( off.values() ) <= { "no run record: runs inside a server", "runs once a year", "no schedule" }
+    assert off[ "yearly-reminders" ] == "runs once a year" and off[ "pokes" ] == "no schedule" and off[ "side-services" ] == "no schedule"
+
+
 def test_a_target_job_with_an_unreported_target_says_so_and_a_changed_override_applies_to_the_next_response(tmp_path):
     root = write_registry( tmp_path, [ job( "tar", targets=[ { "target": "t1" } ] ) ] )
     got = svc.build_response( root, tmp_path, NOW, Deps() )[ "jobs" ][ 0 ]

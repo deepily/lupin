@@ -28,6 +28,7 @@ def load_registry( root ):
         - returns { "defaults": {...}, "jobs": [...] }
         - every owner is a lowercase seat name (a role label is refused: its rows are invisible)
         - every job has a unique job id (with its target when it has one), a title, an owner, and schedule entries that each hold exactly one of cron, after_boot_seconds, every_seconds
+        - a job's reporting field, when present, is "on" or "off", and "off" comes with a non-blank reporting_off_reason
     Raises:
         - ValueError when the file is not a job-registry/1 document or a job breaks those rules
         - OSError when the file cannot be read
@@ -41,9 +42,24 @@ def load_registry( root ):
         if job[ "job" ] in seen: raise ValueError( f"registry lists job {job[ 'job' ]!r} twice" )
         if not PERSONA_OWNER.match( job[ "owner" ] ): raise ValueError( f"job {job[ 'job' ]}: owner {job[ 'owner' ]!r} is not a seat name" )
         seen.add( job[ "job" ] )
+        if job.get( "reporting", "on" ) not in ( "on", "off" ): raise ValueError( f"job {job[ 'job' ]}: reporting must be \"on\" or \"off\", not {job[ 'reporting' ]!r}" )
+        if job.get( "reporting" ) == "off" and not str( job.get( "reporting_off_reason", "" ) ).strip(): raise ValueError( f"job {job[ 'job' ]}: reporting off needs a reporting_off_reason" )
         for entry in job.get( "schedule", [] ):
             if sum( key in entry for key in SCHEDULE_KEYS ) != 1: raise ValueError( f"job {job[ 'job' ]}: a schedule entry needs exactly one of {SCHEDULE_KEYS}" )
     return { "defaults": doc[ "defaults" ], "jobs": doc[ "jobs" ] }
+
+
+def reporting_on( job ):
+    """
+    Say whether a job shows in the Background Jobs list.
+
+    Requires:
+        - job is a registry entry
+    Ensures:
+        - returns False only when the entry says "reporting": "off"; a missing field means on
+        - switching reporting off hides the job from the list and the counts; it does not stop the job
+    """
+    return job.get( "reporting", "on" ) != "off"
 
 
 def load_overrides( root ):

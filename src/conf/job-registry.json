@@ -468,6 +468,8 @@
       "catalog": "L10",
       "title": "Yearly reminders (password rotation, LoRA review)",
       "owner": "rick",
+      "reporting": "off",
+      "reporting_off_reason": "runs once a year",
       "schedule": [
         {
           "cron": "0 21 17 8 *"
@@ -529,6 +531,8 @@
       "catalog": "L12",
       "title": "Worktree janitor",
       "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
         {
           "every_seconds": 60
@@ -554,6 +558,8 @@
       "catalog": "L18",
       "title": "Notification expiry",
       "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
         {
           "every_seconds": 300
@@ -568,6 +574,8 @@
       "catalog": "L19",
       "title": "Commons archival",
       "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
         {
           "every_seconds": 3600
@@ -582,6 +590,8 @@
       "catalog": "L20",
       "title": "Notify outbox flush",
       "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
         {
           "every_seconds": 30
@@ -597,6 +607,8 @@
       "catalog": "L22",
       "title": "Socket heartbeat, cleanup and transcript tailer",
       "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
         {
           "every_seconds": 30,
@@ -616,6 +628,8 @@
       "catalog": "L28",
       "title": "Side services",
       "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no schedule",
       "schedule": [],
       "summary_path": "{root}/io/jobs/side-services/job-summary.json",
       "targets": [
@@ -648,6 +662,8 @@
       "catalog": "L30",
       "title": "Pokes (when started)",
       "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no schedule",
       "schedule": [],
       "summary_path": "{root}/io/jobs/pokes/job-summary.json",
       "owner_confirmed": false

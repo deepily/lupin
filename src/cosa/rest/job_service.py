@@ -276,7 +276,8 @@ def build_response( root, data, now, deps ):
     Requires:
         - root holds src/conf/job-registry.json; now is aware; deps offers boot_time, crontab_text, host_zone, unit_state, lock_held and store_counts
     Ensures:
-        - returns { schema, generated_at, jobs }, one entry per registry job, worst state first and then by title
+        - returns { schema, generated_at, jobs, reporting_off, reporting_off_line }, one entry per registry job whose reporting is on, worst state first and then by title
+        - a job with "reporting": "off" is left out of jobs; reporting_off counts those jobs and reporting_off_line says so in one sentence (None when none are off)
         - cron times are read in the zone of the crontab, so a UTC container agrees with the host
         - a job with a cron_tag takes the schedule of its installed crontab lines, else the registry's
         - the registry's overrides file is read on this call, so a changed grace or notification interval applies at once
@@ -289,9 +290,12 @@ def build_response( root, data, now, deps ):
     zone      = deps.host_zone()
     if zone is not None: now = now.astimezone( zone )                    # cron hours are in the host's zone, whatever zone this process runs in
     ctx       = { "root": root, "data": data, "now": now, "deps": deps }
-    jobs      = [ assess_job( jr.with_installed_schedule( jr.effective( j, registry[ "defaults" ], overrides ), cron ), registry[ "defaults" ], ctx ) for j in registry[ "jobs" ] ]
+    shown     = [ j for j in registry[ "jobs" ] if jr.reporting_on( j ) ]
+    off       = len( registry[ "jobs" ] ) - len( shown )
+    jobs      = [ assess_job( jr.with_installed_schedule( jr.effective( j, registry[ "defaults" ], overrides ), cron ), registry[ "defaults" ], ctx ) for j in shown ]
     jobs.sort( key=lambda e: ( jh.STATE_ORDER.index( e[ "state" ] ), e[ "title" ] ) )
-    return { "schema": SCHEMA, "generated_at": now.isoformat(), "jobs": jobs }
+    line      = None if off == 0 else f"{off} {'job has' if off == 1 else 'jobs have'} reporting switched off"
+    return { "schema": SCHEMA, "generated_at": now.isoformat(), "jobs": jobs, "reporting_off": off, "reporting_off_line": line }
 
 
 def run_command( registry, ent, root, data, trigger, base_env=None ):
