@@ -145,6 +145,12 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "nonexistent path used to prove the refusal fires. Measured BOTH ways at 998dd427 "
         "in this worktree, the `.venv` symlink moved aside and restored between the two "
         "runs: 10 passed without, 10 passed with.",
+    "test_job_registry_and_service.py":
+        "the two `.venv/bin/python` strings are EXPECTED VALUES: one is the argv the service is "
+        "asserted to build and the other a command template the registry is asserted to expand. "
+        "The spawn is a recording stub (`Spawner`), so no interpreter is started. Measured both ways at "
+        "325deac2a in a detached worktree, the `.venv` symlink moved aside and restored between "
+        "the two runs: 28 passed without, 28 passed with.",
     "test_coverage_contention.py":
         "the `.venv/bin/pytest` strings are FIXTURE DATA — command lines the checker under "
         "test is asked to parse. Nothing is executed, so no interpreter is needed.",

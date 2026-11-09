@@ -59,9 +59,9 @@ async def test_concurrent_dry_run_chains_address_their_own_user():
     with patch.object( cosa_interface._dispatcher, "notify_progress", side_effect=record ), \
          patch.object( voice_io, "notify", side_effect=notify_via_interface ), \
          patch( "asyncio.sleep", quick_sleep ):
-        t1 = asyncio.create_task( job_tester._execute_dry_run( voice_io, cosa_interface ) )
+        t1 = asyncio.create_task( job_tester._run_chained_dry_run( voice_io, cosa_interface ) )
         await REAL_SLEEP( 0.005 )
-        t2 = asyncio.create_task( job_other._execute_dry_run( voice_io, cosa_interface ) )
+        t2 = asyncio.create_task( job_other._run_chained_dry_run( voice_io, cosa_interface ) )
         await asyncio.gather( t1, t2 )
 
     assert len( seen ) > 4, "the loop must have found notifications to check"
