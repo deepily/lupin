@@ -185,3 +185,10 @@ def test_a_tool_name_that_holds_another_is_replaced_whole_because_the_longest_go
     scrub = [ "check", "check_exists" ]
     assert bl.redact_tool_names( "x = check_exists( y ) + check( z )", scrub ) == f"x = {bl.PLACEHOLDER}( y ) + {bl.PLACEHOLDER}( z )"
     assert "_exists" not in bl.redact_tool_names( "check_exists", scrub ), "the shorter token first would leave a fragment"
+
+
+@pytest.mark.parametrize( "tokens,text", [ ( ( "exists", "check_exists" ), "a = check_exists( x ) + exists( y )" ), ( ( "check_exists", "exists" ), "a = check_exists( x ) + exists( y )" ) ] )
+def test_a_tool_name_that_ends_with_another_is_replaced_whole_whichever_order_they_are_listed( monkeypatch, tokens, text ):
+    monkeypatch.setattr( bl, "REUSE_TOOL_TOKENS", tokens )
+    got = bl.redact_tool_names( text, list( tokens ) )
+    assert got == f"a = {bl.PLACEHOLDER}( x ) + {bl.PLACEHOLDER}( y )" and "check_" not in got, "the short suffix first would leave check_ behind"
