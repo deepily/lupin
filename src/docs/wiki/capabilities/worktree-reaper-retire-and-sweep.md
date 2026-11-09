@@ -6,7 +6,7 @@ pins:
   - cosa.agents.shared.worktree_reaper.default_evacuation_root@bff6e0e00d
   - cosa.agents.shared.worktree_reaper.evacuate_blockers@3bfccfc6f0
   - cosa.agents.shared.worktree_reaper.archive_branch@20bd74c14e
-  - cosa.agents.shared.worktree_reaper.retire_branch@b9426eba89
+  - cosa.agents.shared.worktree_reaper.retire_branch@4f3fe4b3cb
   - cosa.agents.shared.worktree_reaper.branch_created_ts@57e2aaff41
   - cosa.agents.shared.worktree_reaper.sweep_archive@64fdc5fe54
 ---
@@ -19,7 +19,7 @@ How the janitor saves a tree's data files and unmerged branches before it remove
 - `evacuate_blockers` moves those files to `<root>/io/worktree-evacuated/<day>-<tree>-<stamp>`, keeping each relative path.
 - `default_evacuation_root` returns that folder under the main tree.
 - `archive_branch` moves a branch to `refs/archive/<day>/<branch>`. It writes the archive ref and reads it back before it removes the branch.
-- `retire_branch` deletes a merged branch and archives an unmerged one. The outcome says whether the commits had landed by content.
+- `retire_branch` deletes a merged branch and archives an unmerged one. An archived branch's outcome carries `landed`, `unpushed_count` and `unpushed_files`. Each is `None` when git could not say. `landed` is whether the commits are on the target by content, measured before the ref moves.
 - `branch_created_ts` returns the epoch seconds of the oldest reflog entry, so the janitor can judge a branch's age.
 - `sweep_archive` deletes dated archive refs and evacuation folders older than the retention window of 14 days.
 

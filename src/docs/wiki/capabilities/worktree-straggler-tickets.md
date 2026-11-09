@@ -2,8 +2,8 @@
 capability: worktree-straggler-tickets
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.shared.worktree_straggler_tickets.RepositoryStragglerStore@a073439dbc
-  - cosa.agents.shared.worktree_straggler_tickets.compose_archive_row@b39d32d912
+  - cosa.agents.shared.worktree_straggler_tickets.RepositoryStragglerStore@96ef0a9d0e
+  - cosa.agents.shared.worktree_straggler_tickets.compose_archive_row@0fafdae820
   - cosa.agents.shared.worktree_straggler_tickets.compose_row@d79e065756
   - cosa.agents.shared.worktree_straggler_tickets.load_state@53db943f3b
   - cosa.agents.shared.worktree_straggler_tickets.open_archive_tickets@c63bfabe98
@@ -14,7 +14,7 @@ pins:
   - cosa.agents.shared.worktree_straggler_tickets.write_stamp@42b6604559
   - cosa.agents.shared.worktree_straggler_tickets.read_creator_record@6c119cdd7b
   - cosa.agents.shared.worktree_straggler_tickets.spawn_registry_manager@a201694448
-  - cosa.agents.shared.worktree_straggler_tickets.resolve_creator@a6399601d7
+  - cosa.agents.shared.worktree_straggler_tickets.resolve_creator@b713a471aa
   - cosa.agents.shared.worktree_straggler_tickets.straggler_key@20185c3e08
   - cosa.agents.shared.worktree_straggler_tickets.write_state@18d5c9e395
 ---
@@ -24,15 +24,15 @@ A tree refused for more than a day, or an archived branch whose work never lande
 
 ## What it does
 - `straggler_key` returns `worktree:` plus the normalized tree path, one key per tree.
-- `resolve_creator` finds the owning manager by lookups in order. They are the branch stamp (`read_stamp`), the creator ledger (`read_creator_record`), a seat tree name and the spawn lineage of a live worker (`spawn_registry_manager`). It returns the manager, the source and every lookup tried.
+- `resolve_creator` finds the owning manager by lookups in order. They are the branch stamp (`read_stamp`), the creator ledger (`read_creator_record`), a seat tree name and the spawn lineage of a live worker (`spawn_registry_manager`). A registered persona the registry did not place goes to a live unspawned seat ([[worktree-straggler-persona-lookup]]). It returns the manager, the source and every lookup tried.
 - `owner_for_tree` resolves a tree through it. A seat tree name `seat-cc-<role>-<manager>-<n>` names its manager. A name nothing resolves goes to `maria`, and the row lists the lookups tried.
 - `owner_for_branch` reads the stamp first, then the last path segment of the branch, minus a rescue time stamp, as a tree name. `write_stamp` sets the stamp.
 - `project_for_tree` returns the basename of the repository that holds the tree, or `lupin` outside any sandbox.
 - `compose_row` builds the title, body, owner, project and key for one straggler. The body marks an estimated first-refused time.
-- `compose_archive_row` builds the row for an archived branch, keyed `archive:` plus the archive ref, with the restore command.
+- `compose_archive_row` builds the row for an archived branch, keyed `archive:` plus the archive ref. The body gives the count of commits held on no remote, the files they touch (first `MAX_ROW_FILES`), the restore command and the 14-day deadline.
 - `open_archive_tickets` opens one row per archived branch whose commits did not land. An open row with the key is adopted.
 - `load_state` and `write_state` read and atomically replace the sidecar holding `first_refused_at`, `estimated` and `ticket_id` per tree.
-- `RepositoryStragglerStore` is the real store. It has `find_open`, `create` and `drop`.
+- `RepositoryStragglerStore` is the real store. It has `find_open`, `create` and `drop`. `create` stamps the filer as a persona with the arbiter in brackets.
 
 ## Invariants
 - The store writes to the task repository directly, and not through `/api/tasks`, so the arbiter can close its own rows.

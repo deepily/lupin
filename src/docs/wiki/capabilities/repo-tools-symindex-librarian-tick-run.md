@@ -8,17 +8,17 @@ pins:
   - cosa.repo.symindex.librarian_tick.read_state@dcc7be473b
   - cosa.repo.symindex.librarian_tick.write_state@4ba0748bb6
   - cosa.repo.symindex.librarian_tick.make_logger@2bd00293f7
-  - cosa.repo.symindex.librarian_tick.LiveStore@b85657f1be
+  - cosa.repo.symindex.librarian_tick.LiveStore@11cd75077d
   - cosa.repo.symindex.librarian_tick.notify_owner@56aee637b7
   - cosa.repo.symindex.librarian_tick.data_dir@1dc90370b7
-  - cosa.repo.symindex.librarian_tick.main@0351f4d1dd
+  - cosa.repo.symindex.librarian_tick.main@03d7e24432
 ---
 # Wiki librarian tick: one run
 
 The daily job that lints the wiki, queues the findings and exports the reuse misses. Rows are made by [[repo-tools-symindex-librarian-queue]]; the switches and cron lines are in [[repo-tools-symindex-librarian-tick-config]].
 
 ## Running it
-- `python -m cosa.repo.symindex.librarian_tick [--force] [--root R] [--misses-out P]`. The tick is off until the configuration key `wiki librarian tick enabled` is true, and an off tick exits 3 before building anything. `main` prints the run summary as JSON.
+- `python -m cosa.repo.symindex.librarian_tick [--force] [--root R] [--misses-out P]`. The tick is off until the configuration key `wiki librarian tick enabled` is true, and an off tick exits 3 before building anything. `main` prints the run summary as JSON and runs a configured lupin-mobile corpus in the same tick. It takes `--print-install`, `--install`, `--uninstall` and `--status` for the cron lines. The vector status check runs on every tick, whether or not the refresh switch is on.
 - Exit 0: nothing due, or the run finished and nothing is held. Exit 1: the run could not finish. Exit 2: it finished and some rows, lupin or lupin-mobile, sit in a pending file. Exit 3: switched off.
 
 ## What `run_tick` does
@@ -32,5 +32,5 @@ The daily job that lints the wiki, queues the findings and exports the reuse mis
 - `run_mobile` lints the lupin-mobile wiki against its Dart index and syncs its rollups under their own key. It refuses a wiki with no capability page or an index with no symbols. Nothing is written inside the mobile repo.
 - `data_dir` is `<fleet data root>/reuse-review/librarian`. It holds `tick-state.json`, `pending.jsonl`, `librarian.log` and `misses.jsonl`.
 - `read_state` returns an empty dict for an absent or unreadable file. `write_state` writes by temporary name and rename. `make_logger` appends stamped lines and drops one it cannot write.
-- `LiveStore` is the adapter over the task-store client. Its reads follow pages of 500 and fail on a truncated read; `query` also reads held rows, `query_all` adds done and dropped ones. Creates are stamped with the actor `wiki-librarian tick`. It extends [[utils-task-store-adapter]].
+- `LiveStore` is the adapter over the task-store client. Its reads follow pages of 500 and fail on a truncated read; `query` also reads held rows, `query_all` adds done and dropped ones. A create is filed by the row's manager persona with the tick in brackets (`cheech (wiki-librarian tick)`) under the standing authority. An amend carries the tick as its actor. It extends [[utils-task-store-adapter]].
 - `notify_owner( persona, text, environ )` sends one direct message and returns True only on a 201. It never raises.
