@@ -28,7 +28,7 @@
 #   4  findings, every channel unchanged since its last delivery and inside the quiet window
 #   5  findings, and delivery is switched off (HOOK_LINK_DELIVER=0): printed only, nothing sent
 #
-# Usage:  hook-link-tick.sh [--install | --uninstall | --status | --print-install]
+# Usage:  hook-link-tick.sh [--install (retired: prints the cron_generate command) | --uninstall | --status | --print-install]
 # Environment (all optional):
 #   HOOK_LINK_REPO          the checkout to look at (tests); setting it marks every message a drill
 #   HOOK_LINK_DM            persona to direct-message

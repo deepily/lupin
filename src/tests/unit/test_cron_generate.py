@@ -29,7 +29,7 @@ def tree( tmp_path, monkeypatch ):
     jobs = [ job( "alpha", [ { "cron": "0 10 * * *" }, { "after_boot_seconds": 120 } ], cron_log="{data}/alpha.log" ),
              job( "beta", [ { "cron": "5 * * * *" }, { "after_boot_seconds": 0 }, { "every_seconds": 60 } ], cron_replaces=[ "beta-old.sh" ] ),
              job( "gamma", [ { "cron": "1 1 * * *" } ], cron_enabled=False ),
-             { **job( "delta", [ { "cron": "2 2 * * *" } ] ), "cron_managed": False } ]
+             { **job( "delta", [ { "cron": "2 2 * * *" } ] ), "cron_managed": False, "cron_exclusion_reason": "another tool owns this line" } ]
     doc = { "schema": "job-registry/1", "defaults": { "run_env": { "LUPIN_ROOT": "{root}", "D": "{deepily_data}" } }, "jobs": jobs }
     conf = tmp_path / "src" / "conf"
     conf.mkdir( parents=True )
@@ -40,6 +40,11 @@ def tree( tmp_path, monkeypatch ):
 def test_only_managed_jobs_are_picked_and_a_managed_job_needs_a_tag( tree ):
     registry = jr.load_registry( str( tree ) )
     assert [ j[ "job" ] for j in cg.managed_jobs( registry ) ] == [ "alpha", "beta", "gamma" ]
+    registry[ "jobs" ][ 3 ].pop( "cron_exclusion_reason" )
+    with pytest.raises( ValueError, match="delta runs or has a cron_tag but is neither cron_managed nor given a cron_exclusion_reason" ): cg.managed_jobs( registry )
+    registry[ "jobs" ][ 3 ][ "cron_exclusion_reason" ] = "   "
+    with pytest.raises( ValueError, match="delta runs" ): cg.managed_jobs( registry )
+    registry[ "jobs" ][ 3 ][ "cron_exclusion_reason" ] = "another tool owns this line"
     registry[ "jobs" ][ 0 ].pop( "cron_tag" )
     with pytest.raises( ValueError, match="alpha is cron_managed but has no cron_tag" ): cg.managed_jobs( registry )
 
@@ -321,6 +326,9 @@ def test_cron_job_sh_with_no_job_or_no_interpreter_or_an_unreadable_secrets_file
     if os.geteuid() != 0:
         locked = bare( "x", LUPIN_ROOT=tmp_path, LUPIN_CRON_ENV=secret )
         assert locked.returncode == 1 and "cannot read" in locked.stderr
+    secret.chmod( 0o644 )
+    loose = bare( "x", LUPIN_ROOT=tmp_path, LUPIN_CRON_ENV=secret )
+    assert loose.returncode == 1 and "must be mode 600" in loose.stderr and "chmod 600" in loose.stderr, "a secrets file other users can read is refused"
     secret.chmod( 0o600 )
     ok = bare( "x", "boot", LUPIN_ROOT=tmp_path, LUPIN_CRON_ENV=secret )
     assert ok.returncode == 0 and "--job x --from-registry --trigger boot" in ok.stdout
@@ -331,7 +339,7 @@ def test_cron_job_sh_with_no_job_or_no_interpreter_or_an_unreadable_secrets_file
 def test_a_job_that_writes_its_own_record_is_not_overwritten_by_job_run( tmp_path, monkeypatch ):
     monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
     path = tmp_path / "s.json"
-    assert jrun.run_and_report( path, "j", [ "x" ], runner=lambda command, **kw: type( "R", (), { "returncode": 4, "stdout": "", "stderr": "" } )(), write_record=False ) == 4
+    assert jrun.run_and_report( path, "j", [ "x" ], runner=lambda command, **kw: type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )(), write_record=False ) == 0
     assert not path.exists()
 
 
@@ -368,3 +376,58 @@ def test_main_reads_clean_exit_codes_from_the_registry_entry( tree, monkeypatch 
     monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
     code = jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda command, **kw: type( "R", (), { "returncode": 2, "stdout": "", "stderr": "" } )() )
     assert code == 2 and json.loads( ( tree / "io" / "jobs" / "alpha" / "job-summary.json" ).read_text() )[ "last_attempt" ][ "outcome" ] == "clean"
+
+
+def test_every_registry_job_that_runs_or_has_a_cron_tag_is_managed_or_says_why_not():
+    jobs     = jr.load_registry( REAL_ROOT )[ "jobs" ]
+    runnable = [ j for j in jobs if j.get( "run" ) or j.get( "cron_tag" ) ]
+    managed  = [ j for j in runnable if j.get( "cron_managed" ) ]
+    excluded = [ j for j in runnable if not j.get( "cron_managed" ) ]
+    assert len( managed ) >= 9 and len( excluded ) >= 2, "the loop below sees both populations"
+    assert "worktree-census" in { j[ "job" ] for j in managed }
+    for j in excluded: assert ( j.get( "cron_exclusion_reason" ) or "" ).strip(), f"{j[ 'job' ]} runs or has a cron tag but is neither managed nor excluded with a reason"
+    for j in managed: assert not j.get( "cron_exclusion_reason" ), f"{j[ 'job' ]} is managed, so it carries no exclusion reason"
+
+
+# ---- an own_summary job that crashes before it writes ------------------------------------------------------------
+
+def answer( code, before=None ):
+    """Ensures: returns a runner stand-in that runs before() when given, then exits with code."""
+    def run( command, **kw ):
+        if before: before()
+        return type( "R", (), { "returncode": code, "stdout": "", "stderr": "" } )()
+    return run
+
+
+def test_an_own_summary_job_that_fails_before_writing_still_leaves_a_failed_record( tmp_path, monkeypatch ):
+    monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
+    path = tmp_path / "s.json"
+    jrun.run_and_report( path, "j", [ "x" ], runner=answer( 1 ), write_record=False )
+    assert json.loads( path.read_text() )[ "last_attempt" ][ "outcome" ] == "failed", "no record at all: one is written"
+    path.write_text( json.dumps( { **json.loads( path.read_text() ), "last_attempt": { **json.loads( path.read_text() )[ "last_attempt" ], "outcome": "clean", "failure": None, "finished_at": "2020-01-01T00:00:00+00:00" } } ) )
+    jrun.run_and_report( path, "j", [ "x" ], runner=answer( 3 ), write_record=False )
+    got = json.loads( path.read_text() )[ "last_attempt" ]
+    assert got[ "outcome" ] == "failed" and got[ "failure" ] == "exit 3", "an old clean record does not stand in for this crash"
+
+
+def test_an_own_summary_job_that_wrote_its_own_record_or_exited_clean_is_left_alone( tmp_path, monkeypatch ):
+    monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
+    path = tmp_path / "s.json"
+    own  = lambda: jrun.js.write_summary( path, "j", { "started_at": jrun.js.iso_now(), "finished_at": jrun.js.iso_now(), "trigger": "cron", "outcome": "failed", "stage": "mine", "failure": "its own words", "evidence": None, "mode": None } )
+    jrun.run_and_report( path, "j", [ "x" ], runner=answer( 2, own ), write_record=False )
+    assert json.loads( path.read_text() )[ "last_attempt" ][ "stage" ] == "mine", "a failing job that wrote its own record keeps it"
+    path.unlink()
+    jrun.run_and_report( path, "j", [ "x" ], runner=answer( 0 ), write_record=False )
+    assert not path.exists(), "a clean exit writes nothing for an own_summary job"
+
+
+def test_recorded_since_reads_the_finish_time_and_refuses_what_it_cannot_read( tmp_path ):
+    started = jrun.datetime.datetime( 2026, 11, 9, 12, 0, 0, tzinfo=jrun.datetime.timezone.utc )
+    path    = tmp_path / "s.json"
+    assert jrun.recorded_since( path, started ) is False, "missing file"
+    base    = { "schema": jrun.js.SCHEMA, "last_attempt": { "finished_at": "2026-11-09T12:00:01+00:00" } }
+    path.write_text( json.dumps( base ) )
+    assert jrun.recorded_since( path, started ) is True
+    for bad in ( { **base, "last_attempt": { "finished_at": "2026-11-09T11:59:59+00:00" } }, { **base, "last_attempt": {} }, { **base, "last_attempt": { "finished_at": "not a time" } }, { **base, "last_attempt": { "finished_at": "2026-11-09T12:00:01" } } ):
+        path.write_text( json.dumps( bad ) )
+        assert jrun.recorded_since( path, started ) is False

@@ -273,7 +273,8 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false
+      "owner_confirmed": false,
+      "cron_exclusion_reason": "planning-is-prompting owns this script and its fleet timer install (slot-fleet tag), so it is not a Lupin line to generate"
     },
     {
       "job": "doc-parity-tick",
@@ -293,7 +294,8 @@
         "env": {}
       },
       "owner_confirmed": false,
-      "cron_tag": "doc-parity-tick"
+      "cron_tag": "doc-parity-tick",
+      "cron_exclusion_reason": "planning-is-prompting owns this script and installs its own line; Lupin does not write it"
     },
     {
       "job": "worktree-census",
@@ -318,7 +320,9 @@
         }
       },
       "owner_confirmed": false,
-      "cron_tag": "worktree-hygiene-report"
+      "cron_tag": "worktree-hygiene-report",
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/worktree-hygiene-report.log"
     },
     {
       "job": "disk-report",

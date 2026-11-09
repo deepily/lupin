@@ -304,13 +304,12 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return EXIT_OK
-    if args.install:
-        print( lt.install_moved_text( root ), file=err )
-        return 1
     try:
-        if args.uninstall:
-            lt.edit_crontab( [], environ, cmd, os.path.join( folder, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
-            print( "uninstalled", file=out )
+        # The one --install kept (Mr. Radio, 9 Nov 2026): the test VM has no .venv, so cron-job.sh cannot serve it.
+        # Its only caller is `lupin-vm.sh install-refresh-cron`; every host line is written by lupin_mcp.cron_generate.
+        if args.install or args.uninstall:
+            lt.edit_crontab( [] if args.uninstall else lines, environ, cmd, os.path.join( folder, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
+            print( "uninstalled" if args.uninstall else "installed: 2 lines", file=out )
             return EXIT_OK
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )

@@ -67,6 +67,21 @@ def stream_run( command, env=None, **_ignored ):
     return types.SimpleNamespace( returncode=proc.wait(), stdout="".join( kept[ "out" ] ), stderr="".join( kept[ "err" ] ) )
 
 
+def recorded_since( summary_path, started ):
+    """
+    Say whether a job's own record was written during this run.
+
+    Requires:
+        - started is the aware time the run began
+    Ensures:
+        - returns True when the file holds a record whose last attempt finished at or after started, to the second, because records are stamped to the second
+        - returns False for a missing, unreadable or foreign file and for a finish time that cannot be read
+    """
+    doc = js.read_summary( summary_path )
+    try: return doc is not None and datetime.datetime.fromisoformat( doc[ "last_attempt" ][ "finished_at" ] ) >= started.replace( microsecond=0 )
+    except ( KeyError, TypeError, ValueError ): return False
+
+
 def run_and_report( summary_path, job, command, mode=None, count_re=None, drained_re=None, environ=None, runner=stream_run, write_record=True, clean_codes=( 0, ) ):
     """
     Run a command and write the record of the run.
@@ -77,7 +92,8 @@ def run_and_report( summary_path, job, command, mode=None, count_re=None, draine
         - returns the command's exit code, and passes its stdout and stderr through
         - an exit code in clean_codes (default only 0) is clean, any other code is failed with the code as the failure; a command that cannot start is failed with exit 127
         - the scan debt and drained figures come from the patterns, when they match
-        - with write_record false (a job that writes its own record) nothing is written to summary_path
+        - with write_record false (a job that writes its own record) nothing is written when the command was clean or the job wrote its own record during the run
+        - a job that writes its own record and exits with a failing code before writing it still gets a failed record, so a crash never leaves the old record standing
     """
     started = datetime.datetime.now().astimezone()
     try:
@@ -90,7 +106,7 @@ def run_and_report( summary_path, job, command, mode=None, count_re=None, draine
                 "stage": None if code in clean_codes else "command", "failure": None if code in clean_codes else f"exit {code}", "evidence": None, "mode": mode }
     count, drained = last_int( count_re, out + err ), last_int( drained_re, out + err )
     scan = { "unit": "items", "count": count, "drained_last_run": drained } if count is not None else None
-    if write_record: js.write_summary( summary_path, job, attempt, scan, None, count )
+    if write_record or ( code not in clean_codes and not recorded_since( summary_path, started ) ): js.write_summary( summary_path, job, attempt, scan, None, count )
     hs.refresh_best_effort( environ )                                  # leave the container a fresh copy of the crontab
     return code
 

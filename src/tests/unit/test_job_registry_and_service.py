@@ -404,7 +404,7 @@ def test_cron_is_read_in_the_hosts_zone_when_the_container_runs_in_another(tmp_p
 
 
 READER_FILES = ( "src/cosa/rest/job_registry.py", "src/cosa/rest/job_service.py", "src/cosa/rest/job_health.py", "src/cosa/rest/job_cron.py",
-                 "src/cosa/rest/routers/job_summary.py", "src/lupin_mcp/job_summary.py" )
+                 "src/cosa/rest/routers/job_summary.py", "src/lupin_mcp/job_summary.py", "src/lupin_mcp/cron_generate.py", "src/lupin_mcp/job_run.py" )
 
 
 NOTE_KEYS        = ( "catalog", "owner_confirmed", "owner_note", "schedule_note" )     # for people reading the file; no code is meant to read them

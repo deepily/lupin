@@ -38,7 +38,11 @@ def managed_jobs( registry ):
     Ensures:
         - returns the jobs with cron_managed true, in registry order
         - raises ValueError for a managed job with no cron_tag, because its old lines could not be found again
+        - raises ValueError for a job that has a run block or a cron_tag and is neither managed nor given a cron_exclusion_reason, so no job is left out without a stated reason
     """
+    for job in registry[ "jobs" ]:
+        if ( job.get( "run" ) or job.get( "cron_tag" ) ) and not job.get( "cron_managed" ) and not ( job.get( "cron_exclusion_reason" ) or "" ).strip():
+            raise ValueError( f"job {job[ 'job' ]} runs or has a cron_tag but is neither cron_managed nor given a cron_exclusion_reason" )
     jobs = [ job for job in registry[ "jobs" ] if job.get( "cron_managed" ) ]
     for job in jobs:
         if not job.get( "cron_tag" ): raise ValueError( f"job {job[ 'job' ]} is cron_managed but has no cron_tag" )

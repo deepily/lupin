@@ -497,9 +497,15 @@ def limit_flag( cap, ceiling ):
 
 
 def reinstall_command( root, python, cap, cli_path, branch, ceiling=None, with_baseline=False ):
-    """Ensures: returns the reinstall command, keeping the branch, limit and baseline line."""
-    more = " --with-baseline" if with_baseline else ""
-    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {python} -m lupin_mcp.duplicate_check_daily --install {limit_flag( cap, ceiling )} --claude-cli-path {cli_path} --branch {shlex.quote( branch )}{more}"
+    """
+    Say how to move the check to another branch.
+
+    Ensures:
+        - returns the registry edit and the generator command; the limit, binary and baseline arguments are kept so callers need no change, because the registry now holds them
+        - the cron lines read the registry's duplicate-check entry when they run, so the branch edit needs no reinstall; the generator command is for a changed schedule
+    """
+    return ( f"In {root}/src/conf/job-registry.json, set \"--branch\" to {shlex.quote( branch )} in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
+             f"If the schedule changed too, run: cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
 
 
 def refusal_message( refusal, command ):
@@ -507,16 +513,16 @@ def refusal_message( refusal, command ):
     Say what a refusal means and what to run.
 
     Ensures:
-        - returns ( spoken, abstract ): spoken is short and holds no path; abstract names the branch and carries the reinstall command, or says no other branch exists
+        - returns ( spoken, abstract ): spoken is short and holds no path; abstract names the branch and carries the registry edit, or says no other branch exists
     """
     name = refusal[ "branch" ]
     if refusal[ "refusal" ] in CONTINUITY:
         what = f"it last judged `{refusal['previous']}` and now chooses `{name}`" if refusal[ "refusal" ] == BRANCH_CHANGED else f"its last judged commit is not on `{name}`"
         return ( f"The duplicate check refused to run: {what.replace('`', '')}.",
-                 f"Progress is recorded per branch, and {what}.\n\nTo keep going on the old branch, reinstall with `--branch {refusal['previous']}`. To start `{name}` fresh, delete last-success.json and baseline.json in the check's folder." )
+                 f"Progress is recorded per branch, and {what}.\n\nTo keep going on the old branch, set `--branch {refusal['previous']}` on the duplicate-check entry in src/conf/job-registry.json. To start `{name}` fresh, delete last-success.json and baseline.json in the check's folder." )
     if refusal[ "refusal" ] == STALE_BRANCH: spoken, why = f"The daily duplicate check refused to run: its branch {name} has been idle {refusal[ 'idle_days' ]} days.", f"Pinned branch `{name}` has not moved in {refusal[ 'idle_days' ]} days and `{refusal[ 'newest' ]}` has a newer commit ({refusal[ 'newest_at' ]})."
     else:                                      spoken, why = f"The daily duplicate check refused to run: its branch {name} no longer exists.", f"Pinned branch `{name}` does not resolve to a commit."
-    fix = f"Reinstall for the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
+    fix = f"Move the check to the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
     return spoken, f"{why}\n\n{fix}"
 
 
