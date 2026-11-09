@@ -408,7 +408,6 @@ READER_FILES = ( "src/cosa/rest/job_registry.py", "src/cosa/rest/job_service.py"
 
 
 NOTE_KEYS        = ( "catalog", "owner_confirmed", "owner_note", "schedule_note" )     # for people reading the file; no code is meant to read them
-KNOWN_UNREAD     = ( "fix_kind", )                                                     # a setting no code reads today; reported to Cheech, drop it here when it is read or removed
 
 
 def _registry_keys( reg ):
@@ -431,15 +430,15 @@ def test_every_key_the_registry_sets_is_read_by_some_code():
     assert len( keys ) > 20, f"only {len( keys )} keys found: the sweep is not reaching the registry"
     assert _is_read( "grace_minutes", reader_text ), "positive control: a key the readers certainly use must be found"
     assert not _is_read( "summary_every_seconds_unread_control", reader_text ), "negative control: an invented key must not be found"
-    unread = sorted( k for k in keys if not _is_read( k, reader_text ) and k not in NOTE_KEYS and k not in KNOWN_UNREAD )
+    unread = sorted( k for k in keys if not _is_read( k, reader_text ) and k not in NOTE_KEYS )
     assert unread == [ ], f"registry keys no code reads (a setting that does nothing): {unread}"
-    assert set( NOTE_KEYS ) | set( KNOWN_UNREAD ) <= keys, "an exemption names a key the registry no longer sets: drop it from the list"
-    assert not any( _is_read( k, reader_text ) for k in NOTE_KEYS + KNOWN_UNREAD ), "an exempted key is now read: drop it from the exemption list"
+    assert set( NOTE_KEYS ) <= keys, "an exemption names a key the registry no longer sets: drop it from the list"
+    assert not any( _is_read( k, reader_text ) for k in NOTE_KEYS ), "an exempted key is now read: drop it from the exemption list"
 
 
 def test_the_unread_key_sweep_would_catch_the_removed_key():
     reg = jr.load_registry( REAL_ROOT )
     reg[ "defaults" ][ "summary_every_seconds" ] = 60
     reader_text = "\n".join( ( REAL_ROOT / path ).read_text() for path in READER_FILES )
-    unread = [ k for k in _registry_keys( reg ) if not _is_read( k, reader_text ) and k not in NOTE_KEYS and k not in KNOWN_UNREAD ]
+    unread = [ k for k in _registry_keys( reg ) if not _is_read( k, reader_text ) and k not in NOTE_KEYS ]
     assert unread == [ "summary_every_seconds" ]

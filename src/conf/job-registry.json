@@ -292,7 +292,6 @@
       ],
       "summary_path": "{root}/io/jobs/worktree-census/job-summary.json",
       "fix_debt": true,
-      "fix_kind": "reported",
       "run": {
         "argv": [
           "{python}",
@@ -318,7 +317,6 @@
       ],
       "summary_path": "{root}/io/jobs/disk-report/job-summary.json",
       "fix_debt": true,
-      "fix_kind": "reported",
       "run": {
         "argv": [
           "{root}/src/scripts/disk-hygiene-report.sh"
