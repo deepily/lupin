@@ -250,6 +250,22 @@ def cron_lines( root, python, log_path, env_path, carried=None ):
     return lt.cron_lines_for( run, CRON_SCHEDULE, 240 )
 
 
+def write_status( root, now, environ, log ):
+    """
+    Write vector-status.json beside the state file, and file no row.
+
+    Requires:
+        - log is a callable taking one line
+
+    Ensures:
+        - calls vector_status.check with no librarian, so the status file is rewritten and no store row is filed
+        - an OSError, ValueError or CandidateError from the check is logged and never raised
+    """
+    from cosa.repo.symindex import vector_status                       # imported here because vector_status imports this module
+    try: vector_status.check( root, now, environ=environ, log=log )
+    except ( OSError, ValueError, CandidateError ) as error: log( f"vector status check failed: {error}" )
+
+
 def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, crontab_cmd=None, writer_factory=None, client=None, enabled_fn=None ):
     """
     Run the command line.
@@ -264,7 +280,8 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
         - --install, --uninstall and --status go through the librarian's locked crontab editor with this job's tag
         - an InstallRefused or a RuntimeError prints one line to err and returns 1
         - a worktree root or a missing credential prints the named error as JSON and returns EXIT_NAMED
-        - after every run that returns, whatever its outcome, writes vector-status.json beside the state file and files no row; a check that fails is logged and leaves the exit code alone
+        - writes vector-status.json beside the state file and files no row on every exit past the folder lookup: a run, a switched-off exit, a worktree or credential refusal, and a run_refresh exception (written before it is re-raised); a check that fails is logged and leaves the exit code alone
+        - the one exit that writes nothing is a refresh_dir refusal, because the status file's folder is what failed
     """
     environ = os.environ if environ is None else environ
     now     = now or datetime.datetime.now()
@@ -305,25 +322,27 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
         log( f"refresh could not read {ENABLED_KEY}, so it stays off: {read_errors[ 0 ]}" if read_errors else f"refresh is switched off: {ENABLED_KEY} is not true" )
         print( json.dumps( { "ran": False, "reason": "switched off" }, sort_keys=True ), file=out )
         jsa.record_refresh( folder, { "ran": False, "reason": "switched off" }, EXIT_DISABLED, {}, now, environ )
+        write_status( root, now, environ, log )
         return EXIT_DISABLED
     try:
         writer = ( writer_factory or ( lambda a: cb.make_job_writer( root, a.base_url, environ ) ) )( args )
     except ValueError as error:
         print( json.dumps( { "error": "WORKTREE_ROOT", "detail": str( error ) } ), file=out )
+        write_status( root, now, environ, log )
         return EXIT_NAMED
     except CandidateError as error:
         print( json.dumps( { "error": error.code, "detail": error.detail } ), file=out )
+        write_status( root, now, environ, log )
         return EXIT_NAMED
     try:
         code, summary = run_refresh( root, writer, client if client is not None else cb.vb.EndpointClient(),
                                      os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, environ=environ )
     except Exception as error:                                         # the job's own record says it failed; the exception still ends the run
         jsa.record_refresh( folder, { "ran": False, "reason": f"{type( error ).__name__}: {error}" }, EXIT_FAILED, lt.read_state( os.path.join( folder, STATE_NAME ) ), now, environ )
+        write_status( root, now, environ, log )
         raise
     jsa.record_refresh( folder, summary, code, lt.read_state( os.path.join( folder, STATE_NAME ) ), now, environ )
-    from cosa.repo.symindex import vector_status                       # imported here because vector_status imports this module
-    try: vector_status.check( root, now, environ=environ, log=log )   # no librarian: writes vector-status.json and files no row
-    except ( OSError, ValueError, CandidateError ) as error: log( f"vector status check failed: {error}" )
+    write_status( root, now, environ, log )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
 

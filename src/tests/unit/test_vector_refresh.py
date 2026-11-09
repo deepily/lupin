@@ -532,6 +532,43 @@ def test_the_status_file_really_lands_in_the_refresh_folder_after_a_run( world, 
     assert json.loads( path.read_text() )[ "checked_at" ] == NOON.isoformat( timespec="seconds" )
 
 
+def _watch_status( world, monkeypatch ):
+    """Ensures: returns the list that each vector_status.check call appends its ( root, now ) to."""
+    from cosa.repo.symindex import vector_status as vs
+    seen = []
+    monkeypatch.setattr( vs, "check", lambda root, now, **kw: seen.append( ( root, now ) ) )
+    return seen
+
+
+def test_a_switched_off_exit_still_writes_the_status( world, monkeypatch ):
+    seen = _watch_status( world, monkeypatch )
+    rc, _, _ = run_main( world, [], enabled_fn=lambda: False )
+    assert rc == vr.EXIT_DISABLED and seen == [ ( str( world[ "root" ] ), NOON ) ]
+
+
+def test_a_worktree_root_refusal_still_writes_the_status( world, monkeypatch ):
+    seen = _watch_status( world, monkeypatch )
+    def worktree( a ): raise ValueError( "--root /wt is a worktree" )
+    rc, _, _ = run_main( world, [], enabled_fn=lambda: True, writer_factory=worktree )
+    assert rc == vr.EXIT_NAMED and len( seen ) == 1
+
+
+def test_a_missing_credential_refusal_still_writes_the_status( world, monkeypatch ):
+    seen = _watch_status( world, monkeypatch )
+    def no_credentials( a ): raise CandidateError( DEPENDENCY_MISSING, "no key" )
+    rc, _, _ = run_main( world, [], enabled_fn=lambda: True, writer_factory=no_credentials )
+    assert rc == vr.EXIT_NAMED and len( seen ) == 1
+
+
+def test_a_crashed_run_writes_the_status_and_still_raises( world, monkeypatch ):
+    seen = _watch_status( world, monkeypatch )
+    def crash( *a, **k ): raise OSError( "disk" )
+    monkeypatch.setattr( vr, "run_refresh", crash )
+    with pytest.raises( OSError, match="disk" ):
+        run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    assert len( seen ) == 1, "written once, before the exception left main"
+
+
 @pytest.mark.parametrize( "error", [ OSError( "disk" ), ValueError( "bad" ), vr.CandidateError( "X", "detail" ) ] )
 def test_a_failing_status_check_is_logged_and_never_changes_the_exit_code( world, monkeypatch, error ):
     from cosa.repo.symindex import vector_status as vs
