@@ -445,7 +445,15 @@
         "env": {}
       },
       "owner_confirmed": false,
-      "cron_tag": "hook-link-tick"
+      "cron_tag": "hook-link-tick",
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/hook-link-tick.log",
+      "clean_exit_codes": [
+        0,
+        2,
+        4,
+        5
+      ]
     },
     {
       "job": "yearly-reminders",

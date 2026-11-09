@@ -165,7 +165,8 @@ REAL_ROOT = str( __import__( "pathlib" ).Path( __file__ ).resolve().parents[ 3 ]
 def test_the_real_registry_generates_a_line_set_with_the_gates_demands():
     registry = jr.load_registry( REAL_ROOT )
     managed  = { j[ "job" ]: j for j in cg.managed_jobs( registry ) }
-    assert set( managed ) >= { "duplicate-check", "wiki-librarian", "reuse-behaviour", "vector-refresh", "shadow-audit", "host-snapshot" }
+    assert set( managed ) >= { "duplicate-check", "wiki-librarian", "reuse-behaviour", "vector-refresh", "shadow-audit", "host-snapshot", "hook-link-tick" }
+    assert managed[ "hook-link-tick" ][ "clean_exit_codes" ] == [ 0, 2, 4, 5 ], "its exit codes 2, 4 and 5 are outcomes, not failures; 1 and 3 stay failures"
     assert registry[ "defaults" ][ "run_env" ][ "LUPIN_CONFIG_MGR_CLI_ARGS" ] and registry[ "defaults" ][ "run_env" ][ "COSA_VOICE_MANAGERS__LUPIN" ]
     dup = managed[ "duplicate-check" ][ "run" ][ "argv" ]
     assert dup[ dup.index( "--ceiling" ) + 1 ] == "800" and "--adaptive" in dup and dup[ dup.index( "--branch" ) + 1 ] == "auto"
@@ -338,3 +339,24 @@ def test_main_passes_own_summary_through_as_no_record_written( tree, monkeypatch
 def test_the_four_jobs_that_write_their_own_record_are_marked_so_in_the_shipped_registry():
     own = { j[ "job" ] for j in jr.load_registry( REAL_ROOT )[ "jobs" ] if j.get( "own_summary" ) }
     assert own == { "duplicate-check", "wiki-librarian", "vector-refresh", "reuse-behaviour" }
+
+
+def test_exit_codes_a_job_lists_as_clean_are_recorded_clean_and_the_rest_failed( tmp_path, monkeypatch ):
+    monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
+    answer = lambda code: ( lambda command, **kw: type( "R", (), { "returncode": code, "stdout": "", "stderr": "" } )() )
+    path   = tmp_path / "s.json"
+    for code, outcome in ( ( 0, "clean" ), ( 2, "clean" ), ( 5, "clean" ), ( 1, "failed" ), ( 3, "failed" ) ):
+        assert jrun.run_and_report( path, "j", [ "x" ], runner=answer( code ), clean_codes=( 0, 2, 4, 5 ) ) == code, "the exit code itself is passed on unchanged"
+        attempt = json.loads( path.read_text() )[ "last_attempt" ]
+        assert attempt[ "outcome" ] == outcome and attempt[ "failure" ] == ( None if outcome == "clean" else f"exit {code}" )
+    jrun.run_and_report( path, "j", [ "x" ], runner=answer( 2 ) )
+    assert json.loads( path.read_text() )[ "last_attempt" ][ "outcome" ] == "failed", "with no list, only 0 is clean"
+
+
+def test_main_reads_clean_exit_codes_from_the_registry_entry( tree, monkeypatch ):
+    doc = json.loads( ( tree / "src/conf/job-registry.json" ).read_text() )
+    doc[ "jobs" ][ 0 ][ "clean_exit_codes" ] = [ 0, 2 ]
+    ( tree / "src/conf/job-registry.json" ).write_text( json.dumps( doc ) )
+    monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
+    code = jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda command, **kw: type( "R", (), { "returncode": 2, "stdout": "", "stderr": "" } )() )
+    assert code == 2 and json.loads( ( tree / "io" / "jobs" / "alpha" / "job-summary.json" ).read_text() )[ "last_attempt" ][ "outcome" ] == "clean"

@@ -67,7 +67,7 @@ def stream_run( command, env=None, **_ignored ):
     return types.SimpleNamespace( returncode=proc.wait(), stdout="".join( kept[ "out" ] ), stderr="".join( kept[ "err" ] ) )
 
 
-def run_and_report( summary_path, job, command, mode=None, count_re=None, drained_re=None, environ=None, runner=stream_run, write_record=True ):
+def run_and_report( summary_path, job, command, mode=None, count_re=None, drained_re=None, environ=None, runner=stream_run, write_record=True, clean_codes=( 0, ) ):
     """
     Run a command and write the record of the run.
 
@@ -75,7 +75,7 @@ def run_and_report( summary_path, job, command, mode=None, count_re=None, draine
         - command is a non-empty argv list
     Ensures:
         - returns the command's exit code, and passes its stdout and stderr through
-        - exit 0 is clean, any other code is failed with the code as the failure; a command that cannot start is failed with exit 127
+        - an exit code in clean_codes (default only 0) is clean, any other code is failed with the code as the failure; a command that cannot start is failed with exit 127
         - the scan debt and drained figures come from the patterns, when they match
         - with write_record false (a job that writes its own record) nothing is written to summary_path
     """
@@ -86,8 +86,8 @@ def run_and_report( summary_path, job, command, mode=None, count_re=None, draine
     except OSError as error:
         code, out, err = 127, "", f"job_run: could not start {command[ 0 ]}: {error}\n"
     if runner is not stream_run: sys.stdout.write( out ); sys.stderr.write( err )      # stream_run has already passed the output through
-    attempt = { "started_at": js.iso_now( started ), "finished_at": js.iso_now(), "trigger": js.trigger_from_env( "cron", environ ), "outcome": "clean" if code == 0 else "failed",
-                "stage": None if code == 0 else "command", "failure": None if code == 0 else f"exit {code}", "evidence": None, "mode": mode }
+    attempt = { "started_at": js.iso_now( started ), "finished_at": js.iso_now(), "trigger": js.trigger_from_env( "cron", environ ), "outcome": "clean" if code in clean_codes else "failed",
+                "stage": None if code in clean_codes else "command", "failure": None if code in clean_codes else f"exit {code}", "evidence": None, "mode": mode }
     count, drained = last_int( count_re, out + err ), last_int( drained_re, out + err )
     scan = { "unit": "items", "count": count, "drained_last_run": drained } if count is not None else None
     if write_record: js.write_summary( summary_path, job, attempt, scan, None, count )
@@ -147,7 +147,7 @@ def main( argv=None, environ=None, runner=stream_run ):
         command, environ = run_command( registry, entry, root, data, args.trigger, environ )
         command = with_trigger( command, args.trigger )
     path = jr.resolve_path( entry[ "summary_path" ], root, data )
-    return run_and_report( path, args.job, command, args.mode, args.count_re, args.drained_re, environ, runner, write_record=not entry.get( "own_summary" ) )
+    return run_and_report( path, args.job, command, args.mode, args.count_re, args.drained_re, environ, runner, write_record=not entry.get( "own_summary" ), clean_codes=tuple( entry.get( "clean_exit_codes", [ 0 ] ) ) )
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point
