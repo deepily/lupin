@@ -117,6 +117,7 @@ EXPECTED = {
     "tool_runners.find_tool:os.path.exists#0"                : SAFE,
     "tool_runners.find_tool:os.path.exists#1"                : SAFE,
     "ts_counts.extract_with:shutil.rmtree#0"                 : SAFE,
+    "gate.crash_head:subprocess.run#0"                       : SAFE,
     "range_gate.working_epoch_text:os.path.exists#0"         : RANGE,
     "range_gate.check_commit:os.path.exists#0"               : RANGE,
     "range_gate.sweep_stale:os.path.exists#0"                : RANGE,
@@ -364,10 +365,10 @@ def test_the_module_list_is_every_module_the_gate_imports_from_its_package():
 
 def test_every_place_the_gate_reads_a_file_or_starts_a_process_has_a_row():
     sites = [ site for site, _path, _first, _last in _sites() ]
-    assert len( sites ) == len( set( sites ) ) == 63 and sorted( sites ) == sorted( EXPECTED )
+    assert len( sites ) == len( set( sites ) ) == 64 and sorted( sites ) == sorted( EXPECTED )
     lines = [ ( path, site.split( ":" )[ 1 ].split( "#" )[ 0 ], first ) for site, path, first, _last in _sites() ]
     assert len( lines ) == len( set( lines ) )                                                    # one place of a kind on a line, so a frame names its place
-    assert [ sum( 1 for row in EXPECTED.values() if row == kind ) for kind in ( OFF, RANGE, SAFE ) ] == [ 11, 19, 5 ]
+    assert [ sum( 1 for row in EXPECTED.values() if row == kind ) for kind in ( OFF, RANGE, SAFE ) ] == [ 11, 19, 6 ]
     assert sum( 1 for row in EXPECTED.values() if row not in ( OFF, RANGE, SAFE ) ) == 28
 
 

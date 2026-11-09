@@ -2,7 +2,7 @@
 Pre-commit gate for the documentation standard (plan 1, section 4.2).
 
 Lints the staged lines of Python and markdown files with ruff, markdownlint-cli2 and the
-doc_lint rules and prints the findings to stderr. It exits 0 on its own crash.
+doc_lint rules and prints the findings to stderr. It exits 0 on its own crash and sends one notification for it, and a failed send never changes the exit.
 The hook is shared by every worktree, and a crashing gate must not block every seat.
 A missing tool prints a loud warning. It does not read PLANNING_IS_PROMPTING_ROOT.
 A staged gitlink, which is a submodule entry, holds no text and is named as not checked.
@@ -49,6 +49,7 @@ import re
 import subprocess
 import sys
 import traceback
+import uuid
 
 from . import comment_lint, docstring_lint, md_lint
 from collections import namedtuple
@@ -1119,6 +1120,76 @@ def collect( root ):
     return kept, ruff_warnings + md_warnings + warnings, lines_out, tally
 
 
+CRASH_SENDER     = "claude.code@lupin.deepily.ai#doc-lint-gate"
+CRASH_TEXT_LIMIT = 200
+
+
+def crash_head( root ):
+    """
+    Name the commit the crashed run was building on.
+
+    Requires:
+        - root is a directory path
+
+    Ensures:
+        - returns the short sha of HEAD, or the word unknown when git cannot give one
+
+    Raises:
+        - nothing
+    """
+    try:
+        return subprocess.run( [ "git", "-C", root, "rev-parse", "--short", "HEAD" ], capture_output=True, text=True, check=True, timeout=10 ).stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+def notify_crash( exc, root, err, query=None, api_key=None, target_of=None ):
+    """
+    Send one notification that the gate crashed.
+
+    Requires:
+        - exc is the exception the gate crashed on
+        - root is a directory path
+        - err is a writable text stream
+        - query, api_key and target_of are None, or match the hook_link_tick helpers of the same names
+        - cosa.utils is imported here and not at the top, because the gate runs from copies that hold only this package
+
+    Ensures:
+        - one notification goes out, naming the exception type and text and the commit the run built on
+        - returns True when the server answered 200, otherwise False
+        - a failed delivery is printed to err as one line
+        - never raises, so the commit is let through whatever happens here
+
+    Raises:
+        - nothing
+    """
+    head   = crash_head( root )
+    detail = f"{type( exc ).__name__}: {str( exc )[ : CRASH_TEXT_LIMIT ]}"
+    try:
+        from cosa.utils import hook_link_tick
+        query     = hook_link_tick.post_query if query is None else query
+        api_key   = hook_link_tick._api_key if api_key is None else api_key
+        target_of = hook_link_tick._notify_target if target_of is None else target_of
+        target    = target_of( os.environ )
+        if not target: raise ValueError( "no notification recipient" )
+        status, answer = query( os.environ.get( "HOOK_LINK_API_BASE", hook_link_tick.DEFAULT_API_BASE ).rstrip( "/" ), api_key(), "/api/notify", {
+            "message"        : f"The doc-lint commit gate crashed and let the commit through. {detail}. The commit was built on {head}.",
+            "type"           : "alert",
+            "priority"       : "high",
+            "target_user"    : target,
+            "sender_id"      : CRASH_SENDER,
+            "abstract"       : f"Gate crash at {root}, commit built on {head}.\n\n{detail}\n\n{traceback.format_exc()}",
+            "idempotency_key": str( uuid.uuid4() ),
+        } )
+    except Exception as failure:
+        err.write( f"[doc-lint] crash notification not sent: {type( failure ).__name__}: {failure}\n" )
+        return False
+    if status != 200:
+        err.write( f"[doc-lint] crash notification not sent: HTTP {status} {answer}\n" )
+        return False
+    return True
+
+
 def main( argv=None, err=None ):
     """
     Run the gate.
@@ -1139,6 +1210,7 @@ def main( argv=None, err=None ):
         - otherwise returns 0; the gate itself never returns 1
         - prints the swept-scope denominator on every run that does not crash
         - an internal error is printed as a loud line and the exit is 0, with or without --blocking
+        - an internal error sends one crash notification through notify_crash, and a failed send never changes the exit
         - every warning from a missing tool is printed
 
     Raises:
@@ -1160,6 +1232,7 @@ def main( argv=None, err=None ):
     except Exception as exc:
         say( f"[doc-lint] GATE CRASHED, commit allowed: {type( exc ).__name__}: {exc}" )
         say( traceback.format_exc().rstrip( "\n" ) )
+        notify_crash( exc, args.repo_root, err )
         return 0
     held      = [ w for w in warnings if args.blocking and isinstance( w, Unchecked ) ]
     for warning in warnings + merge_warnings: say( warning.replace( "WARNING:", "REFUSED:", 1 ) if warning in held else warning )

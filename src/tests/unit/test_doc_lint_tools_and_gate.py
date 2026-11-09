@@ -1341,9 +1341,77 @@ def test_gate_prints_every_missing_tool_warning_and_includes_tool_findings( repo
 def test_gate_allows_the_commit_and_says_so_loudly_when_it_crashes( repo, monkeypatch ):
     def boom( root ): raise ValueError( "injected crash" )
     monkeypatch.setattr( gate, "collect", boom )
+    sent = []
+    monkeypatch.setattr( gate, "notify_crash", lambda exc, root, err: sent.append( ( type( exc ).__name__, str( exc ), root ) ) )
     err = io.StringIO()
     assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == 0
     assert "[doc-lint] GATE CRASHED, commit allowed: ValueError: injected crash" in err.getvalue()
+    assert sent == [ ( "ValueError", "injected crash", str( repo ) ) ], "one crash, one notification"
+
+
+def _crash_sink():
+    """A stand-in for the notify call that records what it was sent."""
+    calls = []
+    def query( base, key, path, params ):
+        calls.append( ( base, key, path, params ) )
+        return 200, "ok"
+    return calls, query
+
+
+def test_a_forced_crash_exits_zero_and_calls_the_real_notifier_once_with_the_exception_and_the_commit( repo, monkeypatch ):
+    def boom( root ): raise ValueError( "injected crash" )
+    monkeypatch.setattr( gate, "collect", boom )
+    calls, query = _crash_sink()
+    real = gate.notify_crash
+    monkeypatch.setattr( gate, "notify_crash", lambda exc, root, err: real( exc, root, err, query=query, api_key=lambda: "k", target_of=lambda env: "rick@example.test" ) )
+    _stage( repo, { "docs/a.md": "clean\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    head = _git( repo, "rev-parse", "--short", "HEAD" ).strip()
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == 0
+    assert len( calls ) == 1
+    base, key, path, params = calls[ 0 ]
+    assert ( key, path, params[ "target_user" ], params[ "sender_id" ] ) == ( "k", "/api/notify", "rick@example.test", gate.CRASH_SENDER )
+    assert "ValueError: injected crash" in params[ "message" ] and head in params[ "message" ]
+    assert "Traceback" in params[ "abstract" ] and head in params[ "abstract" ]
+
+
+def test_notify_crash_reports_true_on_http_200_and_names_the_exception_type_and_text( repo ):
+    calls, query = _crash_sink()
+    err = io.StringIO()
+    try: raise KeyError( "k1" )
+    except KeyError as exc: assert gate.notify_crash( exc, str( repo ), err, query=query, api_key=lambda: "key", target_of=lambda env: "who" ) is True
+    assert err.getvalue() == "" and "KeyError: 'k1'" in calls[ 0 ][ 3 ][ "message" ]
+
+
+def test_notify_crash_cuts_a_long_exception_text_to_the_limit( repo ):
+    calls, query = _crash_sink()
+    exc = ValueError( "x" * 1000 )
+    gate.notify_crash( exc, str( repo ), io.StringIO(), query=query, api_key=lambda: "key", target_of=lambda env: "who" )
+    assert "x" * gate.CRASH_TEXT_LIMIT in calls[ 0 ][ 3 ][ "message" ] and "x" * ( gate.CRASH_TEXT_LIMIT + 1 ) not in calls[ 0 ][ 3 ][ "message" ]
+
+
+@pytest.mark.parametrize( "target,expect", [ ( None, "no notification recipient" ), ( "boom", "RuntimeError: key unreadable" ) ] )
+def test_notify_crash_prints_one_line_and_returns_false_when_it_cannot_send( repo, target, expect ):
+    calls, query = _crash_sink()
+    def no_key(): raise RuntimeError( "key unreadable" )
+    err = io.StringIO()
+    result = gate.notify_crash( ValueError( "e" ), str( repo ), err, query=query, api_key=no_key if target == "boom" else ( lambda: "k" ), target_of=lambda env: None if target is None else "who" )
+    assert result is False and not calls
+    assert err.getvalue().count( "\n" ) == 1 and expect in err.getvalue()
+
+
+def test_notify_crash_prints_one_line_and_returns_false_on_a_non_200_answer( repo ):
+    err = io.StringIO()
+    result = gate.notify_crash( ValueError( "e" ), str( repo ), err, query=lambda *a: ( 503, "down" ), api_key=lambda: "k", target_of=lambda env: "who" )
+    assert result is False and err.getvalue() == "[doc-lint] crash notification not sent: HTTP 503 down\n"
+
+
+def test_crash_head_names_the_head_sha_and_says_unknown_outside_a_repository( repo, tmp_path ):
+    _stage( repo, { "docs/a.md": "clean\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    assert gate.crash_head( str( repo ) ) == _git( repo, "rev-parse", "--short", "HEAD" ).strip()
+    assert gate.crash_head( str( tmp_path / "missing" ) ) == "unknown"
 
 
 def test_gate_allows_the_commit_outside_a_repository( tmp_path ):
