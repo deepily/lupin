@@ -19,7 +19,8 @@ It is silent on drift that does not.
 
 Exit codes (four states, four codes):
     0  every judged bundle is `FRESH`: a rebuild would produce byte-identical output.
-       `NOT-BUILT` bundles do not block this.
+       `NOT-BUILT` and `DORMANT` bundles do not block this. A dormant bundle is a built bundle that has
+       drifted but that no tracked file loads, so no page serves it.
     1  at least one bundle is `STALE`: a rebuild would change the delivered bytes.
        This wins over 2: a bundle that could not be checked never hides one that is stale.
     2  `REFUSED`: could not answer (no esbuild, unparseable build script, a build that failed,
@@ -54,6 +55,7 @@ FRESH        = "FRESH"
 STALE        = "STALE"
 REFUSED      = "REFUSED"
 NOT_BUILT    = "NOT-BUILT"
+DORMANT      = "DORMANT"
 
 EXIT_FRESH   = 0
 EXIT_STALE   = 1
@@ -276,7 +278,9 @@ def check_bundle( root, script_path, esbuild ):
 
     Ensures:
         - returns a dict carrying "name", "status" and enough detail to print a report row
-        - "status" is one of `FRESH`, `STALE`, `REFUSED` — never a bare boolean
+        - "status" is one of `FRESH`, `STALE`, `DORMANT`, `NOT-BUILT`, `REFUSED` — never a bare boolean
+        - a built bundle whose rebuild differs is `STALE` when a tracked file loads its output or git cannot say who does,
+          and `DORMANT` only when git answers that nothing loads it
         - a question that cannot be answered returns `REFUSED` with a "reason", never `FRESH`
 
     Notes:
@@ -371,7 +375,16 @@ def check_bundle( root, script_path, esbuild ):
             with open( meta_path, encoding="utf-8" ) as handle:
                 result[ "sources" ] = len( json.load( handle ).get( "inputs", {} ) )
 
-    result[ "status" ] = FRESH if result[ "rebuilt_hash" ] == shipped_hash else STALE
+    if result[ "rebuilt_hash" ] == shipped_hash:
+        result[ "status" ] = FRESH
+        return result
+    loaders = consumers_of( root, spec[ "outdir" ] )
+    if loaders == []:
+        # Built once, drifted since, and nothing loads it: the delivered bytes are not delivered to anyone.
+        result[ "status" ] = DORMANT
+        result[ "reason" ] = f"{spec['outdir']} has drifted from its source, but no tracked file loads it, so no page serves the old bytes"
+    else:
+        result[ "status" ] = STALE      # a loader exists, or git could not say: stay loud
     return result
 
 
@@ -452,7 +465,7 @@ def format_report( root, results, sha ):
     ]
 
     for entry in results:
-        if entry[ "status" ] in ( REFUSED, NOT_BUILT ):
+        if entry[ "status" ] in ( REFUSED, NOT_BUILT, DORMANT ):
             lines.append( f"  {entry['name']:<14} {entry['status']:<9} {'-':>7}  {'-':<13} {'-':<13}" )
             lines.append( f"      ↳ {entry['reason']}" )
             continue
@@ -494,6 +507,7 @@ def main( argv=None ):
         - returns EXIT_STALE when any judged bundle was `STALE`, even if another could not be judged
         - returns EXIT_REFUSED when a bundle could not be judged and none was stale, and when none were found
         - returns EXIT_CRASHED, with a traceback on stderr, when the checker itself raises
+        - a `DORMANT` bundle, built and drifted but loaded by no page, does not block EXIT_FRESH and never counts as `FRESH`
         - a NOT_BUILT bundle does not block EXIT_FRESH, but EXIT_FRESH still requires that at
           least one bundle was actually judged — an all-NOT_BUILT tree has measured nothing
           and must not report a clean zero

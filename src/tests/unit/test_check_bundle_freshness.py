@@ -731,3 +731,60 @@ def test_every_stale_remedy_in_this_repo_is_honest_about_npm_run_build():
         runs = driver in json.loads( ( REPO_ROOT / "package.json" ).read_text( encoding="utf-8" ) )[ "scripts" ][ "build" ]
         assert ( "npm run build (or" in mod.remedy( REPO_ROOT, name ) ) == runs, name
     assert "does not build it" in mod.remedy( REPO_ROOT, "nav" ), "nav is dormant: nothing loads dist/nav, so the build omits it"
+
+
+# ── DORMANT: built, drifted, and loaded by nothing ───────────────────────────────
+
+def _drifted_tree( tmp_path ):
+    """Ensures: returns a tree whose built probe bundle no longer matches a rebuild."""
+    tree = _make_tree( tmp_path )
+    _build( tree )
+    _mutate_emitted_string( tree )
+    return tree
+
+
+@needs_esbuild
+def test_a_drifted_bundle_that_no_page_loads_is_dormant_and_exits_clean( tmp_path, monkeypatch, capsys ):
+    tree = _drifted_tree( tmp_path )
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: [] )
+    result = mod.check_bundle( tree, tree / "src" / "scripts" / "build-probe.sh", str( ESBUILD ) )
+    assert result[ "status" ] == mod.DORMANT and result[ "shipped_hash" ] != result[ "rebuilt_hash" ]
+    assert "no tracked file loads it" in result[ "reason" ]
+    other = { "name": "live", "status": mod.FRESH, "sources": 1, "shipped_hash": "a", "rebuilt_hash": "a", "reason": None }
+    monkeypatch.setattr( mod, "discover_bundles", lambda root: [ "one", "two" ] )
+    monkeypatch.setattr( mod, "check_bundle", lambda root, script, esbuild: result if script == "one" else other )
+    monkeypatch.setattr( mod, "current_sha", lambda root: "deadbeef" )
+    assert mod.main( [] ) == mod.EXIT_FRESH
+    out = capsys.readouterr().out
+    assert "DORMANT" in out and "a rebuild WOULD change" not in out, "no rebuild remedy is printed for a bundle nothing serves"
+
+
+@needs_esbuild
+@pytest.mark.parametrize( "loaders", [ [ "src/lupin_app/static/html/probe.html" ], None ], ids=[ "a page loads it", "git cannot say" ] )
+def test_a_drifted_bundle_stays_stale_when_a_page_loads_it_or_git_cannot_say( tmp_path, monkeypatch, loaders ):
+    tree = _drifted_tree( tmp_path )
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: loaders )
+    assert mod.check_bundle( tree, tree / "src" / "scripts" / "build-probe.sh", str( ESBUILD ) )[ "status" ] == mod.STALE
+
+
+@needs_esbuild
+def test_a_matching_bundle_never_asks_who_loads_it( tmp_path, monkeypatch ):
+    tree = _make_tree( tmp_path )
+    _build( tree )
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: pytest.fail( "a fresh bundle needs no consumer search" ) )
+    assert mod.check_bundle( tree, tree / "src" / "scripts" / "build-probe.sh", str( ESBUILD ) )[ "status" ] == mod.FRESH
+
+
+def test_an_all_dormant_tree_still_refuses_because_nothing_was_judged_fresh( monkeypatch ):
+    row = { "name": "probe", "status": mod.DORMANT, "sources": 2, "shipped_hash": "a", "rebuilt_hash": "b", "reason": "dormant: nothing loads it" }
+    monkeypatch.setattr( mod, "discover_bundles", lambda root: [ "driver" ] )
+    monkeypatch.setattr( mod, "check_bundle", lambda root, script, esbuild: row )
+    monkeypatch.setattr( mod, "current_sha", lambda root: "deadbeef" )
+    assert mod.main( [] ) == mod.EXIT_REFUSED
+
+
+def test_format_report_shows_a_dormant_row_with_its_reason_and_no_rebuild_remedy():
+    row = { "name": "probe", "status": mod.DORMANT, "sources": None, "shipped_hash": "a", "rebuilt_hash": "b", "reason": "nothing loads it" }
+    lines = mod.format_report( "/t", [ row ], "abc123" )
+    assert any( "DORMANT" in l for l in lines ) and any( "nothing loads it" in l for l in lines )
+    assert not any( "WOULD change" in l for l in lines )
