@@ -259,7 +259,7 @@ def sweep_of( ctx_factory, ask ):
     return sweep
 
 
-def drain( data_dir, ctx_factory, ask, today, ceiling, weekly_cap ):
+def drain( data_dir, ctx_factory, ask, today, ceiling, weekly_cap, on_failure=None ):
     """
     Drain the audit queue under a token ceiling.
 
@@ -270,8 +270,9 @@ def drain( data_dir, ctx_factory, ask, today, ceiling, weekly_cap ):
         - returns run_pending's result with spent_tokens and stopped_by
         - the run stops before a sweep that could pass the ceiling, and the rest of the queue waits for the next drain
         - the run also stops when the audits of the last seven days reach weekly_cap, which main reads from the INI (None when the budgets are switched off)
+        - on_failure, when given, is called with the item id and the exception of each failed item
     """
-    return sa.run_pending( data_dir, sweep_of( ctx_factory, ask ), today, max_tokens=ceiling, pass_language=True, weekly_cap=weekly_cap )
+    return sa.run_pending( data_dir, sweep_of( ctx_factory, ask ), today, max_tokens=ceiling, pass_language=True, weekly_cap=weekly_cap, on_failure=on_failure )
 
 
 def cron_lines( root, python, log_path, carried=None ):
@@ -377,7 +378,7 @@ def main( argv=None, environ=None, now=None, out=None, err=None, crontab_cmd=Non
         weekly  = read_weekly_cap( reader ) if budgets else None
         if budgets: check_lifetime_limit( ledger or reuse_ledger.AccountLedger( reuse_ledger.ledger_path( root ) ), read_lifetime_limit( reader ), ceiling )
         else: log( f"budgets are off: {BUDGETS_KEY} is false, so the lifetime limit and the weekly cap are not applied; the per-drain ceiling of {ceiling} still is" )
-        result  = drain( data, factory or _context_factory( root, environ, ceiling ), ask or reuse_tools.unstored_need_impl, now.date().isoformat(), ceiling, weekly )
+        result  = drain( data, factory or _context_factory( root, environ, ceiling ), ask or reuse_tools.unstored_need_impl, now.date().isoformat(), ceiling, weekly, lambda item_id, exc: log( f"item {item_id} failed: {type( exc ).__name__}: {exc}" ) )
     except CandidateError as error:
         log( f"drain refused: {error}" )
         print( json.dumps( { "error": error.code, "detail": error.detail } ), file=out )

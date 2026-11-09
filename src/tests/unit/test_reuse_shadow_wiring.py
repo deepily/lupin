@@ -403,6 +403,12 @@ class TestMain:
         rc, out, _ = run_main( world, [ ], reader=reader_of( ON ), factory=lambda name: name, ask=lambda *a, **k: { "status": "error", "error": "INDEX_STALE" } )
         assert rc == rs.EXIT_FAILED and json.loads( out )[ "failed" ] == 1
 
+    def test_a_failed_item_names_its_cause_in_the_log( self, world ):
+        queue_up( world[ "data" ], [ "n1" ] )
+        run_main( world, [ ], reader=reader_of( ON ), factory=lambda name: name, ask=lambda *a, **k: { "status": "error", "error": "UNKNOWN_ENTRY" } )
+        log_text = ( world[ "data" ] / "shadow-audit" / rs.LOG_NAME ).read_text()
+        assert "failed: CandidateError: " in log_text and "UNKNOWN_ENTRY" in log_text
+
     def test_a_missing_pack_size_is_exit_two_when_no_factory_is_injected( self, world ):
         rc, out, _ = run_main( world, [ ], reader=reader_of( ON ) )
         assert rc == rs.EXIT_NAMED and json.loads( out )[ "error" ] == rs.AUDIT_NEEDS_PACKED
