@@ -81,7 +81,7 @@ def test_refiling_again_files_nothing_more_and_adds_a_second_record( repo, tmp_p
     out   = io.StringIO()
     assert rf.main( [ str( path ) ], out=out, filer=working_filer( store ), now=LATER + datetime.timedelta( hours=1 ) ) == 0
     again = json.loads( out.getvalue() )
-    assert again == { ff.FILED: [], ff.ALREADY: [], ff.QUEUED: [], ff.REFUSED: [] }, "every finding is on the first row"
+    assert again == { ff.FILED: [], ff.ALREADY: [], ff.QUEUED: [], ff.REFUSED: [], ff.RETIRED: [] }, "every finding is on the first row"
     assert len( store.created ) == 1, "the store was asked to create one row in all"
     kept = json.loads( path.read_text() )[ rf.REFILINGS ]
     assert [ r[ "at" ] for r in kept ] == [ LATER.isoformat(), ( LATER + datetime.timedelta( hours=1 ) ).isoformat() ]
@@ -161,7 +161,7 @@ def test_a_file_with_no_findings_is_refiled_as_nothing_to_do( tmp_path ):
     path = tmp_path / "r.json"
     path.write_text( json.dumps( { "status": "ok", "findings": [] } ), encoding="utf-8" )
     out  = io.StringIO()
-    assert rf.main( [ str( path ) ], out=out, filer=working_filer( Store() ) ) == 0 and json.loads( out.getvalue() ) == { ff.FILED: [], ff.ALREADY: [], ff.QUEUED: [], ff.REFUSED: [] }
+    assert rf.main( [ str( path ) ], out=out, filer=working_filer( Store() ) ) == 0 and json.loads( out.getvalue() ) == { ff.FILED: [], ff.ALREADY: [], ff.QUEUED: [], ff.REFUSED: [], ff.RETIRED: [] }
 
 
 def test_the_command_defaults_to_the_live_filer_and_the_present_time( tmp_path, monkeypatch, capsys ):

@@ -36,6 +36,7 @@ FILED          = "filed"
 ALREADY        = "already_filed"
 QUEUED         = "queued_for_retry"
 REFUSED        = "refused"
+RETIRED        = "retired_shape"
 
 
 def correlation_key( definition_id, text ):
@@ -217,7 +218,8 @@ def file_findings( findings, folder, store, declared, roster, day=None ):
         - findings are triage_payload's findings; folder is the daily check's record folder
         - day is the date for the title; None takes the first finding's day field, an ISO date, else today
     Ensures:
-        - returns { filed, already_filed, queued_for_retry, refused } as lists of { key, ... }, at most one entry for this run's row and one for each spooled row
+        - returns { filed, already_filed, queued_for_retry, refused, retired_shape } as lists of { key, ... }, at most one entry for this run's row and one for each spooled row
+        - a spooled payload with no finding_keys is in the retired one-row-per-definition shape: it is never sent, it is listed under retired_shape with its key and owner, and it stays in the spool for a person to remove
         - a finding already on an earlier triage row, or on a spooled one, is left out; with none left no row is filed
         - a spooled row is tried before the new one; the spool afterwards holds only the rows still queued
         - the findings of a row the store took, or already held, are written to the triaged file, so no later run lists them again
@@ -225,9 +227,12 @@ def file_findings( findings, folder, store, declared, roster, day=None ):
         - NoTriageOwner when there are findings to file and the roster is empty, before anything is sent
     """
     if day is None: day = datetime.date.fromisoformat( findings[ 0 ][ "day" ] ) if findings and "day" in findings[ 0 ] else datetime.date.today()
-    out     = { FILED: [], ALREADY: [], QUEUED: [], REFUSED: [] }
-    waiting = []
+    out     = { FILED: [], ALREADY: [], QUEUED: [], REFUSED: [], RETIRED: [] }
     spooled = read_pending( folder )
+    retired = [ p for p in spooled if "finding_keys" not in p ]
+    out[ RETIRED ] = [ { "key": p.get( "correlation_key" ), "owner": p.get( "owner_persona" ) } for p in retired ]
+    waiting = list( retired )
+    spooled = [ p for p in spooled if "finding_keys" in p ]
     seen    = read_triaged( folder ) | { k for p in spooled for k in p.get( "finding_keys", [] ) }
     fresh   = [ f for f in findings if ( f[ "correlation_key" ] if "correlation_key" in f else correlation_key( f[ "id" ], f[ "text" ] ) ) not in seen ]
     todo    = [ *spooled, *( [ triage_payload( fresh, triage_owner( declared, roster ), day ) ] if fresh else [] ) ]

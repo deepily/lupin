@@ -107,14 +107,14 @@ def test_a_run_with_many_findings_files_one_row_and_a_second_run_and_the_next_da
     assert "finding_keys" not in store.created[ 0 ], "the store is sent the payload without the filer's own bookkeeping"
     for _ in range(2):                                                                     # the same day, then the next
         again = run_once( tmp_path, many, store )
-        assert again == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [] }, "every finding is already on the first row: no row, no probe"
+        assert again == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [] }, "every finding is already on the first row: no row, no probe"
     assert len( store.created ) == 1 and len( store.probes ) == 1
     assert len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == 3
 
 
 def test_a_run_with_no_findings_files_no_row_and_asks_for_no_owner( tmp_path ):
     got = ff.file_findings( [], tmp_path, Store(), "x", [], DAY )
-    assert got == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [] } and not ( tmp_path / ff.TRIAGED_FILE ).exists()
+    assert got == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [] } and not ( tmp_path / ff.TRIAGED_FILE ).exists()
 
 
 def test_a_run_with_findings_and_an_empty_roster_raises_before_anything_is_sent( tmp_path ):
@@ -259,13 +259,28 @@ def test_a_finding_already_in_the_spool_is_not_spooled_twice( tmp_path ):
     assert not ( tmp_path / ff.TRIAGED_FILE ).exists(), "a queued row triages nothing"
 
 
-def test_a_spooled_row_from_before_the_triage_row_has_no_finding_keys_and_is_still_sent( tmp_path ):
-    old = { "item_class": "task", "title": "Duplicate: a in b repeats 1 existing definition(s)", "project": "lupin", "correlation_key": "epic:dupcheck-0123456789abcdef", "priority": "P5" }
+def test_a_spooled_row_in_the_retired_one_row_per_definition_shape_is_never_sent_and_stays_in_the_spool( tmp_path ):
+    old = { "item_class": "task", "title": "Duplicate: a in b repeats 1 existing definition(s)", "project": "lupin", "correlation_key": "epic:dupcheck-0123456789abcdef", "priority": "P5",
+            "owner_persona": "manager-on-duty" }
     ff.write_pending( tmp_path, [ old ] )
     store = Store()
     got   = run_once( tmp_path, [], store )
-    assert [ k[ "key" ] for k in got[ "filed" ] ] == [ old[ "correlation_key" ] ] and store.created == [ old ] and not ( tmp_path / ff.PENDING_FILE ).exists()
-    assert ( tmp_path / ff.TRIAGED_FILE ).read_text() == "", "no findings to mark"
+    assert got[ ff.RETIRED ] == [ { "key": old[ "correlation_key" ], "owner": "manager-on-duty" } ] and store.created == [] and store.probes == []
+    assert got[ ff.FILED ] == [] and ff.read_pending( tmp_path ) == [ old ] and ff.read_triaged( tmp_path ) == set()
+
+
+def test_a_retired_shape_row_does_not_stop_the_current_shape_row_beside_it_from_filing( tmp_path ):
+    old  = { "item_class": "task", "title": "t", "project": "lupin", "correlation_key": "epic:dupcheck-0123456789abcdef", "priority": "P5", "owner_persona": "manager-on-duty" }
+    good = { "item_class": "task", "title": "t", "project": "lupin", "correlation_key": "epic:dupcheck-run-1", "priority": "P5", "owner_persona": "cheech", "body": "b", "finding_keys": [ "k1" ] }
+    ff.write_pending( tmp_path, [ old, good ] )
+    store = Store()
+    got   = run_once( tmp_path, [], store )
+    assert [ k[ "key" ] for k in got[ ff.FILED ] ] == [ "epic:dupcheck-run-1" ] and [ k[ "key" ] for k in got[ ff.RETIRED ] ] == [ old[ "correlation_key" ] ]
+    assert [ p[ "correlation_key" ] for p in store.created ] == [ "epic:dupcheck-run-1" ] and ff.read_pending( tmp_path ) == [ old ] and ff.read_triaged( tmp_path ) == { "k1" }
+
+
+def test_a_spool_with_nothing_retired_reports_an_empty_retired_list( tmp_path ):
+    assert run_once( tmp_path, [ finding() ], Store() )[ ff.RETIRED ] == []
 
 
 def test_the_spool_helpers_write_one_line_a_payload_and_remove_the_file_when_empty( tmp_path ):
@@ -380,7 +395,7 @@ def test_every_key_of_a_long_row_is_triaged_once_it_is_filed_so_the_unlisted_one
     found = many_findings( ff.LIST_LIMIT + 3 )
     run_once( tmp_path, found, store )
     assert len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == ff.LIST_LIMIT + 3
-    assert run_once( tmp_path, found, store ) == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [] }
+    assert run_once( tmp_path, found, store ) == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [], "retired_shape": [] }
 
 
 def test_one_finding_past_the_limit_lists_the_limit_and_counts_exactly_one_more():
