@@ -85,9 +85,9 @@ def test_the_message_names_the_state_and_handles_no_reason_and_long_reasons():
 OK = [ { "channel": "durable", "outcome": "posted" } ]
 
 
-def sender( sent, outcomes=OK ):
+def sender( sent, outcomes=None ):
     """A notify_fn that records the message and answers like the escalation sink."""
-    def send( message ): sent.append( message ); return outcomes
+    def send( message ): sent.append( message ); return OK if outcomes is None else outcomes
     return send
 
 
