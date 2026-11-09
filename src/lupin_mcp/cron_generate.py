@@ -15,10 +15,10 @@ import difflib
 import os
 import pathlib
 import shlex
-import subprocess
 import sys
 
 import cosa.rest.job_registry as jr
+from lupin_mcp import host_snapshot as hs
 from cosa.repo.symindex import librarian_tick as lt
 from cosa.rest.job_service import expand, paths_of
 
@@ -107,13 +107,6 @@ def make_log_folders( lines ):
         pathlib.Path( log ).parent.mkdir( parents=True, exist_ok=True )
 
 
-def read_crontab( cmd ):
-    """Ensures: returns the text of crontab -l, or an empty string when it cannot be read."""
-    try: done = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
-    except OSError: return ""
-    return done.stdout if done.returncode == 0 else ""
-
-
 def main( argv=None, environ=None, now=None, out=print, err=None, crontab_cmd=None ):
     """
     Print, diff, install, remove or report the generated block.
@@ -122,6 +115,7 @@ def main( argv=None, environ=None, now=None, out=print, err=None, crontab_cmd=No
         - argv holds at most one of --print, --diff, --install, --uninstall, --status; the default is --print
     Ensures:
         - --print writes the block and changes nothing; --diff writes the unified diff the install would make and changes nothing
+        - a run that would change nothing writes no backup, no log folder and no crontab, and says so; two runs in one second cannot overwrite the first backup
         - --install and --uninstall go through the librarian's locked crontab editor: a timestamped backup under io/jobs/crontab-backups first, no backup no write, old tagged and legacy lines replaced, never added to
         - --install prints the backup folder and the diff it applied
         - --status says how many lines of the block are installed
@@ -139,7 +133,7 @@ def main( argv=None, environ=None, now=None, out=print, err=None, crontab_cmd=No
     root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
     with contextlib.redirect_stdout( sys.stderr ):                    # the configuration manager prints a banner on import; keep stdout clean for --print
         lines, tags, legacy = generate( root, environ )
-    old     = read_crontab( cmd )
+    old     = hs.crontab_text( cmd=cmd ) or ""
     new     = lt.merge_lines( old, [] if args.uninstall else lines, tags, legacy )
     delta   = "".join( difflib.unified_diff( old.splitlines( keepends=True ), new.splitlines( keepends=True ), "crontab.before", "crontab.after" ) )
     if args.status:
@@ -150,6 +144,9 @@ def main( argv=None, environ=None, now=None, out=print, err=None, crontab_cmd=No
         return 0
     if not ( args.install or args.uninstall ):
         out( "\n".join( lines ) )
+        return 0
+    if new == old:
+        out( "no change: the crontab already holds this block, so no backup was written and nothing was rewritten" )
         return 0
     backups = f"{root}/{BACKUP_DIR}"
     if args.install: make_log_folders( lines )

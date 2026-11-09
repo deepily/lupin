@@ -425,6 +425,19 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
     return ( 2 if held else 0 ), summary
 
 
+def install_moved_text( root ):
+    """
+    Say where the cron installer went.
+
+    Requires:
+        - root is the main checkout path
+    Ensures:
+        - returns the text a retired --install prints: one tool writes every cron line, and the exact command that runs it
+    """
+    return ( "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:\n"
+             f"  cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+
+
 def cron_lines_for( run, schedule, boot_delay_seconds ):
     """
     Pair a daily cron line with a slow-start reboot line for one command.
@@ -627,10 +640,13 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return 0
+    if args.install:
+        print( install_moved_text( root ), file=err )
+        return 1
     try:
-        if args.install or args.uninstall:
-            edit_crontab( [] if args.uninstall else lines, environ, cmd, os.path.join( folder, "crontab-backups" ), now )
-            print( "uninstalled" if args.uninstall else "installed: 2 lines", file=out )
+        if args.uninstall:
+            edit_crontab( [], environ, cmd, os.path.join( folder, "crontab-backups" ), now )
+            print( "uninstalled", file=out )
             return 0
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )

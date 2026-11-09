@@ -355,10 +355,13 @@ def main( argv=None, environ=None, now=None, out=None, err=None, crontab_cmd=Non
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return EXIT_OK
+    if args.install:
+        print( lt.install_moved_text( root ), file=err )
+        return 1
     try:
-        if args.install or args.uninstall:
-            lt.edit_crontab( [] if args.uninstall else lines, environ, cmd, os.path.join( log_dir, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
-            print( "uninstalled" if args.uninstall else "installed: 2 lines", file=out )
+        if args.uninstall:
+            lt.edit_crontab( [], environ, cmd, os.path.join( log_dir, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
+            print( "uninstalled", file=out )
             return EXIT_OK
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )

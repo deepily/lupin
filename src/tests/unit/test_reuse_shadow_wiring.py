@@ -354,12 +354,13 @@ class TestMain:
         assert rc == 0 and out.count( rs.CRON_TAG ) == 2 and "DEEPILY_DATA_DIR=/mnt/d" in out and f"{reuse_tools.PACK_SIZE_VARIABLE}=8" in out
         assert not world[ "data" ].exists()
 
-    def test_install_status_and_uninstall_keep_other_lines( self, world, cron ):
-        cron[ "file" ].write_text( "0 * * * * other\n" )
+    def test_install_is_retired_and_writes_nothing( self, world, cron ):
+        rc, out, err = run_main( world, [ "--install", "--python", "/py" ], environ=cron[ "env" ], crontab_cmd=cron[ "cmd" ] )
+        assert rc == 1 and out.strip() == "" and "lupin_mcp.cron_generate --install" in err and not cron[ "file" ].exists()
+
+    def test_status_and_uninstall_keep_other_lines( self, world, cron ):
+        cron[ "file" ].write_text( f"0 * * * * other\n0 11 * * * a {rs.CRON_TAG}\n@reboot b {rs.CRON_TAG}\n" )
         env = cron[ "env" ]
-        rc, out, _ = run_main( world, [ "--install", "--python", "/py" ], environ=env, crontab_cmd=cron[ "cmd" ] )
-        assert ( rc, out.strip() ) == ( 0, "installed: 2 lines" )
-        assert "lock-enter " + rs.LOCK_OWNER in cron[ "log" ].read_text()
         assert run_main( world, [ "--status" ], environ=env, crontab_cmd=cron[ "cmd" ] )[ 1 ].strip() == "installed: 2 lines"
         assert run_main( world, [ "--uninstall" ], environ=env, crontab_cmd=cron[ "cmd" ] )[ 1 ].strip() == "uninstalled"
         text = cron[ "file" ].read_text()
@@ -368,8 +369,8 @@ class TestMain:
     def test_status_reads_not_installed_when_there_is_no_crontab( self, world, cron ):
         assert run_main( world, [ "--status" ], environ=cron[ "env" ], crontab_cmd=cron[ "cmd" ] )[ 1 ].strip() == "not installed"
 
-    def test_an_install_without_the_shared_lock_is_refused_and_returns_one( self, world, cron ):
-        rc, _, err = run_main( world, [ "--install" ], environ={ }, crontab_cmd=cron[ "cmd" ] )
+    def test_an_uninstall_without_the_shared_lock_is_refused_and_returns_one( self, world, cron ):
+        rc, _, err = run_main( world, [ "--uninstall" ], environ={ }, crontab_cmd=cron[ "cmd" ] )
         assert rc == 1 and err.startswith( "reuse-shadow-audit:" ) and not cron[ "file" ].exists()
 
     def test_a_switched_off_job_logs_one_line_and_returns_three_before_reading_the_ceiling( self, world ):

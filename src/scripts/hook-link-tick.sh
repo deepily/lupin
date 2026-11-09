@@ -100,20 +100,13 @@ do_status() {
 }
 
 do_install() {
-    local main existing backup
+    local main
     main="$( main_for_install )" || exit $?
-    existing="$( $CRONTAB_CMD -l 2>/dev/null )"
-    if printf '%s\n' "$existing" | grep -Fq "$CRON_TAG"; then
-        echo "already installed, leaving the existing line exactly as it is:"; printf '%s\n' "$existing" | grep -F "$CRON_TAG"; return 0
-    fi
-    mkdir -p "$( dirname "$CRON_LOG" )" 2>/dev/null
-    # Back up before any write: a crontab is one file with no history, and no backup means no write.
-    backup="$HOME/.claude/crontab-backup-$( date +%Y%m%d-%H%M%S ).txt"
-    mkdir -p "$( dirname "$backup" )" 2>/dev/null
-    printf '%s\n' "$existing" > "$backup" || { echo "INSTALL ABORTED: could not write backup $backup" >&2; return 1; }
-    { [ -n "$existing" ] && printf '%s\n' "$existing"; cron_line "$main"; } | $CRONTAB_CMD - \
-        || { echo "INSTALL FAILED: crontab refused the write (backup at $backup)" >&2; return 1; }
-    echo "installed (backup at $backup):"; cron_line "$main"
+    {
+        echo "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:"
+        echo "  cd $main && LUPIN_ROOT=$main PYTHONPATH=$main/src .venv/bin/python -m lupin_mcp.cron_generate --install"
+    } >&2
+    return 1
 }
 
 do_uninstall() {

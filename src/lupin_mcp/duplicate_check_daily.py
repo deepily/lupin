@@ -834,13 +834,16 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     Requires:
         - args holds the parsed flags; exactly one of print_install, install, uninstall or status is set; out and err take one line of text
     Ensures:
-        - --print-install prints the lines and changes nothing; --install and --uninstall go through the librarian's locked crontab editor with this job's tag and owner
+        - --print-install prints the lines and changes nothing; --uninstall goes through the librarian's locked crontab editor with this job's tag and owner; --install is retired: it prints where the installer went on err and returns 1
         - --status says whether the lines are present
         - returns 0, or 1 with the reason on err when the install is refused or the crontab call fails
     """
     root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
     log_dir = f"{root}{proof_cli.DATA_RELATIVE}/{FOLDER[ 0 ]}"
     cmd     = crontab_cmd or [ environ.get( "DUPLICATE_CHECK_DAILY_CRONTAB", "crontab" ) ]
+    if args.install:
+        err( lt.install_moved_text( root ) )
+        return 1
     try:
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
@@ -851,11 +854,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
             out( "uninstalled" )
             return 0
         lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) }, args.branch, args.ceiling, args.with_baseline, args.adaptive )
-        if args.print_install:
-            out( "\n".join( lines ) )
-            return 0
-        lt.edit_crontab( lines, environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
-        out( f"installed: {len( lines )} lines" )
+        out( "\n".join( lines ) )                                    # the one mode left is --print-install
         return 0
     except ( lt.InstallRefused, RuntimeError ) as e:
         err( f"duplicate-check-daily: {e}" )

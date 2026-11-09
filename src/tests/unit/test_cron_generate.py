@@ -108,9 +108,15 @@ def test_install_replaces_old_tagged_and_legacy_lines_keeps_the_rest_and_a_secon
     assert len( list( ( tree / "io" / "jobs" / "crontab-backups" ).glob( "crontab-*.txt" ) ) ) == 1
     assert ( tree / "io" / "jobs" / "beta" ).is_dir() and ( tree / "data" ).is_dir(), "the log folders exist before cron needs them"
     once = cron[ "file" ].read_text()
+    now   = cg.datetime.datetime( 2026, 11, 9, 12, 0, 0 )
+    first = [ p.read_text() for p in ( tree / "io" / "jobs" / "crontab-backups" ).glob( "crontab-*.txt" ) ]
+    code, out, _ = cg.main( [ "--root", str( tree ), "--install" ], environ=cron[ "env" ], now=now, out=lambda t: None, crontab_cmd=cron[ "cmd" ] ), [], []
+    assert code == 0 and cron[ "file" ].read_text() == once
     code, out, _ = run_main( tree, [ "--install" ], cron )
-    assert code == 0 and cron[ "file" ].read_text() == once and out[ 1 ] == "no change"
-    assert cron[ "log" ].read_text().count( "lock-enter " + cg.LOCK_OWNER ) == 2
+    assert code == 0 and out[ 0 ].startswith( "no change" ) and cron[ "file" ].read_text() == once
+    backups = [ p.read_text() for p in ( tree / "io" / "jobs" / "crontab-backups" ).glob( "crontab-*.txt" ) ]
+    assert backups == first and "old alpha" in backups[ 0 ], "a run with nothing to change leaves the pre-install backup as it was"
+    assert cron[ "log" ].read_text().count( "lock-enter " + cg.LOCK_OWNER ) == 1, "only the run that changed something took the lock"
 
 
 def test_status_counts_the_block_and_uninstall_removes_only_our_lines( tree, cron ):
@@ -136,7 +142,9 @@ def test_a_failed_crontab_write_is_one_and_the_reason( tree, cron, monkeypatch )
 
 
 def test_an_unreadable_crontab_command_reads_as_empty( tree ):
-    assert cg.read_crontab( [ "/nonexistent-crontab" ] ) == ""
+    assert cg.hs.crontab_text( cmd=[ "/nonexistent-crontab" ] ) is None
+    out = []
+    assert cg.main( [ "--root", str( tree ) ], environ={}, out=out.append, crontab_cmd=[ "/nonexistent-crontab" ] ) == 0 and out[ 0 ].startswith( "# Generated" ), "no readable crontab is an empty one"
 
 
 def test_make_log_folders_skips_the_header_and_makes_every_parent( tmp_path ):
