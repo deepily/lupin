@@ -150,3 +150,31 @@ def test_breaching_ids_names_each_definition_blind_definition_refuses_in_sorted_
     for d in ( leak1, leak2 ):
         with pytest.raises( err.DuplicateCheckError ) as caught: bl.blind_definition( d, SCRUB )
         assert caught.value.code == err.BLINDNESS_BREACH
+
+
+def test_redact_tool_names_replaces_every_tool_name_longest_first_and_leaves_arm_labels_and_clean_text_alone():
+    text = "check_exists( reuse-reviewer ) then SEARCHED and ARM-WITH, check_exists again"
+    got  = bl.redact_tool_names( text, SCRUB )
+    assert got == f"{bl.PLACEHOLDER}( {bl.PLACEHOLDER} ) then {bl.PLACEHOLDER} and ARM-WITH, {bl.PLACEHOLDER} again"
+    assert bl.redact_tool_names( "def helper( x ): return x", SCRUB ) == "def helper( x ): return x"
+    assert bl.redact_tool_names( "check_exists", [ "fetch_similar" ] ) == "check_exists", "only names that are in the scrub list are replaced"
+    assert not any( t in bl.PLACEHOLDER for t in SCRUB ), "the placeholder holds no scrub token"
+    with pytest.raises( ValueError, match="empty token" ): bl.redact_tool_names( "x", [ "" ] )
+
+
+def test_a_definition_naming_a_tool_in_any_field_is_shown_with_the_placeholder_when_asked_and_refused_by_default():
+    d = make( name="use_check_exists", text="def use_check_exists( x ):\n    return check_exists( x )  # fetch_similar here", file="src/fetch_similar_user.py", sig="( check_exists )" )
+    with pytest.raises( err.DuplicateCheckError ) as caught: bl.blind_definition( d, SCRUB )
+    assert caught.value.code == err.BLINDNESS_BREACH
+    shown = bl.blind_definition( d, SCRUB, redact_tools=True )
+    assert shown[ "name" ] == f"use_{bl.PLACEHOLDER}" and shown[ "file" ] == f"src/{bl.PLACEHOLDER}_user.py" and shown[ "sig" ] == f"( {bl.PLACEHOLDER} )"
+    assert shown[ "text" ] == f"def use_{bl.PLACEHOLDER}( x ):\n    return {bl.PLACEHOLDER}( x )  # {bl.PLACEHOLDER} here"
+    assert shown[ "id" ] == bl.blind_definition( make( name="use_check_exists", text=d[ "text" ], file=d[ "file" ], sig="( x )" ), SCRUB, redact_tools=True )[ "id" ], "the id comes from the original text"
+
+
+def test_an_arm_label_is_still_refused_when_tool_names_are_replaced_and_breaching_ids_follows_the_flag():
+    tool = make( name="a", text="def a( x ):\n    return check_exists( x )" )
+    arm  = make( name="b", text="def b( x ):\n    return 'ARM-WITH'" )
+    with pytest.raises( err.DuplicateCheckError ): bl.blind_definition( arm, SCRUB, redact_tools=True )
+    assert bl.breaching_ids( [ tool, arm ], SCRUB ) == sorted( [ tool[ "id" ], arm[ "id" ] ] )
+    assert bl.breaching_ids( [ tool, arm ], SCRUB, redact_tools=True ) == [ arm[ "id" ] ]

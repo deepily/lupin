@@ -581,13 +581,21 @@ def test_a_rename_alone_leaves_its_functions_out_and_an_edit_beside_it_judges_on
     assert names == [ "added", "edit" ], "the renamed and edited file is read against its old path"
 
 
-def test_a_new_definition_naming_the_lookup_tool_is_left_unjudged_and_counted_and_the_run_goes_on_to_advance( repo, tmp_path ):
+def test_a_new_definition_naming_the_lookup_tool_is_judged_with_the_name_replaced_and_the_run_advances( repo, tmp_path ):
     c1 = commit( repo, { "server/s1.py": function( "s1", [ "MARKB" ], 50 ) }, "old", 48 )
     c2 = commit( repo, { "client/a1.py": function( "a1", [ "MARKA" ], 2 ), "client/a2.py": function( "a2", [ "MARKA" ], 4 ), "client/leak.py": "def leak( x ):\n    return check_exists( x )\n" }, "a1, a2 and a leak", 3 )
-    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
-    assert doc[ "status" ] == "ok" and doc[ "advanced_to" ] == c2 and doc[ "judge_calls" ] == 2, "only the two clean definitions were asked"
-    assert [ ( u[ "code" ], "check_exists" in u[ "detail" ] ) for u in doc[ "unreadable" ] ] == [ ( err.BLINDNESS_BREACH, True ) ]
-    assert doc[ "carried" ] == [], "a definition that can never be shown is not carried to the next run"
+    class Recording( FakeBackend ):
+        """Ensures: keeps each prompt the judge was sent."""
+        prompts = []
+        async def complete( self, model, system, user ):
+            self.prompts.append( system + "\n" + user )
+            return await super().complete( model, system, user )
+    Recording.prompts = []
+    doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, backend=Recording() ) )
+    assert doc[ "status" ] == "ok" and doc[ "advanced_to" ] == c2 and doc[ "judge_calls" ] == 3, "the definition that names the tool was asked too"
+    assert doc[ "unreadable" ] == [] and doc[ "carried" ] == []
+    seen = "\n".join( Recording.prompts )
+    assert "check_exists" not in seen and "TOOLNAME" in seen, "the judge saw the placeholder, never the tool name"
 
 
 def branched( repo, name, hours_ago ):

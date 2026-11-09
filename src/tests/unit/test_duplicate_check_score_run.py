@@ -380,3 +380,17 @@ def test_judge_all_hands_the_call_cap_to_the_judge_and_names_the_definitions_it_
     defs    = ex.extract_tree( w[ "root" ], w[ "files" ], "new" )[ "definitions" ]
     out     = pl.judge_all( defs, defs, cfg, w, 0, max_calls=2 )
     assert w[ "backend" ].calls == 2 and len( out[ "unjudged" ] ) == 1 and out[ "unjudged" ][ 0 ][ "code" ] == "JUDGE_CAP_REACHED"
+
+
+def test_judge_all_with_redact_tools_keeps_a_server_definition_naming_a_tool_in_the_pool_and_counts_none_dropped(tmp_path):
+    run, w = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ) ], server=[ ( "s1", [ "MARKA" ] ) ] )
+    leak   = w[ "root" ] / "server" / "leak.py"
+    leak.write_text( function( "leak", [ "MARKA" ], 9 ).replace( "MARKA", "check_exists" ), encoding="utf-8" )
+    server = ex.extract_tree( w[ "root" ], [ leak ], "server" )[ "definitions" ]
+    cfg    = cf.verify_frozen( w[ "frozen_path" ], w[ "live" ] )
+    news   = ex.extract_tree( w[ "root" ], w[ "files" ], "new" )[ "definitions" ]
+    pool   = [ *news, *w[ "server_defs" ], *server ]
+    kept   = pl.judge_all( news, pool, cfg, { **w, "redact_tools": True, "cache_dir": tmp_path / "kept" }, 0 )
+    assert kept[ "dropped" ] == { "count": 0, "ids": [] }
+    gone   = pl.judge_all( news, pool, cfg, { **w, "cache_dir": tmp_path / "gone" }, 0 )
+    assert gone[ "dropped" ] == { "count": 1, "ids": [ server[ 0 ][ "id" ] ] }

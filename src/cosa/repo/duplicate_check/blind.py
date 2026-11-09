@@ -7,6 +7,7 @@ from cosa.repo.duplicate_check import errors as err
 REUSE_TOOL_TOKENS = ( "check_exists", "fetch_similar", "read_capability", "record_search", "reuse-reviewer", "reuse-receipt", "SEARCHED" )
 COMMENT_STARTS    = { "py": ( "#", ), "ts": ( "//", "/*", "*" ) }
 WORKTREE_PREFIX   = re.compile( r"^(?:[^/]+/)*?\.claude/worktrees/[^/]+/" )
+PLACEHOLDER       = "TOOLNAME"      # stands for a reuse-tool name left in a definition; it holds no scrub token itself
 
 
 def _check_scrub( scrub ):
@@ -116,34 +117,56 @@ def strip_comment_lines( text, lang, scrub ):
     return "\n".join( line for line in text.split( "\n" ) if not ( line.lstrip().startswith( starts ) and any( t in line for t in tokens ) ) )
 
 
-def blind_definition( d, scrub ):
+def redact_tool_names( text, scrub ):
+    """
+    Replace every reuse-tool name left in a text with the placeholder word `TOOLNAME`.
+
+    Requires:
+        - text is a string; scrub is the scrub list
+
+    Ensures:
+        - returns text with each occurrence of each tool-name token that is in scrub replaced, the longest first so a name that holds another leaves no fragment
+        - arm labels and any other scrub token are left alone, so assert_blind still refuses them
+        - a text with no tool name is returned unchanged
+
+    Raises:
+        - ValueError if the scrub list holds an empty token
+    """
+    names = sorted( [ t for t in _check_scrub( scrub ) if t in REUSE_TOOL_TOKENS ], key=len, reverse=True )
+    for name in names: text = text.replace( name, PLACEHOLDER )
+    return text
+
+
+def blind_definition( d, scrub, redact_tools=False ):
     """
     Return what the judge may see of a definition.
 
     Requires:
         - d is a definition record from extract
-        - scrub is the scrub list
+        - scrub is the scrub list; redact_tools is True to replace reuse-tool names left in the fields by the placeholder word
 
     Ensures:
         - returns { id, lang, file, name, sig, text } and nothing else, so origin, line numbers, calls and declared names stay out
-        - id is opaque_id; file has no worktree prefix; text has lost its comment lines that hold a scrub token
+        - id is opaque_id, computed from the original text; file has no worktree prefix; text has lost its comment lines that hold a scrub token
+        - with redact_tools, a tool name left in file, name, sig or text is replaced by the placeholder word, so a definition that names a reuse tool is still judged; without it the name is a breach
         - no field carries a scrub token
 
     Raises:
-        - DuplicateCheckError BLINDNESS_BREACH if a token survives in any field
+        - DuplicateCheckError BLINDNESS_BREACH if a token survives in any field, an arm label with redact_tools too
     """
-    blinded = { "id": opaque_id( d ), "lang": d[ "lang" ], "file": relative_path( d[ "file" ] ), "name": d[ "name" ], "sig": d[ "sig" ],
-                "text": strip_comment_lines( d[ "text" ], d[ "lang" ], scrub ) }
+    show    = ( lambda t: redact_tool_names( t, scrub ) ) if redact_tools else ( lambda t: t )
+    blinded = { "id": opaque_id( d ), "lang": d[ "lang" ], "file": show( relative_path( d[ "file" ] ) ), "name": show( d[ "name" ] ), "sig": show( d[ "sig" ] ),
+                "text": show( strip_comment_lines( d[ "text" ], d[ "lang" ], scrub ) ) }
     assert_blind( "\n".join( ( blinded[ "file" ], blinded[ "name" ], blinded[ "sig" ], blinded[ "text" ] ) ), scrub )
     return blinded
 
 
-def breaching_ids( defs, scrub ):
+def breaching_ids( defs, scrub, redact_tools=False ):
     """
     Name the definitions that blind_definition would refuse.
 
     Requires:
-        - defs are definition records from extract; scrub is the scrub list
+        - defs are definition records from extract; scrub is the scrub list; redact_tools is blind_definition's flag
 
     Ensures:
         - returns the sorted ids of the definitions whose blinding raises, which it does only for BLINDNESS_BREACH
@@ -152,7 +175,7 @@ def breaching_ids( defs, scrub ):
     found = set()
     for d in defs:
         try:
-            blind_definition( d, scrub )
+            blind_definition( d, scrub, redact_tools )
         except err.DuplicateCheckError:
             found.add( d[ "id" ] )
     return sorted( found )

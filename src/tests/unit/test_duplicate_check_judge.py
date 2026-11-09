@@ -474,3 +474,23 @@ def test_a_reply_that_must_be_asked_again_past_the_cap_leaves_the_definition_unj
     backend     = FakeBackend( replies=[ "I think they match" ] )
     out         = asyncio.run( jd.judge_run( news[ :1 ], cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, max_calls=1 ) )
     assert len( backend.calls ) == 1 and [ u[ "code" ] for u in out[ "unjudged" ] ] == [ err.JUDGE_CAP_REACHED ]
+
+
+def test_with_redact_tools_a_definition_and_a_candidate_naming_a_tool_are_judged_and_the_judge_sees_the_placeholder(tmp_path):
+    news, cands = world()
+    news[ 0 ]   = { **news[ 0 ], "text": "def first( x ):\n    return check_exists( x )  # MARK0" }
+    leaky       = definition( "leaky", "def leaky( y ):\n    return reuse-receipt( y )  # MARK1", origin="new" )
+    cands[ news[ 1 ][ "id" ] ][ 0 ] = leaky
+    backend = FakeBackend()
+    out     = asyncio.run( jd.judge_run( news, cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, skip_breaching=True, redact_tools=True ) )
+    assert out[ "unjudged" ] == [] and len( backend.calls ) == 3 and {v[ "id" ] for v in out[ "verdicts" ]} == {n[ "id" ] for n in news}
+    seen = "\n".join( user for _model, _system, user in backend.calls )
+    assert "check_exists" not in seen and "reuse-receipt" not in seen and bl.PLACEHOLDER in seen and leaky[ "id" ] in {v[ "candidate" ] for v in out[ "verdicts" ]}
+
+
+def test_with_redact_tools_an_arm_label_in_a_definition_is_still_left_unjudged(tmp_path):
+    news, cands = world()
+    news[ 0 ]   = { **news[ 0 ], "text": "def first( x ):\n    return 'ARM-WITH'" }
+    backend = FakeBackend()
+    out     = asyncio.run( jd.judge_run( news, cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, skip_breaching=True, redact_tools=True ) )
+    assert [ ( u[ "id" ], u[ "code" ] ) for u in out[ "unjudged" ] ] == [ ( news[ 0 ][ "id" ], err.BLINDNESS_BREACH ) ] and len( backend.calls ) == 2

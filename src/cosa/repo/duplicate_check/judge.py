@@ -233,7 +233,7 @@ def _pair( d, cands ):
     return { "old": "\0".join( c[ "text" ] for c in cands ), "new": d[ "text" ] }
 
 
-async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, max_calls=None, skip_breaching=False ):
+async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, max_calls=None, skip_breaching=False, redact_tools=False ):
     """
     Judge each new definition once against its candidates, resuming from the ledger.
 
@@ -243,6 +243,7 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         - slot is the pass number; cfg is the frozen configuration; scrub is the scrub list; parallel is an int of 1 or more
         - max_calls is None for no cap, or the most backend calls this run may make
         - skip_breaching is False to stop the run on a scrub token, or True to leave the definition unjudged and the candidate out
+        - redact_tools is True to show a definition's reuse-tool names as a placeholder, so they are not a scrub token to refuse; arm labels still are
 
     Ensures:
         - returns { verdicts, unjudged }: a row { id, candidate, verdict, reason, model, prompt_version, server, slot } for each candidate of each
@@ -275,14 +276,14 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         if done is not None: return done
         capped  = { "unreadable": { "code": err.JUDGE_CAP_REACHED, "detail": f"the cap of {max_calls} calls was reached" } }
         if max_calls is not None and made[ 0 ] >= max_calls: return capped
-        try: mine = blind.blind_definition( d, scrub )
+        try: mine = blind.blind_definition( d, scrub, redact_tools )
         except err.DuplicateCheckError as e:
             if not skip_breaching: raise
             return { "unreadable": { "code": e.code, "detail": e.detail } }
         if skip_breaching and records:
-            records = [ c for c in records if c[ "id" ] not in set( blind.breaching_ids( records, scrub ) ) ]
+            records = [ c for c in records if c[ "id" ] not in set( blind.breaching_ids( records, scrub, redact_tools ) ) ]
             if not records: return { "rulings": [] }
-        shown   = blind.candidate_order( [ blind.blind_definition( c, scrub ) for c in records ] )
+        shown   = blind.candidate_order( [ blind.blind_definition( c, scrub, redact_tools ) for c in records ] )
         by_seen = {}
         for c in records: by_seen.setdefault( blind.opaque_id( c ), [] ).append( c[ "id" ] )
         order   = [ by_seen[ b[ "id" ] ].pop( 0 ) for b in shown ]

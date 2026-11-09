@@ -644,7 +644,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
             rotated = proof_cli.rotate_ledger_for_new_cli( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
             if rotated is not None: doc[ "ledger_rotated" ] = rotated
             ledger = proof_cli.proof_ledger( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
-            wiring = { **proof_cli.base_wiring( folder / VECTORS_DIR, parts[ "structural" ]( tree, cfg ), parallel, parts[ "client" ] ), "backend": count, "ledger": ledger }
+            wiring = { **proof_cli.base_wiring( folder / VECTORS_DIR, parts[ "structural" ]( tree, cfg ), parallel, parts[ "client" ] ), "backend": count, "ledger": ledger, "redact_tools": True }
             out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap, skip_breaching=True )
     except Exception as exc:               # the pool build, the embeddings or the judge failed: leave a record and change nothing else
         doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, usage=usage_since( used0, spend(), count.calls ), rate_limited=count.limited, elapsed_seconds=round( clock() - started, 3 ) )
