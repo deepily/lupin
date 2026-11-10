@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.Counting@b972f2d227
   - lupin_mcp.duplicate_check_daily.findings_of@cfdb1b0bd4
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
-  - lupin_mcp.duplicate_check_daily.run@7158d45fd1
+  - lupin_mcp.duplicate_check_daily.run@0e3d95bce3
   - lupin_mcp.duplicate_check_daily.cron_lines@5d30783eec
   - lupin_mcp.duplicate_check_daily.install_mode@7596ab9118
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
@@ -27,6 +27,7 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - A complete baseline judges nothing. A run inside a rate-limit back-off is recorded `skipped` and judges nothing. A failed prerequisite writes status `failed` and changes nothing else.
 - A judge ledger written under another Claude Code version is renamed aside (see `rotate_ledger_for_new_cli` in [[duplicate-check-proof-command]]); the result then holds `ledger_rotated`.
 - An error while reading the configuration, choosing the window or making the worktree writes status `failed`, stage `setup`. An error while building the pool, embedding or judging writes stage `judging`. `last-success.json` does not move. Worktrees are removed either way.
+- The result holds `test_code_dropped` with `owed` and `pool`: the test-code definitions left out of the owed set and of the comparison pool.
 - Otherwise status is `ok`, or `carried` when the cap left definitions. `last-success.json` advances to the last commit fully judged and records the branch.
 - A filer or auditor that raises is caught and recorded with an `error`; the run still advances. Findings stay in the result file, and [[duplicate-check-refile]] can file them again.
 - With `ceiling` (`--ceiling N`) the cap is the number of definitions to judge, up to N. With `baseline` (`--baseline`) the definitions are every one in the tree, drained over runs; `baseline.json` says `in_progress` or `complete`.

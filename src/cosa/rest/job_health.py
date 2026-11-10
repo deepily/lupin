@@ -85,8 +85,8 @@ def silence( entry, summary, now, boot_time, lock_age, tune ):
         - returns { silent, machine_off, running, last_due, next_due }
         - silent needs a schedule, a due time at least one grace ago, and no attempt since it
         - a live lock younger than lock_stale_seconds makes the job running, never silent
-        - if the machine booted after the due time and the boot catch-up entry is not yet due, the job is not yet late
-        - if it booted after the due time and the job has no boot entry, silent carries machine_off
+        - if the machine booted after the due time and the job has an after_boot entry, the job is not silent: the boot catch-up covers it
+        - if it booted after the due time and the job has no after_boot entry, silent carries machine_off
     """
     schedule = entry.get( "schedule", [] )
     last     = parse_time( summary[ "last_attempt" ][ "started_at" ] )

@@ -8,14 +8,14 @@ pins:
   - lupin_mcp.duplicate_check_daily.changes@69474b63bc
   - lupin_mcp.duplicate_check_daily.changed_files@af39eb4bf8
   - lupin_mcp.duplicate_check_daily.old_paths@44460499c8
-  - lupin_mcp.duplicate_check_daily.new_definitions@a8ab2d3bb9
+  - lupin_mcp.duplicate_check_daily.new_definitions@b8f2bf57b6
   - lupin_mcp.duplicate_check_daily.definitions_held_at_start@12bbbb125c
   - lupin_mcp.duplicate_check_daily.release@78925fda8f
-  - lupin_mcp.duplicate_check_daily.pool_without_earlier_versions@157e09aba7
+  - lupin_mcp.duplicate_check_daily.pool_without_earlier_versions@d1cd025e2d
   - lupin_mcp.duplicate_check_daily.progress@29d6340dbb
   - lupin_mcp.duplicate_check_daily.write_json@d65f1e03d9
   - lupin_mcp.duplicate_check_daily.baseline_window@bd338e256d
-  - lupin_mcp.duplicate_check_daily.baseline_definitions@c2329a0869
+  - lupin_mcp.duplicate_check_daily.baseline_definitions@5ac7f081d3
   - lupin_mcp.duplicate_check_daily.read_baseline@c51274d43b
 ---
 # Duplicate check daily: window and new definitions
@@ -29,12 +29,12 @@ The first half of `lupin_mcp.duplicate_check_daily`: which commits a run judges,
 - `changes( root, window )` returns `( old path, new path )` for each added, modified or renamed file. Old is None for an added file. A deleted file is not listed.
 - `changed_files` is the sorted new paths of Python and script files. `old_paths` maps each renamed file to the path it had at the start.
 - `definitions_held_at_start` reads what the start commit held, under the old path of a renamed file. `new_definitions` and [[reuse-merge-gate]] share it.
-- `new_definitions( tree, root, window )` returns `{ defs, commit_of }`, ordered by the commit that last touched the file, then file and line.
+- `new_definitions( tree, root, window )` returns `{ defs, commit_of, test_dropped }`. Test code is left out ([[duplicate-check-test-code]]). Order is by the commit that last touched the file, then file and line.
 - A definition is left out when the window's start held the same file, name and text. A renamed file is compared with its old path, so a rename alone judges nothing.
-- `baseline_window( root, branch )` is the whole branch, from its first commit. `baseline_definitions( tree, window )` lists every definition of the tree's Python and script files, in file and line order, each tied to the window's end.
+- `baseline_window( root, branch )` is the whole branch, from its first commit. `baseline_definitions( tree, window )` lists every definition of the tree's Python and script files, in file and line order. Each is tied to the window's end; test code is left out and counted in `test_dropped`.
 - `read_baseline( folder )` returns the parsed `baseline.json`, or None. Its status is `in_progress` or `complete`.
 - `release( root, tree )` unlocks and removes a detached worktree. It raises nothing.
-- `pool_without_earlier_versions` drops, from the tree's server and client definitions, any that share a file and name with a new one. No new definition pairs with its own earlier version.
+- `pool_without_earlier_versions` drops, from the tree's server and client definitions, any that share a file and name with a new one. No new definition pairs with its own earlier version. Test code is left out too, and the count is appended to `dropped` when given.
 - `progress( defs, commit_of, unjudged, window )` returns `{ advanced_to, carried }`. A definition the cap or a failed call left unjudged is carried. An unreadable reply was ledgered and is not carried.
 - `advanced_to` is the commit before the first one with a carried definition, or the window's start when that is the first. With nothing carried it is the window's end.
 - `write_json( path, doc )` writes the document, makes the folder and returns the path.

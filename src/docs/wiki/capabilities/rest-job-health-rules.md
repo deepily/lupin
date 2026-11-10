@@ -27,7 +27,7 @@ Decides the state of one job from its registry entry and its summary record. The
 
 ## Rules
 - `silence` returns whether the job is silent, whether the machine was off, whether it is running, and the last and next due times. A job is silent when a due time is more than one grace old and nothing started since.
-- A live run lock younger than the stale limit means running, never silent. A boot after the due time with a boot entry not yet due means not yet late. A boot after the due time with no boot entry marks silent as machine off.
+- A live run lock younger than the stale limit means running, never silent. A boot after the due time, for a job with an `after_boot` entry, means not silent. With no `after_boot` entry it marks silent as machine off.
 - `strip_of` builds up to 14 recent attempts, oldest first, adding a `missed` hole for each cron due time that nothing covered. Holes start after the oldest recorded attempt, and a due time still inside its grace is not a hole.
 - `reasons_for` lists each true rule as state, rule and text, in the order silent, failing, then the behind rules.
 - `assess` builds the whole job entry for the jobs endpoint. A job with a liveness block is healthy when its unit is up, silent when down, and unknown when the answer is missing. A job with no summary is unknown, never reported.
