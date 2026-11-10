@@ -1143,12 +1143,14 @@ SMOKE = "def quick_smoke_test():\n    def helper( items ):\n        tags = [ \"M
 
 
 @pytest.mark.parametrize( "file, name, expected", [
-    ( "src/tests/unit/test_a.py", "f", True ), ( "src/cosa/tests/unit/x.py", "f", True ), ( "tests/x.py", "f", True ),
-    ( "src/pkg/test_thing.py", "f", True ), ( "src/pkg/thing_test.py", "f", True ), ( "src/conftest.py", "f", True ),
-    ( "src/web/a.test.ts", "f", True ), ( "src/web/a.test.js", "f", True ),
+    ( "src/tests/unit/test_a.py", "f", True ), ( "src/cosa/tests/unit/x.py", "f", True ), ( "tests/x.py", "f", True ), ( "src/cosa/agents/foo/tests/x.py", "f", True ),
+    ( "src/conftest.py", "f", True ), ( "conftest.py", "f", True ), ( "src/web/a.test.ts", "f", True ), ( "src/web/a.test.js", "f", True ),
     ( "src/pkg/mod.py", "quick_smoke_test", True ), ( "src/pkg/mod.py", "quick_smoke_test.<locals>.helper", True ), ( "src/pkg/mod.py", "Cls.quick_smoke_test", True ),
     ( "src/pkg/mod.py", "helper", False ), ( "src/pkg/mod.py", "quick_smoke_tester", False ), ( "src/pkg/contest.py", "f", False ), ( "src/pkg/attest.py", "f", False ),
-    ( "src/web/a.ts", "f", False ), ( "src/latests/a.py", "f", False ), ( "src/web/a.spec.ts", "f", True ), ( "src/pkg/test/a.py", "f", True ),
+    ( "src/web/a.ts", "f", False ), ( "src/latests/a.py", "f", False ), ( "src/web/a.spec.ts", "f", False ), ( "src/pkg/test/a.py", "f", False ), ( "src/pkg/thing_test.py", "f", False ),
+    ( "src/cosa/agents/test_suite/test_runner.py", "f", False ), ( "src/cosa/rest/routers/test_suite.py", "f", False ),
+    ( "src/cosa/rest/test_suite_completion_watchdog.py", "f", False ), ( "src/cosa/rest/routers/notifications/test_notifications.py", "f", False ),
+    ( "src/scripts/test_websocket_notification.py", "f", False ),
 ] )
 def test_is_test_code_names_each_kind_of_test_code_and_nothing_else( file, name, expected ):
     assert dd.is_test_code( file, name ) is expected

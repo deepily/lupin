@@ -27,6 +27,7 @@ from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check import errors as err
 from cosa.repo.duplicate_check.proof import label_prep, proof_cli
 from cosa.repo.symindex import librarian_tick as lt
+from cosa.repo.symindex import spec as symindex_spec
 from cosa.repo.symindex.candidates import vector_build
 from lupin_mcp import duplicate_check_audit as audit
 from lupin_mcp import duplicate_check_filing as filing
@@ -36,7 +37,6 @@ from lupin_mcp import reuse_behaviour as behaviour
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_tie as tie_mod
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import pool as pool_mod
 from lupin_mcp.reuse_needset import source_at
 
 FOLDER            = ( "duplicate-check-daily", )
@@ -220,13 +220,13 @@ def is_test_code( file, name ):
     Requires:
         - file is a repository-relative path with forward slashes; name is the definition's dotted name
     Ensures:
-        - returns True where reuse_needset.pool.is_test_path is: a path with a tests, test or __tests__ directory, a test_ file name, or a .test. or .spec. file name
-        - returns True for a file named conftest.py or *_test.py, which that function does not cover
+        - returns True where symindex.spec.is_test_path is: a directory of the path is named tests (src/tests/, src/cosa/tests/, agents/x/tests/)
+        - returns True for a file named conftest.py, *.test.ts or *.test.js
         - returns True for any definition inside a quick_smoke_test (the function and its locals) in any module
+        - a file name beginning test_ is not matched on its own, so production files such as test_runner.py are judged
         - returns False for everything else
     """
-    base = file.rsplit( "/", 1 )[ -1 ]
-    if pool_mod.is_test_path( file ) or base == "conftest.py" or base.endswith( "_test.py" ): return True
+    if symindex_spec.is_test_path( file ) or file.endswith( ( "/conftest.py", ".test.ts", ".test.js" ) ) or file == "conftest.py": return True
     return "quick_smoke_test" in name.split( "." )
 
 
