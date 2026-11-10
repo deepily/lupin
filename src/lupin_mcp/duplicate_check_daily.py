@@ -84,6 +84,7 @@ BRANCH_CHANGED    = "branch_changed"      # the recorded progress belongs to ano
 COMMIT_NOT_ON_BRANCH = "commit_not_on_branch"
 CONTINUITY        = ( BRANCH_CHANGED, COMMIT_NOT_ON_BRANCH )
 STAGE_GUARD       = "branch_guard"
+STAGE_BASELINE    = "baseline"        # the stage named in a result file when the baseline part of an hourly slot raised after the daily part had finished
 STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
 UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable", "owed", "usage", "rate_limited", "backoff_until" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
@@ -772,6 +773,7 @@ def adaptive_run( root, now, trigger, cli_path, parts, branch, parallel, ceiling
         - with nothing owed the daily run exits in seconds without a judge call
         - a daily run that was backed off, failed or carried definitions is not followed by a baseline run
         - announce is called once, after both runs
+        - a baseline run that raises is recorded as its own failed run (stage baseline, the error, judge_calls None); the daily run's record and last-success stand, announce and the caller's summary still happen, and exit_code reads 1
         - returns the result documents, daily first
     """
     folder = pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER )
@@ -781,7 +783,12 @@ def adaptive_run( root, now, trigger, cli_path, parts, branch, parallel, ceiling
     left   = chunk - ( docs[ 0 ][ "judge_calls" ] or 0 )
     if docs[ 0 ][ "status" ] == "ok" and left >= MIN_BASELINE_CALLS and ( read_baseline( folder ) or { } ).get( "status" ) != BASELINE_DONE:
         later = now + datetime.timedelta( seconds=max( 1, math.ceil( docs[ 0 ][ "elapsed_seconds" ] ) ) )       # a distinct second, so the two result files have distinct names
-        docs.append( run( root, later, trigger, None, cli_path, parts, branch, parallel, clock, ceiling=left, baseline=True ) )
+        began = clock()
+        try: docs.append( run( root, later, trigger, None, cli_path, parts, branch, parallel, clock, ceiling=left, baseline=True ) )
+        except Exception as exc:       # a baseline crash must not take the daily part's finished record with it: write its own failed record, then announce and summarise as usual
+            doc = { "date": later.date().isoformat(), "trigger": trigger, "cap": None, "ceiling": left, "mode": history.MODE_BASELINE, "branch": branch, "status": "failed", "stage": STAGE_BASELINE,
+                    "error": f"{type( exc ).__name__}: {exc}", "judge_calls": None, "elapsed_seconds": round( clock() - began, 3 ) }
+            docs.append( record( folder, f"{later.date().isoformat()}-{later.strftime( '%H%M%S' )}-{trigger}", doc, later ) )
     announce( parts, folder, docs, now + datetime.timedelta( seconds=1 ), before )
     return docs
 

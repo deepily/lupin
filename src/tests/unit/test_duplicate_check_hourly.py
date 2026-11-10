@@ -455,3 +455,24 @@ def test_a_run_through_the_real_transport_records_the_tokens_the_sdk_reported_in
     row = hist.read_lines( tmp_path / "io" / "duplicate-check-daily" )[ 0 ]
     assert ( row[ "input_tokens" ], row[ "output_tokens" ], row[ "cache_creation_tokens" ], row[ "cache_read_tokens" ], row[ "usage_calls" ], row[ "cost_usd" ] ) == ( 33, 39, 51, 57, 3, 0.75 )
     assert row[ "calls_per_hour" ] is not None
+
+
+def test_a_baseline_part_that_raises_leaves_the_daily_record_standing_records_its_own_failure_alerts_and_exits_one( repo, tmp_path, monkeypatch ):
+    # the clustering ValueError once killed the process: the slot showed one bare "exit 1" and no baseline line (row d8c78588)
+    history( repo )
+    monkeypatch.setattr( dd, "MIN_BASELINE_CALLS", 1 )
+    real = dd.run
+    def crashing( *args, **kwargs ):
+        if kwargs.get( "baseline" ): raise ValueError( "pair names d-92909e2698, which is not a definition of the run" )
+        return real( *args, **kwargs )
+    monkeypatch.setattr( dd, "run", crashing )
+    hooks  = Hooks()
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    docs   = dd.adaptive_run( *adaptive_args( repo, tmp_path, parts_of( tmp_path, noter=hooks.hook( "noter" ), urgent=hooks.hook( "urgent" ) ), ceiling=10 ) )
+    assert [ ( d[ "mode" ], d[ "status" ] ) for d in docs ] == [ ( "daily", "ok" ), ( "baseline", "failed" ) ]
+    assert docs[ 1 ][ "stage" ] == dd.STAGE_BASELINE and "d-92909e2698" in docs[ 1 ][ "error" ] and docs[ 1 ][ "judge_calls" ] is None
+    assert dd.exit_code( docs ) == 1 and ( folder / dd.LAST_SUCCESS ).exists() and not ( folder / dd.BASELINE ).exists()
+    lines = hist.read_lines( folder )
+    assert [ ( l[ "mode" ], l[ "status" ] ) for l in lines ] == [ ( "daily", "ok" ), ( "baseline", "failed" ) ] and lines[ 0 ][ "run_file" ] != lines[ 1 ][ "run_file" ]
+    urgent = [ s for s in hooks.sent if s[ 0 ] == "urgent" ]
+    assert len( urgent ) == 1 and "baseline" in urgent[ 0 ][ 1 ] + urgent[ 0 ][ 2 ] and "d-92909e2698" in urgent[ 0 ][ 1 ] + urgent[ 0 ][ 2 ]

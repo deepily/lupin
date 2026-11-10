@@ -4,7 +4,7 @@ import json
 import re
 
 from cosa.repo.doc_lint import harness_runner, model_transport
-from cosa.repo.duplicate_check import blind, errors as err
+from cosa.repo.duplicate_check import blind, errors as err, extract
 
 VERDICTS      = ( "duplicate", "near_duplicate", "related", "distinct" )
 FLAG_VERDICTS = ( "duplicate", "near_duplicate" )
@@ -233,6 +233,26 @@ def _pair( d, cands ):
     return { "old": "\0".join( c[ "text" ] for c in cands ), "new": d[ "text" ] }
 
 
+def rehomed( value, records ):
+    """
+    Point a ledgered ruling's candidates at the definitions the run has now.
+
+    Requires:
+        - value is a ledger value; records are the full candidate records of the run
+    Ensures:
+        - the ledger key holds the candidates' text, not their ids, and an id carries its origin: a ruling saved by a daily run names a function as "server", the baseline reads the same function as "new"
+        - a candidate id the run has now stays; one that is that record's id under the other origin becomes the record's id
+        - a ruling whose candidate is neither is dropped, since it names a definition the run does not hold
+        - a value with no rulings is returned as it is
+    """
+    if "rulings" not in value: return value
+    now = { }
+    for c in records:
+        for origin in extract.ORIGINS: now.setdefault( extract.definition_id( origin, c[ "file" ], c[ "name" ], c[ "text" ] ), c[ "id" ] )
+        now[ c[ "id" ] ] = c[ "id" ]
+    return { **value, "rulings": [ { **r, "candidate": now[ r[ "candidate" ] ] } for r in value[ "rulings" ] if r[ "candidate" ] in now ] }
+
+
 async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, max_calls=None, skip_breaching=False, redact_tools=False ):
     """
     Judge each new definition once against its candidates, resuming from the ledger.
@@ -273,7 +293,7 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         records = cands[ d[ "id" ] ]
         key     = harness_runner.ledger_key( STAGE, _pair( d, records ), cfg[ "prompt_version" ], cfg[ "model_id" ], slot )
         done    = ledger.get( key )
-        if done is not None: return done
+        if done is not None: return rehomed( done, records )
         capped  = { "unreadable": { "code": err.JUDGE_CAP_REACHED, "detail": f"the cap of {max_calls} calls was reached" } }
         if max_calls is not None and made[ 0 ] >= max_calls: return capped
         try: mine = blind.blind_definition( d, scrub, redact_tools )

@@ -494,3 +494,28 @@ def test_with_redact_tools_an_arm_label_in_a_definition_is_still_left_unjudged(t
     backend = FakeBackend()
     out     = asyncio.run( jd.judge_run( news, cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, skip_breaching=True, redact_tools=True ) )
     assert [ ( u[ "id" ], u[ "code" ] ) for u in out[ "unjudged" ] ] == [ ( news[ 0 ][ "id" ], err.BLINDNESS_BREACH ) ] and len( backend.calls ) == 2
+
+
+def test_a_ledgered_ruling_names_the_candidate_by_the_id_the_run_has_now_not_the_id_it_was_saved_under( tmp_path ):
+    # the baseline replayed a daily run's ruling that named a function as "server" while it held that function as "new" (row d8c78588)
+    news, cands = world()
+    path        = str( tmp_path / "l" )
+    first       = run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ) )
+    saved       = cands[ news[ 0 ][ "id" ] ]
+    twin_saved  = saved[ 0 ]
+    assert { v[ "candidate" ] for v in first[ "verdicts" ] } == { c[ "id" ] for c in saved }
+    renamed     = [ { **c, "origin": "new", "id": ex.definition_id( "new", c[ "file" ], c[ "name" ], c[ "text" ] ) } for c in saved ]
+    assert renamed[ 0 ][ "id" ] != twin_saved[ "id" ]
+    second_back = FakeBackend()
+    second      = run( news[ :1 ], { news[ 0 ][ "id" ]: renamed }, second_back, hr.Ledger( path ) )
+    assert second_back.calls == []
+    assert { v[ "candidate" ] for v in second[ "verdicts" ] } == { c[ "id" ] for c in renamed }
+    assert [ v[ "verdict" ] for v in second[ "verdicts" ] ] == [ v[ "verdict" ] for v in first[ "verdicts" ] ]
+
+
+def test_rehomed_drops_a_ruling_naming_a_definition_the_run_does_not_hold_and_leaves_an_unreadable_value_alone():
+    held = definition( "held", "def held( x ):\n    return x", origin="server" )
+    value = { "rulings": [ { "candidate": held[ "id" ], "verdict": "related", "reason": "r" }, { "candidate": "d-0000000000", "verdict": "duplicate", "reason": "r" } ] }
+    assert jd.rehomed( value, [ held ] ) == { "rulings": [ value[ "rulings" ][ 0 ] ] }
+    unreadable = { "unreadable": { "code": "x", "detail": "y" } }
+    assert jd.rehomed( unreadable, [ held ] ) is unreadable
