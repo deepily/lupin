@@ -155,7 +155,7 @@ def test_a_new_definition_is_never_paired_with_its_own_earlier_version( repo, tm
     commit( repo, { "client/a1.py": function( "a1", [ "MARKA", "MARKD" ], 3 ) }, "change a1", 2 )
     dropped = []
     real    = dd.pool_without_earlier_versions
-    monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh: dropped.append( [ d[ "name" ] for d in fresh ] ) or real( tree, fresh ) )
+    monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh, left=None: dropped.append( [ d[ "name" ] for d in fresh ] ) or real( tree, fresh, left ) )
     ledgers = []
     real_led = proof_cli.proof_ledger
     monkeypatch.setattr( dd.proof_cli, "proof_ledger", lambda *a, **k: ledgers.append( real_led( *a, **k ) ) or ledgers[ -1 ] )
@@ -825,7 +825,7 @@ def test_a_baseline_run_does_not_move_the_daily_marker_so_the_daily_window_still
 def test_the_baseline_window_is_the_whole_branch_and_a_tree_with_no_source_files_has_no_definitions( repo, tmp_path ):
     first = commit( repo, { "README.md": "hi" }, "readme", 30 )
     assert dd.baseline_window( repo ) == { "start": first, "end": first, "commits": [] }
-    assert dd.baseline_definitions( repo, dd.baseline_window( repo ) ) == { "defs": [], "commit_of": { } }
+    assert dd.baseline_definitions( repo, dd.baseline_window( repo ) ) == { "defs": [], "commit_of": { }, "test_dropped": 0 }
     assert dd.read_baseline( folder_of( tmp_path ) ) is None
 
 
@@ -970,7 +970,7 @@ def test_a_branch_guard_refusal_appends_a_failed_history_line_and_the_file_holds
 
 def test_a_failure_while_judging_appends_a_failed_history_line_naming_the_stage_and_the_error_and_keeps_the_window( repo, tmp_path, monkeypatch ):
     history( repo )
-    monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh: ( _ for _ in () ).throw( RuntimeError( "pool broke" ) ) )
+    monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh, left=None: ( _ for _ in () ).throw( RuntimeError( "pool broke" ) ) )
     doc  = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path ) )
     line = failed_line( tmp_path )
     assert line[ "failure" ] == "judging: RuntimeError: pool broke" and line[ "window_end" ] == doc[ "window" ][ "end" ] and line[ "carried" ] is None
@@ -1137,3 +1137,56 @@ def test_a_verdict_on_either_new_definition_of_a_cluster_settles_the_whole_clust
     assert dd.findings_of( group, fresh, pool, win, {}, None, { key( "n2", "tb" ) } ) == [], "the other side's verdict settles it too"
     assert dd.findings_of( group, fresh, pool, win, {}, None, { key( "n2", "changed" ) } ) != [], "a verdict on other text is not this cluster's"
     assert len( dd.findings_of( [ [ "n1", "p1" ], [ "n2", "p1" ] ], fresh, pool, win, {}, None, { key( "n2", "tb" ) } ) ) == 1, "only the settled cluster is left out"
+
+
+SMOKE = "def quick_smoke_test():\n    def helper( items ):\n        tags = [ \"MARKS\" ]\n        out = []\n        for item in items:\n            out.append( item * 9 )\n        return out\n    return helper( [ 1 ] )\n"
+
+
+@pytest.mark.parametrize( "file, name, expected", [
+    ( "src/tests/unit/test_a.py", "f", True ), ( "src/cosa/tests/unit/x.py", "f", True ), ( "tests/x.py", "f", True ),
+    ( "src/pkg/test_thing.py", "f", True ), ( "src/pkg/thing_test.py", "f", True ), ( "src/conftest.py", "f", True ),
+    ( "src/web/a.test.ts", "f", True ), ( "src/web/a.test.js", "f", True ),
+    ( "src/pkg/mod.py", "quick_smoke_test", True ), ( "src/pkg/mod.py", "quick_smoke_test.<locals>.helper", True ), ( "src/pkg/mod.py", "Cls.quick_smoke_test", True ),
+    ( "src/pkg/mod.py", "helper", False ), ( "src/pkg/mod.py", "quick_smoke_tester", False ), ( "src/pkg/contest.py", "f", False ), ( "src/pkg/attest.py", "f", False ),
+    ( "src/web/a.ts", "f", False ), ( "src/latests/a.py", "f", False ), ( "src/web/a.spec.ts", "f", True ), ( "src/pkg/test/a.py", "f", True ),
+] )
+def test_is_test_code_names_each_kind_of_test_code_and_nothing_else( file, name, expected ):
+    assert dd.is_test_code( file, name ) is expected
+
+
+def test_without_test_code_keeps_order_and_counts_what_it_left_out():
+    defs = [ { "file": "a.py", "name": "x" }, { "file": "src/tests/t.py", "name": "y" }, { "file": "b.py", "name": "z" } ]
+    assert dd.without_test_code( defs ) == ( [ defs[ 0 ], defs[ 2 ] ], 1 )
+    assert dd.without_test_code( [] ) == ( [], 0 )
+
+
+def test_a_window_that_adds_only_test_files_owes_nothing_and_a_mixed_window_owes_only_the_code( repo, tmp_path ):
+    commit( repo, { "client/base.py": function( "base", [ "MARKB" ], 2 ) }, "base", 48 )
+    commit( repo, { "tests/test_t.py": function( "test_one", [ "MARKT" ], 3 ), "client/conftest.py": function( "fix", [ "MARKF" ], 4 ), "client/mod.py": SMOKE }, "tests only", 5 )
+    only   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert only[ "owed" ] == 0 and only[ "judge_calls" ] == 0
+    assert only[ "test_code_dropped" ][ "owed" ] == 4, "test_one, fix, quick_smoke_test and its local helper"
+    commit( repo, { "client/code.py": function( "real", [ "MARKR" ], 5 ), "tests/test_u.py": function( "test_two", [ "MARKU" ], 6 ) }, "mixed", 2 )
+    mixed = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert mixed[ "owed" ] == 1 and mixed[ "test_code_dropped" ][ "owed" ] == 1
+
+
+def test_the_pool_leaves_test_code_out_and_reports_how_many_and_a_run_records_it( repo, tmp_path ):
+    commit( repo, { "client/old.py": function( "old", [ "MARKO" ], 1 ) }, "base", 48 )
+    commit( repo, { "client/code.py": function( "real", [ "MARKR" ], 5 ), "tests/test_fake.py": function( "real", [ "MARKR" ], 5 ), "client/smoke.py": SMOKE }, "pool", 1 )
+    left = []
+    pool = dd.pool_without_earlier_versions( repo, [], left )
+    names = sorted( ( d[ "file" ], d[ "name" ] ) for d in pool )
+    assert ( "client/code.py", "real" ) in names
+    assert not [ n for n in names if dd.is_test_code( *n ) ], "no test definition is offered as a candidate"
+    assert left[ 0 ] == 2, "the smoke test and its local; the pool's file list does not read a tests/ folder of this fixture"
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert doc[ "test_code_dropped" ] == { "owed": 3, "pool": 2 }, "owed: test_fake, the smoke test and its local"
+    assert dd.pool_without_earlier_versions( repo, [] ) == pool, "the count argument is optional"
+
+
+def test_a_baseline_run_leaves_test_code_out_and_counts_it( repo ):
+    commit( repo, { "client/code.py": function( "real", [ "MARKR" ], 5 ), "client/smoke.py": SMOKE }, "base", 1 )
+    got = dd.baseline_definitions( repo, dd.baseline_window( repo ) )
+    assert [ d[ "name" ] for d in got[ "defs" ] ] == [ "real" ]
+    assert got[ "test_dropped" ] == 2, "the smoke test and its local"

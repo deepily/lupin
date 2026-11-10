@@ -36,6 +36,7 @@ from lupin_mcp import reuse_behaviour as behaviour
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_tie as tie_mod
 from lupin_mcp import reuse_tools as rt
+from lupin_mcp.reuse_needset import pool as pool_mod
 from lupin_mcp.reuse_needset import source_at
 
 FOLDER            = ( "duplicate-check-daily", )
@@ -212,6 +213,29 @@ def changes( root, window ):
     return pairs
 
 
+def is_test_code( file, name ):
+    """
+    Say whether a definition is test code, which the check neither judges nor offers.
+
+    Requires:
+        - file is a repository-relative path with forward slashes; name is the definition's dotted name
+    Ensures:
+        - returns True where reuse_needset.pool.is_test_path is: a path with a tests, test or __tests__ directory, a test_ file name, or a .test. or .spec. file name
+        - returns True for a file named conftest.py or *_test.py, which that function does not cover
+        - returns True for any definition inside a quick_smoke_test (the function and its locals) in any module
+        - returns False for everything else
+    """
+    base = file.rsplit( "/", 1 )[ -1 ]
+    if pool_mod.is_test_path( file ) or base == "conftest.py" or base.endswith( "_test.py" ): return True
+    return "quick_smoke_test" in name.split( "." )
+
+
+def without_test_code( defs ):
+    """Ensures: returns ( the definitions that are not test code; the number left out )."""
+    kept = [ d for d in defs if not is_test_code( d[ "file" ], d[ "name" ] ) ]
+    return kept, len( defs ) - len( kept )
+
+
 def changed_files( root, window ):
     """
     List the Python and script files the window added, changed or renamed.
@@ -260,19 +284,20 @@ def new_definitions( tree, root, window ):
     Requires:
         - tree is a worktree at the window's end commit
     Ensures:
-        - returns { defs, commit_of }: new-origin definitions of the changed files, in the order of the first-parent commit that last touched their file, then file and line
+        - returns { defs, commit_of, test_dropped }: new-origin definitions of the changed files, in the order of the first-parent commit that last touched their file, then file and line
         - commit_of maps a definition id to that commit
         - a definition whose file, name and text the window's start already held is left out, so only a function that changed or is new is judged
         - a renamed file is compared with the path it had at the start, so a rename alone leaves its functions out
+        - test code (is_test_code) is left out, and test_dropped counts the definitions it removed
     """
     files = changed_files( root, window )
     found = extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )[ "definitions" ] if files else []
     held  = definitions_held_at_start( root, window, files, window[ "start" ], pathlib.Path( tree ).parent / f"{pathlib.Path( tree ).name}-start", lambda f, d: ( f, d[ "name" ], d[ "text" ] ) ) if files else set()
     rank  = { c: i for i, c in enumerate( window[ "commits" ] ) }
     touch = { f: git( root, "log", "-1", "--first-parent", "--format=%H", f"{window[ 'start' ]}..{window[ 'end' ]}", "--", f ) for f in files }
-    fresh = [ d for d in found if ( d[ "file" ], d[ "name" ], d[ "text" ] ) not in held ]
+    fresh, dropped = without_test_code( [ d for d in found if ( d[ "file" ], d[ "name" ], d[ "text" ] ) not in held ] )
     fresh.sort( key=lambda d: ( rank.get( touch[ d[ "file" ] ], len( rank ) ), d[ "file" ], d[ "line" ] ) )
-    return { "defs": fresh, "commit_of": { d[ "id" ]: touch[ d[ "file" ] ] for d in fresh } }
+    return { "defs": fresh, "commit_of": { d[ "id" ]: touch[ d[ "file" ] ] for d in fresh }, "test_dropped": dropped }
 
 
 def release( root, tree ):
@@ -281,17 +306,20 @@ def release( root, tree ):
     subprocess.run( [ "git", "-C", str( root ), "worktree", "remove", "--force", str( tree ) ], capture_output=True, text=True )
 
 
-def pool_without_earlier_versions( tree, fresh ):
+def pool_without_earlier_versions( tree, fresh, dropped=None ):
     """
     Build the server pool of a tree without the earlier versions of the new definitions.
 
     Ensures:
         - returns the tree's server and client definitions, less every one whose file and name a new definition shares
         - so no new definition can be paired with its own earlier version
+        - test code (is_test_code) is left out, so a definition is never paired with a test fake; when dropped is a list, the number left out is appended to it
     """
     parts = label_prep.tree_definitions( tree )
     taken = { ( d[ "file" ], d[ "name" ] ) for d in fresh }
-    return [ d for d in [ *parts[ "server_defs" ], *parts[ "client_defs" ] ] if ( d[ "file" ], d[ "name" ] ) not in taken ]
+    kept, left = without_test_code( [ *parts[ "server_defs" ], *parts[ "client_defs" ] ] )
+    if dropped is not None: dropped.append( left )
+    return [ d for d in kept if ( d[ "file" ], d[ "name" ] ) not in taken ]
 
 
 def progress( defs, commit_of, unjudged, window ):
@@ -333,12 +361,13 @@ def baseline_definitions( tree, window ):
     Ensures:
         - returns { defs, commit_of } like new_definitions: new-origin definitions in file and line order, each mapped to the window's end commit
         - the files are those label_prep.tree_definitions reads for the pool, so a file the pool cannot read is not asked for
+        - test code (is_test_code) is left out, and test_dropped counts the definitions it removed
     """
     parts = label_prep.tree_definitions( tree )
     files = sorted( { d[ "file" ] for d in [ *parts[ "server_defs" ], *parts[ "client_defs" ] ] } )
-    found = extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )[ "definitions" ] if files else []
+    found, dropped = without_test_code( extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )[ "definitions" ] if files else [] )
     found.sort( key=lambda d: ( d[ "file" ], d[ "line" ] ) )
-    return { "defs": found, "commit_of": { d[ "id" ]: window[ "end" ] for d in found } }
+    return { "defs": found, "commit_of": { d[ "id" ]: window[ "end" ] for d in found }, "test_dropped": dropped }
 
 
 def read_baseline( folder ):
@@ -590,6 +619,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - an exception while reading the frozen configuration, choosing the window or making the worktree writes that file with status failed, stage setup and the error, removes a worktree it began, and moves nothing
+        - the result holds test_code_dropped { owed, pool }: how many test-code definitions (is_test_code) were left out of the owed set and of the comparison pool
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
         - a baseline run leaves last-success alone and writes baseline.json: status complete when nothing is carried, else in_progress; once complete, a baseline run judges nothing
         - a daily run whose carried count, with the history's, rose on the last rise_limit measured daily runs records that as rising and alerts through the notifier
@@ -646,7 +676,9 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     try:
         fresh = baseline_definitions( tree, window ) if baseline else new_definitions( tree, root, window )
         doc[ "owed" ] = len( fresh[ "defs" ] )
-        pool  = pool_without_earlier_versions( tree, fresh[ "defs" ] )
+        left  = []
+        pool  = pool_without_earlier_versions( tree, fresh[ "defs" ], left )
+        doc[ "test_code_dropped" ] = { "owed": fresh[ "test_dropped" ], "pool": left[ 0 ] }
         if ceiling is not None: cap = min( ceiling, len( fresh[ "defs" ] ) )
         out   = { "verdicts": [], "unjudged": [], "dropped": { "count": 0, "ids": [] } }
         if fresh[ "defs" ]:
