@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_history.failure_of@43157d9e67
   - lupin_mcp.duplicate_check_history.counts_of@7147132f71
   - lupin_mcp.duplicate_check_history.started_from_name@a7bba8bc4c
-  - lupin_mcp.duplicate_check_history.line_of@39d984af13
+  - lupin_mcp.duplicate_check_history.line_of@b15a729b17
   - lupin_mcp.duplicate_check_history.append_line@8af6d2a2ba
   - lupin_mcp.duplicate_check_history.read_lines@bd01db055b
   - lupin_mcp.duplicate_check_history.backfill@0454cced16
@@ -18,9 +18,10 @@ pins:
 `lupin_mcp.duplicate_check_history` keeps `runs.jsonl` in the check's record folder (`io/duplicate-check-daily`): one JSON line per run, failed runs included. The run itself is in [[duplicate-check-daily-run]].
 
 ## What it does
-- `line_of( doc, run_file )` flattens a result file to one line with `schema_version` 1. The keys are the same for every run. A number the run could not measure is `None`, never zero.
+- `line_of( doc, run_file )` flattens a result file to one line with `schema_version` 2. The keys are the same for every run. A number the run could not measure is `None`, never zero.
 - A line holds `started_at`, `elapsed_seconds`, `trigger`, `mode` (`daily` or `baseline`), `status` and `failure`. It holds the window (`window_start`, `window_end`, `commits`) and `judged`, `carried`, `cap`, `ceiling` and `judge_calls`.
 - It also holds `findings`, `groups`, `group_sizes`, `findings_by_commit`, the four filing counts, `unreadable` and `backfilled`.
+- Further keys are copied when the run measured them, else `None`. They are `branch`, `owed`, `rate_limited`, `backoff_until`, the token counts and notional cost of the judge calls, and `calls_per_hour`. The last is the calls scaled to an hour (`None` with no call).
 - `failure_of( doc )` gives `<stage or prerequisite>: <error, refusal or detail>` for a failed run, else `None`.
 - `counts_of( filing )` turns the filer's lists into counts. A run with no filer, or a filer that raised, has `None` counts.
 - `append_line( folder, line )` appends and keeps earlier lines. `read_history( folder )` returns `{ lines, bad }`. The lines are sorted by `started_at`, so a backfill after newer runs still reads in time order. `bad` holds the numbers of lines that are not a JSON object with an ISO-8601 `started_at`; they are skipped, never fatal. `read_lines` returns the lines only.

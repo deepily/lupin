@@ -11,9 +11,9 @@ pins:
   - lupin_mcp.reuse_shadow.audit_inputs@d02f6f2200
   - lupin_mcp.reuse_shadow.queue_lookup@1316129eec
   - lupin_mcp.reuse_shadow.sweep_of@f2b1218847
-  - lupin_mcp.reuse_shadow.drain@05b5be5ffb
+  - lupin_mcp.reuse_shadow.drain@cf41c6dca6
   - lupin_mcp.reuse_shadow.cron_lines@074a604b39
-  - lupin_mcp.reuse_shadow.main@cfb7766c77
+  - lupin_mcp.reuse_shadow.main@abd4608179
 ---
 # Reuse shadow audit wiring
 
@@ -31,10 +31,10 @@ pins:
 - `check_lifetime_limit( ledger, limit, ceiling )` runs before any sweep. It adds up the Jev spend ledger's `shadow-audit-` runs with `held_by_prefix`, and raises `AUDIT_LIFETIME_REACHED` when that total plus the drain ceiling would pass the limit. A ledger it cannot read raises `AUDIT_LEDGER_UNREADABLE`. A refused drain spends nothing, leaves the queue alone and logs `drain refused`.
 - `live_capacity( ledger )` runs `reuse_ledger.account_capacity` with the audit ceiling and weekly cap read from the drain's keys. The two cannot drift apart. `reuse_ledger` holds no audit constant.
 - `sweep_of( ctx_factory, ask )` builds the sweep function. Each sweep gets a fresh packed context and its own run name. It returns the verdict, the shortlist ids and the tokens in plus out, and the cause when the verdict is uncertain. An error answer raises `AUDIT_SWEEP_REFUSED`.
-- `drain` runs the queue through `run_pending` under that ceiling and returns its result with `spent_tokens` and `stopped_by`. It also stops at the weekly cap it is given. That is the INI value, or none when the budgets are off. The cap counts the last seven days, and `stopped_by` then reads `weekly_cap`. Known-miss items drain first, so a week with four known misses leaves no sample audits.
+- `drain` runs the queue through `run_pending` under that ceiling and returns its result with `spent_tokens` and `stopped_by`. An `on_failure` callback, when given, gets the item id and the exception of each failed item. It also stops at the weekly cap it is given. That is the INI value, or none when the budgets are off. The cap counts the last seven days, and `stopped_by` then reads `weekly_cap`. Known-miss items drain first, so a week with four known misses leaves no sample audits.
 - The live drain needs the pack size variable, or it raises `AUDIT_NEEDS_PACKED`.
 
 ## Command and cron
 - `cron_lines` builds a daily line at 11:37 and a reboot line, both running `src/scripts/reuse-shadow-audit.sh` and ending with the tag `# reuse-shadow-audit`.
-- `main` drains once by default. `--print-install` shows the lines. `--install` is retired and prints the `cron_generate` command; `--uninstall` and `--status` use the librarian's locked crontab editor.
-- Exit 0 means the drain ran or an install worked. Exit 1 means it failed or an install was refused. Exit 2 means a named error, such as a missing ceiling or a drain that would pass the lifetime limit. Exit 3 means the job is switched off.
+- `main` drains once by default and logs the cause of each failed item. `--print-install` shows the lines. `--install` is retired and prints the `cron_generate` command; `--uninstall` and `--status` use the librarian's locked crontab editor.
+- Exit 0 means the drain ran or an install worked. Exit 1 means an install was refused, or the drain audited nothing and at least one item failed. Exit 2 means a named error, such as a missing ceiling or a drain that would pass the lifetime limit. Exit 3 means the job is switched off.

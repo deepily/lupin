@@ -9,7 +9,7 @@ pins:
   - scripts.check_schema_at_head.classify@eea0a7d7a4
   - scripts.check_dead_claims.find_live_claims@55856ed256
   - scripts.bridge_pin_sweep.sweep@6b207ec6e8
-  - scripts.check_bundle_freshness.check_bundle@bacc3d7387
+  - scripts.check_bundle_freshness.check_bundle@52424de60a
 ---
 # Test and eval scripts
 

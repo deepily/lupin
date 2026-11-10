@@ -2,7 +2,7 @@
 capability: rest-data-repos-tasks
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.db.repositories.task_repository.TaskRepository@07eade4779
+  - cosa.rest.db.repositories.task_repository.TaskRepository@b761592614
   - cosa.rest.db.repositories.approval_setting_repository.ApprovalSettingRepository@8a1babb9aa
 ---
 # Task store repositories
@@ -15,7 +15,7 @@ pins:
 - `apply_patch`, `apply_amendment`, `apply_correlation`, `apply_chase`, `apply_request_filing` and `apply_request_verdict` each change one family of fields and append one event. A patch that changes nothing still writes a no-op event.
 - `get_by_id_for_update` loads a row with `SELECT ... FOR UPDATE` and refreshes it from the database.
 - `find_by_id_prefix` returns up to 10 rows whose id starts with a hyphen-free prefix. `statuses_for_ids` maps each ref to a status or `None`: full UUIDs in one query, other refs by prefix when exactly one row matches.
-- `query_tasks` returns rows newest first, 100 by default. Terminal rows come back only with `include_terminal` or an explicit terminal `status`.
+- `query_tasks` returns rows newest first, 100 by default. It can also filter on a `correlation_key_prefix`, matched as literal text with wildcard characters escaped. Terminal rows come back only with `include_terminal` or an explicit terminal `status`.
 - `count_tasks`, `count_tasks_by_status` and `count_tasks_by_priority` count over the same filters without loading rows. `count_tasks_by_project` takes no `project` filter, so its buckets show every project the other filters admit.
 - `query_chase_due` lists blocked rows whose chase time has passed, oldest chase first. `get_events` returns one row's trail oldest first. `query_events` filters by actor, transition, project and time, newest first.
 - `count_admissions_since` counts one actor's `not_approved->` events since a time, leaving out `not_approved->not_approved`.

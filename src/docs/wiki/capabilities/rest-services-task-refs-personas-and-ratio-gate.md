@@ -4,7 +4,9 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_store_rules.classify_task_ref@dc1fc8e4e4
   - cosa.rest.task_store_rules.hyphenate_compact_prefix@8012462ec6
-  - cosa.rest.task_store_rules.persona_from_created_by@cee2de9232
+  - cosa.rest.task_store_rules.persona_from_created_by@68ec6b654f
+  - cosa.rest.task_store_rules.filer_created_by@207b946a90
+  - cosa.rest.task_store_rules.creator_refusal@fab3afcf26
   - cosa.rest.task_store_rules.session_id_from_created_by@d8886f669b
   - cosa.rest.task_store_rules.build_persona_advisory@f52c483918
   - cosa.rest.task_store_rules.epic_key_advisory@3932f0fdbb
@@ -21,7 +23,9 @@ Helpers in `task_store_rules` for naming a row, naming its owner, and limiting h
 ## What it does
 - `classify_task_ref( ref )` returns `( "full", UUID )`, `( "prefix", lowercase hex )` for 4 or more hex characters, or `( "invalid", None )`. Hyphens are allowed in a prefix. Junk is never a prefix, so caller text never builds a `LIKE` pattern.
 - `hyphenate_compact_prefix` puts the 8-4-4-4-12 hyphens back so a compact prefix matches stored ids. Both prefix lookups share it.
-- `persona_from_created_by( created_by )` strips a trailing 6 or more hex session id from `"<persona> <sid>"` and canonicalizes the rest. `session_id_from_created_by` returns that tail or `None`.
+- `persona_from_created_by( created_by )` first drops a trailing bracketed note. Then it strips a trailing 6 or more hex session id from `"<persona> <sid>"` and canonicalizes the rest. `session_id_from_created_by` returns that tail or `None`.
+- `filer_created_by( persona, tool )` returns `"<persona key> (<tool>)"` for a row a tool files on a persona's behalf. It raises `ValueError` for a blank persona or a tool name that is blank or holds a bracket.
+- `creator_refusal( created_by )` is `None` for a seat's `"<name> <session id>"`, or for a creator on the roster or among the approvers. Otherwise it returns a refusal text. It never raises.
 - `build_persona_advisory( owner, manager, known_keys )` returns `( advisory, marker )` for off-roster persona fields, or `( None, None )`. It never rejects.
 - `epic_key_advisory( correlation_key )` is `None` for an `epic:` or `cc-task:` key and otherwise names `epic:unassigned` as a legal answer.
 - `ratio_gate_advisory( created, closed, priority, correlation_key, allow_below )` returns a refusal string or `None`. A P0 priority and a `cc-task:` key return `None` before any arithmetic. `ratio_gate_reading` is the log line for a permit, with `n/a` when nothing is closed.

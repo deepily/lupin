@@ -8,7 +8,7 @@ pins:
   - cosa.rest.routers.tasks.TaskCorrelateIn@22e61de319
   - cosa.rest.routers.tasks.TaskAmendIn@2696c629b7
   - cosa.rest.routers.tasks.TaskPatchIn@cf730bfc20
-  - cosa.rest.routers.tasks.create_task@12e9802221
+  - cosa.rest.routers.tasks.create_task@157d0aa19f
   - cosa.rest.routers.tasks.transition_task@6a5554ab30
   - cosa.rest.routers.tasks.correlate_task@323fddc93c
   - cosa.rest.routers.tasks.ask_to_unpark@f623852974
@@ -20,7 +20,7 @@ pins:
 The routes of `cosa.rest.routers.tasks` that change an item, under `/api`. All take an API key or a Bearer token. Each body model forbids unknown fields, so a misspelt key is a 422, never a silent drop. Reads are in [[rest-routers-tasks-reads]]; the rules are in [[task-store]].
 
 ## What it does
-- `create_task`, `POST /tasks` (`TaskCreateIn`): makes one row with 201. An omitted status takes the approval default. An over-long title is trimmed. The overflow becomes the body when the body is empty, and is appended to it after an overflow marker line when it is not. The priority firewall answers 403 for a priority the caller may not set. A manager relaying the operator's word for P0 is filed as a petition at P1 instead.
+- `create_task`, `POST /tasks` (`TaskCreateIn`): makes one row with 201. An omitted status takes the approval default. An over-long title is trimmed. The overflow becomes the body when the body is empty, and is appended to it after an overflow marker line when it is not. The priority firewall answers 403 for a priority the caller may not set. A caller using an API key must send a `created_by` that names a persona, or it is a 422 before anything is written. A manager relaying the operator's word for P0 is filed as a petition at P1 instead.
 - `transition_task`, `POST /tasks/{id}/transition` (`TaskTransitionIn`): one state change. Done needs `receipt_refs`, blocked needs typed `blocked_by`, dropped needs a `reason`, parked needs `park_reason`. Returns `{ item, event }`. A body `promote_priority` (`P0` to `P5`) raises the priority and admits the row in one event. Only the operator's login may ([[rest-services-task-feed-and-priority-firewall]]). With `asynchronous: true` and the operator flag on, a promotion that needs the owner's answer writes only a promotion ticket. It returns 202 `{ status: "awaiting_human_approval", ticket_id, ... }`.
 - `correlate_task`, `.../correlate` (`TaskCorrelateIn`): re-stamps the `correlation_key`. A terminal row is 422.
 - `ask_to_unpark`, `.../unpark-ask` (`UnparkAskIn`): a manager seat asks the operator to un-park a row. The server makes a yes or no card and pushes it. It is 403 for a non-manager and 404 for no such row or no operator account. It is 409 for a row not parked, one with no recorded park time, or one with a card already waiting. It writes no task event.

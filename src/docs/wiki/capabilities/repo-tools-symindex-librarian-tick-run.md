@@ -11,14 +11,14 @@ pins:
   - cosa.repo.symindex.librarian_tick.LiveStore@11cd75077d
   - cosa.repo.symindex.librarian_tick.notify_owner@56aee637b7
   - cosa.repo.symindex.librarian_tick.data_dir@1dc90370b7
-  - cosa.repo.symindex.librarian_tick.main@03d7e24432
+  - cosa.repo.symindex.librarian_tick.main@4ff14907ef
 ---
 # Wiki librarian tick: one run
 
 The daily job that lints the wiki, queues the findings and exports the reuse misses. Rows are made by [[repo-tools-symindex-librarian-queue]]; the switches and cron lines are in [[repo-tools-symindex-librarian-tick-config]].
 
 ## Running it
-- `python -m cosa.repo.symindex.librarian_tick [--force] [--root R] [--misses-out P]`. The tick is off until the configuration key `wiki librarian tick enabled` is true, and an off tick exits 3 before building anything. `main` prints the run summary as JSON and runs a configured lupin-mobile corpus in the same tick. It takes `--print-install`, `--install`, `--uninstall` and `--status` for the cron lines. The vector status check runs on every tick, whether or not the refresh switch is on.
+- `python -m cosa.repo.symindex.librarian_tick [--force] [--root R] [--misses-out P]`. The tick is off until the configuration key `wiki librarian tick enabled` is true, and an off tick exits 3 before building anything. `main` prints the run summary as JSON. It records the job summary for the background-jobs page on every outcome (ran, switched off or crashed). It also runs a configured lupin-mobile corpus in the same tick. It takes `--print-install`, `--install`, `--uninstall` and `--status` for the cron lines. The vector status check runs on every tick, whether or not the refresh switch is on.
 - Exit 0: nothing due, or the run finished and nothing is held. Exit 1: the run could not finish. Exit 2: it finished and some rows, lupin or lupin-mobile, sit in a pending file. Exit 3: switched off.
 
 ## What `run_tick` does

@@ -7,11 +7,14 @@ pins:
   - cosa.repo.symindex.librarian_tick.read_enabled@48426a4325
   - cosa.repo.symindex.librarian_tick.read_persona@bfb1570e2a
   - cosa.repo.symindex.librarian_tick.read_mobile_corpus@3e5c46846d
+  - cosa.repo.symindex.librarian_tick.crontab_command@1b83cbb8d8
+  - cosa.repo.symindex.librarian_tick.holds_generated_block@99257915fa
+  - cosa.repo.symindex.librarian_tick.install_moved_text@0453364e89
   - cosa.repo.symindex.librarian_tick.cron_lines_for@f736281e58
   - cosa.repo.symindex.librarian_tick.cron_lines@ab28a46f8d
-  - cosa.repo.symindex.librarian_tick.merge_lines@029adb24e5
+  - cosa.repo.symindex.librarian_tick.merge_lines@cd8b7c7098
   - cosa.repo.symindex.librarian_tick.load_crontab_lock@b5f0cfe1ba
-  - cosa.repo.symindex.librarian_tick.edit_crontab@0df0429592
+  - cosa.repo.symindex.librarian_tick.edit_crontab@032f4b2309
   - cosa.repo.symindex.librarian_tick.status_text@e0e972f7d7
   - cosa.repo.symindex.librarian_tick.InstallRefused@9475ee3bd2
 ---
@@ -27,12 +30,11 @@ How the tick ([[repo-tools-symindex-librarian-tick-run]]) reads its settings and
 - `read_mobile_corpus` reads the lupin-mobile settings. A blank `wiki librarian mobile repo root` defaults to the `lupin-mobile` folder beside the checkout, and a missing folder returns None. The owner defaults to `tiffany`.
 
 ## Cron lines
-- `cron_lines( root, python, log_path )` returns a daily line at `17 10 * * *` and an `@reboot sleep 120 &&` line. Each ends with the tag `# wiki-librarian-tick`.
-- `cron_lines_for( run, schedule, boot_delay_seconds )` pairs a daily line with an `@reboot sleep <delay> &&` line for one command. `cron_lines` passes it 120 seconds, and the vector refresh passes 240.
-- `merge_lines( current, lines, tag )` drops every tagged line from a crontab text and puts the new ones last. Untagged lines keep their text and order.
-- `status_text` answers `not installed`, `installed: 2 lines`, or `partly installed: n lines` for any other count.
+- `cron_lines( root, python, log_path )` returns two lines. One is a daily line at `17 10 * * *`; the other is an `@reboot sleep 120 &&` line. Each ends with the tag `# wiki-librarian-tick`. It builds them with `cron_lines_for( run, schedule, boot_delay_seconds )`. That pairs a daily line with a reboot line for one command. The vector refresh passes 240 seconds.
+- `merge_lines( current, lines, tag, legacy )` drops every line that ends with the tag (or one of a tuple of tags). It also drops any line holding a `legacy` substring. It puts the new ones last. Other lines keep their text and order. `status_text` answers `not installed`, `installed: n lines` for the expected count (2 by default), or `partly installed: n lines`.
 
 ## Installing
-- `--print-install` prints the lines and changes nothing. `--install` is retired and prints the `cron_generate` command; `--uninstall` goes through `edit_crontab`. `--status` only reads the crontab and prints the status text.
-- `edit_crontab( lines, environ, crontab_cmd, backup_dir, now )` holds the shared crontab lock for the whole read and write. It writes a timestamped backup first, and writes nothing if the backup fails. It raises `RuntimeError` on a failed crontab call or backup.
+- `--print-install` prints the lines and changes nothing. `--install` is retired and prints `install_moved_text( root )`: the `cron_generate` command, which writes every Lupin cron line from the job registry. `--uninstall` goes through `edit_crontab`. `--status` only reads the crontab.
+- `crontab_command( environ, own_variable )` picks the crontab command: `LUPIN_CRONTAB` when set, so one scratch crontab covers every tool, else the tool's own variable, else `crontab`. `holds_generated_block( cmd )` is True when a line ends with `# lupin-cron-generated`, and False when the crontab cannot be read.
+- `edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag, owner, legacy )` holds the shared crontab lock, recorded under `owner`, for the whole read and write. `tag` and `legacy` go to `merge_lines`. It writes a timestamped backup first, and writes nothing if the backup fails. It raises `RuntimeError` on a failed crontab call or backup.
 - `load_crontab_lock` loads `workflow/scripts/crontab_lock.py` from `PLANNING_IS_PROMPTING_ROOT`. When the variable is unset or the file is absent it raises `InstallRefused`, and nothing is written.
