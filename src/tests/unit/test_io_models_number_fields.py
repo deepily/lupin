@@ -52,3 +52,12 @@ def test_a_model_amount_is_parsed_but_not_clamped():
     assert intent.get_principal_float() == 300000.0
     assert intent.get_annual_rate_float() == 6.5
     assert intent.get_down_payment_float() == 0.0
+
+
+def test_batch_script_matcher_confidence_is_parsed_then_clamped():
+    from cosa.agents.notification_proxy.xml_models import BatchScriptMatcherResponse
+    def conf( text ): return BatchScriptMatcherResponse( entries=[], confidence=text ).get_confidence_float()
+    assert conf( "0.9" ) == 0.9
+    assert conf( "1.7" ) == 1.0
+    assert conf( "-1" ) == 0.0
+    assert conf( "n/a" ) == 0.0
