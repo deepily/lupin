@@ -22,9 +22,8 @@ Can also run locally against :7999 via:
 
 Requires:
     - Test server running (port 8000 default; LUPIN_TEST_BASE_URL overrides)
-    - The Firefox plugin's `microphone-48.png` icon exists at
-      `src/lupin-plugin-firefox/icons/microphone-48.png` (used as the
-      test fixture — small, version-controlled, always present)
+    - The tracked diagram `src/docs/images/notification-lifecycle.png` exists
+      (the test fixture, in the lupin repo, so the VM checkout has it too)
     - The aggressive-400 + image-MIME + cache-control CoSA changes are
       loaded in the running server (bounce required after pages.py and
       docs_files.py edits land in the CoSA submodule)
@@ -36,7 +35,7 @@ from .conftest import BASE_URL
 # A version-controlled PNG that's always present in the Lupin tree.
 # Used because creating temp PNGs from a Playwright test would require
 # fixture setup; using a pre-existing one keeps the test self-contained.
-_FIXTURE_IMAGE_PATH = "lupin/src/lupin-plugin-firefox/icons/microphone-48.png"
+_FIXTURE_IMAGE_PATH = "lupin/src/docs/images/notification-lifecycle.png"
 
 
 class TestDocViewerImageRendering:
@@ -94,7 +93,7 @@ class TestDocViewerImageRendering:
         natural_width = logged_in_page.evaluate(
             "() => document.querySelector('#doc-viewer-target img')?.naturalWidth ?? 0"
         )
-        # microphone-48.png is 48x48, but we just check non-zero to keep
+        # the fixture's size is not pinned, so we just check non-zero to keep
         # the test resilient to fixture swaps.
         assert natural_width > 0, \
             f"image didn't decode; naturalWidth={natural_width}"
