@@ -304,7 +304,7 @@
       "owner": "cheech",
       "schedule": [
         {
-          "cron": "0 9 * * 1"
+          "cron": "0 13 * * 1"
         }
       ],
       "summary_path": "{root}/io/jobs/worktree-census/job-summary.json",
