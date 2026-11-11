@@ -17,6 +17,7 @@ to prove the call happens.
 from cosa.rest.task_approval_settings import _ini_value, approver_persona_for_account
 from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_store_rules       as rules
+from cosa.utils.flag_text import is_flag_on
 
 import re
 import uuid
@@ -117,7 +118,7 @@ def get_asynchronous_enabled():
     """
     raw = _ini_value( INI_KEY_ASYNCHRONOUS, "string", None )
     if raw is None: return FALLBACK_ASYNCHRONOUS
-    return str( raw ).strip().lower() in ( "true", "1", "yes", "on" )
+    return is_flag_on( raw )
 
 
 def promotion_is_asynchronous( requested, enabled_fn=get_asynchronous_enabled ):
