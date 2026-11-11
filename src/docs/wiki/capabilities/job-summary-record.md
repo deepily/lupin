@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.job_summary.check_attempt@e674f456a4
   - lupin_mcp.job_summary.trigger_from_env@19ef499d42
   - lupin_mcp.job_summary.trimmed@6e4b8751ff
-  - lupin_mcp.job_summary.scan_block@452acaf9a9
+  - lupin_mcp.job_summary.scan_block@f8175446a8
   - lupin_mcp.job_summary.fix_block@6c6588c557
   - lupin_mcp.job_summary.build_summary@c3e4376087
   - lupin_mcp.job_summary.write_summary@a3c34e8116
@@ -32,7 +32,7 @@ The shared writer of the `job-summary/1` file each background job leaves after a
 - `build_summary` moves `last_finished` only on clean or carried. Failures grow on failed, reset on clean or carried and hold on skipped.
 - `scan_block` and `fix_block` keep the previous block when the run gave none or did not finish. A finished run adds one point; `trimmed` keeps the newest 14.
 - A failed or skipped run keeps the old scan block and time: stale, not zero. Fix debt points add the opened rows to the previous total.
-- A job that reports drained 0 or nothing, and whose count fell, is given the fall: 168 to 3 drained 165. The wiki librarian reports 0. A non-zero figure is kept, and nothing stays nothing when the count did not fall. Arrivals are derived only when the job left them null and a previous count exists: count now minus count before plus drained.
+- When a job's count fell, drained is the larger of its reported figure and the fall. 168 to 3 drains 165. 24 to 2 with a reported 10 drains 22. So arrived is never negative. The wiki librarian reports its own small figure. A reported figure above the fall is kept, and nothing stays nothing when the count did not fall. Arrivals are derived only when the job left them null and a previous count exists: count now minus count before plus drained.
 
 ## Writing
 - `write_summary` returns the record, or None with a message when the file cannot be written. A write failure never fails the job. A malformed attempt still raises.

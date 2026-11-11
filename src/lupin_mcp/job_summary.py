@@ -102,15 +102,15 @@ def scan_block( given, previous, attempt, as_of ):
         - a run that gave no block, or did not finish, returns the previous block (None when there is none)
         - a failed or skipped run carries the previous block forward with its old as_of: the count is stale, not zero
         - a finished run gets a new as_of and appends one point when it reported a count
-        - a job that reports drained 0 or none, and whose count fell, is given the fall as drained: 168 to 3 drained 165, because the count cannot fall unless work leaves it (a job whose debt others clear reports 0)
-        - any other figure stays as reported: a non-zero drained is kept whatever the fall, and none stays none when the count did not fall, because a missing figure is not a zero
+        - a job whose count fell gets drained = max( reported, the fall ): 168 to 3 drained 165, and 24 to 2 with a reported 10 drained 22, so arrived can never be negative (a job whose debt others clear reports 0 or too little)
+        - a reported figure above the fall is kept, and none stays none when the count did not fall, because a missing figure is not a zero
         - arrived_last_interval is derived (count now - count before + drained) only when the job left it null and a previous count exists
     """
     if given is None or attempt[ "outcome" ] not in FINISHED: return previous
     block  = { key: given.get( key ) for key in SCAN_KEYS }
     points = list( previous[ "points" ] ) if previous is not None else []
-    if not block[ "drained_last_run" ] and block[ "count" ] is not None and points and points[ -1 ][ "count" ] is not None and points[ -1 ][ "count" ] > block[ "count" ]:
-        block[ "drained_last_run" ] = points[ -1 ][ "count" ] - block[ "count" ]
+    if block[ "count" ] is not None and points and points[ -1 ][ "count" ] is not None and points[ -1 ][ "count" ] > block[ "count" ]:
+        block[ "drained_last_run" ] = max( block[ "drained_last_run" ] or 0, points[ -1 ][ "count" ] - block[ "count" ] )
     if block[ "arrived_last_interval" ] is None and block[ "count" ] is not None and block[ "drained_last_run" ] is not None and points:
         block[ "arrived_last_interval" ] = block[ "count" ] - points[ -1 ][ "count" ] + block[ "drained_last_run" ]
     if block[ "count" ] is not None: points.append( { "at": as_of, "count": block[ "count" ], "drained": block[ "drained_last_run" ] } )
