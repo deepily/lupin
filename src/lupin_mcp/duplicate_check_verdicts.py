@@ -8,6 +8,10 @@ This verb checks the line and amends it onto the night's triage row. Then it app
 The weekly page reads that file (reuse_behaviour.read_verdicts), so the file and the row carry the same lines.
 It refuses a malformed line and a run with no result file.
 It also refuses a finding id that is not in that run's file, and a finding already ruled on.
+A wrong ruling is corrected with --correct. The line has the same shape, its own by= and ts=, and is appended after the earlier line.
+The correction line also carries corrects=<the verdict it replaces>. The earlier line stays in the file.
+Every reader takes the last line per finding, through reuse_behaviour.read_verdicts. So the correction is the verdict they report.
+--correct refuses a finding with no earlier line. It also refuses a verdict equal to the one it would replace. A finding may be corrected again.
 Nothing is written when a check fails or when the row cannot be amended.
 
 Exit 0 means the line was written. Exit 3 means it was refused and nothing was written.
@@ -119,26 +123,34 @@ def put_back( path, existed, before ):
     return None
 
 
-def write_verdict( line, folder, row_id, amender ):
+def write_verdict( line, folder, row_id, amender, correct=False ):
     """
     Check a verdict line, append it to verdicts.jsonl, then amend it onto the triage row.
 
     Requires:
         - folder is the check's result folder; row_id is the triage row's uuid, or None for a file-only back-fill
         - amender has amend( row_id, note ) returning ( ok, status, body ), and is read only when row_id is given
+        - correct is True to replace the finding's earlier verdict, False to rule on a finding with none
     Ensures:
-        - returns the record written: { run, finding, verdict, class, by, ts }
+        - returns the record written: { run, finding, verdict, class, by, ts }, plus corrects, the replaced verdict, for a correction
+        - a correction is appended after the earlier line, which stays; the row is amended with the line followed by corrects=<replaced verdict>
         - the file is written first and the row amended second; if the amend fails, the file is put back to what it was
         - so a failed append leaves the row unamended, and a failed amend leaves the file as it was
         - the file's line is the record as JSON, one per line, the folder made if absent
         - any exception from the amend, not only a refusal, puts the file back before it is raised on
     Raises:
-        - VerdictRefused for a malformed line, a missing run file, a finding id not in that run, a finding that already has a line, an amend the store did not accept, or a file that cannot be written
+        - VerdictRefused for a malformed line, a missing run file, a finding id not in that run, a finding that already has a line and no correction asked, a correction of a finding with no line or with the same verdict, an amend the store did not accept, or a file that cannot be written
         - the message says what was and was not written
     """
     rec = parse_line( line )
     if rec[ "finding" ] not in finding_ids( folder, rec[ "run" ] ): raise VerdictRefused( f"finding {rec[ 'finding' ]} is not in run {rec[ 'run' ]}" )
-    if ( rec[ "run" ], rec[ "finding" ] ) in rb.read_verdicts( folder ): raise VerdictRefused( f"finding {rec[ 'finding' ]} of run {rec[ 'run' ]} already has a verdict line" )
+    ruled = rb.read_verdicts( folder ).get( ( rec[ "run" ], rec[ "finding" ] ) )
+    if ruled is not None and not correct: raise VerdictRefused( f"finding {rec[ 'finding' ]} of run {rec[ 'run' ]} already has a verdict line; to replace it, write the corrected line with --correct" )
+    if ruled is None and correct: raise VerdictRefused( f"finding {rec[ 'finding' ]} of run {rec[ 'run' ]} has no verdict line to correct; write it without --correct" )
+    if correct and ruled == rec[ "verdict" ]: raise VerdictRefused( f"finding {rec[ 'finding' ]} of run {rec[ 'run' ]} is already {ruled}, so the correction changes nothing" )
+    if correct:
+        rec  = { **rec, "corrects": ruled }
+        line = f"{line} corrects={ruled}"
     folder  = pathlib.Path( folder )
     path    = folder / rb.VERDICTS_FILE
     existed = path.exists()
@@ -166,6 +178,7 @@ def main( argv=None, out=None, amender=None ):
 
     Ensures:
         - takes the line as its one argument; --row names the triage row to amend, or --file-only writes the file alone, one of the two being needed
+        - --correct writes the line as a correction of the finding's earlier verdict
         - --data-dir holds the check's folder, as reuse_behaviour's flag does
         - the live row amend carries the seat's actor, as task_amend does; the store refuses one with none
         - returns 0 with the written line printed; 3 with the reason printed and nothing written
@@ -174,13 +187,14 @@ def main( argv=None, out=None, amender=None ):
     ap.add_argument( "line" )
     ap.add_argument( "--row", default=None, help="the triage row's uuid, amended with the line" )
     ap.add_argument( "--file-only", action="store_true", help="write verdicts.jsonl without amending a row, for a back-fill" )
+    ap.add_argument( "--correct", action="store_true", help="replace the finding's earlier verdict: appends the line and records the verdict it replaces" )
     ap.add_argument( "--data-dir", default=None )
     a   = ap.parse_args( argv )
     if ( a.row is None ) == ( not a.file_only ): ap.error( "give --row <uuid> or --file-only, not both and not neither" )
     out = out if out is not None else sys.stdout
     folder = pathlib.Path( a.data_dir ) / rb.CHECK_FOLDER if a.data_dir else dcs.folder_of( cu.get_project_root() )
     try:
-        rec = write_verdict( a.line, folder, a.row, amender if amender is not None or a.row is None else SeatStore( seat_actor() ) )
+        rec = write_verdict( a.line, folder, a.row, amender if amender is not None or a.row is None else SeatStore( seat_actor() ), a.correct )
     except ValueError as e:
         print( f"REFUSING: {e}. Nothing was written.", file=out )
         return EXIT_REFUSED

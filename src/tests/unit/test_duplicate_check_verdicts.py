@@ -4,6 +4,7 @@ The verdict-line writer of the check, and the weekly table's reading of its file
 Every run is a real result file in a temporary folder, written under the name the check gives it. The store is a small amender
 that answers in the shape of the real task store and records each note it was sent. Nothing calls a model or touches the shared data folder.
 """
+import datetime
 import io
 import json
 
@@ -398,3 +399,60 @@ def test_the_command_exits_3_and_writes_nothing_when_the_seat_id_is_a_fallback( 
     monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } )
     out = io.StringIO()
     assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=out ) == 3 and "cwd_fallback" in out.getvalue() and "Nothing was written" in out.getvalue() and not ( folder / "verdicts.jsonl" ).exists()
+
+
+def corrected( verdict, by="rachel" ):
+    """Ensures: returns LINE_OK with another verdict and another seat's name on it."""
+    return swap( "by", by ).replace( "verdict=EXTEND", f"verdict={verdict}" )
+
+
+def test_a_correction_is_appended_after_the_ruling_with_its_own_author_and_the_replaced_verdict( folder ):
+    store = Amender()
+    dv.write_verdict( swap( "verdict", "DISTINCT" ), folder, ROW, store )
+    rec = dv.write_verdict( corrected( "EXTEND" ), folder, ROW, store, correct=True )
+    got = lines( folder )
+    assert [ r[ "verdict" ] for r in got ] == [ "DISTINCT", "EXTEND" ] and [ r[ "by" ] for r in got ] == [ "cheech", "rachel" ]
+    assert "corrects" not in got[ 0 ] and got[ 1 ][ "corrects" ] == "DISTINCT" and rec == got[ 1 ]
+    assert store.sent[ 1 ] == ( ROW, corrected( "EXTEND" ) + " corrects=DISTINCT" ), "the row carries the correction line and the verdict it replaces"
+
+
+def test_every_reader_of_the_verdict_file_reports_the_corrected_verdict( folder ):
+    dv.write_verdict( swap( "verdict", "DISTINCT" ), folder, ROW, Amender() )
+    runs, _ = rb.read_check_runs( folder, rb.week_of( "2026-11-08" ) )
+    before  = rb.weekly_report( [], [], [], "2026-11-08", tz=datetime.timezone.utc, check_dir=folder, store=None )
+    assert rb.check_counts( runs[ 0 ], None, rb.read_verdicts( folder ) )[ "not_dup" ] == 1
+    dv.write_verdict( corrected( "EXTEND" ), folder, ROW, Amender(), correct=True )
+    logged = rb.read_verdicts( folder )
+    assert logged == { ( RUN, "d-a1" ): "EXTEND" } and rb.verdict_of( None, "epic:dupcheck-d-a1", None, logged[ ( RUN, "d-a1" ) ] ) == "EXTEND"
+    counts = rb.check_counts( runs[ 0 ], None, logged )
+    assert counts[ "real" ] == 1 and counts[ "not_dup" ] == 0, "the weekly table's counts follow the correction"
+    assert rb.weekly_report( [], [], [], "2026-11-08", tz=datetime.timezone.utc, check_dir=folder, store=None ) != before
+    assert rb.settled_keys( folder ) == { "epic:dupcheck-d-a1" }, "a corrected finding stays settled"
+    with pytest.raises( dv.VerdictRefused, match="is already EXTEND" ): dv.write_verdict( corrected( "EXTEND", by="john" ), folder, ROW, Amender(), correct=True )
+
+
+def test_a_finding_may_be_corrected_again_and_the_last_correction_is_the_verdict( folder ):
+    dv.write_verdict( swap( "verdict", "DISTINCT" ), folder, ROW, Amender() )
+    dv.write_verdict( corrected( "EXTEND" ), folder, ROW, Amender(), correct=True )
+    dv.write_verdict( corrected( "DUPLICATE", by="john" ), folder, ROW, Amender(), correct=True )
+    assert [ r.get( "corrects" ) for r in lines( folder ) ] == [ None, "DISTINCT", "EXTEND" ] and rb.read_verdicts( folder ) == { ( RUN, "d-a1" ): "DUPLICATE" }
+
+
+def test_a_correction_of_a_finding_with_no_ruling_is_refused_and_writes_nothing( folder ):
+    store = Amender()
+    with pytest.raises( dv.VerdictRefused, match="no verdict line to correct" ): dv.write_verdict( corrected( "EXTEND" ), folder, ROW, store, correct=True )
+    assert not ( folder / "verdicts.jsonl" ).exists() and store.sent == [ ]
+
+
+def test_a_plain_second_line_is_still_refused_and_the_refusal_names_the_correction_flag( folder ):
+    dv.write_verdict( LINE_OK, folder, ROW, Amender() )
+    with pytest.raises( dv.VerdictRefused, match="with --correct" ): dv.write_verdict( swap( "verdict", "DISTINCT" ), folder, ROW, Amender() )
+
+
+def test_the_command_corrects_with_the_flag_and_refuses_a_correction_that_changes_nothing( folder ):
+    dv.main( [ swap( "verdict", "DISTINCT" ), "--file-only", "--data-dir", str( folder.parent ) ], out=io.StringIO() )
+    out = io.StringIO()
+    assert dv.main( [ corrected( "EXTEND" ), "--file-only", "--correct", "--data-dir", str( folder.parent ) ], out=out ) == 0 and '"corrects": "DISTINCT"' in out.getvalue()
+    out = io.StringIO()
+    assert dv.main( [ corrected( "EXTEND" ), "--file-only", "--correct", "--data-dir", str( folder.parent ) ], out=out ) == 3 and "changes nothing" in out.getvalue()
+    assert len( lines( folder ) ) == 2
