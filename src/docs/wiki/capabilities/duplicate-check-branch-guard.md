@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.resolve_branch@9a4142b845
   - lupin_mcp.duplicate_check_daily.reinstall_command@8bfd412466
   - lupin_mcp.duplicate_check_daily.refusal_message@cbdcf6a0b1
-  - lupin_mcp.duplicate_check_daily.live_notifier@0be36b1b8e
+  - lupin_mcp.duplicate_check_daily.live_notifier@ab9ae59d5c
   - lupin_mcp.duplicate_check_daily.baseline_installed@a2a6e85774
 ---
 # Duplicate check daily: the branch guards
@@ -29,6 +29,6 @@ When a new working branch starts, the pinned one goes quiet and a plain run woul
 - Nothing is judged and `last-success.json` does not move. `main` exits 3, which differs from 1 (failed) and 2 (usage).
 - `reinstall_command` builds the text that moves the check to the newest branch. It names a registry edit of `--branch` in the duplicate-check entry, and the librarian tick's install command (`install_command` in [[repo-tools-symindex-librarian-tick-config]]) for a changed schedule. The cron lines read the registry when they run. `baseline_installed` says whether the crontab holds the baseline line.
 - `refusal_message` makes the spoken line and the card text, including the two continuity cases. Either keep the old branch in the registry, or delete the two progress files to start fresh.
-- `live_notifier` sends one alert through `/api/notify`, high priority unless told otherwise, and returns True on HTTP 200. It never raises.
+- `live_notifier` sends one alert through `/api/notify`, high priority unless told otherwise, and returns True on HTTP 200. It resolves the route with `notify_route` and posts with `send_notify` of [[hook-link-tick-reporting]], reading the base from `LUPIN_API_BASE`. A missing key or recipient gives False. It never raises.
 - A continuity refusal goes through the urgent hook and is not sent again while the next run refuses the same way. A stale or missing branch repeats the alert every run until someone moves the pin.
 - A missing or raising notifier leaves `notified` False. The file and the exit code still say it.

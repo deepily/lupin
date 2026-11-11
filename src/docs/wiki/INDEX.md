@@ -113,6 +113,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[proxy-shared-helpers]] — the notify keyword builder and the stats table printer the proxies share. `cosa.agents.utils` (sync_notify), `cosa.agents.utils.proxy_agents` (base_responder)
 - [[agentic-job-contract]] — `AgenticJobBase`: the fields and lifecycle every long-running queue job provides. `cosa.agents` (agentic_job_base), `cosa.agents.claude_code`, `cosa.agents.deep_research`
 - [[deep-research]] — answering a question from the web and saving a markdown report. `cosa.agents.deep_research` (cli, search_cache, seed_context)
+- [[deep-research-shared-helpers]] — the output settings, session name and report save shared by the plain and chained research jobs. `cosa.agents.deep_research` (job)
 - [[generator-sdk-clients]] — the Claude Agent SDK client classes of the podcast, presentation and deep-research agents. `cosa.agents.podcast_generator`, `cosa.agents.presentation_generator`, `cosa.agents.deep_research` (api_client)
 - [[bounded-cc-client-base]] — the shared constructor, typed call, JSON call and cost tally of the podcast and presentation SDK clients. `cosa.agents.shared` (bounded_cc_client)
 - [[presentation-generation]] — turning a source document into a YAML deck, Marp Markdown and a pptx, with its review gates. `cosa.agents.presentation_generator` (job, deck_verdict)
