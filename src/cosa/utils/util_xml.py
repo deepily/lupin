@@ -26,6 +26,7 @@ import warnings
 from typing import Optional, Union
 
 import cosa.utils.util as du
+from cosa.agents.io_models.utils.util_xml_pydantic import remove_xml_escapes
 
 # Emit deprecation warning when this module is imported
 warnings.warn(
@@ -140,22 +141,6 @@ def get_nested_list( xml_string: str, tag_name: str="code", debug: bool=False, v
                 if debug and verbose: print( "[]" )
         
     return code_list
-
-def remove_xml_escapes( xml_string: str ) -> str:
-    """
-    Remove common XML escape sequences from a string.
-    
-    Requires:
-        - xml_string is a string that may contain XML escapes
-        
-    Ensures:
-        - Returns string with XML escapes replaced:
-          - &gt; becomes >
-          - &lt; becomes <
-          - &amp; becomes &
-        - Order of replacements prevents double-unescaping
-    """
-    return xml_string.replace( "&gt;", ">" ).replace( "&lt;", "<" ).replace( "&amp;", "&" )
 
 def rescue_code_using_tick_tick_tick_syntax( raw_response_text: str, debug: bool=False ) -> str:
     """
