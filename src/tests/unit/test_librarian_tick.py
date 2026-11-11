@@ -852,3 +852,21 @@ def test_the_retired_install_text_is_pinned_to_a_literal():
     assert lt.install_moved_text( "/m" ) == (
         "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:\n"
         "  cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+
+
+def test_manage_cron_runs_the_four_verbs_for_any_job( monkeypatch ):
+    import types
+    said, edits = [], []
+    def verbs( **kw ): return types.SimpleNamespace( **{ "install": False, "status": False, "uninstall": False, **kw } )
+    def run( args, cmd, text=None ):
+        return lt.manage_cron( args, "/r", {}, "now", said.append, said.append, cmd, "/b", "# t", "own", 2, "job-x", lambda: text )
+    shell = [ sys.executable, "-c", "print('a # t'); print('b # t')", "--" ]
+    assert run( verbs( install=True ), None ) == 1 and "cron_generate --install" in said[ -1 ]
+    assert run( verbs( status=True ), shell[ :3 ] ) == 0 and said[ -1 ] == "installed: 2 lines"
+    assert run( verbs( status=True ), [ sys.executable, "-c", "import sys; sys.exit(1)" ] ) == 0 and said[ -1 ] == "not installed"
+    monkeypatch.setattr( lt, "edit_crontab", lambda lines, env, cmd, backup, now, tag, owner: edits.append( ( lines, backup, tag, owner ) ) )
+    assert run( verbs( uninstall=True ), shell ) == 0 and edits == [ ( [], "/b", "# t", "own" ) ] and said[ -1 ] == "uninstalled"
+    assert run( verbs(), shell, "the lines" ) == 0 and said[ -1 ] == "the lines"
+    def refuse( *a, **k ): raise lt.InstallRefused( "no lock" )
+    monkeypatch.setattr( lt, "edit_crontab", refuse )
+    assert run( verbs( uninstall=True ), shell ) == 1 and said[ -1 ] == "job-x: no lock"

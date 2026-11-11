@@ -33,6 +33,7 @@ if lupin_root is None:
 src_path = os.path.join( lupin_root, "src" )
 if src_path not in sys.path: sys.path.insert( 0, src_path )
 
+from cosa.rest.account_script_body     import provision_test_account
 from cosa.rest.db.database             import get_db
 from cosa.rest.db.repositories         import UserRepository
 from cosa.rest.password_service        import hash_password, validate_password_strength
@@ -40,9 +41,20 @@ from cosa.rest.password_service        import hash_password, validate_password_s
 ADMIN_ROLES = [ "user", "admin" ]
 
 
+def _finish_new( repo, user ):
+    """Ensures: the new account is marked is_protected, so test-database cleanups keep it."""
+    repo.update( user.id, is_protected=True )
+
+
+def _finish_existing( repo, existing, updated ):
+    """Ensures: the promoted account is marked is_protected; returns the updated user."""
+    repo.update( existing.id, is_protected=True )
+    return updated
+
+
 def main():
     """
-    Create or promote the admin test account named by the environment.
+    Create or promote the environment's admin test account.
 
     Requires:
         - LUPIN_TEST_ADMIN_EMAIL and LUPIN_TEST_ADMIN_PASSWORD are both set
@@ -59,43 +71,9 @@ def main():
     Raises:
         - SystemExit(1) if either variable is unset or the password is rejected
     """
-    email    = os.environ.get( "LUPIN_TEST_ADMIN_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_ADMIN_PASSWORD" )
-
-    missing = [ name for name, value in (
-        ( "LUPIN_TEST_ADMIN_EMAIL",    email    ),
-        ( "LUPIN_TEST_ADMIN_PASSWORD", password ),
-    ) if not value ]
-    if missing:
-        print( f"ERROR: unset: {', '.join( missing )}", file=sys.stderr )
-        return 1
-
-    is_valid, why = validate_password_strength( password )
-    if not is_valid:
-        print( f"ERROR: supplied password rejected by the live policy: {why}", file=sys.stderr )
-        return 1
-
-    with get_db() as session:
-        user_repo = UserRepository( session )
-        existing  = user_repo.get_by_email( email )
-
-        if existing is None:
-            user = user_repo.create_user(
-                email         = email,
-                password_hash = hash_password( password ),
-                roles         = ADMIN_ROLES
-            )
-            user_repo.update( user.id, is_protected=True )
-            session.commit()
-            print( f"✓ created admin test account: {user.email} roles={user.roles}" )
-        else:
-            user_repo.update_password( existing.id, hash_password( password ) )
-            user = user_repo.update_roles( existing.id, ADMIN_ROLES )
-            user_repo.update( existing.id, is_protected=True )
-            session.commit()
-            print( f"✓ promoted existing account: {user.email} roles={user.roles}" )
-
-    return 0
+    seams = { "get_db": get_db, "user_repository": UserRepository, "hash_password": hash_password, "validate_password_strength": validate_password_strength }
+    return provision_test_account( "LUPIN_TEST_ADMIN_EMAIL", "LUPIN_TEST_ADMIN_PASSWORD", ADMIN_ROLES, seams, _finish_new, _finish_existing,
+                                   "created admin test account", "promoted existing account" )
 
 
 if __name__ == "__main__":
