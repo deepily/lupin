@@ -4,13 +4,13 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@07297bd4b4
   - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@1b18bbe364
-  - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@ccb618c09b
-  - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@3353b96e74
+  - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@00e8649115
+  - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@a3f55a5904
   - cosa.agents.deep_research_to_podcast.state.ChainedResult@69c6756c1a
   - cosa.agents.deep_research_to_presentation.state.ChainedResult@5d8d002f2d
   - cosa.agents.deep_research_to_podcast.state.PipelineState@4b3355bdf0
   - cosa.agents.chained_pipeline_state.ChainedResultMixin@043deeda1d
-  - cosa.agents.chained_pipeline_state.ChainedDeepResearchAgent@8da2018669
+  - cosa.agents.chained_pipeline_state.ChainedDeepResearchAgent@025d75c750
 ---
 # Research chained pipelines
 

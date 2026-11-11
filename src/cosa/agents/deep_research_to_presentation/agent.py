@@ -340,14 +340,6 @@ class DeepResearchToPresentationAgent( ChainedDeepResearchAgent ):
             "cancelled"   : False,
         }
 
-    def _finalize_result( self ) -> ChainedResult:
-        """Finalize and return the result with timing info."""
-        self.result.completed_at = datetime.now().isoformat()
-        if self._start_time:
-            self.result.duration_seconds = time.time() - self._start_time
-        self.result.total_cost = self.result.dr_cost + self.result.pg_cost
-        return self.result
-
     async def _notify( self, message: str, priority: str = "medium", **kwargs ) -> None:
         """
         Send a notification using the appropriate modality.

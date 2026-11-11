@@ -6,7 +6,11 @@ The Deep Research to Podcast and Deep Research to Presentation pipelines each ke
 PipelineState enum and ChainedResult dataclass. They share one rule for a half-finished run,
 which lives here as a mixin so the two result classes agree on it.
 The two chained agents also share the whole Deep Research stage, which lives here as a base class.
+The same class finalizes a run: the end time, the duration and the combined cost.
 """
+
+import time
+from datetime import datetime
 
 
 class ChainedResultMixin:
@@ -175,3 +179,23 @@ class ChainedDeepResearchAgent:
 
         except BudgetExceededError as e:
             raise Exception( f"Deep Research budget exceeded: ${e.current_cost:.2f} of ${e.budget_limit:.2f}" )
+
+    def _finalize_result( self ):
+        """
+        Stamp the finished run with its end time, duration and combined cost, and return it.
+
+        Requires:
+            - self.result has completed_at, duration_seconds, total_cost, dr_cost and pg_cost
+            - self._start_time is None or the time.time() value taken when the run began
+
+        Ensures:
+            - result.completed_at is the current local time as ISO text
+            - result.duration_seconds is set only when _start_time is truthy
+            - result.total_cost is dr_cost plus pg_cost
+            - returns self.result
+        """
+        self.result.completed_at = datetime.now().isoformat()
+        if self._start_time:
+            self.result.duration_seconds = time.time() - self._start_time
+        self.result.total_cost = self.result.dr_cost + self.result.pg_cost
+        return self.result
