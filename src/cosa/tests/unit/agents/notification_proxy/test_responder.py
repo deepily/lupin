@@ -296,6 +296,26 @@ class TestSubmitResponse:
         with patch.object( requests, "post", side_effect=ValueError( "weird" ) ):
             assert r._submit_response( "n1", "yes" ) is False
 
+    def test_posts_to_the_responders_own_host_and_port( self ):
+        r, _, _, _ = _make_responder()
+        r.host = "example-host"
+        r.port = 4321
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
+            assert r._submit_response( "n1", "yes" ) is True
+        assert m.call_args[ 0 ][ 0 ] == "http://example-host:4321/api/notify/response"
+
+    def test_verbose_prints_the_submitter_line( self, capsys ):
+        r, _, _, _ = _make_responder( verbose=True )
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200, json=lambda: { "status": "ok", "message": "m" } ) ):
+            r._submit_response( "n1", "yes" )
+        assert "[Submitter] API response: ok" in capsys.readouterr().out
+
+    def test_quiet_responder_prints_no_submitter_line( self, capsys ):
+        r, _, _, _ = _make_responder( verbose=False )
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200 ) ):
+            r._submit_response( "n1", "yes" )
+        assert "[Submitter] API response" not in capsys.readouterr().out
+
     # ---- the credential (row e20e249a) -----------------------------------------------
 
     def test_sends_the_token_its_listener_holds( self ):
