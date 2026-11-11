@@ -351,7 +351,7 @@ def test_the_stores_amend_refuses_a_call_with_no_actor_and_the_command_leaves_th
 
 def test_the_seat_actor_is_the_bridge_persona_and_the_session_id_the_way_task_amend_stamps_it( monkeypatch ):
     from lupin_cli.claude_code.hooks.lib import session_bridge as sb
-    monkeypatch.setattr( sb, "get_claude_session_id", lambda: "26f75e16-6b01-4705-b16f-85cb4f32e043" )
+    monkeypatch.setattr( sb, "get_claude_session_id_with_source", lambda: ( "26f75e16-6b01-4705-b16f-85cb4f32e043", sb.SOURCE_PPID ) )
     monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } if sid.startswith( "26f75e16" ) else None )
     assert dv.seat_actor() == "clayton 26f75e16"
     monkeypatch.setattr( sb, "get_voice_persona", lambda sid: None )
@@ -374,3 +374,27 @@ def test_the_body_a_seat_store_sends_is_accepted_by_the_stores_own_amend_model_a
     assert "actor" in required, "the pin is aimed at the model that refused the call"
     assert required <= set( seen[ 0 ] ), "a field the model requires is missing from the body"
     assert TaskAmendIn( **seen[ 0 ] ).actor == "clayton 26f75e16", "extra=forbid and the field limits are the model's own"
+
+
+@pytest.mark.parametrize( "source", [ "cwd_fallback", "generated_fallback" ] )
+def test_a_session_id_that_came_from_a_fallback_is_refused_so_no_guessed_actor_reaches_the_store( monkeypatch, source ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    monkeypatch.setattr( sb, "get_claude_session_id_with_source", lambda: ( "26f75e16-6b01-4705-b16f-85cb4f32e043", source ) )
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } )
+    with pytest.raises( dv.VerdictRefused, match=source ): dv.seat_actor()
+
+
+@pytest.mark.parametrize( "source", [ "env", "ppid", "grandparent" ] )
+def test_a_session_id_reached_by_a_definitive_door_is_accepted( monkeypatch, source ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    monkeypatch.setattr( sb, "get_claude_session_id_with_source", lambda: ( "26f75e16-6b01-4705-b16f-85cb4f32e043", source ) )
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } )
+    assert dv.seat_actor() == "clayton 26f75e16"
+
+
+def test_the_command_exits_3_and_writes_nothing_when_the_seat_id_is_a_fallback( folder, monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    monkeypatch.setattr( sb, "get_claude_session_id_with_source", lambda: ( "26f75e16-6b01-4705-b16f-85cb4f32e043", "cwd_fallback" ) )
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } )
+    out = io.StringIO()
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=out ) == 3 and "cwd_fallback" in out.getvalue() and "Nothing was written" in out.getvalue() and not ( folder / "verdicts.jsonl" ).exists()

@@ -44,10 +44,12 @@ def seat_actor():
     Ensures:
         - returns "<persona key> <8-hex session id>" read from the session bridge
     Raises:
+        - VerdictRefused when the session id was reached by a fallback (cwd_fallback or generated_fallback), because a guessed id could name another seat
         - VerdictRefused when the bridge holds no voice persona for this session, so the store is never sent a made-up actor
     """
     from lupin_cli.claude_code.hooks.lib import session_bridge as sb
-    sid     = sb.get_claude_session_id()
+    sid, source = sb.get_claude_session_id_with_source()
+    if source in ( sb.SOURCE_CWD_FALLBACK, sb.SOURCE_GENERATED ): raise VerdictRefused( f"the session id {sid[ :8 ]} came from a fallback ({source}), so it may name another seat and the amend has no trustworthy actor" )
     persona = sb.get_voice_persona( sid )
     if not persona or not persona.get( "name" ): raise VerdictRefused( f"session {sid[ :8 ]} has no voice persona in its bridge, so the amend has no actor to carry" )
     return f"{persona[ 'name' ].lower()} {sid[ :8 ]}"
