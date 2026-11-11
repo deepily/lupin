@@ -10,13 +10,12 @@ import datetime
 import json
 import os
 import pathlib
-import shlex
 import subprocess
 import sys
 import urllib.request
 import zoneinfo
 
-from lupin_mcp.job_summary import write_atomic
+from cosa.utils.atomic_json import write_json_atomic
 
 SCHEMA          = "host-snapshot/1"
 SNAPSHOT_FILE   = "job-host-snapshot.json"                             # in the reuse-review data folder, which the container mounts
@@ -106,11 +105,8 @@ def health_ok( url, opener=urllib.request.urlopen ):
     Ensures:
         - returns "active" for an HTTP 200, "inactive" for any other answer or no answer within 3 seconds
     """
-    try:
-        with opener( url, timeout=3 ) as answer:
-            return "active" if answer.status == 200 else "inactive"
-    except OSError:
-        return "inactive"
+    from lupin_mcp.reuse_harness.server import answers_health
+    return "active" if answers_health( url, path="", timeout=3, opener=opener ) else "inactive"
 
 
 def read_snapshot( data, now ):
@@ -156,7 +152,7 @@ def write_snapshot( data, now, units=None, run=None ):
     except ( OSError, ValueError ): old = {}
     doc = { "schema": SCHEMA, "crontab": crontab_text( run ), "crontab_at": now.isoformat(), "zone": host_zone_name(), "units": old.get( "units" ), "units_at": old.get( "units_at" ) }
     if units is not None: doc.update( units={ u: unit_state( u, run ) for u in units }, units_at=now.isoformat() )
-    write_atomic( path, doc )
+    write_json_atomic( path, doc, indent=2, trailing_newline=True )
     return doc
 
 
@@ -180,27 +176,8 @@ def refresh_best_effort( environ=None, now=None, run=None ):
 
 
 CRON_TAG      = "# job-host-snapshot"
-CRON_SCHEDULE = "*/5 * * * *"
 LOCK_OWNER    = "job-host-snapshot"
-CARRIED       = ( "DEEPILY_DATA_DIR", "LUPIN_CONFIG_MGR_CLI_ARGS", "LUPIN_REUSE_REVIEW_DATA_ROOT" )
-DEFAULT_CLI   = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
-
-
-def cron_line( root, python, log_path, environ ):
-    """
-    Build the one cron line of the snapshot tick.
-
-    Requires:
-        - root is the main checkout; python is the interpreter; log_path is the file the line appends to
-    Ensures:
-        - returns one line that runs every five minutes from root with LUPIN_ROOT, PYTHONPATH, LUPIN_CONFIG_MGR_CLI_ARGS and DEEPILY_DATA_DIR set
-        - the two settings come from environ, shell-quoted; the config arguments default to the Development block when environ has none
-        - the line ends with CRON_TAG
-    """
-    carried = { "LUPIN_CONFIG_MGR_CLI_ARGS": environ.get( "LUPIN_CONFIG_MGR_CLI_ARGS" ) or DEFAULT_CLI }
-    carried.update( { n: environ[ n ] for n in CARRIED if environ.get( n ) and n != "LUPIN_CONFIG_MGR_CLI_ARGS" } )
-    extra = "".join( f"{name}={shlex.quote( value )} " for name, value in carried.items() )
-    return f"{CRON_SCHEDULE} cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {extra}{python} -m lupin_mcp.host_snapshot >> {log_path} 2>&1 {CRON_TAG}"
+JOB_NAME      = "host-snapshot"
 
 
 def install_mode( args, environ, now, out, err, crontab_cmd ):
@@ -210,17 +187,20 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     Requires:
         - args holds root, python and one of print_install, install, uninstall, status
     Ensures:
-        - --print-install prints the line and changes nothing
+        - --print-install prints the registry's line for this job and changes nothing
         - --uninstall goes through the librarian's locked crontab editor with this job's tag and owner, after a timestamped backup; --install is retired: it prints where the installer went on err and returns 1
         - --status says whether the line is present
         - returns 0, or 1 with the reason on err when the install is refused or the crontab call fails
     """
     from cosa.repo.symindex import librarian_tick as lt
+    from cosa.repo.symindex.paths import data_dir
+    from cosa.rest.job_registry import load_registry
+    from lupin_mcp.cron_generate import lines_for_job
     root = args.root or environ.get( "LUPIN_ROOT" ) or os.getcwd()
     cmd  = crontab_cmd or lt.crontab_command( environ )
     logs = f"{root}/io/jobs"
     return lt.manage_cron( args, root, environ, now, out, err, cmd, f"{logs}/crontab-backups", CRON_TAG, LOCK_OWNER, 1, "job-host-snapshot",
-                           lambda: cron_line( root, args.python, f"{logs}/host-snapshot.log", environ ) )
+                           lambda: "\n".join( lines_for_job( next( job for job in load_registry( root )[ "jobs" ] if job[ "job" ] == JOB_NAME ), root, data_dir( root ), environ ) ) )
 
 
 def main( argv=None, environ=None, now=None, run=None, out=print, err=None, crontab_cmd=None ):

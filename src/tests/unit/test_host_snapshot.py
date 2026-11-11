@@ -131,19 +131,21 @@ def args( **over ):
     return types.SimpleNamespace( **{ **base, **over } )
 
 
-def test_the_cron_line_runs_every_five_minutes_carries_the_environment_quoted_and_ends_with_the_tag():
-    line = hs.cron_line( "/r", "/py", "/r/io/jobs/host-snapshot.log", ENV )
-    assert line.startswith( "*/5 * * * * cd /r && LUPIN_ROOT=/r PYTHONPATH=/r/src " ) and line.endswith( " -m lupin_mcp.host_snapshot >> /r/io/jobs/host-snapshot.log 2>&1 # job-host-snapshot" )
-    assert "LUPIN_CONFIG_MGR_CLI_ARGS='config_path=/a b=c'" in line and "DEEPILY_DATA_DIR='/mnt/data dir'" in line
-    plain = hs.cron_line( "/r", "/py", "/l", {} )
-    assert "LUPIN_CONFIG_MGR_CLI_ARGS='" + hs.DEFAULT_CLI + "'" in plain and "DEEPILY_DATA_DIR" not in plain
+def test_print_install_prints_the_line_the_registry_gives_this_job_through_the_generator(monkeypatch):
+    import os
+    said = []
+    root = os.environ[ "LUPIN_ROOT" ]
+    assert hs.install_mode( args( print_install=True, root=root ), ENV, NOW, said.append, said.append, None ) == 0
+    assert said[ 0 ].startswith( "*/5 * * * * " ) and f"{root}/src/scripts/cron-job.sh host-snapshot cron" in said[ 0 ] and said[ 0 ].endswith( "# job-host-snapshot" )
+    assert not hasattr( hs, "cron_line" )
 
 
 def test_print_install_changes_nothing_install_is_retired_and_uninstall_uses_the_locked_editor_with_this_tag(monkeypatch):
+    import os
     from cosa.repo.symindex import librarian_tick as lt
     calls, said = [], []
     monkeypatch.setattr( lt, "edit_crontab", lambda lines, environ, cmd, backups, now, tag, owner: calls.append( ( lines, backups, tag, owner ) ) )
-    assert hs.install_mode( args( print_install=True ), ENV, NOW, said.append, said.append, None ) == 0 and calls == [] and said[ 0 ].endswith( "# job-host-snapshot" )
+    assert hs.install_mode( args( print_install=True, root=os.environ[ "LUPIN_ROOT" ] ), ENV, NOW, said.append, said.append, None ) == 0 and calls == [] and said[ 0 ].endswith( "# job-host-snapshot" ) and "cron-job.sh host-snapshot cron" in said[ 0 ]
     assert hs.install_mode( args( install=True ), ENV, NOW, said.append, said.append, None ) == 1 and calls == [] and "lupin_mcp.cron_generate --install" in said[ -1 ]
     assert hs.install_mode( args( uninstall=True ), ENV, NOW, said.append, said.append, None ) == 0 and calls[ 0 ][ 0 ] == [] and said[ -1 ] == "uninstalled"
     assert calls[ 0 ][ 1: ] == ( "/r/io/jobs/crontab-backups", "# job-host-snapshot", "job-host-snapshot" )
