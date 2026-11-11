@@ -10,10 +10,10 @@ card once, and builds the job for Rick through the existing v2 submit path.
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from cosa.rest import podcast_proxy as proxy
 from cosa.rest import task_promotion_gate as promotion_gate
@@ -35,6 +35,12 @@ def _refuse( status, code, message ):
     return HTTPException( status_code=status, detail=proxy.refusal_detail( code, message ) )
 
 
+def _checked_script_type( value ):
+    """Return value when it is None or a known script type; raise ValueError otherwise."""
+    if value is not None: proxy.get_profile( value )
+    return value
+
+
 class AskIn( BaseModel ):
     """
     Body for POST /api/podcast-proxy/ask.
@@ -44,8 +50,13 @@ class AskIn( BaseModel ):
     """
     model_config = ConfigDict( extra="forbid" )
 
-    path  : str = Field( ..., min_length=1, max_length=1024 )
-    actor : str = Field( ..., min_length=1, max_length=255 )
+    path        : str = Field( ..., min_length=1, max_length=1024 )
+    actor       : str = Field( ..., min_length=1, max_length=255 )
+    script_type : Optional[ str ] = None
+    languages   : Optional[ Union[ list[ str ], str ] ] = None
+
+    _known_type = field_validator( "script_type" )( lambda value: _checked_script_type( value ) )
+    _codes      = field_validator( "languages" )( lambda value: proxy.normalize_languages( value ) )
 
 
 @router.post(
@@ -97,7 +108,7 @@ def ask_for_a_podcast(
     persona    = get_voice_persona( session_id )
     seat       = find_session_by_id( session_id, check_pid=False ) or { }
     asker      = proxy.asker_label( session_id, persona.get( "name" ) if persona is not None else None )
-    ask_payload = proxy.card_payload( facts, asker, proxy.binding_id( session_id, seat ) )
+    ask_payload = proxy.card_payload( facts, asker, proxy.binding_id( session_id, seat ), script_type=payload.script_type, languages=payload.languages )
     question, abstract = proxy.card_text( ask_payload )
     now        = datetime.now( timezone.utc )
     with get_db() as session:
@@ -182,7 +193,7 @@ SEAT_QUEUE_FAILED_TEXT   = "The job could not be queued. The yes is still good; 
 VIEWER_QUEUE_FAILED_TEXT = "The job could not be queued. Nothing was started; press the button again."
 
 
-def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, queue_failed_text=SEAT_QUEUE_FAILED_TEXT ):
+def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, queue_failed_text=SEAT_QUEUE_FAILED_TEXT, script_type=None, languages=None ):
     """
     Queue the podcast job for a claim this caller already won, and record it.
 
@@ -191,6 +202,7 @@ def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, 
         - facts is the dict check_source returned with keep_content=True
         - copy_id names this attempt's copy folder; the seat door passes its card id, the viewer door a fresh id per click
         - queue_failed_text is the 502 sentence, written for the caller's door
+        - script_type and languages are what the card or the click chose; None leaves the job's default
 
     Ensures:
         - with INI `podcast proxy dry run` on: nothing is copied or queued and the spent row takes a "dry-run-" job id
@@ -206,9 +218,12 @@ def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, 
 
     try:
         path   = proxy.write_copy( copy_directory(), copy_id, facts[ "name" ], facts[ "content" ] )
+        args   = { "research": path }
+        if script_type is not None: args[ "script_type" ] = script_type
+        if languages is not None:   args[ "languages" ]   = languages
         result = flow.submit(
             command      = proxy.COMMAND,
-            args         = { "research": path },
+            args         = args,
             user_id      = recipient_id,
             user_email   = user_email,
             session_id   = f"podcast-proxy-{str( copy_id )[ :8 ]}",
@@ -300,7 +315,9 @@ def start_a_podcast(
     if not won:
         raise _refuse( 409, "spent", "That card has already started a podcast, and a yes covers one, so it is refused." )
 
-    outcome = _run_claimed_job( flow, facts, claim_id=payload.card_id, copy_id=payload.card_id, recipient_id=recipient_id, user_email=operator[ "email" ] )
+    script_type, languages = proxy.card_options( stored )
+    outcome = _run_claimed_job( flow, facts, claim_id=payload.card_id, copy_id=payload.card_id, recipient_id=recipient_id, user_email=operator[ "email" ],
+                                script_type=script_type, languages=languages )
     return { "card_id": str( payload.card_id ), **outcome }
 
 
@@ -344,7 +361,12 @@ class ViewerIn( BaseModel ):
     """Body for POST /api/podcast-proxy/from-viewer: the document as `<scope>/<path>`."""
     model_config = ConfigDict( extra="forbid" )
 
-    path : str = Field( ..., min_length=1, max_length=1024 )
+    path        : str = Field( ..., min_length=1, max_length=1024 )
+    script_type : Optional[ str ] = None
+    languages   : Optional[ Union[ list[ str ], str ] ] = None
+
+    _known_type = field_validator( "script_type" )( lambda value: _checked_script_type( value ) )
+    _codes      = field_validator( "languages" )( lambda value: proxy.normalize_languages( value ) )
 
 
 def _signed_in_person( account_email ):
@@ -421,7 +443,8 @@ def start_a_podcast_from_viewer(
         raise _refuse( 400, refusal.code, refusal.message )
 
     scope_path = f"{facts[ 'scope' ]}/{facts[ 'rel' ]}"
-    claim_id   = proxy.viewer_claim_id( authenticated_user_id, scope_path, facts[ "sha256" ] )
+    variant    = ":".join( [ payload.script_type or "", ",".join( payload.languages or [] ) ] ) if ( payload.script_type or payload.languages ) else ""
+    claim_id   = proxy.viewer_claim_id( authenticated_user_id, scope_path, facts[ "sha256" ], variant )
     cutoff     = datetime.now( timezone.utc ) - timedelta( seconds=proxy.max_age_seconds() )
     with get_db() as session:
         spent_rows = PodcastProxySpentRepository( session )
@@ -434,5 +457,5 @@ def start_a_podcast_from_viewer(
         raise HTTPException( status_code=409, detail={ **proxy.refusal_detail( "spent", "A podcast of this file was already started, and one click starts one job." ), "job_id": earlier_job } )
 
     outcome = _run_claimed_job( flow, facts, claim_id=claim_id, copy_id=uuid.uuid4(), recipient_id=authenticated_user_id, user_email=email,
-                                queue_failed_text=VIEWER_QUEUE_FAILED_TEXT )
+                                queue_failed_text=VIEWER_QUEUE_FAILED_TEXT, script_type=payload.script_type, languages=payload.languages )
     return { **outcome, "size": facts[ "size" ] }

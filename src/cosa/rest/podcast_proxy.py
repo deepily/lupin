@@ -33,6 +33,7 @@ import uuid
 
 from fastapi import HTTPException
 
+from cosa.agents.podcast_generator.script_types import DEFAULT_TYPE, get_profile
 from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest.routers._pinned_open import PinnedPathGone, landed_path_of_fd
 from cosa.rest.routers._scope_registry import _prefix_looks_like_credential, landed_relative_path
@@ -46,6 +47,8 @@ MAX_BYTES = 8 * 1024 * 1024
 # The two words that mark a card as this feature's. The server writes both; the start door reads them back.
 CARD_KIND = "podcast_proxy_start"
 COMMAND   = "agent router go to podcast generator"
+
+DEFAULT_SCRIPT_TYPE = DEFAULT_TYPE
 
 # The viewer door has no card: a signed-in person's click is the yes. Its claim is keyed on who clicked,
 # which file and which bytes, so a double click is one job and an edited file is a new one.
@@ -198,18 +201,20 @@ def check_source( scope_path, registry=None, keep_content=False ):
     return facts
 
 
-def viewer_claim_id( user_id, scope_path, sha256 ):
+def viewer_claim_id( user_id, scope_path, sha256, variant="" ):
     """
     The spent-record id for one person's podcast of one file's bytes from the doc viewer.
 
     Requires:
         - user_id is the signed-in person's id; scope_path is `<scope>/<rel>` as the check returned it
         - sha256 is the hex digest of the judged bytes
+        - variant names a non-default script type or language choice, and is "" for the default podcast
 
     Ensures:
-        - returns the same uuid for the same three values, and a different one when any differs
+        - returns the same uuid for the same values, and a different one when any differs
+        - an empty variant gives the id the three-value form always gave, so earlier claims still match
     """
-    return uuid.uuid5( VIEWER_NAMESPACE, f"{user_id}:{scope_path}:{sha256}" )
+    return uuid.uuid5( VIEWER_NAMESPACE, f"{user_id}:{scope_path}:{sha256}" + ( f":{variant}" if variant else "" ) )
 
 
 def max_age_seconds( config_mgr=None ):
@@ -296,19 +301,21 @@ def asker_label( session_id, persona_name ):
     return f"an unrecognized session ({session_id})"
 
 
-def card_payload( facts, asker, session_id ):
+def card_payload( facts, asker, session_id, script_type=None, languages=None ):
     """
     The binding a podcast card carries in its payload, written by the server.
 
     Requires:
         - facts is the dict check_source returned; asker is the label asker_label made
         - session_id is the asking seat's binding id from `binding_id`
+        - script_type is None or a script type name; languages is None or a list of codes
 
     Ensures:
         - returns { kind, command, scope_path, server_path, name, size, sha256, asked_by, asked_by_session }
+        - script_type and languages are added only when given, so a default podcast keeps the original shape
         - every value comes from the server: the file's measured facts, the constant command, and the label
     """
-    return {
+    payload = {
         "kind"             : CARD_KIND,
         "command"          : COMMAND,
         "scope_path"       : f"{facts[ 'scope' ]}/{facts[ 'rel' ]}",
@@ -319,6 +326,9 @@ def card_payload( facts, asker, session_id ):
         "asked_by"         : asker,
         "asked_by_session" : session_id,
     }
+    if script_type is not None: payload[ "script_type" ] = script_type
+    if languages is not None:   payload[ "languages" ]   = languages
+    return payload
 
 
 def card_text( payload ):
@@ -335,12 +345,18 @@ def card_text( payload ):
         - the question carries no path and no hash, which a voice would read as noise
     """
     size = human_size( payload[ "size" ] )
-    question = f"{payload[ 'asked_by' ]} asks for a podcast of {payload[ 'name' ]}, {size}. Start it?"
+    script_type, languages = card_options( payload )
+    kind     = "a status report podcast" if script_type == "status_report" else "a podcast"
+    question = f"{payload[ 'asked_by' ]} asks for {kind} of {payload[ 'name' ]}, {size}. Start it?"
+    options  = ""
+    if script_type not in ( None, DEFAULT_SCRIPT_TYPE ): options += f"- script type: {script_type}\n"
+    if languages: options += f"- languages: {', '.join( languages )}\n"
     abstract = (
         f"**Make a podcast**\n\n"
         f"- file: `{payload[ 'scope_path' ]}`\n"
         f"- size: {size}, SHA-256 `{payload[ 'sha256' ][ :12 ]}`\n"
         f"- asked by: {payload[ 'asked_by' ]}\n"
+        f"{options}"
         f"- will be started by: {payload[ 'asked_by' ]}, once you say yes\n"
         f"- the script is written first and a Script Review card follows; audio is bought after that\n\n"
         f"{UNANSWERED_MEANS}"
@@ -383,7 +399,59 @@ def default_yes_due( card, now ):
     return card.state == "expired" or ( card.expires_at is not None and card.expires_at <= now )
 
 
-PAYLOAD_KEYS = frozenset( { "kind", "command", "scope_path", "server_path", "name", "size", "sha256", "asked_by", "asked_by_session" } )
+PAYLOAD_KEYS          = frozenset( { "kind", "command", "scope_path", "server_path", "name", "size", "sha256", "asked_by", "asked_by_session" } )
+OPTIONAL_PAYLOAD_KEYS = frozenset( { "script_type", "languages" } )
+
+
+def payload_shape_ok( payload ):
+    """
+    Whether a card payload carries every required key and no key beyond the optional two.
+
+    Requires:
+        - payload is a dict
+
+    Ensures:
+        - True when PAYLOAD_KEYS are all present and the rest are within OPTIONAL_PAYLOAD_KEYS
+        - an old card, written before the optional keys existed, passes
+    """
+    keys = set( payload )
+    return PAYLOAD_KEYS <= keys <= ( PAYLOAD_KEYS | OPTIONAL_PAYLOAD_KEYS )
+
+
+def normalize_languages( value ):
+    """
+    Turn a languages choice into a list of codes, or None for English only.
+
+    Requires:
+        - value is None, a comma string, or a list of strings
+
+    Ensures:
+        - returns None for None, an empty string or an empty list
+        - returns the stripped, non-empty codes otherwise
+
+    Raises:
+        - ValueError when value is neither a string nor a list of strings
+    """
+    from cosa.agents.podcast_generator.__main__ import parse_languages_arg
+    if value is None: return None
+    if isinstance( value, str ): return parse_languages_arg( value )
+    if isinstance( value, list ) and all( isinstance( code, str ) for code in value ):
+        return [ code.strip() for code in value if code.strip() ] or None
+    raise ValueError( "languages must be a comma string or a list of strings" )
+
+
+def card_options( payload ):
+    """
+    The script type and languages a stored card carries.
+
+    Requires:
+        - payload is a card payload that passed payload_shape_ok
+
+    Ensures:
+        - returns ( script_type, languages ), each None when the card holds none
+        - an old card gives ( None, None ), which the job reads as research_critical and English only
+    """
+    return payload.get( "script_type" ), payload.get( "languages" )
 
 
 class StartRefusal( Exception ):
@@ -410,7 +478,7 @@ def start_refusal( card, actor_session, now, max_age ):
 
     Ensures:
         - returns None only when every one of these holds: the card exists and carries the payload
-          this feature's ask writes, no more and no less; it asked a question; either its own default of yes now stands
+          this feature's ask writes: every required key and at most the two optional ones; it asked a question; either its own default of yes now stands
           (`default_yes_due`), or it was answered with a yes a person gave, a typed comment after the word allowed, that the
           server saw arrive on the operator's own login; the caller is the seat that asked, by stable id (a courtesy check,
           not a lock); the card is no older than max_age
@@ -420,7 +488,7 @@ def start_refusal( card, actor_session, now, max_age ):
     if card is None:
         return StartRefusal( 404, "no_card", "No card with that id exists, so the podcast is not started." )
     payload = card.payload if isinstance( card.payload, dict ) else { }
-    if payload.get( "kind" ) != CARD_KIND or set( payload ) != PAYLOAD_KEYS or payload.get( "command" ) != COMMAND:
+    if payload.get( "kind" ) != CARD_KIND or not payload_shape_ok( payload ) or payload.get( "command" ) != COMMAND:
         return StartRefusal( 403, "bad_card", "That card was not made by the server for a podcast, so the podcast is not started." )
     if card.response_requested is not True:
         return StartRefusal( 403, "bad_card", "That notification asked no question, so it cannot approve a podcast." )

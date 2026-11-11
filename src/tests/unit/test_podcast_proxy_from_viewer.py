@@ -276,3 +276,41 @@ def test_the_derived_id_changes_with_each_of_its_three_parts():
                   pp.viewer_claim_id( USER_ID, "demo/b.md", "a" * 64 ),
                   pp.viewer_claim_id( USER_ID, "demo/a.md", "b" * 64 ) } ) == 4
     assert isinstance( base, uuid.UUID )
+
+
+# ---- script type and languages from the confirm step (row 60d13c9a) ----
+
+def _click_with( world, **body ):
+    return _app( world ).post( "/api/podcast-proxy/from-viewer", json=dict( { "path": "demo/io/tmp/summary.md" }, **body ) )
+
+
+@pytest.mark.parametrize( "languages,sent", [ ( [ "en", "es-MX" ], [ "en", "es-MX" ] ), ( "en,es-MX", [ "en", "es-MX" ] ) ] )
+def test_a_click_carries_script_type_and_languages_as_a_list_or_a_comma_string( world, languages, sent ):
+    answer = _click_with( world, script_type="status_report", languages=languages )
+    assert answer.status_code == 200, answer.text
+    args = world[ "flow" ].calls[ 0 ][ "args" ]
+    assert args[ "script_type" ] == "status_report" and args[ "languages" ] == sent
+
+
+def test_a_click_with_no_choice_sends_neither_key( world ):
+    assert _click( world ).status_code == 200
+    assert set( world[ "flow" ].calls[ 0 ][ "args" ] ) == { "research" }
+
+
+def test_a_different_type_on_the_same_bytes_is_its_own_job_inside_the_window( world ):
+    assert _click( world ).status_code == 200
+    assert _click_with( world, script_type="status_report" ).status_code == 200
+    assert _click_with( world, script_type="status_report" ).status_code == 409
+    assert _click_with( world, languages=[ "es-MX" ] ).status_code == 200
+    assert len( world[ "flow" ].calls ) == 3
+
+
+def test_the_viewer_claim_id_with_no_variant_is_the_original_three_value_id():
+    assert pp.viewer_claim_id( "u", "demo/a.md", "a" * 64 ) == pp.viewer_claim_id( "u", "demo/a.md", "a" * 64, "" )
+    assert pp.viewer_claim_id( "u", "demo/a.md", "a" * 64, "status_report:" ) != pp.viewer_claim_id( "u", "demo/a.md", "a" * 64 )
+
+
+def test_an_unknown_type_in_a_click_is_a_422_and_claims_nothing( world ):
+    assert _click_with( world, script_type="nope" ).status_code == 422
+    assert _click_with( world, languages=5 ).status_code == 422
+    assert _spent( world ) == [ ] and world[ "flow" ].calls == [ ]

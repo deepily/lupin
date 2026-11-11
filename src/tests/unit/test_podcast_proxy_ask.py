@@ -340,3 +340,52 @@ def test_with_no_environment_variable_the_ini_decides( monkeypatch ):
         def get( self, key, default=None, return_type=None ): return True
     monkeypatch.delenv( "LUPIN_PODCAST_PROXY_DRY_RUN", raising=False )
     assert pp.dry_run_enabled( Config() ) is True
+
+
+# ---- script type and languages chosen at ask time (row 60d13c9a) ----
+
+@pytest.mark.parametrize( "sent,stored", [
+    ( [ "en", "es-MX" ], [ "en", "es-MX" ] ),
+    ( "en, es-MX", [ "en", "es-MX" ] ),
+    ( "", None ),
+    ( [], None ),
+] )
+def test_the_ask_stores_script_type_and_languages_from_a_list_or_a_comma_string( world, sent, stored ):
+    _file( world )
+    answer = _ask( world, script_type="status_report", languages=sent )
+    assert answer.status_code == 200, answer.text
+    payload = world[ "cards" ].created[ 0 ].payload
+    assert payload[ "script_type" ] == "status_report" and payload.get( "languages" ) == stored
+    assert ( "languages" in payload ) == ( stored is not None )
+    assert pp.payload_shape_ok( payload )
+
+
+def test_an_ask_with_no_choice_writes_the_original_payload_shape( world ):
+    _file( world )
+    _ask( world )
+    payload = world[ "cards" ].created[ 0 ].payload
+    assert set( payload ) == pp.PAYLOAD_KEYS
+    assert pp.card_options( payload ) == ( None, None )
+
+
+def test_the_card_text_names_a_status_report_and_the_languages( world ):
+    _file( world )
+    _ask( world, script_type="status_report", languages="en,es-MX" )
+    card = world[ "cards" ].created[ 0 ]
+    assert "status report podcast" in card.message
+    assert "- script type: status_report" in card.abstract and "- languages: en, es-MX" in card.abstract
+
+
+def test_the_card_text_for_the_default_type_names_neither_option( world ):
+    _file( world )
+    _ask( world, script_type="research_critical" )
+    card = world[ "cards" ].created[ 0 ]
+    assert "script type" not in card.abstract and "languages" not in card.abstract and "status report" not in card.message
+
+
+def test_an_unknown_script_type_or_a_bad_languages_value_is_a_422_and_makes_no_card( world ):
+    _file( world )
+    assert _ask( world, script_type="nope" ).status_code == 422
+    assert _ask( world, languages=5 ).status_code == 422
+    assert _ask( world, languages=[ "en", 5 ] ).status_code == 422
+    assert world[ "cards" ].created == [ ]

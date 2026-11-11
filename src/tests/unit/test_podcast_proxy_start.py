@@ -503,3 +503,59 @@ def test_a_planted_link_is_never_written_through_even_when_the_stale_copy_check_
     monkeypatch.setattr( pp.os.path, "lexists", lambda path: False )
     with pytest.raises( FileExistsError ): pp.write_copy( str( world[ "copies" ] ), "planted", "summary.md", b"new bytes" )
     assert victim.read_text() == "keep me"
+
+
+# ---- script type and languages read from the card (row 60d13c9a) ----
+
+def _optioned_card( world, **options ):
+    facts = pp.check_source( "demo/io/tmp/summary.md", world[ "registry" ] )
+    return _card( world, payload=pp.card_payload( facts, f"Maya ({SESSION_ID})", SESSION_ID, **options ) )
+
+
+def test_the_job_gets_the_script_type_and_languages_the_card_carries( world ):
+    card   = _optioned_card( world, script_type="status_report", languages=[ "en", "es-MX" ] )
+    answer = _start( world, card.id )
+    assert answer.status_code == 200, answer.text
+    args = world[ "flow" ].calls[ 0 ][ "args" ]
+    assert args[ "script_type" ] == "status_report" and args[ "languages" ] == [ "en", "es-MX" ] and set( args ) == { "research", "script_type", "languages" }
+
+
+def test_an_old_shape_card_starts_a_default_job_with_no_type_and_no_languages( world ):
+    card = _card( world )
+    assert set( card.payload ) == pp.PAYLOAD_KEYS
+    assert _start( world, card.id ).status_code == 200
+    assert set( world[ "flow" ].calls[ 0 ][ "args" ] ) == { "research" }
+
+
+def test_start_does_not_take_a_type_so_nobody_can_change_what_was_approved( world ):
+    card = _optioned_card( world, script_type="research_critical" )
+    answer = _start( world, card.id, body={ "card_id": str( card.id ), "actor": ACTOR, "script_type": "status_report" } )
+    assert answer.status_code == 422 and world[ "flow" ].calls == [ ]
+
+
+def test_a_card_with_a_key_beyond_the_two_optional_ones_is_refused( world ):
+    card = _card( world )
+    card.payload = dict( card.payload, languages=[ "en" ], injected="x" )
+    answer = _start( world, card.id )
+    assert answer.status_code == 403 and _code( answer ) == "bad_card" and world[ "flow" ].calls == [ ]
+
+
+def test_a_card_missing_a_required_key_is_refused_even_with_both_optional_keys( world ):
+    card = _optioned_card( world, script_type="status_report", languages=[ "en" ] )
+    card.payload = { key: value for key, value in card.payload.items() if key != "sha256" }
+    assert _code( _start( world, card.id ) ) == "bad_card"
+
+
+def test_the_payload_shape_check_accepts_exactly_required_plus_at_most_the_optional_keys():
+    required = { key: "x" for key in pp.PAYLOAD_KEYS }
+    assert pp.payload_shape_ok( required )
+    assert pp.payload_shape_ok( dict( required, script_type="s" ) ) and pp.payload_shape_ok( dict( required, languages=[ "en" ], script_type="s" ) )
+    assert not pp.payload_shape_ok( dict( required, other="x" ) )
+    assert not pp.payload_shape_ok( { key: "x" for key in list( pp.PAYLOAD_KEYS )[ 1: ] } )
+
+
+def test_normalize_languages_shapes():
+    assert pp.normalize_languages( None ) is None and pp.normalize_languages( "" ) is None and pp.normalize_languages( [ " ", "" ] ) is None
+    assert pp.normalize_languages( "en,es-MX" ) == [ "en", "es-MX" ] and pp.normalize_languages( [ " en ", "es" ] ) == [ "en", "es" ]
+    with pytest.raises( ValueError ):
+        pp.normalize_languages( 5 )

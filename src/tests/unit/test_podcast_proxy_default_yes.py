@@ -18,9 +18,11 @@ SESSION  = "binding-1"
 OPERATOR = { "method": "jwt", "user_id": "u-1", "account_email": "rick@example.com" }
 
 
-def card( state="delivered", default="yes", value=None, responded=False, expires_in=30, made_ago=10 ):
+def card( state="delivered", default="yes", value=None, responded=False, expires_in=30, made_ago=10, with_optional=False ):
     """A podcast card row as the ask door writes it, with only the fields the judges read."""
+    # required keys only: the shape every card had before the optional script_type and languages keys
     payload = { key: "x" for key in pp.PAYLOAD_KEYS }
+    if with_optional: payload.update( script_type="status_report", languages=[ "en" ] )
     payload.update( kind=pp.CARD_KIND, command=pp.COMMAND, asked_by_session=SESSION )
     return SimpleNamespace(
         payload            = payload,
@@ -125,3 +127,8 @@ def test_an_old_cards_default_of_no_is_still_refused():
     settled = card( default="no", state="responded", responded=True, value={ "value": "no", "source": "timeout_default" } )
     assert pp.start_refusal( settled, SESSION, NOW, 900 ).code == "default_answer"
     assert pp.card_state( settled, NOW ) == "default_answer"
+
+
+def test_a_card_with_the_optional_keys_judges_the_same_as_one_without():
+    assert pp.start_refusal( card( value={ "value": "yes", "source": "ui", "answered_by": OPERATOR }, responded=True, state="responded", default="no" ), SESSION, NOW, 900 ) is None
+    assert pp.start_refusal( card( value={ "value": "yes", "source": "ui", "answered_by": OPERATOR }, responded=True, state="responded", default="no", with_optional=True ), SESSION, NOW, 900 ) is None
