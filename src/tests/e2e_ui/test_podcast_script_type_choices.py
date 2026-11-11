@@ -157,7 +157,7 @@ REVEAL = """() => {
 }"""
 
 
-def _research_args( page, prefix, status_report_and_spanish ):
+def _research_args( page, prefix, status_report_and_spanish, one_shot=True ):
     """Fill and submit the research form with this test id prefix; return the posted args."""
     seen = _stub_submit( page )
     page.evaluate( REVEAL )
@@ -172,6 +172,8 @@ def _research_args( page, prefix, status_report_and_spanish ):
         page.get_by_test_id( f"{prefix}-research-podcast-type" ).select_option( "status_report" )
         page.get_by_test_id( f"{prefix}-research-podcast-oneshot" ).wait_for( state="visible", timeout=5_000 )
         page.get_by_test_id( f"{prefix}-research-podcast-spanish" ).check()
+        if not one_shot:
+            page.get_by_test_id( f"{prefix}-research-podcast-oneshot" ).uncheck()
     page.get_by_test_id( f"{prefix}-research-submit-btn" ).click()
     page.wait_for_function( "() => document.getElementById( 'research-submit-status' ).textContent.includes( 'job-1' )",
                             timeout=5_000 )
@@ -209,3 +211,19 @@ def test_the_legacy_research_form_sends_status_report_and_spanish( logged_in_pag
     args = _research_args( logged_in_page, "notifications", True )
     assert args == { "query": "what is a lupin", "budget": 3, "dry_run": True,
                      "script_type": "status_report", "review": "one_shot", "languages": SPANISH }
+
+
+def test_the_legacy_research_form_asks_for_review_when_one_shot_is_unticked( logged_in_page ):
+    logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
+    logged_in_page.wait_for_load_state( "networkidle" )
+    args = _research_args( logged_in_page, "notifications", True, one_shot=False )
+    assert args == { "query": "what is a lupin", "budget": 3, "dry_run": True,
+                     "script_type": "status_report", "review": "ask", "languages": SPANISH }
+
+
+def test_the_multiplexer_research_form_asks_for_review_when_one_shot_is_unticked( logged_in_page ):
+    logged_in_page.goto( f"{BASE_URL}/app/multiplexer" )
+    logged_in_page.wait_for_load_state( "networkidle" )
+    args = _research_args( logged_in_page, "multiplexer", True, one_shot=False )
+    assert args == { "query": "what is a lupin", "budget": 3, "dry_run": True,
+                     "script_type": "status_report", "review": "ask", "languages": SPANISH }
