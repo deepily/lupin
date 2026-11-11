@@ -2127,7 +2127,7 @@ class TestSuiteJob( AgenticJobBase ):
             - returns None for an unknown suite (callers treat that as a no-op)
         """
         basename = cls._LOG_BASENAMES.get( suite_type )
-        return os.path.join( cls._artifact_dir(), basename ) if basename else None
+        return cls._artifact_path( basename ) if basename else None
 
     @classmethod
     def _artifact_dir( cls ) -> str:
