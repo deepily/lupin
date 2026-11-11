@@ -11,6 +11,7 @@ import json
 import pathlib
 
 from cosa.repo.symindex import build as sx_build
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import finalize, freeze, keys
 
@@ -190,7 +191,7 @@ def refreeze( frozen_dir, new_gen, new_vectors, dest, new, report_path, expected
     dest     = pathlib.Path( dest )
     got      = freeze.freeze( new_gen, new_vectors, dest / freeze.FROZEN_DIR )
     ( dest / finalize.FINAL_FILE ).write_bytes( ( folder / finalize.FINAL_FILE ).read_bytes() )
-    manifest = dict( old, **got, refrozen_from={ **{ k: old[ k ] for k in freeze.IDENTITY_KEYS }, "final_sha256": old[ "final_sha256" ], "report_sha256": finalize.file_sha256( report_path ) } )
+    manifest = dict( old, **got, refrozen_from={ **{ k: old[ k ] for k in freeze.IDENTITY_KEYS }, "final_sha256": old[ "final_sha256" ], "report_sha256": file_sha256( report_path ) } )
     ( dest / finalize.MANIFEST_FILE ).write_text( json.dumps( manifest, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
     finalize.verify_manifest( dest / finalize.MANIFEST_FILE, expected )
     return manifest

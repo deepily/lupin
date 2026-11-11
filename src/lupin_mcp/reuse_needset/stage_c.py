@@ -22,10 +22,11 @@ from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.candidates import search as sx_search
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp import reuse_need_check as nc
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, control_report, draft, expansion_run, finalize, first_thousand, forced_judge, source_at, strip
+from lupin_mcp.reuse_needset import call_cap, control_report, draft, expansion_run, first_thousand, forced_judge, source_at, strip
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import judge_probe as jp
 
@@ -113,7 +114,7 @@ def check_pins( labels_dir, answer_key, expected_shas="pinned" ):
     wanted = control_report.LABEL_PINS if expected_shas == "pinned" else expected_shas
     if wanted is None: return
     paths   = { **{ n: f"{labels_dir}/{n}" for n in control_report.LABEL_FILES }, control_report.KEY_FILE: answer_key }
-    changed = sorted( n for n, p in paths.items() if finalize.file_sha256( p ) != wanted[ n ] )
+    changed = sorted( n for n, p in paths.items() if file_sha256( p ) != wanted[ n ] )
     if changed: raise er.NeedsetError( er.CONTROL_LABELS_CHANGED, f"the hash of {', '.join( changed )} is not the pinned one" )
 
 

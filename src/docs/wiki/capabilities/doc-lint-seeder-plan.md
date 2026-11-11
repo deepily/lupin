@@ -9,7 +9,7 @@ pins:
   - cosa.repo.doc_lint.labelled_set_seeder.seed_search@0662a2d4bb
   - cosa.repo.doc_lint.labelled_set_seeder.make_pair@bf7092e863
   - cosa.repo.doc_lint.labelled_set_seeder.build_split_plan@07304567be
-  - cosa.repo.doc_lint.labelled_set_seeder.cmd_plan@0259ae69e8
+  - cosa.repo.doc_lint.labelled_set_seeder.cmd_plan@1e67ae70fa
   - cosa.repo.doc_lint.labelled_set_seeder.refuse_gate_out_in_repo@7def30bbb9
   - cosa.repo.doc_lint.labelled_set_seeder.check_writer_model@b1678bd823
   - cosa.repo.doc_lint.labelled_set_seeder.task_sha@433ba7ac92

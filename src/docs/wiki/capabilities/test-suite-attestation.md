@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.test_suite.attestation.artifact_root@21b494997a
   - cosa.agents.test_suite.attestation.attestation_path@19f3ef9e80
-  - cosa.agents.test_suite.attestation.sha256_file@cc2300efe3
+  - cosa.agents.test_suite.attestation.sha256_file@bc2df87e02
   - cosa.agents.test_suite.attestation.canonical_payload@daaebfffbe
   - cosa.agents.test_suite.attestation.build_record@104c7f0067
   - cosa.agents.test_suite.attestation.read_records@b1738f5198

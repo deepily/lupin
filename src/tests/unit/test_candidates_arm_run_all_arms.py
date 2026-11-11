@@ -12,6 +12,7 @@ import types
 import numpy as np
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex.candidates import arm_report
 from cosa.repo.symindex.candidates import arm_run
 from cosa.repo.symindex.candidates import arms
@@ -147,7 +148,7 @@ class TestRunAllArms:
     def test_the_reserved_needs_file_is_refused( self, tmp_path ):
         w = world( tmp_path )
         with pytest.raises( CandidateError ) as caught:
-            arm_run.run_all_arms( w[ "env" ], w[ "snaps" ], w[ "needs" ], arm_run.sha256_of( w[ "needs" ] ), w[ "manifest" ], vset(), PURPOSE, w[ "pages" ],
+            arm_run.run_all_arms( w[ "env" ], w[ "snaps" ], w[ "needs" ], file_sha256( w[ "needs" ] ), w[ "manifest" ], vset(), PURPOSE, w[ "pages" ],
                                   query, lambda text: text, "abc123" )
         assert caught.value.code == arms.FRESH_NEEDS_REFUSED
 

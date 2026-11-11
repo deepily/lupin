@@ -8,7 +8,7 @@ pins:
   - cosa.repo.duplicate_check.proof.label_load.disputed_items@61090437b8
   - cosa.repo.duplicate_check.proof.label_load.supplement_rows@dd327fdd98
   - cosa.repo.duplicate_check.proof.label_load.resolved_labels@ea3bbd020b
-  - cosa.repo.duplicate_check.proof.label_load.fingerprints@fca0830aef
+  - cosa.repo.duplicate_check.proof.label_load.fingerprints@76469ea0e3
   - cosa.repo.duplicate_check.proof.label_load.unsure_pair_keys@51041bcc53
 ---
 # Duplicate checker proof: the label loader
@@ -21,7 +21,7 @@ Turns the reviewers' pair labels and the answer key into the `{ pair key: bool }
 - `pair_key_labels` refuses labels for an item the key does not know.
 - `resolved_labels` settles every pair from two reviewers with `resolve_label`. A third rater's file may settle each disagreement; that rater labels only the disputed pairs.
 - A supplement is labels for pairs the run's key lacks. It lives in files of its own, so the frozen labels files stay as they were. `supplement_rows` reads its key. It refuses an item id or pair the run's key holds, and anything but two labels files. `resolved_labels` needs both reviewers on those pairs too. A split takes the supplement's third file if it names one, else a ruling. That file must label every disputed supplement pair and no other.
-- `fingerprints` gives the sha256 of each label file used and of the answer key. It adds the rulings and third files when given, the supplement's key, files and third file when given, and the tree root. It hashes each file with the shared `arm_run.sha256_of`. `unsure_pair_keys` lists the pairs either reviewer's latest answer marks unsure, a supplement's included.
+- `fingerprints` gives the sha256 of each label file used and of the answer key. It adds the rulings and third files when given, the supplement's key, files and third file when given, and the tree root. It hashes each file with `file_sha256` from [[utils-file-hash]]. `unsure_pair_keys` lists the pairs either reviewer's latest answer marks unsure, a supplement's included.
 - `disputed_items` lists the items the two reviewers labelled differently. `third_votes` turns the third rater's file into votes on them, and an unsure label is a vote of `None`.
 - A sure third label outranks a ruling. An unsure one leaves the pair to the ruling, passed in as `{ pair key: bool }`.
 

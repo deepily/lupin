@@ -3,8 +3,7 @@ capability: repo-tools-candidate-arms-run-inputs
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.arm_run.real_env@18a45ad171
-  - cosa.repo.symindex.candidates.arm_run.sha256_of@684acd39fd
-  - cosa.repo.symindex.candidates.arm_run.load_needs@bc2c5f5cac
+  - cosa.repo.symindex.candidates.arm_run.load_needs@6b88a669d2
   - cosa.repo.symindex.candidates.arm_run.snapshot_entries@6060881749
   - cosa.repo.symindex.candidates.arm_run.pick_snapshot@3dc71c97c8
   - cosa.repo.symindex.candidates.arm_run.load_answers@eab2da3551
@@ -16,7 +15,7 @@ pins:
 
 ## Environment and files
 - `real_env( data_dir )` builds the real readers as a namespace: `sendable`, `entry_text`, `pair_key`, `model` and a `JevCache` over `data_dir`.
-- `sha256_of( path )` returns the hex digest of a file's bytes. It is how a page names the needs file and manifest it read.
+- The run names the needs file and manifest it read by `file_sha256` from [[utils-file-hash]].
 - `load_needs( path, fresh_sha )` returns `{ need id: record }` from `{ "needs": [ { id, need, exclude } ] }`. It calls `refuse_fresh_needs`, so a reserved id or file raises `FRESH_NEEDS_REFUSED`.
 
 ## Snapshot

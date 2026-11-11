@@ -13,7 +13,7 @@ pins:
   - cosa.repo.doc_lint.pool_builder.drop_duplicates@ec4ce4c596
   - cosa.repo.doc_lint.pool_builder.build_pool@3bc0dfb113
   - cosa.repo.doc_lint.pool_builder.builder_sha256@4b6a27c6b0
-  - cosa.repo.doc_lint.pool_builder.write_pool@6d3a8141b7
+  - cosa.repo.doc_lint.pool_builder.write_pool@52b5210ee7
   - cosa.repo.doc_lint.pool_builder.build_parser@637276283a
   - cosa.repo.doc_lint.pool_builder.main@ffb483566e
 ---

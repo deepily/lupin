@@ -3,7 +3,7 @@ capability: needset-freeze
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.freeze.freeze@d0c03c4411
-  - lupin_mcp.reuse_needset.freeze.identity@5a91505214
+  - lupin_mcp.reuse_needset.freeze.identity@33342cfa9e
   - lupin_mcp.reuse_needset.freeze.require_same@d529bea0af
 ---
 # Need set: freeze

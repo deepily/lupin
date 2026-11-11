@@ -12,6 +12,7 @@ import pathlib
 import secrets
 import shutil
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex.candidates.errors import (
     CandidateError, DEPENDENCY_MISSING, ENGINE_MISMATCH, ENGINE_NOT_LOADED, VECTOR_SET_UNAVAILABLE, VECTOR_SET_CORRUPT )
 
@@ -34,19 +35,6 @@ def canonical( obj ):
         - returns JSON with sorted keys and no spaces after separators
     """
     return json.dumps( obj, sort_keys=True, separators=( ",", ":" ), ensure_ascii=True )
-
-
-def file_sha256( path ):
-    """
-    Hash a file in chunks.
-
-    Ensures:
-        - returns the hex sha256 of the file's bytes
-    """
-    h = hashlib.sha256()
-    with open( path, "rb" ) as f:
-        for chunk in iter( lambda: f.read( 1 << 20 ), b"" ): h.update( chunk )
-    return h.hexdigest()
 
 
 def manifest_hash( manifest ):

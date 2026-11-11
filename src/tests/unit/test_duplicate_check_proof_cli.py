@@ -10,12 +10,12 @@ import shutil
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import errors as lb_errors
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
-from cosa.repo.symindex.candidates import arm_run
 from cosa.repo.duplicate_check import extract as ex
 from cosa.repo.duplicate_check import judge as jd
 from cosa.repo.duplicate_check.proof import label_load as ll
@@ -586,7 +586,7 @@ def test_main_takes_the_third_raters_majority_on_a_dispute( venue, capsys ):
     assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     assert len( ran ) == 1 and ran[ 0 ][ "labels" ][ odd ] is False
     third    = str( pl.labels_path( packet ) )
-    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, None, third, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "third_labels" ] == arm_run.sha256_of( third )
+    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, None, third, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "third_labels" ] == file_sha256( third )
 
 
 # ---- the trial run --------------------------------------------------------------------------------------------

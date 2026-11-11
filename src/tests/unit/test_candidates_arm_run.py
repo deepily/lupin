@@ -11,6 +11,7 @@ import types
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex.candidates import arm_run
 from cosa.repo.symindex.candidates import arms
 from cosa.repo.symindex.candidates.errors import CandidateError
@@ -66,7 +67,7 @@ class TestLoadNeeds:
     def test_the_reserved_file_is_refused_by_its_hash( self, tmp_path ):
         path = write_needs( tmp_path )
         with pytest.raises( CandidateError ):
-            arm_run.load_needs( path, arm_run.sha256_of( path ) )
+            arm_run.load_needs( path, file_sha256( path ) )
 
 
 class TestSnapshots:

@@ -17,8 +17,8 @@ import json
 import pathlib
 import sys
 
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp.reuse_needset import errors as er
-from lupin_mcp.reuse_needset import finalize
 
 MATRICES     = ( "code.f32", "concat.f32", "prose.f32", "ids.txt" )
 PURPOSE_FILE = "purpose.jsonl"
@@ -31,7 +31,7 @@ REFUSALS     = ( er.PRIOR_GEN_MISSING, er.PURPOSE_STORE_NOT_LIVE, er.MATRICES_CH
 def _sha( path ):
     """Ensures: returns the sha256 of the file's bytes, or None when it is not a file."""
     path = pathlib.Path( path )
-    return finalize.file_sha256( path ) if path.is_file() else None
+    return file_sha256( path ) if path.is_file() else None
 
 
 def live_purpose_store( root ):

@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp.reuse_needset import draft, finalize, schema
 from lupin_mcp.reuse_needset import errors as er
 
@@ -68,7 +69,7 @@ def rewrite_rows( tmp_path, change ):
     final.write_text( "".join( json.dumps( r, sort_keys=True ) + "\n" for r in rows ), encoding="utf-8" )
     manifest = tmp_path / finalize.MANIFEST_FILE
     data = json.loads( manifest.read_text() )
-    data[ "final_sha256" ] = finalize.file_sha256( final )
+    data[ "final_sha256" ] = file_sha256( final )
     manifest.write_text( json.dumps( data ), encoding="utf-8" )
 
 
@@ -78,7 +79,7 @@ def test_a_400_row_set_passes_and_its_manifest_holds_the_counts_the_seed_and_the
     manifest = json.loads( path.read_text() )
     ids = [ json.loads( l )[ "id" ] for l in ( tmp_path / finalize.FINAL_FILE ).read_text().splitlines() ]
     assert manifest[ "counts" ] == { "rows": 400, "matched": 300, "nothing": 100, "ts": 240, "py": 160 } and manifest[ "kappa" ] == 0.62 and manifest[ "seed" ] == 7
-    assert manifest[ "source_commit" ] == COMMIT and manifest[ "final_sha256" ] == finalize.file_sha256( tmp_path / finalize.FINAL_FILE ) and ids == sorted( ids )
+    assert manifest[ "source_commit" ] == COMMIT and manifest[ "final_sha256" ] == file_sha256( tmp_path / finalize.FINAL_FILE ) and ids == sorted( ids )
 
 
 @pytest.mark.parametrize( "kwargs, name", [

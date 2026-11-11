@@ -12,9 +12,10 @@ import re
 
 from cosa.repo.duplicate_check.proof import label_load, proof_run
 from cosa.repo.symindex.candidates import rank_fusion as rf
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp.reuse_e2e import wilson
 from lupin_mcp.reuse_needset import errors as er
-from lupin_mcp.reuse_needset import finalize, judge_readings, loss_trace
+from lupin_mcp.reuse_needset import judge_readings, loss_trace
 
 NOT_SAME_JOB   = frozenset( ( "d-35e19468ee", "d-5270a48d23", "d-e4d0d1e147", "d-7a334b0576", "d-803557386f" ) )
 LABEL_FILES    = ( "labels-rick.jsonl", "labels-reviewer-2.jsonl", "labels-jason.jsonl" )
@@ -43,7 +44,7 @@ def same_job_labels( pairs, labels_dir, answer_key, expected_not_same=NOT_SAME_J
         - ValueError from label_load when a label file is incomplete
     """
     first, second, third = ( f"{labels_dir}/{name}" for name in LABEL_FILES )
-    shas      = { **{ name: finalize.file_sha256( f"{labels_dir}/{name}" ) for name in LABEL_FILES }, KEY_FILE: finalize.file_sha256( answer_key ) }
+    shas      = { **{ name: file_sha256( f"{labels_dir}/{name}" ) for name in LABEL_FILES }, KEY_FILE: file_sha256( answer_key ) }
     wanted    = LABEL_PINS if expected_shas == "pinned" else expected_shas
     changed   = sorted( n for n in shas if wanted is not None and shas[ n ] != wanted[ n ] )
     if changed: raise er.NeedsetError( er.CONTROL_LABELS_CHANGED, f"the hash of {', '.join( changed )} is not the pinned one" )

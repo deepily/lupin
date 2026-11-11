@@ -2,10 +2,10 @@
 import json
 import pathlib
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
 from cosa.repo.duplicate_check.proof import proof_run
-from cosa.repo.symindex.candidates import arm_run
 
 
 def key_rows( key_path ):
@@ -165,12 +165,12 @@ def fingerprints( labels_paths, rulings_path, third_path, key_path, tree_root, s
         - a supplement that names a third file adds third_labels: sha256 to that field
         - the digests are of the bytes on disk now, so a later edit of a file, an appended answer included, no longer matches
     """
-    prints = { "labels": { str( p ): arm_run.sha256_of( p ) for p in labels_paths },
-               "rulings": arm_run.sha256_of( rulings_path ) if rulings_path is not None else None,
-               "third_labels": arm_run.sha256_of( third_path ) if third_path is not None else None,
-               "answer_key": arm_run.sha256_of( key_path ), "tree_root": str( tree_root ) }
-    if supplement is not None: prints[ "supplement" ] = { "key": arm_run.sha256_of( supplement[ "key" ] ), "labels": { str( p ): arm_run.sha256_of( p ) for p in supplement[ "labels" ] } }
-    if supplement is not None and supplement.get( "third" ) is not None: prints[ "supplement" ][ "third_labels" ] = arm_run.sha256_of( supplement[ "third" ] )
+    prints = { "labels": { str( p ): file_sha256( p ) for p in labels_paths },
+               "rulings": file_sha256( rulings_path ) if rulings_path is not None else None,
+               "third_labels": file_sha256( third_path ) if third_path is not None else None,
+               "answer_key": file_sha256( key_path ), "tree_root": str( tree_root ) }
+    if supplement is not None: prints[ "supplement" ] = { "key": file_sha256( supplement[ "key" ] ), "labels": { str( p ): file_sha256( p ) for p in supplement[ "labels" ] } }
+    if supplement is not None and supplement.get( "third" ) is not None: prints[ "supplement" ][ "third_labels" ] = file_sha256( supplement[ "third" ] )
     return prints
 
 

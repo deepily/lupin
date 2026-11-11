@@ -14,7 +14,6 @@ pins:
   - cosa.research.phi4_flash_lite_study.freeze_corpus.resolve_live_corpus_path@12f35d4889
   - cosa.research.phi4_flash_lite_study.freeze_corpus.sample_rows@7b107deac0
   - cosa.research.phi4_flash_lite_study.freeze_corpus.select_eligible@b31ae2109f
-  - cosa.research.phi4_flash_lite_study.freeze_corpus.sha256_of_file@b4a8bcd899
   - cosa.research.phi4_flash_lite_study.freeze_corpus.sha256_of_rows@a59d4255a5
   - cosa.research.phi4_flash_lite_study.freeze_corpus.verify_snapshot@e8f8f864be
   - cosa.research.phi4_flash_lite_study.freeze_corpus.write_snapshot@b8134d1542
@@ -28,7 +27,7 @@ The helpers behind `freeze` in [[dm-rewrite-model-study]]. Replay and statistics
 - `assert_dir_is_not_live_corpus_dir` refuses the live directory by real path and by device and inode. A bind mount defeats a path check alone.
 - `read_corpus_rows` returns the rows and a count of unparseable lines. A truncated last line is counted, not fatal.
 - `count_claims` is the router's own claim counter. `select_eligible` keeps non-blank bodies with strictly more claims than the trigger, in input order.
-- `sample_rows` keeps the original order and is repeatable for a seed. `write_snapshot` writes sorted-key JSON, one row per line to `dm_replay_frozen.jsonl`, and the manifest is `manifest.json` beside it. `sha256_of_file` and `sha256_of_rows` give the source and snapshot checksums, and the row checksum covers the exact bytes `write_snapshot` emits.
+- `sample_rows` keeps the original order and is repeatable for a seed. `write_snapshot` writes sorted-key JSON, one row per line to `dm_replay_frozen.jsonl`, and the manifest is `manifest.json` beside it. `file_sha256` from [[utils-file-hash]] and `sha256_of_rows` give the source and snapshot checksums, and the row checksum covers the exact bytes `write_snapshot` emits.
 - `build_manifest` records source and snapshot paths, counts and checksums, the selection settings and the git sha from `current_git_sha`. That sha is `None` when git fails, and a freeze goes on.
 - `verify_snapshot` returns `( ok, detail )`. It fails on an unparseable line, too few rows, a row count that differs, or a checksum that differs.
 - `main` is the command line: `--out-dir`, `--trigger-claims` (default 4), `--all-rows`, `--sample`, `--seed`, `--minimum-rows` and `--verify`. It returns 1 only for a failed verify.

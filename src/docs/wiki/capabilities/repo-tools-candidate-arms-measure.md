@@ -9,7 +9,7 @@ pins:
   - cosa.repo.symindex.candidates.arm_run.query_text@e6050f30ca
   - cosa.repo.symindex.candidates.arm_run.measure_twins@4d81cbe45e
   - cosa.repo.symindex.candidates.arm_run.render_partial_page@d1c0988d51
-  - cosa.repo.symindex.candidates.arm_run.run_arm_report@29004293b7
+  - cosa.repo.symindex.candidates.arm_run.run_arm_report@8d45501606
   - cosa.repo.symindex.candidates.arm_run.main@3737b347e8
 ---
 # Candidate arms: measuring and the page
