@@ -287,20 +287,18 @@ def _pid_alive( pid ):
     True iff a process with `pid` exists (the worker that produces next turns).
 
     Ensures:
-        - returns False for None / non-int / dead pid
+        - returns False for None / non-int / non-positive / dead pid
         - returns True when the pid exists (incl. EPERM = exists-but-not-ours)
+        - returns False for any other OSError, so the arbiter never raises on a probe
+        - the probe is the hook library's is_pid_alive, so there is one kill -0 reading in the tree
     """
     if not isinstance( pid, int ):
         return False
+    from lupin_cli.claude_code.hooks.lib.stale_buffer_janitor import is_pid_alive   # lazy: keep this module's import time stdlib-only
     try:
-        os.kill( pid, 0 )
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+        return is_pid_alive( pid )
     except OSError:
         return False
-    return True
 
 
 def assess_liveness( listener_pid, mtime, *, now, cc_pid=None, idle_mtime_seconds=DEFAULT_IDLE_MTIME_SECONDS ):
