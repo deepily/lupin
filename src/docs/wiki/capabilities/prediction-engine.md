@@ -12,7 +12,7 @@ pins:
   - cosa.agents.prediction_engine.prediction_result.PredictionResult.to_hint_dict@74e10b5df2
   - cosa.agents.prediction_engine.notification_category_classifier.NotificationCategoryClassifier@c07615726c
   - cosa.agents.prediction_engine.accuracy_comparators.get_comparator@f9857181fc
-  - cosa.agents.prediction_engine.xml_models.OpenEndedSynthesisResponse@c40ca5091b
+  - cosa.agents.prediction_engine.xml_models.OpenEndedSynthesisResponse@958a1f1d8d
 ---
 # Prediction engine
 

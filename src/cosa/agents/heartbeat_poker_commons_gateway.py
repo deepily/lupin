@@ -27,7 +27,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from cosa.agents.heartbeat_poker_job import RecipientSpec
-from lupin_mcp.persona_normalization import canonical_persona_key, persona_slug
+from lupin_mcp.persona_normalization import canonical_persona_key, dm_topic_for as _dm_topic_for_root
 
 
 class LupinCommonsGateway:
@@ -114,19 +114,7 @@ class LupinCommonsGateway:
             persona_color     = persona_color,
         )
 
-    @staticmethod
-    def dm_topic_for( identifier: str ) -> str:
-        """
-        Derive a server-pattern-safe DM topic from a recipient identifier.
-
-        Routes through the shared `persona_slug` root, so the topic always equals
-        `dm-{persona_slug( identifier, sep='_' )}`. That is byte-identical to the
-        Arbiter gateway, the cascade scheduler and the MCP DM layer
-        (`_derive_dm_topic`). It is accent-proof: `"Mr Radio"` gives
-        `"dm-mr_radio"` and `"María"` gives `"dm-maria"`. A regex that kept
-        accents would split one persona across two topics.
-        """
-        return f"dm-{persona_slug( identifier, sep='_' )}"
+    dm_topic_for = staticmethod( _dm_topic_for_root )   # one definition, in lupin_mcp.persona_normalization
 
     def send_to( self, recipient: RecipientSpec, body: str ) -> None:
         """

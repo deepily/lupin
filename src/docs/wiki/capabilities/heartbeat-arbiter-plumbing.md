@@ -2,7 +2,7 @@
 capability: heartbeat-arbiter-plumbing
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway@6eb9cacf70
+  - cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway@0f26dfe5ba
   - cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterGateway@1a80108b53
   - cosa.agents.heartbeat_arbiter.arbiter_job.owed_class_suppresses@359d8e594d
   - cosa.agents.heartbeat_arbiter.arbiter_journal.format_ts_local@c57a944303

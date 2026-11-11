@@ -16,6 +16,7 @@ from typing import ClassVar, List, Optional
 from pydantic import Field, field_validator
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
 
 
 class CRUDIntent( BaseXMLModel ):
@@ -102,10 +103,7 @@ class CRUDIntent( BaseXMLModel ):
             - Returns float between 0.0 and 1.0
             - Returns 0.0 if parsing fails
         """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return clamp_unit( float_or_zero( self.confidence ) )
 
     def is_destructive( self ):
         """

@@ -14,6 +14,7 @@ from typing import ClassVar, List
 from pydantic import Field, field_validator
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
 
 
 class CalcIntent( BaseXMLModel ):
@@ -104,10 +105,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float between 0.0 and 1.0
             - Returns 0.0 if parsing fails
         """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return clamp_unit( float_or_zero( self.confidence ) )
 
     def get_value_float( self ):
         """
@@ -120,10 +118,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float value
             - Returns 0.0 if parsing fails
         """
-        try:
-            return float( self.value )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return float_or_zero( self.value )
 
     def get_items_list( self ):
         """
@@ -180,10 +175,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float value
             - Returns 0.0 if parsing fails
         """
-        try:
-            return float( self.principal )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return float_or_zero( self.principal )
 
     def get_annual_rate_float( self ):
         """
@@ -196,10 +188,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float value (as percentage, e.g. 6.5)
             - Returns 0.0 if parsing fails
         """
-        try:
-            return float( self.annual_rate )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return float_or_zero( self.annual_rate )
 
     def get_term_years_int( self ):
         """
@@ -229,12 +218,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float value
             - Returns 0.0 if parsing fails or empty
         """
-        if not self.down_payment or not self.down_payment.strip():
-            return 0.0
-        try:
-            return float( self.down_payment )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return float_or_zero( self.down_payment )
 
     def to_xml( self, root_tag="calc_intent", pretty=True ):
         """

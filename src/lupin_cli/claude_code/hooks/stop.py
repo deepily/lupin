@@ -1234,25 +1234,6 @@ def _emit_genuine_idle( session_id, persona_name, cap ):
         } )
 
 
-def _dm_topic_for( persona_name ):
-    """
-    Derive the commons DM-topic name ("dm-<slug>") for a persona.
-
-    The slug comes from the shared `persona_slug` root, so it ignores accents and agrees with the store's
-    canonical persona key: "Mr. Radio" gives "dm-mr_radio" and "María" gives "dm-maria".
-    The separator "_" keeps the `dm-<persona>` topic-file convention (spaces become underscores).
-
-    Requires:
-        - persona_name is a string or None
-
-    Ensures:
-        - Returns "dm-<slug>" matching the server-side topic pattern
-        - Accent/punctuation in the persona collapses to the canonical form
-    """
-    from lupin_mcp.persona_normalization import persona_slug
-    return f"dm-{persona_slug( persona_name, sep='_' )}"
-
-
 def _gather_outstanding_delegations( session_id ):
     """
     List this manager's spawned workers that are still alive and not yet reaped.
@@ -1359,7 +1340,8 @@ def _gather_unanswered_inbound_questions( session_id ):
         if not commons_root:
             return empty
         from lupin_mcp.commons_store import CommonsStore
-        entries = CommonsStore( commons_root ).read( _dm_topic_for( name ), limit=50 )
+        from lupin_mcp.persona_normalization import dm_topic_for
+        entries = CommonsStore( commons_root ).read( dm_topic_for( name ), limit=50 )
 
         tenure_floor = persona.get( "assigned_at" )    # ISO-8601 str or None
         acked        = read_acked_qids( session_id )   # (c) bulk-marked "looked at"

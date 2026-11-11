@@ -117,8 +117,9 @@ def test_arbiter_modules_make_no_destructive_call():
 
 
 def test_only_kill_is_os_kill_signal_zero_liveness():
-    """The ONLY `kill` anywhere in the arbiter surface is `os.kill(pid, 0)` — a
-    liveness probe. Proves the allowed-exception is the single kill in scope."""
+    """The arbiter surface holds no `kill` call at all. Its liveness probe is the hook
+    library's is_pid_alive, and the lone kill there is pinned as signal 0 in
+    test_context_pressure_pid_alive.py."""
     kill_sites = [ ]
     for path in _arbiter_source_files():
         with open( path, "r", encoding="utf-8" ) as f:
@@ -127,10 +128,9 @@ def test_only_kill_is_os_kill_signal_zero_liveness():
             if isinstance( node, ast.Call ) and _call_name( node ) == "kill":
                 kill_sites.append( ( os.path.relpath( path, _src_path ), node.lineno,
                                      _is_allowed( node, "kill" ) ) )
-    # exactly one kill call, and it is the allowed os.kill(pid, 0) liveness probe
-    assert len( kill_sites ) == 1, f"expected exactly one kill site, got {kill_sites}"
-    assert kill_sites[ 0 ][ 2 ] is True, f"the lone kill is not the allowed liveness probe: {kill_sites}"
-    assert kill_sites[ 0 ][ 0 ].endswith( "context_pressure.py" )
+    # the arbiter surface holds no kill of its own: its liveness probe is the hook library's is_pid_alive,
+    # whose lone kill is pinned as signal 0 in test_context_pressure_pid_alive.py
+    assert kill_sites == [ ], f"the arbiter surface must call the hook library's probe, not kill itself: {kill_sites}"
 
 
 def test_redline_helper_flags_a_synthetic_destructive_call():

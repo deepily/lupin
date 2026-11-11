@@ -7,7 +7,7 @@ pins:
   - cosa.rest.job_service.paths_of@6a2f351cb1
   - cosa.rest.job_service.run_command@c6fb608f03
   - cosa.rest.job_service.bootstrap_env@af5e0ff32e
-  - cosa.rest.job_service.run_now@0c0aded8d7
+  - cosa.rest.job_service.run_now@dd6f2038fd
 ---
 # Jobs service: Run now and run commands
 

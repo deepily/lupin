@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.decision_proxy.responder.DecisionResponder@a28d093366
   - cosa.agents.decision_proxy.trust_tracker.TrustTracker@e6ea84b97f
-  - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@9a28bb3dc6
+  - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@3433f1a34d
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker@ed1b3c7973
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker.check@37ecd22e31
   - cosa.agents.decision_proxy.smart_router.SmartRouter@6734207a13

@@ -309,8 +309,6 @@ class PodcastGeneratorJob( AgenticJobBase ):
             from cosa.agents.podcast_generator.play_links import io_relative, language_card_lines, ordered_languages, source_ref
             io_base = cu.get_project_root() + "/io/"
 
-            def _to_rel( p ): return io_relative( p, io_base )
-
             languages  = getattr( self, "target_languages", [] ) or [ "en" ]
 
             # Fallback for single-language or older orchestrator state that only set
@@ -325,8 +323,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # that actually produced an artifact but were not in target_languages.
             ordered_langs = ordered_languages( languages, audio_by_lang, script_by_lang )
 
-            audio_rel  = _to_rel( self.audio_path )
-            script_rel = _to_rel( self.script_path )
+            audio_rel  = io_relative( self.audio_path, io_base )
+            script_rel = io_relative( self.script_path, io_base )
 
             # Store relative paths in artifacts so the UI job-card builds correct URLs
             # (matches presentation_generator convention in PresentationGeneratorJob._execute). Primary
@@ -336,8 +334,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
             self.artifacts[ "script_path" ] = script_rel
             self.artifacts[ "report_path" ] = script_rel
             self.artifacts[ "podcast_id" ]  = agent.podcast_id
-            self.artifacts[ "audio_paths_by_language" ]  = { l: _to_rel( p ) for l, p in audio_by_lang.items() }
-            self.artifacts[ "script_paths_by_language" ] = { l: _to_rel( p ) for l, p in script_by_lang.items() }
+            self.artifacts[ "audio_paths_by_language" ]  = { l: io_relative( p, io_base ) for l, p in audio_by_lang.items() }
+            self.artifacts[ "script_paths_by_language" ] = { l: io_relative( p, io_base ) for l, p in script_by_lang.items() }
 
             # Optional Google Drive copy (flag off = no-op and no Google import). full_path is the
             # resolved source document path computed above, never the possibly-relative research_path.

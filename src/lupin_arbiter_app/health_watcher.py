@@ -40,6 +40,7 @@ from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
+from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
 from lupin_arbiter_app.poll_loop import run_poll_loop
 
 
@@ -333,8 +334,7 @@ class ContainerHealthTracker:
 
     def _prune( self, now: datetime.datetime ) -> None:
         """Drop transition timestamps older than the flap window (rolling)."""
-        while self.transitions and ( now - self.transitions[ 0 ] ).total_seconds() > self.flap_window_seconds:
-            self.transitions.popleft()
+        self.transitions = deque( prune_window( self.transitions, now, self.flap_window_seconds ) )
 
     def is_flapping( self ) -> bool:
         """Ensures: True iff transitions-in-window ≥ flap_threshold."""
@@ -421,8 +421,7 @@ class RestartLoopTracker:
 
     def _prune( self, now: datetime.datetime ) -> None:
         """Drop rise timestamps older than the window (rolling)."""
-        while self.rises and ( now - self.rises[ 0 ] ).total_seconds() > self.window_seconds:
-            self.rises.popleft()
+        self.rises = deque( prune_window( self.rises, now, self.window_seconds ) )
 
     def rises_in_window( self ) -> int:
         """Ensures: returns the count of RestartCount rises currently in the window."""

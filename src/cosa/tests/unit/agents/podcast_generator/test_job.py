@@ -242,7 +242,7 @@ class TestExecute:
     _execute branch coverage (non-dry-run) with all boundaries faked.
 
     Ensures: path resolution (relative/absolute); missing-file FileNotFoundError;
-    audience/audience_context overrides; script-None cancel; the _to_rel helper's
+    audience/audience_context overrides; script-None cancel; the io_relative calls'
     four arcs (None / io_base / "io/" / lstrip); cost from api_client vs 0.0;
     the three completion-TTS variants; completion-notify failure swallowed;
     job_id cleared in finally.
@@ -259,7 +259,7 @@ class TestExecute:
         # overrides applied to config
         assert graph.config_obj.audience         == "expert"
         assert graph.config_obj.audience_context == "phds"
-        # _to_rel io_base branch
+        # io_relative io_base branch
         assert job.artifacts[ "audio_path" ]  == "pod/ep.mp3"
         assert job.artifacts[ "script_path" ] == "pod/ep.md"
         assert job.artifacts[ "podcast_id" ]  == "pg-abc"
@@ -476,7 +476,7 @@ class TestExecute:
         graph.voice_io.clear_job_id.assert_called_once_with()
 
     def test_no_audio_uses_second_tts_variant_and_no_audio_links( self ):
-        # final_audio_path None -> _to_rel None arc; has_audio False, segments>0
+        # final_audio_path None -> io_relative None arc; has_audio False, segments>0
         job   = _job()
         graph = _ExecGraph( state={ "final_audio_path": None, "final_script_path": "/proj/io/pod/ep.md" } )
         with graph.patcher(), \

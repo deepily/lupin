@@ -5,7 +5,8 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.BackgroundJobsRendererImpl@505564eac5
   - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.createBackgroundJobsRenderer@5fb9926bb5
   - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.runNowPath@911df302b4
-  - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.runNowFailureText@fea4d99968
+  - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.runNowFailureText@52db6c247f
+  - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.refusalDetail@3bcfce3888
   - src.lupin_app.static.js.shared.approve-link.publishOnWindow@0042bf3332
 ---
 # Web client: Background Jobs pane

@@ -13,6 +13,7 @@ that is failing and also growing says both.
 import datetime
 
 import cosa.rest.job_cron as jc
+from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
 from cosa.repo.symindex.vector_status import age_hours
 from lupin_mcp.reap_memento import _parse_iso_aware as parse_time
 
@@ -96,8 +97,7 @@ def silence( entry, summary, now, boot_time, lock_age, tune ):
 
 def window_points( points, now, days ):
     """Ensures: returns the points no older than days, oldest first."""
-    cutoff = now - datetime.timedelta( days=days )
-    return [ p for p in points if parse_time( p[ "at" ] ) is not None and parse_time( p[ "at" ] ) >= cutoff ]
+    return prune_window( points, now, days * 86400, stamp=lambda p: parse_time( p[ "at" ] ) )
 
 
 def scan_grew( points, tune ):

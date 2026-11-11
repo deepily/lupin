@@ -7,7 +7,7 @@ pins:
   - cosa.agents.heartbeat_poker_job.Clock@b12bb6b742
   - cosa.agents.heartbeat_poker_job.SystemClock@dd6dc72e64
   - cosa.agents.heartbeat_poker_job.CommonsGateway@629f30a94e
-  - cosa.agents.heartbeat_poker_commons_gateway.LupinCommonsGateway@941cf4bc45
+  - cosa.agents.heartbeat_poker_commons_gateway.LupinCommonsGateway@ff15a413bc
 ---
 # Heartbeat poker
 

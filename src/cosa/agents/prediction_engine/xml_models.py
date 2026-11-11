@@ -11,6 +11,7 @@ Pattern follows CalcIntent in cosa.agents.calculator.xml_models.
 from pydantic import Field, field_validator
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
 
 
 class OpenEndedSynthesisResponse( BaseXMLModel ):
@@ -60,10 +61,7 @@ class OpenEndedSynthesisResponse( BaseXMLModel ):
             - Returns float between 0.0 and 1.0
             - Returns 0.0 if parsing fails
         """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return clamp_unit( float_or_zero( self.confidence ) )
 
     def to_xml( self, root_tag="open_ended_synthesis_response", pretty=True ):
         """

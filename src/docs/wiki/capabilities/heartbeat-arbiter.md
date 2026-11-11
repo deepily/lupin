@@ -3,7 +3,7 @@ capability: heartbeat-arbiter
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_arbiter_app.fleet_arbiter_loop.FleetArbiterLoop@f658361fd6
-  - cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterConsumerJob@715b2b6bdf
+  - cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterConsumerJob@6d27cdf914
   - cosa.agents.heartbeat_arbiter.arbiter_routing.tier_for@810e74e825
   - cosa.rest.arbiter_bootstrap.submit_arbiter_if_enabled@23da8f20f5
   - cosa.rest.routers.arbiter.get_fleet_state@10c8ded44d

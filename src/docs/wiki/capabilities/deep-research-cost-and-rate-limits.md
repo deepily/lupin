@@ -7,7 +7,7 @@ pins:
   - cosa.agents.deep_research.cost_tracker.SessionSummary@545d23e059
   - cosa.agents.deep_research.cost_tracker.UsageRecord@f7608839c4
   - cosa.agents.deep_research.rate_limiter.TokenRecord@15a50a36f6
-  - cosa.agents.deep_research.rate_limiter.WebSearchRateLimiter@cfcbd4ca03
+  - cosa.agents.deep_research.rate_limiter.WebSearchRateLimiter@dd66bda470
 ---
 # Deep research usage records and rate limiting
 

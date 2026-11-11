@@ -7,8 +7,8 @@ pins:
   - lupin_arbiter_app.health_watcher.docker_inspect_restart_count@fc9554f6d3
   - lupin_arbiter_app.health_watcher.docker_inspect_env@473f7ad88c
   - lupin_arbiter_app.health_watcher.assess_reload_blindness@6e042ca10a
-  - lupin_arbiter_app.health_watcher.ContainerHealthTracker@e8b512386a
-  - lupin_arbiter_app.health_watcher.RestartLoopTracker@04ab5b97f4
+  - lupin_arbiter_app.health_watcher.ContainerHealthTracker@485f173a1e
+  - lupin_arbiter_app.health_watcher.RestartLoopTracker@ca5d6c7053
   - lupin_arbiter_app.health_watcher.HealthWatcherLoop@ea1fbeccba
   - lupin_arbiter_app.poll_loop.run_poll_loop@42cc6fdf79
 ---

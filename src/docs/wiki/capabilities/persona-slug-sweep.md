@@ -10,6 +10,7 @@ pins:
   - scripts.sweep_persona_slug_canonicalization.discover_owners_from_bridges@229375e602
   - scripts.sweep_persona_slug_canonicalization.run_sweep@5f207e6bc3
   - scripts.sweep_persona_slug_canonicalization.main@edfc4ef044
+  - lupin_mcp.persona_normalization.dm_topic_for@dfab24b98c
 ---
 # Persona slug sweep
 

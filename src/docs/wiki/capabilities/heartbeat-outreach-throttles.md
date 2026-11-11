@@ -12,10 +12,11 @@ pins:
   - cosa.agents.heartbeat_arbiter.outreach_ledger.write_pending@b8cfa1f89a
   - cosa.agents.heartbeat_arbiter.ping_throttle.backoff_for_attempt@6111a5a436
   - cosa.agents.heartbeat_arbiter.ping_throttle.edge_key@02b176eb11
-  - cosa.agents.heartbeat_arbiter.ping_throttle.in_window@5203c800fa
+  - cosa.agents.heartbeat_arbiter.ping_throttle.in_window@b8d21601ec
   - cosa.agents.heartbeat_arbiter.ping_throttle.should_ping@67cc4bd23d
   - cosa.agents.heartbeat_arbiter.ping_throttle.trailing_window_allows@ddcf8ecf09
   - cosa.agents.heartbeat_arbiter.ping_throttle.under_global_cap@56cdc5aa07
+  - cosa.agents.heartbeat_arbiter.ping_throttle.prune_window@dfa2dc98a8
 ---
 # Heartbeat outreach throttles
 

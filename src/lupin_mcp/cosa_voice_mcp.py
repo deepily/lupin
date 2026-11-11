@@ -59,7 +59,7 @@ from typing import List, Optional, Union
 from pydantic import ValidationError
 from fastmcp import FastMCP
 
-from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp.persona_normalization import dm_topic_for as _derive_dm_topic
 from lupin_mcp import validation_alert_throttle
 
 # Import from lupin_cli.notifications (the notification library)
@@ -3659,42 +3659,6 @@ def commons_ask_async(
         body        = body,
         question_id = question_id,
     )
-
-
-def _derive_dm_topic( recipient: str ) -> str:
-    """
-    Derive a server-pattern-safe DM topic from a recipient persona name.
-
-    Phase 3 of the persona-name normalization plan
-    (`src/rnd/v0.1.9/2026.06.19-persona-name-normalization/`) routes this through
-    the shared `persona_slug` root so a DM topic ALWAYS equals the recipient's
-    canonical persona key with spaces → `_`: "Mr. Radio" → "dm-mr_radio",
-    "María"/"MARÍA" → "dm-maria". DM topics are always persona-derived, and the
-    store/bridges hold the canonical (accent-stripped, ASCII) pool form, so this
-    is the form that actually matches in practice.
-
-    NOTE — this REVERSES the 2026-05-17 Q8 "unicode all the way down" directive
-    that previously preserved exact unicode spelling ("María" → "dm-maría",
-    "中文" → "dm-中文", "jean-luc" → "dm-jean-luc"). Under the canonical root,
-    accents strip ("dm-maria"), non-Latin scripts reduce to "" ("中文" →
-    "dm-"), and internal separators map to a single underscore boundary
-    ("jean-luc" → "dm-jean_luc", bug 951a22be — they are NOT dropped). This
-    is intentional for real personas (all ASCII/accented-Latin pool names), but
-    it is a contract change on arbitrary input — see the Phase 3 flag.
-
-    Pairs with the server-side topic pattern at
-    `src/cosa/rest/routers/commons.py:100` (`_TOPIC_OR_QID_PATTERN`): the
-    canonical output is `[a-z0-9_-]+`, a strict subset of the accepted `[\\w-]+`.
-
-    Requires:
-        - recipient is a string or None
-
-    Ensures:
-        - return value starts with `"dm-"`
-        - the slug equals `persona_slug( recipient, sep='_' )` — canonical,
-          accent-stripped, lowercased, ASCII-only
-    """
-    return f"dm-{persona_slug( recipient, sep='_' )}"
 
 
 def _commons_ask_async_dispatch(
