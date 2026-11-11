@@ -20,14 +20,19 @@ pins:
   - scripts.seed_proxy_decisions.verify@4a5d2ff1a4
   - scripts.seed_proxy_decisions.clean_seed_data@fd23a3d4f5
   - scripts.seed_proxy_decisions.main@59cc47af4a
-  - scripts.seed_test_companions.seed_if_missing@10bf247c34
+  - scripts.seed_test_companions.seed_if_missing@9d306981f6
+  - scripts.export_test_companions.sql_literal@1d0b060d39
+  - scripts.export_test_companions.fetch_rows@e3cd7909e8
+  - scripts.export_test_companions.build_sql@cc719afa0b
+  - scripts.export_test_companions.main@25e6562f0e
 ---
 # Database setup, migration and seed scripts
 One-off setup scripts under `src/scripts/`. Most are idempotent or have a dry run.
 - `SolutionSnapshotMigrator` adds the default user id to existing snapshot files. Its `main` takes `--dry-run` and `--backup`.
 - `migrate_users` and `generate_secure_password` migrate the three mock users into the JWT database with random passwords. `validate_migration` checks that all exist and verify.
 - `create_notifications_table` creates the SQLite notifications table with its indexes. `validate_schema` checks every field and index.
-- `seed_if_missing` copies the companion users and API keys from the dev database to the test database.
+- `seed_if_missing` copies the companion users and API keys from the dev database to the test database. It skips the copy when `LUPIN_TEST_SEED_FROM_DEV` is `0`, as on the VM test server.
+- `export_test_companions` runs inside the :7999 container and prints the same companions as one SQL script, so the VM test server needs no dev database. `fetch_rows` reads them, `build_sql` writes the transaction, `sql_literal` quotes the JSON payload, and `main --check` prints counts only. Run it through `lupin-vm.sh test-server seed-companions`.
 - `seed_decisions` inserts 50 proxy decision scenarios into Postgres and the pgvector store. `ratify_suggested`, `verify` and `clean_seed_data` ratify, check and remove them.
 - `generate_embedding_via_api` gets an embedding from the running server.
 - `build_statements` builds a throwaway clone of the embedding tables in its own schema. `drop_statements` removes it in one statement.
