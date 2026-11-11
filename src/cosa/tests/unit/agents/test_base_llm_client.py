@@ -20,7 +20,7 @@ import asyncio
 import unittest
 from unittest.mock import Mock, patch
 
-from cosa.agents.base_llm_client import LlmClientInterface, BaseLlmClient
+from cosa.agents.base_llm_client import LlmClientInterface, BaseLlmClient, format_duration_ms
 
 
 class _ConcreteInterface( LlmClientInterface ):
@@ -61,8 +61,8 @@ class TestLlmClientInterface( unittest.TestCase ):
         self.assertIsNone( asyncio.run( inst.run_async( "p" ) ) )
 
     def test_format_duration( self ):
-        inst = _ConcreteInterface()
-        self.assertEqual( inst._format_duration( 1.5 ), "1500ms" )
+        self.assertEqual( format_duration_ms( 1.5 ), "1500ms" )
+        self.assertEqual( format_duration_ms( 0.0426 ), "42ms", "the fraction of a millisecond is cut, not rounded" )
 
     def test_print_metadata_with_duration( self ):
         """duration>0 → tokens/sec computed, duration formatted."""
