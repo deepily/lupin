@@ -18,7 +18,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.anyMetric@64cf0d7bf8
   - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.QaPaneRendererImpl@fe60594839
   - src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.schedulingOf@5176441fd7
-  - src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.SubmitJobsPaneRendererImpl@e7c1ad06b5
+  - src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.SubmitJobsPaneRendererImpl@686b1d635f
 ---
 # Transcript console, reading pane, Q&A pane and submit pane renderers
 
@@ -33,7 +33,7 @@ These four renderers paint the reading pane, one seat's live console, the Q&A pa
 - `ReadingPaneRendererImpl` takes an optional `approveSender`. With it, a click is first offered to the approve-link handler, ahead of the doc-link branch, so an approve link never navigates ([[task-approve-link]]). The priority link (`handleApprovePriorityLinkClick`) is offered next ([[task-approve-priority-link]]). Without it, approve links are left alone.
 - It also takes an optional `taskReader` and `tooltip`. With a reader, a click goes next to the 📋 view-link handler. The pane also watches for newly drawn approve links (`observeApproveLinks`) until unmount. The ticket text shows like an abstract 📋: in the pane in horizontal layout, else in the tooltip. A live action-required card owning the pane also sends it to the tooltip.
 - `QaPaneRendererImpl` paints the Q&A pane from its store. `formatMetric` shows milliseconds or `--`. `anyMetric` keeps the metrics strip hidden until one of the three stamps has landed.
-- `SubmitJobsPaneRendererImpl` wires the CC, research, test suite and TFE cards to the store. `schedulingOf` reads a card's schedule checkbox and time, plus the monopolize box when the card has one.
+- `SubmitJobsPaneRendererImpl` wires the CC, research, test suite and TFE cards to the store, and passes the research card's podcast choices. `schedulingOf` reads a card's schedule checkbox and time, plus the monopolize box when the card has one.
 
 ## How the parts work together
 

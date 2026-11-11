@@ -14,7 +14,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.refusalText@14d4588c8e
   - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.FlowRatioStoreImpl@558eac8d4b
   - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.createFlowRatioStore@cf9eb930f8
-  - src.lupin_app.static.js.multiplexer.stores.SubmitJobsStore.SubmitJobsStoreImpl@10f6a6f23d
+  - src.lupin_app.static.js.multiplexer.stores.SubmitJobsStore.SubmitJobsStoreImpl@1056c25a3d
   - src.lupin_app.static.js.multiplexer.stores.SubmitJobsStore.scheduledAtOf@7144b81980
   - src.lupin_app.static.js.multiplexer.stores.SubmitJobsStore.schedulingParams@3c29e8c790
   - src.lupin_app.static.js.multiplexer.stores.SubmitJobsStore.errorText@3f111b35ad
@@ -29,4 +29,4 @@ The stores for fleet status, the flow ratio, submitted jobs, commons entries and
 - `EpicStoriesStore.ts`. `EpicStoriesStoreImpl`: Caches the map of epic stories fetched from the server, loading it at most once. `createEpicStoriesStore`: Build the store. It fetches nothing until `load()` is called, and then only once.
 - `FleetStatusStore.ts`. `FleetStatusStoreImpl`: Holds fleet status, size cap and skeleton-crew state for the fleet pane. `serverDetail`: The server's own reason for a refusal, or the status when it gave none. `createFleetStatusStore`: Build the store. It fetches nothing when it is built.
 - `FlowRatioStore.ts`. `statusOf`: The HTTP status of a rejection, or null for one that never reached the server. `refusalText`: "<verb> — admin only", "<verb> (HTTP n)", or "<verb> (network)". `FlowRatioStoreImpl`: Holds the flow ratio reading, its settings and the manager pull state for the page. `createFlowRatioStore`: Build the store. It fetches nothing when it is built.
-- `SubmitJobsStore.ts`. `SubmitJobsStoreImpl`: Holds status, in-flight flags and candidates for the Submit Agentic Jobs cards. `scheduledAtOf`: `scheduled_at`, or null when the pair is incomplete. `schedulingParams`: The top-level scheduling directives for a v2 body. `errorText`: The message a caller should show for a thrown value of unknown shape. `createSubmitJobsStore`: Build the store.
+- `SubmitJobsStore.ts`. `SubmitJobsStoreImpl`: Holds status, in-flight flags and candidates for the Submit Agentic Jobs cards, and adds the podcast choices to a research submit. `scheduledAtOf`: `scheduled_at`, or null when the pair is incomplete. `schedulingParams`: The top-level scheduling directives for a v2 body. `errorText`: The message a caller should show for a thrown value of unknown shape. `createSubmitJobsStore`: Build the store.

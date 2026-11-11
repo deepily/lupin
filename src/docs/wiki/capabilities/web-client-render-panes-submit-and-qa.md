@@ -13,7 +13,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.templates.submitJobsChrome.scheduleRow@aab2ecb512
   - src.lupin_app.static.js.multiplexer.render.templates.submitJobsChrome.option@4469baf8b7
   - src.lupin_app.static.js.multiplexer.render.templates.submitJobsChrome.buildCcCard@466d447710
-  - src.lupin_app.static.js.multiplexer.render.templates.submitJobsChrome.buildResearchCard@5f22c78f26
+  - src.lupin_app.static.js.multiplexer.render.templates.submitJobsChrome.buildResearchCard@dba5ec4ff7
   - src.lupin_app.static.js.multiplexer.render.templates.submitJobsChrome.buildTestSuiteCard@81585035b7
   - src.lupin_app.static.js.multiplexer.render.templates.submitJobsChrome.buildTfeCard@3c6c56ed68
   - src.lupin_app.static.js.multiplexer.render.templates.submitJobsChrome.renderSubmitJobsChrome@a7f6ec266b
@@ -29,7 +29,7 @@ Pure element builders for the Submit Agentic Jobs pane and the question pane. Ea
 
 ## Submit pane
 - `renderSubmitJobsChrome()` returns the body and four cards: Claude Code, research, test suite and test-fix resume. `SubmitJobsPaneRenderer` is the only caller.
-- `buildCcCard`, `buildResearchCard` and `buildTestSuiteCard` return their card handles. Each starts collapsed with a right-pointing chevron, an empty status line, a hidden spinner and a checked dry-run box.
+- `buildCcCard`, `buildResearchCard` and `buildTestSuiteCard` return their card handles. The research card also holds podcast choices (type, Spanish, one-shot), shown only while "With podcast" is ticked. Each starts collapsed with a right-pointing chevron, an empty status line, a hidden spinner and a checked dry-run box.
 - `buildTfeCard` has no chevron and is always open. It holds a text area, a Resume button, a status line and a hidden candidates list.
 - The test suite card offers grouped suite options with `integration,e2e` chosen. Its file path and fail-fast rows start hidden.
 - `scheduleRow( prefix, withMonopolize )` adds a schedule checkbox and a hidden time input. The exclusive checkbox is left out when false, as for the test suite.

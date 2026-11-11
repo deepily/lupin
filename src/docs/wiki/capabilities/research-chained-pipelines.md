@@ -2,9 +2,9 @@
 capability: research-chained-pipelines
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@741cb974f2
+  - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@6090285370
   - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@1b18bbe364
-  - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@1bde28b1fd
+  - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@0875be9d18
   - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@3353b96e74
   - cosa.agents.deep_research_to_podcast.state.ChainedResult@69c6756c1a
   - cosa.agents.deep_research_to_presentation.state.ChainedResult@5d8d002f2d
@@ -30,9 +30,9 @@ Two queue jobs run [[deep-research]] and then hand its saved report to [[podcast
 - On success the job stores `artifacts["abstract"]`, a card with links to the report and the generated files.
 
 ## What differs between the two
-- Podcast options: `target_languages` (default `["en"]`) and `max_segments`. The queue factory passes `languages` but not `max_segments`, so `max_segments` is reachable only by constructing the job or agent directly.
+- Podcast options: `target_languages` (default `["en"]`), `script_type`, `review` and `max_segments` ([[podcast-script-types]]). The queue factory passes `languages` but not `max_segments`, so `max_segments` is reachable only by constructing the job or agent directly.
 - Presentation options: `target_duration_minutes`, `target_slide_count`, `theme`. The presentation job also takes `lead_model`, which sets the research leg's lead model only; the podcast job does not pass one (its agent accepts it).
-- The presentation leg builds its config from the INI file and overrides it with these options and `audience`, through `apply_job_overrides`, which the presentation job shares. The podcast leg uses a default `PodcastConfig()`.
+- The presentation leg builds its config from the INI file and overrides it with these options and `audience`, through `apply_job_overrides`, which the presentation job shares. The podcast leg builds its config with `resolve_podcast_config`: request, then script type, then INI.
 - Results: the podcast has `audio_path` and `script_path`, with per-language maps in `pg_artifacts`; the presentation has `yaml_path`, `marp_path` and `slide_count`. The podcast job can also copy to Google Drive ([[podcast-drive-publishing]]). It passes the job's `user_email` but no config. So the hook loads the Drive settings from the INI, and `podcast drive upload users` decides whether this user is uploaded.
 
 ## When not to use it

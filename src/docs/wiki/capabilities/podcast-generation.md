@@ -2,17 +2,17 @@
 capability: podcast-generation
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.podcast_generator.job.PodcastGeneratorJob@f6799acfdd
-  - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent@ea3d669e08
-  - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.do_all_async@35027a15ba
-  - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.from_saved_script@31deaf79fe
+  - cosa.agents.podcast_generator.job.PodcastGeneratorJob@835cb3212e
+  - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent@8633e1f5ba
+  - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.do_all_async@abdf9f3367
+  - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.from_saved_script@c8ab07d7ed
   - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.pause@f6228a01d2
   - cosa.agents.podcast_generator.orchestrator.PodcastGenerationError@0a67abdebe
   - cosa.agents.podcast_generator.orchestrator.auto_approval_notice@4fc01a1320
-  - cosa.agents.podcast_generator.state.PodcastScript@56902960a1
+  - cosa.agents.podcast_generator.state.PodcastScript@2bd4d3d944
   - cosa.agents.podcast_generator.tts_client.PodcastTTSClient@b609170958
   - cosa.agents.podcast_generator.audio_stitcher.PodcastAudioStitcher@7a56300067
-  - cosa.agents.podcast_generator.config.PodcastConfig@52ab30888c
+  - cosa.agents.podcast_generator.config.PodcastConfig@7e28175dd9
   - cosa.agents.podcast_generator.config.read_owner_email@5549eda88a
 ---
 # Podcast generation
@@ -22,11 +22,11 @@ pins:
 ## What it does
 - Order: load the document, analyze topics, generate the script, review it, translate and review each extra language, make audio per language, stitch. The state is an `OrchestratorState` (`get_state()` reports it).
 - `PodcastTTSClient` streams each segment from ElevenLabs as 24 kHz PCM; `PodcastAudioStitcher` joins them with silence between speakers into an MP3 (192k by default). The key is `ELEVENLABS_API_KEY`, else the key file `eleven11`. The cost in the completion summary is an estimate at 0.30 per 1,000 characters.
-- `target_languages` defaults to `["en"]`; The English script is always generated, reviewed and saved; English audio is made only if "en" is listed. `max_segments` limits TTS to the first N segments.
-- `from_saved_script` with `do_review_only_async` or `do_audio_only_async` resumes from a script file; only the CLI (`__main__.py`) uses them.
+- `target_languages` defaults to `["en"]`; The English script is always generated, reviewed and saved; English audio is made only if "en" is listed. `max_segments` limits TTS to the first N segments. A language whose translation fails is not produced, and the card names it.
+- `from_saved_script` with `do_review_only_async` or `do_audio_only_async` resumes from a script file; only the CLI uses them. A saved script records its type; an untyped one needs `script_type` and review-only refuses it.
 
 ## Invariants
-- The script review gate fails open: no answer within `script_review_timeout_seconds` (600) continues as "Approve script". The completion notice says the script was approved automatically (`auto_approval_notice`). Each translated script has its own gate, with "Skip language".
+- The script review gate fails open: no answer within `script_review_timeout_seconds` (600) continues as "Approve script". The completion notice says the script was approved automatically (`auto_approval_notice`). Each translated script has its own gate, with "Skip language". With review `one_shot` there is no gate ([[podcast-script-types]]).
 - "Revise script" followed by silence raises `PodcastGenerationError` and the job fails; it is not turned into an approval. The feedback wait is 300 seconds.
 - If the first script reply cannot be parsed, the job sends a low-priority note and asks for the script once more. A second parse failure fails the job, and the error gives the path of the saved raw reply. Script revision is not retried. A script with zero segments raises `PodcastGenerationError` before the gate; it is never offered for approval.
 - If some segments fail, the job asks whether to continue with partial audio and takes "yes" when nobody can answer. A language with no successful segment is skipped; if no language has audio, the job fails with a `RuntimeError` that names `ELEVENLABS_API_KEY`.
