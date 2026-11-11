@@ -350,7 +350,8 @@ for d in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
     # does NOT break the supported path — it only bites a bare `sudo git` typed by
     # hand. Reporting it as BLOCK was this check's first-run defect: it failed a VM
     # whose supported workflow was entirely healthy.
-    if sudo -n git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$d"; then
+    root_safe_dirs="$( sudo -n git config --global --get-all safe.directory 2>/dev/null )"
+    if grep -qxF "$d" <<< "$root_safe_dirs"; then
         report pass WARN "safe.directory registered for $d in root's gitconfig"
     else
         report fail WARN "no root-side safe.directory for $d — a bare 'sudo git -C $d' will refuse (the tooling passes it inline, so this is not blocking)" \
@@ -734,7 +735,7 @@ say_head "C. Compose / container"
 
 if ! command -v docker >/dev/null 2>&1; then
     report unknown BLOCK "docker not reachable" "check the docker daemon"
-elif ! docker ps --filter "name=^${CONTAINER}$" --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
+elif running_names="$( docker ps --filter "name=^${CONTAINER}$" --format '{{.Names}}' 2>/dev/null )"; ! grep -qx "$CONTAINER" <<< "$running_names"; then
     report fail BLOCK "container '$CONTAINER' is not running" \
                   "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps $SERVICE"
 else
@@ -804,7 +805,8 @@ PY
         && report pass BLOCK "container runs as uid 1001" \
         || report unknown BLOCK "container uid is '$cuid', expected 1001" "check the image's USER directive"
     if [ -n "${LUPIN_BRIDGE_GID:-}" ]; then
-        docker exec "$CONTAINER" id -G 2>/dev/null | tr ' ' '\n' | grep -qx "$LUPIN_BRIDGE_GID" \
+        container_gids="$( docker exec "$CONTAINER" id -G 2>/dev/null | tr ' ' '\n' )"
+        grep -qx "$LUPIN_BRIDGE_GID" <<< "$container_gids" \
             && report pass BLOCK "container joined bridge gid $LUPIN_BRIDGE_GID" \
             || report fail BLOCK "container is NOT in bridge gid $LUPIN_BRIDGE_GID — it cannot read host-written bridges" \
                           "add group_add: [\"\${LUPIN_BRIDGE_GID}\"] to the compose service, then --force-recreate"
@@ -1355,7 +1357,7 @@ if [ "${CLAUDE_CODE_USE_VERTEX:-}" = "1" ]; then
 else
     report pass WARN "Vertex not enabled in the host shell (CLAUDE_CODE_USE_VERTEX != 1) — skipping host region checks"
 fi
-if env | grep -q '^VERTEX_REGION_CLAUDE_5_OPUS='; then
+if printenv VERTEX_REGION_CLAUDE_5_OPUS >/dev/null 2>&1; then
     report fail WARN "VERTEX_REGION_CLAUDE_5_OPUS is set in the host shell — a per-model override routes ONE model elsewhere, silently" \
                   "unset VERTEX_REGION_CLAUDE_5_OPUS   # unless this is deliberate"
 else

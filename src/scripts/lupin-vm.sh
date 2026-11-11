@@ -966,7 +966,8 @@ for p in $APP_PORT $ARBITER_PORT; do
   echo \":\$p health -> \$st (after ~\$((i*8))s)\"
 done
 echo '== test server overlay (only when its containers exist) =='
-if sudo docker ps -a --format '{{.Names}}' | grep -Fxq $TEST_REST_SERVICE; then
+all_names=\"\$( sudo docker ps -a --format '{{.Names}}' )\" || all_names=\"\"
+if grep -Fxq $TEST_REST_SERVICE <<< \"\$all_names\"; then
   sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE restart $TEST_REST_SERVICE
   for i in \$(seq 1 90); do
     if python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:$TEST_PORT/health', timeout=2)\" 2>/dev/null; then echo \"$TEST_REST_SERVICE healthy after \$i poll(s)\"; break; fi

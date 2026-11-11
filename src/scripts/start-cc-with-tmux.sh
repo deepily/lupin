@@ -555,7 +555,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
         tmux kill-session -t "$_probe_session" 2>/dev/null || true
         echo "BRIEF-LENGTH-PROBE: ok — assembled command is $_inner_bytes bytes; this box's tmux accepts it."
         exit 0
-    elif printf '%s' "$_probe_err" | grep -qi 'command too long'; then
+    elif grep -qi 'command too long' <<< "$_probe_err"; then
         # The decisive verdict: this brief WILL blow the live spawn. Fail loud,
         # early, with the measured byte count — never a quiet dry_run pass.
         echo "BRIEF-LENGTH-PROBE: FAIL — assembled command is $_inner_bytes bytes; this box's tmux rejects it as 'command too long'. The live spawn WILL fail; trim the brief/memento." >&2

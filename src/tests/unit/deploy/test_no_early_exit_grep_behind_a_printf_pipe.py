@@ -65,3 +65,56 @@ def test_the_census_pattern_finds_the_old_shape():
                  """printf '%s\\n' "${1:-}" | grep -Fxq -- "$2\"""",
                  """printf '%s\\n' "$running_mounts" | grep -qx "/home/x" && y=true""" ]:
         assert PRINTF_PIPE_GREP_Q.search( old ), old
+
+
+# Any producer, any option order: `... | grep -q`, `| grep -E -q`, `| sudo grep --quiet`.
+ANY_PIPE_GREP_Q = re.compile( r"""\|\s*(?:sudo\s+(?:-n\s+)?)?grep\s+(?:-\S+\s+)*(?:-[A-Za-z]*q[A-Za-z]*|--quiet|--silent)\b""" )
+
+
+def _pipefail_scripts():
+    """Tracked src/scripts files that set pipefail (from git), plus the sourced VM lib."""
+    tracked = subprocess.run( [ "git", "-C", ROOT, "ls-files", "src/scripts" ], capture_output=True, text=True, check=True ).stdout.split()
+    found   = [ rel for rel in tracked if os.path.isfile( f"{ROOT}/{rel}" ) and "pipefail" in open( f"{ROOT}/{rel}", errors="replace" ).read() ]
+    # The lib sets no option itself, but is sourced into scripts that do, so it runs under pipefail.
+    return found + [ rel for rel in SCRIPTS if rel not in found ]
+
+
+def test_the_pipefail_population_is_found_and_names_the_scripts_that_matter():
+    """Control: the census walks a real population, not an empty loop."""
+    found = _pipefail_scripts()
+    assert len( found ) >= 40, len( found )
+    for rel in SCRIPTS + [ "src/scripts/hook-link-tick.sh", "src/scripts/tfe_to_cc_matrix.sh", "src/scripts/orphan-sweep-tick.sh", "src/scripts/start-cc-with-tmux.sh" ]:
+        assert rel in found, rel
+
+
+def test_every_pipe_into_grep_q_in_every_pipefail_script_reads_through_a_here_string():
+    """Census: no `<any producer> | grep -q` remains in a pipefail script."""
+    hits = []
+    for rel in _pipefail_scripts():
+        for n, text in enumerate( open( f"{ROOT}/{rel}", errors="replace" ).read().split( "\n" ), 1 ):
+            if text.lstrip().startswith( "#" ): continue
+            if ANY_PIPE_GREP_Q.search( text ): hits.append( f"{rel}:{n}: {text.strip()}" )
+    assert not hits, "pipe into grep -q (SIGPIPE race under pipefail):\n" + "\n".join( hits )
+
+
+def test_the_any_producer_pattern_finds_each_command_fed_shape_that_was_fixed():
+    """Control: the pattern matches every shape this row fixed, and spares a here-string."""
+    for old in [ """sudo docker ps -a --format '{{.Names}}' | grep -Fxq $TEST_REST_SERVICE; then""",
+                 """sudo -n git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$d"; then""",
+                 """docker exec "$C" id -G 2>/dev/null | tr ' ' '\\n' | grep -qx "$G" \\""",
+                 """if env | grep -q '^VERTEX_REGION_CLAUDE_5_OPUS='; then""",
+                 """crontab -l 2>/dev/null | grep -Fq "$TAG"; then""",
+                 """x | grep -E -q foo""", """x | grep --quiet foo""" ]:
+        assert ANY_PIPE_GREP_Q.search( old ), old
+    assert not ANY_PIPE_GREP_Q.search( """grep -qx "$C" <<< "$names" \\""" )
+    assert not ANY_PIPE_GREP_Q.search( """printf '%s\\n' "$r" | grep -m1 '^D=' | cut -d= -f2-""" )
+
+
+def test_command_fed_pipe_form_loses_and_here_string_form_survives_a_failing_early_match():
+    """Behaviour: the pipe form loses an early match; the here-string form keeps it."""
+    pipe = _bash( 'set -o pipefail; { echo lupin-rest-test; yes yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy | head -n 20000; } | grep -Fxq -- lupin-rest-test; echo rc=$?' )
+    assert "rc=0" not in pipe.stdout, "the command-fed pipe survived; the producer is too short to force SIGPIPE here"
+    here = _bash( 'set -o pipefail; N="$( echo lupin-rest-test; yes yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy | head -n 20000 )"; grep -Fxq -- lupin-rest-test <<< "$N"; echo rc=$?' )
+    assert here.stdout.strip() == "rc=0", here.stdout + here.stderr
+    empty = _bash( 'set -o pipefail; N="$( false )"; grep -Fxq -- lupin-rest-test <<< "$N"; echo rc=$?' )
+    assert empty.stdout.strip() == "rc=1", "a failed producer must read as no match: " + empty.stdout
