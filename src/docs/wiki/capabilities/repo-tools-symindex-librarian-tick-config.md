@@ -8,7 +8,6 @@ pins:
   - cosa.repo.symindex.librarian_tick.read_persona@bfb1570e2a
   - cosa.repo.symindex.librarian_tick.read_mobile_corpus@3e5c46846d
   - cosa.repo.symindex.librarian_tick.crontab_command@1b83cbb8d8
-  - cosa.repo.symindex.librarian_tick.holds_generated_block@99257915fa
   - cosa.repo.symindex.librarian_tick.install_moved_text@0453364e89
   - cosa.repo.symindex.librarian_tick.cron_lines_for@f736281e58
   - cosa.repo.symindex.librarian_tick.cron_lines@ab28a46f8d
@@ -35,6 +34,6 @@ How the tick ([[repo-tools-symindex-librarian-tick-run]]) reads its settings and
 
 ## Installing
 - `--print-install` prints the lines and changes nothing. `--install` is retired and prints `install_moved_text( root )`: the `cron_generate` command, which writes every Lupin cron line from the job registry. `--uninstall` goes through `edit_crontab`. `--status` only reads the crontab.
-- `crontab_command( environ, own_variable )` picks the crontab command: `LUPIN_CRONTAB` when set, so one scratch crontab covers every tool, else the tool's own variable, else `crontab`. `holds_generated_block( cmd )` is True when a line ends with `# lupin-cron-generated`, and False when the crontab cannot be read.
+- `crontab_command( environ, own_variable )` picks the crontab command: `LUPIN_CRONTAB` when set, so one scratch crontab covers every tool, else the tool's own variable, else `crontab`.
 - `edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag, owner, legacy )` holds the shared crontab lock, recorded under `owner`, for the whole read and write. `tag` and `legacy` go to `merge_lines`. It writes a timestamped backup first, and writes nothing if the backup fails. It raises `RuntimeError` on a failed crontab call or backup.
 - `load_crontab_lock` loads `workflow/scripts/crontab_lock.py` from `PLANNING_IS_PROMPTING_ROOT`. When the variable is unset or the file is absent it raises `InstallRefused`, and nothing is written.

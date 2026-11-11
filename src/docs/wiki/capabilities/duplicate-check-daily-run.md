@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.install_mode@7596ab9118
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
   - lupin_mcp.duplicate_check_daily.live_filer@832dcfdc1a
-  - lupin_mcp.duplicate_check_daily.live_auditor@46c2ce1135
+  - lupin_mcp.duplicate_check_daily.live_auditor@4cc714910e
   - lupin_mcp.duplicate_check_daily.main@7182ace7dc
   - lupin_mcp.duplicate_check_daily.record@0c6e420b03
   - lupin_mcp.duplicate_check_daily.rising_guard@9bf675aa57
@@ -36,5 +36,5 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - `limit_flag` gives `--ceiling N` when a ceiling is set, else `--cap N`. The cron lines use it.
 - `cron_lines` returns a 10:00 daily line and a reboot line 300 seconds after boot, which catches up from the last successful run. `--with-baseline` adds an 11:07 line. With `adaptive` it returns an hourly line (10:00 to 22:00) and the reboot line, both with `--adaptive`. A branch other than `main` is added as `--branch`.
 - `install_mode` handles `--print-install`, `--uninstall` and `--status` through the librarian's locked crontab editor. `--install` is retired: it prints the `cron_generate` command, which writes every cron line now.
-- `live_parts` builds the real parts without a call. `live_filer` files the triage rows over HTTP; `live_auditor` queues known-miss audits ([[duplicate-check-audit]]) with no model call.
+- `live_parts` builds the real parts without a call. `live_filer` files the triage rows over HTTP; `live_auditor` queues known-miss audits ([[duplicate-check-audit]]) with no model call. It names each finding by its id in the symbol index the sweep reads. That is not the checker's own `d-` id, so the sweep knows every queued item.
 - `main` needs `--cap` or `--ceiling`, unless it only removes or reports the cron lines. `--adaptive` needs `--ceiling`. Verdict lines are in [[duplicate-check-verdict-lines]].

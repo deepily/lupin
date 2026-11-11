@@ -8,7 +8,7 @@ pins:
   - cosa.repo.symindex.vector_refresh.run_refresh@f87af81c7a
   - cosa.repo.symindex.vector_refresh.cron_lines@09adf82286
   - cosa.repo.symindex.vector_refresh.write_status@4bd74cb0ee
-  - cosa.repo.symindex.vector_refresh.main@adac15d16d
+  - cosa.repo.symindex.vector_refresh.main@65085e6c3e
   - cosa.repo.symindex.vector_refresh.env_file_path@6220714314
   - cosa.repo.symindex.vector_refresh.carried_env@97e4d23411
   - cosa.repo.symindex.candidate_build.run@8c0684e323
