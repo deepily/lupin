@@ -16,6 +16,7 @@ import { headerLine } from "../jobs/jobsFormat";
 import { renderAccordion } from "../jobs/jobsRender";
 import type { JobsActions } from "../jobs/jobsRender";
 import type { JobEntry, JobRunStarted, JobsSummary } from "../jobs/types";
+import { teardownScaffold } from "./dom";
 import { renderSectionHeader, wireSectionCollapse } from "./templates/sectionHeader";
 import type { SectionHeaderHandle } from "./templates/sectionHeader";
 
@@ -131,8 +132,7 @@ class BackgroundJobsRendererImpl implements BackgroundJobsRenderer {
 
   unmount(): void {
     if ( this.pollId !== null ) this.clearIntervalFn( this.pollId );
-    this.collapseOff?.();
-    this.root?.replaceChildren();
+    teardownScaffold( [], this.collapseOff, this.root );
     this.pollId = null; this.collapseOff = null; this.root = null;
     this.header = null; this.errorEl = null; this.mountEl = null;
   }
