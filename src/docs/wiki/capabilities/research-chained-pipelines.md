@@ -2,9 +2,9 @@
 capability: research-chained-pipelines
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@6090285370
+  - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@07297bd4b4
   - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@1b18bbe364
-  - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@0875be9d18
+  - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@ccb618c09b
   - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@3353b96e74
   - cosa.agents.deep_research_to_podcast.state.ChainedResult@69c6756c1a
   - cosa.agents.deep_research_to_presentation.state.ChainedResult@5d8d002f2d
@@ -27,7 +27,7 @@ Two queue jobs run [[deep-research]] and then hand its saved report to [[podcast
 - `dry_run` sends only breadcrumb notifications and mock paths; it builds no agent and reports zero cost. The jobs share one frame, `_run_chained_pipeline` and `_run_chained_dry_run` in `AgenticJobBase`, and the agents share the research leg in `ChainedDeepResearchAgent`.
 - `source_document` (a list of absolute paths, or one string; `/api/v2/submit` takes it as `<scope>/<path>`) reaches only the research prompt. It is kept out of the session-name gist, the notifications and the saved report's query field.
 - `budget` limits research only. A `BudgetExceededError` is re-raised as a plain exception, which ends the run `FAILED`.
-- On success the job stores `artifacts["abstract"]`, a card with links to the report and the generated files.
+- On success the job stores `artifacts["abstract"]`, a card with links to the report and the generated files. A language whose translation failed has no files and no links. The agent passes the generator's `failed_translations` through `pg_artifacts`. The card names each one as "Translation failed (not produced)", with its reason.
 
 ## What differs between the two
 - Podcast options: `target_languages` (default `["en"]`), `script_type`, `review` and `max_segments` ([[podcast-script-types]]). The queue factory passes `languages` but not `max_segments`, so `max_segments` is reachable only by constructing the job or agent directly.

@@ -170,6 +170,41 @@ escaped with a backslash, so a pause tag is written <break time=\\"1.5s\\"/> the
 # Prompt Templates
 # =============================================================================
 
+def clip_to_ceiling( text: str, max_source_chars: Optional[ int ] ) -> str:
+    """
+    Clip source text to the configured ceiling; None means no clip.
+
+    Requires:
+        - text is a string
+        - max_source_chars is None or a non-negative int
+
+    Ensures:
+        - returns text unchanged when the ceiling is None or text is not longer than it
+        - otherwise returns the first max_source_chars characters
+    """
+    if max_source_chars is not None and len( text ) > max_source_chars: return text[ :max_source_chars ]
+    return text
+
+
+def audience_block( audience: Optional[ str ], audience_context: Optional[ str ] ) -> str:
+    """
+    Build the audience guidance block that the prompts embed.
+
+    Requires:
+        - audience is None or an audience name; audience_context is None or free text
+
+    Ensures:
+        - returns "" when neither adds anything
+        - the audience's dialogue guidelines come first, then the additional context
+    """
+    block = ""
+    if audience:
+        guidelines = AUDIENCE_DIALOGUE_GUIDELINES.get( audience, "" )
+        if guidelines: block += f"\n{guidelines}\n"
+    if audience_context: block += f"\n**Additional Audience Context**: {audience_context}\n"
+    return block
+
+
 def get_content_analysis_prompt(
     research_content: str,
     max_topics: int = 5,
@@ -200,15 +235,9 @@ def get_content_analysis_prompt(
     # Truncate research to the configured ceiling (was a hardcoded 50000). The
     # ceiling is passed in from config (PodcastConfig.max_source_chars, loaded
     # from the shared `agent source content max chars` INI key); None = no clip.
-    content_preview = research_content[ :max_source_chars ] if ( max_source_chars is not None and len( research_content ) > max_source_chars ) else research_content
+    content_preview = clip_to_ceiling( research_content, max_source_chars )
 
-    audience_instruction = ""
-    if audience:
-        audience_guidelines = AUDIENCE_DIALOGUE_GUIDELINES.get( audience, "" )
-        if audience_guidelines:
-            audience_instruction += f"\n{audience_guidelines}\n"
-    if audience_context:
-        audience_instruction += f"\n**Additional Audience Context**: {audience_context}\n"
+    audience_instruction = audience_block( audience, audience_context )
 
     return f"""Analyze this research document for podcast conversion.
 
@@ -267,7 +296,7 @@ def get_script_generation_prompt(
     # Truncate research to the configured ceiling (was a hardcoded 30000). The
     # ceiling is passed in from config (PodcastConfig.max_source_chars, loaded
     # from the shared `agent source content max chars` INI key); None = no clip.
-    research_preview = research_content[ :max_source_chars ] if ( max_source_chars is not None and len( research_content ) > max_source_chars ) else research_content
+    research_preview = clip_to_ceiling( research_content, max_source_chars )
 
     # Build host descriptions
     host_a_desc = host_a_personality.to_prompt_description()
@@ -292,13 +321,7 @@ Generate this podcast script in {language_name}.
 """
 
     # Build audience instruction block
-    audience_instruction = ""
-    if audience:
-        audience_guidelines = AUDIENCE_DIALOGUE_GUIDELINES.get( audience, "" )
-        if audience_guidelines:
-            audience_instruction += f"\n{audience_guidelines}\n"
-    if audience_context:
-        audience_instruction += f"\n**Additional Audience Context**: {audience_context}\n"
+    audience_instruction = audience_block( audience, audience_context )
 
     return f"""Create a podcast script based on the following analysis and source material.
 {language_instruction}

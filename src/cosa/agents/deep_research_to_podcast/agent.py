@@ -341,6 +341,8 @@ class DeepResearchToPodcastAgent( ChainedDeepResearchAgent ):
                 "duration_min" : script.estimated_duration_minutes if script else 0,
                 "audio_paths_by_language"  : state.get( "audio_paths_by_language" ),
                 "script_paths_by_language" : state.get( "script_paths_by_language" ),
+                # Languages whose translation failed; the card names them, since they have no links.
+                "failed_translations"      : dict( agent._failed_translations ),
             },
             "cancelled"   : False,
         }

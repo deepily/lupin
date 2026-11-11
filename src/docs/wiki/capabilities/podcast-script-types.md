@@ -9,8 +9,8 @@ pins:
   - cosa.agents.podcast_generator.script_types.apply_script_type@176ccc6a37
   - cosa.agents.podcast_generator.script_types.resolve_podcast_config@2e4fb69ec1
   - cosa.agents.podcast_generator.orchestrator.one_shot_notice@34aef7462e
-  - cosa.agents.podcast_generator.prompts.status_report.get_status_analysis_prompt@766bb9e785
-  - cosa.agents.podcast_generator.prompts.status_report.get_status_script_prompt@179b47468b
+  - cosa.agents.podcast_generator.prompts.status_report.get_status_analysis_prompt@23f1326503
+  - cosa.agents.podcast_generator.prompts.status_report.get_status_script_prompt@76236e6eac
   - cosa.agents.podcast_generator.state.DigestItem@e4dfb2b7b9
   - cosa.agents.podcast_generator.state.StatusDigest@77a13fb494
   - cosa.agents.podcast_generator.state.StatusDigest.all_items@7e9285cc20
@@ -29,7 +29,7 @@ A script type is a frozen profile in `script_types.py`: prompts, length, analysi
 - `apply_script_type` sets the type and a concrete review on a config. Precedence is request, then profile, then INI. `resolve_podcast_config` builds the config from the INI first.
 - `status_report` reads its own INI keys for duration, exchanges and audience (`podcast status report *`). Research uses the generic podcast keys.
 - A status report is analysed into a `StatusDigest` of `DigestItem` rows, each with the source line it came from. `unsupported_items( text )` lists items whose line is not in the document.
-- `get_status_analysis_prompt` and `get_status_script_prompt` build the two status prompts; `max_source_chars` clips the document.
+- `get_status_analysis_prompt` and `get_status_script_prompt` build the two status prompts; `max_source_chars` clips the document, and both prompts use the shared `clip_to_ceiling` and `audience_block` of [[podcast-prompts]].
 - `one_shot_notice( True )` is the completion sentence saying nobody read the script. It is `""` otherwise.
 - `spanish_stopword_ratio( text )` is the share of Spanish function words, 0.0 for no words. A Spanish script under `podcast translation min spanish stopword ratio` (0.20) fails as untranslated.
 
