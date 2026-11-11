@@ -204,8 +204,10 @@ def test_the_command_files_a_back_fill_with_file_only_and_needs_exactly_one_of_r
 
 def test_the_command_builds_the_live_store_when_a_row_is_given_and_none_is_passed( folder, monkeypatch ):
     store = Amender()
-    monkeypatch.setattr( dv.ff, "LiveStore", lambda: store )
-    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=io.StringIO() ) == 0 and store.sent == [ ( ROW, LINE_OK ) ]
+    seen  = { }
+    monkeypatch.setattr( dv, "seat_actor", lambda: "clayton 26f75e16" )
+    monkeypatch.setattr( dv, "SeatStore", lambda actor: seen.update( actor=actor ) or store )
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=io.StringIO() ) == 0 and store.sent == [ ( ROW, LINE_OK ) ] and seen == { "actor": "clayton 26f75e16" }
 
 
 # ---- the weekly table's side ----
@@ -303,3 +305,54 @@ def test_a_line_for_a_run_with_no_readable_file_or_a_finding_without_a_key_settl
 def test_a_damaged_verdicts_line_is_raised_by_settled_keys_as_read_verdicts_raises_it( folder ):
     ( folder / "verdicts.jsonl" ).write_text( "garbage\n" )
     with pytest.raises( ValueError, match="line 1 is not a verdict record" ): rb.settled_keys( folder )
+
+
+class StrictStore:
+    """A store that answers an amend with HTTP 422 unless the body names an actor."""
+
+    def __init__( self ):
+        self.bodies = [ ]
+
+    def request( self, method, url, api_key, timeout, body=None ):
+        self.bodies.append( body )
+        if not body.get( "actor" ): return False, 422, { "detail": "actor: Field required" }
+        return True, 200, { "item": { } }
+
+
+@pytest.fixture
+def strict( monkeypatch ):
+    """Ensures: the hooks' store client talks to a StrictStore, and the seat is Clayton's."""
+    from lupin_cli.claude_code.hooks.lib import task_store_client as client
+    store = StrictStore()
+    monkeypatch.setattr( client, "_request", store.request )
+    monkeypatch.setattr( client, "read_api_key", lambda: "key" )
+    from lupin_cli.claude_code.hooks.lib import task_store_settings
+    monkeypatch.setattr( task_store_settings, "load_task_store_settings", lambda: { "api_base_url": "http://x", "timeout_seconds": 5 } )
+    monkeypatch.setattr( dv, "seat_actor", lambda: "clayton 26f75e16", raising=False )
+    return store
+
+
+def test_the_command_amends_the_row_with_an_actor_stamped_from_the_seat_so_the_store_accepts_it( folder, strict ):
+    out = io.StringIO()
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=out ) == 0, out.getvalue()
+    assert strict.bodies[ 0 ][ "actor" ] == "clayton 26f75e16" and strict.bodies[ 0 ][ "note" ] == LINE_OK and strict.bodies[ 0 ][ "authority" ] == "standing"
+    assert len( lines( folder ) ) == 1
+
+
+def test_the_stores_amend_refuses_a_call_with_no_actor_and_the_command_leaves_the_file_as_it_was( folder, strict, monkeypatch ):
+    from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
+    from lupin_mcp import duplicate_check_filing as ff
+    bare = ff.LiveStore()
+    assert bare.amend( ROW, LINE_OK )[ 1 ] == 422, "the filer's own store sends no actor, which is the defect"
+    monkeypatch.setattr( dv, "seat_actor", lambda: "" )
+    out = io.StringIO()
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=out ) == 3 and "HTTP 422" in out.getvalue() and not ( folder / "verdicts.jsonl" ).exists()
+
+
+def test_the_seat_actor_is_the_bridge_persona_and_the_session_id_the_way_task_amend_stamps_it( monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    monkeypatch.setattr( sb, "get_claude_session_id", lambda: "26f75e16-6b01-4705-b16f-85cb4f32e043" )
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } if sid.startswith( "26f75e16" ) else None )
+    assert dv.seat_actor() == "clayton 26f75e16"
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: None )
+    with pytest.raises( dv.VerdictRefused, match="no voice persona" ): dv.seat_actor()

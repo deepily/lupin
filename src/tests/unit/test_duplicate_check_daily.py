@@ -461,10 +461,10 @@ def test_the_live_filer_files_with_the_configured_manager_the_roster_and_the_liv
     monkeypatch.setattr( vh, "pick_declared_managers_from_env", lambda project: [ "roster-" + project ] )
     monkeypatch.setattr( dd.filing, "LiveStore", lambda: "store" )
     monkeypatch.setattr( dd.filing, "file_findings", lambda findings, folder, store, declared, roster: ( findings, folder, store, declared, roster ) )
-    assert dd.live_filer( [ "f" ], tmp_path ) == ( [ "f" ], tmp_path, "store", "manager-on-duty", [ "roster-lupin" ] ), "an empty setting falls back to the placeholder"
+    assert dd.live_filer( [ "f" ], tmp_path ) == ( [ "f" ], tmp_path, "store", "", [ "roster-lupin" ] ), "an empty setting is passed on empty, so the filer refuses it rather than guessing"
     seen[ "value" ] = "real-manager"
     assert dd.live_filer( [ "f" ], tmp_path )[ 3 ] == "real-manager"
-    assert seen[ "env" ] == "LUPIN_CONFIG_MGR_CLI_ARGS" and seen[ "key" ] == "arbiter manager on duty"
+    assert seen[ "env" ] == "LUPIN_CONFIG_MGR_CLI_ARGS" and seen[ "key" ] == "duplicate check triage owner"
 
 
 def test_a_filer_that_raises_is_recorded_and_the_run_still_writes_its_file_and_advances_last_success( repo, tmp_path ):

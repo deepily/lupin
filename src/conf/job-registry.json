@@ -12,7 +12,7 @@
       "PYTHONPATH": "{root}/src",
       "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
       "DEEPILY_DATA_DIR": "{deepily_data}",
-      "COSA_VOICE_MANAGERS__LUPIN": "Tiberius, Mr. Radio"
+      "COSA_VOICE_MANAGERS__LUPIN": "Cheech, Mr. Radio"
     },
     "owner_note": "owner_confirmed false means the owner is cheech by default and no open row names another seat (Cheech, 2026-11-07)",
     "schedule_note": "A job with cron_tag takes its schedule from the installed crontab lines that end with # <tag>; the schedule here is the fallback when none is installed or the crontab cannot be read; the duplicate-check fallback is the three lines installed on 2026-11-07, which any hourly run also covers; a job with cron_managed true has its lines written by lupin_mcp.cron_generate from this entry, and cron_replaces names hand-written lines its install removes"

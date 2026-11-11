@@ -37,6 +37,30 @@ class VerdictRefused( ValueError ):
     """A verdict line that was not written, with the reason in the message."""
 
 
+def seat_actor():
+    """
+    Name the seat running this command, the way the task_amend tool names its caller.
+
+    Ensures:
+        - returns "<persona key> <8-hex session id>" read from the session bridge
+    Raises:
+        - VerdictRefused when the bridge holds no voice persona for this session, so the store is never sent a made-up actor
+    """
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    sid     = sb.get_claude_session_id()
+    persona = sb.get_voice_persona( sid )
+    if not persona or not persona.get( "name" ): raise VerdictRefused( f"session {sid[ :8 ]} has no voice persona in its bridge, so the amend has no actor to carry" )
+    return f"{persona[ 'name' ].lower()} {sid[ :8 ]}"
+
+
+class SeatStore( ff.LiveStore ):
+    """The filer's HTTP store, with every amend carrying the calling seat as its actor."""
+
+    def __init__( self, actor, settings=None, api_key=None ):
+        super().__init__( settings, api_key )
+        self.amend_extra = { **self.amend_extra, "actor": actor }
+
+
 def parse_line( line ):
     """
     Check one verdict line against the agreed format.
@@ -141,6 +165,7 @@ def main( argv=None, out=None, amender=None ):
     Ensures:
         - takes the line as its one argument; --row names the triage row to amend, or --file-only writes the file alone, one of the two being needed
         - --data-dir holds the check's folder, as reuse_behaviour's flag does
+        - the live row amend carries the seat's actor, as task_amend does; the store refuses one with none
         - returns 0 with the written line printed; 3 with the reason printed and nothing written
     """
     ap = argparse.ArgumentParser( description="Write one daily duplicate check verdict line." )
@@ -153,7 +178,7 @@ def main( argv=None, out=None, amender=None ):
     out = out if out is not None else sys.stdout
     folder = pathlib.Path( a.data_dir or rr.default_data_dir( cu.get_project_root() ) ) / rb.CHECK_FOLDER
     try:
-        rec = write_verdict( a.line, folder, a.row, amender if amender is not None or a.row is None else ff.LiveStore() )
+        rec = write_verdict( a.line, folder, a.row, amender if amender is not None or a.row is None else SeatStore( seat_actor() ) )
     except ValueError as e:
         print( f"REFUSING: {e}. Nothing was written.", file=out )
         return EXIT_REFUSED
