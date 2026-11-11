@@ -540,3 +540,16 @@ def test_a_spooled_row_over_the_cap_is_not_sent_and_marks_nothing_and_a_run_give
     exact = { **big, "correlation_key": "epic:dupcheck-run-exact", "body": "y" * ff.BODY_LIMIT }
     ff.write_pending( tmp_path, [ exact ] )
     assert run_once( tmp_path, [], Store() )[ ff.OVERSIZE ] == [], "a body exactly at the limit is sent"
+
+
+def test_the_configured_triage_owner_is_on_the_rosters_the_cron_jobs_and_the_servers_read():
+    import configparser
+    root = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    ini  = configparser.RawConfigParser( inline_comment_prefixes=None )
+    ini.read( root / "src/conf/lupin-app.ini", encoding="utf-8" )
+    owners = [ v for s in ini.sections() for k, v in ini.items( s ) if k == "duplicate check triage owner" ]
+    assert len( owners ) == 1 and owners[ 0 ].strip(), "the INI names exactly one triage owner"
+    registry = json.loads( ( root / "src/conf/job-registry.json" ).read_text( encoding="utf-8" ) )[ "defaults" ][ "run_env" ][ "COSA_VOICE_MANAGERS__LUPIN" ]
+    roster   = [ n.strip() for n in registry.split( "," ) ]
+    assert ff.triage_owner( owners[ 0 ].strip(), roster )[ "owner" ] == "cheech", f"the registry roster {roster!r} must hold the INI's triage owner or every cron run refuses"
+    assert "Tiberius" not in roster, "Tiberius is a lupin-mobile seat, not a lupin manager"
