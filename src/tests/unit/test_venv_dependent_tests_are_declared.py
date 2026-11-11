@@ -214,6 +214,18 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "Measured BOTH ways at c7c456cb6 in one worktree, the `.venv` symlink moved aside and "
         "restored, the interpreter pinned to the main checkout so only the target moved: 33 passed "
         "with a `.venv`, 33 passed without, 33 passed with again.",
+    "test_librarian_tick.py":
+        "the one `.venv/bin/python` is the EXPECTED TEXT of the retired-install message "
+        "(`install_moved_text( \"/m\" )` is asserted equal to a literal). Nothing opens, runs or checks "
+        "that path, so it is text in the test and never a property of the tree running the suite. "
+        "Measured BOTH ways at 17fce2541 in one worktree, the two files below run together, the `.venv` "
+        "symlink moved aside and restored with `readlink` read after, the interpreter pinned to the main "
+        "checkout so only the target moved: 222 passed with a `.venv`, 222 passed without, 222 passed with again.",
+    "test_duplicate_check_daily.py":
+        "the one `.venv/bin/python` is the EXPECTED TEXT of the reinstall instruction "
+        "(`reinstall_command( ... )` is asserted equal to a literal). Nothing opens, runs or checks that "
+        "path. Measured in the same three-arm run as `test_librarian_tick.py` (both files together, 222 tests): "
+        "222 passed with a `.venv`, 222 passed without, 222 passed with again.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "
