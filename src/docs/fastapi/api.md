@@ -5139,6 +5139,9 @@ caller's persona and session id; only the id is used, and the card names the sea
 |-------|------|-------------|
 | path | string |  |
 | actor | string |  |
+| script_type |  |  |
+| languages |  |  |
+| review |  |  |
 
 
 ## AskRequest
@@ -6486,6 +6489,9 @@ Body for POST /api/podcast-proxy/from-viewer: the document as `<scope>/<path>`.
 | Field | Type | Description |
 |-------|------|-------------|
 | path | string |  |
+| script_type |  |  |
+| languages |  |  |
+| review |  |  |
 
 
 ## VoicePersonaSampleRequest
