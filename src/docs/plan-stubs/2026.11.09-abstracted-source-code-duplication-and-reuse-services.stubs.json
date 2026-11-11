@@ -5,7 +5,7 @@
     "plan_number": 1,
     "plan_name": "Code-health abstraction",
     "correlation_key": "epic:code-health-abstraction-build",
-    "owner_persona": "maria",
+    "owner_persona": "cheech",
     "phases": [
         {
             "phase": 0,
@@ -179,7 +179,7 @@
                     "item_class": "task",
                     "priority": "P2",
                     "acceptance": "EXECUTOR: AI. The Step 9 author names the lupin-mobile session's owner and manager and files the store row; done when the row exists with both named",
-                    "owner_role": "manager",
+                    "owner_role": "tiffany (lupin-mobile session)",
                     "depends_on": [
                         "ph1-s11"
                     ]
@@ -190,7 +190,7 @@
                     "item_class": "task",
                     "priority": "P2",
                     "acceptance": "EXECUTOR: AI, by a lupin-mobile session. Its registry rows carry its repo key and its per-repo INI keys exist with twins; lupin-side code changed for it holds 100% lines, branches and functions on the changed files",
-                    "owner_role": "lupin-mobile session",
+                    "owner_role": "tiffany (lupin-mobile session)",
                     "depends_on": [
                         "ph2-s1",
                         "ph0-s2"
@@ -202,7 +202,7 @@
                     "item_class": "gate",
                     "priority": "P2",
                     "acceptance": "EXECUTOR: AI. D-AC2 passes: a script reads the repo's runs.jsonl and reports 14 consecutive days, counted from the first green one, each with at least one line status ok, failure null, trigger cron; skipped and reboot lines do not count",
-                    "owner_role": "lupin-mobile session",
+                    "owner_role": "tiffany (lupin-mobile session)",
                     "depends_on": [
                         "ph2-s2"
                     ]
