@@ -3,7 +3,7 @@ capability: utils-atomic-json
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.atomic_json.load_json_section@2f34252d1b
-  - cosa.utils.atomic_json.write_json_atomic@c275b6195a
+  - cosa.utils.atomic_json.write_json_atomic@9bd982618d
   - cosa.utils.atomic_json.load_json_dict@33b46df3c0
 ---
 # Atomic JSON files
@@ -22,4 +22,4 @@ Three helpers the arbiter and the worktree ledgers share to write a JSON file wh
 
 ## Invariants
 - `load_json_section` never raises. A missing or unreadable file, bad JSON, a non-object file or a non-dict value gives `{}`. `load_json_dict` never raises either: an absent or unreadable file, bad JSON or a non-object top level gives `{}`, or the `default` when one is passed.
-- `write_json_atomic` never swallows an `OSError`.
+- `write_json_atomic` never swallows an `OSError`. It serialises first, so an unserialisable value raises before any file exists. If the write or the rename fails it removes its temp file and re-raises.
