@@ -16,6 +16,7 @@ import xmltodict
 from pydantic import Field, field_validator, model_validator
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
 
 
 def _says_no_entry( matched_entry ):
@@ -105,10 +106,7 @@ class ScriptMatcherResponse( BaseXMLModel ):
             - Returns float in [0.0, 1.0]
             - Returns 0.0 on parse failure
         """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return clamp_unit( float_or_zero( self.confidence ) )
 
     def is_match( self ):
         """
@@ -367,10 +365,7 @@ class BatchScriptMatcherResponse( BaseXMLModel ):
             - Returns float in [0.0, 1.0]
             - Returns 0.0 on parse failure
         """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return clamp_unit( float_or_zero( self.confidence ) )
 
     def is_match( self ):
         """
@@ -607,10 +602,7 @@ class VerificationResponse( BaseXMLModel ):
             - Returns float in [0.0, 1.0]
             - Returns 0.0 on parse failure
         """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return clamp_unit( float_or_zero( self.confidence ) )
 
     @classmethod
     def quick_smoke_test( cls, debug=False ):
