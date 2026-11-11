@@ -1,10 +1,10 @@
 """
 Unit tests for Coder tool-use notification summaries (2026-04-18).
 
-Both TFE and BFE orchestrators carry an identical `_summarize_tool_use`
-staticmethod that digests a ToolUseBlock into a compact, informative
+The test fix and bug fix orchestrators share `summarize_tool_use`,
+which digests a ToolUseBlock into a compact, informative
 single-line string for Phase 3 progress notifications. These tests
-lock down the contract for both copies.
+lock down its contract.
 
 Replaces the prior bare-name format ("Coder: Bash") which was opaque
 over long runs.
@@ -12,8 +12,7 @@ over long runs.
 
 from types import SimpleNamespace
 
-from cosa.agents.test_fix_expediter.orchestrator import TFEOrchestrator
-from cosa.agents.bug_fix_expediter.orchestrator import BFEOrchestrator
+from cosa.agents.shared.tool_use_summary import summarize_tool_use
 
 
 def _block( name: str, **inputs ) -> SimpleNamespace:
@@ -21,8 +20,8 @@ def _block( name: str, **inputs ) -> SimpleNamespace:
     return SimpleNamespace( name=name, input=inputs )
 
 
-# The two helpers are textually identical copies; test both to catch drift.
-SUMMARIZERS = [ TFEOrchestrator._summarize_tool_use, BFEOrchestrator._summarize_tool_use ]
+# One helper serves both expediters; the loops below stay so each case reads the same.
+SUMMARIZERS = [ summarize_tool_use ]
 
 
 def test_bash_includes_command_first_line():

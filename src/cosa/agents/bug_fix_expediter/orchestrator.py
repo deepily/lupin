@@ -45,6 +45,7 @@ from cosa.agents.bug_fix_expediter.plan_writer import PlanWriter
 from cosa.agents.shared.git_strategist import GitStrategist
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.fix_executor import FixExecutor
+from cosa.agents.shared.tool_use_summary import summarize_tool_use
 
 # SWE Team reuse — safety, hooks, test runner (kept for back-compat;
 # FixExecutor imports these directly, but existing BFE test fixtures may
@@ -1452,7 +1453,7 @@ class BFEOrchestrator:
                                 await post_tool_hook( block.name, block.input, guard )
                             await self._notify(
                                 voice_io,
-                                f"Coder: {self._summarize_tool_use( block )}",
+                                f"Coder: {summarize_tool_use( block )}",
                                 priority="low",
                             )
                 elif isinstance( message, TextBlock ):
@@ -1655,28 +1656,6 @@ class BFEOrchestrator:
         lines.append( f"- `git -C {worktree_path} log --oneline`" )
         lines.append( f"- `git -C {worktree_path} diff --stat origin/main`" )
         return lines
-
-    @staticmethod
-    def _summarize_tool_use( block ) -> str:
-        """
-        Compact single-line summary of a ToolUseBlock for progress notifications.
-
-        Gives a tool-specific digest that surfaces the key argument instead of the bare
-        tool name. Parity with TFE's `TFEOrchestrator._summarize_tool_use`. Truncated to 100 chars.
-        """
-        name = block.name
-        inp  = block.input or {}
-        if name == "Bash":
-            cmd = inp.get( "command", "" ) or ""
-            first_line = cmd.splitlines()[ 0 ] if cmd else ""
-            return f"Bash: {first_line[ :100 ]}" if first_line else "Bash"
-        if name in ( "Read", "Edit", "Write" ):
-            fp = inp.get( "file_path", "" ) or ""
-            return f"{name}: {fp[ -100: ]}" if fp else name
-        if name in ( "Grep", "Glob" ):
-            pat = inp.get( "pattern", "" ) or ""
-            return f"{name}: {pat[ :100 ]}" if pat else name
-        return name
 
     def _build_tester_options( self, guard, cosa_interface ):
         """

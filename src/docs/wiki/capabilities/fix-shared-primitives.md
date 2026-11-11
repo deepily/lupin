@@ -10,6 +10,7 @@ pins:
   - cosa.agents.shared.git_strategist.GitStrategist.commit_and_pr_multi@2faed2d084
   - cosa.agents.shared.plan_writer.PlanWriter.write_plan@7642a07cc3
   - cosa.agents.shared.report_writer.ReportWriter.write@a665de39e7
+  - cosa.agents.shared.tool_use_summary.summarize_tool_use@dd0edceb77
 ---
 # Shared fix primitives
 
@@ -34,5 +35,6 @@ Both [[fix-expediter-bfe]] and [[fix-expediter-tfe]] use these: a coder and test
 - Both return a dict with an `error` field instead of raising.
 
 ## Plan and report files
+- `summarize_tool_use` turns a Coder tool call into its `Coder:` progress line: the Bash command, file path or search pattern, cut to 100 characters.
 - `PlanWriter.write_plan` writes under `io/swe-team/plans/<user email>/`, named `<date>-<slug>-plan.md`.
 - `ReportWriter.write` writes under `io/swe-team/reports/<user email>/`. The name carries the configured zone's abbreviation at write time, so it follows daylight saving. A missing or invalid `app timezone` key raises when the writer is built.

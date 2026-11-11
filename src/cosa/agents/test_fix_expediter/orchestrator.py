@@ -29,6 +29,7 @@ import cosa.utils.util as cu
 
 from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.shared.resume_guard import resume_covers
+from cosa.agents.shared.tool_use_summary import summarize_tool_use
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
     TFEPhase,
@@ -1485,7 +1486,7 @@ class TFEOrchestrator:
                                     files_changed.append( file_path )
                                 await post_tool_hook( block.name, block.input, guard )
                             await self._notify(
-                                f"Coder: {self._summarize_tool_use( block )}",
+                                f"Coder: {summarize_tool_use( block )}",
                                 priority="low",
                             )
                 elif isinstance( message, TextBlock ):
@@ -1704,29 +1705,6 @@ class TFEOrchestrator:
         lines.append( f"- `git -C {worktree_path} log --oneline`" )
         lines.append( f"- `git -C {worktree_path} diff --stat origin/main`" )
         return lines
-
-    @staticmethod
-    def _summarize_tool_use( block ) -> str:
-        """
-        Compact single-line summary of a ToolUseBlock for progress notifications.
-
-        A bare `Coder: {block.name}` line gave long runs of identical entries with no
-        context, so this builds a tool-specific digest that surfaces the key argument.
-        The argument is truncated to 100 chars to keep notification text tight.
-        """
-        name = block.name
-        inp  = block.input or {}
-        if name == "Bash":
-            cmd = inp.get( "command", "" ) or ""
-            first_line = cmd.splitlines()[ 0 ] if cmd else ""
-            return f"Bash: {first_line[ :100 ]}" if first_line else "Bash"
-        if name in ( "Read", "Edit", "Write" ):
-            fp = inp.get( "file_path", "" ) or ""
-            return f"{name}: {fp[ -100: ]}" if fp else name
-        if name in ( "Grep", "Glob" ):
-            pat = inp.get( "pattern", "" ) or ""
-            return f"{name}: {pat[ :100 ]}" if pat else name
-        return name
 
     @staticmethod
     def _derive_budget_tier( proposed, cluster=None ) -> str:
