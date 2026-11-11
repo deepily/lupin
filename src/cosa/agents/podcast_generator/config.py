@@ -352,6 +352,8 @@ class PodcastConfig:
 
     # === Language Configuration ===
     target_languages           : List[ str ] = field( default_factory=lambda: [ "en" ] )
+    # A Spanish translation below this share of Spanish function words is a failed translation.
+    min_spanish_stopword_ratio : float = 0.20
     # Examples: ["en"], ["en", "es"], ["en", "es-MX", "es-AR"]
 
     def get_host_a_name( self ) -> str:
@@ -476,6 +478,7 @@ class PodcastConfig:
             host_b_voice              = voice_b,
             target_duration_minutes   = _get( "podcast target duration minutes",   "10",   "int" ),
             min_exchanges             = _get( "podcast min exchanges",             "8",    "int" ),
+            min_spanish_stopword_ratio = _get( "podcast translation min spanish stopword ratio", "0.20", "float" ),
             max_exchanges             = _get( "podcast max exchanges",             "20",   "int" ),
             script_max_turns          = _get( "podcast script max turns",          "5",    "int" ),
             include_intro             = _get( "podcast include intro",             "True", "boolean" ),

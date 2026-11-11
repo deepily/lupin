@@ -54,6 +54,7 @@ from .prompts import (
 )
 from .prompts.status_report import get_status_analysis_prompt, get_status_script_prompt
 from .script_types import ANALYSIS_DIGEST, REVIEW_ONE_SHOT, effective_review, get_profile
+from .translation_check import spanish_stopword_ratio
 
 logger = logging.getLogger( __name__ )
 
@@ -1961,6 +1962,17 @@ Generate the {language_name} script in JSON format with the same structure:
                     "output could not be turned into a translated script."
                 )
 
+            # Bug 0913bb90, the other manifestation: the model returns the English text
+            # unchanged, which parses to a full set of segments. A Spanish script is full of
+            # Spanish function words, so too few of them means it was not translated.
+            if target_language.startswith( "es" ):
+                ratio = spanish_stopword_ratio( " ".join( seg.text for seg in segments ) )
+                if ratio < self.config.min_spanish_stopword_ratio:
+                    raise ValueError(
+                        f"{language_name} translation came back untranslated (Spanish word share "
+                        f"{ratio:.2f}, minimum {self.config.min_spanish_stopword_ratio:.2f})."
+                    )
+
             translated_script = PodcastScript(
                 title                      = result.get( "title", f"{english_script.title} ({language_name})" ),
                 research_source            = english_script.research_source,
@@ -2010,6 +2022,7 @@ Generate the {language_name} script in JSON format with the same structure:
                 segments                   = english_script.segments,
                 estimated_duration_minutes = english_script.estimated_duration_minutes,
                 key_topics                 = english_script.key_topics,
+                script_type                = english_script.script_type,
             )
 
     # =========================================================================

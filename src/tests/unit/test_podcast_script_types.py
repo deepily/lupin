@@ -196,7 +196,8 @@ def test_revision_and_translation_keep_the_type():
     config = PodcastConfig( script_type="status_report" )
     agent  = PodcastOrchestratorAgent( research_doc_path="/io/x.md", user_id="u@t.com", config=config, target_languages=[ "en" ] )
     reply  = json.dumps( { "title": "T", "segments": [ { "speaker": "Maria", "role": "curious", "text": "Hola" } ] } )
-    agent._api_client = RecordingClient( { "revision": reply, "translation": reply } )
+    spanish = json.dumps( { "title": "T", "segments": [ { "speaker": "Maria", "role": "curious", "text": "Es la historia de que el mercado crece en el país" } ] } )
+    agent._api_client = RecordingClient( { "revision": reply, "translation": spanish } )
     agent._podcast_state[ "revision_count" ] = 1
 
     async def _go():
