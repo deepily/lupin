@@ -9,6 +9,7 @@ pins:
   - cosa.agents.shared.sdk_error_result.login_hint@ae2c20cf15
   - cosa.agents.shared.sdk_error_result.raise_error_result@de5e8eacd5
   - cosa.agents.shared.fix_executor.BFETimeoutError@0414fa1b5b
+  - cosa.agents.shared.diagnosis_json.parse_diagnosis_json@42f2080b38
 ---
 # Fix run outputs and guards
 

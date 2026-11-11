@@ -66,14 +66,14 @@ class WebSocketDiagnosticTool {
      */
     setupStatusElements() {
         this.statusElements = {
-            sessionId: document.getElementById('session-id'),
-            activeConnections: document.getElementById('active-connections'),
-            totalConnections: document.getElementById('total-connections'),
-            duplicateConnections: document.getElementById('duplicate-connections'),
-            chunksReceived: document.getElementById('chunks-received'),
-            audioElements: document.getElementById('audio-elements'),
-            simultaneousPlay: document.getElementById('simultaneous-play'),
-            firstAudioLatency: document.getElementById('first-audio-latency')
+            'session-id': document.getElementById('session-id'),
+            'active-connections': document.getElementById('active-connections'),
+            'total-connections': document.getElementById('total-connections'),
+            'duplicate-connections': document.getElementById('duplicate-connections'),
+            'chunks-received': document.getElementById('chunks-received'),
+            'audio-elements': document.getElementById('audio-elements'),
+            'simultaneous-play': document.getElementById('simultaneous-play'),
+            'first-audio-latency': document.getElementById('first-audio-latency')
         };
     }
     

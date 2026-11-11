@@ -3,7 +3,7 @@ capability: notification-proxy-startup
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.notification_proxy.__main__.main@0cf15f83b3
-  - cosa.agents.notification_proxy.__main__.parse_args@5acfa0926f
+  - cosa.agents.notification_proxy.__main__.parse_args@bccb2ff07e
   - cosa.agents.notification_proxy.listener.WebSocketListener@f9243e7377
   - cosa.agents.notification_proxy.voice_io.notify@1f32442af0
 ---

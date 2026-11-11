@@ -46,6 +46,8 @@ from cosa.agents.shared.git_strategist import GitStrategist
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.fix_executor import FixExecutor
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
+from cosa.agents.shared.diagnosis_json import parse_diagnosis_json
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_object
 
 # SWE Team reuse — safety, hooks, test runner (kept for back-compat;
 # FixExecutor imports these directly, but existing BFE test fixtures may
@@ -539,56 +541,20 @@ class BFEOrchestrator:
         Returns:
             DiagnosisResult: Parsed or fallback diagnosis
         """
-        text = raw_response.strip()
+        data, failure = parse_diagnosis_json( raw_response )
 
-        # Strip markdown code fences
-        if "```json" in text:
-            text = text.split( "```json" )[ -1 ]
-        if "```" in text:
-            text = text.split( "```" )[ 0 ]
-
-        # Find last JSON object: search backward for } then find matching {
-        json_str = self._extract_last_json_object( text )
-
-        if json_str is None:
-            logger.warning( "No JSON object found in response — returning fallback" )
+        if data is None:
+            logger.warning( f"{failure} — returning fallback" )
             return self._fallback_diagnosis( raw_response[ :500 ] )
 
         try:
-            data = json.loads( json_str )
             return DiagnosisResult( **data )
 
-        except ( json.JSONDecodeError, ValueError, TypeError ) as e:
+        except ( ValueError, TypeError ) as e:
             logger.warning( f"JSON parse/validation failed: {e}" )
             return self._fallback_diagnosis( raw_response[ :500 ] )
 
-    @staticmethod
-    def _extract_last_json_object( text: str ) -> Optional[ str ]:
-        """
-        Extract the last JSON object from text by finding matching braces.
-
-        Args:
-            text: Text that may contain a JSON object
-
-        Returns:
-            str or None: Extracted JSON string, or None if not found
-        """
-        # Find last closing brace
-        close_idx = text.rfind( "}" )
-        if close_idx == -1:
-            return None
-
-        # Walk backward to find matching opening brace
-        depth = 0
-        for i in range( close_idx, -1, -1 ):
-            if text[ i ] == "}":
-                depth += 1
-            elif text[ i ] == "{":
-                depth -= 1
-                if depth == 0:
-                    return text[ i : close_idx + 1 ]
-
-        return None
+    _extract_last_json_object = staticmethod( extract_json_object )
 
     @staticmethod
     def _fallback_diagnosis( reason: str ) -> DiagnosisResult:
