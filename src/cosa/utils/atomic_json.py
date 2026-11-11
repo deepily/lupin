@@ -10,6 +10,8 @@ import os
 import uuid
 from pathlib import Path
 
+_UNSET = object()
+
 
 def write_json_atomic( path, data, indent=None, trailing_newline=False ) -> None:
     """
@@ -61,7 +63,7 @@ def load_json_section( path, key ) -> dict:
         return {}
 
 
-def load_json_dict( path ) -> dict:
+def load_json_dict( path, default=_UNSET ):
     """
     Read a JSON file whose top level is an object.
 
@@ -70,12 +72,14 @@ def load_json_dict( path ) -> dict:
 
     Ensures:
         - returns the dict in the file
-        - returns {} when the file is absent, unreadable, not valid JSON, or not a JSON
-          object; it never raises
+        - returns `default` when the file is absent, unreadable, not valid JSON, or not a
+          JSON object; `default` is {} when the caller gives none
+        - never raises
     """
+    fallback = {} if default is _UNSET else default
     try:
         with open( path, "r", encoding="utf-8" ) as fh:
             data = json.load( fh )
     except ( OSError, ValueError ):
-        return {}
-    return data if isinstance( data, dict ) else {}
+        return fallback
+    return data if isinstance( data, dict ) else fallback

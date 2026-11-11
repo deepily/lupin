@@ -56,6 +56,12 @@ def test_remove_xml_escapes():
     assert remove_xml_escapes( "a &gt; b &lt; c &amp; d" ) == "a > b < c & d"
 
 
+def test_remove_xml_escapes_does_not_unescape_twice():
+    # "&amp;lt;" is the text "&lt;" escaped once; the ampersand must be unescaped last
+    assert remove_xml_escapes( "&amp;lt;" ) == "&lt;"
+    assert remove_xml_escapes( "&amp;gt;" ) == "&gt;"
+
+
 # =========================================================================== #
 # XMLParsingError.__init__ ( message / xml_content truncation / original_error )
 # =========================================================================== #

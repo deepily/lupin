@@ -7,7 +7,7 @@ pins:
   - cosa.agents.heartbeat_arbiter.respin_wake_check.describe_block@12d86f7529
   - cosa.agents.heartbeat_arbiter.respin_wake_check.build_receipt_dict@2f3f63b68d
   - cosa.agents.heartbeat_arbiter.respin_wake_check.write_boot_receipt@6171593e9a
-  - cosa.agents.heartbeat_arbiter.respin_wake_check.read_receipt@1a341dc941
+  - cosa.agents.heartbeat_arbiter.respin_wake_check.read_receipt@c9a10cad03
   - cosa.agents.heartbeat_arbiter.respin_wake_check.persona_slugs@f7ebe11b36
   - cosa.agents.heartbeat_arbiter.respin_wake_check.find_receipt_by_identity@c3da97bf22
   - cosa.agents.heartbeat_arbiter.respin_wake_check.receipt_is_misplaced@777f7c8bb7

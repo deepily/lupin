@@ -21,3 +21,15 @@ def test_write_json_atomic_indents_and_ends_with_a_newline_only_when_asked(tmp_p
     write_json_atomic( compact, { "a": 1 } )
     write_json_atomic( pretty, { "a": 1 }, indent=2, trailing_newline=True )
     assert compact.read_text() == '{"a": 1}' and pretty.read_text() == '{\n  "a": 1\n}\n'
+
+
+def test_a_given_default_replaces_the_empty_dict_in_every_unreadable_case( tmp_path ):
+    path = tmp_path / "state.json"
+    assert load_json_dict( path, default=None ) is None, "absent file"
+    path.write_text( "{not json" );  assert load_json_dict( path, default=None ) is None
+    path.write_text( "[1, 2]" );     assert load_json_dict( path, default=None ) is None, "not an object"
+    path.write_text( "{}" );         assert load_json_dict( path, default=None ) == {}, "an empty object is a real answer, not a miss"
+    sentinel = { "marker": 1 }
+    assert load_json_dict( tmp_path / "gone.json", default=sentinel ) is sentinel
+    write_json_atomic( path, { "k": "v" } )
+    assert load_json_dict( path, default=None ) == { "k": "v" }
