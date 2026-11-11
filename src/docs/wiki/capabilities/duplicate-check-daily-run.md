@@ -7,9 +7,9 @@ pins:
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
   - lupin_mcp.duplicate_check_daily.run@0e3d95bce3
   - lupin_mcp.duplicate_check_daily.cron_lines@5d30783eec
-  - lupin_mcp.duplicate_check_daily.install_mode@7596ab9118
+  - lupin_mcp.duplicate_check_daily.install_mode@4c5ac279ec
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
-  - lupin_mcp.duplicate_check_daily.live_filer@832dcfdc1a
+  - lupin_mcp.duplicate_check_daily.live_filer@ae7b324cde
   - lupin_mcp.duplicate_check_daily.live_auditor@4cc714910e
   - lupin_mcp.duplicate_check_daily.main@7182ace7dc
   - lupin_mcp.duplicate_check_daily.record@0c6e420b03
@@ -35,6 +35,6 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - `record` adds `schema_version`, `started_at` and `None` for each measure the run never reached, writes the file, then appends the run's line to `runs.jsonl` ([[duplicate-check-run-history]]).
 - `limit_flag` gives `--ceiling N` when a ceiling is set, else `--cap N`. The cron lines use it.
 - `cron_lines` returns a 10:00 daily line and a reboot line 300 seconds after boot, which catches up from the last successful run. `--with-baseline` adds an 11:07 line. With `adaptive` it returns an hourly line (10:00 to 22:00) and the reboot line, both with `--adaptive`. A branch other than `main` is added as `--branch`.
-- `install_mode` handles `--print-install`, `--uninstall` and `--status` through the librarian's locked crontab editor. `--install` is retired: it prints the `cron_generate` command, which writes every cron line now.
-- `live_parts` builds the real parts without a call. `live_filer` files the triage rows over HTTP; `live_auditor` queues known-miss audits ([[duplicate-check-audit]]) with no model call. It names each finding by its id in the symbol index the sweep reads. That is not the checker's own `d-` id, so the sweep knows every queued item.
+- `install_mode` handles `--print-install`, `--uninstall` and `--status` through the librarian's locked crontab editor. `--install` is retired: it prints where the installer went on stderr and returns 1, because `cron_generate` writes every cron line now. The cron work is done by `manage_cron` of [[repo-tools-symindex-librarian-tick-run]].
+- `live_parts` builds the real parts without a call. `live_filer` files the run's one triage row over HTTP, with the configured `duplicate check triage owner` and the project's manager roster. It raises `NoTriageOwner` when there are findings and the owner is unset or not on the roster. The findings stay in the result file for a refile, and `run` records that as the filer's error. `live_auditor` queues known-miss audits ([[duplicate-check-audit]]) with no model call. It names each finding by its id in the symbol index the sweep reads. That is not the checker's own `d-` id, so the sweep knows every queued item.
 - `main` needs `--cap` or `--ceiling`, unless it only removes or reports the cron lines. `--adaptive` needs `--ceiling`. Verdict lines are in [[duplicate-check-verdict-lines]].

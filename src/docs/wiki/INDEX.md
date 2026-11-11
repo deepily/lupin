@@ -237,6 +237,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[duplicate-check-verdict-lines]] — the fixed verdict line for each finding of a run, and its writer, which amends the triage row and logs the line. `lupin_mcp` (duplicate_check_verdicts)
 - [[duplicate-check-branch-guard]] — the daily check refuses a pinned branch that is stale or gone, exits 3 and alerts with the reinstall command. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-audit]] — queues a known-miss shadow audit for each duplicate the daily check finds, and counts why the rest were not queued. `lupin_mcp` (duplicate_check_audit)
+- [[shadow-pending-reid]] — one-off repair that rewrites or removes shadow-audit queue items still carrying a daily-check `d-` id, dry-run unless `--apply`. `lupin_mcp` (shadow_pending_reid)
 - [[reuse-merge-gate]] — the merge-pyramid reuse gate: the base it measures from, the outcome lines and new definitions it checks, and its exit codes. `lupin_mcp` (reuse_merge_gate)
 - [[reuse-record-search]] — the `record_search` MCP tool: a fixed-string search of the tree for the nearest existing definitions, recorded under a search id. `lupin_mcp` (cosa_voice_mcp, reuse_search)
 - [[reuse-search-terms-and-grep]] — reuse_search term derivation, the fixed-string git grep, the freshness check and the receipt and entry text sources. `lupin_mcp` (reuse_search)

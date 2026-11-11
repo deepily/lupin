@@ -12,7 +12,7 @@ pins:
   - lupin_mcp.host_snapshot.write_snapshot@df7caf57d6
   - lupin_mcp.host_snapshot.refresh_best_effort@302df86440
   - lupin_mcp.host_snapshot.cron_line@b911e65b05
-  - lupin_mcp.host_snapshot.install_mode@0bfb9509b9
+  - lupin_mcp.host_snapshot.install_mode@4f56222d2c
   - lupin_mcp.host_snapshot.main@597d41070c
 ---
 # Job host snapshot
@@ -36,4 +36,4 @@ The :7999 container has no crontab command and no systemctl. Host jobs write a s
 ## The five-minute tick
 - `main` with no verb writes the crontab, zone and registry units and returns 0.
 - `cron_line` builds the tick's line (every 5 minutes, ending `# job-host-snapshot`). `--print-install` prints it; `--status` reports it; `--uninstall` removes it after a backup.
-- `--install` is retired: it prints where the installer went and returns 1.
+- `--install` is retired: it prints where the installer went and returns 1. `install_mode` hands the verbs to `manage_cron` of [[repo-tools-symindex-librarian-tick-run]] with this job's tag, owner and one expected line.

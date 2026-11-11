@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.reuse_needset.judge_probe_read.index_results@3de67b3dc1
   - lupin_mcp.reuse_needset.judge_probe_read.repeats_of@6e4442affb
   - lupin_mcp.reuse_needset.judge_probe_read.figures@1bef63d345
-  - lupin_mcp.reuse_needset.judge_probe_read.pairing_share@45eb3aa53e
+  - lupin_mcp.reuse_needset.judge_probe_read.pairing_share@e3fe03627c
   - lupin_mcp.reuse_needset.judge_probe_read.duplicate_figures@48fa92a55f
   - lupin_mcp.reuse_needset.judge_probe_read.arm_summary@c8e10a9f9f
   - lupin_mcp.reuse_needset.judge_probe_read.pair_status@e65703a685
@@ -23,7 +23,7 @@ Turns the report that `run_variant` writes ([[needset-judge-probe-arms]]) into t
 - `newcombe` gives that difference with its 95 percent interval, from two Wilson intervals.
 
 ## Other readings
-- `pairing_share` is the share of pairings where the same-job plant rates higher. Ties count one half.
+- `pairing_share` is the share of pairings where the same-job plant rates higher. Ties count one half. It counts the wins with `auc_counts` of the scorer. A share of None with 0 pairings means either class has no answered plant.
 - `duplicate_figures` is the second reading: a plant or original at 0.30 or higher.
 - In the both-lines arm only the plant is read, because the original's own line is the need's purpose.
 - `arm_summary` summarises one arm over its repeats.

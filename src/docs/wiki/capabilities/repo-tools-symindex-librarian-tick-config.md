@@ -8,7 +8,8 @@ pins:
   - cosa.repo.symindex.librarian_tick.read_persona@bfb1570e2a
   - cosa.repo.symindex.librarian_tick.read_mobile_corpus@3e5c46846d
   - cosa.repo.symindex.librarian_tick.crontab_command@1b83cbb8d8
-  - cosa.repo.symindex.librarian_tick.install_moved_text@0453364e89
+  - cosa.repo.symindex.librarian_tick.install_moved_text@858db60dd5
+  - cosa.repo.symindex.librarian_tick.install_command@48f4c13acd
   - cosa.repo.symindex.librarian_tick.cron_lines_for@f736281e58
   - cosa.repo.symindex.librarian_tick.cron_lines@ab28a46f8d
   - cosa.repo.symindex.librarian_tick.merge_lines@cd8b7c7098
@@ -33,7 +34,7 @@ How the tick ([[repo-tools-symindex-librarian-tick-run]]) reads its settings and
 - `merge_lines( current, lines, tag, legacy )` drops every line that ends with the tag (or one of a tuple of tags). It also drops any line holding a `legacy` substring. It puts the new ones last. Other lines keep their text and order. `status_text` answers `not installed`, `installed: n lines` for the expected count (2 by default), or `partly installed: n lines`.
 
 ## Installing
-- `--print-install` prints the lines and changes nothing. `--install` is retired and prints `install_moved_text( root )`: the `cron_generate` command, which writes every Lupin cron line from the job registry. `--uninstall` goes through `edit_crontab`. `--status` only reads the crontab.
+- `--print-install` prints the lines and changes nothing. `--install` is retired and prints `install_moved_text( root )`. One tool writes every Lupin cron line from the job registry, and the text gives its exact command. `install_command( root )` builds that command: the `cron_generate --install` line with its `cd` and environment. The branch guard's reinstall text reuses it. `--uninstall` goes through `edit_crontab`. `--status` only reads the crontab. The shared verb handler is `manage_cron` in [[repo-tools-symindex-librarian-tick-run]].
 - `crontab_command( environ, own_variable )` picks the crontab command: `LUPIN_CRONTAB` when set, so one scratch crontab covers every tool, else the tool's own variable, else `crontab`.
 - `edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag, owner, legacy )` holds the shared crontab lock, recorded under `owner`, for the whole read and write. `tag` and `legacy` go to `merge_lines`. It writes a timestamped backup first, and writes nothing if the backup fails. It raises `RuntimeError` on a failed crontab call or backup.
 - `load_crontab_lock` loads `workflow/scripts/crontab_lock.py` from `PLANNING_IS_PROMPTING_ROOT`. When the variable is unset or the file is absent it raises `InstallRefused`, and nothing is written.
