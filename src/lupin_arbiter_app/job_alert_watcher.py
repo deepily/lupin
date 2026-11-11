@@ -17,12 +17,12 @@ All decisions are pure and work through injected seams: the summary reader, the 
 store, the clock and the logger. Unit tests drive them with a fake clock and need no server.
 """
 import datetime
-import json
 import os
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cosa.agents.heartbeat_arbiter.arbiter_journal import DELIVERED_OUTCOMES
+from cosa.utils.atomic_json import load_json_dict, write_json_atomic
 from lupin_arbiter_app.poll_loop import run_poll_loop
 from lupin_arbiter_app.health_watcher import SystemClock
 
@@ -141,36 +141,6 @@ def delivered( outcomes: Any ) -> bool:
     return isinstance( outcomes, list ) and any( isinstance( o, dict ) and o.get( "outcome" ) in DELIVERED for o in outcomes )
 
 
-def read_state( path: str ) -> Dict[ str, str ]:
-    """
-    Read the alert state file.
-
-    Ensures:
-        - returns the dict in the file, or an empty dict when the file is missing, unreadable or not a dict
-    """
-    try:
-        with open( path ) as handle:
-            got = json.load( handle )
-    except ( OSError, ValueError ):
-        return { }
-    return got if isinstance( got, dict ) else { }
-
-
-def write_state( path: str, state: Dict[ str, str ] ) -> None:
-    """
-    Write the alert state file in one step.
-
-    Ensures:
-        - the file holds the whole state or the previous state, never half of it
-        - the folder is made when it is missing
-    """
-    os.makedirs( os.path.dirname( path ), exist_ok=True )
-    tmp = f"{path}.tmp"
-    with open( tmp, "w" ) as handle:
-        json.dump( state, handle )
-    os.replace( tmp, path )
-
-
 def make_live_summary_fn( root: str ) -> Callable[ [], List[ dict ] ]:
     """
     Build the reader of the real job summary.
@@ -202,8 +172,8 @@ class JobAlertLoop:
         log_fn           : Callable,
         interval_seconds : int = 300,
         clock            : Any = None,
-        read_state_fn    : Callable = read_state,
-        write_state_fn   : Callable = write_state,
+        read_state_fn    : Callable = load_json_dict,
+        write_state_fn   : Callable = write_json_atomic,
     ):
         """
         Hold the seams.
