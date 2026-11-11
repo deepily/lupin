@@ -25,6 +25,7 @@ from typing import Optional, List
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.podcast_generator.script_types import apply_script_type, get_profile, validate_review
 from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from cosa.rest.job_state import JobState
 
@@ -66,6 +67,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
         force_failure_mode: Optional[ str ] = None,
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
+        script_type: Optional[ str ] = None,
+        review: Optional[ str ] = None,
         debug: bool = False,
         verbose: bool = False
     ) -> None:
@@ -92,9 +95,16 @@ class PodcastGeneratorJob( AgenticJobBase ):
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
             audience_context: Custom audience description
+            script_type: Script type name (research_critical or status_report); None means research_critical
+            review: Review mode (ask or one_shot); None means the script type's default
             debug: Enable debug output
             verbose: Enable verbose output
+
+        Raises:
+            - ValueError when script_type or review is unknown
         """
+        get_profile( script_type )
+        validate_review( review )
         super().__init__(
             user_id    = user_id,
             user_email = user_email,
@@ -111,6 +121,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
         self.force_failure_mode = force_failure_mode
         self.audience           = audience
         self.audience_context   = audience_context
+        self.script_type        = script_type
+        self.review             = review
 
         # Results (populated after execution)
         self.audio_path    = None
@@ -249,13 +261,16 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # Create config from INI
             from cosa.config.configuration_manager import ConfigurationManager
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+            # Request beats script-type profile beats INI
             config = PodcastConfig.from_config( config_mgr, debug=self.debug )
-
-            # Job args override INI values
-            if self.audience:
-                config.audience = self.audience
-            if self.audience_context:
-                config.audience_context = self.audience_context
+            apply_script_type(
+                config,
+                config_mgr,
+                script_type      = self.script_type,
+                review           = self.review,
+                audience         = self.audience,
+                audience_context = self.audience_context,
+            )
 
             # Create orchestrator
             agent = PodcastOrchestratorAgent(
@@ -281,7 +296,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             self.audio_path  = state.get( "final_audio_path" )
             self.script_path = state.get( "final_script_path" )
 
-            # Every run generates one artifact pair PER language (default en,es-MX).
+            # Every run generates one artifact pair per language (default en).
             # The orchestrator stores them keyed by language; thread ALL of them into
             # the card, not just the English primary (bug 00e6aba1).
             audio_by_lang  = dict( state.get( "audio_paths_by_language" )  or {} )
@@ -344,7 +359,10 @@ class PodcastGeneratorJob( AgenticJobBase ):
             script_minutes = script.estimated_duration_minutes
             elapsed_sec   = round( time.time() - self._start_time, 1 )
             has_audio     = bool( self.audio_path )
-            n_langs       = len( languages )
+            # A language whose translation failed is not produced: name it, and do not count it.
+            failed_langs  = dict( agent._failed_translations )
+            produced_langs = [ l for l in languages if l not in failed_langs ]
+            n_langs       = len( produced_langs )
 
             # Three-variant TTS
             if has_audio and n_segments > 0:
@@ -373,7 +391,9 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # Rich markdown abstract
             lines = [ "**Podcast Activity Report**", "" ]
             lines.append( f"**Segments**: {n_segments} (~{script_minutes:.1f} min)" )
-            lines.append( f"**Languages**: {', '.join( languages )}" )
+            lines.append( f"**Languages**: {', '.join( produced_langs )}" )
+            for lang, reason in failed_langs.items():
+                lines.append( f"**Translation failed (not produced)**: {LANGUAGE_NAMES.get( lang, lang )}. {reason}" )
             lines.extend( per_language_lines )
             lines.extend( drive[ "extra_lines" ] )
             if self.cost_summary:  # pragma: no branch - cost_summary is set unconditionally (3-key dict) earlier, so it is always truthy here; the False arc is unreachable

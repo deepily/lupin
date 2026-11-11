@@ -340,3 +340,83 @@ def test_with_no_environment_variable_the_ini_decides( monkeypatch ):
         def get( self, key, default=None, return_type=None ): return True
     monkeypatch.delenv( "LUPIN_PODCAST_PROXY_DRY_RUN", raising=False )
     assert pp.dry_run_enabled( Config() ) is True
+
+
+# ---- script type and languages chosen at ask time (row 60d13c9a) ----
+
+@pytest.mark.parametrize( "sent,stored", [
+    ( [ "en", "es-MX" ], [ "en", "es-MX" ] ),
+    ( "en, es-MX", [ "en", "es-MX" ] ),
+    ( "", None ),
+    ( [], None ),
+] )
+def test_the_ask_stores_script_type_and_languages_from_a_list_or_a_comma_string( world, sent, stored ):
+    _file( world )
+    answer = _ask( world, script_type="status_report", languages=sent )
+    assert answer.status_code == 200, answer.text
+    payload = world[ "cards" ].created[ 0 ].payload
+    assert payload[ "script_type" ] == "status_report" and payload.get( "languages" ) == stored
+    assert ( "languages" in payload ) == ( stored is not None )
+    assert pp.payload_shape_ok( payload )
+
+
+def test_an_ask_with_no_choice_writes_the_original_payload_shape( world ):
+    _file( world )
+    _ask( world )
+    payload = world[ "cards" ].created[ 0 ].payload
+    assert set( payload ) == pp.PAYLOAD_KEYS
+    assert pp.card_options( payload ) == ( None, None, None )
+
+
+def test_the_card_text_names_a_status_report_and_the_languages( world ):
+    _file( world )
+    _ask( world, script_type="status_report", languages="en,es-MX" )
+    card = world[ "cards" ].created[ 0 ]
+    assert "status report podcast" in card.message
+    assert "- script type: status_report" in card.abstract and "- languages: en, es-MX" in card.abstract
+
+
+def test_the_card_text_for_the_default_type_names_neither_option( world ):
+    _file( world )
+    _ask( world, script_type="research_critical" )
+    card = world[ "cards" ].created[ 0 ]
+    assert "script type" not in card.abstract and "languages" not in card.abstract and "status report" not in card.message
+
+
+def test_an_unknown_script_type_or_a_bad_languages_value_is_a_422_and_makes_no_card( world ):
+    _file( world )
+    assert _ask( world, script_type="nope" ).status_code == 422
+    assert _ask( world, languages=5 ).status_code == 422
+    assert _ask( world, languages=[ "en", 5 ] ).status_code == 422
+    assert world[ "cards" ].created == [ ]
+
+
+# ---- review chosen at ask time, and the exact body the doc viewer posts ----
+
+CLIENT_BODY = { "script_type": "status_report", "review": "one_shot", "languages": [ "en", "es-MX" ] }
+
+
+def test_the_exact_body_the_viewer_page_sends_is_accepted_by_the_ask_door( world ):
+    _file( world )
+    answer = _ask( world, **CLIENT_BODY )
+    assert answer.status_code == 200, answer.text
+    payload = world[ "cards" ].created[ 0 ].payload
+    assert payload[ "review" ] == "one_shot" and payload[ "script_type" ] == "status_report" and pp.payload_shape_ok( payload )
+    assert pp.card_options( payload ) == ( "status_report", [ "en", "es-MX" ], "one_shot" )
+
+
+def test_the_card_for_a_one_shot_says_no_script_review_follows_and_for_ask_says_one_does( world ):
+    _file( world )
+    _ask( world, script_type="status_report" )
+    assert "no Script Review card follows" in world[ "cards" ].created[ 0 ].abstract
+    _ask( world, script_type="research_critical", review="one_shot" )
+    assert "- review: one_shot" in world[ "cards" ].created[ 1 ].abstract and "no Script Review card follows" in world[ "cards" ].created[ 1 ].abstract
+    _ask( world, script_type="status_report", review="ask" )
+    assert "a Script Review card follows" in world[ "cards" ].created[ 2 ].abstract
+    _ask( world )
+    assert "a Script Review card follows" in world[ "cards" ].created[ 3 ].abstract
+
+
+def test_an_unknown_review_is_a_422_and_makes_no_card( world ):
+    _file( world )
+    assert _ask( world, review="maybe" ).status_code == 422 and world[ "cards" ].created == [ ]

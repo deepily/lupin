@@ -805,7 +805,7 @@ class TestGenerateTranslated:
         english = _script( title="EN", prosody_markers=[ "pause" ] )
         parsed = {
             "title"    : "ES",
-            "segments" : [ { "speaker": "Nora", "role": "curious", "text": "hola", "prosody": [ "pause" ] } ],
+            "segments" : [ { "speaker": "Nora", "role": "curious", "text": "Es la historia de que el mercado crece en el país", "prosody": [ "pause" ] } ],
             "key_topics" : [ "z" ],
             "estimated_duration_minutes" : 6.0,
         }
@@ -823,7 +823,7 @@ class TestGenerateTranslated:
         english = _script( title="EN", prosody_markers=[ "pause" ] )
         parsed = {
             "title"    : "ES",
-            "segments" : [ { "speaker": "Nora", "role": "curious", "text": "hola" } ],
+            "segments" : [ { "speaker": "Nora", "role": "curious", "text": "Es la historia de que el mercado crece en el país" } ],
         }
         with patch.object( orch_mod, "parse_script_response", return_value=parsed ), \
              patch.object( orch_mod, "validate_prosody_preservation",

@@ -16,6 +16,7 @@ TTS audio generation and stitching is the later stage.
 """
 
 import asyncio
+import dataclasses
 import time
 import logging
 import os
@@ -31,6 +32,7 @@ from .state import (
     PodcastScript,
     ScriptSegment,
     ContentAnalysis,
+    StatusDigest,
     PodcastMetadata,
     create_initial_state,
     validate_prosody_preservation,
@@ -42,7 +44,6 @@ from .api_client import PodcastAPIClient
 from .tts_client import PodcastTTSClient, TTSSegmentResult
 from .audio_stitcher import PodcastAudioStitcher, StitchingResult
 from .prompts import (
-    SCRIPT_GENERATION_SYSTEM_PROMPT,
     CONTENT_ANALYSIS_SYSTEM_PROMPT,
     get_script_generation_prompt,
     get_content_analysis_prompt,
@@ -51,11 +52,29 @@ from .prompts import (
     parse_analysis_response,
     get_dynamic_duo_description,
 )
+from .prompts.status_report import get_status_analysis_prompt, get_status_script_prompt
+from .script_types import ANALYSIS_DIGEST, REVIEW_ONE_SHOT, effective_review, get_profile
+from .translation_check import spanish_stopword_ratio
 
 logger = logging.getLogger( __name__ )
 
 # ElevenLabs pricing (standard tier)
 ELEVENLABS_COST_PER_1K_CHARS = 0.30  # $0.30 per 1000 characters
+
+
+def one_shot_notice( one_shot: bool ) -> str:
+    """
+    One-line completion note saying the script went to audio without a review stop.
+
+    Requires:
+        - one_shot is a bool
+
+    Ensures:
+        - returns a single plain sentence when one_shot is True, else ""
+    """
+    if one_shot:
+        return "This script was generated in one shot and not reviewed. Nobody read it before it went to audio."
+    return ""
 
 
 def build_auto_continue_disclosure( timeout_seconds: int ) -> str:
@@ -212,6 +231,8 @@ class PodcastOrchestratorAgent:
         self.research_doc_path = research_doc_path
         self.user_id           = user_id
         self.config            = config or PodcastConfig()
+        self.profile           = get_profile( self.config.script_type )
+        self._script_type_unknown = False
         self.max_segments      = max_segments
         self.debug             = debug
         self.verbose           = verbose
@@ -231,6 +252,8 @@ class PodcastOrchestratorAgent:
 
         # Initialize internal state (TypedDict for tracking)
         self._podcast_state = create_initial_state( research_doc_path, user_id )
+        # Languages whose translation failed, by language code, with the reason. They are not produced.
+        self._failed_translations = {}
 
         # Generate podcast ID
         self.podcast_id = f"podcast-{uuid.uuid4().hex[ :8 ]}"
@@ -304,6 +327,7 @@ class PodcastOrchestratorAgent:
         config           : Optional[ PodcastConfig ] = None,
         max_segments     : Optional[ int ] = None,
         target_languages : Optional[ List[ str ] ] = None,
+        script_type      : Optional[ str ] = None,
         debug            : bool = False,
         verbose          : bool = False
     ) -> "PodcastOrchestratorAgent":
@@ -328,8 +352,13 @@ class PodcastOrchestratorAgent:
             config: Podcast configuration (uses defaults if None)
             max_segments: Limit TTS to first N segments (for cost control)
             target_languages: List of ISO language codes (default: from config or ["en"])
+            script_type: Type to run the script as; beats the type the saved script records
             debug: Enable debug output
             verbose: Enable verbose output
+
+        Ensures:
+            - the orchestrator runs the explicit script_type, else the type the file records
+            - a script that records no type and gets none runs as research_critical, but review-only refuses it
 
         Returns:
             PodcastOrchestratorAgent: Ready for review workflow
@@ -346,6 +375,12 @@ class PodcastOrchestratorAgent:
 
         script = PodcastScript.from_markdown( markdown_content )
 
+        # Request beats the type the file records. An untyped script with no request keeps the
+        # config's type, and review-only refuses it: it cannot know which prompts to revise with.
+        resolved = script_type if script_type is not None else script.script_type
+        if resolved is not None:
+            config = dataclasses.replace( config or PodcastConfig(), script_type=get_profile( resolved ).name )
+
         # Create orchestrator with dummy research path (not used in edit mode)
         agent = cls(
             research_doc_path = script.research_source or "edit-mode",
@@ -358,6 +393,7 @@ class PodcastOrchestratorAgent:
         )
 
         # Pre-populate state
+        agent._script_type_unknown                  = resolved is None
         agent._podcast_state[ "draft_script" ]      = script
         agent._podcast_state[ "draft_script_path" ] = script_path
         agent._podcast_state[ "revision_count" ]    = script.revision_count
@@ -480,6 +516,12 @@ class PodcastOrchestratorAgent:
                         script.revision_count = self._podcast_state[ "revision_count" ]
                         script_path = await self._save_script_async( script )
                         self._podcast_state[ "draft_script_path" ] = script_path
+
+                # One shot: the saved draft is the script. Nobody is asked anything.
+                if self._one_shot():
+                    self._podcast_state[ "script_one_shot" ] = True
+                    script_approved = True
+                    continue
 
                 # Build clickable link to full script using /api/io/file endpoint
                 import cosa.utils.util as cu
@@ -605,6 +647,11 @@ class PodcastOrchestratorAgent:
 
                 # Generate translated script
                 translated_script = await self._generate_translated_script_async( script, lang )
+
+                # A failed translation is reported on the card and produced nowhere: no saved
+                # script under this language, no review, no audio, no upload.
+                if lang in self._failed_translations: continue
+
                 scripts_by_language[ lang ] = translated_script
 
                 # Save translated script
@@ -621,8 +668,8 @@ class PodcastOrchestratorAgent:
                 else:
                     translated_link = f"`{translated_path}`"
 
-                # Review loop for translated script
-                translated_approved = False
+                # Review loop for translated script; one shot skips it
+                translated_approved = self._one_shot()
                 while not translated_approved:
                     # Notify: Ready for review
                     await voice_io.notify(
@@ -727,7 +774,7 @@ class PodcastOrchestratorAgent:
                         ( r.error_message for r in tts_results if not r.success and r.error_message ),
                         "Unknown error"
                     )
-                    continue_anyway = await voice_io.ask_yes_no(
+                    continue_anyway = True if self._one_shot() else await voice_io.ask_yes_no(
                         f"{lang_name}: {len( failed_indices )} segments failed. Continue with partial audio?",
                         default  = "yes",
                         # Unattended: keep the partial audio, as this path has
@@ -855,6 +902,9 @@ class PodcastOrchestratorAgent:
 
                 output_lines.append( f"**{lang_name}**: {script_link} | {audio_link}" )
 
+            for lang, reason in self._failed_translations.items():
+                output_lines.append( f"**{LANGUAGE_NAMES.get( lang, lang )}**: translation failed (not produced). {reason}" )
+
             # Calculate total audio cost from all TTS results
             total_chars = 0
             for lang in scripts_by_language.keys():
@@ -867,7 +917,8 @@ class PodcastOrchestratorAgent:
             lang_count = len( scripts_by_language )
             lang_summary = f"{lang_count} language(s)" if lang_count > 1 else "1 language"
 
-            auto_notice   = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) )
+            auto_notice   = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) ) \
+                            or one_shot_notice( self._podcast_state.get( "script_one_shot", False ) )
             approval_line = f"\n\n**Approval**: {auto_notice}" if auto_notice else ""
 
             await voice_io.notify(
@@ -914,7 +965,16 @@ class PodcastOrchestratorAgent:
 
         Returns:
             PodcastScript or None: Updated script, or None if cancelled
+
+        Raises:
+            - ValueError when the config runs one shot, since this mode exists only to review
+            - ValueError when the loaded script records no script type and none was given
         """
+        if self._one_shot():
+            raise ValueError( "review=one_shot cannot be used with review-only mode: that mode exists only to review a script" )
+        if self._script_type_unknown:
+            raise ValueError( "This saved script records no script type, so review-only cannot choose its prompts. Pass script_type (--script-type)." )
+
         self.metrics[ "start_time" ] = time.time()
 
         try:
@@ -1118,7 +1178,7 @@ class PodcastOrchestratorAgent:
                     ( r.error_message for r in tts_results if not r.success and r.error_message ),
                     "Unknown error"
                 )
-                continue_anyway = await voice_io.ask_yes_no(
+                continue_anyway = True if self._one_shot() else await voice_io.ask_yes_no(
                     f"{len( failed_indices )} segments failed. Continue with partial audio?",
                     default  = "yes",
                     unattended_default = True,
@@ -1204,7 +1264,8 @@ class PodcastOrchestratorAgent:
             if research_link:
                 abstract_lines.append( f"**Research**: {research_link}" )
 
-            auto_notice = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) )
+            auto_notice = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) ) \
+                          or one_shot_notice( self._podcast_state.get( "script_one_shot", False ) )
             if auto_notice:
                 abstract_lines.append( f"**Approval**: {auto_notice}" )
 
@@ -1345,6 +1406,9 @@ class PodcastOrchestratorAgent:
         """
         try:
             response = None   # bound before the API call so the except can read stop_reason safely (bug e0bb5a94 B)
+            if self.profile.analysis_kind == ANALYSIS_DIGEST:
+                return await self._analyze_status_async( research_content )
+
             prompt = get_content_analysis_prompt(
                 research_content = research_content,
                 max_topics       = self.config.key_topics_to_extract,
@@ -1390,6 +1454,46 @@ class PodcastOrchestratorAgent:
                 f"Podcast generation failed while analyzing the research document: {e}{stop}"
             ) from e
 
+    async def _analyze_status_async( self, research_content: str ) -> StatusDigest:
+        """
+        Ask for a status digest and parse it with the shared analysis parser.
+
+        Requires:
+            - the profile's analysis kind is the status digest
+
+        Ensures:
+            - returns a StatusDigest whose items name the source lines they came from
+            - items whose source line is not in the document are logged as a warning
+
+        Raises:
+            - pydantic.ValidationError when the reply holds no digest, so the caller fails the job
+        """
+        prompt = get_status_analysis_prompt(
+            research_content = research_content,
+            audience         = self.config.audience,
+            audience_context = self.config.audience_context,
+            max_source_chars = self.config.max_source_chars,
+        )
+        response = await self.api_client.call_for_analysis(
+            system_prompt = self.profile.analysis_system_prompt,
+            user_message  = prompt,
+        )
+        self.metrics[ "api_calls" ] += 1
+
+        digest      = StatusDigest.model_validate( parse_analysis_response( response.content ) )
+        unsupported = digest.unsupported_items( research_content )
+        if unsupported:
+            logger.warning( f"Status digest holds {len( unsupported )} item(s) whose source line is not in the document" )
+        return digest
+
+    def _one_shot( self ) -> bool:
+        """Return True when this run has no review stop and asks nobody anything."""
+        return effective_review( self.config ) == REVIEW_ONE_SHOT
+
+    def _script_system_prompt( self ) -> str:
+        """Return the system prompt for script writing, revision and translation."""
+        return self.profile.system_prompt
+
     async def _generate_script_async(
         self,
         research_content: str,
@@ -1412,10 +1516,11 @@ class PodcastOrchestratorAgent:
                 host_a = self.config.host_a_personality,
                 host_b = self.config.host_b_personality,
             )
-            system_prompt = SCRIPT_GENERATION_SYSTEM_PROMPT + "\n\n" + duo_description
+            system_prompt = self._script_system_prompt() + "\n\n" + duo_description
 
             # Build user prompt
-            user_prompt = get_script_generation_prompt(
+            prompt_builder = get_status_script_prompt if self.profile.analysis_kind == ANALYSIS_DIGEST else get_script_generation_prompt
+            user_prompt = prompt_builder(
                 content_analysis       = analysis.model_dump(),
                 research_content       = research_content,
                 host_a_personality     = self.config.host_a_personality,
@@ -1468,6 +1573,7 @@ class PodcastOrchestratorAgent:
                 segments                   = segments,
                 estimated_duration_minutes = result.get( "estimated_duration_minutes", 10.0 ),
                 key_topics                 = result.get( "key_topics", analysis.key_subtopics ),
+                script_type                = self.profile.name,
             )
 
         except Exception as e:
@@ -1512,7 +1618,7 @@ class PodcastOrchestratorAgent:
             )
 
             response = await self.api_client.call_for_revision(
-                system_prompt = SCRIPT_GENERATION_SYSTEM_PROMPT,
+                system_prompt = self._script_system_prompt(),
                 user_message  = revision_prompt,
             )
             self.metrics[ "api_calls" ] += 1
@@ -1553,6 +1659,7 @@ class PodcastOrchestratorAgent:
                                                           current_script.estimated_duration_minutes ),
                 key_topics                 = result.get( "key_topics", current_script.key_topics ),
                 revision_count             = current_script.revision_count + 1,
+                script_type                = current_script.script_type,
             )
 
             return revised
@@ -1640,7 +1747,7 @@ class PodcastOrchestratorAgent:
             def write_file():
                 os.makedirs( output_dir, exist_ok=True )
                 with open( output_path, "w", encoding="utf-8" ) as f:
-                    f.write( script.to_markdown() )
+                    f.write( script.to_markdown( include_script_type=True ) )
                 return output_path
 
             path = await asyncio.to_thread( write_file )
@@ -1833,7 +1940,7 @@ Generate the {language_name} script in JSON format with the same structure:
 }}"""
 
             response = await self.api_client.call_for_script(
-                system_prompt = SCRIPT_GENERATION_SYSTEM_PROMPT,
+                system_prompt = self._script_system_prompt(),
                 user_message  = translation_prompt,
             )
             self.metrics[ "api_calls" ] += 1
@@ -1865,6 +1972,17 @@ Generate the {language_name} script in JSON format with the same structure:
                     "output could not be turned into a translated script."
                 )
 
+            # Bug 0913bb90, the other manifestation: the model returns the English text
+            # unchanged, which parses to a full set of segments. A Spanish script is full of
+            # Spanish function words, so too few of them means it was not translated.
+            if target_language.startswith( "es" ):
+                ratio = spanish_stopword_ratio( " ".join( seg.text for seg in segments ) )
+                if ratio < self.config.min_spanish_stopword_ratio:
+                    raise ValueError(
+                        f"{language_name} translation came back untranslated (Spanish word share "
+                        f"{ratio:.2f}, minimum {self.config.min_spanish_stopword_ratio:.2f})."
+                    )
+
             translated_script = PodcastScript(
                 title                      = result.get( "title", f"{english_script.title} ({language_name})" ),
                 research_source            = english_script.research_source,
@@ -1875,6 +1993,7 @@ Generate the {language_name} script in JSON format with the same structure:
                                                           english_script.estimated_duration_minutes ),
                 key_topics                 = result.get( "key_topics", english_script.key_topics ),
                 revision_count             = 0,  # Start fresh for translated version
+                script_type                = english_script.script_type,
             )
 
             # Validate prosody preservation
@@ -1894,13 +2013,14 @@ Generate the {language_name} script in JSON format with the same structure:
 
         except Exception as e:
             logger.error( f"Script translation to {target_language} failed: {e}" )
+            self._failed_translations[ target_language ] = str( e )[ :200 ]
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Translation error: {e}" )
 
             # P0 4317efd1: tell the user the translation failed instead of silently
             # substituting the English script.
             await voice_io.notify(
-                f"{language_name} translation failed — using the English script. ({str( e )[ :100 ]})",
+                f"{language_name} translation failed, so no {language_name} podcast is produced. ({str( e )[ :100 ]})",
                 priority = "high",
             )
 
@@ -1913,6 +2033,7 @@ Generate the {language_name} script in JSON format with the same structure:
                 segments                   = english_script.segments,
                 estimated_duration_minutes = english_script.estimated_duration_minutes,
                 key_topics                 = english_script.key_topics,
+                script_type                = english_script.script_type,
             )
 
     # =========================================================================

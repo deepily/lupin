@@ -23,11 +23,12 @@ import asyncio
 import re
 import sys
 
+from cosa.agents.podcast_generator.script_types import PROFILES, REVIEW_MODES
 from cosa.agents.utils.smoke_suite import run_import_smoke_suite
 
 # User-visible args: the canonical list of args that end users should see
 # and interact with. Engineering params (models, debug, etc.) are excluded.
-USER_VISIBLE_ARGS = [ "research", "languages", "audience", "audience_context" ]
+USER_VISIBLE_ARGS = [ "research", "languages", "audience", "audience_context", "script_type", "review" ]
 
 
 def extract_user_id_from_path( path: str ) -> str:
@@ -147,18 +148,17 @@ async def run_podcast_generation( args ):
         print( "  6. Stitch audio into final MP3(s)" )
         return 0
 
-    # Create config
-    config = PodcastConfig()
-
-    # Target audience configuration (CLI overrides config file)
+    # Create config: CLI beats the script-type profile, which beats the INI
     from cosa.config.configuration_manager import ConfigurationManager
-    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    config.audience = args.audience or config_mgr.get(
-        "podcast generator audience",
-        default="academic"
+    from .script_types import resolve_podcast_config
+    config = resolve_podcast_config(
+        ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ),
+        script_type      = args.script_type,
+        review           = args.review,
+        audience         = args.audience,
+        audience_context = args.audience_context,
+        debug            = args.debug,
     )
-    audience_context_from_config = config_mgr.get( "podcast generator audience context", default="" )
-    config.audience_context = args.audience_context or audience_context_from_config or None
 
     # Create orchestrator with target languages
     agent = PodcastOrchestratorAgent(
@@ -171,6 +171,7 @@ async def run_podcast_generation( args ):
     )
 
     print( f"Podcast ID: {agent.podcast_id}" )
+    print( f"Script type: {config.script_type} (review: {config.review})" )
     if config.audience:
         print( f"Target audience: {config.audience}" )
     if config.audience_context:
@@ -236,7 +237,7 @@ async def run_script_editing( args ):
     print( "" )
 
     # Create config
-    config = PodcastConfig()
+    config = PodcastConfig( review=args.review )
 
     try:
         # Create orchestrator from saved script
@@ -244,6 +245,7 @@ async def run_script_editing( args ):
             script_path = script_path,
             user_id     = args.user_id,
             config      = config,
+            script_type = args.script_type,
             debug       = args.debug,
             verbose     = args.verbose,
         )
@@ -484,6 +486,22 @@ Language codes:
         type    = str,
         default = None,
         help    = "Custom audience description (e.g., 'AI architect familiar with LLMs')"
+    )
+
+    parser.add_argument(
+        "--script-type",
+        type    = str,
+        choices = list( PROFILES ),
+        default = None,
+        help    = "Script type (default: research_critical). With --edit-script, names the type of a saved script that records none"
+    )
+
+    parser.add_argument(
+        "--review",
+        type    = str,
+        choices = list( REVIEW_MODES ),
+        default = None,
+        help    = "Review mode: ask stops for script review, one_shot asks nobody (default: the script type's own)"
     )
 
     parser.add_argument(

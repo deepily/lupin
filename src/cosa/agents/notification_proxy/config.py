@@ -98,6 +98,14 @@ TEST_PROFILES = {
         "budget"           : "no limit",
         "audience"         : "academic",
         "audience_context" : "none",
+        "languages"        : "en",
+    },
+    "research_to_podcast_spanish" : {
+        "description" : "Auto-answer for research-to-podcast runs that ask for English and Mexican Spanish",
+        "query"            : "artificial intelligence safety research 2026",
+        "budget"           : "no limit",
+        "audience"         : "academic",
+        "audience_context" : "none",
         "languages"        : "en,es-MX",
     },
     "all_agents" : {

@@ -13,6 +13,7 @@ Used by:
     - v2 submit (agent router go to mock job — the retired mock-job door's two modes)
 """
 
+import ast
 import functools
 import shlex
 
@@ -216,6 +217,29 @@ def _build_deep_research( command, args_dict, user_id, user_email, session_id, d
     )
     return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
+def _podcast_languages( args_dict ):
+    """
+    Read the requested podcast languages from a submit request.
+
+    Both key names are accepted, because the browser clients send target_languages and the
+    other doors send languages. The key languages wins when both are present.
+
+    Requires:
+        - args_dict is the request's argument dict
+
+    Ensures:
+        - returns None when no language was asked for, which means English only
+        - returns the list unchanged when the value is a list
+        - parses a comma string with the shared CLI parser
+        - reads a string that spells a Python list, which is how the voice router writes it
+    """
+    from cosa.agents.podcast_generator.__main__ import parse_languages_arg
+    value = args_dict.get( "languages" ) or args_dict.get( "target_languages" )
+    if not value: return None
+    if isinstance( value, list ): return value
+    if value.strip().startswith( "[" ): return list( ast.literal_eval( value.strip() ) )
+    return parse_languages_arg( value )
+
 def _build_podcast_generator( command, args_dict, user_id, user_email, session_id, debug, verbose,
                         scheduled_at, monopolize, spawned_by_id_hash ):
     """
@@ -236,13 +260,7 @@ def _build_podcast_generator( command, args_dict, user_id, user_email, session_i
     from cosa.agents.swe_team.job                        import SweTeamJob
     from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
     from cosa.agents.test_suite.job                      import TestSuiteJob
-    # Parse target_languages if provided as string
-    languages = None
-    if args_dict.get( "languages" ):
-        if isinstance( args_dict[ "languages" ], list ):
-            languages = args_dict[ "languages" ]
-        else:
-            languages = [ lang.strip() for lang in args_dict[ "languages" ].split( "," ) ]
+    languages = _podcast_languages( args_dict )
 
     job = PodcastGeneratorJob(
         research_path      = args_dict.get( "research", "" ),
@@ -254,6 +272,8 @@ def _build_podcast_generator( command, args_dict, user_id, user_email, session_i
         force_failure_mode = args_dict.get( "force_failure_mode" ),
         audience           = args_dict.get( "audience" ),
         audience_context   = args_dict.get( "audience_context" ),
+        script_type        = args_dict.get( "script_type" ),
+        review             = args_dict.get( "review" ),
         debug              = debug,
         verbose            = verbose
     )
@@ -279,13 +299,7 @@ def _build_research_to_podcast( command, args_dict, user_id, user_email, session
     from cosa.agents.swe_team.job                        import SweTeamJob
     from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
     from cosa.agents.test_suite.job                      import TestSuiteJob
-    # Parse target_languages if provided as string
-    languages = None
-    if args_dict.get( "languages" ):
-        if isinstance( args_dict[ "languages" ], list ):
-            languages = args_dict[ "languages" ]
-        else:
-            languages = [ lang.strip() for lang in args_dict[ "languages" ].split( "," ) ]
+    languages = _podcast_languages( args_dict )
 
     job = DeepResearchToPodcastJob(
         query            = args_dict.get( "query", "" ),
@@ -303,6 +317,8 @@ def _build_research_to_podcast( command, args_dict, user_id, user_email, session
         # -- and this builder was already dropping it. A caller got a 200, the job ran, and
         # the research read nothing. Krishna's no-op shape, live on two more doors.
         source_document  = args_dict.get( "source_document" ),
+        script_type      = args_dict.get( "script_type" ),
+        review           = args_dict.get( "review" ),
         debug            = debug,
         verbose          = verbose
     )

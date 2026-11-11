@@ -8,7 +8,7 @@ Designed for the podcast generation workflow with script review checkpoints.
 
 import re
 from enum import Enum
-from typing import TypedDict, Literal, Any, Optional
+from typing import TypedDict, Literal, Any, Optional, Union
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -155,10 +155,21 @@ class PodcastScript( BaseModel ):
         description     = "Main topics covered in the podcast"
     )
     revision_count       : int = Field( default=0 )
+    script_type          : Optional[ str ] = Field(
+        default     = None,
+        description = "Script type the script was written as; None when unknown (older saved scripts)"
+    )
 
-    def to_markdown( self ) -> str:
+    def to_markdown( self, include_script_type: bool = False ) -> str:
         """
         Convert entire script to minimalist markdown format.
+
+        Requires:
+            - include_script_type is True only when saving to disk
+
+        Ensures:
+            - the header gains a Script Type line only when include_script_type is True and the type is known
+            - the default output is unchanged, so prompts that embed it stay the same
 
         Returns:
             str: Full markdown script document
@@ -168,10 +179,10 @@ class PodcastScript( BaseModel ):
             f"## Generated: {self.generated_at}",
             f"## Hosts: {self.host_a_name}, {self.host_b_name}",
             f"## Estimated Duration: {self.estimated_duration_minutes:.1f} minutes",
-            "",
-            "---",
-            "",
         ]
+        if include_script_type and self.script_type is not None:
+            lines.append( f"## Script Type: {self.script_type}" )
+        lines += [ "", "---", "" ]
 
         for segment in self.segments:
             lines.append( segment.to_markdown() )
@@ -256,6 +267,8 @@ class PodcastScript( BaseModel ):
         source_pattern   = r'^##\s+Research Source:\s*(.+)$'
         topics_pattern   = r'^##\s+Key Topics:\s*(.+)$'
         revision_pattern = r'^##\s+Revision:\s*(\d+)$'
+        type_pattern     = r'^##\s+Script Type:\s*(\S+)$'
+        script_type      = None
 
         # First pass: parse header
         for line in lines:
@@ -294,6 +307,11 @@ class PodcastScript( BaseModel ):
             if match:
                 topics_str = match.group( 1 ).strip()
                 key_topics = [ t.strip() for t in topics_str.split( "," ) ]
+                continue
+
+            match = re.match( type_pattern, line )
+            if match:
+                script_type = match.group( 1 )
                 continue
 
             match = re.match( revision_pattern, line )
@@ -345,6 +363,7 @@ class PodcastScript( BaseModel ):
             estimated_duration_minutes = duration,
             key_topics                 = key_topics,
             revision_count             = revision_count,
+            script_type                = script_type,
         )
 
 
@@ -381,6 +400,54 @@ class ContentAnalysis( BaseModel ):
         default = "intermediate"
     )
     estimated_coverage_minutes : float = Field( default=10.0 )
+
+
+class DigestItem( BaseModel ):
+    """One status item and the source line it came from."""
+
+    text        : str = Field( description="One plain sentence stating the item" )
+    source_line : str = Field( description="The line of the source document the item came from" )
+
+
+class StatusDigest( BaseModel ):
+    """
+    Digest of a status document for the status_report script type.
+
+    Lives in the same state slot as ContentAnalysis, under the script_type tag.
+    done and outstanding are required, so a research-shaped default dict fails validation.
+    """
+
+    script_type : Literal[ "status_report" ] = Field( default="status_report" )
+    main_topic  : str = Field( default="Status report" )
+    done        : list[ DigestItem ]
+    outstanding : list[ DigestItem ]
+    tricky      : list[ DigestItem ] = Field( default_factory=list )
+    unresolved  : list[ DigestItem ] = Field( default_factory=list )
+    blocked     : list[ DigestItem ] = Field( default_factory=list )
+    next_steps  : list[ DigestItem ] = Field( default_factory=list )
+
+    @property
+    def key_subtopics( self ) -> list[ str ]:
+        """Topics for the script's key_topics field: the main topic only."""
+        return [ self.main_topic ]
+
+    def all_items( self ) -> list[ DigestItem ]:
+        """
+        Return every item across all six categories.
+
+        Ensures:
+            - the list is ordered done, outstanding, tricky, unresolved, blocked, next steps
+        """
+        return self.done + self.outstanding + self.tricky + self.unresolved + self.blocked + self.next_steps
+
+    def unsupported_items( self, source_text: str ) -> list[ DigestItem ]:
+        """
+        Return the items whose source line is not a substring of the source text.
+
+        Requires:
+            - source_text is the document the digest was built from
+        """
+        return [ item for item in self.all_items() if item.source_line not in source_text ]
 
 
 class PodcastMetadata( BaseModel ):
@@ -421,7 +488,7 @@ class PodcastState( TypedDict ):
     user_id              : str
 
     # Analysis Phase
-    content_analysis     : Optional[ ContentAnalysis ]
+    content_analysis     : Optional[ Union[ ContentAnalysis, StatusDigest ] ]
     topics_extracted     : bool
     analysis_confidence  : float
 
