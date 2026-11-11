@@ -22,8 +22,8 @@
     const POLL_MS       = 60 * 1000;
     const SVG_NS        = "http://www.w3.org/2000/svg";
     const NOT_REPORTED  = "not reported";
-    const STATE_ORDER   = [ "healthy", "behind", "failing", "silent", "unknown" ];   // active first (Rick, 9 Nov, row 300af681); a running job goes above all of them
-    const DEFAULT_SORT  = { id : null, direction : "asc" };   // no header picked: the active-first order
+    const STATE_ORDER   = [ "healthy", "behind", "failing", "silent", "unknown" ];   // the order of the header line's counts
+    const DEFAULT_SORT  = { id : null, direction : "asc" };   // no header picked: service name A to Z
     const STATE_LABEL   = { unknown : "UNKNOWN", silent : "SILENT", failing : "FAILING", behind : "BEHIND", healthy : "healthy" };
 
     // ─── Text rules (no DOM, no clock) ─────────────────────────────────
@@ -46,24 +46,22 @@
         return last < first ? "▼" : "=";
     }
 
-    // The states by urgency, least urgent first (Rick, 11 Nov, row 4b807ffd): failing is the most urgent. Not STATE_ORDER, which ranks the default order.
+    // The states by urgency, least urgent first (Rick, 11 Nov, row 4b807ffd): failing is the most urgent. Not STATE_ORDER, which orders the header line.
     const HEALTH_URGENCY = [ "healthy", "behind", "silent", "unknown", "failing" ];
 
     // When a job's last attempt began, in milliseconds; a job with none, or a time that does not parse, counts as -1 (oldest).
     function attemptTime( j ) { return j.last_attempt === null ? -1 : ( Date.parse( j.last_attempt.started_at ) || -1 ); }
 
-    // The default order: active first (running now, healthy, behind, failing, silent, never reported). Inside one rank the most
-    // recent attempt comes first (a job with none, last), then title, then target.
+    // The default order is service name A to Z (Rick, 11 Nov, row 1ac04991): title, then target.
     function defaultCompare( a, b ) {
-        const rank    = ( j ) => j.running ? -1 : STATE_ORDER.indexOf( j.state );
-        return rank( a ) - rank( b ) || attemptTime( b ) - attemptTime( a ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" );
+        return a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" );
     }
 
     // The sort orders a reader can pick from the column headers (row 4b807ffd). One entry each: a third order is one more entry
     // here and nothing else. `compare` runs in the ascending direction; "desc" flips it, and ties fall back to the default order.
     // Health runs by HEALTH_URGENCY, healthy at one end and failing at the other. Last run is oldest first when ascending, a job that never ran first.
     const SORT_ORDERS = [
-        { id : "name",   label : "Service", compare : ( a, b ) => a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) },
+        { id : "name",   label : "Service", compare : defaultCompare },
         { id : "health", label : "Status",  compare : ( a, b ) => HEALTH_URGENCY.indexOf( a.state ) - HEALTH_URGENCY.indexOf( b.state ) },
         { id : "last-run", label : "Last run", compare : ( a, b ) => attemptTime( a ) - attemptTime( b ) },
     ];
@@ -111,16 +109,16 @@
         if ( attempt === null ) return job.state === "unknown" ? "never reported" : "no run recorded";
         const at = formatWhen( attempt.started_at, todayIso );
         if ( attempt.outcome === "failed" ) {
-            return attempt.failure === null ? "last run " + at + " failed" : "last run " + at + " failed (" + attempt.failure + ")";
+            return attempt.failure === null ? at + " failed" : at + " failed (" + attempt.failure + ")";
         }
-        if ( attempt.outcome === "skipped" ) return "last run " + at + " skipped";
+        if ( attempt.outcome === "skipped" ) return at + " skipped";
         if ( attempt.outcome === "clean" && job.work_found_last_run === 0 ) return "ran " + at + ", found nothing";
-        return "last run " + at + " " + attempt.outcome;
+        return at + " " + attempt.outcome;
     }
 
     function lastFinishedText( job, todayIso ) {
-        if ( job.last_finished === null ) return "last finished: " + NOT_REPORTED;
-        return "last finished " + formatWhen( job.last_finished.started_at, todayIso );
+        if ( job.last_finished === null ) return NOT_REPORTED;
+        return formatWhen( job.last_finished.started_at, todayIso );
     }
 
     function freshnessText( debt ) {
@@ -133,10 +131,10 @@
     function scanText( job ) {
         if ( !job.applies.scan_debt ) return "";
         const debt = job.scan_debt;
-        if ( debt === null ) return "scan: " + NOT_REPORTED;
+        if ( debt === null ) return NOT_REPORTED;
         if ( debt.freshness !== null ) return freshnessText( debt );
-        if ( debt.count === null ) return "scan: " + NOT_REPORTED;
-        return ( "scan " + formatCount( debt.count ) + " " + trendArrow( debt.points ) ).trimEnd();
+        if ( debt.count === null ) return NOT_REPORTED;
+        return ( formatCount( debt.count ) + " " + trendArrow( debt.points ) ).trimEnd();
     }
 
     function fixText( job ) {
@@ -153,10 +151,10 @@
     function clearsText( job ) {
         const clears = job.scan_debt === null ? null : job.scan_debt.clears_in;
         if ( !job.applies.scan_debt || clears === null ) return "";
-        if ( clears.kind === "never_at_this_rate" ) return "clears: never at this rate";
-        if ( clears.kind === "not_enough_runs" ) return "clears: not enough runs";
-        if ( clears.days === null ) return "clears: " + NOT_REPORTED;
-        return "clears: " + ( clears.days === 1 ? "1 day" : clears.days + " days" );
+        if ( clears.kind === "never_at_this_rate" ) return "never at this rate";
+        if ( clears.kind === "not_enough_runs" ) return "not enough runs";
+        if ( clears.days === null ) return NOT_REPORTED;
+        return clears.days === 1 ? "1 day" : clears.days + " days";
     }
 
     function notReportedNames( job ) {
@@ -305,7 +303,7 @@
         addRow( dl, "Drained last run", formatCount( debt.drained_last_run ), "jobs-scan-drained" );
         addRow( dl, "Arrived last interval", formatCount( debt.arrived_last_interval ), "jobs-scan-arrived" );
         addRow( dl, "Never checked", formatCount( debt.never_checked ), "jobs-scan-never" );
-        addRow( dl, "Clears in", clearsText( job ).replace( /^clears: /, "" ) || NOT_REPORTED, "jobs-scan-clears" );
+        addRow( dl, "Clears in", clearsText( job ) || NOT_REPORTED, "jobs-scan-clears" );
         section.appendChild( dl );
         const spark = sparkline( debt.points, "scan debt" );
         if ( spark !== null ) section.appendChild( spark );

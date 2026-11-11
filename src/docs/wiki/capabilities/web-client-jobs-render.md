@@ -9,7 +9,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.block@4c3525bfd4
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.reasonsBlock@10bc72da0d
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.stripBlock@55f74b3b70
-  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.scanBlock@d8e3e5d837
+  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.scanBlock@72cb5560db
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.fixBlock@bb8780d322
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.scheduleBlock@f3a385797d
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.evidenceBlock@fe909d3e62

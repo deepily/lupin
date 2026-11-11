@@ -132,7 +132,7 @@ function scanBlock( doc: Document, job: JobEntry, todayIso: string ): HTMLElemen
   addRow( doc, dl, "Drained last run", formatCount( debt.drained_last_run ), "jobs-scan-drained" );
   addRow( doc, dl, "Arrived last interval", formatCount( debt.arrived_last_interval ), "jobs-scan-arrived" );
   addRow( doc, dl, "Never checked", formatCount( debt.never_checked ), "jobs-scan-never" );
-  addRow( doc, dl, "Clears in", clearsText( job ).replace( /^clears: /, "" ) || NOT_REPORTED, "jobs-scan-clears" );
+  addRow( doc, dl, "Clears in", clearsText( job ) || NOT_REPORTED, "jobs-scan-clears" );
   section.appendChild( dl );
   const spark = sparkline( doc, debt.points, "scan debt" );
   if ( spark !== null ) section.appendChild( spark );

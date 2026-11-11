@@ -265,7 +265,7 @@ test( "the legacy toolbar button and section header both carry 🔁, and no othe
   assert.ok( ( document.querySelector( "#section-background-jobs h3" )!.textContent as string ).startsWith( "🔁 Background Jobs" ) );
 } );
 
-test( "the legacy sort goes active first: running, healthy, behind, failing, silent, unknown, newest attempt first, none last (row 300af681)", async () => {
+test( "the legacy sort defaults to service name A to Z, whatever the state, running flag or attempt time (row 1ac04991, replacing row 300af681)", async () => {
   const api = await load();
   const base = FIXTURE.jobs[ 0 ]!;
   const mk = ( name: string, state: string, at: string | null, running = false ) =>
@@ -277,7 +277,7 @@ test( "the legacy sort goes active first: running, healthy, behind, failing, sil
     mk( "h-utc", "healthy", "2026-11-09T14:30:00+00:00" ),
   ];
   const before = jobs.map( ( j ) => j.job );
-  assert.deepEqual( api.sortJobs( jobs ).map( ( j: { job: string } ) => j.job ), [ "z-run", "h-utc", "h-new", "h-old", "h-bad", "h-none", "b", "f", "s", "u" ] );
+  assert.deepEqual( api.sortJobs( jobs ).map( ( j: { job: string } ) => j.job ), [ "b", "f", "h-bad", "h-new", "h-none", "h-old", "h-utc", "s", "u", "z-run" ] );
   assert.deepEqual( jobs.map( ( j ) => j.job ), before, "sortJobs must not touch its input" );
   assert.equal( api.headerLine( jobs.filter( ( j ) => [ "u", "f", "h-old" ].includes( j.job ) ) ), "3 jobs: 1 healthy, 1 failing, 1 unknown" );
 } );
