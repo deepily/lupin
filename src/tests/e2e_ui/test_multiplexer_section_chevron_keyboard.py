@@ -23,8 +23,8 @@ population is countable from the source:
     grep -rn "renderSectionHeader(" src/lupin_app/static/js/multiplexer/render/ \
         --include=*.ts | grep -v "templates/sectionHeader.ts" | wc -l
 
-16 call sites, 16 rendered bars, each with a chevron (re-derived 2026-09-23 at
-92c3b434, the merge-train tip that landed B-3, B-6 and B-7; it read 13 at 11a6f9f3).
+17 call sites, 17 rendered bars, each with a chevron (re-derived 2026-11-11 at
+6addfb232, after Background Jobs landed in 890995c41; it read 16 at 92c3b434, 13 at 11a6f9f3).
 The list below is COPIED, not derived from the page — a list read off the thing it
 checks agrees with itself. A new section means adding it here.
 
@@ -71,6 +71,7 @@ ALL_CHEVRON_HEADERS = [
     "multiplexer-task-list-header",
     "multiplexer-holding-area-header",
     "multiplexer-epic-board-header",
+    "multiplexer-background-jobs-header", # Background Jobs pane, 890995c41 (row 50393d00)
     "multiplexer-jobs-header",
     # The seven below are B-1..B-7 in page order. The first four (*) are the ones
     # this guard caught missing while their panes were already live; B-3, B-6 and
@@ -99,9 +100,9 @@ ALL_CHEVRON_HEADERS = [
 #
 # ⚠️ PRESENCE AND REACHABILITY ARE DIFFERENT QUESTIONS AND THE SPLIT KEEPS THEM APART.
 # A `display: none` element is still in the DOM, so `querySelectorAll( ".section-header" )`
-# counts it — the CENSUS must therefore expect all sixteen, for every user. What a
+# counts it — the CENSUS must therefore expect all seventeen, for every user. What a
 # non-admin cannot do is SEE or TAB TO it, so the visibility wait and the keyboard walks
-# use the fifteen. Collapsing those two into one list is what made this look like a
+# use the sixteen. Collapsing those two into one list is what made this look like a
 # missing chevron rather than a hidden pane.
 ADMIN_ONLY_CHEVRON_HEADERS = [
     "multiplexer-filter-settings-header", # B-3 — axis 1, 4c730b46b
@@ -239,9 +240,9 @@ class TestMultiplexerSectionChevronKeyboard:
         page = logged_in_page
         _open_multiplexer_with_every_pane_shown( page )
         census = page.evaluate( _CENSUS_JS )
-        # ALL sixteen, including the admin-only pane: a `display: none` section is still in
+        # ALL seventeen, including the admin-only pane: a `display: none` section is still in
         # the DOM, so this census is about PRESENCE, not visibility (see the note beside
-        # ADMIN_ONLY_CHEVRON_HEADERS). Asserting the fifteen here would let an admin-only
+        # ADMIN_ONLY_CHEVRON_HEADERS). Asserting the sixteen here would let an admin-only
         # pane lose its chevron entirely without anything going red.
         assert [ h[ "testid" ] for h in census ] == ALL_CHEVRON_HEADERS, (
             "The rendered section headers no longer match the guarded list, so this guard's "
@@ -281,7 +282,7 @@ class TestMultiplexerSectionChevronKeyboard:
         pre-97ab72a2 `<span role="button">` with no tabindex — product code untouched —
         and drive it through the same helpers the guards above use. They must report
         what a keyboard user would hit: Tab never lands on it, and Enter does nothing.
-        The other eight must still be reached, or the walk proved nothing.
+        The other fifteen must still be reached, or the walk proved nothing.
         """
         page = logged_in_page
         _open_multiplexer_with_every_pane_shown( page )
@@ -383,7 +384,7 @@ class TestAdminOnlySectionChevrons:
 
         This case does NOT call `_open_multiplexer_with_every_pane_shown` — that helper
         waits for every non-admin header to be visible, which is beside the point here and
-        would couple this assertion to the other fifteen.
+        would couple this assertion to the other sixteen.
         """
         page = logged_in_page
         page.goto( f"{BASE_URL}/app/multiplexer" )
