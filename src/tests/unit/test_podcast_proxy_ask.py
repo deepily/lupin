@@ -365,7 +365,7 @@ def test_an_ask_with_no_choice_writes_the_original_payload_shape( world ):
     _ask( world )
     payload = world[ "cards" ].created[ 0 ].payload
     assert set( payload ) == pp.PAYLOAD_KEYS
-    assert pp.card_options( payload ) == ( None, None )
+    assert pp.card_options( payload ) == ( None, None, None )
 
 
 def test_the_card_text_names_a_status_report_and_the_languages( world ):
@@ -389,3 +389,34 @@ def test_an_unknown_script_type_or_a_bad_languages_value_is_a_422_and_makes_no_c
     assert _ask( world, languages=5 ).status_code == 422
     assert _ask( world, languages=[ "en", 5 ] ).status_code == 422
     assert world[ "cards" ].created == [ ]
+
+
+# ---- review chosen at ask time, and the exact body the doc viewer posts ----
+
+CLIENT_BODY = { "script_type": "status_report", "review": "one_shot", "languages": [ "en", "es-MX" ] }
+
+
+def test_the_exact_body_the_viewer_page_sends_is_accepted_by_the_ask_door( world ):
+    _file( world )
+    answer = _ask( world, **CLIENT_BODY )
+    assert answer.status_code == 200, answer.text
+    payload = world[ "cards" ].created[ 0 ].payload
+    assert payload[ "review" ] == "one_shot" and payload[ "script_type" ] == "status_report" and pp.payload_shape_ok( payload )
+    assert pp.card_options( payload ) == ( "status_report", [ "en", "es-MX" ], "one_shot" )
+
+
+def test_the_card_for_a_one_shot_says_no_script_review_follows_and_for_ask_says_one_does( world ):
+    _file( world )
+    _ask( world, script_type="status_report" )
+    assert "no Script Review card follows" in world[ "cards" ].created[ 0 ].abstract
+    _ask( world, script_type="research_critical", review="one_shot" )
+    assert "- review: one_shot" in world[ "cards" ].created[ 1 ].abstract and "no Script Review card follows" in world[ "cards" ].created[ 1 ].abstract
+    _ask( world, script_type="status_report", review="ask" )
+    assert "a Script Review card follows" in world[ "cards" ].created[ 2 ].abstract
+    _ask( world )
+    assert "a Script Review card follows" in world[ "cards" ].created[ 3 ].abstract
+
+
+def test_an_unknown_review_is_a_422_and_makes_no_card( world ):
+    _file( world )
+    assert _ask( world, review="maybe" ).status_code == 422 and world[ "cards" ].created == [ ]

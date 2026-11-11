@@ -348,7 +348,7 @@ def test_the_tool_stamps_the_actor_and_passes_the_path_through( stamped, monkeyp
     captured, sentinel = { }, { "status": "started" }
     monkeypatch.setattr( cv, "podcast_for_rick_impl", lambda **kwargs: captured.update( kwargs ) or sentinel )
     assert cv.podcast_for_rick.fn.sync( path="/abs/x.md", card_id="c1" ) is sentinel
-    assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "actor": "tiffany 641d31ee", "host_path": "/abs/x.md", "card_id": "c1", "script_type": "", "languages": "" }
+    assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "actor": "tiffany 641d31ee", "host_path": "/abs/x.md", "card_id": "c1", "script_type": "", "languages": "", "review": "" }
 
 
 def test_the_actor_binds_to_the_stable_session_id_not_the_current_one( stamped, monkeypatch ):
@@ -380,7 +380,7 @@ def test_a_bridge_failure_falls_back_to_the_current_session( stamped, monkeypatc
 
 
 def test_actor_is_not_a_tool_parameter():
-    assert list( inspect.signature( cv.podcast_for_rick.fn ).parameters ) == [ "path", "card_id", "script_type", "languages" ]
+    assert list( inspect.signature( cv.podcast_for_rick.fn ).parameters ) == [ "path", "card_id", "script_type", "languages", "review" ]
 
 
 def test_a_borrowed_identity_is_refused_before_the_impl( stamped, monkeypatch ):
@@ -405,11 +405,11 @@ def run_with( server, repos, **options ):
 
 def test_the_ask_carries_script_type_and_languages_only_when_given( repos ):
     server = Server( ASK(), [ ANSWER( "yes" ) ], start={ "job_id": "j9" } )
-    run_with( server, repos, script_type="status_report", languages=[ "en", "es-MX" ] )
+    run_with( server, repos, script_type="status_report", languages=[ "en", "es-MX" ], review="one_shot" )
     assert server.asks()[ 0 ][ 2 ] == { "path": "lupin/io/tmp/x.md", "actor": "tiffany 641d31ee",
-                                        "script_type": "status_report", "languages": [ "en", "es-MX" ] }
+                                        "script_type": "status_report", "languages": [ "en", "es-MX" ], "review": "one_shot" }
     plain = Server( ASK(), [ ANSWER( "yes" ) ], start={ "job_id": "j9" } )
-    run_with( plain, repos, script_type="", languages="" )
+    run_with( plain, repos, script_type="", languages="", review="" )
     assert set( plain.asks()[ 0 ][ 2 ] ) == { "path", "actor" }
 
 
@@ -433,5 +433,5 @@ def test_the_mcp_tool_hands_both_new_arguments_to_the_impl( monkeypatch ):
     monkeypatch.setattr( mcp_mod, "_get_server_url", lambda: "http://s" )
     monkeypatch.setattr( mcp_mod, "_mcp_outbound_api_key", lambda: "k" )
     monkeypatch.setattr( mcp_mod, "_podcast_actor", lambda: "a 12345678" )
-    mcp_mod.podcast_for_rick.fn.sync( path="/p.md", script_type="status_report", languages=[ "en" ] )
-    assert seen[ "script_type" ] == "status_report" and seen[ "languages" ] == [ "en" ] and seen[ "host_path" ] == "/p.md"
+    mcp_mod.podcast_for_rick.fn.sync( path="/p.md", script_type="status_report", languages=[ "en" ], review="ask" )
+    assert seen[ "script_type" ] == "status_report" and seen[ "languages" ] == [ "en" ] and seen[ "review" ] == "ask" and seen[ "host_path" ] == "/p.md"

@@ -54,8 +54,10 @@ class AskIn( BaseModel ):
     actor       : str = Field( ..., min_length=1, max_length=255 )
     script_type : Optional[ str ] = None
     languages   : Optional[ Union[ list[ str ], str ] ] = None
+    review      : Optional[ str ] = None
 
     _known_type = field_validator( "script_type" )( lambda value: _checked_script_type( value ) )
+    _known_mode = field_validator( "review" )( lambda value: proxy.validate_review( value ) )
     _codes      = field_validator( "languages" )( lambda value: proxy.normalize_languages( value ) )
 
 
@@ -108,7 +110,7 @@ def ask_for_a_podcast(
     persona    = get_voice_persona( session_id )
     seat       = find_session_by_id( session_id, check_pid=False ) or { }
     asker      = proxy.asker_label( session_id, persona.get( "name" ) if persona is not None else None )
-    ask_payload = proxy.card_payload( facts, asker, proxy.binding_id( session_id, seat ), script_type=payload.script_type, languages=payload.languages )
+    ask_payload = proxy.card_payload( facts, asker, proxy.binding_id( session_id, seat ), script_type=payload.script_type, languages=payload.languages, review=payload.review )
     question, abstract = proxy.card_text( ask_payload )
     now        = datetime.now( timezone.utc )
     with get_db() as session:
@@ -193,7 +195,7 @@ SEAT_QUEUE_FAILED_TEXT   = "The job could not be queued. The yes is still good; 
 VIEWER_QUEUE_FAILED_TEXT = "The job could not be queued. Nothing was started; press the button again."
 
 
-def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, queue_failed_text=SEAT_QUEUE_FAILED_TEXT, script_type=None, languages=None ):
+def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, queue_failed_text=SEAT_QUEUE_FAILED_TEXT, script_type=None, languages=None, review=None ):
     """
     Queue the podcast job for a claim this caller already won, and record it.
 
@@ -202,7 +204,7 @@ def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, 
         - facts is the dict check_source returned with keep_content=True
         - copy_id names this attempt's copy folder; the seat door passes its card id, the viewer door a fresh id per click
         - queue_failed_text is the 502 sentence, written for the caller's door
-        - script_type and languages are what the card or the click chose; None leaves the job's default
+        - script_type, languages and review are what the card or the click chose; None leaves the job's default
 
     Ensures:
         - with INI `podcast proxy dry run` on: nothing is copied or queued and the spent row takes a "dry-run-" job id
@@ -221,6 +223,7 @@ def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, 
         args   = { "research": path }
         if script_type is not None: args[ "script_type" ] = script_type
         if languages is not None:   args[ "languages" ]   = languages
+        if review is not None:      args[ "review" ]      = review
         result = flow.submit(
             command      = proxy.COMMAND,
             args         = args,
@@ -315,9 +318,9 @@ def start_a_podcast(
     if not won:
         raise _refuse( 409, "spent", "That card has already started a podcast, and a yes covers one, so it is refused." )
 
-    script_type, languages = proxy.card_options( stored )
+    script_type, languages, review = proxy.card_options( stored )
     outcome = _run_claimed_job( flow, facts, claim_id=payload.card_id, copy_id=payload.card_id, recipient_id=recipient_id, user_email=operator[ "email" ],
-                                script_type=script_type, languages=languages )
+                                script_type=script_type, languages=languages, review=review )
     return { "card_id": str( payload.card_id ), **outcome }
 
 
@@ -364,8 +367,10 @@ class ViewerIn( BaseModel ):
     path        : str = Field( ..., min_length=1, max_length=1024 )
     script_type : Optional[ str ] = None
     languages   : Optional[ Union[ list[ str ], str ] ] = None
+    review      : Optional[ str ] = None
 
     _known_type = field_validator( "script_type" )( lambda value: _checked_script_type( value ) )
+    _known_mode = field_validator( "review" )( lambda value: proxy.validate_review( value ) )
     _codes      = field_validator( "languages" )( lambda value: proxy.normalize_languages( value ) )
 
 
@@ -443,7 +448,7 @@ def start_a_podcast_from_viewer(
         raise _refuse( 400, refusal.code, refusal.message )
 
     scope_path = f"{facts[ 'scope' ]}/{facts[ 'rel' ]}"
-    variant    = ":".join( [ payload.script_type or "", ",".join( payload.languages or [] ) ] ) if ( payload.script_type or payload.languages ) else ""
+    variant    = ":".join( [ payload.script_type or "", ",".join( payload.languages or [] ), payload.review or "" ] ) if ( payload.script_type or payload.languages or payload.review ) else ""
     claim_id   = proxy.viewer_claim_id( authenticated_user_id, scope_path, facts[ "sha256" ], variant )
     cutoff     = datetime.now( timezone.utc ) - timedelta( seconds=proxy.max_age_seconds() )
     with get_db() as session:
@@ -457,5 +462,5 @@ def start_a_podcast_from_viewer(
         raise HTTPException( status_code=409, detail={ **proxy.refusal_detail( "spent", "A podcast of this file was already started, and one click starts one job." ), "job_id": earlier_job } )
 
     outcome = _run_claimed_job( flow, facts, claim_id=claim_id, copy_id=uuid.uuid4(), recipient_id=authenticated_user_id, user_email=email,
-                                queue_failed_text=VIEWER_QUEUE_FAILED_TEXT, script_type=payload.script_type, languages=payload.languages )
+                                queue_failed_text=VIEWER_QUEUE_FAILED_TEXT, script_type=payload.script_type, languages=payload.languages, review=payload.review )
     return { **outcome, "size": facts[ "size" ] }

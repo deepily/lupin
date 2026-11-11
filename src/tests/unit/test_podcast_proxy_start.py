@@ -559,3 +559,19 @@ def test_normalize_languages_shapes():
     assert pp.normalize_languages( "en,es-MX" ) == [ "en", "es-MX" ] and pp.normalize_languages( [ " en ", "es" ] ) == [ "en", "es" ]
     with pytest.raises( ValueError ):
         pp.normalize_languages( 5 )
+
+
+def test_the_job_gets_the_review_the_card_carries( world ):
+    card = _optioned_card( world, script_type="status_report", languages=[ "en" ], review="one_shot" )
+    assert _start( world, card.id ).status_code == 200
+    assert world[ "flow" ].calls[ 0 ][ "args" ][ "review" ] == "one_shot"
+    other = _optioned_card( world, script_type="research_critical" )
+    _start( world, other.id )
+    assert "review" not in world[ "flow" ].calls[ 1 ][ "args" ]
+
+
+def test_a_card_with_review_still_passes_the_shape_check_and_an_unknown_mode_cannot_be_written():
+    required = { key: "x" for key in pp.PAYLOAD_KEYS }
+    assert pp.payload_shape_ok( dict( required, review="ask", script_type="s", languages=[ "en" ] ) )
+    with pytest.raises( ValueError, match="Unknown review" ):
+        pp.card_payload( { "scope": "d", "rel": "a.md", "server_path": "/a", "name": "a.md", "size": 1, "sha256": "x" }, "m", "s", review="maybe" )

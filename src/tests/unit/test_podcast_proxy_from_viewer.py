@@ -314,3 +314,22 @@ def test_an_unknown_type_in_a_click_is_a_422_and_claims_nothing( world ):
     assert _click_with( world, script_type="nope" ).status_code == 422
     assert _click_with( world, languages=5 ).status_code == 422
     assert _spent( world ) == [ ] and world[ "flow" ].calls == [ ]
+
+
+def test_the_exact_body_docpodcast_sends_for_a_status_report_starts_a_job_carrying_review( world ):
+    body   = { "path": "demo/io/tmp/summary.md", "script_type": "status_report", "review": "one_shot", "languages": [ "en", "es-MX" ] }
+    answer = _app( world ).post( "/api/podcast-proxy/from-viewer", json=body )
+    assert answer.status_code == 200, answer.text
+    args = world[ "flow" ].calls[ 0 ][ "args" ]
+    assert ( args[ "script_type" ], args[ "review" ], args[ "languages" ] ) == ( "status_report", "one_shot", [ "en", "es-MX" ] )
+
+
+def test_a_different_review_on_the_same_bytes_and_type_is_its_own_job( world ):
+    assert _click_with( world, script_type="status_report", review="one_shot" ).status_code == 200
+    assert _click_with( world, script_type="status_report", review="one_shot" ).status_code == 409
+    assert _click_with( world, script_type="status_report", review="ask" ).status_code == 200
+
+
+def test_an_unknown_review_in_a_click_is_a_422_and_claims_nothing( world ):
+    assert _click_with( world, review="maybe" ).status_code == 422
+    assert _spent( world ) == [ ] and world[ "flow" ].calls == [ ]

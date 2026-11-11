@@ -33,7 +33,7 @@ import uuid
 
 from fastapi import HTTPException
 
-from cosa.agents.podcast_generator.script_types import DEFAULT_TYPE, get_profile
+from cosa.agents.podcast_generator.script_types import DEFAULT_TYPE, REVIEW_ONE_SHOT, get_profile, validate_review
 from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest.routers._pinned_open import PinnedPathGone, landed_path_of_fd
 from cosa.rest.routers._scope_registry import _prefix_looks_like_credential, landed_relative_path
@@ -301,18 +301,18 @@ def asker_label( session_id, persona_name ):
     return f"an unrecognized session ({session_id})"
 
 
-def card_payload( facts, asker, session_id, script_type=None, languages=None ):
+def card_payload( facts, asker, session_id, script_type=None, languages=None, review=None ):
     """
     The binding a podcast card carries in its payload, written by the server.
 
     Requires:
         - facts is the dict check_source returned; asker is the label asker_label made
         - session_id is the asking seat's binding id from `binding_id`
-        - script_type is None or a script type name; languages is None or a list of codes
+        - script_type is None or a script type name; languages is None or a list of codes; review is None, ask or one_shot
 
     Ensures:
         - returns { kind, command, scope_path, server_path, name, size, sha256, asked_by, asked_by_session }
-        - script_type and languages are added only when given, so a default podcast keeps the original shape
+        - script_type, languages and review are added only when given, so a default podcast keeps the original shape
         - every value comes from the server: the file's measured facts, the constant command, and the label
     """
     payload = {
@@ -328,6 +328,7 @@ def card_payload( facts, asker, session_id, script_type=None, languages=None ):
     }
     if script_type is not None: payload[ "script_type" ] = script_type
     if languages is not None:   payload[ "languages" ]   = languages
+    if review is not None:      payload[ "review" ]      = validate_review( review )
     return payload
 
 
@@ -345,12 +346,16 @@ def card_text( payload ):
         - the question carries no path and no hash, which a voice would read as noise
     """
     size = human_size( payload[ "size" ] )
-    script_type, languages = card_options( payload )
+    script_type, languages, review = card_options( payload )
+    one_shot = ( review or get_profile( script_type ).review_default ) == REVIEW_ONE_SHOT
     kind     = "a status report podcast" if script_type == "status_report" else "a podcast"
     question = f"{payload[ 'asked_by' ]} asks for {kind} of {payload[ 'name' ]}, {size}. Start it?"
     options  = ""
     if script_type not in ( None, DEFAULT_SCRIPT_TYPE ): options += f"- script type: {script_type}\n"
     if languages: options += f"- languages: {', '.join( languages )}\n"
+    if review is not None: options += f"- review: {review}\n"
+    flow = ( "the script is written and goes straight to audio; no Script Review card follows, and audio is bought now" if one_shot
+             else "the script is written first and a Script Review card follows; audio is bought after that" )
     abstract = (
         f"**Make a podcast**\n\n"
         f"- file: `{payload[ 'scope_path' ]}`\n"
@@ -358,7 +363,7 @@ def card_text( payload ):
         f"- asked by: {payload[ 'asked_by' ]}\n"
         f"{options}"
         f"- will be started by: {payload[ 'asked_by' ]}, once you say yes\n"
-        f"- the script is written first and a Script Review card follows; audio is bought after that\n\n"
+        f"- {flow}\n\n"
         f"{UNANSWERED_MEANS}"
     )
     return question, abstract
@@ -400,18 +405,18 @@ def default_yes_due( card, now ):
 
 
 PAYLOAD_KEYS          = frozenset( { "kind", "command", "scope_path", "server_path", "name", "size", "sha256", "asked_by", "asked_by_session" } )
-OPTIONAL_PAYLOAD_KEYS = frozenset( { "script_type", "languages" } )
+OPTIONAL_PAYLOAD_KEYS = frozenset( { "script_type", "languages", "review" } )
 
 
 def payload_shape_ok( payload ):
     """
-    Whether a card payload carries every required key and no key beyond the optional two.
+    Whether a card payload carries every required key and no key beyond the optional three.
 
     Requires:
         - payload is a dict
 
     Ensures:
-        - True when PAYLOAD_KEYS are all present and the rest are within OPTIONAL_PAYLOAD_KEYS
+        - True when PAYLOAD_KEYS are all present and the rest are within OPTIONAL_PAYLOAD_KEYS (script_type, languages, review)
         - an old card, written before the optional keys existed, passes
     """
     keys = set( payload )
@@ -442,16 +447,16 @@ def normalize_languages( value ):
 
 def card_options( payload ):
     """
-    The script type and languages a stored card carries.
+    The script type, languages and review mode a stored card carries.
 
     Requires:
         - payload is a card payload that passed payload_shape_ok
 
     Ensures:
-        - returns ( script_type, languages ), each None when the card holds none
-        - an old card gives ( None, None ), which the job reads as research_critical and English only
+        - returns ( script_type, languages, review ), each None when the card holds none
+        - an old card gives ( None, None, None ), which the job reads as research_critical, English only, the type's own review
     """
-    return payload.get( "script_type" ), payload.get( "languages" )
+    return payload.get( "script_type" ), payload.get( "languages" ), payload.get( "review" )
 
 
 class StartRefusal( Exception ):

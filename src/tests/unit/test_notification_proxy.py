@@ -668,6 +668,22 @@ class TestProfileScriptPairing:
         missing = [ k for k in TEST_PROFILES if not os.path.isfile( resolve_script_path( k ) ) ]
         assert missing == [], f"profiles with no script file: {missing}"
 
+    def test_only_a_spanish_named_script_answers_a_languages_question_with_a_spanish_code( self ):
+        """Only a Spanish-named script answers a languages question with a Spanish code."""
+        import json
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        answering   = { }
+        for name in sorted( os.listdir( scripts_dir ) ):
+            if not name.endswith( ".json" ) or name.startswith( "_" ): continue
+            with open( os.path.join( scripts_dir, name ), encoding="utf-8" ) as f:
+                entries = json.load( f ).get( "entries", [ ] )
+            for entry in entries:
+                if entry.get( "arg_name" ) == "languages": answering[ name ] = str( entry.get( "answer" ) )
+        assert { "podcast.json", "research-to-podcast.json", "research-to-podcast-spanish.json" } <= set( answering )
+        spanish = sorted( name for name, answer in answering.items() if any( code.strip().lower().startswith( "es" ) for code in answer.split( "," ) ) )
+        assert spanish == [ "research-to-podcast-spanish.json" ]
+        assert answering[ "research-to-podcast.json" ] == "en" and answering[ "podcast.json" ] == "en"
+
     def test_every_non_template_script_file_is_reached_by_a_profile( self ):
         """Every script file, templates aside, is the target of some profile key."""
         scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR

@@ -4811,6 +4811,7 @@ def podcast_for_rick(
     card_id     : str = "",
     script_type : str = "",
     languages   : Union[ list[ str ], str ] = "",
+    review      : str = "",
 ) -> dict:
     """
     Ask Rick about a podcast of one file, wait for his answer, and start it on a yes.
@@ -4826,6 +4827,8 @@ def podcast_for_rick(
         script_type: "research_critical" (the default when empty) or "status_report", a five minute spoken status report.
             It is recorded on the card Rick answers, so it cannot change after his yes.
         languages: Empty for English only, or a list or comma string of codes such as ["en", "es-MX"].
+        review: Empty for the script type's own default, "ask" to stop for script review, or "one_shot" to run without any stop.
+            A status report defaults to one_shot. It is recorded on the card, so it cannot change after Rick's yes.
 
     Returns:
         { status: "started", card_id, job_id, ... } after a yes and a successful start;
@@ -4857,6 +4860,7 @@ def podcast_for_rick(
         card_id      = card_id,
         script_type  = script_type,
         languages    = languages,
+        review       = review,
     )
 
 

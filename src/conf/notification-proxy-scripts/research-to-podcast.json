@@ -29,7 +29,7 @@
         },
         {
             "question_pattern" : "What languages for the podcast? Use ISO codes like 'en' for English, 'es-MX' for Mexican Spanish.",
-            "answer"           : "en,es-MX",
+            "answer"           : "en",
             "arg_name"         : "languages",
             "response_types"   : [ "open_ended", "open_ended_batch" ]
         },
