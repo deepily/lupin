@@ -277,7 +277,8 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
         - with no mode flag, runs one refresh and returns its exit code
         - a job that is switched off logs one line and returns EXIT_DISABLED before the index is built
         - --print-install prints the cron lines and changes nothing
-        - --install, --uninstall and --status go through the librarian's locked crontab editor with this job's tag
+        - --install is retired: it prints the cron_generate command and returns 1
+        - --uninstall and --status go through the librarian's locked crontab editor with this job's tag
         - an InstallRefused or a RuntimeError prints one line to err and returns 1
         - a worktree root or a missing credential prints the named error as JSON and returns EXIT_NAMED
         - writes vector-status.json beside the state file and files no row on every exit past the folder lookup: a run, a switched-off exit, a worktree or credential refusal, and a run_refresh exception (written before it is re-raised); a check that fails is logged and leaves the exit code alone
@@ -304,15 +305,13 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return EXIT_OK
-    if args.install and lt.holds_generated_block( cmd ):
-        print( lt.install_moved_text( root ), file=err )                # the host crontab is cron_generate's now; this installer is for the VM
+    if args.install:
+        print( lt.install_moved_text( root ), file=err )                # every cron line is cron_generate's now; the VM runs it with --only vector-refresh
         return 1
     try:
-        # The one --install kept (Mr. Radio, 9 Nov 2026): the test VM has no .venv, so cron-job.sh cannot serve it.
-        # Its only caller is `lupin-vm.sh install-refresh-cron`; every host line is written by lupin_mcp.cron_generate.
-        if args.install or args.uninstall:
-            lt.edit_crontab( [] if args.uninstall else lines, environ, cmd, os.path.join( folder, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
-            print( "uninstalled" if args.uninstall else "installed: 2 lines", file=out )
+        if args.uninstall:
+            lt.edit_crontab( [], environ, cmd, os.path.join( folder, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
+            print( "uninstalled", file=out )
             return EXIT_OK
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )

@@ -536,6 +536,22 @@ for hook_row in "pre-commit:pre-commit-chain.sh" "pre-push:pre-push-chain.sh"; d
     esac
 done
 
+# B9 — ~/.lupin holds secrets: the directory is at most 750, the config and the notification key at most 640
+# (Rick, 9 Nov 2026, row 1dcecdb9). push-env creates them that way; this is the witness a rebuilt VM
+# does not come back looser. LUPIN_HOME_CONFIG_DIR names another directory, for tests.
+LUPIN_CFG_DIR="${LUPIN_HOME_CONFIG_DIR:-$HOME/.lupin}"
+for mode_row in "$LUPIN_CFG_DIR:750" "$LUPIN_CFG_DIR/config:640" "$LUPIN_CFG_DIR/notification-api.key:640"; do
+    mode_path="${mode_row%:*}"; mode_max="${mode_row##*:}"
+    mode_seen="$( stat -c '%a' "$mode_path" 2>/dev/null || printf '' )"
+    pfv_mode_within "$mode_seen" "$mode_max"; mode_rc=$?
+    case $mode_rc in
+        0) report pass BLOCK "$mode_path is $mode_seen, no looser than $mode_max" ;;
+        1) report fail BLOCK "$mode_path is $mode_seen, looser than $mode_max" \
+                        "chmod $mode_max $mode_path   # or re-run, from the dev box: lupin-vm.sh push-env" ;;
+        *) report unknown BLOCK "could not read the mode of $mode_path" "ls -ld $mode_path" ;;
+    esac
+done
+
 # B8 — the test role's password reaches the VM (row 80513825). Plain mode is a legal state, so this
 # is a WARN: tests that create databases then run as DB_USER. The env file is the only witness here;
 # whether the Secret Manager secret lupin-db-test-password exists is not checked from the VM.

@@ -449,30 +449,18 @@ def test_crontab_command_prefers_the_shared_override_then_the_tools_own_variable
     assert lt.crontab_command( {}, "X" ) == [ "crontab" ] and lt.crontab_command( {} ) == [ "crontab" ] and lt.crontab_command( { "LUPIN_CRONTAB": "/s" } ) == [ "/s" ]
 
 
-def test_holds_generated_block_reads_the_crontab_for_the_header_tag( cron ):
-    assert lt.holds_generated_block( cron[ "cmd" ] ) is False, "no crontab"
-    cron[ "file" ].write_text( "0 * * * * x\n" )
-    assert lt.holds_generated_block( cron[ "cmd" ] ) is False
-    cron[ "file" ].write_text( f"0 * * * * x\n{cg.HEADER}\n" )
-    assert lt.holds_generated_block( cron[ "cmd" ] ) is True
-    assert lt.holds_generated_block( [ "/no/such/crontab-binary" ] ) is False
-
-
-def test_the_kept_vector_refresh_install_refuses_on_a_host_crontab_that_holds_the_generated_block_and_still_works_elsewhere( cron, tmp_path, monkeypatch ):
-    from cosa.repo.symindex import vector_refresh as vr
+def test_the_vector_refresh_install_refuses_on_every_crontab_and_writes_nothing( cron, tmp_path, monkeypatch ):
     import io
+    from cosa.repo.symindex import vector_refresh as vr
     monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
     def install():
         out, err = io.StringIO(), io.StringIO()
         code = vr.main( [ "--install", "--root", str( tmp_path / "repo" ), "--python", "/py" ], environ=cron[ "env" ], now=cg.datetime.datetime( 2026, 11, 9, 12, 0 ), out=out, err=err, crontab_cmd=cron[ "cmd" ] )
         return code, out.getvalue(), err.getvalue()
-    cron[ "file" ].write_text( f"0 * * * * x\n{cg.HEADER}\n" )
-    before = cron[ "file" ].read_text()
-    code, out, err = install()
-    assert code == 1 and "lupin_mcp.cron_generate --install" in err and cron[ "file" ].read_text() == before, "refused: the host crontab is cron_generate's"
-    cron[ "file" ].write_text( "0 * * * * x\n" )
-    code, out, err = install()
-    assert code == 0 and out.strip() == "installed: 2 lines" and err == "", "the VM's crontab has no generated block, so the installer works"
+    for text in ( f"0 * * * * x\n{cg.HEADER}\n", "0 * * * * x\n" ):          # a host crontab with the generated block, then the VM's without one
+        cron[ "file" ].write_text( text )
+        code, out, err = install()
+        assert code == 1 and out == "" and "lupin_mcp.cron_generate --install" in err and cron[ "file" ].read_text() == text
 
 
 def test_with_the_shared_override_set_no_tool_touches_the_real_crontab( cron, tmp_path, monkeypatch ):
@@ -506,3 +494,45 @@ def test_with_the_shared_override_set_no_tool_touches_the_real_crontab( cron, tm
     assert not ( tmp_path / "real-crontab-calls" ).exists(), "the crontab on PATH was never run"
     assert cron[ "log" ].read_text().count( "lock-enter" ) >= 5, "every writer went through the scratch crontab's lock path"
     assert cg.HEADER in cron[ "file" ].read_text() and "0 * * * * x" in cron[ "file" ].read_text()
+
+
+def test_only_prints_just_that_jobs_lines_with_no_header_and_names_an_unknown_job( tree, cron ):
+    code, out, _ = run_main( tree, [ "--only", "alpha" ], cron )
+    assert code == 0 and cg.HEADER not in out[ 0 ] and out[ 0 ].count( "# alpha-tag" ) >= 1 and "beta" not in out[ 0 ]
+    code, out, err = run_main( tree, [ "--only", "nope" ], cron )
+    assert code == 1 and out == [] and "--only names nope, which is not a cron_managed job" in err[ 0 ]
+    with pytest.raises( ValueError, match="not a cron_managed job" ): cg.generate( str( tree ), {}, "delta" )
+
+
+def test_only_installs_one_jobs_lines_and_leaves_every_other_line_and_the_header_alone( tree, cron ):
+    cron[ "file" ].write_text( "0 0 * * * keep\n0 9 * * * old alpha # alpha-tag\n5 5 * * * old beta # beta-tag\n# header # lupin-cron-generated\n" )
+    code, out, err = run_main( tree, [ "--only", "alpha", "--install" ], cron )
+    after = cron[ "file" ].read_text().splitlines()
+    assert code == 0 and not err
+    assert "0 0 * * * keep" in after and "5 5 * * * old beta # beta-tag" in after and "# header # lupin-cron-generated" in after
+    assert not any( "old alpha" in line for line in after ) and sum( line.endswith( "# alpha-tag" ) for line in after ) >= 1
+    assert cg.HEADER not in after, "the full block's header is not rewritten"
+    code, out, _ = run_main( tree, [ "--only", "alpha", "--status" ], cron )
+    assert code == 0 and out[ 0 ].startswith( "installed: " ), out
+    code, out, _ = run_main( tree, [ "--only", "alpha", "--install" ], cron )
+    assert code == 0 and out[ 0 ].startswith( "no change" )
+    code, out, _ = run_main( tree, [ "--only", "alpha", "--uninstall" ], cron )
+    left = cron[ "file" ].read_text()
+    assert code == 0 and "# alpha-tag" not in left and "keep" in left and "old beta" in left
+
+
+def test_cron_job_sh_falls_back_to_the_vm_interpreter_when_the_checkout_has_no_venv( tmp_path ):
+    script = str( pathlib.Path( REAL_ROOT ) / "src/scripts/cron-job.sh" )
+    run    = lambda: subprocess.run( [ "env", "-i", f"HOME={tmp_path}", f"LUPIN_ROOT={tmp_path / 'checkout'}", script, "x" ], capture_output=True, text=True, timeout=60 )
+    ( tmp_path / "checkout" ).mkdir()
+    gone = run()
+    assert gone.returncode == 1 and ".venv-lupin-mcp/bin/python" in gone.stderr and "no interpreter" in gone.stderr
+    ( tmp_path / ".venv-lupin-mcp" / "bin" ).mkdir( parents=True )
+    ( tmp_path / ".venv-lupin-mcp" / "bin" / "python" ).write_text( "#!/bin/sh\necho vm-python \"$@\"\n" )
+    ( tmp_path / ".venv-lupin-mcp" / "bin" / "python" ).chmod( 0o755 )
+    ok = run()
+    assert ok.returncode == 0 and "vm-python -m lupin_mcp.job_run --job x" in ok.stdout
+    ( tmp_path / "checkout" / ".venv" / "bin" ).mkdir( parents=True )
+    ( tmp_path / "checkout" / ".venv" / "bin" / "python" ).write_text( "#!/bin/sh\necho checkout-python\n" )
+    ( tmp_path / "checkout" / ".venv" / "bin" / "python" ).chmod( 0o755 )
+    assert "checkout-python" in run().stdout, "the checkout's own venv still wins"

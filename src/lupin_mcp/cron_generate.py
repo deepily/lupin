@@ -5,7 +5,8 @@ A job opts in with "cron_managed": true; "cron_enabled": false keeps its lines o
 src/scripts/cron-job.sh <job> <cron|boot>, which loads one environment and runs the job through job_run.
 The command and its settings are read from the registry at run time, so changing a flag needs no reinstall.
 
-Usage:  python -m lupin_mcp.cron_generate [--print | --diff | --install | --uninstall | --status]
+Usage:  python -m lupin_mcp.cron_generate [--only JOB] [--print | --diff | --install | --uninstall | --status]
+--only JOB writes just that job's lines, with no header. Every other crontab line stays as it was. The test VM uses it for vector-refresh.
 A Claude seat never installs. A person runs --install from the main checkout.
 """
 import argparse
@@ -76,22 +77,29 @@ def lines_for_job( job, root, data, environ ):
     return out
 
 
-def generate( root, environ ):
+def generate( root, environ, only=None ):
     """
     Build the whole block, and the names its install replaces.
 
     Requires:
         - root holds src/conf/job-registry.json
+        - only is None, or the name of a cron_managed job
     Ensures:
         - returns ( lines, tags, legacy ): lines start with the header comment; tags is the tuple of every "# <tag>" the block owns, header tag included; legacy is the tuple of substrings the jobs' cron_replaces name
+        - with only, lines hold just that job's lines (no header) and tags and legacy name just that job, so a merge touches no other line
+    Raises:
+        - ValueError when only names no cron_managed job
     """
     registry = jr.load_registry( root )
     from cosa.repo.symindex.paths import data_dir
     data     = data_dir( root )
     jobs     = managed_jobs( registry )
-    lines    = [ HEADER ]
+    if only is not None:
+        jobs = [ job for job in jobs if job[ "job" ] == only ]
+        if not jobs: raise ValueError( f"--only names {only}, which is not a cron_managed job" )
+    lines    = [] if only is not None else [ HEADER ]
     for job in jobs: lines.extend( lines_for_job( job, root, data, environ ) )
-    tags     = ( BLOCK_TAG, *( f"# {job[ 'cron_tag' ]}" for job in jobs ) )
+    tags     = ( *( () if only is not None else ( BLOCK_TAG, ) ), *( f"# {job[ 'cron_tag' ]}" for job in jobs ) )
     legacy   = tuple( word for job in jobs for word in job.get( "cron_replaces", [] ) )
     return lines, tags, legacy
 
@@ -132,15 +140,22 @@ def main( argv=None, environ=None, now=None, out=print, err=None, crontab_cmd=No
     cmd     = crontab_cmd or lt.crontab_command( environ, "CRON_GENERATE_CRONTAB" )
     parser  = argparse.ArgumentParser( description="Write the Lupin cron lines from the job registry." )
     parser.add_argument( "--root", default=None )
+    parser.add_argument( "--only", default=None, help="write only this job's lines (a cron_managed job name)" )
     mode    = parser.add_mutually_exclusive_group()
     for name in ( "print", "diff", "install", "uninstall", "status" ): mode.add_argument( f"--{name}", action="store_true" )
     args    = parser.parse_args( argv )
     root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
     with contextlib.redirect_stdout( sys.stderr ):                    # the configuration manager prints a banner on import; keep stdout clean for --print
-        lines, tags, legacy = generate( root, environ )
+        try: lines, tags, legacy = generate( root, environ, args.only )
+        except ValueError as error:
+            err( f"cron-generate: {error}" )
+            return 1
     old     = hs.crontab_text( cmd=cmd ) or ""
     new     = lt.merge_lines( old, [] if args.uninstall else lines, tags, legacy )
     delta   = "".join( difflib.unified_diff( old.splitlines( keepends=True ), new.splitlines( keepends=True ), "crontab.before", "crontab.after" ) )
+    if args.status and args.only is not None:
+        out( lt.status_text( old, tags[ 0 ], len( lines ) ) )
+        return 0
     if args.status:
         out( lt.status_text( old, BLOCK_TAG, 1 ) + f"; {sum( 1 for line in old.splitlines() if line.rstrip().endswith( tuple( tags[ 1: ] ) ) )} of {len( lines ) - 1} job lines" )
         return 0

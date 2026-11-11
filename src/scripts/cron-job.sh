@@ -13,6 +13,7 @@
 # Name another file with LUPIN_CRON_ENV. A missing file is fine; one that is unreadable, not mode 600 or not
 # owned by the running user stops the run, because a secrets file other users can read is not a secret.
 #
+# The interpreter is $ROOT/.venv/bin/python, else ~/.venv-lupin-mcp/bin/python (the test VM).
 # Exit codes: the job's own, or 64 for no job given, 1 for no interpreter or an unreadable secrets file.
 set -uo pipefail
 
@@ -25,7 +26,9 @@ export PATH="/usr/local/bin:/usr/bin:/bin:${HOME:-}/.local/bin:${PATH:-}"
 SELF="$( readlink -f "${BASH_SOURCE[0]}" )"
 ROOT="${LUPIN_ROOT:-$( cd "$( dirname "$SELF" )/../.." && pwd )}"
 PYTHON="$ROOT/.venv/bin/python"
-if [ ! -x "$PYTHON" ]; then echo "cron-job.sh: no interpreter at $PYTHON" >&2; exit 1; fi
+# The test VM has no .venv; its interpreter is ~/.venv-lupin-mcp (row d47761a5).
+if [ ! -x "$PYTHON" ] && [ -x "${HOME:-}/.venv-lupin-mcp/bin/python" ]; then PYTHON="${HOME:-}/.venv-lupin-mcp/bin/python"; fi
+if [ ! -x "$PYTHON" ]; then echo "cron-job.sh: no interpreter at $ROOT/.venv/bin/python or ${HOME:-}/.venv-lupin-mcp/bin/python" >&2; exit 1; fi
 
 ENV_FILE="${LUPIN_CRON_ENV:-${HOME:-}/.lupin/cron.env}"
 if [ -e "$ENV_FILE" ]; then
