@@ -116,6 +116,7 @@ JOB_ARG_CONTRACTS = {
             # fuzzy_file_match handler below fires and asks which document was meant.
             "audience"         : "audience",
             "audience_context" : "audience_context",
+            "script_type"      : "script_type",
         },
         "fallback_questions" : {
             "research"         : "Which research document should I use for the podcast? Describe it or say the filename.",
@@ -124,9 +125,10 @@ JOB_ARG_CONTRACTS = {
             "audience_context" : "Any additional context about the audience? Say 'none' to skip.",
         },
         "fallback_defaults" : {
-            "languages"        : "en,es-MX",
+            "languages"        : "en",
             "audience"         : "academic",
             "audience_context" : "none",
+            "script_type"      : "research_critical",
         },
         "special_handlers"   : {
             "research" : "fuzzy_file_match",
@@ -158,6 +160,7 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "budget",
             "audience"         : "audience",
             "audience_context" : "audience_context",
+            "script_type"      : "script_type",
             # SEED CONTEXT FOR THE RESEARCH LEG, row 5726e3c5. This command researches a
             # query and THEN builds the artefact, so `source_document` means here exactly
             # what it means on deep research -- the research leg reads it first.
@@ -184,7 +187,8 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "no limit",
             "audience"         : "academic",
             "audience_context" : "none",
-            "languages"        : "en,es-MX",
+            "languages"        : "en",
+            "script_type"      : "research_critical",
         },
         # WHERE A source_document MAY BE LOOKED FOR when the expeditor resolves one from
         # prose. Declared beside the argument it belongs to, per row a1420538.

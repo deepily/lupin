@@ -169,3 +169,11 @@ do a dry run podcast about RESEARCH_TOPIC
 dry run the podcast generator on RESEARCH_TOPIC
 trial run a podcast about RESEARCH_TOPIC
 test run the podcast on RESEARCH_TOPIC
+
+# ── Script type: status report ───────────────────────────────────────────────
+make a status report podcast about RESEARCH_TOPIC
+create a status report podcast of RESEARCH_TOPIC
+generate a status report podcast on RESEARCH_TOPIC
+I want a status report podcast about RESEARCH_TOPIC
+give me a status-report podcast of RESEARCH_TOPIC
+make a five minute status report podcast about RESEARCH_TOPIC

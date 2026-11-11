@@ -52,7 +52,7 @@ router = APIRouter(
 #
 #     POST /api/v2/submit
 #     { "command": "agent router go to research to podcast",
-#       "args"   : { "query": "...", "budget": 3.0, "target_languages": [ "en", "es-MX" ] },
+#       "args"   : { "query": "...", "budget": 3.0, "target_languages": [ "en" ] },
 #       "scheduled_at": "...", "monopolize": false, "parent_id_hash": null }
 #
 # NOTHING THIS DOOR DID IS LOST, and each piece is worth naming because "the new door does

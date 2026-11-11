@@ -13,6 +13,7 @@ Used by:
     - v2 submit (agent router go to mock job — the retired mock-job door's two modes)
 """
 
+import ast
 import functools
 import shlex
 
@@ -230,11 +231,13 @@ def _podcast_languages( args_dict ):
         - returns None when no language was asked for, which means English only
         - returns the list unchanged when the value is a list
         - parses a comma string with the shared CLI parser
+        - reads a string that spells a Python list, which is how the voice router writes it
     """
     from cosa.agents.podcast_generator.__main__ import parse_languages_arg
     value = args_dict.get( "languages" ) or args_dict.get( "target_languages" )
     if not value: return None
     if isinstance( value, list ): return value
+    if value.strip().startswith( "[" ): return list( ast.literal_eval( value.strip() ) )
     return parse_languages_arg( value )
 
 def _build_podcast_generator( command, args_dict, user_id, user_email, session_id, debug, verbose,
