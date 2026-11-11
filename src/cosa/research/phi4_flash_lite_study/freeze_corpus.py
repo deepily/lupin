@@ -37,6 +37,7 @@ import datetime
 import subprocess
 
 import cosa.utils.util as cu
+from cosa.utils.file_hash import file_sha256
 
 
 CORPUS_FILENAME  = "dm_traffic.jsonl"
@@ -184,28 +185,6 @@ def _file_identity( path ):
         return ( info.st_dev, info.st_ino )
     except OSError:
         return None
-
-
-def sha256_of_file( path ):
-    """
-    Checksum a file in chunks.
-
-    Requires:
-        - path names a readable file
-
-    Ensures:
-        - returns a 64-character lowercase hex digest
-        - reads in bounded chunks, so a multi-hundred-MB corpus does not have to
-          fit in memory
-
-    Raises:
-        - OSError if the file cannot be read
-    """
-    digest = hashlib.sha256()
-    with open( path, "rb" ) as handle:
-        for chunk in iter( lambda: handle.read( 1024 * 1024 ), b"" ):
-            digest.update( chunk )
-    return digest.hexdigest()
 
 
 def sha256_of_rows( rows ):
@@ -451,9 +430,9 @@ def freeze( out_dir, trigger_claims=4, eligible_only=True, sample_size=None,
     # Checksum, read, checksum again. The corpus is append-only and live; a digest
     # taken before the read describes a file that may have grown by the time the
     # read finishes, and the manifest would then pin bytes nobody replayed.
-    source_sha        = sha256_of_file( source )
+    source_sha        = file_sha256( source )
     all_rows, skipped = read_corpus_rows( source )
-    source_sha_after  = sha256_of_file( source )
+    source_sha_after  = file_sha256( source )
     if source_sha != source_sha_after:
         raise SourceChangedDuringRead(
             f"{source} changed while it was being read ({source_sha[ :12 ]} -> "

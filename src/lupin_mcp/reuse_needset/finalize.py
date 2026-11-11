@@ -1,6 +1,5 @@
 """Choose the needs people label, build the final set and verify its manifest."""
 import copy
-import hashlib
 import json
 import pathlib
 import random
@@ -8,6 +7,7 @@ import random
 from cosa.repo.labelling import call_sites as cs
 from cosa.repo.labelling import items as lb
 from cosa.repo.labelling import run_check as rc
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp.reuse_needset import check, freeze, schema
 from lupin_mcp.reuse_needset import errors as er
 
@@ -223,11 +223,6 @@ def _frozen_hashes( holder ):
     """Raises: NeedsetError MANIFEST_MISMATCH when a frozen hash is missing or empty."""
     absent = [ k for k in freeze.IDENTITY_KEYS if not isinstance( holder.get( k ), str ) or not holder[ k ] ]
     if absent: _mismatch( "FROZEN", f"no frozen hash for {absent}" )
-
-
-def file_sha256( path ):
-    """Return the sha256 hex digest of a file's bytes."""
-    return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
 
 
 def finalize( needs, labels, kappa, seed, source_commit, frozen, out_dir, known_symbols=None ):

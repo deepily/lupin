@@ -12,7 +12,7 @@ import shutil
 
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.candidates import freshness as fr
-from cosa.repo.symindex.candidates import vector_store as vs
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp.reuse_needset import errors as er
 
 IDENTITY_KEYS = ( "index_manifest", "symbols_sha", "vector_build_info_sha" )
@@ -48,7 +48,7 @@ def identity( index_gen, vectors_dir ):
     if info is None: raise er.NeedsetError( er.FREEZE_INCOMPLETE, f"no readable {fr.BUILD_INFO_FILE} in {vectors_dir}" )
     if info[ "index_manifest" ] != manifest:
         raise er.NeedsetError( er.VECTORS_NOT_FROM_INDEX, f"the vector set was built from index {info[ 'index_manifest' ][ :12 ]}, the index is {manifest[ :12 ]}" )
-    return { "index_manifest": manifest, "symbols_sha": symbols, "vector_build_info_sha": vs.file_sha256( pathlib.Path( vectors_dir ) / fr.BUILD_INFO_FILE ) }
+    return { "index_manifest": manifest, "symbols_sha": symbols, "vector_build_info_sha": file_sha256( pathlib.Path( vectors_dir ) / fr.BUILD_INFO_FILE ) }
 
 
 def _read_only( folder ):

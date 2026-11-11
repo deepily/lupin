@@ -12,6 +12,7 @@ import pathlib
 import numpy as np
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex.candidates import vector_build as vb
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.utils.secret_drift import sha256_of
@@ -142,7 +143,7 @@ def test_a_matrix_of_the_wrong_size_is_corrupt_even_when_hashes_match( built ):
     d = built[ "dir" ]
     ( d / "code.f32" ).write_bytes( b"\x00" * 4 * DIM )          # one row instead of two
     m = json.loads( ( d / "manifest.json" ).read_text() )
-    m[ "files" ][ "code.f32" ] = vs.file_sha256( d / "code.f32" )
+    m[ "files" ][ "code.f32" ] = file_sha256( d / "code.f32" )
     m[ "manifest_hash" ]       = vs.manifest_hash( m )
     ( d / "manifest.json" ).write_text( json.dumps( m ) )
     with pytest.raises( CandidateError ) as e:

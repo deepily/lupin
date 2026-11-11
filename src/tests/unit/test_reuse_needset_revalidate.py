@@ -9,6 +9,7 @@ import stat
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.candidates import freshness as fr
 from lupin_mcp.reuse_needset import errors as er
@@ -191,7 +192,7 @@ def test_a_refreeze_over_unbroken_keys_writes_a_verified_manifest_with_the_new_h
     old  = json.loads( ( w[ "folder" ] / finalize.MANIFEST_FILE ).read_text() )
     now  = freeze.identity( w[ "new" ], w[ "vectors" ] )
     assert { k: new[ k ] for k in freeze.IDENTITY_KEYS } == now and now[ "symbols_sha" ] != old[ "symbols_sha" ]
-    assert new[ "refrozen_from" ] == { **{ k: old[ k ] for k in freeze.IDENTITY_KEYS }, "final_sha256": old[ "final_sha256" ], "report_sha256": finalize.file_sha256( report ) }
+    assert new[ "refrozen_from" ] == { **{ k: old[ k ] for k in freeze.IDENTITY_KEYS }, "final_sha256": old[ "final_sha256" ], "report_sha256": file_sha256( report ) }
     assert new[ "final_sha256" ] == old[ "final_sha256" ] and ( dest / finalize.FINAL_FILE ).read_bytes() == ( w[ "folder" ] / finalize.FINAL_FILE ).read_bytes()
     assert json.loads( ( dest / finalize.MANIFEST_FILE ).read_text() ) == new and stat.S_IMODE( os.stat( dest / "frozen" / "index" / "header.json" ).st_mode ) == 0o444
     assert revalidate.load_frozen( dest, EXPECTED )[ 0 ] == new
@@ -236,7 +237,7 @@ def test_main_with_a_refreeze_writes_the_new_set_beside_the_report( tmp_path, mo
     w = world( tmp_path, edit=INTACT )
     monkeypatch.setattr( finalize, "EXPECTED", EXPECTED )
     revalidate.main( argv( w, tmp_path, "--refreeze", str( tmp_path / "next" ) ), lambda args: ( fake_evidence( w ), source_of( w ) ) )
-    assert json.loads( ( tmp_path / "next" / finalize.MANIFEST_FILE ).read_text() )[ "refrozen_from" ][ "report_sha256" ] == finalize.file_sha256( tmp_path / "out" / revalidate.REPORT_FILE )
+    assert json.loads( ( tmp_path / "next" / finalize.MANIFEST_FILE ).read_text() )[ "refrozen_from" ][ "report_sha256" ] == file_sha256( tmp_path / "out" / revalidate.REPORT_FILE )
     open_up( w[ "folder" ] ); open_up( tmp_path / "next" )
 
 

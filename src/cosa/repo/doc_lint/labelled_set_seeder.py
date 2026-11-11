@@ -37,6 +37,7 @@ import secrets
 import sys
 
 import cosa.utils.util as cu
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.doc_lint import claim_extractor, labelled_pairs, model_transport
 from cosa.repo.doc_lint import labelled_set_rules as rules
 from cosa.repo.doc_lint.labelled_set_rules import EDGE_PUNCT, PRONOUNS, sentences_of, words_of
@@ -107,11 +108,6 @@ def write_json( path, obj ):
     os.makedirs( os.path.dirname( os.path.abspath( path ) ), exist_ok=True )
     with open( path, "w", encoding="utf-8" ) as f:
         f.write( json.dumps( obj, sort_keys=True, indent=2 ) + "\n" )
-
-
-def sha256_file( path ):
-    """Return the sha256 hex digest of a file's bytes."""
-    with open( path, "rb" ) as f: return hashlib.sha256( f.read() ).hexdigest()
 
 
 def load_stoplist( path ):
@@ -754,7 +750,7 @@ def cmd_plan( args ):
     for name in ( "dev", "gate", "gate-reserve" ):
         plan, task_rows = build_split_plan( name, picks[ name ], args.seed if name == "dev" else args.gate_seed )
         base = os.path.join( args.out if name == "dev" else args.gate_out, name )
-        plan[ "pool_sha" ] = sha256_file( args.pool )
+        plan[ "pool_sha" ] = file_sha256( args.pool )
         if mix != STRATA_MIX: plan[ "strata_mix" ] = mix
         if name != "dev": plan[ "split_seed" ] = seed
         write_json( os.path.join( base, "plan.json" ), plan )
@@ -1179,7 +1175,7 @@ def cmd_redraw( args ):
         failures, _, _ = rule1_status( args.base, args.split, args.accept )
         source = os.path.join( args.base, args.split )
         plan   = json.loads( open( os.path.join( source, "plan.json" ), encoding="utf-8" ).read() )
-        if plan.get( "pool_sha" ) != sha256_file( args.pool ): raise ValueError( "the pool is not the one this plan was drawn from" )
+        if plan.get( "pool_sha" ) != file_sha256( args.pool ): raise ValueError( "the pool is not the one this plan was drawn from" )
         failing = set( failures ) | ( read_failed_ids( args.failed, plan ) if args.failed else set() )
         if args.split in GATE_SPLITS: refuse_gate_out_in_repo( args.out )
         target = os.path.join( args.out, args.split )
@@ -1260,7 +1256,7 @@ def cmd_verify( args ):
         print( f"REFUSED: rule 1 fails {len( failures )} seeded pair(s): {' '.join( sorted( failures ) )}; run `check`, then redraw them or accept the ones a reader judged fine", file=sys.stderr )
         return 2
     if args.accept:
-        write_json( os.path.join( base, "rule1-accepted.json" ), { "accepted": accepted, "accept_file_sha256": sha256_file( args.accept ) } )
+        write_json( os.path.join( base, "rule1-accepted.json" ), { "accepted": accepted, "accept_file_sha256": file_sha256( args.accept ) } )
         print( f"rule 1: accepted {len( accepted )} pair(s) by a reader's list; recorded in rule1-accepted.json" )
     by_pair = { p[ "id" ]: { "id": p[ "id" ], "old": p[ "old" ], "new": "", "linked_doc": "" } for p in plan[ "pairs" ] }
     for task_id, meta in plan[ "tasks" ].items(): by_pair[ meta[ "pair_id" ] ][ meta[ "role" ] ] = outputs[ task_id ]
@@ -1343,7 +1339,7 @@ def cmd_assemble( args ):
     except ValueError as e:
         print( f"REFUSED: the assembled set does not load: {e}", file=sys.stderr )
         return 2
-    info = { "split": args.split, "pairs_sha256": sha256_file( pairs_path ), "keys_sha256": sha256_file( keys_path ), "counts": recount( plan ),
+    info = { "split": args.split, "pairs_sha256": file_sha256( pairs_path ), "keys_sha256": file_sha256( keys_path ), "counts": recount( plan ),
              "writer": ledger[ 0 ][ "model" ], "writer_prompt_hash": prompt_hash(), "writer_calls": len( ledger ), "human_arm": "no human arm" }
     write_json( os.path.join( args.out, args.split + "-info.json" ), info )
     return 0
@@ -1369,7 +1365,7 @@ def cmd_manifest( args ):
     manifest = { "dev": { "pairs_sha256": dev[ "pairs_sha256" ], "keys_sha256": dev[ "keys_sha256" ], "counts": dev[ "counts" ], "seed": args.seed },
                  "writer": dev[ "writer" ], "writer_prompt_hash": dev[ "writer_prompt_hash" ], "human_arm": dev[ "human_arm" ],
                  "floors": { "min_quote_words": claim_extractor.MIN_QUOTE_WORDS, "min_quote_chars": claim_extractor.MIN_QUOTE_CHARS },
-                 "stoplist": { "path": os.path.basename( args.stoplist ), "sha256": sha256_file( args.stoplist ) },
+                 "stoplist": { "path": os.path.basename( args.stoplist ), "sha256": file_sha256( args.stoplist ) },
                  "gate_pairs_sha256": hashes[ "gate_pairs_sha256" ], "gate_keys_sha256": hashes[ "gate_keys_sha256" ],
                  "reserve_plan_sha256": hashes[ "reserve_plan_sha256" ], "reserve_pairs_sha256": hashes.get( "reserve_pairs_sha256" ), "reserve_keys_sha256": hashes.get( "reserve_keys_sha256" ),
                  "harness_commit": args.harness_commit }

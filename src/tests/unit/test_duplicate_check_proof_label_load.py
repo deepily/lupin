@@ -9,9 +9,10 @@ import pathlib
 
 import pytest
 
+from cosa.utils import file_hash
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
-from cosa.repo.symindex.candidates import arm_run
 from cosa.repo.duplicate_check.proof import label_load as ll
 from cosa.repo.duplicate_check.proof import label_prep as lp
 from cosa.repo.duplicate_check.proof import proof_run as pr
@@ -238,18 +239,18 @@ def test_a_different_answer_key_gives_a_different_fingerprint_for_the_same_label
     other  = tmp_path / "other-key.json"
     other.write_text( pathlib.Path( key ).read_text( encoding="utf-8" ) + " ", encoding="utf-8" )
     same   = ll.fingerprints( [ a ], None, None, key, "/t" )
-    assert ll.fingerprints( [ a ], None, None, other, "/t" )[ "answer_key" ] != same[ "answer_key" ] and same[ "answer_key" ] == arm_run.sha256_of( key )
+    assert ll.fingerprints( [ a ], None, None, other, "/t" )[ "answer_key" ] != same[ "answer_key" ] and same[ "answer_key" ] == file_sha256( key )
 
 
-def test_fingerprints_hash_files_with_the_one_shared_sha256_of_helper( run, monkeypatch, tmp_path ):
+def test_fingerprints_hash_files_with_the_one_shared_file_sha256_helper( run, monkeypatch, tmp_path ):
     toy, packets, key = run
     a    = pl.labels_path( packets[ "rick" ] )
     a.write_text( "", encoding="utf-8" )
-    monkeypatch.setattr( arm_run, "sha256_of", lambda path: f"sha-of-{pathlib.Path( path ).name}" )
+    assert ll.file_sha256 is file_hash.file_sha256, "the loader must not keep a copy of its own"
+    monkeypatch.setattr( ll, "file_sha256", lambda path: f"sha-of-{pathlib.Path( path ).name}" )
     got  = ll.fingerprints( [ a ], key, key, key, "/t" )
     assert got == { "labels": { str( a ): f"sha-of-{a.name}" }, "rulings": f"sha-of-{pathlib.Path( key ).name}", "third_labels": f"sha-of-{pathlib.Path( key ).name}",
                     "answer_key": f"sha-of-{pathlib.Path( key ).name}", "tree_root": "/t" }
-    assert not hasattr( ll, "file_sha256" )
 
 
 # ---- the supplement: labels for pairs outside the key, kept in files of their own --------------------------------
@@ -340,7 +341,7 @@ def test_fingerprints_name_the_supplement_key_and_both_its_files_and_say_nothing
     truth, first, second, key = labelled_run( run )
     supp, _                   = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ True, False ] )
     got                       = ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )
-    assert got[ "supplement" ] == { "key": arm_run.sha256_of( supp[ "key" ] ), "labels": { str( p ): arm_run.sha256_of( p ) for p in supp[ "labels" ] } }
+    assert got[ "supplement" ] == { "key": file_sha256( supp[ "key" ] ), "labels": { str( p ): file_sha256( p ) for p in supp[ "labels" ] } }
     assert "supplement" not in ll.fingerprints( [ first, second ], None, None, key, "/t" )
 
 
@@ -420,7 +421,7 @@ def test_fingerprints_add_the_supplement_third_file_only_when_one_is_named( run,
     supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ False, False ] )
     assert "third_labels" not in ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )[ "supplement" ]
     supp[ "third" ]           = supp_third( supp, by_pair, list( by_pair )[ 0 ], True )
-    assert ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )[ "supplement" ][ "third_labels" ] == arm_run.sha256_of( supp[ "third" ] )
+    assert ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )[ "supplement" ][ "third_labels" ] == file_sha256( supp[ "third" ] )
 
 
 def test_a_supplement_third_file_naming_an_item_in_neither_key_is_refused( run, tmp_path ):

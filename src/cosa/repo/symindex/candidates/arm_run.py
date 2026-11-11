@@ -13,6 +13,7 @@ import os
 import pathlib
 import types
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex.candidates import arm_metrics as am
 from cosa.repo.symindex.candidates import arm_report as ar
@@ -42,11 +43,6 @@ def real_env( data_dir ):
     return types.SimpleNamespace( sendable=rt.sendable, entry_text=rt.entry_text, pair_key=rp.pair_key, model=rt.JEV_MODEL, cache=rt.JevCache( data_dir ) )
 
 
-def sha256_of( path ):
-    """Return the sha256 hex digest of a file's bytes."""
-    return hashlib.sha256( open( path, "rb" ).read() ).hexdigest()
-
-
 def load_needs( path, fresh_sha ):
     """
     Read the in-sample needs and refuse the reserved file.
@@ -63,7 +59,7 @@ def load_needs( path, fresh_sha ):
         - CandidateError FRESH_NEEDS_REFUSED from the guard
     """
     needs = { n[ "id" ]: n for n in json.load( open( path ) )[ "needs" ] }
-    arms.refuse_fresh_needs( list( needs ), sha256_of( path ), fresh_sha )
+    arms.refuse_fresh_needs( list( needs ), file_sha256( path ), fresh_sha )
     return needs
 
 
@@ -322,7 +318,7 @@ def run_arm_report( env, snapshot_paths, needs_path, fresh_sha, manifest_path, o
     t3 = am.t3_summary( dict( ranks, all=[ r for held in ranks.values() for r in held ] ) )
     for language, held in dict( ranks, all=[ r for h in ranks.values() for r in h ] ).items(): t3[ language ][ "first" ] = sum( 1 for r in held if r == 1 )
     meta = { "run_id": f"{arm}-{hash_answers( answers )[ :8 ]}", "code_sha": code_sha, "index_sha": os.path.basename( path ).split( "." )[ 0 ],
-             "manifest_hash": sha256_of( manifest_path ), "needs_sha": sha256_of( needs_path ), "cache_sha": hash_answers( answers ) }
+             "manifest_hash": file_sha256( manifest_path ), "needs_sha": file_sha256( needs_path ), "cache_sha": hash_answers( answers ) }
     pending = [ ( "C1", "purpose lines for the whole index; only samples exist" ), ( "B1", "the concatenated vector matrix" ),
                 ( "B2", "the prose and code vector matrices" ), ( "B2w", "the vector matrices and the wiki page list" ) ]
     ruling  = ( "Query ruling (Cheech, 2026-10-15): a known-twin member's query is its own entry text, the name, the signature and the first docstring line, "
@@ -435,11 +431,11 @@ def run_all_arms( env, snapshot_paths, needs_path, fresh_sha, manifest_path, vse
     per_need = { n: len( ids ) for n, ids in sorted( first.items() ) if ids }
     used = sorted( empty_pins & ( set().union( *first.values() ) | set().union( *union.values() ) ) )
     meta = { "run_id": f"all-{hash_answers( answers )[ :8 ]}", "code_sha": code_sha, "index_sha": os.path.basename( path ).split( "." )[ 0 ],
-             "manifest_hash": vset.manifest_hash if vset is not None else "none", "needs_sha": sha256_of( needs_path ), "cache_sha": hash_answers( answers ) }
+             "manifest_hash": vset.manifest_hash if vset is not None else "none", "needs_sha": file_sha256( needs_path ), "cache_sha": hash_answers( answers ) }
     return { "meta": meta, "fusion": fusion, "recall_by_params": recall, "measured": measured, "t3": t3, "absent": absent,
              "vectors_choice": am.choose_vectors( b1, b2 ) if b1 and b2 else None, "misses": misses, "snapshot": path,
              "empty_purpose_entries": len( empty_pins ), "empty_purpose_in_references": used,
-             "vector_entries": len( held_ids ), "snapshot_entries": len( entry_ids ), "twin_manifest_sha": sha256_of( manifest_path ), "pages": len( pages ),
+             "vector_entries": len( held_ids ), "snapshot_entries": len( entry_ids ), "twin_manifest_sha": file_sha256( manifest_path ), "pages": len( pages ),
              "reference": { "needs": len( per_need ), "items": sum( per_need.values() ), "per_need": per_need },
              "needs": len( needs ) }
 

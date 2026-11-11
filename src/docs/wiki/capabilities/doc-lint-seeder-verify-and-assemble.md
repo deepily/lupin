@@ -4,13 +4,13 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.labelled_set_seeder.read_failed_ids@fffc934d2b
   - cosa.repo.doc_lint.labelled_set_seeder.redraw_pairs@fb29b6d2f9
-  - cosa.repo.doc_lint.labelled_set_seeder.cmd_redraw@9adfa5746e
+  - cosa.repo.doc_lint.labelled_set_seeder.cmd_redraw@33a0e287af
   - cosa.repo.doc_lint.labelled_set_seeder.checked_outputs@032ae73f3b
-  - cosa.repo.doc_lint.labelled_set_seeder.cmd_verify@55cecb6dea
+  - cosa.repo.doc_lint.labelled_set_seeder.cmd_verify@4f73dc09af
   - cosa.repo.doc_lint.labelled_set_seeder.check_verification@61a0aa5e26
   - cosa.repo.doc_lint.labelled_set_seeder.recount@9bf2457715
-  - cosa.repo.doc_lint.labelled_set_seeder.cmd_assemble@f72df6f4ac
-  - cosa.repo.doc_lint.labelled_set_seeder.cmd_manifest@78fbdb059c
+  - cosa.repo.doc_lint.labelled_set_seeder.cmd_assemble@a5abfc54cc
+  - cosa.repo.doc_lint.labelled_set_seeder.cmd_manifest@4db8e4dd32
   - cosa.repo.doc_lint.labelled_set_seeder.cmd_natural@0488185aa6
 ---
 # Doc-lint seeder verify and assemble

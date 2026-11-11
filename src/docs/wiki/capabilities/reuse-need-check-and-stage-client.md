@@ -3,7 +3,6 @@ capability: reuse-need-check-and-stage-client
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_need_check.entry_text_of@e084f98b33
-  - lupin_mcp.reuse_need_check.file_sha256@263a4ccc40
   - lupin_mcp.reuse_need_check.twin_groups@ae524d039f
   - lupin_mcp.reuse_need_check.identifier_tokens@cc312d2b3d
   - lupin_mcp.reuse_need_check.name_pieces@416af78e49
@@ -30,7 +29,7 @@ Two pieces of the end-to-end run ([[reuse-end-to-end-run]]). The need check test
 - `need_words` maps each word of the need, after the opening phrase, to the whole word as written. `shared_run( need, text )` returns the first four-word run they share. `check_form` returns None for a well-formed sentence.
 - `check_need( member_id, need, index, groups )` returns the failed checks against the member and its twins. `check_all` checks every sampled member and fails a sample id with no need.
 - `resend_list( results )` builds the entries for the need writer: member, failed checks and `avoid_words`. Both run checks show as `text_run`, so the writer is not told a twin exists.
-- `load_sample_ids`, `load_needs` and `load_index` read the sample, the needs document and `symbols.jsonl`. `file_sha256` hashes a file. `main` writes `check-results.json` and `resend-list.json`, and returns 0 only if all pass.
+- `load_sample_ids`, `load_needs` and `load_index` read the sample, the needs document and `symbols.jsonl`. Files are hashed with `file_sha256` from [[utils-file-hash]]. `main` writes `check-results.json` and `resend-list.json`, and returns 0 only if all pass.
 
 ## Candidate stage client
 - `CandidateStage` is the client of the resident search for one vector set. The cosa-voice process cannot import numpy, so the search runs on the Lupin server.
