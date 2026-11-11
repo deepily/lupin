@@ -52,12 +52,27 @@ from .prompts import (
     get_dynamic_duo_description,
 )
 from .prompts.status_report import get_status_analysis_prompt, get_status_script_prompt
-from .script_types import ANALYSIS_DIGEST, get_profile
+from .script_types import ANALYSIS_DIGEST, REVIEW_ONE_SHOT, effective_review, get_profile
 
 logger = logging.getLogger( __name__ )
 
 # ElevenLabs pricing (standard tier)
 ELEVENLABS_COST_PER_1K_CHARS = 0.30  # $0.30 per 1000 characters
+
+
+def one_shot_notice( one_shot: bool ) -> str:
+    """
+    One-line completion note saying the script went to audio without a review stop.
+
+    Requires:
+        - one_shot is a bool
+
+    Ensures:
+        - returns a single plain sentence when one_shot is True, else ""
+    """
+    if one_shot:
+        return "This script was generated in one shot and not reviewed. Nobody read it before it went to audio."
+    return ""
 
 
 def build_auto_continue_disclosure( timeout_seconds: int ) -> str:
@@ -484,6 +499,12 @@ class PodcastOrchestratorAgent:
                         script_path = await self._save_script_async( script )
                         self._podcast_state[ "draft_script_path" ] = script_path
 
+                # One shot: the saved draft is the script. Nobody is asked anything.
+                if self._one_shot():
+                    self._podcast_state[ "script_one_shot" ] = True
+                    script_approved = True
+                    continue
+
                 # Build clickable link to full script using /api/io/file endpoint
                 import cosa.utils.util as cu
                 io_base = cu.get_project_root() + "/io/"
@@ -624,8 +645,8 @@ class PodcastOrchestratorAgent:
                 else:
                     translated_link = f"`{translated_path}`"
 
-                # Review loop for translated script
-                translated_approved = False
+                # Review loop for translated script; one shot skips it
+                translated_approved = self._one_shot()
                 while not translated_approved:
                     # Notify: Ready for review
                     await voice_io.notify(
@@ -730,7 +751,7 @@ class PodcastOrchestratorAgent:
                         ( r.error_message for r in tts_results if not r.success and r.error_message ),
                         "Unknown error"
                     )
-                    continue_anyway = await voice_io.ask_yes_no(
+                    continue_anyway = True if self._one_shot() else await voice_io.ask_yes_no(
                         f"{lang_name}: {len( failed_indices )} segments failed. Continue with partial audio?",
                         default  = "yes",
                         # Unattended: keep the partial audio, as this path has
@@ -870,7 +891,8 @@ class PodcastOrchestratorAgent:
             lang_count = len( scripts_by_language )
             lang_summary = f"{lang_count} language(s)" if lang_count > 1 else "1 language"
 
-            auto_notice   = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) )
+            auto_notice   = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) ) \
+                            or one_shot_notice( self._podcast_state.get( "script_one_shot", False ) )
             approval_line = f"\n\n**Approval**: {auto_notice}" if auto_notice else ""
 
             await voice_io.notify(
@@ -917,7 +939,13 @@ class PodcastOrchestratorAgent:
 
         Returns:
             PodcastScript or None: Updated script, or None if cancelled
+
+        Raises:
+            - ValueError when the config runs one shot, since this mode exists only to review
         """
+        if self._one_shot():
+            raise ValueError( "review=one_shot cannot be used with review-only mode: that mode exists only to review a script" )
+
         self.metrics[ "start_time" ] = time.time()
 
         try:
@@ -1121,7 +1149,7 @@ class PodcastOrchestratorAgent:
                     ( r.error_message for r in tts_results if not r.success and r.error_message ),
                     "Unknown error"
                 )
-                continue_anyway = await voice_io.ask_yes_no(
+                continue_anyway = True if self._one_shot() else await voice_io.ask_yes_no(
                     f"{len( failed_indices )} segments failed. Continue with partial audio?",
                     default  = "yes",
                     unattended_default = True,
@@ -1207,7 +1235,8 @@ class PodcastOrchestratorAgent:
             if research_link:
                 abstract_lines.append( f"**Research**: {research_link}" )
 
-            auto_notice = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) )
+            auto_notice = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) ) \
+                          or one_shot_notice( self._podcast_state.get( "script_one_shot", False ) )
             if auto_notice:
                 abstract_lines.append( f"**Approval**: {auto_notice}" )
 
@@ -1427,6 +1456,10 @@ class PodcastOrchestratorAgent:
         if unsupported:
             logger.warning( f"Status digest holds {len( unsupported )} item(s) whose source line is not in the document" )
         return digest
+
+    def _one_shot( self ) -> bool:
+        """Return True when this run has no review stop and asks nobody anything."""
+        return effective_review( self.config ) == REVIEW_ONE_SHOT
 
     def _script_system_prompt( self ) -> str:
         """Return the system prompt for script writing, revision and translation."""
