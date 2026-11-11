@@ -14,7 +14,7 @@ Dependency Rule:
 import json
 from typing import Optional
 
-from cosa.agents.utils.proxy_agents.base_responder import BaseResponder
+from cosa.agents.utils.proxy_agents.base_responder import BaseResponder, print_job_state_transition
 from cosa.agents.decision_proxy.base_decision_strategy import DecisionResult
 from cosa.agents.decision_proxy.config import (
     DEFAULT_ACTIVE_HOURS_START,
@@ -160,15 +160,7 @@ class DecisionResponder( BaseResponder ):
             await self._handle_decision_event( event_data )
 
         elif event_type == "job_state_transition":
-            if self.verbose:
-                # from_state / to_state are the keys emit_job_state_transition()
-                # actually sends (cosa/rest/queue_util.py). This read from_queue /
-                # to_queue, which the event has never carried, so the "?" defaults
-                # meant this line printed "? -> ?" on every transition. Row e3417974.
-                job_id     = event_data.get( "job_id", "?" )
-                from_state = event_data.get( "from_state", "?" )
-                to_state   = event_data.get( "to_state", "?" )
-                print( f"{self.LOG_PREFIX} Job state: {job_id} {from_state} -> {to_state}" )
+            if self.verbose: print_job_state_transition( event_data, self.LOG_PREFIX )
 
         elif self.verbose:
             print( f"{self.LOG_PREFIX} Event: {event_type}" )

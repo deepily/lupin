@@ -30,7 +30,7 @@ from cosa.agents.notification_proxy.config import (
     LLM_SCRIPT_MATCHER_BATCH_TEMPLATE,
 )
 import cosa.utils.util as cu
-from cosa.agents.utils.proxy_agents.base_responder import print_stats_table
+from cosa.agents.utils.proxy_agents.base_responder import print_job_state_transition, print_stats_table
 from cosa.agents.utils.proxy_agents.rest_submitter import submit_notification_response
 
 # The two escapes every document choice card appends. Imported from the expeditor so
@@ -180,15 +180,7 @@ class NotificationResponder:
             await self._handle_notification_update( event_data )
 
         elif event_type == "job_state_transition":
-            if self.verbose:
-                # from_state / to_state are the keys emit_job_state_transition()
-                # actually sends (cosa/rest/queue_util.py). This read from_queue /
-                # to_queue, which the event has never carried, so the "?" defaults
-                # meant this line printed "? -> ?" on every transition. Row e3417974.
-                job_id     = event_data.get( "job_id", "?" )
-                from_state = event_data.get( "from_state", "?" )
-                to_state   = event_data.get( "to_state", "?" )
-                print( f"[Responder] Job state: {job_id} {from_state} → {to_state}" )
+            if self.verbose: print_job_state_transition( event_data, "[Responder]", arrow="→" )
 
         elif self.verbose:
             print( f"[Responder] Event: {event_type}" )
