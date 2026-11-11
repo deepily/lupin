@@ -61,16 +61,27 @@ def series( counts, drained=0 ):
     return prev[ "scan_debt" ]
 
 
-def test_a_falling_count_is_drained_by_the_fall_even_when_the_job_reports_none_and_arrivals_never_go_negative():
+def test_a_falling_count_is_drained_by_the_fall_when_the_job_reports_zero_and_arrivals_are_zero():
     block = series( [ 526, 168, 3 ] )
     assert [ p[ "drained" ] for p in block[ "points" ] ] == [ 0, 358, 165 ]
     assert ( block[ "drained_last_run" ], block[ "arrived_last_interval" ] ) == ( 165, 0 )
     assert not job_health.no_drain( block, block[ "points" ] )
 
 
-def test_a_job_that_reports_more_than_the_fall_keeps_its_own_figure():
-    block = series( [ 100, 90 ], drained=25 )
-    assert ( block[ "drained_last_run" ], block[ "arrived_last_interval" ] ) == ( 25, 15 )
+def test_a_job_that_reports_its_own_non_zero_drained_keeps_it_even_when_the_fall_is_larger():
+    block = series( [ 10, 2 ], drained=2 )
+    assert ( block[ "drained_last_run" ], block[ "points" ][ -1 ][ "drained" ] ) == ( 2, 2 )
+
+
+def test_a_job_that_reports_nothing_stays_none_when_the_count_did_not_fall():
+    block = series( [ 10, 15 ], drained=None )
+    assert ( block[ "drained_last_run" ], block[ "points" ][ -1 ][ "drained" ], block[ "arrived_last_interval" ] ) == ( None, None, None )
+    assert not job_health.no_drain( block, block[ "points" ] )
+
+
+def test_a_job_that_reports_nothing_is_given_the_fall_when_the_count_fell():
+    block = series( [ 10, 4 ], drained=None )
+    assert ( block[ "drained_last_run" ], block[ "arrived_last_interval" ] ) == ( 6, 0 )
 
 
 def test_a_growing_or_flat_count_with_no_drain_is_still_behind():
