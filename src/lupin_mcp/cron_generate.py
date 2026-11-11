@@ -127,6 +127,7 @@ def main( argv=None, environ=None, now=None, out=print, err=None, crontab_cmd=No
     Requires:
         - argv holds at most one of --print, --diff, --install, --uninstall, --status; the default is --print
     Ensures:
+        - --backup-dir prints the backup folder, relative to the root, and does nothing else
         - --print writes the block and changes nothing; --diff writes the unified diff the install would make and changes nothing
         - a run that would change nothing writes no backup, no log folder and no crontab, and says so; two runs in one second cannot overwrite the first backup
         - --install and --uninstall go through the librarian's locked crontab editor: a timestamped backup under io/jobs/crontab-backups first, no backup no write, old tagged and legacy lines replaced, never added to
@@ -141,9 +142,13 @@ def main( argv=None, environ=None, now=None, out=print, err=None, crontab_cmd=No
     parser  = argparse.ArgumentParser( description="Write the Lupin cron lines from the job registry." )
     parser.add_argument( "--root", default=None )
     parser.add_argument( "--only", default=None, help="write only this job's lines (a cron_managed job name)" )
+    parser.add_argument( "--backup-dir", action="store_true", help="print the crontab backup folder, relative to the root, and exit" )
     mode    = parser.add_mutually_exclusive_group()
     for name in ( "print", "diff", "install", "uninstall", "status" ): mode.add_argument( f"--{name}", action="store_true" )
     args    = parser.parse_args( argv )
+    if args.backup_dir:
+        out( BACKUP_DIR )
+        return 0
     root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
     with contextlib.redirect_stdout( sys.stderr ):                    # the configuration manager prints a banner on import; keep stdout clean for --print
         try: lines, tags, legacy = generate( root, environ, args.only )

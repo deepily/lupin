@@ -536,3 +536,9 @@ def test_cron_job_sh_falls_back_to_the_vm_interpreter_when_the_checkout_has_no_v
     ( tmp_path / "checkout" / ".venv" / "bin" / "python" ).write_text( "#!/bin/sh\necho checkout-python\n" )
     ( tmp_path / "checkout" / ".venv" / "bin" / "python" ).chmod( 0o755 )
     assert "checkout-python" in run().stdout, "the checkout's own venv still wins"
+
+
+def test_backup_dir_prints_the_folder_and_does_nothing_else( tree, cron ):
+    code, out, err = run_main( tree, [ "--backup-dir" ], cron )
+    assert code == 0 and out == [ cg.BACKUP_DIR ] and err == []
+    assert not ( tree / cg.BACKUP_DIR ).exists()

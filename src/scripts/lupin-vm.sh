@@ -1558,7 +1558,7 @@ $RCMD_TM"
         require_project
         IR_WHERE="${1:-local}"
         case "$IR_WHERE" in local|vm) ;; *) die "install-refresh-cron takes local or vm, not '$IR_WHERE'" ;; esac
-        IR_PREP=""
+        IR_PREP=""; IR_BACKUP=""
         if [ "$IR_WHERE" = vm ]; then
             IR_ROOT="$VM_ROOT"; IR_DATA="$VM_DEEPILY_DATA_DIR"; IR_PIP="$VM_PIP_ROOT"
             # The purpose-line hand-off folder sits inside the checkout, which the container user (uid 1001) owns, so
@@ -1567,6 +1567,14 @@ $RCMD_TM"
             IR_PREP="HANDOFF=\"\$( sed -n 's/^reuse candidate purpose handoff subdir *= *//p' src/conf/lupin-app.ini | head -1 )\"
 [ -n \"\$HANDOFF\" ] || { echo 'ERROR: src/conf/lupin-app.ini has no reuse candidate purpose handoff subdir'; exit 1; }
 sudo install -d -m 2775 -o 1001 -g \"\$( id -g )\" \"$IR_ROOT/\$HANDOFF\""
+            # cron_generate writes its crontab backup under the checkout, in folders the ssh user cannot create (Permission
+            # denied on io/jobs, 2026-11-11). Ask cron_generate for the folder, so the path has one home, and create each level
+            # below io the same way as the hand-off folder. No backup means no write, so this must exist first.
+            IR_BACKUP="BDIR=\"\$( PYTHONPATH=\"\$LUPIN_ROOT/src\" \"\$CGPY\" -m lupin_mcp.cron_generate --backup-dir )\"
+[ -n \"\$BDIR\" ] || { echo 'ERROR: cron_generate --backup-dir printed nothing'; exit 1; }
+IFS=/ read -ra BPARTS <<< \"\$BDIR\"
+BPATH=\"$IR_ROOT/\${BPARTS[0]}\"
+for BPART in \"\${BPARTS[@]:1}\"; do BPATH=\"\$BPATH/\$BPART\"; sudo install -d -m 2775 -o 1001 -g \"\$( id -g )\" \"\$BPATH\"; done"
             # The vector build imports numpy late, and ~/.venv-lupin-mcp has none and no pip (cron runs died at
             # vector_build.py on 2026-10-29 and 10-30). Install the pinned file with uv, else ensurepip plus pip.
             IR_PREP="$IR_PREP
@@ -1593,6 +1601,7 @@ cd '$IR_ROOT'
 $IR_PREP
 # cron_generate writes the one job's lines (--only leaves every other crontab line alone). The VM has no .venv.
 CGPY=\"\$LUPIN_ROOT/.venv/bin/python\"; [ -x \"\$CGPY\" ] || CGPY=\"\$HOME/.venv-lupin-mcp/bin/python\"
+$IR_BACKUP
 PYTHONPATH=\"\$LUPIN_ROOT/src\" \"\$CGPY\" -m lupin_mcp.cron_generate --only vector-refresh --install
 bash src/scripts/reuse-vector-refresh.sh --status"
         if [ "$DRY_RUN" -eq 1 ]; then
