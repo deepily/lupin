@@ -196,7 +196,7 @@ def test_deploy_runs_the_secret_check_first_and_refreshes_the_overlay_before_the
     assert "PRE-deploy secret check: lupin-vm.sh secrets-check" in text
     overlay = text.index( "test server overlay (only when its containers exist)" )
     assert text.index( "[1/3] restart" ) < overlay < text.index( "POST-deploy preflight (--phase post)" )
-    assert "-f docker-compose.cloud-gpu.yml -f docker-compose.vm-test-overlay.yml --env-file cloud-gpu.env restart lupin-rest-test" in text
+    assert "-f docker-compose.cloud-gpu.yml -f docker-compose.vm-test-overlay.yml --env-file cloud-gpu.env up -d --force-recreate --no-deps lupin-rest-test" in text
     assert "overlay lupin-rest-test is not on this VM; skipped" in text
 
 
@@ -367,9 +367,16 @@ def test_refresh_waits_up_to_180_seconds_for_health():
     assert "seq 1 180" in text and "within 180s" in text and "seq 1 60" not in text
 
 
-def test_the_deploy_overlay_step_restarts_and_waits_up_to_180_seconds():
+def test_the_deploy_overlay_step_recreates_and_waits_up_to_180_seconds():
     text = _vm( "--dry-run", "deploy" ); text = text.stdout + text.stderr
-    assert "--env-file cloud-gpu.env restart lupin-rest-test" in text and "seq 1 90" in text
+    assert "--env-file cloud-gpu.env up -d --force-recreate --no-deps lupin-rest-test" in text and "seq 1 90" in text
+
+
+def test_the_deploy_overlay_step_never_restarts_the_test_app():
+    # A restart keeps the old mounts and env, so a changed overlay file would silently not land. This reddens on `restart`.
+    text = _vm( "--dry-run", "deploy" ); text = text.stdout + text.stderr
+    step = text[ text.index( "test server overlay (only when its containers exist)" ) : text.index( "install git hooks" ) ]
+    assert " restart lupin-rest-test" not in step and "--force-recreate" in step
 
 
 def test_install_refresh_cron_exports_the_config_manager_args_from_the_job_registry( tmp_path ):
