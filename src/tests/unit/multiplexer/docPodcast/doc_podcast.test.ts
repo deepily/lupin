@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   CHECK_URL, START_URL, FILE_EVENT, IDS,
-  humanSize, confirmCopy, refusalText, createDocPodcast, bindDocPodcast,
+  humanSize, choicesBody, confirmCopy, refusalText, createDocPodcast, bindDocPodcast,
 } from "../../../../lupin_app/static/js/multiplexer/docPodcast/docPodcast";
 import type { DocWindowLike } from "../../../../lupin_app/static/js/multiplexer/docPodcast/docPodcast";
 
@@ -29,6 +29,9 @@ function buildPage(): void {
     </div>
     <div id="${IDS.panel}" hidden>
       <span id="${IDS.text}"></span>
+      <select id="${IDS.type}"><option value="research_critical" selected>R</option><option value="status_report">S</option></select>
+      <input type="checkbox" id="${IDS.spanish}">
+      <label id="${IDS.oneShotRow}" hidden><input type="checkbox" id="${IDS.oneShot}" checked></label>
       <button id="${IDS.yes}">Yes</button>
       <button id="${IDS.cancel}">Cancel</button>
     </div>`;
@@ -267,4 +270,53 @@ test( "with no event and no path the module does nothing", async () => {
   await flush();
   assert.equal( net.calls.length, 0 );
   assert.equal( $( IDS.button ).hidden, true );
+} );
+
+// ---- row 60d13c9a: the script type, Spanish and one-shot choices ----
+
+test( "choicesBody: nothing picked adds no key at all", () => {
+  assert.deepEqual( choicesBody( "research_critical", false, true ), {} );
+  assert.deepEqual( choicesBody( "research_critical", false, false ), {} );
+} );
+
+test( "choicesBody: status report carries its review, Spanish carries the pair", () => {
+  assert.deepEqual( choicesBody( "status_report", false, true ), { script_type: "status_report", review: "one_shot" } );
+  assert.deepEqual( choicesBody( "status_report", false, false ), { script_type: "status_report", review: "ask" } );
+  assert.deepEqual( choicesBody( "research_critical", true, true ), { languages: [ "en", "es-MX" ] } );
+} );
+
+async function confirmAndPost( pick: () => void ): Promise<Record<string, unknown>> {
+  const s = scripted( CHECK_OK(), answer( 200, { job_id: "pg-1" } ) );
+  await createDocPodcast( { doc: document, authedFetch: s.authedFetch, path: PATH } ).start();
+  $( IDS.button ).click();
+  pick();
+  $( IDS.yes ).click();
+  await flush();
+  return JSON.parse( s.calls[ 1 ].init.body as string );
+}
+
+test( "the viewer posts only the path when nothing is picked", async () => {
+  assert.deepEqual( await confirmAndPost( () => {} ), { path: PATH } );
+} );
+
+test( "the viewer posts script_type, review and languages for a status report in Spanish", async () => {
+  const body = await confirmAndPost( () => {
+    const type = $( IDS.type ) as HTMLSelectElement;
+    type.value = "status_report";
+    type.dispatchEvent( new Event( "change" ) );
+    ( $( IDS.spanish ) as HTMLInputElement ).checked = true;
+  } );
+  assert.deepEqual( body, { path: PATH, script_type: "status_report", review: "one_shot", languages: [ "en", "es-MX" ] } );
+} );
+
+test( "the one-shot switch shows only for a status report", async () => {
+  const s = scripted( CHECK_OK() );
+  await createDocPodcast( { doc: document, authedFetch: s.authedFetch, path: PATH } ).start();
+  const type = $( IDS.type ) as HTMLSelectElement;
+  type.value = "status_report";
+  type.dispatchEvent( new Event( "change" ) );
+  assert.equal( $( IDS.oneShotRow ).hidden, false );
+  type.value = "research_critical";
+  type.dispatchEvent( new Event( "change" ) );
+  assert.equal( $( IDS.oneShotRow ).hidden, true );
 } );

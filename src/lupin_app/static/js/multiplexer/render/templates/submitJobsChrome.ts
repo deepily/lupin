@@ -68,6 +68,12 @@ export interface ResearchCardEls {
   spinner      : HTMLSpanElement;
   status       : HTMLDivElement;
   schedule     : ScheduleEls;
+  /** The podcast choices row: shown only while "With podcast" is ticked. */
+  podcastOptions : HTMLDivElement;
+  scriptType     : HTMLSelectElement;
+  spanish        : HTMLInputElement;
+  oneShot        : HTMLInputElement;
+  oneShotRow     : HTMLLabelElement;
 }
 
 /**
@@ -356,6 +362,27 @@ function buildResearchCard(): ResearchCardEls {
   const presentation = checkbox( "research-with-presentation", "multiplexer-research-presentation-checkbox", false );
   const dryRun       = checkbox( "research-dry-run", "multiplexer-research-dry-run-checkbox", true );
 
+  // Podcast choices (row 60d13c9a): script type, a Spanish switch (off) and, for a status report, one-shot.
+  const podcastOptions = el( "div", "podcast-options", "multiplexer-research-podcast-options" );
+  podcastOptions.hidden = true;
+  const scriptType = document.createElement( "select" );
+  scriptType.id = "research-podcast-type";
+  scriptType.setAttribute( "data-testid", "multiplexer-research-podcast-type" );
+  const typeChoices: ReadonlyArray<readonly [ string, string ]> = [
+    [ "research_critical", "Research critical" ], [ "status_report", "Status report" ],
+  ];
+  for ( const [ value, text ] of typeChoices ) {
+    const option = document.createElement( "option" );
+    option.value       = value;
+    option.textContent = text;
+    scriptType.append( option );
+  }
+  const spanish    = checkbox( "research-podcast-spanish", "multiplexer-research-podcast-spanish", false );
+  const oneShot    = checkbox( "research-podcast-oneshot", "multiplexer-research-podcast-oneshot", true );
+  const oneShotRow = labelled( "One shot (no script review)", oneShot );
+  oneShotRow.hidden = true;
+  podcastOptions.append( labelled( "Podcast type", scriptType ), labelled( "Also in Spanish", spanish ), oneShotRow );
+
   const { button, spinner } = submitButton(
     "submit-research-job", "multiplexer-research-submit-btn", "Submit Research Job", "research-loading" );
   const status = statusLine( "research-submit-status", "multiplexer-research-submit-status" );
@@ -366,6 +393,7 @@ function buildResearchCard(): ResearchCardEls {
     micBtn, topic,
     labelled( "Budget ($)", budget ),
     labelled( "With podcast", podcast ),
+    podcastOptions,
     labelled( "With presentation", presentation ),
     labelled( "Dry run", dryRun ),
     schedule.row, button, status,
@@ -375,6 +403,7 @@ function buildResearchCard(): ResearchCardEls {
   return {
     card, header, toggle, body, micBtn, topic, budget, podcast, presentation, dryRun,
     submitBtn: button, spinner, status, schedule,
+    podcastOptions, scriptType, spanish, oneShot, oneShotRow,
   };
 }
 

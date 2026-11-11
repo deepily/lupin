@@ -89,6 +89,7 @@ const CC = {
 const RESEARCH = {
   topic: "what is a lupin", budget: "3.00", withPodcast: false,
   withPresentation: false, dryRun: true, scheduling: NO_SCHEDULE,
+  scriptType: "research_critical", spanish: false, oneShot: true,
 };
 const SUITE = {
   testTypes: "integration,e2e", filePath: "", failFast: false,
@@ -214,14 +215,50 @@ test( "research with neither box posts the plain command and no extra arg", asyn
   assert.deepEqual( p.body.args, { query: "what is a lupin", budget: 3, dry_run: true } );
 } );
 
-test( "the podcast box picks the podcast COMMAND and adds the languages arg", async () => {
+test( "the podcast box picks the podcast COMMAND and, with nothing picked, sends no languages and no type", async () => {
   const h = setup();
   await h.store.submitResearch( { ...RESEARCH, withPodcast: true } );
 
   const p = h.last();
   assert.equal( p.body.command, "agent router go to research to podcast" );
-  assert.deepEqual( ( p.body.args as Record<string, unknown> ).target_languages, [ "en", "es-MX" ] );
+  assert.deepEqual( p.body.args, { query: "what is a lupin", budget: 3, dry_run: true } );
   assert.equal( h.store.status( "research" ).text, "✓ Research→Podcast job submitted! Job ID: job-1" );
+} );
+
+test( "status report plus Spanish sends script_type, review and languages, never target_languages", async () => {
+  const h = setup();
+  await h.store.submitResearch( { ...RESEARCH, withPodcast: true, scriptType: "status_report", spanish: true } );
+
+  assert.deepEqual( h.last().body.args, {
+    query: "what is a lupin", budget: 3, dry_run: true,
+    script_type: "status_report", review: "one_shot", languages: [ "en", "es-MX" ],
+  } );
+} );
+
+test( "a status report with one-shot unticked asks for review", async () => {
+  const h = setup();
+  await h.store.submitResearch( { ...RESEARCH, withPodcast: true, scriptType: "status_report", oneShot: false } );
+
+  const args = h.last().body.args as Record<string, unknown>;
+  assert.equal( args.review, "ask" );
+  assert.equal( "languages" in args, false );
+} );
+
+test( "Spanish alone sends languages and no type", async () => {
+  const h = setup();
+  await h.store.submitResearch( { ...RESEARCH, withPodcast: true, spanish: true } );
+
+  const args = h.last().body.args as Record<string, unknown>;
+  assert.deepEqual( args.languages, [ "en", "es-MX" ] );
+  assert.equal( "script_type" in args, false );
+  assert.equal( "review" in args, false );
+} );
+
+test( "podcast choices are ignored when the podcast box is off", async () => {
+  const h = setup();
+  await h.store.submitResearch( { ...RESEARCH, scriptType: "status_report", spanish: true } );
+
+  assert.deepEqual( h.last().body.args, { query: "what is a lupin", budget: 3, dry_run: true } );
 } );
 
 test( "the presentation box picks its command and adds the duration arg", async () => {

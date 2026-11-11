@@ -2839,6 +2839,20 @@ class NotificationsUI {
             });
         }
 
+        // Podcast choices: shown only while the podcast box is ticked; one-shot only for a status report.
+        const podcastOptions = document.getElementById( 'research-podcast-options' );
+        const podcastType = document.getElementById( 'research-podcast-type' );
+        const oneShotRow = document.getElementById( 'research-podcast-oneshot-row' );
+        if ( podcastCb && podcastOptions && podcastType && oneShotRow ) {
+            const syncPodcastOptions = () => {
+                podcastOptions.style.display = podcastCb.checked ? 'flex' : 'none';
+                oneShotRow.style.display = podcastType.value === 'status_report' ? 'flex' : 'none';
+            };
+            podcastCb.addEventListener( 'change', syncPodcastOptions );
+            presentationCb.addEventListener( 'change', syncPodcastOptions );
+            podcastType.addEventListener( 'change', syncPodcastOptions );
+        }
+
 
         // Research STT button (voice input)
         const researchSttBtn = document.getElementById( 'research-stt-button' );
@@ -4202,7 +4216,15 @@ class NotificationsUI {
             const schedulingParams = this._getSchedulingParams( 'research' );
             let args = { query: topic, budget: budget, dry_run: dryRun };
             if ( withPodcast ) {
-                args.target_languages = [ 'en', 'es-MX' ];
+                // English only unless the Spanish switch is on; no type unless it is not research critical.
+                const scriptType = document.getElementById( 'research-podcast-type' ).value;
+                if ( scriptType !== 'research_critical' ) {
+                    args.script_type = scriptType;
+                    args.review = document.getElementById( 'research-podcast-oneshot' ).checked ? 'one_shot' : 'ask';
+                }
+                if ( document.getElementById( 'research-podcast-spanish' ).checked ) {
+                    args.languages = [ 'en', 'es-MX' ];
+                }
             } else if ( withPresentation ) {
                 args.target_duration_minutes = 15;
             }

@@ -84,3 +84,4 @@ src/tests/e2e_ui/test_multiplexer_focus_bar_toggles_row.py
 src/tests/e2e_ui/test_multiplexer_keep_place_toggle_style.py
 src/tests/e2e_ui/test_task_list_status_chips.py
 src/tests/e2e_ui/test_doc_viewer_relative_link_resolves.py
+src/tests/e2e_ui/test_podcast_script_type_choices.py

@@ -284,6 +284,23 @@
                                 <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
                             </label>
                         </div>
+                        <!-- Podcast choices: shown only while "Also generate podcast" is ticked -->
+                        <div id="research-podcast-options" data-testid="notifications-research-podcast-options" class="form-group" style="display: none; gap: 16px; align-items: center; margin-bottom: 12px;">
+                            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;">Podcast type
+                                <select id="research-podcast-type" data-testid="notifications-research-podcast-type">
+                                    <option value="research_critical" selected>Research critical</option>
+                                    <option value="status_report">Status report</option>
+                                </select>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="research-podcast-spanish" data-testid="notifications-research-podcast-spanish" />
+                                <span style="font-size: 13px;">Also in Spanish</span>
+                            </label>
+                            <label id="research-podcast-oneshot-row" style="display: none; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="research-podcast-oneshot" data-testid="notifications-research-podcast-oneshot" checked />
+                                <span style="font-size: 13px;">One shot (no script review)</span>
+                            </label>
+                        </div>
                         <!-- Scheduling Options -->
                         <div class="schedule-section" data-testid="notifications-research-schedule-section">
                             <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
@@ -1610,7 +1627,7 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=1a684b94bb13"></script>
+    <script src="/static/js/notifications.js?v=d3f92e8d45b0"></script>
     <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
     <script src="/static/js/broadcast-panel.js?v=02bdb607cf2a"></script>
