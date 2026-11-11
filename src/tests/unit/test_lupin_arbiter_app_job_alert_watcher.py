@@ -256,3 +256,20 @@ def test_the_lifespan_starts_and_stops_the_job_alert_loop_and_health_reports_it(
         assert loop.started and client.app.state.job_alert_loop is loop
         assert client.get( "/health" ).json()[ "loops" ] == { "job_alert_watcher": "alive" }
     assert loop.stopped
+
+
+def test_start_runs_the_poll_loop_on_a_named_daemon_thread_and_stop_joins_it():
+    import threading, time
+    polled = threading.Event()
+    def summary(): polled.set(); return [ ]
+    class Nap( Clock ):
+        def sleep( self, seconds ): time.sleep( 0.01 )
+    loop = jaw.JobAlertLoop( summary, print, "/x/state.json", print, clock=Nap() )
+    loop.start()
+    try:
+        assert polled.wait( 5 ), "the loop never polled"
+        assert [ t for t in threading.enumerate() if t.name == "job-alert-watcher" and t.daemon ], "no named daemon thread"
+    finally:
+        loop.stop()
+    assert not [ t for t in threading.enumerate() if t.name == "job-alert-watcher" ], "stop() left the thread running"
+    loop.stop()                                                            # a second stop is harmless
