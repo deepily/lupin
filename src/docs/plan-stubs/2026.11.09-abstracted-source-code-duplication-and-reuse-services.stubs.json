@@ -1,0 +1,292 @@
+{
+    "plan_ref": "src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md",
+    "project": "lupin",
+    "prefix": "LUPIN",
+    "plan_number": 1,
+    "plan_name": "Code-health abstraction",
+    "correlation_key": "epic:code-health-abstraction-build",
+    "owner_persona": "maria",
+    "phases": [
+        {
+            "phase": 0,
+            "name": "Owed work first",
+            "steps": [
+                {
+                    "key": "ph0-s1",
+                    "name": "7.4 fix_debt_key vs filed rows",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. Read the duplicate-check fix_debt_key (prefix:epic:dupcheck-) against the rows actually filed; stamp job:<name> only if it misses. Done when the jobs page count for the duplicate check equals the store count, as a dated line in the plan; any code written holds 100% lines, branches and functions on the changed files",
+                    "owner_role": "tester"
+                },
+                {
+                    "key": "ph0-s2",
+                    "name": "7.8 lupin-mobile baseline cost",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI, run by a lupin-mobile session. Done when a dated line in the plan gives lupin-mobile's definition count read from its symbol index, the per-definition rate and its source, and the product with the arithmetic; the same count command is run first on Lupin's index as a control. Any script written holds 100% lines, branches and functions on the changed files",
+                    "owner_role": "lupin-mobile session"
+                },
+                {
+                    "key": "ph0-s3",
+                    "name": "7.9 Dated census of couplings",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. Population: git ls-files of the main tree minus .venv, node_modules and site-packages, counted and stated; fixed-string searches; a positive control finds spec.py:77 and proof_cli.py:33 first. Done when a timestamped table with the commit sha replaces section 4's sample and every row maps to an INI key or a pin. A committed script holds 100% lines, branches and functions on the changed files",
+                    "owner_role": "tester"
+                }
+            ]
+        },
+        {
+            "phase": 1,
+            "name": "INI keys and seams in cosa",
+            "steps": [
+                {
+                    "key": "ph1-s1",
+                    "name": "INI keys, defaults, splainer twins",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. Eight per-repo keys and one global key from section 6.1 exist in lupin-app.ini with today's defaults and splainer twins; B-AC1 to B-AC6 pass; 100% lines, branches and functions on the changed files on every reader module",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph0-s3"
+                    ]
+                },
+                {
+                    "key": "ph1-s2",
+                    "name": "Jev ledger sync and drift check",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. B-AC7 passes: the sync writes the ledger limit row from the key, the drift check fails on a one-token difference and refuses a Jev run before any spend; 100% lines, branches and functions on the changed files on the sync and the check",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s1"
+                    ]
+                },
+                {
+                    "key": "ph1-s3",
+                    "name": "Duplicate-check ceiling to the INI",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. C-AC10 passes: no --ceiling and key at 800 gives adaptive_run 800, a blank key refuses naming the key, a hand-run --ceiling wins, and the registry entry no longer holds --ceiling; 100% lines, branches and functions on the changed files on duplicate_check_daily.py",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s1"
+                    ]
+                },
+                {
+                    "key": "ph1-s4",
+                    "name": "IndexSpec mapping and exclude",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. C-AC3, C-AC7 and C-AC8 pass, including the one-time mutation arm in a detached worktree; 100% lines, branches and functions on the changed files on spec.py",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s1"
+                    ]
+                },
+                {
+                    "key": "ph1-s5",
+                    "name": "Open sub-question 3: module_base",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. One outcome (derived with a test for the known-wrong case, or an INI key added with its twin and the census count) is written into section 6.2 and its tests pass; 100% lines, branches and functions on the changed files",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s4"
+                    ]
+                },
+                {
+                    "key": "ph1-s6",
+                    "name": "Open sub-question 4: shadow ceiling",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. The outcome (per repo, or one global key by design) is written into section 6.1; if per repo, the INI, twin, census count and table change in the same commit",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s1"
+                    ]
+                },
+                {
+                    "key": "ph1-s7",
+                    "name": "Scheduler repo key in the registry",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. C-AC5 and C-AC9 pass: Lupin's 17 generated lines are unchanged and a scratch second-repo row yields lines with its own root, --root and config; 100% lines, branches and functions on the changed files on cron_generate.py",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s3"
+                    ]
+                },
+                {
+                    "key": "ph1-s8",
+                    "name": "Install regenerated cron lines",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: HUMAN (seats install nothing in cron, row 449bf026). Rick runs python -m lupin_mcp.cron_generate --install from the main checkout; done when --status shows the lines match --print",
+                    "owner_role": "operator",
+                    "depends_on": [
+                        "ph1-s7"
+                    ]
+                },
+                {
+                    "key": "ph1-s9",
+                    "name": "7.10 Route vector_build through EmbeddingProvider",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. vector_build.py:61 no longer calls the embeddings route directly; C-AC4 passes and lands in the same commit or after; 100% lines, branches and functions on the changed files on vector_build.py and embedding_provider.py",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s1"
+                    ]
+                },
+                {
+                    "key": "ph1-s10",
+                    "name": "Seam contract paragraphs, defaults pinned",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. C-AC1 and C-AC2 pass: one capability page holds the eight contract paragraphs and wiki_lint is clean on it; each default test pins a literal from the base sha; 100% lines, branches and functions on the changed files",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s4",
+                        "ph1-s7",
+                        "ph1-s9"
+                    ]
+                },
+                {
+                    "key": "ph1-s11",
+                    "name": "Merge pyramid green for step 1",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. D-AC1 passes: C-AC1 to C-AC10 and merge pyramid rows 1 to 15 are green on the merged tree; rows 8, 13, 14 and 15 run on :8000 through POST /api/v2/submit after venue_idle answers idle; 100% lines, branches and functions on the changed files",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s10",
+                        "ph1-s2",
+                        "ph1-s5",
+                        "ph1-s6"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 2,
+            "name": "lupin-mobile as repo 2",
+            "steps": [
+                {
+                    "key": "ph2-s1",
+                    "name": "File the lupin-mobile owner and manager row",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. The Step 9 author names the lupin-mobile session's owner and manager and files the store row; done when the row exists with both named",
+                    "owner_role": "manager",
+                    "depends_on": [
+                        "ph1-s11"
+                    ]
+                },
+                {
+                    "key": "ph2-s2",
+                    "name": "lupin-mobile registry rows and INI keys",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI, by a lupin-mobile session. Its registry rows carry its repo key and its per-repo INI keys exist with twins; lupin-side code changed for it holds 100% lines, branches and functions on the changed files",
+                    "owner_role": "lupin-mobile session",
+                    "depends_on": [
+                        "ph2-s1",
+                        "ph0-s2"
+                    ]
+                },
+                {
+                    "key": "ph2-s3",
+                    "name": "Two-week green gate",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. D-AC2 passes: a script reads the repo's runs.jsonl and reports 14 consecutive days, counted from the first green one, each with at least one line status ok, failure null, trigger cron; skipped and reboot lines do not count",
+                    "owner_role": "lupin-mobile session",
+                    "depends_on": [
+                        "ph2-s2"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 3,
+            "name": "Installable package and installer",
+            "steps": [
+                {
+                    "key": "ph3-s1",
+                    "name": "Open sub-question 1: merge-gate carrier",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. The chosen option (hook script, call into Lupin's job, or none until the package exists) is written into section 6.3 step 3 and a test installs it into a scratch repo and shows a failing merge-gate input refused",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s3"
+                    ]
+                },
+                {
+                    "key": "ph3-s2",
+                    "name": "Open sub-question 2: vendored doc-lint copy",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. The outcome (lupin-mobile keeps its vendored copy or moves to the installed package) is written into section 6.3 step 3",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s3"
+                    ]
+                },
+                {
+                    "key": "ph3-s3",
+                    "name": "Installer composing two scripts and a check",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. D-AC3 passes in a scratch registered repo: INI keys with twins, hooks, registry rows, compose mount line and a seeded ledger with a limit row equal to the key exist; install-cosa-voice.sh --check-only is a precondition only; 100% lines, branches and functions on the changed files on the installer. cron_generate --install stays EXECUTOR: HUMAN",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s1",
+                        "ph3-s2"
+                    ]
+                },
+                {
+                    "key": "ph3-s4",
+                    "name": "Mount takes effect after recreate",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. D-AC3b passes: after --force-recreate of both services (:8000 only once venue_idle answers idle; :7999 through bounce-dev-server.sh) a loader read for the new repo returns its vectors",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s3"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 4,
+            "name": "Claude Code plugin",
+            "steps": [
+                {
+                    "key": "ph4-s1",
+                    "name": "Move reuse-tool wrappers and registration",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. D-AC4 passes: the reuse-tool unit tests pass unmoved, git diff --stat touches no line of reuse_tools.py logic; 100% lines, branches and functions on the changed files on the new server module",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s4"
+                    ]
+                },
+                {
+                    "key": "ph4-s2",
+                    "name": "Plugin manifest and packaging",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. A plugin manifest (genuinely new; none exists in the tree) loads the five reuse tools and the reviewer skill from a standalone server with lupin_mcp importable and the environment and data root resolved by the step 3 package; 100% lines, branches and functions on the changed files on new code",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph4-s1"
+                    ]
+                }
+            ]
+        }
+    ]
+}
