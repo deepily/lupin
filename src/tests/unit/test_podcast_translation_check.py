@@ -187,3 +187,43 @@ def test_a_real_translation_is_saved_voiced_and_listed_as_es_mx():
     assert saved == [ "en", "es-MX" ] and voiced == [ "en", "es-MX" ]
     assert "translation failed" not in card
     assert "Mexican Spanish" in card
+
+
+async def _job_card( failed ):
+    """Run the real job over a stub orchestrator; return the completion text and abstract."""
+    from cosa.agents.podcast_generator.job import PodcastGeneratorJob
+    job = PodcastGeneratorJob( research_path="io/deep-research/u/r.md", user_id="u", user_email="card@test.com",
+                               session_id="s", target_languages=[ "en", "es-MX" ], debug=False )
+    script = MagicMock( estimated_duration_minutes=3.5 )
+    script.get_segment_count.return_value = 5
+    agent = MagicMock( do_all_async=AsyncMock( return_value=script ), _api_client=None, _failed_translations=failed )
+    agent._podcast_state = {
+        "final_audio_path"          : "io/podcasts/u/en.mp3",
+        "final_script_path"         : "io/podcasts/u/en.md",
+        "audio_paths_by_language"   : { "en": "io/podcasts/u/en.mp3" },
+        "script_paths_by_language"  : { "en": "io/podcasts/u/en.md" },
+    }
+    with patch( "cosa.agents.podcast_generator.voice_io.notify", new_callable=AsyncMock ) as notify, \
+         patch( "cosa.agents.podcast_generator.voice_io.reconfigure" ), \
+         patch( "cosa.agents.podcast_generator.voice_io.clear_job_id" ), \
+         patch( "cosa.agents.podcast_generator.cosa_interface" ), \
+         patch( "cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent", return_value=agent ), \
+         patch( "os.path.exists", return_value=True ):
+        await job._execute()
+    call = next( c for c in notify.call_args_list if c.kwargs.get( "abstract" ) and "Podcast Activity Report" in c.kwargs[ "abstract" ] )
+    return call.args[ 0 ], call.kwargs[ "abstract" ]
+
+
+def test_the_job_card_names_a_language_whose_translation_failed():
+    spoken, card = asyncio.run( _job_card( { "es-MX": "came back untranslated" } ) )
+    assert "**Languages**: en\n" in card
+    assert "**Translation failed (not produced)**: Mexican Spanish. came back untranslated" in card
+    assert "en, es-MX" not in card
+    assert "1 language" in spoken and "2 language" not in spoken
+
+
+def test_the_job_card_lists_both_languages_when_nothing_failed():
+    spoken, card = asyncio.run( _job_card( { } ) )
+    assert "**Languages**: en, es-MX\n" in card
+    assert "Translation failed" not in card
+    assert "2 languages" in spoken

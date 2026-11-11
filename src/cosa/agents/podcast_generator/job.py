@@ -366,7 +366,10 @@ class PodcastGeneratorJob( AgenticJobBase ):
             script_minutes = script.estimated_duration_minutes
             elapsed_sec   = round( time.time() - self._start_time, 1 )
             has_audio     = bool( self.audio_path )
-            n_langs       = len( languages )
+            # A language whose translation failed is not produced: name it, and do not count it.
+            failed_langs  = dict( agent._failed_translations )
+            produced_langs = [ l for l in languages if l not in failed_langs ]
+            n_langs       = len( produced_langs )
 
             # Three-variant TTS
             if has_audio and n_segments > 0:
@@ -408,7 +411,9 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # Rich markdown abstract
             lines = [ "**Podcast Activity Report**", "" ]
             lines.append( f"**Segments**: {n_segments} (~{script_minutes:.1f} min)" )
-            lines.append( f"**Languages**: {', '.join( languages )}" )
+            lines.append( f"**Languages**: {', '.join( produced_langs )}" )
+            for lang, reason in failed_langs.items():
+                lines.append( f"**Translation failed (not produced)**: {LANGUAGE_NAMES.get( lang, lang )}. {reason}" )
             lines.extend( per_language_lines )
             lines.extend( drive[ "extra_lines" ] )
             if self.cost_summary:  # pragma: no branch - cost_summary is set unconditionally (3-key dict) earlier, so it is always truthy here; the False arc is unreachable
