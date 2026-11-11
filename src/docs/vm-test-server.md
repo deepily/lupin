@@ -27,7 +27,7 @@ Files under `/etc/lupin/secrets` (root, host gid, 0440), written by `lupin-vm.sh
 1. checks Secret Manager (a warning, never a stop);
 2. runs the pre preflight and syncs the code;
 3. restarts :7999, where the app migrates the database to head at startup, and the arbiter;
-4. restarts `lupin-rest-test` and waits for `/health`, only when the overlay containers exist;
+4. recreates `lupin-rest-test` (never a plain restart, which keeps the old mounts and env) and waits for `/health`, only when the overlay containers exist;
 5. runs the post preflight.
 
 `push-bundle --checkout` alone moves code and restarts nothing, so it leaves schema drift behind.

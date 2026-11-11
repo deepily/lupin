@@ -968,7 +968,9 @@ done
 echo '== test server overlay (only when its containers exist) =='
 all_names=\"\$( sudo docker ps -a --format '{{.Names}}' )\" || all_names=\"\"
 if grep -Fxq $TEST_REST_SERVICE <<< \"\$all_names\"; then
-  sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE restart $TEST_REST_SERVICE
+  # Recreate, never restart: the overlay's mounts and env resolve at container create, so a restart leaves a changed overlay
+  # file unapplied (the node_modules volume never landed this way, 2026-11-11). --no-deps keeps the database container up.
+  sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE up -d --force-recreate --no-deps $TEST_REST_SERVICE
   for i in \$(seq 1 90); do
     if python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:$TEST_PORT/health', timeout=2)\" 2>/dev/null; then echo \"$TEST_REST_SERVICE healthy after \$i poll(s)\"; break; fi
     sleep 2
