@@ -665,6 +665,65 @@ if sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" ls-files --error-u
 else
     report pass WARN ".mcp.json is not tracked"
 fi
+
+# B10 — the vector-refresh cron is installed for THIS user (row c22e5ec1). `install-refresh-cron vm` is a separate
+# step that nothing reported on. WARN: a missing cron stops no deploy. Assert-only: the remedy is a line a person runs.
+cron_text="$( crontab -l 2>/dev/null || printf '' )"
+if pfv_cron_status "$cron_text" >/dev/null; then
+    report pass WARN "the reuse-vector-refresh cron line is in this user's crontab"
+else
+    report fail WARN "the reuse-vector-refresh cron line is NOT in this user's crontab, so the vector index is never refreshed" \
+                  "from the dev box: src/scripts/lupin-vm.sh install-refresh-cron vm"
+fi
+
+# B11 — the overlay test server (lupin-rest-test on :8000), only when its container exists (row c22e5ec1).
+# Absent is a legal state (a VM without the overlay), so it prints a skip line and counts nothing.
+# Present, it must answer /health, sit at the tree's head schema, hold its database roles and a tester login.
+OVERLAY_APP="${PREFLIGHT_VM_OVERLAY_APP:-lupin-rest-test}"
+OVERLAY_DB="${PREFLIGHT_VM_OVERLAY_DB:-lupin-pgvector-test}"
+OVERLAY_PORT="${PREFLIGHT_VM_OVERLAY_PORT:-8000}"
+OVERLAY_SECRETS="${PREFLIGHT_VM_OVERLAY_SECRETS:-/etc/lupin/secrets}"
+if pfv_overlay_present "$( docker ps -a --format '{{.Names}}' 2>/dev/null || printf '' )" "$OVERLAY_APP"; then
+    overlay_up="lupin-vm.sh test-server up   # from the dev box; first-time bring-up: see src/docs/vm-test-server.md"
+    ov_code="$( curl -s -o /dev/null -w '%{http_code}' --max-time 20 "http://localhost:$OVERLAY_PORT/health" 2>/dev/null )"
+    if [ "$ov_code" = "200" ]; then report pass BLOCK "overlay $OVERLAY_APP /health 200 on :$OVERLAY_PORT"
+    else report fail BLOCK "overlay $OVERLAY_APP /health returned '$ov_code' on :$OVERLAY_PORT" "$overlay_up   # then: lupin-vm.sh test-server logs"; fi
+
+    ov_out="$( docker exec "$OVERLAY_APP" python /var/lupin/src/scripts/check_schema_at_head.py 2>&1 )"; ov_rc=$?
+    ov_detail="$( printf '%s\n' "$ov_out" | grep -m1 '^DETAIL=' | cut -d= -f2- )"
+    case $ov_rc in
+        0) report pass BLOCK "overlay DB schema is at the tree's head revision" ;;
+        1) report fail BLOCK "overlay SCHEMA DRIFT — ${ov_detail:-see the probe}" "lupin-vm.sh test-server recreate   # main.py migrates to head at startup" ;;
+        *) report unknown BLOCK "cannot determine the overlay schema revision — ${ov_detail:-$( printf '%s' "$ov_out" | tr '\n' ' ' | cut -c1-160 )}" \
+                         "docker exec $OVERLAY_APP python /var/lupin/src/scripts/check_schema_at_head.py" ;;
+    esac
+
+    # --database lupin_db_test: lupin_db_dev is empty on the VM, so an unlimited --check exits 1 on a healthy overlay.
+    if ( cd "$REPO_ROOT" && sudo -n env LUPIN_ROOT="$REPO_ROOT" PYTHONPATH=src python3 -m cosa.utils.db_roles \
+            --app-pw-file "$OVERLAY_SECRETS/db_app_password" --host-pw-file "$OVERLAY_SECRETS/db_host_password" \
+            --test-pw-file "$OVERLAY_SECRETS/db_test_password" \
+            --psql "docker exec -i $OVERLAY_DB psql -U lupin_dev -d lupin_db_dev" --check --database lupin_db_test >/dev/null 2>&1 ); then
+        report pass BLOCK "overlay database roles and grants read back clean"
+    else
+        report fail BLOCK "overlay database roles or grants are not clean (db_roles --check)" \
+                      "lupin-vm.sh test-server roles --apply, then: lupin-vm.sh test-server roles --grants-only"
+    fi
+
+    ov_email="$( pfv_test_login_email "$OVERLAY_SECRETS/test_env.sh" )"
+    if [ -z "$ov_email" ]; then
+        report unknown WARN "the overlay's tester address could not be read from $OVERLAY_SECRETS/test_env.sh" "lupin-vm.sh push-test-server-secrets"
+    else
+        ov_count="$( docker exec -i "$OVERLAY_DB" psql -U lupin_dev -d lupin_db_test -tAc "select count(*) from users where email = '$ov_email'" 2>/dev/null || printf '' )"
+        case "$( pfv_count_status "$ov_count" )" in
+            PRESENT) report pass WARN "the overlay's lupin_db_test holds the tester login (address not shown)" ;;
+            ABSENT)  report fail WARN "the overlay's lupin_db_test has no tester login, so submit-test-suite.py cannot log in" \
+                                   "create the tester user in lupin_db_test (known gap in src/docs/vm-test-server.md)" ;;
+            *)       report unknown WARN "could not query lupin_db_test for the tester login" "docker exec -i $OVERLAY_DB psql -U lupin_dev -d lupin_db_test -c 'select count(*) from users'" ;;
+        esac
+    fi
+else
+    printf "[SKIP]  overlay test server %s is not on this host; its checks did not run\n" "$OVERLAY_APP"
+fi
 else note_skip B; fi
 
 # ══════════════════════════════════════════════════════════════════════════

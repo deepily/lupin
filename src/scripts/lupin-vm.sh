@@ -111,6 +111,7 @@ Destructive-test server (overlay $TEST_COMPOSE_FILE: lupin-rest-test on VM :$TES
                          the pgvector admin and lupin_host passwords are generated ON the VM, once.
                          Says only written / unchanged / kept per file. Never prints a value.
   test-server prep       make the two host folders the test server mounts (sessions-test, flow-ratio)
+  test-server up-db      up -d the pgvector container alone; do this before roles, which needs it running
   test-server up         up -d the pgvector container and lupin-rest-test
   test-server recreate   up -d --force-recreate --no-deps lupin-rest-test (env, groups or mounts changed)
   test-server down       stop both containers; the database volume stays
@@ -119,7 +120,7 @@ Destructive-test server (overlay $TEST_COMPOSE_FILE: lupin-rest-test on VM :$TES
   test-server refresh    restart lupin-rest-test and poll /health on VM :$TEST_PORT
   test-server idle       venue_idle --port $TEST_PORT ON the VM; its exit code is the answer (0 idle, 1 busy, 2 unknown)
   test-server roles [--apply|--check|--grants-only]
-                         db_roles against the local pgvector container: dry run by default; --apply
+                         db_roles against the local pgvector container (run up-db first): dry run by default; --apply
                          creates the roles and grants, --grants-only repeats the grants after the app
                          has created its tables, --check reads them back (exit 0 clean)
   To reach VM :$TEST_PORT from here (submit-test-suite.py, a browser): firewall open $TEST_PORT, then
@@ -147,6 +148,9 @@ Deployment contract (task 47c4801b):
                          report), and credential ACCEPTANCE with a wrong-key control.
                          Assert-only — every failure prints an executable remedy.
                          'deploy' runs the pre arm before, and the post arm after, automatically.
+  secrets-check          which Secret Manager secrets this script's verbs read (derived from the script itself), and
+                         does each have an enabled version? Prints names and the gcloud line you run; never a value.
+                         Exit 0 all present, 1 one missing, 2 could not ask. 'deploy' runs it first, as a warning.
   install-hooks          link the two git hooks (pre-commit, pre-push) on the VM's checkout; 'deploy' runs it
                          after the checkout. Safe to re-run. Leaves a file in the way alone and says so.
   push-unversioned       ship the payloads git cannot deliver (gitignored keys, personal-data maps),
@@ -177,6 +181,12 @@ Full deploy (bundle -> checkout -> restart BOTH servers -> verify) — RUN FROM 
   deploy [branch]        one-shot: push-bundle --checkout, then force-recreate :$APP_PORT $REST_SERVICE
                          (compose) + restart :$ARBITER_PORT arbiter (systemd --user), then probe
                          /health on both. Neither server hot-reloads on the VM, so both are bounced.
+                         The restart migrates the database to head at startup; the post arm then checks
+                         schema at head. It also: warns on missing Secret Manager secrets first, recreates
+                         lupin-rest-test when its container exists (skips when not), and the post arm checks
+                         the refresh cron and the overlay (/health :$TEST_PORT, schema, roles, tester login).
+                         This is the one command for a server update; push-bundle --checkout alone moves
+                         code, restarts nothing and migrates nothing.
                          Build the bundle here where the checkout + GitHub live; the other
                          subcommands (shell/tunnel/svc) are what the laptops run against the VM.
                          COMMITTED work only — the bundle ships the branch's last commit, NOT your
@@ -277,6 +287,44 @@ runit() {
         return 0
     fi
     "$@"
+}
+
+# ---- Secret Manager names this script reads (row c22e5ec1) -----------------
+# The names come from this file's own gcloud secret-flag references, not from a list somebody keeps: a verb that
+# starts reading a new secret is covered by the next check. Each variable is followed to its assignment, through a
+# `for V in $LIST` loop and a `${X:-default}` default. A reference that cannot be resolved fails the whole call,
+# so the list cannot shrink quietly. Prints one name per line, sorted, no duplicates.
+vm_secret_names() {
+    local self="${BASH_SOURCE[0]}" ref src val names="" refs
+    refs="$( grep -o -- '--secret="\$[A-Za-z_]*"' "$self" | sed 's/.*\$//; s/"//' | sort -u )" || refs=""
+    [ -n "$refs" ] || { echo "vm_secret_names: no --secret= reference found in $self" >&2; return 1; }
+    for ref in $refs; do
+        src="$( sed -n "s/^[[:space:]]*for $ref in \$\([A-Za-z_]*\);.*/\1/p" "$self" | head -1 )"
+        [ -n "$src" ] || src="$ref"
+        val="$( sed -n "s/^[[:space:]]*$src=\"\(.*\)\"[[:space:]]*\$/\1/p" "$self" | head -1 | sed 's/^\${[A-Za-z_]*:-\(.*\)}$/\1/' )"
+        [ -n "$val" ] || { echo "vm_secret_names: cannot resolve \$$ref to a name in $self" >&2; return 1; }
+        names="$names $val"
+    done
+    printf '%s\n' $names | sort -u
+}
+
+# Does each name have an ENABLED version? Names and remedy lines only, never a value. Needs your own gcloud login.
+# Returns 0 all present, 1 at least one missing, 2 could not ask (no gcloud, or the names could not be derived).
+vm_secrets_check() {
+    local names name out missing=0
+    names="$( vm_secret_names )" || return 2
+    command -v gcloud >/dev/null 2>&1 || { log "gcloud is not on this host, so the Secret Manager secrets are unchecked"; return 2; }
+    for name in $names; do
+        out="$( gcloud secrets versions list "$name" --project="$LUPIN_GCP_PROJECT_ID" --filter='state=enabled' --limit=1 --format='value(name)' 2>/dev/null )"
+        if [ -n "$out" ]; then
+            log "[OK]    Secret Manager $name has an enabled version"
+        else
+            missing=1
+            log "[FAIL]  Secret Manager $name is missing, has no enabled version, or your login cannot list it"
+            log "        remedy (you run it; the value arrives on stdin): gcloud secrets create $name --project=$LUPIN_GCP_PROJECT_ID --data-file=-   # an existing secret with no enabled version: gcloud secrets versions add $name --project=$LUPIN_GCP_PROJECT_ID --data-file=-"
+        fi
+    done
+    return $missing
 }
 
 # ---- remote compose helper ----------------------------------------------
@@ -763,6 +811,13 @@ case "$SUBCMD" in
         #    the deploy; set LUPIN_SKIP_PREFLIGHT=1 to override deliberately.
         #    Running both arms is what distinguishes "the deploy broke it" from "it was
         #    already broken" — the diagnosis that cost five minutes of bisection on 07-26.
+        # 0-secrets. Secret Manager has what the later verbs read (row c22e5ec1). Advisory: a missing secret stops
+        #     no deploy step, only a later push-test-server-secrets, so it warns, names the line a person runs and goes on.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) PRE-deploy secret check: lupin-vm.sh secrets-check"
+        elif [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+            vm_secrets_check || log "WARN: the Secret Manager check above found a problem; the deploy goes on. Fix it before push-test-server-secrets."
+        fi
         # 0a. The cloud-gpu compose file requires LUPIN_GCP_PROJECT_ID and the VM runs compose with
         #     --env-file, which drops the shell's environment. A VM whose cloud-gpu.env lacks the line aborts
         #     every compose call, the preflight's own included, so write it before anything else runs.
@@ -840,6 +895,16 @@ for p in $APP_PORT $ARBITER_PORT; do
   done
   echo \":\$p health -> \$st (after ~\$((i*8))s)\"
 done
+echo '== test server overlay (only when its containers exist) =='
+if sudo docker ps -a --format '{{.Names}}' | grep -Fxq $TEST_REST_SERVICE; then
+  sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE restart $TEST_REST_SERVICE
+  for i in \$(seq 1 90); do
+    if python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:$TEST_PORT/health', timeout=2)\" 2>/dev/null; then echo \"$TEST_REST_SERVICE healthy after \$i poll(s)\"; break; fi
+    sleep 2
+  done
+else
+  echo 'overlay $TEST_REST_SERVICE is not on this VM; skipped'
+fi
 echo '== install git hooks (pre-commit, pre-push) =='
 bash src/scripts/install-git-hooks.sh || echo 'WARN: git hook install reported a problem (above); the post-deploy preflight below will say which hook is missing'
 echo '== [4/4] POST-deploy preflight (--phase post) =='
@@ -1519,6 +1584,10 @@ fi"
         fi
         RCMD_IR="set -e
 export LUPIN_ROOT='$IR_ROOT' DEEPILY_DATA_DIR='$IR_DATA' PLANNING_IS_PROMPTING_ROOT='$IR_PIP'
+# cron_generate builds a ConfigurationManager, which needs this variable; the job registry carries the value the cron jobs run with.
+LUPIN_CONFIG_MGR_CLI_ARGS=\"\$( python3 -c \"import json; print( json.load( open( '$IR_ROOT/src/conf/job-registry.json' ) )[ 'defaults' ][ 'run_env' ][ 'LUPIN_CONFIG_MGR_CLI_ARGS' ] )\" )\"
+[ -n \"\$LUPIN_CONFIG_MGR_CLI_ARGS\" ] || { echo 'ERROR: no LUPIN_CONFIG_MGR_CLI_ARGS in $IR_ROOT/src/conf/job-registry.json'; exit 1; }
+export LUPIN_CONFIG_MGR_CLI_ARGS
 [ -r \"\$HOME/.lupin/reuse-vector-refresh.env\" ] || echo \"WARN: \$HOME/.lupin/reuse-vector-refresh.env is missing, so the refresh cannot log in; run lupin-vm.sh push-test-mock-login $IR_WHERE\"
 cd '$IR_ROOT'
 $IR_PREP
@@ -1535,6 +1604,18 @@ bash src/scripts/reuse-vector-refresh.sh --status"
                 $SSH_KEEPALIVE --command "$RCMD_IR"
         else
             bash -c "$RCMD_IR"
+        fi
+        ;;
+
+    secrets-check)
+        # Row c22e5ec1. Which Secret Manager secrets do this script's verbs read, and does each have an enabled
+        # version? Detects and prints the line a person runs; it never writes a secret.
+        require_project
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would ask Secret Manager, with your gcloud login, whether each of these has an enabled version:"
+            vm_secret_names | sed 's/^/    /'
+        else
+            vm_secrets_check
         fi
         ;;
 
@@ -1602,6 +1683,7 @@ $RCMD_TS"
                 remote_script "make $TEST_STATE_DIR/sessions-test and $TEST_STATE_DIR/flow-ratio (2775)" \
                     "set -e; for d in sessions-test flow-ratio; do mkdir -p '$TEST_STATE_DIR'/\$d; chmod 2775 '$TEST_STATE_DIR'/\$d; done; ls -ld '$TEST_STATE_DIR'/sessions-test '$TEST_STATE_DIR'/flow-ratio"
                 ;;
+            up-db)    remote_test_compose "up -d $TEST_PGVECTOR_CONTAINER" ;;   # roles needs this container running, before the app
             up)       remote_test_compose "up -d $TEST_SERVICES" ;;
             # --no-deps: the database container is already up and a recreate of the app must not touch it.
             recreate) remote_test_compose "up -d --force-recreate --no-deps $TEST_REST_SERVICE" ;;
@@ -1611,7 +1693,7 @@ $RCMD_TS"
             refresh)
                 # Poll /health on the VM itself, so the IAP tunnel and the firewall rule are not needed.
                 remote_script "restart $TEST_REST_SERVICE and poll /health on :$TEST_PORT" \
-                    "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE restart $TEST_REST_SERVICE && for i in \$(seq 1 60); do if python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:$TEST_PORT/health', timeout=2)\" 2>/dev/null; then echo \"OK: $TEST_REST_SERVICE healthy after \$i poll(s)\"; exit 0; fi; sleep 1; done; echo 'ERROR: /health did not answer within 60s' >&2; sudo docker logs --tail 50 $TEST_REST_SERVICE >&2; exit 1"
+                    "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE restart $TEST_REST_SERVICE && for i in \$(seq 1 180); do if python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:$TEST_PORT/health', timeout=2)\" 2>/dev/null; then echo \"OK: $TEST_REST_SERVICE healthy after \$i poll(s)\"; exit 0; fi; sleep 1; done; echo 'ERROR: /health did not answer within 180s' >&2; sudo docker logs --tail 50 $TEST_REST_SERVICE >&2; exit 1"
                 ;;
             idle)
                 # venue_idle is standard library only; the exit code rides back through ssh.
@@ -1627,9 +1709,9 @@ $RCMD_TS"
                 esac
                 # Needs root only to read the password files; the psql step is `docker exec` into the local pgvector.
                 remote_script "db_roles $TS_ROLE_ARG against $TEST_PGVECTOR_CONTAINER" \
-                    "cd $VM_ROOT && sudo env PYTHONPATH=src python3 -m cosa.utils.db_roles --app-pw-file $TEST_SECRETS_DIR/db_app_password --host-pw-file $TEST_SECRETS_DIR/db_host_password --test-pw-file $TEST_SECRETS_DIR/db_test_password --psql 'docker exec -i $TEST_PGVECTOR_CONTAINER psql -U lupin_dev -d lupin_db_dev' $TS_ROLE_ARG"
+                    "cd $VM_ROOT && sudo env LUPIN_ROOT=$VM_ROOT PYTHONPATH=src python3 -m cosa.utils.db_roles --app-pw-file $TEST_SECRETS_DIR/db_app_password --host-pw-file $TEST_SECRETS_DIR/db_host_password --test-pw-file $TEST_SECRETS_DIR/db_test_password --psql 'docker exec -i $TEST_PGVECTOR_CONTAINER psql -U lupin_dev -d lupin_db_dev' $TS_ROLE_ARG"
                 ;;
-            *) die "test-server needs one of: prep | up | recreate | down | status | logs | refresh | idle | roles" ;;
+            *) die "test-server needs one of: prep | up-db | up | recreate | down | status | logs | refresh | idle | roles" ;;
         esac
         ;;
 
