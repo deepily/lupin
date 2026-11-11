@@ -356,3 +356,21 @@ def test_the_seat_actor_is_the_bridge_persona_and_the_session_id_the_way_task_am
     assert dv.seat_actor() == "clayton 26f75e16"
     monkeypatch.setattr( sb, "get_voice_persona", lambda sid: None )
     with pytest.raises( dv.VerdictRefused, match="no voice persona" ): dv.seat_actor()
+
+
+def test_the_body_a_seat_store_sends_is_accepted_by_the_stores_own_amend_model_and_carries_every_field_it_requires():
+    from cosa.rest.routers.tasks import TaskAmendIn
+    seen = [ ]
+
+    class Client:
+        def amend_task( self, settings, api_key, item_id, payload ):
+            seen.append( payload )
+            return True, 200, { }
+
+    store        = dv.SeatStore( "clayton 26f75e16", settings={ "api_base_url": "http://x" }, api_key="k" )
+    store.client = Client()
+    store.amend( ROW, LINE_OK )
+    required = { name for name, field in TaskAmendIn.model_fields.items() if field.is_required() }
+    assert "actor" in required, "the pin is aimed at the model that refused the call"
+    assert required <= set( seen[ 0 ] ), "a field the model requires is missing from the body"
+    assert TaskAmendIn( **seen[ 0 ] ).actor == "clayton 26f75e16", "extra=forbid and the field limits are the model's own"
