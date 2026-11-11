@@ -449,7 +449,7 @@ def test_a_renamed_file_makes_only_its_new_functions_new( repo, data, tmp_path )
     assert ( count( text, "Total Tests" ), count( text, "Failed" ) ) == ( 2, 1 )
 
 
-FLIP_SINCE  = "d0180365caa7c8c8e6b189af6b98daa93fb43d72"                                     # the v0.2.2 squash merge on main, which carries the C3 flip (row 3f6b7e79, 3 Nov 2026; re-pointed 4 Nov after the squash)
+FLIP_SINCE  = "2e91a63f2d26ee2645030da6304aaef39d418eeb"                                     # Rick, 10 Nov 2026 (row 5f8fc615): moved from d0180365c, the v0.2.2 squash merge, to the branch tip that night; the older definitions are back-filled by row
 FLIP_BASE   = "main"                                                                       # the branch v0.2.3 merges into
 FLIP_VALUES = { mg.SINCE_KEY: FLIP_SINCE, mg.BASE_KEY: FLIP_BASE }
 
