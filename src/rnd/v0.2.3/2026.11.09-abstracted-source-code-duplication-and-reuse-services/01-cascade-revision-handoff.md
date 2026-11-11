@@ -199,3 +199,79 @@ Section 6.3 step 3. Steps `ph3-s1` to `ph3-s4`: Open sub-questions 1 and 2 as de
 ## Phase 4: Claude Code plugin
 
 Section 6.3 step 4. Steps `ph4-s1` and `ph4-s2`: move the wrappers, then the new plugin manifest.
+
+## Reuse review: coupling census script (row 43f4a504, step ph0-s3)
+
+The census script was first written with its own `tracked_files` and `head_sha`. The lookups showed `cosa.repo.doc_lint.cli.tracked_files( root, ( "", ), scoped=False )` lists every tracked file from git, and `cosa.repo.doc_lint.range_gate.git` runs a git command and raises on failure. The script now calls both, so those two definitions are gone. Each remaining definition's search candidates are listed below with a ruling.
+
+SEARCHED cosa.repo.coupling_census.validate_needles :: rs-9ff2becfc4 :: lupin_mcp.session_spawner.spawn_sessions :: UNRELATED :: starts sessions; shares only the words requires and ensures
+SEARCHED cosa.repo.coupling_census.validate_needles :: rs-9ff2becfc4 :: cosa.rest.routers.tasks.create_task :: UNRELATED :: a task-store endpoint, validates a task payload
+SEARCHED cosa.repo.coupling_census.validate_needles :: rs-9ff2becfc4 :: cosa.rest.task_store_rules.validate_transition :: UNRELATED :: validates a task status change, not a needle table
+SEARCHED cosa.repo.coupling_census.validate_needles :: rs-9ff2becfc4 :: cosa.rest.routers.notifications.notify_user :: UNRELATED :: a notification endpoint
+SEARCHED cosa.repo.coupling_census.validate_needles :: rs-9ff2becfc4 :: cosa.rest.routers.tasks._apply_transition_under_lock :: UNRELATED :: a task transition under lock
+RULING cosa.repo.coupling_census.validate_needles :: DISTINCT checks that every needle has a kind and a mapping, which no existing validator does :: reuse-receipt: 4fedbecc4e14e5a5 :: search: rs-9ff2becfc4
+REUSE-OUTCOME 4fedbecc4e14e5a5 :: rs-9ff2becfc4 :: WROTE_NEW checks that every needle has a kind and a mapping, which no existing validator does :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+SEARCHED cosa.repo.coupling_census.in_population :: rs-383dad9dcc :: cosa.repo.gate_reachability.find_test_file_population :: UNRELATED :: walks the disk for test files, not git
+SEARCHED cosa.repo.coupling_census.in_population :: rs-383dad9dcc :: lupin_mcp.fleet_cap_admission.admit :: UNRELATED :: fleet admission control
+SEARCHED cosa.repo.coupling_census.in_population :: rs-383dad9dcc :: lupin_mcp.session_spawner.spawn_sessions :: UNRELATED :: starts sessions
+SEARCHED cosa.repo.coupling_census.in_population :: rs-383dad9dcc :: cosa.rest.routers.tasks.query_tasks :: UNRELATED :: a task-store query endpoint
+SEARCHED cosa.repo.coupling_census.in_population :: rs-383dad9dcc :: cosa.utils.checked_hash_pyc._in_scope :: RELATED :: an in-scope test for pyc rewriting, owned roots rather than vendored names
+RULING cosa.repo.coupling_census.in_population :: DISTINCT drops a path with any of exactly three directory names (.venv, node_modules, site-packages) and nothing else; symindex skipped() would also drop SKIP_SUFFIXES files and change the stated population :: reuse-receipt: 1fa57c013fa8d776 :: search: rs-383dad9dcc
+REUSE-OUTCOME 1fa57c013fa8d776 :: rs-383dad9dcc :: WROTE_NEW drops a path with any of exactly three directory names (.venv, node_modules, site-packages) and nothing else; symindex skipped() would also drop SKIP_SUFFIXES files and change the stated population :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+SEARCHED cosa.repo.coupling_census.is_code :: rs-8761fa2ff2 :: cosa.rest.routers.notifications.notify_user :: UNRELATED :: a notification endpoint
+SEARCHED cosa.repo.coupling_census.is_code :: rs-8761fa2ff2 :: cosa.repo.coupling_census.render :: UNRELATED :: the renderer in this file, which calls is_code
+SEARCHED cosa.repo.coupling_census.is_code :: rs-8761fa2ff2 :: cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent._ingest_async :: UNRELATED :: ingests documents for a presentation
+SEARCHED cosa.repo.coupling_census.is_code :: rs-8761fa2ff2 :: cosa.rest.v2.source_document.validate_source_documents :: UNRELATED :: validates a request's source documents
+SEARCHED cosa.repo.coupling_census.is_code :: rs-8761fa2ff2 :: cosa.repo.doc_lint.claim_judge.history_destinations_missing :: UNRELATED :: checks history-note destinations in a lint report
+RULING cosa.repo.coupling_census.is_code :: DISTINCT separates production code from tests, documents, history and backup copies; the existing is_test_path variants judge tests only :: reuse-receipt: e55f08a1376ee415 :: search: rs-8761fa2ff2
+REUSE-OUTCOME e55f08a1376ee415 :: rs-8761fa2ff2 :: WROTE_NEW separates production code from tests, documents, history and backup copies; the existing is_test_path variants judge tests only :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+SEARCHED cosa.repo.coupling_census.scan :: rs-ae70edd899 :: cosa.repo.coupling_census.run :: UNRELATED :: the caller of scan
+SEARCHED cosa.repo.coupling_census.scan :: rs-ae70edd899 :: cosa.rest.podcast_proxy.check_source :: UNRELATED :: checks a scope path for a podcast source
+SEARCHED cosa.repo.coupling_census.scan :: rs-ae70edd899 :: lupin_cli.claude_code.hooks.lib.commit_scope_guard._staged_paths :: UNRELATED :: lists staged paths
+SEARCHED cosa.repo.coupling_census.scan :: rs-ae70edd899 :: lupin_cli.claude_code.hooks.lib.heartbeat_hold.classify_hold_file :: UNRELATED :: classifies a hold file
+SEARCHED cosa.repo.coupling_census.scan :: rs-ae70edd899 :: cosa.repo.coupling_census.render :: UNRELATED :: the renderer in this file
+RULING cosa.repo.coupling_census.scan :: DISTINCT one case-sensitive pass of fixed strings over many needles; reuse_search.git_grep is case-insensitive and takes one term, which would blur needles such as PROJECT = "lupin" :: reuse-receipt: d69eb10f8ac1ab6b :: search: rs-ae70edd899
+REUSE-OUTCOME d69eb10f8ac1ab6b :: rs-ae70edd899 :: WROTE_NEW one case-sensitive pass of fixed strings over many needles; reuse_search.git_grep is case-insensitive and takes one term, which would blur needles such as PROJECT = "lupin" :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+SEARCHED cosa.repo.coupling_census.check_controls :: rs-c60e3186ae :: cosa.rest.routers.notifications.notify_user :: UNRELATED :: a notification endpoint
+SEARCHED cosa.repo.coupling_census.check_controls :: rs-c60e3186ae :: lupin_mcp.session_spawner.spawn_sessions :: UNRELATED :: starts sessions
+SEARCHED cosa.repo.coupling_census.check_controls :: rs-c60e3186ae :: lupin_mcp.reuse_needset.first_thousand.control_stage_live :: RELATED :: a live control for the reuse needset: plants decoys and asks a judge; it checks a different pipeline
+SEARCHED cosa.repo.coupling_census.check_controls :: rs-c60e3186ae :: lupin_mcp.session_spawner.dismiss_sessions :: UNRELATED :: reaps sessions
+SEARCHED cosa.repo.coupling_census.check_controls :: rs-c60e3186ae :: lupin_app.main.lifespan :: UNRELATED :: server startup
+RULING cosa.repo.coupling_census.check_controls :: DISTINCT asserts the first hit of a needle in a file is at a known line; positive_control.run_control plants records in a pool, which is a different control :: reuse-receipt: 77704f03c3e5e23f :: search: rs-c60e3186ae
+REUSE-OUTCOME 77704f03c3e5e23f :: rs-c60e3186ae :: WROTE_NEW asserts the first hit of a needle in a file is at a known line; positive_control.run_control plants records in a pool, which is a different control :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+SEARCHED cosa.repo.coupling_census.render :: rs-e469decc9a :: cosa.repo.coupling_census.run :: UNRELATED :: the caller of render
+SEARCHED cosa.repo.coupling_census.render :: rs-e469decc9a :: lupin_mcp.session_spawner.default_fleet_gate :: UNRELATED :: fleet gate
+SEARCHED cosa.repo.coupling_census.render :: rs-e469decc9a :: cosa.agents.deep_research.seed_context.read_seed_documents :: UNRELATED :: reads seed documents
+SEARCHED cosa.repo.coupling_census.render :: rs-e469decc9a :: cosa.rest.routers.arbiter._live_fleet_counts :: UNRELATED :: counts live sessions
+SEARCHED cosa.repo.coupling_census.render :: rs-e469decc9a :: lupin_cli.claude_code.hooks.register_session.main :: UNRELATED :: session registration hook
+RULING cosa.repo.coupling_census.render :: DISTINCT builds the census table from hits and the population line; the doc_lint and directory_analyzer reporters format other data :: reuse-receipt: 12d8ed12a862641a :: search: rs-e469decc9a
+REUSE-OUTCOME 12d8ed12a862641a :: rs-e469decc9a :: WROTE_NEW builds the census table from hits and the population line; the doc_lint and directory_analyzer reporters format other data :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+SEARCHED cosa.repo.coupling_census.run :: rs-12f39e6cf0 :: cosa.rest.routers.notifications.notify_user :: UNRELATED :: a notification endpoint
+SEARCHED cosa.repo.coupling_census.run :: rs-12f39e6cf0 :: cosa.repo.directory_analyzer.report_formatter.DirectoryReportFormatter.format_markdown :: UNRELATED :: formats line-of-code statistics
+SEARCHED cosa.repo.coupling_census.run :: rs-12f39e6cf0 :: cosa.agents.deep_research.cli.save_report_with_frontmatter :: UNRELATED :: saves a research report
+SEARCHED cosa.repo.coupling_census.run :: rs-12f39e6cf0 :: cosa.agents.shared.report_writer.ReportWriter.write :: UNRELATED :: writes an agent report file
+SEARCHED cosa.repo.coupling_census.run :: rs-12f39e6cf0 :: cosa.repo.directory_analyzer.analyzer.quick_smoke_test :: UNRELATED :: a smoke test
+RULING cosa.repo.coupling_census.run :: DISTINCT wires listing, scanning, the controls and rendering into one census; no existing function does this job :: reuse-receipt: df42ec3de13547b5 :: search: rs-12f39e6cf0
+REUSE-OUTCOME df42ec3de13547b5 :: rs-12f39e6cf0 :: WROTE_NEW wires listing, scanning, the controls and rendering into one census; no existing function does this job :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+SEARCHED cosa.repo.coupling_census.main :: rs-7cdfe429ef :: cosa.rest.routers.notifications.notify_user :: UNRELATED :: a notification endpoint
+SEARCHED cosa.repo.coupling_census.main :: rs-7cdfe429ef :: cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.from_saved_script :: UNRELATED :: loads a saved podcast script
+SEARCHED cosa.repo.coupling_census.main :: rs-7cdfe429ef :: cosa.agents.runtime_argument_expeditor.expeditor.RuntimeArgumentExpeditor._build_request_context :: UNRELATED :: builds an expeditor request
+SEARCHED cosa.repo.coupling_census.main :: rs-7cdfe429ef :: cosa.repo.coupling_census.run :: UNRELATED :: the function main calls
+SEARCHED cosa.repo.coupling_census.main :: rs-7cdfe429ef :: cosa.repo.cli_common.add_common_output_args :: UNRELATED :: adds output flags to other repo tools' parsers; this tool has one flag
+RULING cosa.repo.coupling_census.main :: DISTINCT the command line of this census, with exit 1 and a message when a control fails :: reuse-receipt: 3b2d91e6ad57eb9e :: search: rs-7cdfe429ef
+REUSE-OUTCOME 3b2d91e6ad57eb9e :: rs-7cdfe429ef :: WROTE_NEW the command line of this census, with exit 1 and a message when a control fails :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+SEARCHED cosa.repo.coupling_census.ControlFailed :: rs-22812407b4 :: lupin_mcp.session_spawner.spawn_sessions :: UNRELATED :: starts sessions
+SEARCHED cosa.repo.coupling_census.ControlFailed :: rs-22812407b4 :: cosa.rest.routers.tasks._apply_transition_under_lock :: UNRELATED :: task transition
+SEARCHED cosa.repo.coupling_census.ControlFailed :: rs-22812407b4 :: cosa.rest.routers.websocket.websocket_queue_endpoint :: UNRELATED :: a websocket endpoint
+SEARCHED cosa.repo.coupling_census.ControlFailed :: rs-22812407b4 :: cosa.rest.task_approval_settings.refusal_for_pull :: UNRELATED :: a task-approval refusal
+SEARCHED cosa.repo.coupling_census.ControlFailed :: rs-22812407b4 :: cosa.rest.routers.notifications.notify_user :: UNRELATED :: a notification endpoint
+RULING cosa.repo.coupling_census.ControlFailed :: DISTINCT a named exception for a failed positive control, so main can refuse on it and not on any ValueError :: reuse-receipt: 5b828e7ca8b6886e :: search: rs-22812407b4
+REUSE-OUTCOME 5b828e7ca8b6886e :: rs-22812407b4 :: WROTE_NEW a named exception for a failed positive control, so main can refuse on it and not on any ValueError :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
