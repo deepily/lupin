@@ -10,7 +10,7 @@ import json
 from typing import Optional
 
 from ..config import HostPersonality
-from .script_generation import AUDIENCE_DIALOGUE_GUIDELINES
+from .script_generation import audience_block, clip_to_ceiling
 
 
 STATUS_DIGEST_SYSTEM_PROMPT = """You are a project analyst preparing a status report for podcast production.
@@ -88,22 +88,6 @@ escaped with a backslash, so a pause tag is written <break time=\\"1.5s\\"/> the
 }"""
 
 
-def _clip( text: str, max_source_chars: Optional[ int ] ) -> str:
-    """Clip text to the configured ceiling; None means no clip."""
-    if max_source_chars is not None and len( text ) > max_source_chars: return text[ :max_source_chars ]
-    return text
-
-
-def _audience_block( audience: Optional[ str ], audience_context: Optional[ str ] ) -> str:
-    """Build the audience guidance block shared by the status prompts."""
-    block = ""
-    if audience:
-        guidelines = AUDIENCE_DIALOGUE_GUIDELINES.get( audience, "" )
-        if guidelines: block += f"\n{guidelines}\n"
-    if audience_context: block += f"\n**Additional Audience Context**: {audience_context}\n"
-    return block
-
-
 def get_status_analysis_prompt(
     research_content : str,
     audience         : Optional[ str ] = None,
@@ -124,10 +108,10 @@ def get_status_analysis_prompt(
 
 List every completed item, every outstanding item, and the tricky, unresolved and blocked items.
 Quote the source line for each item exactly.
-{_audience_block( audience, audience_context )}
+{audience_block( audience, audience_context )}
 STATUS DOCUMENT:
 ---
-{_clip( research_content, max_source_chars )}
+{clip_to_ceiling( research_content, max_source_chars )}
 ---
 
 Provide your digest as JSON."""
@@ -162,7 +146,7 @@ TARGET SPECIFICATIONS:
 - Duration: approximately {target_duration_minutes} minutes
 - Exchanges: {min_exchanges}-{max_exchanges} dialogue turns
 - Format: Natural conversation between two hosts
-{_audience_block( audience, audience_context )}
+{audience_block( audience, audience_context )}
 HOST A (CURIOUS ROLE):
 {host_a_personality.to_prompt_description()}
 
@@ -174,7 +158,7 @@ STATUS DIGEST:
 
 SOURCE DOCUMENT (for reference):
 ---
-{_clip( research_content, max_source_chars )}
+{clip_to_ceiling( research_content, max_source_chars )}
 ---
 
 INSTRUCTIONS:
