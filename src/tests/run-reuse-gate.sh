@@ -13,7 +13,7 @@
 # outcome line exits 1.
 #
 # Exit codes: 0 clean or report only, 1 refused, 3 could not check (the key is unreadable, git names no base,
-# the list of new definitions cannot be built, or no interpreter). A run that could not check prints no
+# the list of new definitions cannot be built, no interpreter, or an uncommitted merge in the tree). A run that could not check prints no
 # summary block, so TestSuiteJob reads it as not executed, never as passed.
 #
 # Called by TestSuiteJob when test_types="reuse". Module: src/lupin_mcp/reuse_merge_gate.py.
@@ -28,6 +28,14 @@ cd "$PROJECT_ROOT" || exit 3
 
 export LUPIN_ROOT="$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src"
+
+# Refuse mid-merge: the gate reads committed history, so a staged merge is invisible to it and a pass would be
+# a false green (row 07b91f55: 25 checks passed where the merged tree had 99). `rev-parse --verify` is
+# worktree-aware; `test -f .git/MERGE_HEAD` is not, since `.git` is a file in a linked worktree.
+if MERGE_SHA="$( git rev-parse -q --verify MERGE_HEAD 2>/dev/null )"; then
+    echo "REFUSING: $PROJECT_ROOT has an uncommitted merge (MERGE_HEAD ${MERGE_SHA:0:10}). The gate reads committed history and would not see it. Commit or abort the merge, then run again. Nothing was checked."
+    exit 3
+fi
 
 source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
 resolve_venv_python || exit $?

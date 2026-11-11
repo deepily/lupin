@@ -32,6 +32,7 @@ from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import shadow_audit as sa
 from cosa.repo.symindex.candidates.errors import CandidateError
 from lupin_mcp import duplicate_check_filing as ff
+from lupin_mcp import duplicate_check_status as dcs
 from lupin_mcp import job_summary_adapters as jsa
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_outcome as ro
@@ -495,7 +496,7 @@ def main( argv=None, out=None, store=None, environ=None ):
             jsa.record_behaviour( folder, "skipped", started, environ=environ )
             return 0
         records, _bad = eg.merge_call_logs( a.log_dir or data / "call-log" )
-        page  = weekly_report( records, read_refusals( data ), sa.load_receipts( data ), end, check_dir=a.check_dir or data / CHECK_FOLDER, store=store if store is not None else ff.LiveStore() )
+        page  = weekly_report( records, read_refusals( data ), sa.load_receipts( data ), end, check_dir=a.check_dir or ( data / CHECK_FOLDER if a.data_dir else dcs.folder_of( root ) ), store=store if store is not None else ff.LiveStore() )
         if a.write:
             saved.parent.mkdir( parents=True, exist_ok=True )
             saved.write_text( page + "\n", encoding="utf-8" )
