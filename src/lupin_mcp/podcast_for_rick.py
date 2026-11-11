@@ -149,6 +149,8 @@ def podcast_for_rick_impl(
     actor,
     host_path  = "",
     card_id    = "",
+    script_type = "",
+    languages  = None,
     request_fn = task_store_request,
     sleep_fn   = time.sleep,
     now_fn     = lambda: datetime.now( timezone.utc ),
@@ -163,11 +165,13 @@ def podcast_for_rick_impl(
         - actor is the bridge-stamped identity, set by the caller and never a tool parameter
         - host_path is the seat's absolute path to a file in a main checkout, or empty when resuming
         - card_id is a card this seat was given earlier, or empty to ask afresh
+        - script_type is "", or a script type name the server knows; languages is None, a list of codes or a comma string
 
     Ensures:
         - returns { status: "started", card_id, ... } after a person's yes (a typed comment allowed), or after the card's
           own default of yes stood, and a successful start
         - returns { status: "dry run", card_id, job_id } when the server's dry-run switch is on: the yes was spent and nothing was queued
+        - script_type and languages go into the ask body only when given, so the card records what Rick approved
         - returns { status: "declined", card_id } for a no or a neither, and never calls start
         - a timed-out default or an expiry with no answer calls start once, and the server judges it by the card's own default
         - returns { status: "default_used", card_id } when the server refuses a timed-out default of no
@@ -198,8 +202,10 @@ def podcast_for_rick_impl(
             return _refusal( "card_already_spent", f"Card {card_id} already started job {facts.get( 'job_id' )}; no second job was queued.", card_id=card_id, job_id=facts.get( "job_id" ), stage="card" )
         asked = facts
     elif translated is not None:
-        asked = request_fn( "POST", PODCAST_ASK_PATH, api_base_url, api_key,
-                            json_body={ "path": translated[ "path" ], "actor": actor } )
+        body = { "path": translated[ "path" ], "actor": actor }
+        if script_type: body[ "script_type" ] = script_type
+        if languages:   body[ "languages" ]   = languages
+        asked = request_fn( "POST", PODCAST_ASK_PATH, api_base_url, api_key, json_body=body )
         if asked.get( "status" ) == "error":
             # A 409 here means a card for this very file already waits on Rick; asking again would be noise.
             refused = { **asked, "stage": "ask" }
