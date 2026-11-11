@@ -112,30 +112,29 @@ def effective_review( config: PodcastConfig ) -> str:
     return review if review is not None else get_profile( config.script_type ).review_default
 
 
-def resolve_podcast_config(
+def apply_script_type(
+    config,
     config_mgr,
     script_type      : Optional[ str ] = None,
     review           : Optional[ str ] = None,
     audience         : Optional[ str ] = None,
     audience_context : Optional[ str ] = None,
-    debug            : bool = False,
 ) -> PodcastConfig:
     """
-    Build a PodcastConfig from the INI and apply the script type and the request.
+    Apply a script type and a request's choices onto a config built from the INI.
 
     Requires:
-        - config_mgr is a ConfigurationManager
+        - config is a PodcastConfig that PodcastConfig.from_config built from config_mgr
 
     Ensures:
         - request values beat profile values, and profile values beat the INI
-        - the returned config carries the resolved script_type and a concrete review mode
+        - config is changed in place and returned, with the resolved script_type and a concrete review mode
 
     Raises:
         - ValueError when script_type or review is unknown
     """
     profile = get_profile( script_type )
     review  = validate_review( review )
-    config  = PodcastConfig.from_config( config_mgr, debug=debug )
 
     def _read( key, default, rtype ):
         return config_mgr.get( key, default=str( default ), silent=True, return_type=rtype )
@@ -152,3 +151,29 @@ def resolve_podcast_config(
     config.script_type = profile.name
     config.review      = review if review is not None else profile.review_default
     return config
+
+
+def resolve_podcast_config(
+    config_mgr,
+    script_type      : Optional[ str ] = None,
+    review           : Optional[ str ] = None,
+    audience         : Optional[ str ] = None,
+    audience_context : Optional[ str ] = None,
+    debug            : bool = False,
+) -> PodcastConfig:
+    """
+    Build a PodcastConfig from the INI, then apply the script type and the request.
+
+    Requires:
+        - config_mgr is a ConfigurationManager
+
+    Ensures:
+        - returns what apply_script_type returns for a config from PodcastConfig.from_config
+
+    Raises:
+        - ValueError when script_type or review is unknown
+    """
+    get_profile( script_type )
+    validate_review( review )
+    return apply_script_type( PodcastConfig.from_config( config_mgr, debug=debug ), config_mgr,
+                              script_type=script_type, review=review, audience=audience, audience_context=audience_context )

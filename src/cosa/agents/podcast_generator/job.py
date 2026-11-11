@@ -25,7 +25,7 @@ from typing import Optional, List
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
-from cosa.agents.podcast_generator.script_types import get_profile, resolve_podcast_config, validate_review
+from cosa.agents.podcast_generator.script_types import apply_script_type, get_profile, validate_review
 from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from cosa.rest.job_state import JobState
 
@@ -224,6 +224,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
 
         # Import podcast components
         from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
+        from cosa.agents.podcast_generator.config import PodcastConfig
 
         # Validate research document exists
         if not self.research_path.startswith( "/" ):
@@ -261,13 +262,14 @@ class PodcastGeneratorJob( AgenticJobBase ):
             from cosa.config.configuration_manager import ConfigurationManager
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             # Request beats script-type profile beats INI
-            config = resolve_podcast_config(
+            config = PodcastConfig.from_config( config_mgr, debug=self.debug )
+            apply_script_type(
+                config,
                 config_mgr,
                 script_type      = self.script_type,
                 review           = self.review,
                 audience         = self.audience,
                 audience_context = self.audience_context,
-                debug            = self.debug,
             )
 
             # Create orchestrator
