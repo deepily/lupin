@@ -5,18 +5,22 @@
 # Usage:
 #   ./src/scripts/refresh-test-server.sh          # verbose
 #   ./src/scripts/refresh-test-server.sh --quiet  # one-line summary only
+#   ./src/scripts/refresh-test-server.sh --vm     # the test VM's lupin-rest-test (:8000 on lupin-host-test)
+#                                                 # via lupin-vm.sh test-server refresh; needs the GCP project id exported (see lupin-vm.sh)
 
 set -euo pipefail
 
 CONTAINER="lupin-rest-test"
 HEALTH_URL="http://localhost:8000/health"
-TIMEOUT_SECS=30
+TIMEOUT_SECS="${REFRESH_TIMEOUT_SECS:-30}"   # a test shortens it to reach the give-up branch
 POLL_INTERVAL=0.5
 QUIET=0
+VM=0
 
 for arg in "$@"; do
     case "$arg" in
         --quiet|-q) QUIET=1 ;;
+        --vm)       VM=1 ;;
         -h|--help)
             sed -n '2,9p' "$0"
             exit 0
@@ -29,6 +33,12 @@ for arg in "$@"; do
 done
 
 log() { [ "$QUIET" -eq 1 ] || echo "$@"; }
+
+# The VM's test server runs in docker compose on lupin-host-test, not on this host's docker. The verb
+# restarts it and polls /health on the VM itself, so no tunnel or firewall rule is needed for a refresh.
+if [ "$VM" -eq 1 ]; then
+    exec bash "$( dirname "$0" )/lupin-vm.sh" test-server refresh
+fi
 
 log "Restarting container: $CONTAINER"
 start_ts=$(date +%s)

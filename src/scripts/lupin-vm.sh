@@ -51,6 +51,15 @@ ENV_FILE="cloud-gpu.env"                         # requires LUPIN_MODEL_SERVER_U
 # `lupin-rest` (container_name lupin-rest-cloud-gpu) — passing the container name gives
 # "no such service". Compose subcommands here use REST_SERVICE.
 REST_SERVICE="lupin-rest"                        # compose service name (container_name = lupin-rest-cloud-gpu)
+# The destructive-test server (row 8d67e474) is an OVERLAY, so `svc` and `deploy`, which name the base
+# file alone, never touch it. Only the `test-server` verb names both files.
+TEST_COMPOSE_FILE="docker-compose.vm-test-overlay.yml"   # lupin-rest-test (host :8000) + lupin-pgvector-test
+TEST_SERVICES="lupin-pgvector-test lupin-rest-test"
+TEST_REST_SERVICE="lupin-rest-test"
+TEST_PGVECTOR_CONTAINER="lupin-pgvector-test"
+TEST_PORT=8000                                   # in-VM port of the test server (host side of 8000:7999)
+TEST_SECRETS_DIR="/etc/lupin/secrets"            # compose secret files; root:<host gid> 0440
+TEST_STATE_DIR="/mnt/lupin-data/projects-data/lupin"   # holds flow-ratio and sessions-test
 APP_PORT=7999                                    # in-VM app port (docker compose lupin-rest)
 # Keep idle SSH-over-IAP sessions alive. Without a keepalive, an idle interactive `shell` (or a
 # long `svc logs -f`) gets reaped by the IAP tunnel / NAT idle timeout -> "Failed to send all data
@@ -92,6 +101,30 @@ App services (docker compose in $VM_ROOT):
   svc down               down
   svc restart            up -d --force-recreate $REST_SERVICE
   svc logs               logs -f --tail=200 $REST_SERVICE
+
+Destructive-test server (overlay $TEST_COMPOSE_FILE: lupin-rest-test on VM :$TEST_PORT + a local pgvector database):
+  push-test-server-secrets
+                         write the compose secret files under $TEST_SECRETS_DIR (root:<host gid>, 0440):
+                         the app and test role passwords and the tester login come from Secret Manager
+                         (lupin-db-password, lupin-db-test-password, lupin-test-mock-jobs-email,
+                         lupin-test-mock-jobs-password) with your own gcloud login and travel on stdin;
+                         the pgvector admin and lupin_host passwords are generated ON the VM, once.
+                         Says only written / unchanged / kept per file. Never prints a value.
+  test-server prep       make the two host folders the test server mounts (sessions-test, flow-ratio)
+  test-server up         up -d the pgvector container and lupin-rest-test
+  test-server recreate   up -d --force-recreate --no-deps lupin-rest-test (env, groups or mounts changed)
+  test-server down       stop both containers; the database volume stays
+  test-server status     docker compose ps for both
+  test-server logs       logs -f --tail=200 lupin-rest-test
+  test-server refresh    restart lupin-rest-test and poll /health on VM :$TEST_PORT
+  test-server idle       venue_idle --port $TEST_PORT ON the VM; its exit code is the answer (0 idle, 1 busy, 2 unknown)
+  test-server roles [--apply|--check|--grants-only]
+                         db_roles against the local pgvector container: dry run by default; --apply
+                         creates the roles and grants, --grants-only repeats the grants after the app
+                         has created its tables, --check reads them back (exit 0 clean)
+  To reach VM :$TEST_PORT from here (submit-test-suite.py, a browser): firewall open $TEST_PORT, then
+    tunnel 18000 $TEST_PORT     (18000 because this host's own :8000 test server holds 8000)
+  and use --base-url http://127.0.0.1:18000.
 
 Tunnel:
   tunnel [PORT] [VM_PORT]
@@ -257,6 +290,33 @@ remote_compose() {
         --tunnel-through-iap \
         $SSH_KEEPALIVE \
         --command "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE $compose_args"
+}
+
+# ---- remote compose helper for the test-server overlay ------------------
+# Same as remote_compose, but names BOTH compose files, so the overlay's services are in the graph.
+remote_test_compose() {
+    local compose_args="$*"
+    require_project
+    runit gcloud compute ssh "$VM_NAME" \
+        --zone="$VM_ZONE" \
+        --project="$LUPIN_GCP_PROJECT_ID" \
+        --tunnel-through-iap \
+        $SSH_KEEPALIVE \
+        --command "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE $compose_args"
+}
+
+# ---- run one script on the VM, or print it under --dry-run ----------------
+# $1 = label for the dry-run line, $2 = the remote command. Optional stdin is passed through.
+remote_script() {
+    require_project
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "(dry-run) would run on $VM_NAME: $1. The remote command, which holds no secret:"
+        printf '%s\n' "$2" | sed 's/^/    /'
+        return 0
+    fi
+    gcloud compute ssh "$VM_NAME" \
+        --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+        $SSH_KEEPALIVE --command "$2"
 }
 
 # ---- bundle + fetch (+optional checkout) — the shared code-sync primitive -
@@ -1476,6 +1536,101 @@ bash src/scripts/reuse-vector-refresh.sh --status"
         else
             bash -c "$RCMD_IR"
         fi
+        ;;
+
+    push-test-server-secrets)
+        # Row 8d67e474. The secret files the overlay mounts. Values ride on ssh stdin (four lines); the remote
+        # command below holds no secret, so it is safe to log and to show in a process list.
+        require_project
+        TS_SECRETS="lupin-db-password lupin-db-test-password lupin-test-mock-jobs-email lupin-test-mock-jobs-password"
+        read -r -d '' RCMD_TS <<'TSEOF' || true
+set -e
+umask 077
+sudo test -f "$envfile" || { echo "no $envfile on the VM; create it first" >&2; exit 3; }
+IFS= read -r app || true; IFS= read -r tst || true; IFS= read -r em || true; IFS= read -r pw || true
+[ -n "$app" ] && [ -n "$tst" ] && [ -n "$em" ] && [ -n "$pw" ] || { echo "a value did not arrive on stdin" >&2; exit 4; }
+gid="$(sudo sed -n 's/^LUPIN_BRIDGE_GID=//p' "$envfile" | tail -1)"
+[ -n "$gid" ] || { echo "LUPIN_BRIDGE_GID is not in $envfile" >&2; exit 5; }
+sudo install -d -m 0750 -o root -g "$gid" "$dir"
+put() {
+  new="$(mktemp)"; cat > "$new"
+  if sudo test -f "$dir/$1" && sudo cmp -s "$new" "$dir/$1"; then echo "$1: unchanged"
+  else sudo install -o root -g "$gid" -m 0440 "$new" "$dir/$1"; echo "$1: written"; fi
+  rm -f "$new"
+}
+printf '%s\n' "$app" | put db_app_password
+printf '%s\n' "$tst" | put db_test_password
+printf "export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='%s'\nexport LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='%s'\n" "$em" "$pw" | put test_env.sh
+for n in db_admin_password db_host_password; do
+  if sudo test -s "$dir/$n"; then echo "$n: kept"; else openssl rand -hex 24 | put "$n"; fi
+done
+TSEOF
+        RCMD_TS="envfile='$VM_ROOT/$ENV_FILE'; dir='$TEST_SECRETS_DIR'
+$RCMD_TS"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would read Secret Manager $TS_SECRETS with your gcloud login, then send the four values on stdin over IAP ssh to $VM_NAME. The remote command, which holds no secret:"
+            printf '%s\n' "$RCMD_TS" | sed 's/^/    /'
+        else
+            ts_vals=""
+            for ts_name in $TS_SECRETS; do
+                ts_one="$( gcloud secrets versions access latest --secret="$ts_name" --project="$LUPIN_GCP_PROJECT_ID" | tr -d '\r\n' )" \
+                    || die "could not read Secret Manager $ts_name (needs your IAM access to it)"
+                [ -n "$ts_one" ] || die "Secret Manager $ts_name has no value; add one first"
+                # The two role passwords go through psql's \set and a compose secret file: hex-safe characters only.
+                # The tester login is written inside single quotes into a sourced file: no single quote.
+                case "$ts_name" in
+                    lupin-db-*) case "$ts_one" in *[!A-Za-z0-9._~@%+=/-]*) die "the value of $ts_name has characters a psql variable may misread; use letters, digits and . _ ~ @ % + = / -" ;; esac ;;
+                    *) case "$ts_one" in *\'*) die "the value of $ts_name holds a single quote, which the sourced env file cannot carry" ;; esac ;;
+                esac
+                ts_vals="${ts_vals}${ts_one}"$'\n'
+            done
+            printf '%s' "$ts_vals" | gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_TS"
+            unset ts_vals ts_one
+            log "done. Next: test-server prep, then test-server up, then test-server roles --apply."
+        fi
+        ;;
+
+    test-server)
+        # Row 8d67e474. Everything here is a person's command; nothing starts by itself.
+        action="${1:-}"
+        case "$action" in
+            prep)
+                # The same one-time setup the flow-ratio folder needs: group-writable and setgid, so the container
+                # (uid 1001 plus the host gid) and the host user both write. create_host_path is false in the overlay.
+                remote_script "make $TEST_STATE_DIR/sessions-test and $TEST_STATE_DIR/flow-ratio (2775)" \
+                    "set -e; for d in sessions-test flow-ratio; do mkdir -p '$TEST_STATE_DIR'/\$d; chmod 2775 '$TEST_STATE_DIR'/\$d; done; ls -ld '$TEST_STATE_DIR'/sessions-test '$TEST_STATE_DIR'/flow-ratio"
+                ;;
+            up)       remote_test_compose "up -d $TEST_SERVICES" ;;
+            # --no-deps: the database container is already up and a recreate of the app must not touch it.
+            recreate) remote_test_compose "up -d --force-recreate --no-deps $TEST_REST_SERVICE" ;;
+            down)     remote_test_compose "stop $TEST_SERVICES" ;;
+            status)   remote_test_compose "ps $TEST_SERVICES" ;;
+            logs)     remote_test_compose "logs -f --tail=200 $TEST_REST_SERVICE" ;;
+            refresh)
+                # Poll /health on the VM itself, so the IAP tunnel and the firewall rule are not needed.
+                remote_script "restart $TEST_REST_SERVICE and poll /health on :$TEST_PORT" \
+                    "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE restart $TEST_REST_SERVICE && for i in \$(seq 1 60); do if python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:$TEST_PORT/health', timeout=2)\" 2>/dev/null; then echo \"OK: $TEST_REST_SERVICE healthy after \$i poll(s)\"; exit 0; fi; sleep 1; done; echo 'ERROR: /health did not answer within 60s' >&2; sudo docker logs --tail 50 $TEST_REST_SERVICE >&2; exit 1"
+                ;;
+            idle)
+                # venue_idle is standard library only; the exit code rides back through ssh.
+                remote_script "venue_idle --port $TEST_PORT" \
+                    "cd $VM_ROOT && PYTHONPATH=src python3 -m cosa.rest.venue_idle --port $TEST_PORT"
+                ;;
+            roles)
+                shift
+                TS_ROLE_ARG="${1:-}"
+                case "$TS_ROLE_ARG" in
+                    ""|--apply|--check|--grants-only) ;;
+                    *) die "test-server roles takes --apply, --check or --grants-only (no argument is a dry run), not '$TS_ROLE_ARG'" ;;
+                esac
+                # Needs root only to read the password files; the psql step is `docker exec` into the local pgvector.
+                remote_script "db_roles $TS_ROLE_ARG against $TEST_PGVECTOR_CONTAINER" \
+                    "cd $VM_ROOT && sudo env PYTHONPATH=src python3 -m cosa.utils.db_roles --app-pw-file $TEST_SECRETS_DIR/db_app_password --host-pw-file $TEST_SECRETS_DIR/db_host_password --test-pw-file $TEST_SECRETS_DIR/db_test_password --psql 'docker exec -i $TEST_PGVECTOR_CONTAINER psql -U lupin_dev -d lupin_db_dev' $TS_ROLE_ARG"
+                ;;
+            *) die "test-server needs one of: prep | up | recreate | down | status | logs | refresh | idle | roles" ;;
+        esac
         ;;
 
     -h|--help|help)
