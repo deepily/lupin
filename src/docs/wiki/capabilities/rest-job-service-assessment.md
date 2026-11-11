@@ -3,7 +3,7 @@ capability: rest-job-service-assessment
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.job_service.boot_time_from@b61bf5f184
-  - cosa.rest.job_service.store_counts_from_rows@2782881ff6
+  - cosa.rest.job_service.store_counts_from_rows@1c587a2e2f
   - cosa.rest.job_service.LiveDeps@d3145e67da
   - cosa.rest.job_service.assess_read@4bbc6599e7
   - cosa.rest.job_service.assess_target@996e91dc41
@@ -17,7 +17,7 @@ The service behind `GET /api/jobs/summary`. The registry is in [[rest-job-regist
 
 ## Live inputs
 - `boot_time_from` reads the `btime` line of `/proc/stat` and returns an aware local time. No such line raises `ValueError`.
-- `store_counts_from_rows` counts a job's own rows. These are open now, opened in the window, closed in the window, and open at the window start.
+- `store_counts_from_rows` counts a job's own rows. These are open now, opened in the window, closed in the window, and open at the window start. A row is closed when its status is one of `task_store_rules.TERMINAL_STATUSES` (done, dropped or wont_fix), as in the store.
 - `LiveDeps` is the real input set. It reads boot time from `/proc/stat` and the installed crontab. It asks systemd for a unit state, then the host snapshot, then the service health address. The crontab and unit answers can come from the snapshot a host job writes when this process cannot ask.
 - It names the host zone when the crontab came from the snapshot. It probes whether a run lock is held with a shared non-blocking lock, released at once. It counts store rows by the key prefix of the job, and answers `None`, never zero, when the store cannot be reached.
 
