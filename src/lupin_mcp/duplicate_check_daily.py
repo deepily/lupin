@@ -19,7 +19,6 @@ import shlex
 import subprocess
 import sys
 import time
-import uuid
 
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.duplicate_check import cluster, extract, pipeline
@@ -583,12 +582,9 @@ def live_notifier( message, abstract, environ=None, query=None, api_key=None, ta
     """
     from cosa.utils import hook_link_tick as hlt
     environ = os.environ if environ is None else environ
-    base    = environ.get( "LUPIN_API_BASE", lt.DEFAULT_API_BASE ).rstrip( "/" )
-    try: key, target = ( api_key or hlt._api_key )(), ( target_of or hlt._notify_target )( environ )
+    try: base, key, target = hlt.notify_route( environ, "LUPIN_API_BASE", lt.DEFAULT_API_BASE, api_key=api_key, target_of=target_of )
     except Exception: return False
-    if not target: return False
-    status, _ = ( query or hlt.post_query )( base, key, "/api/notify", { "message": message, "type": kind, "priority": priority, "target_user": target, "abstract": abstract,
-                                                                         "sender_id": "claude.code@lupin.deepily.ai#duplicate-check-daily", "idempotency_key": str( uuid.uuid4() ) } )
+    status, _ = hlt.send_notify( base, key, target, message, abstract, "claude.code@lupin.deepily.ai#duplicate-check-daily", priority=priority, kind=kind, query=query or hlt.post_query )
     return status == 200
 
 

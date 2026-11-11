@@ -345,6 +345,94 @@ class AgenticJobBase( ABC ):
         # Per-task identity: the module globals above are shared by every concurrent job in the pool
         set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
 
+    def _io_view_link( self, path, label ):
+        """
+        Make a doc-viewer markdown link for a file under the project io/ directory.
+
+        Requires:
+            - path is a string or None
+            - label is the link text
+
+        Ensures:
+            - a path under io/ comes back as "[label](/app/docs?path=<quoted rel>)"
+            - any other path, empty or not, comes back unchanged
+
+        Raises:
+            - nothing
+        """
+        import urllib.parse
+        io_base = cu.get_project_root() + "/io/"
+        if path and path.startswith( io_base ):
+            rel = path.replace( io_base, "" )
+            return f"[{label}](/app/docs?path={urllib.parse.quote( rel )})"
+        return path
+
+    @staticmethod
+    def _skipped_topic_names( result ) -> list:
+        """
+        List the topics the research stage skipped.
+
+        Requires:
+            - result is a ChainedResult whose dr_artifacts may hold "skipped_topics"
+
+        Ensures:
+            - returns the topic names, empty when none were skipped
+
+        Raises:
+            - nothing
+        """
+        return [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
+
+    @staticmethod
+    def _skipped_topics_line( skipped_names ) -> str:
+        """
+        Build the "Skipped topics" line of a completion card.
+
+        Requires:
+            - skipped_names is a non-empty list of topic names
+
+        Ensures:
+            - returns one markdown line naming the count and every topic
+
+        Raises:
+            - nothing
+        """
+        return f"**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names )
+
+    def _dry_run_io_path( self, folder, filename ) -> str:
+        """
+        Name a mock artifact of a dry run.
+
+        Requires:
+            - folder is an io/ subfolder name such as "podcasts"
+            - self.user_email and self.id_hash are set
+
+        Ensures:
+            - returns "/io/<folder>/<email>/dry-run-<id>/<filename>"
+
+        Raises:
+            - nothing
+        """
+        return f"/io/{folder}/{self.user_email}/dry-run-{self.id_hash}/{filename}"
+
+    def _store_dry_run_research( self ) -> None:
+        """
+        Store the mock research report of a chained dry run.
+
+        Requires:
+            - self.user_email and self.id_hash are set
+
+        Ensures:
+            - research_path is a job attribute and an artifacts entry
+            - research_abstract is a mock text in artifacts
+
+        Raises:
+            - nothing
+        """
+        self.research_path = self._dry_run_io_path( "deep-research", "report.md" )
+        self.artifacts[ "research_path" ]     = self.research_path
+        self.artifacts[ "research_abstract" ] = "Mock abstract from dry-run mode."
+
     async def _run_chained_pipeline( self ) -> str:
         """
         Run a research-then-second-stage pipeline through the agent this job builds.

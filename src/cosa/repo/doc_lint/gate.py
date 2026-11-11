@@ -49,7 +49,6 @@ import re
 import subprocess
 import sys
 import traceback
-import uuid
 
 from . import comment_lint, docstring_lint, md_lint
 from collections import namedtuple
@@ -1167,20 +1166,13 @@ def notify_crash( exc, root, err, query=None, api_key=None, target_of=None ):
     detail = f"{type( exc ).__name__}: {str( exc )[ : CRASH_TEXT_LIMIT ]}"
     try:
         from cosa.utils import hook_link_tick
-        query     = hook_link_tick.post_query if query is None else query
-        api_key   = hook_link_tick._api_key if api_key is None else api_key
-        target_of = hook_link_tick._notify_target if target_of is None else target_of
-        target    = target_of( os.environ )
-        if not target: raise ValueError( "no notification recipient" )
-        status, answer = query( os.environ.get( "HOOK_LINK_API_BASE", hook_link_tick.DEFAULT_API_BASE ).rstrip( "/" ), api_key(), "/api/notify", {
-            "message"        : f"The doc-lint commit gate crashed and let the commit through. {detail}. The commit was built on {head}.",
-            "type"           : "alert",
-            "priority"       : "high",
-            "target_user"    : target,
-            "sender_id"      : CRASH_SENDER,
-            "abstract"       : f"Gate crash at {root}, commit built on {head}.\n\n{detail}\n\n{traceback.format_exc()}",
-            "idempotency_key": str( uuid.uuid4() ),
-        } )
+        base, key, target = hook_link_tick.notify_route( os.environ, "HOOK_LINK_API_BASE", api_key=api_key, target_of=target_of )
+        status, answer    = hook_link_tick.send_notify(
+            base, key, target,
+            f"The doc-lint commit gate crashed and let the commit through. {detail}. The commit was built on {head}.",
+            f"Gate crash at {root}, commit built on {head}.\n\n{detail}\n\n{traceback.format_exc()}",
+            CRASH_SENDER, query=hook_link_tick.post_query if query is None else query
+        )
     except Exception as failure:
         err.write( f"[doc-lint] crash notification not sent: {type( failure ).__name__}: {failure}\n" )
         return False
