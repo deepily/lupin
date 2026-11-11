@@ -61,6 +61,7 @@ beforeEach( () => {
     return net.reply();
   };
   g.localStorage.setItem( "lupin_access_token", "tok" );
+  delete g.window.notificationsUI;
 } );
 
 async function load(): Promise<G> {
@@ -276,4 +277,31 @@ test( "the legacy accordion ends with the switched-off line when the server send
   assert.equal( last.getAttribute( "data-testid" ), "background-jobs-off-line" );
   assert.equal( last.textContent, "8 jobs have reporting switched off" );
   assert.equal( mount.children.length, 24 );
+} );
+
+test( "row 399a266f: with notificationsUI present the request goes through its authedFetch, so a stale stored token is refreshed before it is sent", async () => {
+  const sent: Array<Record<string, string>> = [];
+  let refreshed = 0;
+  g.localStorage.setItem( "lupin_access_token", "stale" );
+  g.window.notificationsUI = {
+    authedFetch : async ( url: string, o: { headers?: Record<string, string> } ) => {
+      refreshed++;
+      g.localStorage.setItem( "lupin_access_token", "fresh" );          // what ensureValidToken does
+      return g.fetch( url, { ...o, headers : { Authorization : "Bearer fresh", ...( o.headers ?? {} ) } } );
+    }
+  };
+  g.fetch = async ( _u: string, o: { headers: Record<string, string> } ) => { sent.push( o.headers ); return net.reply(); };
+  await load();
+  assert.equal( refreshed, 1 );
+  assert.equal( sent.length, 1 );
+  assert.equal( sent[ 0 ]!.Authorization, "Bearer fresh" );
+} );
+
+test( "row 399a266f: without notificationsUI the fallback still sends the stored token, and says so loudly on the console", async () => {
+  const errs: string[] = [];
+  const orig = console.error;
+  console.error = ( ...a: unknown[] ) => { errs.push( a.join( " " ) ); };
+  try { await load(); } finally { console.error = orig; }
+  assert.deepEqual( net.urls, [ "/api/jobs/summary" ] );
+  assert.ok( errs.some( ( e ) => e.includes( "UNREFRESHED" ) ), "no loud console error" );
 } );
