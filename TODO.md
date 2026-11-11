@@ -16,6 +16,17 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-11 (Mr. Radio 🦉 `f55fd006`, post-game for the 10 Nov crew of session `24d257d2`; times Eastern)
+
+Source: `src/docs/post-games/v0.2.3/2026.11.10-mr-radio-crew-vm-and-backfill-post-game.md` (row a47dbb5d). Rick approved the self-report about 10:02.
+
+- **R1**: before a seat hands Rick a VM line, it runs the verb's read-only twin there as the same user. It also test-writes every path the real run writes. Why: the cron install failed at Rick's console twice, on 10 and 11 Nov. Each failure was a VM problem no unit test could see.
+- **R2**: a row for a verb that runs on the VM closes only after one live run on the VM, not on unit tests alone. Why: c22e5ec1 closed with "nothing run against the VM" and its bring-up bugs reached the console.
+- **R3**: after moving a gate's start point, sweep every merge since the new start for the gate's findings before queueing a push. Why: the 10 Nov push stalled on six missing outcome lines from other crews.
+- **R4**: every author brief carries the deposit duty (1–3 sentences to `post-game` at a self-correction, surprise or gate, with how it was learned). Why: six seats left no deposits, so no rule from the run can be checked against its source.
+- **Rick's question, answered** (11 Nov about 09:54): port 8000's firewall rule is not part of a new-host install today. Row b01999e0 (held) declares, ensures and checks the port list.
+- **Manager vote, with Cheech** (broadcast c744d04d, about 10:03): the 7 held duplicate-check rows filed under "tiberius" on 10 Nov were misrouted by the filer. Moved to Cheech, the INI triage owner; both managers vote approve all 7.
+
 ## 📚 Decisions log 2026-11-05 (Mr. Radio 🦉 `7d6c85af`, crew Chloé, Tiberius, Rachel, John, all reaped; times Eastern)
 
 - **Rick's ruling** (broadcast `c874731e`, morning): he is away until evening. Run the list down, push nothing, leave held rows for him, and send one summary card tonight. Followed. The card is `io/tmp/2026.11.05-evening-summary-mr-radio.md`.
