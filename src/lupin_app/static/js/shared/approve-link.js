@@ -108,33 +108,42 @@ function rowIdAfter( prefix, href ) {
 /**
  * Handle a click that may be on an approve link. Returns true when the click was claimed.
  *
+ * `withPriority` picks which links this call answers: false claims the plain link, true claims the
+ * priority link (`&priority=P0`) and sends the level as `promote_priority`. Each click has one handler:
+ * a plain call never claims a priority link and a priority call never claims a plain one.
+ *
  * Ensures:
- *   - a non-approve click is untouched and reports false
+ *   - a click this call does not answer is untouched and reports false
  *   - the browser does not follow the link (preventDefault), wherever the link sits
  *   - one request per link: a second click while it is out sends nothing
- *   - success replaces the link with a disabled "approved ✅"; a refusal or pending answer replaces it with
- *     the server's message, word for word
+ *   - success replaces the link with a disabled "approved ✅" ("approved at <level> ✅" for a priority link);
+ *     a refusal or pending answer replaces it with the server's message, word for word
  *
  * @param {Event} ev
  * @param {Element} target
  * @param {import("./approve-link.js").ApproveSender} sender
+ * @param {boolean} [withPriority]
  * @returns {boolean}
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line (same as docLink.ts isPaneResidentAnchor).
-export function handleApproveLinkClick( ev, target, sender ) {
+export function handleApproveLinkClick( ev, target, sender, withPriority = false ) {
   const anchor = target.closest( "a[href]" );
   if ( anchor === null ) return false;
-  const rowId = approveRowId( anchor.getAttribute( "href" ) );
+  const href     = anchor.getAttribute( "href" );
+  const priority = withPriority ? approvePriorityLink( href ) : null;
+  const rowId    = withPriority ? priority?.rowId ?? null : approveRowId( href );
   if ( rowId === null ) return false;
   ev.preventDefault();
   if ( anchor.getAttribute( "data-approve-state" ) === "pending" ) return true;
   anchor.setAttribute( "data-approve-state", "pending" );
   anchor.setAttribute( "aria-disabled", "true" );
   /** @type {HTMLElement} */ ( anchor ).style.opacity = "0.5";
-  void sender.transitionTask( rowId, "queued", {} ).then( ( result ) => {
+  /** @type {Record<string, string>} */
+  const extras = priority === null ? {} : { promote_priority: priority.priority };
+  void sender.transitionTask( rowId, "queued", extras ).then( ( result ) => {
     const outcome = anchor.ownerDocument.createElement( "span" );
     outcome.className   = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
-    outcome.textContent = result.ok ? APPROVED_TEXT : result.message;
+    outcome.textContent = result.ok ? ( priority === null ? APPROVED_TEXT : `approved at ${ priority.priority } ✅` ) : result.message;
     if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
     anchor.replaceWith( outcome );
   } );
@@ -144,37 +153,16 @@ export function handleApproveLinkClick( ev, target, sender ) {
 /**
  * Handle a click that may be on a priority link. Returns true when the click was claimed.
  *
- * Ensures:
- *   - a non-priority click is untouched and reports false
- *   - the browser does not follow the link
- *   - one request per link: a second click while it is out sends nothing
- *   - the request is the approve move plus `promote_priority`; the server decides who may
- *   - success replaces the link with a disabled "approved at <level> ✅"; a refusal or pending answer with the server's words
+ * It is `handleApproveLinkClick` answering the priority link; the request is the approve move plus
+ * `promote_priority`, and the server decides who may.
  *
  * @param {Event} ev
  * @param {Element} target
  * @param {import("./approve-link.js").ApproveSender} sender
  * @returns {boolean}
  */
-/* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line.
 export function handleApprovePriorityLinkClick( ev, target, sender ) {
-  const anchor = target.closest( "a[href]" );
-  if ( anchor === null ) return false;
-  const link = approvePriorityLink( anchor.getAttribute( "href" ) );
-  if ( link === null ) return false;
-  ev.preventDefault();
-  if ( anchor.getAttribute( "data-approve-state" ) === "pending" ) return true;
-  anchor.setAttribute( "data-approve-state", "pending" );
-  anchor.setAttribute( "aria-disabled", "true" );
-  /** @type {HTMLElement} */ ( anchor ).style.opacity = "0.5";
-  void sender.transitionTask( link.rowId, "queued", { promote_priority: link.priority } ).then( ( result ) => {
-    const outcome = anchor.ownerDocument.createElement( "span" );
-    outcome.className   = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
-    outcome.textContent = result.ok ? `approved at ${ link.priority } ✅` : result.message;
-    if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
-    anchor.replaceWith( outcome );
-  } );
-  return true;
+  return handleApproveLinkClick( ev, target, sender, true );
 }
 
 /**

@@ -71,7 +71,7 @@ export declare function observeApproveLinks( root: Element, reader: TaskReader )
 /** Applies one move to every listed row; one line per row. */
 export declare function applyBatch( link: BatchLink, sender: ApproveSender ): Promise<string[]>;
 /** Handles a click on an approve link; true when it claimed the click. */
-export declare function handleApproveLinkClick( ev: Event, target: Element, sender: ApproveSender ): boolean;
+export declare function handleApproveLinkClick( ev: Event, target: Element, sender: ApproveSender, withPriority?: boolean ): boolean;
 /** Handles a click on a priority link; true when it claimed the click. */
 export declare function handleApprovePriorityLinkClick( ev: Event, target: Element, sender: ApproveSender ): boolean;
 /** Handles a click on a 📋 view link; true when it claimed the click. */
