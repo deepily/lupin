@@ -4,9 +4,9 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.cron_generate.managed_jobs@ca82f9cb8f
   - lupin_mcp.cron_generate.lines_for_job@044de13325
-  - lupin_mcp.cron_generate.generate@7e20676cd5
+  - lupin_mcp.cron_generate.generate@87c0ac7fe8
   - lupin_mcp.cron_generate.make_log_folders@484230930c
-  - lupin_mcp.cron_generate.main@a8c0f68053
+  - lupin_mcp.cron_generate.main@478ea67409
 ---
 # Job cron generator
 
@@ -20,10 +20,11 @@ Writes the cron lines for the background jobs; see [[job-run-wrapper]] for what 
 - A cron line is `<schedule> <entry script> <job> cron >> <log> 2>&1 # <tag>`. A boot line starts `@reboot`, with `sleep <n> &&` when n is not 0, and ends in `boot`.
 - A job with `cron_enabled` false gets no lines, but its tag stays in the block's tags, so an install still removes its old lines.
 - The log defaults to `io/jobs/<job>/cron.log`; the registry's `cron_log` overrides it.
-- `generate` returns the lines (header first), the tags the block owns and the legacy substrings from `cron_replaces`.
+- `generate( root, environ, only )` returns the lines (header first), the tags the block owns and the legacy substrings from `cron_replaces`. With `only` set to a job name, the lines hold just that job's lines with no header. The tags and legacy names are that job's alone, so a merge touches no other line. It raises `ValueError` when `only` names no managed job.
 - `make_log_folders` creates each log's parent folder, because the shell opens the log before the job starts.
 
 ## Modes of `main`
+- `--only JOB` limits any mode to one job. The test VM uses it for `vector-refresh`. With `--status` it counts that job's installed lines. An unknown job name prints the reason and returns 1.
 - `--print` (default) writes the block and changes nothing. `--diff` writes the unified diff an install would make.
 - `--status` says how many block lines are installed.
 - `--install` and `--uninstall` use the librarian's locked crontab editor, with a timestamped backup under `io/jobs/crontab-backups` first. No backup, no write.
