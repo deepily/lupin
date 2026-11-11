@@ -20,6 +20,7 @@ EXCLUDED_PARTS  = ( ".venv", "node_modules", "site-packages" )
 NON_CODE_PREFIX = ( "src/tests/", "src/docs/", "src/rnd/", "src/cosa/rnd/", "src/cosa/tests/", "history/", "todo-history/", "src/cosa/history/" )
 KINDS           = ( "ini", "pin", "registry" )
 FIRST_SHOWN     = 3
+SELF_PATH       = "src/cosa/repo/coupling_census.py"
 
 NEEDLES = (
     { "group": 1, "needle": "def is_lupin_tree",                "kind": "ini",      "maps_to": "external repo <name> index languages" },
@@ -84,8 +85,9 @@ def in_population( path ):
 
     Ensures:
         - returns False when any directory name in the path is one of EXCLUDED_PARTS
+        - returns False for this script's own file, because it holds the needle list and would count itself
     """
-    return not any( part in EXCLUDED_PARTS for part in path.split( "/" ) )
+    return path != SELF_PATH and not any( part in EXCLUDED_PARTS for part in path.split( "/" ) )
 
 
 def is_code( path ):
@@ -158,7 +160,7 @@ def render( hits, needles, stats ):
         firsts = ", ".join( f"`{h[ 1 ]}:{h[ 2 ]}`" for h in code[ :FIRST_SHOWN ] ) or "none in code"
         rows.append( f"| {n[ 'group' ]} | `{n[ 'needle' ]}` | {len( code )} | {len( { h[ 1 ] for h in code } )} | {firsts} | {n[ 'kind' ]}: {n[ 'maps_to' ]} |" )
     head = f"Census taken {stats[ 'stamp' ]} at commit `{stats[ 'sha' ]}`."
-    foot = ( f"Population: {stats[ 'tracked' ]} tracked files, {stats[ 'tracked' ] - stats[ 'population' ]} left out as `.venv`, `node_modules` or `site-packages`, "
+    foot = ( f"Population: {stats[ 'tracked' ]} tracked files, {stats[ 'tracked' ] - stats[ 'population' ]} left out (paths under `.venv`, `node_modules` or `site-packages`, and the script's own file, which holds the needles), "
              f"{stats[ 'population' ]} counted, {stats[ 'scanned' ]} read as UTF-8 text, {stats[ 'unreadable' ]} not readable as text. "
              f"Positive controls passed: {stats[ 'controls' ]} of {len( CONTROLS )}." )
     return "\n".join( [ head, "", *rows, "", foot ] )

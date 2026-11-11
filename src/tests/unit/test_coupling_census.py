@@ -44,6 +44,13 @@ def test_population_leaves_out_the_three_vendored_directory_names_only():
     assert [ cc.in_population( p ) for p in ( "src/a.py", "src/cosa/.venv/x.py", "web/node_modules/y.js", "z/site-packages/q.py", "src/venv_notes.py" ) ] == [ True, False, False, False, True ]
 
 
+def test_the_script_never_counts_its_own_needle_list(tmp_path):
+    root = make_repo( tmp_path, { cc.SELF_PATH: "def is_lupin_tree\n", "a.py": "def is_lupin_tree\n" } )
+    assert cc.in_population( cc.SELF_PATH ) is False
+    out = cc.run( root, NOW, needles=[ needle( "def is_lupin_tree" ) ], controls=[ { "needle": "def is_lupin_tree", "path": "a.py", "line": 1 } ] )
+    assert "| 1 | `def is_lupin_tree` | 1 | 1 | `a.py:1` |" in out and cc.SELF_PATH not in out
+
+
 def test_is_code_rejects_documents_backups_tests_and_history():
     assert [ cc.is_code( p ) for p in ( "src/a.py", "a.md", "src/cosa/history.md.backup-1", ".backup-x/a.py", "src/tests/u.py", "src/cosa/tests/u.py", "src/docs/a.json", "history/a.json", "src/conf/a.ini" ) ] == [ True, False, False, False, False, False, False, False, True ]
 
@@ -86,6 +93,8 @@ def test_run_on_a_small_tree_gives_the_table_and_a_failed_control_refuses(tmp_pa
 def test_the_real_tree_finds_both_known_couplings_before_it_prints_anything():
     out = cc.run( cu.get_project_root(), NOW )
     assert "`src/cosa/repo/symindex/spec.py:77`" in out and "`src/cosa/repo/duplicate_check/proof/proof_cli.py:33`" in out
+    assert cc.SELF_PATH not in out                                         # no first-location list names the script that holds the needles
+    assert "| 1 | `def is_lupin_tree` | 1 | 1 |" in out
 
 
 def test_main_prints_the_census_and_returns_1_with_a_message_when_refused(tmp_path, tmp_path_factory, capsys):
