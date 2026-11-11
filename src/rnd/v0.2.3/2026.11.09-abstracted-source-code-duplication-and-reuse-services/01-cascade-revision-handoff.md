@@ -275,3 +275,58 @@ SEARCHED cosa.repo.coupling_census.ControlFailed :: rs-22812407b4 :: cosa.rest.t
 SEARCHED cosa.repo.coupling_census.ControlFailed :: rs-22812407b4 :: cosa.rest.routers.notifications.notify_user :: UNRELATED :: a notification endpoint
 RULING cosa.repo.coupling_census.ControlFailed :: DISTINCT a named exception for a failed positive control, so main can refuse on it and not on any ValueError :: reuse-receipt: 5b828e7ca8b6886e :: search: rs-22812407b4
 REUSE-OUTCOME 5b828e7ca8b6886e :: rs-22812407b4 :: WROTE_NEW a named exception for a failed positive control, so main can refuse on it and not on any ValueError :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.9-ph0s3
+
+## Reuse review: code-health settings reader (row 7ba187b5, step ph1-s1)
+
+The settings reader first carried its own `load_registry`. The lookup showed `cosa.rest.job_registry.load_registry( root )` already reads and validates `src/conf/job-registry.json`, so the reader now takes that function's result and defines no loader of its own. The other sixteen definitions are ruled distinct below; `read_positive_int` and `check_relative` share a rule with `reuse_shadow._read_positive` and `reader_rig_run.check_prefix` but differ in the error they raise and in naming the key.
+
+RULING cosa.repo.code_health_settings.CodeHealthSettingError :: DISTINCT a bare ValueError subclass whose message names an INI key; directory_analyzer ConfigurationError is a tool-specific error with config_path, field and value attributes :: reuse-receipt: c4c96d69e2dec5b3 :: search: rs-f82c6dec4a
+REUSE-OUTCOME c4c96d69e2dec5b3 :: rs-f82c6dec4a :: WROTE_NEW a bare ValueError subclass whose message names an INI key; directory_analyzer ConfigurationError is a tool-specific error with config_path, field and value attributes :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.repo_key :: DISTINCT builds the new per-repo key names in one place; no shared builder exists, the scope registry writes its path and prefix keys as inline f-strings :: reuse-receipt: fc0caee76223be6c :: search: rs-847715be79
+REUSE-OUTCOME fc0caee76223be6c :: rs-847715be79 :: WROTE_NEW builds the new per-repo key names in one place; no shared builder exists, the scope registry writes its path and prefix keys as inline f-strings :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.read_text :: DISTINCT reads through ConfigurationManager.get with silent=True and returns stripped text; librarian_tick.read_value reads the INI file fresh from disk and returns None :: reuse-receipt: 70328114ada66d43 :: search: rs-b4acce9bbe
+REUSE-OUTCOME 70328114ada66d43 :: rs-b4acce9bbe :: WROTE_NEW reads through ConfigurationManager.get with silent=True and returns stripped text; librarian_tick.read_value reads the INI file fresh from disk and returns None :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.read_entries :: DISTINCT a plain strip-and-drop-blanks comma split of one key; parse_declared_managers also dedupes and drops the star entry :: reuse-receipt: 3768617800ffb64b :: search: rs-cfc50c5ce5
+REUSE-OUTCOME 3768617800ffb64b :: rs-cfc50c5ce5 :: WROTE_NEW a plain strip-and-drop-blanks comma split of one key; parse_declared_managers also dedupes and drops the star entry :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.read_positive_int :: DISTINCT same positive-whole-number rule as reuse_shadow._read_positive, which reads the disk and raises CandidateError with a code; this reads ConfigurationManager and raises an error that names the key :: reuse-receipt: 463c8fced8df781e :: search: rs-26dcda1b8e
+REUSE-OUTCOME 463c8fced8df781e :: rs-26dcda1b8e :: WROTE_NEW same positive-whole-number rule as reuse_shadow._read_positive, which reads the disk and raises CandidateError with a code; this reads ConfigurationManager and raises an error that names the key :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.check_relative :: DISTINCT same absolute-or-dotdot test as reader_rig_run.check_prefix, which raises RunRefused with no key name; this names the key and is reused by two readers :: reuse-receipt: 0c5d4cc061704180 :: search: rs-b714bb6139
+REUSE-OUTCOME 0c5d4cc061704180 :: rs-b714bb6139 :: WROTE_NEW same absolute-or-dotdot test as reader_rig_run.check_prefix, which raises RunRefused with no key name; this names the key and is reused by two readers :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.index_languages :: DISTINCT reads and validates the optional language list against py, ts and dart; IndexSpec holds already-resolved roots :: reuse-receipt: f4aec24502f2b651 :: search: rs-64ae37a822
+REUSE-OUTCOME f4aec24502f2b651 :: rs-64ae37a822 :: WROTE_NEW reads and validates the optional language list against py, ts and dart; IndexSpec holds already-resolved roots :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.relative_paths :: DISTINCT a per-key wrapper that reads a list of repo-relative directories and runs check_relative on each; no other symbol reads such a list from the INI :: reuse-receipt: af7c335f168901aa :: search: rs-e085c244f9
+REUSE-OUTCOME af7c335f168901aa :: rs-e085c244f9 :: WROTE_NEW a per-key wrapper that reads a list of repo-relative directories and runs check_relative on each; no other symbol reads such a list from the INI :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.index_exclude :: DISTINCT reads the configured skip names and refuses a path separator; spec.skipped tests one path against skip names :: reuse-receipt: f29f7ecf0f01fa24 :: search: rs-5349375084
+REUSE-OUTCOME f29f7ecf0f01fa24 :: rs-5349375084 :: WROTE_NEW reads the configured skip names and refuses a path separator; spec.skipped tests one path against skip names :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.wiki_dir :: DISTINCT reads one optional relative path key and returns None when blank; no other reader covers the wiki directory key :: reuse-receipt: 76a159aeb0718b60 :: search: rs-f826cef18b
+REUSE-OUTCOME 76a159aeb0718b60 :: rs-f826cef18b :: WROTE_NEW reads one optional relative path key and returns None when blank; no other reader covers the wiki directory key :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.filed_title_prefix :: DISTINCT adds a bracketed upper-case repo name default on top of read_text for one key; no other symbol resolves a filed-row title prefix :: reuse-receipt: 08cefb911dca5eb8 :: search: rs-b44f067a87
+REUSE-OUTCOME 08cefb911dca5eb8 :: rs-b44f067a87 :: WROTE_NEW adds a bracketed upper-case repo name default on top of read_text for one key; no other symbol resolves a filed-row title prefix :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.duplicate_check_ceiling :: DISTINCT a one-line wrapper that binds the ceiling key to read_positive_int, so no logic is repeated :: reuse-receipt: 9072d19e65c54006 :: search: rs-13fe490223
+REUSE-OUTCOME 9072d19e65c54006 :: rs-13fe490223 :: WROTE_NEW a one-line wrapper that binds the ceiling key to read_positive_int, so no logic is repeated :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.jev_token_limit :: DISTINCT a one-line wrapper that binds the Jev token limit key to read_positive_int, so no logic is repeated :: reuse-receipt: 5b5926aa0f964384 :: search: rs-1a8967c407
+REUSE-OUTCOME 5b5926aa0f964384 :: rs-1a8967c407 :: WROTE_NEW a one-line wrapper that binds the Jev token limit key to read_positive_int, so no logic is repeated :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.data_subdir :: DISTINCT validates one configured folder name with a default and a key-naming error; docs_files._safe_upload_name cleans an upload name and raises HTTP 400 :: reuse-receipt: b7b808b29150086e :: search: rs-359d2e0da4
+REUSE-OUTCOME b7b808b29150086e :: rs-359d2e0da4 :: WROTE_NEW validates one configured folder name with a default and a key-naming error; docs_files._safe_upload_name cleans an upload name and raises HTTP 400 :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.repo_settings :: DISTINCT assembles the six optional per-repo settings into one dict from this file's readers; no existing aggregator reads these keys :: reuse-receipt: 06162257a261cccf :: search: rs-6da0101146
+REUSE-OUTCOME 06162257a261cccf :: rs-6da0101146 :: WROTE_NEW assembles the six optional per-repo settings into one dict from this file's readers; no existing aggregator reads these keys :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.registry_repo_names :: DISTINCT derives repo names from the job-registry jobs, defaulting to lupin; symindex.paths.registered_repo_names lists repos from the INI external repos key :: reuse-receipt: 33c6ec441564c732 :: search: rs-266ff92ce5
+REUSE-OUTCOME 33c6ec441564c732 :: rs-266ff92ce5 :: WROTE_NEW derives repo names from the job-registry jobs, defaulting to lupin; symindex.paths.registered_repo_names lists repos from the INI external repos key :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.code_health_settings.name_mismatches :: DISTINCT compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: reuse-receipt: 2e232146ad501898 :: search: rs-08457a253f
+REUSE-OUTCOME 2e232146ad501898 :: rs-08457a253f :: WROTE_NEW compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
