@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.duplicate_check_verdicts.VerdictRefused@8abf07bd31
   - lupin_mcp.duplicate_check_verdicts.put_back@9629c3aa81
   - lupin_mcp.duplicate_check_verdicts.write_verdict@f1844da0d1
-  - lupin_mcp.duplicate_check_verdicts.main@17d1a5bfcc
+  - lupin_mcp.duplicate_check_verdicts.main@8fe741ddd4
   - lupin_mcp.duplicate_check_verdicts.seat_actor@e2029f1991
   - lupin_mcp.duplicate_check_verdicts.SeatStore@e1fe8da4c8
 ---

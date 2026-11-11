@@ -21,8 +21,8 @@ import sys
 
 import cosa.utils.util as cu
 from lupin_mcp import duplicate_check_filing as ff
+from lupin_mcp import duplicate_check_status as dcs
 from lupin_mcp import reuse_behaviour as rb
-from lupin_mcp import reuse_refusals as rr
 
 PREFIX       = "DUPCHECK-VERDICT"
 FIELDS       = ( "run", "finding", "verdict", "class", "by", "ts" )
@@ -178,7 +178,7 @@ def main( argv=None, out=None, amender=None ):
     a   = ap.parse_args( argv )
     if ( a.row is None ) == ( not a.file_only ): ap.error( "give --row <uuid> or --file-only, not both and not neither" )
     out = out if out is not None else sys.stdout
-    folder = pathlib.Path( a.data_dir or rr.default_data_dir( cu.get_project_root() ) ) / rb.CHECK_FOLDER
+    folder = pathlib.Path( a.data_dir ) / rb.CHECK_FOLDER if a.data_dir else dcs.folder_of( cu.get_project_root() )
     try:
         rec = write_verdict( a.line, folder, a.row, amender if amender is not None or a.row is None else SeatStore( seat_actor() ) )
     except ValueError as e:
