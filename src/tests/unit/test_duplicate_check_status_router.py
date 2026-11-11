@@ -17,7 +17,7 @@ def client( tmp_path, monkeypatch ):
     hist.append_line( tmp_path, hist.line_of( { "status": "carried", "trigger": "cron", "started_at": "2026-11-08T11:00:00-05:00", "carried": [ 1, 2, 3 ], "owed": 9, "judged": 6,
                                                  "judge_calls": 6, "elapsed_seconds": 20.0, "branch": "wip-x" }, "r.json" ) )
     monkeypatch.setattr( dcs, "runs_folder", lambda: tmp_path )
-    monkeypatch.setattr( dcs, "now", lambda: NOW )
+    monkeypatch.setattr( dcs.job_summary, "clock", lambda: NOW )
     monkeypatch.setattr( dcs, "installed_crontab", lambda: ( "0 10 * * * run # duplicate-check-daily\n", None ) )
     app = FastAPI()
     app.include_router( dcs.router )
@@ -40,9 +40,9 @@ def test_the_page_is_html_that_browsers_revalidate( client ):
     assert "Duplicate check" in page.text and "wip-x" in page.text
 
 
-def test_the_folder_and_clock_are_the_servers_own( monkeypatch ):
+def test_the_folder_is_the_servers_own( monkeypatch ):
     monkeypatch.setattr( dcs.cu, "get_project_root", lambda: "/r" )
-    assert str( dcs.runs_folder() ) == "/r/io/duplicate-check-daily" and dcs.now().tzinfo is not None
+    assert str( dcs.runs_folder() ) == "/r/io/duplicate-check-daily"
 
 
 def test_the_status_endpoint_carries_the_installed_schedule_and_is_not_silent_for_this_mornings_daily_run( client ):
@@ -54,7 +54,7 @@ def test_a_crontab_from_the_host_snapshot_is_read_in_the_hosts_zone( tmp_path, m
     zone = datetime.timezone( datetime.timedelta( hours=-4 ) )
     hist.append_line( tmp_path, hist.line_of( { "status": "ok", "trigger": "cron", "started_at": "2026-11-08T10:00:00-04:00", "carried": [], "owed": 0, "judged": 0, "judge_calls": 0, "elapsed_seconds": 1.0 }, "r.json" ) )
     monkeypatch.setattr( dcs, "runs_folder", lambda: tmp_path )
-    monkeypatch.setattr( dcs, "now", lambda: NOW )
+    monkeypatch.setattr( dcs.job_summary, "clock", lambda: NOW )
     monkeypatch.setattr( dcs, "installed_crontab", lambda: ( "0 10 * * * run # duplicate-check-daily\n", zone ) )
     snap = dcs.snapshot_now()
     assert snap[ "as_of" ] == NOW.astimezone( zone ).isoformat() and snap[ "schedule" ][ "verified" ] is True
