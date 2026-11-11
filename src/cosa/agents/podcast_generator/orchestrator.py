@@ -252,6 +252,8 @@ class PodcastOrchestratorAgent:
 
         # Initialize internal state (TypedDict for tracking)
         self._podcast_state = create_initial_state( research_doc_path, user_id )
+        # Languages whose translation failed, by language code, with the reason. They are not produced.
+        self._failed_translations = {}
 
         # Generate podcast ID
         self.podcast_id = f"podcast-{uuid.uuid4().hex[ :8 ]}"
@@ -645,6 +647,11 @@ class PodcastOrchestratorAgent:
 
                 # Generate translated script
                 translated_script = await self._generate_translated_script_async( script, lang )
+
+                # A failed translation is reported on the card and produced nowhere: no saved
+                # script under this language, no review, no audio, no upload.
+                if lang in self._failed_translations: continue
+
                 scripts_by_language[ lang ] = translated_script
 
                 # Save translated script
@@ -894,6 +901,9 @@ class PodcastOrchestratorAgent:
                     audio_link = f"`{lang_audio}`"
 
                 output_lines.append( f"**{lang_name}**: {script_link} | {audio_link}" )
+
+            for lang, reason in self._failed_translations.items():
+                output_lines.append( f"**{LANGUAGE_NAMES.get( lang, lang )}**: translation failed (not produced). {reason}" )
 
             # Calculate total audio cost from all TTS results
             total_chars = 0
@@ -2003,13 +2013,14 @@ Generate the {language_name} script in JSON format with the same structure:
 
         except Exception as e:
             logger.error( f"Script translation to {target_language} failed: {e}" )
+            self._failed_translations[ target_language ] = str( e )[ :200 ]
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Translation error: {e}" )
 
             # P0 4317efd1: tell the user the translation failed instead of silently
             # substituting the English script.
             await voice_io.notify(
-                f"{language_name} translation failed — using the English script. ({str( e )[ :100 ]})",
+                f"{language_name} translation failed, so no {language_name} podcast is produced. ({str( e )[ :100 ]})",
                 priority = "high",
             )
 

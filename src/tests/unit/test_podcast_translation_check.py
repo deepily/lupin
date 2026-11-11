@@ -116,3 +116,74 @@ def test_a_failed_translation_keeps_the_script_type_of_the_english_script():
         translated = asyncio.run( agent._generate_translated_script_async( english, "es-MX" ) )
     assert "Translation Failed" in translated.title
     assert translated.script_type == "status_report"
+
+
+def test_the_ratio_is_pinned_to_exact_values():
+    assert spanish_stopword_ratio( "de la casa que no" ) == 0.8
+    assert spanish_stopword_ratio( "De casa" ) == 0.5
+    assert spanish_stopword_ratio( _text( _captured( UNCHANGED ) ) ) == pytest.approx( 0.050637, abs=1e-6 )
+    assert spanish_stopword_ratio( _text( _captured( REAL_ES ) ) ) == pytest.approx( 0.395773, abs=1e-6 )
+
+
+def _run_whole_job( model_answer ):
+    """
+    Run the whole job for English plus es-MX, with the real translation step.
+
+    Everything around the translation is replaced by a recorder, so the test can say which
+    languages were saved, voiced and listed. Returns the recorded calls and the final card text.
+    """
+    agent = PodcastOrchestratorAgent(
+        research_doc_path="/io/r.md", user_id="u@test.com", target_languages=[ "en", "es-MX" ],
+        config=PodcastConfig( review="one_shot" ) )
+    english  = _english()
+    answer   = json.dumps( {
+        "title"    : model_answer.title,
+        "segments" : [ { "speaker": s.speaker, "role": s.role, "text": s.text, "prosody": [] } for s in model_answer.segments ],
+    } )
+    saved, voiced, stitched = [], [], []
+
+    async def save( script, is_revision=False, language="en" ):
+        saved.append( language )
+        return f"/io/script-{language}.md"
+
+    async def voice( script, language="en" ):
+        voiced.append( language )
+        result = MagicMock( success=True, character_count=10 )
+        return [ result ], []
+
+    async def stitch( results, script, language="en" ):
+        stitched.append( language )
+        return f"/io/audio-{language}.mp3"
+
+    agent._api_client = MagicMock( call_for_script=AsyncMock( return_value=MagicMock( content=answer ) ),
+                                   cost_estimate=MagicMock( total_api_calls=1, total_input_tokens=1,
+                                                            total_output_tokens=1, estimated_cost_usd=0.0 ) )
+    agent._load_research_async              = AsyncMock( return_value="research text" )
+    agent._analyze_content_async            = AsyncMock( return_value=MagicMock( main_topic="T" ) )
+    agent._generate_script_async            = AsyncMock( return_value=english )
+    agent._save_script_async                = save
+    agent._generate_audio_async             = voice
+    agent._stitch_audio_async               = stitch
+    cards = AsyncMock()
+    with patch.object( orch_mod.voice_io, "notify", new=cards ), \
+         patch.object( orch_mod, "validate_prosody_preservation", return_value=( True, {} ) ), \
+         patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+        asyncio.run( agent.do_all_async() )
+    final = [ call.kwargs.get( "abstract" ) for call in cards.await_args_list if call.kwargs.get( "abstract" ) ][ -1 ]
+    return agent, saved, voiced, stitched, final
+
+
+def test_a_failed_translation_is_not_saved_voiced_or_listed_as_es_mx():
+    agent, saved, voiced, stitched, card = _run_whole_job( _captured( UNCHANGED ) )
+    assert saved == [ "en" ], "no script may be saved under the es-MX path"
+    assert voiced == [ "en" ] and stitched == [ "en" ], "no es-MX audio may be made"
+    assert set( agent._podcast_state[ "audio_paths_by_language" ] ) == { "en" }, "nothing es-MX reaches the upload"
+    assert "**Mexican Spanish**: translation failed (not produced)" in card
+    assert "Mexican Spanish Script" not in card and "Mexican Spanish MP3" not in card
+
+
+def test_a_real_translation_is_saved_voiced_and_listed_as_es_mx():
+    agent, saved, voiced, stitched, card = _run_whole_job( _captured( REAL_ES ) )
+    assert saved == [ "en", "es-MX" ] and voiced == [ "en", "es-MX" ]
+    assert "translation failed" not in card
+    assert "Mexican Spanish" in card
