@@ -36,6 +36,7 @@
 // 2026-09-19: that is a defect in the lead and is NOT back-ported. Every card here
 // sends the queue session id.
 
+import { choicesBody } from "../docPodcast/docPodcast";
 import type { EventBus } from "../shared/EventBus";
 import type { StoreSubmitJobsChangedPayload } from "../shared/types";
 
@@ -111,6 +112,10 @@ export interface ResearchSubmitInput {
   withPresentation : boolean;
   dryRun           : boolean;
   scheduling       : SchedulingInput;
+  /** Podcast choices; read only when `withPodcast` is on. */
+  scriptType       : string;
+  spanish          : boolean;
+  oneShot          : boolean;
 }
 
 /** The values the test suite card submits: types, file path, flags, arguments and scheduling. */
@@ -342,7 +347,8 @@ class SubmitJobsStoreImpl implements SubmitJobsStore {
       } else if ( input.withPodcast ) {
         command = RESEARCH_COMMAND_PODCAST;
         jobType = "Research→Podcast";
-        args.target_languages = [ "en", "es-MX" ];
+        // English only unless the Spanish switch is on; no type unless it is not research critical.
+        Object.assign( args, choicesBody( input.scriptType, input.spanish, input.oneShot ) );
       }
 
       const result = await this.postJson<SubmitResult>( "/api/v2/submit", {
