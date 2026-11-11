@@ -5,8 +5,8 @@ pins:
   - lupin_mcp.jsonrpc_stdout.reserve_stdout_for_jsonrpc@1aa1d7aa5b
   - lupin_mcp.outbound_api_key.load_outbound_api_key@7d660725f7
   - lupin_mcp.outbound_api_key.outbound_key_failure_detail@dc982aba74
-  - lupin_mcp.validation_alert_throttle.is_suppressed@d6babf7f87
-  - lupin_mcp.validation_alert_throttle.record_sent@ae0a0ff0af
+  - lupin_mcp.validation_alert_throttle.is_suppressed@eebe2de026
+  - lupin_mcp.validation_alert_throttle.record_sent@15ad247d62
   - lupin_mcp.notify_outbox.spool@1bb5a378a9
   - lupin_mcp.notify_outbox.list_spooled@31b0d8d35c
   - lupin_mcp.notify_outbox.flush@41277f49c2

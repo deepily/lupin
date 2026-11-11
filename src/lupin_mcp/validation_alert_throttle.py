@@ -27,20 +27,10 @@ import tempfile
 import time
 from pathlib import Path
 
+from cosa.utils.atomic_json import load_json_dict
+
 COOLDOWN_SECONDS = 6 * 60 * 60
 STATE_PATH       = Path.home() / ".lupin" / "mcp-validation-alerts.json"
-
-
-def _load( path ):
-    """
-    Requires: path is a Path
-    Ensures:  returns the state dict, or {} for a missing / unreadable / corrupt / non-dict file
-    """
-    try:
-        state = json.loads( path.read_text( encoding="utf-8" ) )
-    except ( OSError, ValueError ):
-        return {}
-    return state if isinstance( state, dict ) else {}
 
 
 def is_suppressed( project, now=None, path=None, cooldown=None ):
@@ -53,7 +43,7 @@ def is_suppressed( project, now=None, path=None, cooldown=None ):
     """
     now      = time.time() if now is None else now
     cooldown = COOLDOWN_SECONDS if cooldown is None else cooldown
-    last     = _load( STATE_PATH if path is None else path ).get( project )
+    last     = load_json_dict( STATE_PATH if path is None else path ).get( project )
     if isinstance( last, bool ) or not isinstance( last, ( int, float ) ):
         return False
     return 0 <= now - last < cooldown
@@ -69,7 +59,7 @@ def record_sent( project, now=None, path=None ):
     """
     now    = time.time() if now is None else now
     target = STATE_PATH if path is None else path
-    state  = _load( target )
+    state  = load_json_dict( target )
     state[ project ] = now
     tmp_name = None
     try:
