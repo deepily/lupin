@@ -28,17 +28,25 @@ def write_json_atomic( path, data, indent=None, trailing_newline=False ) -> None
         - the write is atomic: a temp file named with a per-writer pid and uuid is
           written, then renamed over the target, so concurrent writers never share a
           temp path and a reader sees the old file or the new one
+        - `data` is serialised before any file is opened, and the temp file is removed if
+          the write or the rename fails, so a failed write leaves the old file and no stray
+          temp file
 
     Raises:
         - OSError if the target directory cannot be created or written; it is never swallowed
+        - TypeError or ValueError if `data` cannot be serialised; the target is untouched
     """
+    text = json.dumps( data, default=str, indent=indent ) + ( "\n" if trailing_newline else "" )
     path = Path( path )
     path.parent.mkdir( parents=True, exist_ok=True )
     tmp  = path.parent / f"{path.name}.{os.getpid()}-{uuid.uuid4().hex}.tmp"
-    with open( tmp, "w" ) as f:
-        json.dump( data, f, default=str, indent=indent )
-        if trailing_newline: f.write( "\n" )
-    tmp.replace( path )
+    try:
+        with open( tmp, "w" ) as f:
+            f.write( text )
+        tmp.replace( path )
+    except BaseException:
+        tmp.unlink( missing_ok=True )
+        raise
 
 
 def load_json_section( path, key ) -> dict:

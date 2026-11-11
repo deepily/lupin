@@ -77,3 +77,20 @@ def test_write_puts_the_temp_file_in_the_targets_own_directory( tmp_path, monkey
     target = tmp_path / "deep" / "ledger.json"
     aj.write_json_atomic( target, {} )
     assert moved == [ ( target.parent, target.parent ) ]
+
+
+def test_an_unserialisable_value_raises_and_leaves_the_old_file_and_no_temp_file( tmp_path ):
+    target = tmp_path / "state.json"
+    aj.write_json_atomic( target, { "old": 1 } )
+    with pytest.raises( TypeError ):
+        aj.write_json_atomic( target, { ( 1, 2 ): "tuple keys are not JSON" } )
+    assert json.loads( target.read_text() ) == { "old": 1 }
+    assert [ p.name for p in tmp_path.iterdir() ] == [ "state.json" ], "a stray .tmp was left behind"
+
+
+def test_a_failed_rename_removes_the_temp_file_and_reraises( tmp_path ):
+    target = tmp_path / "state.json"
+    target.mkdir()                                   # a directory in the way: the rename raises OSError
+    with pytest.raises( OSError ):
+        aj.write_json_atomic( target, { "k": 1 } )
+    assert [ p.name for p in tmp_path.iterdir() ] == [ "state.json" ], "a stray .tmp was left behind"
