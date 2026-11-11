@@ -58,17 +58,89 @@ export function trendArrow( points: readonly JobPoint[] ): string {
   return last < first ? "▼" : "=";
 }
 
+/** Which way a sort order runs. "asc" is the order's own direction; "desc" reverses it. */
+export type SortDirection = "asc" | "desc";
+
+/** The reader's pick: a SORT_ORDERS id, or null for the default active-first order. */
+export interface JobSort {
+  id        : string | null;
+  direction : SortDirection;
+}
+
+/** One sort order a reader can pick from a column header. */
+export interface SortOrder {
+  id      : string;
+  /** The column heading that carries it. */
+  label   : string;
+  /** Runs in the ascending direction; ties fall back to the default order. */
+  compare : ( a: JobEntry, b: JobEntry ) => number;
+}
+
+/** No header picked: the active-first order. */
+export const DEFAULT_SORT: JobSort = { id: null, direction: "asc" };
+
+// Failing is the most urgent state (Rick, 11 Nov, row 4b807ffd).
 /**
- * Sort active first.
+ * The states by urgency, least urgent first.
  *
- * Order is running now, healthy, behind, failing, silent, never reported. Inside one rank
- * the newest attempt comes first (none last), then title, then target. The input is not changed.
+ * It is not STATE_ORDER, which ranks the default active-first order.
  */
-export function sortJobs( jobs: readonly JobEntry[] ): JobEntry[] {
+export const HEALTH_URGENCY: readonly JobState[] = [ "healthy", "behind", "silent", "unknown", "failing" ];
+
+/**
+ * When the job's last attempt began, in milliseconds.
+ *
+ * A job with no attempt, or an unreadable time, counts as -1, the oldest.
+ */
+function attemptTime( j: JobEntry ): number {
+  return j.last_attempt === null ? -1 : ( Date.parse( j.last_attempt.started_at ) || -1 );
+}
+
+// Row 4b807ffd: the three orders Rick asked for. A fourth order is one more entry.
+/**
+ * The sort orders a reader can pick from the column headers.
+ *
+ * One entry each. Another order is one more entry here and nothing else. Health runs by
+ * HEALTH_URGENCY, healthy at one end and failing at the other. Last run runs oldest first when
+ * ascending, a job that never ran first.
+ */
+export const SORT_ORDERS: readonly SortOrder[] = [
+  { id: "name",   label: "Service", compare: ( a, b ) => a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) },
+  { id: "health", label: "Status",  compare: ( a, b ) => HEALTH_URGENCY.indexOf( a.state ) - HEALTH_URGENCY.indexOf( b.state ) },
+  { id: "last-run", label: "Last run", compare: ( a, b ) => attemptTime( a ) - attemptTime( b ) },
+];
+
+function defaultCompare( a: JobEntry, b: JobEntry ): number {
   const rank    = ( j: JobEntry ): number => j.running ? -1 : STATE_ORDER.indexOf( j.state );
-  const attempt = ( j: JobEntry ): number => j.last_attempt === null ? -1 : ( Date.parse( j.last_attempt.started_at ) || -1 );
-  return [ ...jobs ].sort( ( a, b ) =>
-    rank( a ) - rank( b ) || attempt( b ) - attempt( a ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) );
+  return rank( a ) - rank( b ) || attemptTime( b ) - attemptTime( a ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" );
+}
+
+/**
+ * Sort the jobs, active first when no sort is picked.
+ *
+ * The default order is running now, then healthy, behind, failing, silent, never reported.
+ * Inside a rank the newest attempt leads, then title, then target. A picked order uses its
+ * own comparator, reversed for "desc", with ties in the default order. The input is kept.
+ *
+ * Raises:
+ *   - Error when sort.id names no entry of SORT_ORDERS
+ */
+export function sortJobs( jobs: readonly JobEntry[], sort: JobSort = DEFAULT_SORT ): JobEntry[] {
+  if ( sort.id === null ) return [ ...jobs ].sort( defaultCompare );
+  const order = SORT_ORDERS.find( ( o ) => o.id === sort.id );
+  if ( order === undefined ) throw new Error( `unknown sort order: ${ sort.id }` );
+  const sign = sort.direction === "desc" ? -1 : 1;
+  return [ ...jobs ].sort( ( a, b ) => sign * order.compare( a, b ) || defaultCompare( a, b ) );
+}
+
+/**
+ * The sort a click on a sortable header gives.
+ *
+ * A new column sorts ascending, a second click descending, a third returns to the default order.
+ */
+export function nextSort( sort: JobSort, id: string ): JobSort {
+  if ( sort.id !== id ) return { id, direction: "asc" };
+  return sort.direction === "asc" ? { id, direction: "desc" } : DEFAULT_SORT;
 }
 
 /** The header line, such as "5 jobs: 1 healthy, 3 failing". Empty states are left out. */

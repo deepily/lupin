@@ -23,6 +23,7 @@
     const SVG_NS        = "http://www.w3.org/2000/svg";
     const NOT_REPORTED  = "not reported";
     const STATE_ORDER   = [ "healthy", "behind", "failing", "silent", "unknown" ];   // active first (Rick, 9 Nov, row 300af681); a running job goes above all of them
+    const DEFAULT_SORT  = { id : null, direction : "asc" };   // no header picked: the active-first order
     const STATE_LABEL   = { unknown : "UNKNOWN", silent : "SILENT", failing : "FAILING", behind : "BEHIND", healthy : "healthy" };
 
     // ─── Text rules (no DOM, no clock) ─────────────────────────────────
@@ -45,13 +46,35 @@
         return last < first ? "▼" : "=";
     }
 
-    // Active first: running now, then healthy, behind, failing, silent, never reported. Inside one rank the most recent
-    // attempt comes first (a job with none, last), then title, then target. Never mutates its input.
-    function sortJobs( jobs ) {
+    // The states by urgency, least urgent first (Rick, 11 Nov, row 4b807ffd): failing is the most urgent. Not STATE_ORDER, which ranks the default order.
+    const HEALTH_URGENCY = [ "healthy", "behind", "silent", "unknown", "failing" ];
+
+    // When a job's last attempt began, in milliseconds; a job with none, or a time that does not parse, counts as -1 (oldest).
+    function attemptTime( j ) { return j.last_attempt === null ? -1 : ( Date.parse( j.last_attempt.started_at ) || -1 ); }
+
+    // The default order: active first (running now, healthy, behind, failing, silent, never reported). Inside one rank the most
+    // recent attempt comes first (a job with none, last), then title, then target.
+    function defaultCompare( a, b ) {
         const rank    = ( j ) => j.running ? -1 : STATE_ORDER.indexOf( j.state );
-        const attempt = ( j ) => j.last_attempt === null ? -1 : ( Date.parse( j.last_attempt.started_at ) || -1 );
-        return [ ...jobs ].sort( ( a, b ) =>
-            rank( a ) - rank( b ) || attempt( b ) - attempt( a ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) );
+        return rank( a ) - rank( b ) || attemptTime( b ) - attemptTime( a ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" );
+    }
+
+    // The sort orders a reader can pick from the column headers (row 4b807ffd). One entry each: a third order is one more entry
+    // here and nothing else. `compare` runs in the ascending direction; "desc" flips it, and ties fall back to the default order.
+    // Health runs by HEALTH_URGENCY, healthy at one end and failing at the other. Last run is oldest first when ascending, a job that never ran first.
+    const SORT_ORDERS = [
+        { id : "name",   label : "Service", compare : ( a, b ) => a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) },
+        { id : "health", label : "Status",  compare : ( a, b ) => HEALTH_URGENCY.indexOf( a.state ) - HEALTH_URGENCY.indexOf( b.state ) },
+        { id : "last-run", label : "Last run", compare : ( a, b ) => attemptTime( a ) - attemptTime( b ) },
+    ];
+
+    // orderId null gives the default order. Never mutates its input.
+    function sortJobs( jobs, orderId = null, direction = "asc" ) {
+        if ( orderId === null ) return [ ...jobs ].sort( defaultCompare );
+        const order = SORT_ORDERS.find( ( o ) => o.id === orderId );
+        if ( order === undefined ) throw new Error( "unknown sort order: " + orderId );
+        const sign = direction === "desc" ? -1 : 1;
+        return [ ...jobs ].sort( ( a, b ) => sign * order.compare( a, b ) || defaultCompare( a, b ) );
     }
 
     function headerLine( jobs ) {
@@ -393,7 +416,7 @@
         return ( "jobs-" + job.job + ( job.target === null ? "" : "-" + job.target ) ).replace( /[^A-Za-z0-9_-]/g, "-" );
     }
 
-    function renderJob( job, todayIso, actions ) {
+    function renderJob( job, todayIso, actions, sort = DEFAULT_SORT ) {
         const id      = itemId( job );
         const item    = el( "section", "jobs-item", null, "jobs-item" );
         item.setAttribute( "data-job", job.job );
@@ -442,7 +465,7 @@
         panel.appendChild( notReportedBlock( job ) );
         const run = runNowBlock( job, actions );
         if ( run !== null ) panel.appendChild( run );
-        for ( const target of sortJobs( job.targets ) ) panel.appendChild( renderJob( target, todayIso, actions ) );
+        for ( const target of sortJobs( job.targets, sort.id, sort.direction ) ) panel.appendChild( renderJob( target, todayIso, actions, sort ) );
         item.appendChild( panel );
 
         button.addEventListener( "click", () => {
@@ -454,9 +477,52 @@
         return item;
     }
 
-    function renderAccordion( mount, summary, actions ) {
+    // The columns of one collapsed line, in grid order. `sortId` names the SORT_ORDERS entry a header click picks, or null.
+    const COLUMNS = [
+        { cls : "jobs-caret",         label : "",              sortId : null },
+        { cls : "jobs-dot",           label : "",              sortId : null },
+        { cls : "jobs-title",         label : "Service",       sortId : "name" },
+        { cls : "jobs-badge",         label : "Status",        sortId : "health" },
+        { cls : "jobs-last-run",      label : "Last run",      sortId : "last-run" },
+        { cls : "jobs-last-finished", label : "Last finished", sortId : null },
+        { cls : "jobs-scan-cell",     label : "Scan",          sortId : null },
+        { cls : "jobs-fix-cell",      label : "Fix",           sortId : null },
+        { cls : "jobs-clears-cell",   label : "Clears",        sortId : null },
+    ];
+
+    // Clicking a sortable header: a new column sorts ascending, a second click descending, a third returns to the default order.
+    function nextSort( sort, sortId ) {
+        if ( sort.id !== sortId ) return { id : sortId, direction : "asc" };
+        return sort.direction === "asc" ? { id : sortId, direction : "desc" } : { id : null, direction : "asc" };
+    }
+
+    function headerRow( sort, onSort ) {
+        const row = el( "div", "jobs-header jobs-line-grid", null, "jobs-header" );
+        row.setAttribute( "role", "row" );
+        for ( const col of COLUMNS ) {
+            const cell = el( "span", "jobs-head-cell " + col.cls, null, null );
+            cell.setAttribute( "role", "columnheader" );
+            if ( col.sortId === null ) cell.textContent = col.label;
+            else {
+                const active = sort.id === col.sortId;
+                const button = el( "button", "jobs-sort-button", col.label + ( active ? ( sort.direction === "asc" ? " ▲" : " ▼" ) : "" ), "jobs-sort-" + col.sortId );
+                button.type = "button";
+                button.addEventListener( "click", () => onSort( nextSort( sort, col.sortId ) ) );
+                cell.setAttribute( "aria-sort", active ? ( sort.direction === "asc" ? "ascending" : "descending" ) : "none" );
+                cell.appendChild( button );
+            }
+            row.appendChild( cell );
+        }
+        return row;
+    }
+
+    let currentSort = DEFAULT_SORT;
+
+    function renderAccordion( mount, summary, actions, sort = currentSort ) {
         mount.replaceChildren();
-        for ( const job of sortJobs( summary.jobs ) ) mount.appendChild( renderJob( job, summary.generated_at, actions ) );
+        currentSort = sort;
+        mount.appendChild( headerRow( sort, ( next ) => renderAccordion( mount, summary, actions, next ) ) );
+        for ( const job of sortJobs( summary.jobs, sort.id, sort.direction ) ) mount.appendChild( renderJob( job, summary.generated_at, actions, sort ) );
         if ( summary.reporting_off_line ) {                      // row 4aa0ba1b: the server drops a switched-off job and says how many
             const line = document.createElement( "p" );
             line.className = "jobs-off-line";
@@ -529,7 +595,7 @@
         window.setInterval( refresh, POLL_MS );
     }
 
-    window.backgroundJobs = { refresh, start, renderAccordion, renderJob, sortJobs, headerLine, formatWhen, runNowPath, runNowFailureText, isSafeHref };
+    window.backgroundJobs = { refresh, start, renderAccordion, renderJob, sortJobs, SORT_ORDERS, HEALTH_URGENCY, headerLine, formatWhen, runNowPath, runNowFailureText, isSafeHref };
 
     if ( document.readyState === "loading" ) document.addEventListener( "DOMContentLoaded", start );
     else start();

@@ -264,7 +264,7 @@ function drawAll( summary: JobsSummary = FIXTURE ): HTMLElement {
 
 test( "the accordion draws all 23 jobs (plus nested targets) active first, each collapsed", () => {
   const mount = drawAll();
-  const top   = [ ...mount.children ] as HTMLElement[];
+  const top   = ( [ ...mount.children ] as HTMLElement[] ).filter( ( c ) => c.getAttribute( "data-testid" ) === "jobs-item" );   // the header row is the first child
   assert.equal( top.length, 23 );
   const states = top.map( ( t ) => t.getAttribute( "data-state" ) as string );
   assert.deepEqual( states, [ ...states ].sort( ( a, b ) => F.STATE_ORDER.indexOf( a as never ) - F.STATE_ORDER.indexOf( b as never ) ) );
@@ -603,7 +603,95 @@ test( "the accordion ends with the switched-off line when the server sends one, 
   const last = off.lastElementChild as HTMLElement;
   assert.equal( last.getAttribute( "data-testid" ), "background-jobs-off-line" );
   assert.equal( last.textContent, "8 jobs have reporting switched off" );
-  assert.equal( off.children.length, 24 );
+  assert.equal( off.children.length, 25 );   // header row + 23 jobs + the off line
   const none = drawAll( { ...clone( FIXTURE ), reporting_off : 0, reporting_off_line : null } );
-  assert.equal( none.children.length, 23 );
+  assert.equal( none.children.length, 24 );   // header row + 23 jobs
+} );
+
+// ─── Sort by name and by health, header row (row 4b807ffd) ─────────────────
+
+const mkJob = ( name: string, state: JobEntry[ "state" ], target: string | null = null, running = false ): JobEntry =>
+  ( { ...find( "duplicate-check" ), job : name, title : name, target, state, running } );
+const names = ( jobs: JobEntry[] ) => jobs.map( ( j ) => `${ j.title }${ j.target === null ? "" : `/${ j.target }` }` );
+
+test( "SORT_ORDERS names the three header orders, one entry each, name first", () => {
+  assert.deepEqual( F.SORT_ORDERS.map( ( o ) => [ o.id, o.label ] ), [ [ "name", "Service" ], [ "health", "Status" ], [ "last-run", "Last run" ] ] );
+} );
+
+test( "sort by name runs A to Z and Z to A, ignores a running job, breaks a tie by target, and leaves its input alone", () => {
+  const input = [ mkJob( "beta", "healthy" ), mkJob( "alpha", "unknown", "y" ), mkJob( "alpha", "failing", "x", true ), mkJob( "Gamma", "silent" ), mkJob( "alpha", "healthy" ) ];
+  const before = names( input );
+  assert.deepEqual( names( F.sortJobs( input, { id : "name", direction : "asc" } ) ), [ "alpha", "alpha/x", "alpha/y", "beta", "Gamma" ] );
+  assert.deepEqual( names( F.sortJobs( input, { id : "name", direction : "desc" } ) ), [ "Gamma", "beta", "alpha/y", "alpha/x", "alpha" ] );
+  assert.deepEqual( names( input ), before );
+} );
+
+test( "the name comparator breaks a title tie by target with either side missing its target", () => {
+  const [ named, bare ] = [ mkJob( "same", "healthy", "x" ), mkJob( "same", "healthy" ) ];
+  const byName = ( F.SORT_ORDERS.find( ( o ) => o.id === "name" ) as F.SortOrder ).compare;
+  assert.ok( byName( named, bare ) > 0 );
+  assert.ok( byName( bare, named ) < 0 );
+} );
+
+test( "sort by health runs healthy, behind, silent, unknown, failing (failing most urgent, Rick 11 Nov), and descending is the exact reverse of the states", () => {
+  const input = [ mkJob( "u", "unknown" ), mkJob( "h", "healthy" ), mkJob( "s", "silent" ), mkJob( "f", "failing" ), mkJob( "b", "behind" ), mkJob( "run", "silent", null, true ) ];
+  assert.deepEqual( F.sortJobs( input, { id : "health", direction : "asc" } ).map( ( j ) => j.state ), [ "healthy", "behind", "silent", "silent", "unknown", "failing" ] );
+  assert.deepEqual( F.sortJobs( input, { id : "health", direction : "desc" } ).map( ( j ) => j.state ), [ "failing", "unknown", "silent", "silent", "behind", "healthy" ] );
+  assert.equal( F.sortJobs( input, { id : "health", direction : "asc" } )[ 2 ]!.job, "run", "a running silent job sorts first among silent ones: ties fall back to the default order" );
+} );
+
+test( "sortJobs refuses a sort id it does not know, and null gives the default order", () => {
+  assert.throws( () => F.sortJobs( [ mkJob( "a", "healthy" ) ], { id : "nope", direction : "asc" } ), /unknown sort order: nope/ );
+  const input = [ mkJob( "b", "unknown" ), mkJob( "a", "healthy" ) ];
+  assert.deepEqual( names( F.sortJobs( input, F.DEFAULT_SORT ) ), [ "a", "b" ] );
+} );
+
+test( "nextSort: a new column ascends, the same column descends, then back to the default", () => {
+  assert.deepEqual( F.nextSort( F.DEFAULT_SORT, "name" ), { id : "name", direction : "asc" } );
+  assert.deepEqual( F.nextSort( { id : "name", direction : "asc" }, "name" ), { id : "name", direction : "desc" } );
+  assert.deepEqual( F.nextSort( { id : "name", direction : "desc" }, "name" ), F.DEFAULT_SORT );
+  assert.deepEqual( F.nextSort( { id : "name", direction : "desc" }, "health" ), { id : "health", direction : "asc" } );
+} );
+
+test( "the accordion draws a header row naming every column, sorts on a heading click, and keeps the pick across a refresh", () => {
+  const mount = byId( "jobs-accordion" );
+  const summary = { ...clone( FIXTURE ), jobs : [ mkJob( "bb", "unknown" ), mkJob( "aa", "failing" ), mkJob( "cc", "healthy" ) ] } as JobsSummary;
+  renderAccordion( document, mount, summary, NO_ACTIONS );
+  const heads = () => Array.from( mount.querySelectorAll( "[data-testid=jobs-header] [role=columnheader]" ) ).map( ( h ) => h.textContent );
+  assert.deepEqual( heads(), [ "", "", "Service", "Status", "Last run", "Last finished", "Scan", "Fix", "Clears" ] );
+  const order = () => Array.from( mount.querySelectorAll( ":scope > [data-testid=jobs-item]" ) ).map( ( i ) => i.getAttribute( "data-job" ) );
+  assert.deepEqual( order(), [ "cc", "aa", "bb" ], "default order is active first: healthy, failing, unknown" );
+  ( mount.querySelector( "[data-testid=jobs-sort-name]" ) as HTMLElement ).click();
+  assert.deepEqual( order(), [ "aa", "bb", "cc" ] );
+  assert.equal( mount.querySelector( "[data-testid=jobs-sort-name]" )!.textContent, "Service ▲" );
+  assert.equal( mount.querySelector( "[aria-sort=ascending]" )!.querySelector( "button" )!.getAttribute( "data-testid" ), "jobs-sort-name" );
+  ( mount.querySelector( "[data-testid=jobs-sort-name]" ) as HTMLElement ).click();
+  assert.deepEqual( order(), [ "cc", "bb", "aa" ] );
+  assert.equal( mount.querySelector( "[data-testid=jobs-sort-name]" )!.textContent, "Service ▼" );
+  renderAccordion( document, mount, summary, NO_ACTIONS );                       // a poll redraws: the pick stays
+  assert.deepEqual( order(), [ "cc", "bb", "aa" ] );
+  ( mount.querySelector( "[data-testid=jobs-sort-name]" ) as HTMLElement ).click();   // third click: back to default
+  assert.deepEqual( order(), [ "cc", "aa", "bb" ] );
+  ( mount.querySelector( "[data-testid=jobs-sort-health]" ) as HTMLElement ).click();
+  ( mount.querySelector( "[data-testid=jobs-sort-health]" ) as HTMLElement ).click();
+  assert.deepEqual( order(), [ "aa", "bb", "cc" ], "health descending: failing, unknown, healthy" );
+} );
+
+test( "the targets inside a panel follow the picked order too", () => {
+  const parent = { ...mkJob( "p", "healthy" ), targets : [ mkJob( "t", "healthy", "b" ), mkJob( "t", "healthy", "a" ) ] };
+  const item = renderJob( document, parent, TODAY, NO_ACTIONS, { id : "name", direction : "desc" } );
+  assert.deepEqual( Array.from( item.querySelectorAll( ":scope > [data-testid=jobs-panel] > [data-testid=jobs-item]" ) ).map( ( i ) => i.getAttribute( "data-target" ) ), [ "b", "a" ] );
+} );
+
+test( "sort by last run goes oldest first ascending and newest first descending, a job that never ran or has an unreadable time at the oldest end", () => {
+  const mk = ( name: string, at: string | null ): JobEntry => {
+    const base = find( "duplicate-check" );
+    return { ...base, job : name, title : name, target : null, state : "healthy", running : false,
+      last_attempt : at === null ? null : { ...( base.last_attempt as NonNullable<JobEntry[ "last_attempt" ]> ), started_at : at } };
+  };
+  const input = [ mk( "new", "2026-11-09T12:00:00-05:00" ), mk( "none", null ), mk( "old", "2026-11-01T12:00:00-05:00" ), mk( "bad", "not a time" ), mk( "utc", "2026-11-09T18:00:00+00:00" ) ];
+  assert.deepEqual( F.sortJobs( input, { id : "last-run", direction : "asc" } ).map( ( j ) => j.job ), [ "bad", "none", "old", "new", "utc" ] );   // 18:00Z is 13:00 in New York, an hour after new's 12:00, so the zone is compared, not the text
+  assert.deepEqual( F.sortJobs( input, { id : "last-run", direction : "desc" } ).map( ( j ) => j.job ), [ "utc", "new", "old", "bad", "none" ] );
+  assert.deepEqual( F.HEALTH_URGENCY, [ "healthy", "behind", "silent", "unknown", "failing" ] );
+  assert.deepEqual( F.STATE_ORDER, [ "healthy", "behind", "failing", "silent", "unknown" ], "the default order keeps its own ranking" );
 } );
