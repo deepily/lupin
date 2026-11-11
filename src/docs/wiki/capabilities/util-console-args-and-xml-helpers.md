@@ -15,7 +15,6 @@ pins:
   - cosa.utils.util_xml.get_nested_list@a0fdcee8e1
   - cosa.utils.util_xml.get_value_by_xml_tag_name@b410c0e986
   - cosa.utils.util_xml.get_xml_tag_and_value_by_name@876202fc8c
-  - cosa.utils.util_xml.remove_xml_escapes@b037863946
   - cosa.utils.util_xml.rescue_code_using_tick_tick_tick_syntax@8361935f69
   - cosa.utils.util_xml.strip_all_white_space@e46d58d72a
 ---
@@ -28,7 +27,7 @@ Console and argument helpers in `cosa.utils.util`, and the deprecated `util_xml`
 - `print_banner( msg, expletive, flex, ... )`, `print_list` and `print_simple_file_list( path )` (runs `ls -alh`) print to the console.
 - `print_stack_trace( exception, explanation, caller, debug )` always prints the exception type and message. It prints the frames only when `debug=True`.
 - `truncate_string( s, max_len=64 )` cuts a string. `generate_domain_names( count )` makes random test names. `add_to_path( path, idx )` adds to `sys.path` once. `init( debug )` sets the debug flag.
-- `util_xml` is deprecated and warns on import. New code uses `cosa.agents.io_models.xml_models`. It holds `get_value_by_xml_tag_name`, `get_xml_tag_and_value_by_name`, `remove_xml_escapes` and `strip_all_white_space`.
+- `util_xml` is deprecated and warns on import. New code uses `cosa.agents.io_models.xml_models`. It holds `get_value_by_xml_tag_name`, `get_xml_tag_and_value_by_name` and `strip_all_white_space`. It imports `remove_xml_escapes` from `util_xml_pydantic` rather than keeping a copy.
 - `get_nested_list` returns the `<line>` tags inside a parent tag, default `code`. `rescue_code_using_tick_tick_tick_syntax` wraps a fenced python block in `<line>` tags, or returns an empty string.
 
 ## Don't
