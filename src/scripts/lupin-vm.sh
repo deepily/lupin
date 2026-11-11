@@ -190,7 +190,7 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           the default) or on the VM (vm). Reads Secret Manager lupin-test-mock-jobs-email
                           and lupin-test-mock-jobs-password with your own gcloud login. The values travel
                           on stdin: they are never in a command line, a log or this verb's output. It says
-                          only set / replaced / unchanged. reuse-vector-refresh.sh --install names this
+                          only set / replaced / unchanged. The refresh cron line names this
                           file in REUSE_VECTOR_REFRESH_ENV.
   push-dist               ship the built static/dist bundles (multiplexer, console, doc-podcast) from this
                           checkout to the VM checkout, which git cannot carry. Prints each bundle's build time beside the newest
@@ -1228,9 +1228,10 @@ grep -qxF 'source ~/.bash_aliases_uc' ~/.bashrc || echo 'source ~/.bash_aliases_
 echo '== export contract-declared vars in ~/.bashrc (whole-line, idempotent; set derived from src/conf/env-contract.tsv) =='
 $EXPORT_BLOCK
 echo '== ensure ~/.lupin/config exists (lupin CLI: api_url + notification recipient) =='
-mkdir -p ~/.lupin
+[ -d ~/.lupin ] || mkdir -m 750 ~/.lupin
+chmod g-w,o-rwx ~/.lupin
 if [ ! -f ~/.lupin/config ]; then
-  cat > ~/.lupin/config <<'LUPINCFG'
+  ( umask 027; cat > ~/.lupin/config <<'LUPINCFG'
 [environments]
 default = local
 
@@ -1238,10 +1239,13 @@ default = local
 api_url = http://localhost:7999
 global_notification_recipient = ricardo.felipe.ruiz@gmail.com
 LUPINCFG
+  )
   echo '   created ~/.lupin/config'
 else
   echo '   ~/.lupin/config already present — left as-is'
 fi
+echo '== tighten ~/.lupin modes: directory at most 750, config and notification key at most 640 (never loosened) =='
+for lf in ~/.lupin/config ~/.lupin/notification-api.key; do [ -e \"\$lf\" ] && chmod g-wx,o-rwx \"\$lf\"; done; true
 echo '== done — open a fresh shell (or: source ~/.bashrc) to pick up aliases + roots =='"
             log "regenerating uc aliases + wiring ~/.bashrc on VM"
             gcloud compute ssh "$VM_NAME" \
@@ -1382,7 +1386,7 @@ $RCMD_TM"
                 { printf '%s\n' "$tm_email"; printf '%s\n' "$tm_password"; } | bash -c "$RCMD_TM"
             fi
             unset tm_email tm_password
-            log "done. Install the cron lines on that host with: src/scripts/reuse-vector-refresh.sh --install (a person runs it)."
+            log "done. Install the cron lines on that host with: src/scripts/lupin-vm.sh install-refresh-cron (a person runs it)."
         fi
         ;;
 
@@ -1458,7 +1462,9 @@ export LUPIN_ROOT='$IR_ROOT' DEEPILY_DATA_DIR='$IR_DATA' PLANNING_IS_PROMPTING_R
 [ -r \"\$HOME/.lupin/reuse-vector-refresh.env\" ] || echo \"WARN: \$HOME/.lupin/reuse-vector-refresh.env is missing, so the refresh cannot log in; run lupin-vm.sh push-test-mock-login $IR_WHERE\"
 cd '$IR_ROOT'
 $IR_PREP
-bash src/scripts/reuse-vector-refresh.sh --install
+# cron_generate writes the one job's lines (--only leaves every other crontab line alone). The VM has no .venv.
+CGPY=\"\$LUPIN_ROOT/.venv/bin/python\"; [ -x \"\$CGPY\" ] || CGPY=\"\$HOME/.venv-lupin-mcp/bin/python\"
+PYTHONPATH=\"\$LUPIN_ROOT/src\" \"\$CGPY\" -m lupin_mcp.cron_generate --only vector-refresh --install
 bash src/scripts/reuse-vector-refresh.sh --status"
         if [ "$DRY_RUN" -eq 1 ]; then
             log "(dry-run) would run on the $IR_WHERE host:"

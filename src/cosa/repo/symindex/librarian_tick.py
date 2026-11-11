@@ -443,21 +443,6 @@ def crontab_command( environ, own_variable=None ):
     return [ environ.get( own_variable, "crontab" ) ] if own_variable else [ "crontab" ]
 
 
-def holds_generated_block( cmd ):
-    """
-    Say whether a crontab already holds the block cron_generate writes.
-
-    Requires:
-        - cmd is the crontab command as a list
-    Ensures:
-        - returns True when a line ends with GENERATED_BLOCK_TAG
-        - returns False when there is no crontab, it cannot be read, or no line carries the tag
-    """
-    try: read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
-    except OSError: return False
-    return read.returncode == 0 and any( line.rstrip().endswith( GENERATED_BLOCK_TAG ) for line in read.stdout.splitlines() )
-
-
 def install_moved_text( root ):
     """
     Say where the cron installer went.

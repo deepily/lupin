@@ -20,7 +20,9 @@ def test_the_vm_install_sets_all_three_variables_from_the_known_vm_paths_and_not
     assert done.returncode == 0
     assert "export LUPIN_ROOT='/mnt/lupin-data/lupin' DEEPILY_DATA_DIR='/mnt/lupin-data/projects-data' PLANNING_IS_PROMPTING_ROOT='/mnt/lupin-data/planning-is-prompting'" in done.stderr + done.stdout
     assert "/dev/box" not in done.stdout + done.stderr
-    assert "reuse-vector-refresh.sh --install" in done.stdout + done.stderr and "reuse-vector-refresh.sh --status" in done.stdout + done.stderr
+    text = done.stdout + done.stderr
+    assert "lupin_mcp.cron_generate --only vector-refresh --install" in text and "reuse-vector-refresh.sh --status" in text
+    assert "reuse-vector-refresh.sh --install" not in text and ".venv-lupin-mcp/bin/python" in text
 
 
 def test_the_install_warns_when_the_test_login_file_is_missing_and_names_the_verb_that_writes_it():
@@ -46,7 +48,7 @@ def test_the_vm_install_creates_the_handoff_folder_for_both_users_before_install
     text = vm( "install-refresh-cron", "vm" ).stderr + vm( "install-refresh-cron", "vm" ).stdout
     create = 'sudo install -d -m 2775 -o 1001 -g "$( id -g )" "/mnt/lupin-data/lupin/$HANDOFF"'
     assert create in text and "reuse candidate purpose handoff subdir" in text
-    assert text.index( create ) < text.index( "reuse-vector-refresh.sh --install" )
+    assert text.index( create ) < text.index( "cron_generate --only vector-refresh --install" )
 
 
 def test_the_handoff_step_reads_the_real_ini_key_and_refuses_when_it_is_absent( tmp_path ):
@@ -94,7 +96,7 @@ def _run_numpy_step( tmp_path, with_numpy, with_uv ):
 
 def test_the_vm_install_puts_numpy_in_the_venv_before_installing_the_cron_lines():
     text = vm( "install-refresh-cron", "vm" ).stdout
-    assert text.index( "requirements-reuse-vector-refresh.txt" ) < text.index( "reuse-vector-refresh.sh --install" )
+    assert text.index( "requirements-reuse-vector-refresh.txt" ) < text.index( "cron_generate --only vector-refresh --install" )
 
 
 def test_the_numpy_step_uses_uv_with_the_pinned_file_when_the_venv_lacks_numpy( tmp_path ):

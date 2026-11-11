@@ -698,6 +698,22 @@ pfv_mode_matches() {
     return 1
 }
 
+# ── pfv_mode_within ──────────────────────────────────────────────────────────
+# Say whether an observed octal mode grants nothing beyond a ceiling mode.
+#
+# Requires:
+#   - $1 = observed octal mode (as `stat -c %a` prints it), $2 = ceiling octal mode
+# Ensures:
+#   - returns 0 when every permission bit set in $1 is also set in $2 (750 is within 750 and 700; 755 is not)
+#   - returns 1 when $1 grants any bit $2 does not
+#   - returns 2 when either value is empty or not octal (UNKNOWN is never folded into a pass)
+pfv_mode_within() {
+    local observed="$1" ceiling="$2"
+    case "$observed" in ""|*[!0-7]*) return 2 ;; esac
+    case "$ceiling"  in ""|*[!0-7]*) return 2 ;; esac
+    [ $(( 8#$observed & ~8#$ceiling & 8#7777 )) -eq 0 ]
+}
+
 # ── pfv_owner_matches ────────────────────────────────────────────────────────
 # Compare an observed numeric uid:gid against an expected one.
 #
