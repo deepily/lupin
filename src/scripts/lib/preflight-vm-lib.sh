@@ -1479,7 +1479,7 @@ pfv_test_login_env_status() {
 #   - prints PRESENT and returns 0 when such a line exists
 #   - prints ABSENT and returns 1 otherwise, including for empty text and for a commented-out line
 pfv_cron_status() {
-    if printf '%s\n' "${1:-}" | grep -Eq '^[[:space:]]*[^#[:space:]].* vector-refresh cron .*# reuse-vector-refresh[[:space:]]*$'; then
+    if grep -Eq '^[[:space:]]*[^#[:space:]].* vector-refresh cron .*# reuse-vector-refresh[[:space:]]*$' <<< "${1:-}"; then
         printf 'PRESENT'; return 0
     fi
     printf 'ABSENT'; return 1
@@ -1494,7 +1494,7 @@ pfv_cron_status() {
 # Ensures:
 #   - returns 0 when a line equals $2 exactly (a longer name that merely contains it does not count), else 1
 pfv_overlay_present() {
-    printf '%s\n' "${1:-}" | grep -Fxq -- "$2"
+    grep -Fxq -- "$2" <<< "${1:-}"
 }
 
 # ── pfv_test_login_email ─────────────────────────────────────────────────────
