@@ -13,7 +13,6 @@ References:
 
 import json
 import time
-import requests
 from typing import Optional
 
 from cosa.agents.notification_proxy import option_sentinels
@@ -32,37 +31,7 @@ from cosa.agents.notification_proxy.config import (
 )
 import cosa.utils.util as cu
 from cosa.agents.utils.proxy_agents.base_responder import print_stats_table
-
-# Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
-# ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
-# explicit headroom, NOT a coverage guarantee. `:7999` runs `uvicorn --reload`
-# and the reloader parent holds the listening socket across a restart, so the
-# kernel ACCEPTS a request nothing is there to answer and the caller hangs
-# instead of getting a fast ConnectionRefused. The prior 10s sat under the
-# 18.76s observed max (measured n=143: min 6.59s, median 6.91s).
-#
-# EXPOSED VIA CLI MODE: `python -m cosa.agents.notification_proxy` runs this
-# responder in a SEPARATE OS process, so a `:7999` reload does not tear the
-# caller down alongside the request. That standalone mode is the documented,
-# actually-exercised one.
-#
-# Full derivation: the dev-server-reload-availability doc, section 9(a), removed from the tree; see 8420e8b0a^.
-#
-# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
-# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
-# It does NOT return members whose budget is carried in a Pydantic FIELD rather
-# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
-# inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
-# (Cited by symbol, not by line: this used to cite a line range in notify_user_async.py and a
-#  seven-line fix above it silently repointed both copies at an unrelated comment block.)
-# Two such members were missed on the first pass for exactly this reason.
-# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
-# Run BOTH, or the set you get back is the set the first grep can see.
-#
-# TRADE: a hung server now stalls a response POST ~30s instead of ~10s. Not free.
-_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
-
-
+from cosa.agents.utils.proxy_agents.rest_submitter import submit_notification_response
 
 # The two escapes every document choice card appends. Imported from the expeditor so
 # a rename there cannot leave this list quietly wrong — the sentinel would then be able
@@ -458,43 +427,15 @@ class NotificationResponder:
         Returns:
             bool: True if response was submitted successfully
         """
-        url = f"http://{self.host}:{self.port}/api/notify/response"
-
-        payload = {
-            "notification_id" : notification_id,
-            "response_value"  : response_value
-        }
-
-        headers       = { "Content-Type": "application/json" }
         authorization = self.authorization_fn() if self.authorization_fn is not None else None
-        if authorization is not None: headers[ "Authorization" ] = authorization
-
-        try:
-            response = requests.post(
-                url,
-                json    = payload,
-                headers = headers,
-                timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
-            )
-
-            if response.status_code == 200:
-                if self.verbose:
-                    data = response.json()
-                    print( f"[Responder] API response: {data.get( 'status', '?' )} — {data.get( 'message', '' )[ :80 ]}" )
-                return True
-            else:
-                print( f"[Responder] API error: HTTP {response.status_code} — {response.text[ :200 ]}" )
-                return False
-
-        except requests.ConnectionError:
-            print( f"[Responder] API connection error: server not reachable at {url}" )
-            return False
-        except requests.Timeout:
-            print( f"[Responder] API timeout submitting response" )
-            return False
-        except Exception as e:
-            print( f"[Responder] API error: {e}" )
-            return False
+        return submit_notification_response(
+            notification_id,
+            response_value,
+            host          = self.host,
+            port          = self.port,
+            verbose       = self.verbose,
+            authorization = authorization
+        )
 
     def print_stats( self ):
         """Print summary statistics."""

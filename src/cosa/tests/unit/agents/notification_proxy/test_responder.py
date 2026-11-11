@@ -163,7 +163,7 @@ class TestHandleNotificationUpdate:
         script.can_handle.return_value = False
         rule.can_handle.return_value   = True
         rule.respond.return_value      = "academic"
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: { "status": "ok", "message": "done" } ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200, json=lambda: { "status": "ok", "message": "done" } ) ):
             self._run( r, { "notification": _notif( abstract="ctx" ) } )
         assert r.stats[ "responses_sent" ] == 1
         assert r.stats[ "rules_used" ] == 1
@@ -173,7 +173,7 @@ class TestHandleNotificationUpdate:
         script.can_handle.return_value = False
         rule.can_handle.return_value   = True
         rule.respond.return_value      = "academic"
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
             self._run( r, _notif() )
         assert r.stats[ "rules_used" ] == 1
 
@@ -183,7 +183,7 @@ class TestHandleNotificationUpdate:
         def fake_post( url, **kw ):
             captured[ "value" ] = kw[ "json" ][ "response_value" ]
             return MagicMock( status_code=200, json=lambda: {} )
-        with patch.object( rr.requests, "post", side_effect=fake_post ):
+        with patch.object( requests, "post", side_effect=fake_post ):
             self._run( r, _notif( response_type="yes_no" ) )
         assert captured[ "value" ] == "no"
         assert r.stats[ "skipped" ] == 1
@@ -194,7 +194,7 @@ class TestHandleNotificationUpdate:
         def fake_post( url, **kw ):
             captured[ "value" ] = kw[ "json" ][ "response_value" ]
             return MagicMock( status_code=200, json=lambda: {} )
-        with patch.object( rr.requests, "post", side_effect=fake_post ):
+        with patch.object( requests, "post", side_effect=fake_post ):
             self._run( r, _notif( response_type="open_ended" ) )
         assert captured[ "value" ] == "cancel"
 
@@ -202,7 +202,7 @@ class TestHandleNotificationUpdate:
         r, rule, script, llm = _make_responder( debug=True )
         script.can_handle.return_value = True
         script.respond.return_value    = "from-script"
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
             self._run( r, _notif() )
         assert r.stats[ "script_matcher_used" ] == 1
 
@@ -212,7 +212,7 @@ class TestHandleNotificationUpdate:
         script.respond.return_value    = None
         rule.can_handle.return_value   = True
         rule.respond.return_value      = "from-rules"
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
             self._run( r, _notif() )
         assert r.stats[ "rules_used" ] == 1
 
@@ -222,7 +222,7 @@ class TestHandleNotificationUpdate:
         rule.can_handle.return_value   = False
         llm.can_handle.return_value    = True
         llm.respond = AsyncMock( return_value={ "answers": { "a": "b" } } )   # dict → json.dumps display path
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
             self._run( r, _notif() )
         assert r.stats[ "llm_used" ] == 1
 
@@ -259,7 +259,7 @@ class TestHandleNotificationUpdate:
         script.can_handle.return_value = False
         rule.can_handle.return_value   = True
         rule.respond.return_value      = "academic"
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=500, text="err" ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=500, text="err" ) ):
             self._run( r, _notif() )
         assert r.stats[ "errors" ] == 1
 
@@ -268,32 +268,32 @@ class TestSubmitResponse:
 
     def test_success_verbose( self ):
         r, _, _, _ = _make_responder( verbose=True )
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: { "status": "ok", "message": "m" } ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200, json=lambda: { "status": "ok", "message": "m" } ) ):
             assert r._submit_response( "n1", "yes" ) is True
 
     def test_success_non_verbose( self ):
         r, _, _, _ = _make_responder( verbose=False )
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200 ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200 ) ):
             assert r._submit_response( "n1", "yes" ) is True
 
     def test_non_200_returns_false( self ):
         r, _, _, _ = _make_responder()
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=403, text="nope" ) ):
+        with patch.object( requests, "post", return_value=MagicMock( status_code=403, text="nope" ) ):
             assert r._submit_response( "n1", "yes" ) is False
 
     def test_connection_error_returns_false( self ):
         r, _, _, _ = _make_responder()
-        with patch.object( rr.requests, "post", side_effect=requests.ConnectionError() ):
+        with patch.object( requests, "post", side_effect=requests.ConnectionError() ):
             assert r._submit_response( "n1", "yes" ) is False
 
     def test_timeout_returns_false( self ):
         r, _, _, _ = _make_responder()
-        with patch.object( rr.requests, "post", side_effect=requests.Timeout() ):
+        with patch.object( requests, "post", side_effect=requests.Timeout() ):
             assert r._submit_response( "n1", "yes" ) is False
 
     def test_generic_exception_returns_false( self ):
         r, _, _, _ = _make_responder()
-        with patch.object( rr.requests, "post", side_effect=ValueError( "weird" ) ):
+        with patch.object( requests, "post", side_effect=ValueError( "weird" ) ):
             assert r._submit_response( "n1", "yes" ) is False
 
     # ---- the credential (row e20e249a) -----------------------------------------------
@@ -301,21 +301,21 @@ class TestSubmitResponse:
     def test_sends_the_token_its_listener_holds( self ):
         r, _, _, _ = _make_responder()
         r.authorization_fn = lambda: "Bearer tok"
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
             assert r._submit_response( "n1", "yes" ) is True
         assert m.call_args[ 1 ][ "headers" ] == { "Content-Type": "application/json", "Authorization": "Bearer tok" }
 
     def test_an_unwired_responder_sends_no_authorization_header( self ):
         r, _, _, _ = _make_responder()
         assert r.authorization_fn is None
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
             r._submit_response( "n1", "yes" )
         assert m.call_args[ 1 ][ "headers" ] == { "Content-Type": "application/json" }
 
     def test_a_listener_that_has_not_logged_in_yet_sends_no_authorization_header( self ):
         r, _, _, _ = _make_responder()
         r.authorization_fn = lambda: None
-        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
+        with patch.object( requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
             r._submit_response( "n1", "yes" )
         assert m.call_args[ 1 ][ "headers" ] == { "Content-Type": "application/json" }
 
@@ -347,7 +347,7 @@ class TestHumanOnlyExemption:
         def fake_post( url, **kw ):
             posted[ "called" ] = True
             return MagicMock( status_code=200, json=lambda: {} )
-        with patch.object( rr.requests, "post", side_effect=fake_post ):
+        with patch.object( requests, "post", side_effect=fake_post ):
             self._run( r, _notif( response_type="yes_no", human_only=True ) )
         assert posted[ "called" ] is False, "proxy answered a human_only ask in dry_run — it must not"
         assert r.stats[ "skipped" ] == 1
@@ -363,7 +363,7 @@ class TestHumanOnlyExemption:
         def fake_post( url, **kw ):
             posted[ "called" ] = True
             return MagicMock( status_code=200, json=lambda: {} )
-        with patch.object( rr.requests, "post", side_effect=fake_post ):
+        with patch.object( requests, "post", side_effect=fake_post ):
             self._run( r, _notif( response_type="yes_no", human_only=True ) )
         assert posted[ "called" ] is False, "proxy answered a human_only ask — it must not"
         assert r.stats[ "skipped" ] == 1
@@ -378,7 +378,7 @@ class TestHumanOnlyExemption:
         def fake_post( url, **kw ):
             posted[ "called" ] = True
             return MagicMock( status_code=200, json=lambda: {} )
-        with patch.object( rr.requests, "post", side_effect=fake_post ):
+        with patch.object( requests, "post", side_effect=fake_post ):
             self._run( r, _notif( response_type="yes_no", human_only=True ) )
         assert posted[ "called" ] is False, "a strategy answered a human_only ask — it must be skipped first"
         assert r.stats[ "skipped" ] == 1

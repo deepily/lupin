@@ -2,7 +2,7 @@
 capability: notification-proxy
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.notification_proxy.responder.NotificationResponder@a1de28efc4
+  - cosa.agents.notification_proxy.responder.NotificationResponder@d4a36bc3b3
   - cosa.agents.notification_proxy.responder.NotificationResponder.handle_event@23ea9bdd9a
   - cosa.agents.notification_proxy.strategies.expediter_rules.ExpediterRuleStrategy@bf4c4fe8e4
   - cosa.agents.notification_proxy.strategies.expediter_rules.ExpediterRuleStrategy.can_handle@edfcb2354c
