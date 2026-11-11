@@ -298,8 +298,16 @@ class TestCallApi:
         assert out.input_tokens  == 0
         assert out.output_tokens == 0
         assert out.sdk_cost_usd  == 0.0
-        assert out.stop_reason   == "end_turn"               # None → default
+        assert out.stop_reason   is None                     # no stop reason reported: unknown, never "end_turn"
         assert capsys.readouterr().out == ""                 # debug is off
+
+    def test_no_result_message_leaves_the_stop_reason_unknown( self ):
+        # A stream that ends with no ResultMessage never reported how it finished.
+        c = _make_client()
+        with _patch_sdk_types(), patch.object( ac, "sdk_query", _fake_sdk_query( [ _FakeTextBlock( "partial" ) ], {} ) ):
+            out = _run( c._call_api( model="m", system_prompt="SYS", user_message="hi", temperature=0.7 ) )
+        assert out.content     == "partial"
+        assert out.stop_reason is None
 
 
 # ----------------------------------------------------------------------------
