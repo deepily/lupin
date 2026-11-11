@@ -112,10 +112,11 @@
                     "name": "Scheduler repo key in the registry",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "EXECUTOR: AI. C-AC5 and C-AC9 pass: Lupin's 17 generated lines are unchanged and a scratch second-repo row yields lines with its own root, --root and config; 100% lines, branches and functions on the changed files on cron_generate.py",
+                    "acceptance": "EXECUTOR: AI. C-AC5 and C-AC9 pass: Lupin's 17 generated lines are unchanged except the cron-log path, which moves per ph1-s12 and a scratch second-repo row yields lines with its own root, --root and config; 100% lines, branches and functions on the changed files on cron_generate.py",
                     "owner_role": "implementer",
                     "depends_on": [
-                        "ph1-s3"
+                        "ph1-s3",
+                        "ph1-s12"
                     ]
                 },
                 {
@@ -126,7 +127,8 @@
                     "acceptance": "EXECUTOR: HUMAN (seats install nothing in cron, row 449bf026). Rick runs python -m lupin_mcp.cron_generate --install from the main checkout; done when --status shows the lines match --print",
                     "owner_role": "operator",
                     "depends_on": [
-                        "ph1-s7"
+                        "ph1-s7",
+                        "ph1-s12"
                     ]
                 },
                 {
@@ -155,10 +157,10 @@
                 },
                 {
                     "key": "ph1-s12",
-                    "name": "Move run history from io/ to DataRoot",
+                    "name": "Move every io/ reference of the code-health jobs",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "EXECUTOR: AI. The duplicate check's run history moves from io/duplicate-check-daily/ to the code-health leaf under fleet_data_root (Q2 retires DATA_RELATIVE), and the duplicate-check registry paths that hardcode io/ (src/conf/job-registry.json lines 34, 39, 55 and 83: summary_path, lock_path, the runs.jsonl evidence path, cron_log) point at the new folder. After the move the jobs page reads the same last-run records as before (count and newest timestamp equal for each moved job, a literal captured before the move) and no history is left in io/; 100% lines, branches and functions on the changed files",
+                    "acceptance": "EXECUTOR: AI. Scope is EVERY io/ reference in the code-health jobs, not a fixed list. Known ones, as a positive control the census must find first: the five io/duplicate-check-daily paths in the duplicate-check registry entry (src/conf/job-registry.json lines 34 summary_path, 39 lock_path, 55 runs.jsonl evidence, 60 daily.log evidence, 83 cron_log); DATA_RELATIVE = \"/io\" at src/cosa/repo/duplicate_check/proof/proof_cli.py:33 and its use at :361; src/lupin_mcp/duplicate_check_daily.py:883; src/lupin_mcp/duplicate_check_history.py:237; src/lupin_mcp/duplicate_check_status.py:231 and :351. A fixed-string census (git grep for \"io/\" and \"/io\" and \"io\" as a path part over src/lupin_mcp/duplicate_check_*.py, src/cosa/repo/duplicate_check/ and src/cosa/rest/routers/duplicate_check_status.py) states its count before and after: measured 11 Nov at 12082dcde, 6 code lines in 4 files plus 2 history comments in proof_run.py (left as they are) and 5 registry paths; after, 0 code lines and 0 registry paths. After the move the jobs page, the duplicate-check status page AND the duplicate_check_history command each read the moved records (count and newest timestamp equal to a literal captured before the move); no history is left in io/ and no code-health code path still resolves under io/; 100% lines, branches and functions on the changed files",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph1-s1"

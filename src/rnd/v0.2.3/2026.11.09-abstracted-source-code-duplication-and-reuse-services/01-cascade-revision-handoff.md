@@ -109,7 +109,7 @@ flowchart LR
 - **S9-2:** a registry row, not a listing in `external repos`, turns code health on for a repo; B-AC6 checks the directory-name match only for repos with a row. `par-pacific` and `claude-plans` do not match their directory names and stay off.
 - **S9-3 to S9-6:** coverage wording on B-AC2, B-AC3 and B-AC5; Open sub-question 4; the drift check runs at the start of every Jev run and at the end of onboarding; leftover wording.
 
-**Manager ruling on Q2's consequence (María, 11 Nov; not one of Rick's rulings):** Q2's move stays: the duplicate check's run history moves from `io/` to the `code-health` leaf under `fleet_data_root`, the registry paths that hardcode `io/` follow, and the jobs page must read the moved files. This was an unwritten consequence in the plan until the Step 9 light review (H1). It is manifest step `ph1-s12`; C-AC1, C-AC2 and D-AC1 now say "unchanged except the run-history location".
+**Manager ruling on Q2's consequence (María, 11 Nov; not one of Rick's rulings):** Q2's move stays: the duplicate check's run history moves from `io/` to the `code-health` leaf under `fleet_data_root`, **every** `io/` reference in the code-health jobs follows (the five registry paths, six code lines in four files, measured at `12082dcde`), and the jobs page, the status page and the history command must read the moved files. This was an unwritten consequence in the plan until the Step 9 light review (H1, then R1 and R2). It is manifest step `ph1-s12`; C-AC1, C-AC2 and D-AC1 say "unchanged except the run-history location", and C-AC5 says "the same 17 lines except the cron-log path".
 
 **Retired during the cascade:** a second settings file; `TaskSink` and `RepoSpec` as new classes; `Embedder` as a new wrapper; `judges.*`, `schedule.*`, `notify`, `doc_lint` and `repo.branch` as settings.
 
@@ -143,7 +143,7 @@ None of these is a decision for Rick. Each has an owner and a done-signal in the
 | §7 item 10: route `vector_build.py:61` through `EmbeddingProvider` | §6.2, C-AC4 | The step 1 builder; lands before or with C-AC4 |
 | **Pocholo's leftover 1:** what `reinstall_command` prints for the ceiling | `duplicate_check_daily.py:523-528` (`limit_flag`, `reinstall_command` print `--ceiling N`) | **Manifest step `ph1-s13`.** After the ceiling moves to the INI, the printed install text must either omit `--ceiling` or print the INI key; the step 1 builder chooses and tests both cases |
 | **Pocholo's leftover 2:** a negative control for B-AC6 | §6.1 | **Manifest step `ph1-s14`.** A registry row whose repo name differs from its directory must make the check fail |
-| The run-history move from `io/` to the `code-health` leaf (Q2) | §6.2 `DataRoot`, C-AC2 | **Manifest step `ph1-s12`** (manager ruling, §4): the registry paths at `src/conf/job-registry.json` lines 34, 39, 55 and 83 follow, and the jobs page reads the same records |
+| The run-history move from `io/` to the `code-health` leaf (Q2) | §6.2 `DataRoot`, C-AC2, C-AC5 | **Manifest step `ph1-s12`** (manager ruling, §4): every `io/` reference of the code-health jobs follows, starting from the five registry paths (`src/conf/job-registry.json` lines 34, 39, 55, 60, 83) and the code lines named in the step; the jobs page, the status page and the history command read the same records |
 | The `lupin-mobile` owner and manager row | §6.3 step 2 | **Filed:** row `e1778814-f4fa-4def-a222-402d64379f07`, owned by Tiffany. Phase 2 step 1 in the manifest checks it is live |
 | ~~Whether the 1 Oct change to `rule_lists.py` (`34988c0f7`) carried Rick's word~~ | §6.2 | **Closed:** Rick ruled keep (row `6b65f04e`). The plan's §6.2 paragraph now says so too |
 
@@ -159,6 +159,7 @@ The deeper redline in planning-is-prompting is not written; the Manager files it
 6. **Reviewer citations drift.** Four of the Stage 1 findings carried a wrong path or line; each cite was re-opened before use. Anchor: author deposit on the `post-game` topic, 11 Nov.
 7. **"Add EXECUTOR tags to every AC" is an instruction to create ACs when a section has none.** The review cascade input here had no ACs at all. Anchor: author deposit, same.
 8. **A decision made after Stage 3 sits outside the cascade's 1-revision cap.** Rick's rulings needed their own revision and re-review; the workflow does not say how that loop is counted. Anchor: rows `b73470ed` and `d8d88860`.
+9. **The light-review cap was exceeded once on this run, because the reviewer's own count was short.** A move ruling needs a census of every reader before the step is written: the run-history move was first scoped to four registry lines (H1) and then widened to every `io/` reference in the code-health jobs (R1, R2). Anchor: light-review re-check of `12082dcde`, 11 Nov.
 
 ## 7. Hand-off statement
 
