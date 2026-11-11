@@ -49,6 +49,8 @@ from dataclasses import dataclass
 from enum        import Enum
 from pathlib     import Path
 
+from cosa.utils.atomic_json import load_json_dict
+
 
 # The on-disk receipt filename shape: <RECEIPT_PREFIX><session_id>.json, living
 # under fleet_data_root() — never the repo root. A hold written to the repo root
@@ -424,12 +426,7 @@ def read_receipt( base_dir, session_id ):
         - returns the parsed dict, or None when absent/unreadable/not a dict
         - never raises
     """
-    try:
-        with open( receipt_path( base_dir, session_id ), "r", encoding="utf-8" ) as fh:
-            data = json.load( fh )
-    except ( OSError, json.JSONDecodeError, ValueError ):
-        return None
-    return data if isinstance( data, dict ) else None
+    return load_json_dict( receipt_path( base_dir, session_id ), default=None )
 
 
 def _norm( value ):
