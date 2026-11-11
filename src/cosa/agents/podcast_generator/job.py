@@ -291,14 +291,10 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # Mirrors PresentationGeneratorJob._execute in presentation_generator/job.py — match the receiving
             # logic in get_io_file in cosa/rest/routers/io_files.py (handles abs / "io/" / "/" prefixes).
             from cosa.agents.podcast_generator.config import LANGUAGE_NAMES
-            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
+            from cosa.agents.podcast_generator.play_links import io_relative, language_card_lines, ordered_languages, source_ref
             io_base = cu.get_project_root() + "/io/"
 
-            def _to_rel( p ):
-                if not p: return None
-                if p.startswith( io_base ): return p[ len( io_base ): ]
-                if p.startswith( "io/" ):   return p[ 3: ]
-                return p.lstrip( "/" )
+            def _to_rel( p ): return io_relative( p, io_base )
 
             languages  = getattr( self, "target_languages", [] ) or [ "en" ]
 
@@ -312,10 +308,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
 
             # Ordered language list: requested order first, then any extra languages
             # that actually produced an artifact but were not in target_languages.
-            ordered_langs = [ l for l in languages if l in audio_by_lang or l in script_by_lang ]
-            for l in list( audio_by_lang ) + list( script_by_lang ):
-                if l not in ordered_langs:
-                    ordered_langs.append( l )
+            ordered_langs = ordered_languages( languages, audio_by_lang, script_by_lang )
 
             audio_rel  = _to_rel( self.audio_path )
             script_rel = _to_rel( self.script_path )
@@ -375,20 +368,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             source_rel = source_ref( full_path, cu.get_project_root() )
 
             # One line per language: "**Mexican Spanish**: 📝 Script | ▶️ Play Here | 🎧 Listen | ⬇️ Download"
-            per_language_lines = []
-            for lang in ordered_langs:
-                label  = LANGUAGE_NAMES.get( lang, lang )
-                a_rel  = _to_rel( audio_by_lang.get( lang ) )
-                s_rel  = _to_rel( script_by_lang.get( lang ) )
-                parts  = []
-                s_link = script_link( s_rel )
-                if s_link: parts.append( s_link )
-                if a_rel:
-                    title = read_script_title( io_base + s_rel ) if s_rel else None
-                    parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
-                if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
-                if parts:
-                    per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
+            per_language_lines = language_card_lines( ordered_langs, LANGUAGE_NAMES, audio_by_lang, script_by_lang, source_rel, io_base, drive[ "language_links" ] )
 
             # Rich markdown abstract
             lines = [ "**Podcast Activity Report**", "" ]

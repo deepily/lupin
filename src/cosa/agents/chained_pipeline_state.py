@@ -82,39 +82,19 @@ class ChainedDeepResearchAgent:
         from cosa.agents.deep_research.config import ResearchConfig
         from cosa.agents.deep_research.cost_tracker import CostTracker, BudgetExceededError
         from cosa.agents.deep_research.seed_context import query_with_seed_context
-        from cosa.agents.deep_research.cli import (
-            run_research,
-            generate_abstract_for_cli,
-            save_report_with_frontmatter,
-        )
+        from cosa.agents.deep_research.cli import run_research
+        from cosa.agents.deep_research.job import abstract_and_save_report, derive_session_name, resolve_output_settings
         from cosa.config.configuration_manager import ConfigurationManager
-        from cosa.memory.gister import Gister
-        import cosa.utils.util as cu
 
         # Initialize configuration
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
-        # Get storage configuration
-        storage_backend = config_mgr.get( "deep research storage backend", default="local" )
-        gcs_bucket = config_mgr.get( "deep research gcs bucket", default=None )
-        output_dir = config_mgr.get( "deep research output directory", default="/io/deep-research" )
+        # Get storage configuration and the full output path
+        output_settings = resolve_output_settings( config_mgr )
+        storage_backend = output_settings[ 0 ]
 
-        # Build full output path
-        if not output_dir.startswith( "/" ):
-            output_dir = cu.get_project_root() + "/" + output_dir
-        elif not output_dir.startswith( cu.get_project_root() ):
-            output_dir = cu.get_project_root() + output_dir
-
-        # Generate session_name from query using Gister
-        gister = Gister( debug=self.debug )
-        session_name = gister.get_gist(
-            self.query,
-            prompt_key="prompt template for deep research session name"
-        )
-        session_name = session_name.lower().strip() if session_name else "general research query"
-
-        # Derive semantic_topic from session_name
-        semantic_topic = session_name.replace( " ", "-" )
+        # Generate session_name from query using Gister, and derive semantic_topic from it
+        session_name, semantic_topic = derive_session_name( self.query, debug=self.debug )
 
         if self.debug:
             print( f"[DR] Session name: {session_name}" )
@@ -170,28 +150,9 @@ class ChainedDeepResearchAgent:
             if report is None:
                 return { "cancelled": True }
 
-            # Generate abstract
-            abstract = await generate_abstract_for_cli(
-                report       = report,
-                config       = config,
-                cost_tracker = cost_tracker,
-                debug        = self.debug
-            )
-
-            # Save report with frontmatter
-            report_path = save_report_with_frontmatter(
-                report          = report,
-                query           = self.query,
-                abstract        = abstract,
-                semantic_topic  = semantic_topic,
-                session_id      = session_id,
-                cost_tracker    = cost_tracker,
-                config          = config,
-                output_dir      = output_dir,
-                user_email      = self.user_email,
-                storage_backend = storage_backend,
-                gcs_bucket      = gcs_bucket,
-                debug           = self.debug
+            # Generate abstract, then save the report with frontmatter
+            abstract, report_path = await abstract_and_save_report(
+                report, self.query, config, cost_tracker, session_id, semantic_topic, output_settings, self.user_email, debug=self.debug
             )
 
             # Get cost summary

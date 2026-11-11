@@ -264,14 +264,8 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             - a Drive folder link, when made, is stored in artifacts
         """
         import urllib.parse
-        from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
+        from cosa.agents.podcast_generator.play_links import io_relative, language_card_lines, ordered_languages, source_ref
         io_base = cu.get_project_root() + "/io/"
-
-        def _to_rel( p ):
-            if not p: return None
-            if p.startswith( io_base ): return p[ len( io_base ): ]
-            if p.startswith( "io/" ):   return p[ 3: ]
-            return p.lstrip( "/" )
 
         # The original document rides the link when it lives inside the project.
         source_rel = source_ref( result.research_path, cu.get_project_root() )
@@ -289,10 +283,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             script_by_lang = { languages[ 0 ]: result.script_path }
 
         # Requested order first, then any extra language that produced an artifact.
-        ordered_langs = [ l for l in languages if l in audio_by_lang or l in script_by_lang ]
-        for l in list( audio_by_lang ) + list( script_by_lang ):
-            if l not in ordered_langs:
-                ordered_langs.append( l )
+        ordered_langs = ordered_languages( languages, audio_by_lang, script_by_lang )
 
         # Optional Google Drive copy (flag off = no-op and no Google import). The source document is
         # the generated research report; the hook loads the config and resolves the path inside its
@@ -301,30 +292,17 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
         drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path, user_email=self.user_email )
         if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
 
-        per_language_lines = []
-        for lang in ordered_langs:
-            label  = _LANGUAGE_NAMES.get( lang, lang )
-            a_rel  = _to_rel( audio_by_lang.get( lang ) )
-            s_rel  = _to_rel( script_by_lang.get( lang ) )
-            parts  = []
-            s_link = script_link( s_rel )
-            if s_link: parts.append( s_link )
-            if a_rel:
-                title = read_script_title( io_base + s_rel ) if s_rel else None
-                parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
-            if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
-            if parts:
-                per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
+        per_language_lines = language_card_lines( ordered_langs, _LANGUAGE_NAMES, audio_by_lang, script_by_lang, source_rel, io_base, drive[ "language_links" ] )
 
         lines   = [ "**Research → Podcast Complete!**", "" ]
-        r_rel   = _to_rel( result.research_path )
+        r_rel   = io_relative( result.research_path, io_base )
         if r_rel:
             lines.append( f"**Research Report**: [📄 View](/app/docs?path={urllib.parse.quote( r_rel )})" )
         lines.extend( per_language_lines )
         lines.extend( drive[ "extra_lines" ] )
-        skipped_names = [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
+        skipped_names = self._skipped_topic_names( result )
         if skipped_names:
-            lines.append( f"**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names ) )
+            lines.append( self._skipped_topics_line( skipped_names ) )
         lines.append( f"**Cost**: ${result.total_cost:.4f}" )
         completion_abstract = "\n".join( lines )
 
@@ -339,12 +317,10 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             - mock paths are job attributes and artifacts entries
             - returns the dry-run completion abstract
         """
-        self.research_path = f"/io/deep-research/{self.user_email}/dry-run-{self.id_hash}/report.md"
-        self.audio_path    = f"/io/podcasts/{self.user_email}/dry-run-{self.id_hash}/podcast.mp3"
-        self.script_path   = f"/io/podcasts/{self.user_email}/dry-run-{self.id_hash}/script.md"
+        self._store_dry_run_research()
+        self.audio_path    = self._dry_run_io_path( "podcasts", "podcast.mp3" )
+        self.script_path   = self._dry_run_io_path( "podcasts", "script.md" )
 
-        self.artifacts[ "research_path" ]     = self.research_path
-        self.artifacts[ "research_abstract" ] = "Mock abstract from dry-run mode."
         self.artifacts[ "audio_path" ]        = self.audio_path
         self.artifacts[ "script_path" ]       = self.script_path
 
