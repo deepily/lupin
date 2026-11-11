@@ -2,7 +2,7 @@
 capability: dm-tutor-rewrite
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.dm_tutor.agent.DmTutorAgent@0df11d62f4
+  - cosa.agents.dm_tutor.agent.DmTutorAgent@2dcf301f00
   - cosa.agents.dm_tutor.agent.rewrite_dm@e214cc20a9
   - cosa.agents.dm_tutor.xml_models.DmTutorResponse@661900ce46
   - cosa.agents.dm_tutor.tutor.build_prompt@37c8633209

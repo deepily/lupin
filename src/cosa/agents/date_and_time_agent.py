@@ -37,21 +37,6 @@ class DateAndTimeAgent( AgentBase ):
         self.xml_response_tag_names   = [ "thoughts", "brainstorm", "evaluation", "code", "example", "returns", "explanation" ]
     
     
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Restore date and time agent state from JSON file.
-        
-        Requires:
-            - file_path points to valid JSON file
-            
-        Ensures:
-            - Raises NotImplementedError (not implemented)
-            
-        Raises:
-            - NotImplementedError always
-        """
-        
-        raise NotImplementedError( "DateAndTimeAgent.restore_from_serialized_state() not implemented" )
     
     
 def quick_smoke_test():

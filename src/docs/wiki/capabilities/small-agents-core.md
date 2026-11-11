@@ -2,13 +2,13 @@
 capability: small-agents-core
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.agent_base.AgentBase@2d667d65d3
+  - cosa.agents.agent_base.AgentBase@1b6e192562
   - cosa.agents.agent_base.AgentBase.do_all@7cdb641a9f
   - cosa.agents.agent_base.AgentBase.run_code@5d9d45ccfb
-  - cosa.agents.math_agent.MathAgent@4676111b43
-  - cosa.agents.weather_agent.WeatherAgent@f952508e2a
+  - cosa.agents.math_agent.MathAgent@770b08c5e7
+  - cosa.agents.weather_agent.WeatherAgent@3888ddeb03
   - cosa.agents.receptionist_agent.ReceptionistAgent@3c22dc244c
-  - cosa.agents.calculator.agent.CalculatorAgent@5d4c47e913
+  - cosa.agents.calculator.agent.CalculatorAgent@1a9871fddf
   - cosa.agents.calculator.agent.CalculatorAgent.run_code@0b641aec1b
   - cosa.rest.v2.flow.AskFlow.ask@57c5527ac0
   - cosa.utils.util_code_runner.assemble_and_run_solution@84dbc3d3b4
