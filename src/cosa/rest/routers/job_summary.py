@@ -7,7 +7,6 @@ Background-job reporting: one endpoint for every job, and Run now.
 The page computes nothing about health. Design: planning-is-prompting src/rnd/2026.11.07-background-job-reporting-format.md.
 """
 import datetime
-import os
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,9 +27,9 @@ def live_deps():
     Ensures:
         - returns the Lupin root, the reuse-review data folder and the live inputs; tests replace this function
     """
-    from cosa.repo.symindex.paths import data_dir
+    from cosa.rest.routers.reuse_candidates import data_root         # the container derives a wrong folder without LUPIN_REUSE_REVIEW_DATA_ROOT; data_root honours it
     root = cu.get_project_root()
-    data = os.environ.get( "LUPIN_REUSE_REVIEW_DATA_ROOT" ) or data_dir( root )       # the container derives a wrong folder without this variable
+    data = data_root()
     return root, data, svc.LiveDeps( root, data )
 
 

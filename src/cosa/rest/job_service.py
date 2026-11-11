@@ -16,6 +16,7 @@ import cosa.rest.job_health as jh
 import cosa.rest.job_registry as jr
 from lupin_mcp import host_snapshot as hs
 from lupin_mcp import job_summary as js
+from lupin_mcp.reuse_needset.stage_c_score import lowest
 
 SCHEMA          = "jobs-summary/1"
 TERMINAL        = ( "done", "dropped" )
@@ -249,7 +250,7 @@ def worst( entries ):
     Ensures:
         - returns the first of unknown, silent, failing, behind, healthy that any entry has
     """
-    return min( ( e[ "state" ] for e in entries ), key=jh.STATE_ORDER.index )
+    return lowest( ( e[ "state" ] for e in entries ), jh.STATE_ORDER )
 
 
 def assess_job( ent, defaults, ctx ):

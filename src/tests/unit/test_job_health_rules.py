@@ -213,6 +213,17 @@ def test_old_records_without_recent_fall_back_to_the_last_attempt():
     assert jh.parse_time( "no" ) is None and jh.parse_time( "2026-11-07T10:00:00" ) is None and jh.parse_time( None ) is None
 
 
+def test_parse_time_is_the_memento_reaper_parser_and_freshness_reads_through_it():
+    from lupin_mcp import reap_memento as rm
+    assert jh.parse_time is rm._parse_iso_aware
+    east = zoneinfo.ZoneInfo( "America/New_York" )
+    now = datetime.datetime( 2026, 11, 7, 12, 0, tzinfo=east )                     # 17:00 UTC
+    block = jh.freshness_of( { "built_at": "2026-11-07T10:00:00+00:00", "stale_after_hours": 24 }, now )
+    assert block == { "built_at": "2026-11-07T10:00:00+00:00", "stale_after_hours": 24, "age_hours": 7.0 }
+    assert jh.freshness_of( { "built_at": "2026-11-07T10:00:00" }, now )[ "age_hours" ] is None
+    assert jh.freshness_of( None, now ) is None
+
+
 def test_output_carries_the_registry_facts_the_page_needs():
     ent = entry( audience=[ "rick" ], rows=[ { "id": "350d43c8", "title": "T", "href": None } ], detail_link="/app/x", run={ "argv": [ "x" ] }, notify_interval_minutes=45 )
     got = run( ent, record(), at( 7, 11 ) )
