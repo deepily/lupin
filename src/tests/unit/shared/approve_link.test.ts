@@ -46,3 +46,32 @@ test( "normalizeDocLinkHref strips a loopback origin and reads null and empty as
   assert.equal( shared.normalizeDocLinkHref( "" ), null );
   assert.equal( shared.normalizeDocLinkHref( null ), null );
 } );
+
+test( "handleApprovePriorityLinkClick is handleApproveLinkClick answering the priority link: each link has one handler, and the move differs only by the level", async () => {
+  const ROW   = "a3975cf4-c640-4659-9247-0a99fa8a5f4a";
+  const calls: Array<{ id: string; status: string; extras: unknown }> = [];
+  const sender = { transitionTask: async ( id: string, status: string, extras: unknown ) => { calls.push( { id, status, extras } ); return { ok: true as const }; } };
+  const plant  = ( href: string ): Element => {
+    document.body.innerHTML = `<a href="${ href }">go</a>`;
+    return document.querySelector( "a" ) as Element;
+  };
+  const ev = (): Event => new Event( "click", { cancelable: true } );
+
+  const plain = plant( `/app/tasks/approve?row=${ ROW }` );
+  assert.equal( shared.handleApprovePriorityLinkClick( ev(), plain, sender as never ), false, "a plain link is not a priority click" );
+  assert.equal( calls.length, 0 );
+  const e1 = ev();
+  assert.equal( shared.handleApproveLinkClick( e1, plain, sender as never ), true );
+  assert.equal( e1.defaultPrevented, true );
+  await Promise.resolve();
+  assert.deepEqual( calls, [ { id: ROW, status: "queued", extras: {} } ] );
+
+  calls.length = 0;
+  const prio = plant( `/app/tasks/approve?row=${ ROW }&priority=P0` );
+  assert.equal( shared.handleApproveLinkClick( ev(), prio, sender as never ), false, "a priority link is not a plain click" );
+  assert.equal( calls.length, 0 );
+  assert.equal( shared.handleApprovePriorityLinkClick( ev(), prio, sender as never ), true );
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  assert.deepEqual( calls, [ { id: ROW, status: "queued", extras: { promote_priority: "P0" } } ] );
+  assert.equal( document.body.textContent, "approved at P0 ✅" );
+} );
