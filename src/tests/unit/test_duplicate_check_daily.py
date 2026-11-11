@@ -521,11 +521,13 @@ def test_the_live_auditor_ties_each_finding_with_the_lookup_tools_logs_and_queue
     monkeypatch.setattr( dd.behaviour, "read_refusals", lambda data: [ "row" ] )
     monkeypatch.setattr( dd.tie_mod, "find_tie", lambda sid, rows, records, root, sha: ( sid, rows, records, root, sha ) )
     monkeypatch.setattr( dd.rt, "load_receipt", lambda ctx, rid: ( ctx, rid ) )
-    def queue( findings, tie_of, receipt_of, data_dir, today ):
-        seen.update( tie=tie_of( findings[ 0 ] ), receipt=receipt_of( "r1" ), data_dir=data_dir, today=today )
+    monkeypatch.setattr( dd.rt, "prepare", lambda ctx: ( set(), [ { "id": "pkg.f", "file": "pkg.py", "name": "f", "line": 3 } ], "sha", "gen" ) )
+    def queue( findings, tie_of, receipt_of, data_dir, today, index_id_of ):
+        seen.update( tie=tie_of( findings[ 0 ] ), receipt=receipt_of( "r1" ), data_dir=data_dir, today=today, index_id=index_id_of( findings[ 0 ] ) )
         return "queued"
     monkeypatch.setattr( dd.audit, "queue_audits", queue )
-    assert dd.live_auditor( [ { "id": "d1", "commit": "abc" } ], tmp_path ) == "queued"
+    assert dd.live_auditor( [ { "id": "d1", "commit": "abc", "file": "pkg.py", "name": "f", "line": 3 } ], tmp_path ) == "queued"
+    assert seen[ "index_id" ] == "pkg.f", "the finding is named by the index the sweep reads"
     assert seen[ "logs" ] == Ctx.data / "call-log" and seen[ "tie" ] == ( "d1", [ "row" ], [ "rec" ], Ctx.root, "abc" )
     assert seen[ "receipt" ] == ( Ctx, "r1" ) and seen[ "data_dir" ] == Ctx.data and seen[ "today" ] == datetime.date.today().isoformat()
 

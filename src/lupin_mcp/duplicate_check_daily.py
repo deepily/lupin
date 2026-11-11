@@ -950,14 +950,16 @@ def live_auditor( findings, folder ):
         - the environment is the lookup tool's: its data folder holds the receipts, the call log and refusals.jsonl
     Ensures:
         - returns queue_audits' answer, made with find_tie over the refusal pairs and the merged call logs
+        - each finding is named by its id in the index the sweep reads (reuse_tools.prepare's entries), so a queued item's exclude_id is one the sweep knows
         - the audit queue and the receipts are read from and written to the lookup tool's own data folder
         - makes no model call
     """
     ctx = rt.context_from_environment()
+    entries = rt.prepare( ctx )[ 1 ]
     records, _bad = eg.merge_call_logs( ctx.data / "call-log" )
     rows = behaviour.read_refusals( ctx.data )
     tie  = lambda finding: tie_mod.find_tie( finding[ "id" ], rows, records, ctx.root, finding[ "commit" ] )
-    return audit.queue_audits( findings, tie, lambda rid: rt.load_receipt( ctx, rid ), ctx.data, datetime.date.today().isoformat() )
+    return audit.queue_audits( findings, tie, lambda rid: rt.load_receipt( ctx, rid ), ctx.data, datetime.date.today().isoformat(), audit.index_id_finder( entries ) )
 
 
 @contextlib.contextmanager
