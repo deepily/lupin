@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.10 - Session 24d257d2 (Mr. Radio 🦉, manager; crew Sam, Krishna, Rio, Clayton, John, Tiffany, all reaped with verified mementos) | Push and VM install done; VM test server up; reuse back-fill A to F merged; next server update now checks itself
+
+- **Rick's end-of-session push** (row aadb5e4b): reuse gate exit 0, then `git push` to `340084718`. On the VM: code sync, an idle check, and a restart so the app migrated its schema. Preflight post read 78 passed, 0 blocking, then the VM was stopped. Rows 1dcecdb9 (the ~/.lupin file-modes check) and aadb5e4b closed.
+- **VM destructive-test server** (row 8d67e474): Sam's overlay compose and test-server verbs merged as `728555051`. Bring-up on the VM: secrets written, roles applied, `lupin_db_test` 28 tables with 0 problems, `/health` 200 on :8000, venue_idle exit 0. Rick created Secret Manager `lupin-db-test-password`. Still open: `firewall open 8000` and a tester login.
+- **The next server update checks itself** (row c22e5ec1, Rick by voice): `deploy` warns on missing Secret Manager secrets, with names derived from the script. It recreates the overlay. The post arm checks the refresh cron and the overlay test server. It also carries four bring-up fixes: roles needs LUPIN_ROOT, a new `up-db` step, refresh waits 180 s, and the cron verb exports LUPIN_CONFIG_MGR_CLI_ARGS. Merged as `36a3e7da8`. Review caught the overlay check failing on every healthy VM, because `--check` lacked `--database lupin_db_test`.
+- **Reuse back-fill A to F** (Rick's ruling on row 5f8fc615): A `b346438dc`, B `ac37c0cb5`, C `0b1fcc002`, D `465f269cb`, F `6b1b051f3`; E was Cheech's. Reuse gate on the branch: 389 passed, 0 failed. The duplicate and extend findings are in 4 held follow-up rows (e8af0b55, e100ff64, 021a7fa6, 8d1f9e10).
+- **Lessons**: the reuse gate reads committed lines, so an uncommitted `merge --no-commit` shows it the old lines. Check a seat's sha, or a trial merge, in a detached tree. Auto mode refuses a seat's crontab install, Secret Manager writes and firewall rules, so those are lines a person runs. A reap reconciles rows by persona name: reaping my "Tiffany" seat moved 11 of the lupin-mobile manager Tiffany's rows to me. I reassigned them back; bug row 85c8606f.
+- **Blocked on Rick, chase 11 Nov 10:30**: d47761a5 needs `install-refresh-cron vm` re-run after the push. Its first run failed on the missing config variable, now fixed. 8d67e474 needs the firewall rule, a tester login and the acceptance e2e half.
+
 ## 2026.11.06 - Session 6bd4df2a (Mr. Radio 🦉, manager; crew Clayton, Rachel, Rio, Tiffany, Sam, John, Pocholo, María, Maya, Krishna, Tiberius, all reaped with mementos) | Backup cut from 22.3 GB to 5.3 GB; eight rows merged, including the trust model switch and BLR persistence
 
 - **Backup size** (Rick's broadcast b4fd692e, row b08f6dd9, `298ac866f`):
