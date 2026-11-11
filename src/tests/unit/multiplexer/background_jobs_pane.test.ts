@@ -572,6 +572,15 @@ test( "Run now posts to the job's own door, with ?target= for a target, and prin
   assert.equal( runNowPath( { ...find( "worktree-census" ), job : "a b", target : "x/y" } ), "/api/jobs/a%20b/run?target=x%2Fy" );
 } );
 
+test( "a 422 that carries a detail shows the detail; a body without a usable detail falls back to the plain line", () => {
+  const detail = "Not started: this server cannot launch /var/planning-is-prompting/x.sh (No such file or directory).";
+  const body = ( o: unknown ) => new ApiError( 422, "/u", JSON.stringify( o ) );
+  assert.equal( runNowFailureText( body( { status : "refused", reason : "launch_failed", detail } ) ), detail );
+  assert.match( runNowFailureText( body( { detail : "" } ) ), /cannot be run by hand/ );
+  assert.match( runNowFailureText( body( { detail : 5 } ) ), /cannot be run by hand/ );
+  assert.match( runNowFailureText( new ApiError( 422, "/u", "{not json" ) ), /cannot be run by hand/ );
+} );
+
 test( "each Run now refusal gets its own plain sentence", async () => {
   const err = ( status: number ) => new ApiError( status, "/u", "m" );
   assert.match( runNowFailureText( err( 403 ) ), /Only Rick's login/ );
