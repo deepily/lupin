@@ -468,7 +468,12 @@
 
     // ─── Network + wiring ──────────────────────────────────────────────
 
+    // Row 399a266f: notificationsUI.authedFetch refreshes the access token before it sends; the bare
+    // localStorage read below is the fallback only, and it is loud because it brings the 401 back.
     function authFetch( url, opts ) {
+        const ui = window.notificationsUI;
+        if ( ui && typeof ui.authedFetch === "function" ) return ui.authedFetch( url, opts || {} );
+        console.error( "[background-jobs] notificationsUI.authedFetch unavailable — sending an UNREFRESHED token; expect 401 after the access-token TTL (row 399a266f)" );
         const headers = Object.assign( { "Authorization": "Bearer " + ( localStorage.getItem( "lupin_access_token" ) || "" ) }, ( opts && opts.headers ) || {} );
         return fetch( url, Object.assign( {}, opts, { headers } ) );
     }
