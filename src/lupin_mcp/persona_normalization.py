@@ -170,6 +170,25 @@ def persona_slug( name, sep="-" ) -> str:
     return key.replace( " ", sep ) if key else ""
 
 
+def dm_topic_for( name ) -> str:
+    """
+    Derive the commons DM-topic name for a persona.
+
+    The one definition of the DM-topic form. The Arbiter and Poker gateways, the MCP DM layer
+    and the stop hook all call it, so a topic can never split across two spellings.
+
+    Requires:
+        - name is a string or None
+
+    Ensures:
+        - returns "dm-" followed by persona_slug( name, sep="_" )
+        - "Mr. Radio" gives "dm-mr_radio" and "María" gives "dm-maria"
+        - the slug is ASCII, so it fits the server's topic pattern [a-z0-9_-]+
+        - None, a non-string or unusable input gives "dm-"
+    """
+    return f"dm-{persona_slug( name, sep='_' )}"
+
+
 def quick_smoke_test():
     """Non-destructive smoke test for the three persona-normalization primitives."""
     import cosa.utils.util as du
