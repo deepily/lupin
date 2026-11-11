@@ -154,6 +154,39 @@
                     ]
                 },
                 {
+                    "key": "ph1-s12",
+                    "name": "Move run history from io/ to DataRoot",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. The duplicate check's run history moves from io/duplicate-check-daily/ to the code-health leaf under fleet_data_root (Q2 retires DATA_RELATIVE), and the duplicate-check registry paths that hardcode io/ (src/conf/job-registry.json lines 34, 39, 55 and 83: summary_path, lock_path, the runs.jsonl evidence path, cron_log) point at the new folder. After the move the jobs page reads the same last-run records as before (count and newest timestamp equal for each moved job, a literal captured before the move) and no history is left in io/; 100% lines, branches and functions on the changed files",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s1"
+                    ]
+                },
+                {
+                    "key": "ph1-s13",
+                    "name": "What reinstall_command prints for the ceiling",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. Choose and test what reinstall_command (duplicate_check_daily.py:523-528, limit_flag) prints once the ceiling comes from the INI: it either omits --ceiling or names the INI key, never a stale literal. A test asserts the printed install text for both cases (key set, key blank); 100% lines, branches and functions on the changed files on duplicate_check_daily.py",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s3"
+                    ]
+                },
+                {
+                    "key": "ph1-s14",
+                    "name": "B-AC6 negative control",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "EXECUTOR: AI. B-AC6 gets a negative control: a scratch registry row whose repo name differs from its checkout's directory name makes the check fail, naming the repo; the check passes on the real repos with a row; 100% lines, branches and functions on the changed files on the check",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s1"
+                    ]
+                },
+                {
                     "key": "ph1-s11",
                     "name": "Merge pyramid green for step 1",
                     "item_class": "task",
@@ -164,7 +197,10 @@
                         "ph1-s10",
                         "ph1-s2",
                         "ph1-s5",
-                        "ph1-s6"
+                        "ph1-s6",
+                        "ph1-s12",
+                        "ph1-s13",
+                        "ph1-s14"
                     ]
                 }
             ]

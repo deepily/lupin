@@ -13,7 +13,7 @@ The input plan is `2026.11.09-abstracted-source-code-duplication-and-reuse-servi
 
 This document is the hand-off, not the plan. It says what the cascade changed, what Rick ruled, what stays open, and who builds what. The plan is the specification; where this document and the plan disagree, the plan wins and this document is the bug.
 
-The task-stub manifest that accompanies it is `src/docs/plan-stubs/2026.11.09-abstracted-source-code-duplication-and-reuse-services.stubs.json` (23 steps in 5 phases, 28 rows with the phase rows). The phase headings it validates against are at the end of this document, because the plan itself carries no `## Phase N` headings.
+The task-stub manifest that accompanies it is `src/docs/plan-stubs/2026.11.09-abstracted-source-code-duplication-and-reuse-services.stubs.json` (26 steps in 5 phases, 31 rows with the phase rows). The phase headings it validates against are at the end of this document, because the plan itself carries no `## Phase N` headings.
 
 ## 2. Cascade telemetry
 
@@ -71,7 +71,7 @@ The input plan had no acceptance criteria. Every AC below was created by the cas
 - **Findings closed:** 11 inconsistency, 7 cosmetic. §6.3 is the one packaging list. The installer composes `install-git-hooks.sh` and `cron_generate --install` and checks `install-cosa-voice.sh --check-only` as a precondition. Q3 states the real mount mechanism (a bind mount cannot take a glob) and the corrected costs of the alternatives. The two-week gate has a start event and a literal pass signal.
 - **ACs created:** D-AC1 to D-AC4, plus D-AC3b (the container reads the new repo's vectors after the recreate).
 
-### 3.5 Cross-section dependencies
+### 3.5 Cross-section dependencies and shared state
 
 ```mermaid
 flowchart LR
@@ -83,6 +83,14 @@ flowchart LR
 
 - The keys in B are what C's seams read; C's `Scheduler` change (a registry repo key) and `duplicate_check_daily.py` ceiling change both depend on B's keys existing first.
 - D's installer writes B's keys and runs C's ledger sync; D's phase order follows from "name existing seams" in C, not from a new package.
+**Shared state the builder must treat as interaction pairs:**
+
+| State | Writers | Readers or other writers |
+|---|---|---|
+| The Jev ledger file (`jev-spend-ledger.jsonl`, one per repo folder) | the §6.1 sync (`create`, `set_limit`); every Jev run (`begin_run`, spend, end) | the drift check at the start of each Jev run; the shadow audit's lifetime check (`reuse_shadow.py`) |
+| `lupin-app.ini` per-repo keys against the ledger's limit row | the INI (the single source) and the sync | the drift check, which fails loud when they differ |
+| The duplicate check's run history (`runs.jsonl`, `job-summary.json`, `run.lock`, `daily.log`) | the duplicate check (path moves from `io/` to `code-health`, step `ph1-s12`) | the registry entry's `summary_path`, `lock_path`, evidence path and `cron_log`; the jobs page; the status page |
+
 - Build order: B's keys, then the sync and the ceiling move, then the seams, then `lupin-mobile`, then the package, then the plugin (§6.3).
 
 ## 4. Cross-section ratification summary
@@ -100,6 +108,8 @@ flowchart LR
 - **S9-1:** two guards in `duplicate_check_daily.py` (`:1005`, `:1006`) refused a run without `--ceiling`; they now accept the INI key, a blank key still refuses naming the key, and C-AC10 covers it.
 - **S9-2:** a registry row, not a listing in `external repos`, turns code health on for a repo; B-AC6 checks the directory-name match only for repos with a row. `par-pacific` and `claude-plans` do not match their directory names and stay off.
 - **S9-3 to S9-6:** coverage wording on B-AC2, B-AC3 and B-AC5; Open sub-question 4; the drift check runs at the start of every Jev run and at the end of onboarding; leftover wording.
+
+**Manager ruling on Q2's consequence (María, 11 Nov; not one of Rick's rulings):** Q2's move stays: the duplicate check's run history moves from `io/` to the `code-health` leaf under `fleet_data_root`, the registry paths that hardcode `io/` follow, and the jobs page must read the moved files. This was an unwritten consequence in the plan until the Step 9 light review (H1). It is manifest step `ph1-s12`; C-AC1, C-AC2 and D-AC1 now say "unchanged except the run-history location".
 
 **Retired during the cascade:** a second settings file; `TaskSink` and `RepoSpec` as new classes; `Embedder` as a new wrapper; `judges.*`, `schedule.*`, `notify`, `doc_lint` and `repo.branch` as settings.
 
@@ -131,8 +141,9 @@ None of these is a decision for Rick. Each has an owner and a done-signal in the
 | §7 item 8: `lupin-mobile` baseline cost | §5, §7 | A `lupin-mobile` session |
 | §7 item 9: dated census of couplings | §4, §7 | Any lupin seat; a timestamped table replaces the nine-group sample |
 | §7 item 10: route `vector_build.py:61` through `EmbeddingProvider` | §6.2, C-AC4 | The step 1 builder; lands before or with C-AC4 |
-| **Pocholo's leftover 1:** what `reinstall_command` prints for the ceiling | `duplicate_check_daily.py:523-528` (`limit_flag`, `reinstall_command` print `--ceiling N`) | Not decided. After the ceiling moves to the INI, the printed install text must either omit `--ceiling` or print the INI key; the step 1 builder chooses and adds a test |
-| **Pocholo's leftover 2:** a negative control for B-AC6 | §6.1 | Not written. B-AC6 needs a case that fails on purpose (a registry row whose repo name differs from its directory) to prove the check can find a mismatch |
+| **Pocholo's leftover 1:** what `reinstall_command` prints for the ceiling | `duplicate_check_daily.py:523-528` (`limit_flag`, `reinstall_command` print `--ceiling N`) | **Manifest step `ph1-s13`.** After the ceiling moves to the INI, the printed install text must either omit `--ceiling` or print the INI key; the step 1 builder chooses and tests both cases |
+| **Pocholo's leftover 2:** a negative control for B-AC6 | §6.1 | **Manifest step `ph1-s14`.** A registry row whose repo name differs from its directory must make the check fail |
+| The run-history move from `io/` to the `code-health` leaf (Q2) | §6.2 `DataRoot`, C-AC2 | **Manifest step `ph1-s12`** (manager ruling, §4): the registry paths at `src/conf/job-registry.json` lines 34, 39, 55 and 83 follow, and the jobs page reads the same records |
 | The `lupin-mobile` owner and manager row | §6.3 step 2 | **Filed:** row `e1778814-f4fa-4def-a222-402d64379f07`, owned by Tiffany. Phase 2 step 1 in the manifest checks it is live |
 | ~~Whether the 1 Oct change to `rule_lists.py` (`34988c0f7`) carried Rick's word~~ | §6.2 | **Closed:** Rick ruled keep (row `6b65f04e`). The plan's §6.2 paragraph now says so too |
 
@@ -174,7 +185,7 @@ The three owed items of §7 (4, 8, 9). Steps `ph0-s1` to `ph0-s3` in the manifes
 
 ## Phase 1: INI keys and seams in cosa
 
-Section 6.3 step 1. Steps `ph1-s1` to `ph1-s11`: the keys, the ledger sync, the ceiling move, `IndexSpec`, the `Scheduler` repo key, Rick's cron install (a gate), the embeddings route, the contract paragraphs and the merge pyramid. Open sub-questions 3 and 4 are decision steps here.
+Section 6.3 step 1. Steps `ph1-s1` to `ph1-s14`: the keys, the ledger sync, the ceiling move, `IndexSpec`, the `Scheduler` repo key, Rick's cron install (a gate), the embeddings route, the contract paragraphs, the run-history move, the `reinstall_command` text, the B-AC6 negative control and the merge pyramid (`ph1-s11`, last). Open sub-questions 3 and 4 are decision steps here.
 
 ## Phase 2: lupin-mobile as repo 2
 
