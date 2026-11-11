@@ -51,6 +51,7 @@ ENV_FILE="cloud-gpu.env"                         # requires LUPIN_MODEL_SERVER_U
 # `docker compose logs/up <name>` take the SERVICE name, NOT the container_name. The service is
 # `lupin-rest` (container_name lupin-rest-cloud-gpu) — passing the container name gives
 # "no such service". Compose subcommands here use REST_SERVICE.
+REST_CONTAINER="lupin-rest-cloud-gpu"            # the :7999 app container; it holds its own database credentials
 REST_SERVICE="lupin-rest"                        # compose service name (container_name = lupin-rest-cloud-gpu)
 # The destructive-test server (row 8d67e474) is an OVERLAY, so `svc` and `deploy`, which name the base
 # file alone, never touch it. Only the `test-server` verb names both files.
@@ -112,6 +113,11 @@ Destructive-test server (overlay $TEST_COMPOSE_FILE: lupin-rest-test on VM :$TES
                          the pgvector admin and lupin_host passwords are generated ON the VM, once.
                          Says only written / unchanged / kept per file. Never prints a value.
   test-server prep       make the two host folders the test server mounts (sessions-test, flow-ratio)
+  test-server node-modules  fill the node_modules volume once: npm ci --ignore-scripts in the test image, then esbuild --version from the volume
+  test-server seed-companions [--check]
+                         copy the companion users and API keys from the :7999 database into the test database, so real
+                         logins work on :8000. Runs inside $REST_CONTAINER and pipes into the pgvector container; the :7999
+                         password never enters the test container. --check only counts and names missing companions
   test-server up-db      up -d the pgvector container alone; do this before roles, which needs it running
   test-server up         up -d the pgvector container and lupin-rest-test
   test-server recreate   up -d --force-recreate --no-deps lupin-rest-test (env, groups or mounts changed)
@@ -1773,6 +1779,26 @@ $RCMD_TS"
                 remote_script "make $TEST_STATE_DIR/sessions-test and $TEST_STATE_DIR/flow-ratio (2775)" \
                     "set -e; for d in sessions-test flow-ratio; do mkdir -p '$TEST_STATE_DIR'/\$d; chmod 2775 '$TEST_STATE_DIR'/\$d; done; ls -ld '$TEST_STATE_DIR'/sessions-test '$TEST_STATE_DIR'/flow-ratio"
                 ;;
+            node-modules)
+                # Row 8d67e474. The volume starts empty and root-owned, so the one-shot runs as root; --ignore-scripts
+                # keeps install scripts from running, --no-deps leaves the database container alone, and the npm cache
+                # goes to /tmp so nothing lands in the checkout. The last command is the proof: esbuild runs from the volume.
+                remote_test_compose "run --rm --no-deps -u root $TEST_REST_SERVICE sh -c 'cd /var/lupin && npm ci --ignore-scripts --no-audit --no-fund --cache /tmp/npm-cache && node_modules/.bin/esbuild --version'"
+                ;;
+            seed-companions)
+                shift
+                TS_SEED_ARG="${1:-}"
+                case "$TS_SEED_ARG" in ""|--check) ;; *) die "test-server seed-companions takes --check or nothing, not '$TS_SEED_ARG'" ;; esac
+                # Row 8d67e474. The export runs where the :7999 credentials already are; its output is credential hashes, so it
+                # is only ever piped (never echoed) and psql runs quiet. One transaction: all rows or none.
+                TS_EXPORT="sudo docker exec -e LUPIN_ROOT=/var/lupin $REST_CONTAINER python3 /var/lupin/src/scripts/export_test_companions.py"
+                if [ "$TS_SEED_ARG" = "--check" ]; then
+                    remote_script "count the companions in the :7999 database (read-only, no value printed)" "$TS_EXPORT --check"
+                else
+                    remote_script "copy the companions from the :7999 database into $TEST_PGVECTOR_CONTAINER (lupin_db_test)" \
+                        "set -o pipefail; $TS_EXPORT | sudo docker exec -i $TEST_PGVECTOR_CONTAINER psql -U lupin_dev -d lupin_db_test -v ON_ERROR_STOP=1 -q && echo 'companions copied'"
+                fi
+                ;;
             up-db)    remote_test_compose "up -d $TEST_PGVECTOR_CONTAINER" ;;   # roles needs this container running, before the app
             up)       remote_test_compose "up -d $TEST_SERVICES" ;;
             # --no-deps: the database container is already up and a recreate of the app must not touch it.
@@ -1801,7 +1827,7 @@ $RCMD_TS"
                 remote_script "db_roles $TS_ROLE_ARG against $TEST_PGVECTOR_CONTAINER" \
                     "cd $VM_ROOT && sudo env LUPIN_ROOT=$VM_ROOT PYTHONPATH=src python3 -m cosa.utils.db_roles --app-pw-file $TEST_SECRETS_DIR/db_app_password --host-pw-file $TEST_SECRETS_DIR/db_host_password --test-pw-file $TEST_SECRETS_DIR/db_test_password --psql 'docker exec -i $TEST_PGVECTOR_CONTAINER psql -U lupin_dev -d lupin_db_dev' $TS_ROLE_ARG"
                 ;;
-            *) die "test-server needs one of: prep | up-db | up | recreate | down | status | logs | refresh | idle | roles" ;;
+            *) die "test-server needs one of: prep | node-modules | seed-companions | up-db | up | recreate | down | status | logs | refresh | idle | roles" ;;
         esac
         ;;
 

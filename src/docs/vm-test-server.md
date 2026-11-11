@@ -10,7 +10,8 @@
 | database | `lupin-postgres` | `lupin-pgvector-test`; `LUPIN_CLOUD_BACKED` stays unset so the app uses `DB_HOST` |
 | image | local candidate tag | `LUPIN_TEST_IMAGE`, else the `LUPIN_IMAGE` that `lupin-rest` runs |
 | `group_add` | 1002 | `LUPIN_BRIDGE_GID`, the host user's gid |
-| not mounted | | `node_modules` (no typescript tier), dm-corpus, reuse-review, lora, worktrees, five of seven external scopes |
+| `node_modules` | `./node_modules` bind | named volume `node-modules-test`, filled once by `lupin-vm.sh test-server node-modules` (`npm ci --ignore-scripts`, then `esbuild --version` from the volume) |
+| not mounted | | dm-corpus, reuse-review, lora, worktrees, five of seven external scopes |
 
 ## Secrets
 Files under `/etc/lupin/secrets` (root, host gid, 0440), written by `lupin-vm.sh push-test-server-secrets`. The app and test role passwords and the tester login come from Secret Manager over ssh stdin. The pgvector admin and `lupin_host` passwords are generated on the VM once. No value is in git, a command line or a log.
@@ -52,9 +53,10 @@ A Claude seat is refused a crontab install and Secret Manager writes, so these o
 5. `lupin-vm.sh test-server up-db` (the pgvector container alone; `roles` needs it running)
 6. `lupin-vm.sh test-server roles` (dry run), then `... roles --apply`
 7. `lupin-vm.sh test-server up`, then `lupin-vm.sh test-server roles --grants-only` and `... roles --check` once the app has created its tables
-8. `lupin-vm.sh test-server idle`, then `lupin-vm.sh firewall check` and the tunnel above
+8. Once per VM, before the first e2e or typescript run, run `lupin-vm.sh test-server node-modules`. Its last line is the `esbuild --version` run from the volume. Then run `lupin-vm.sh test-server seed-companions --check`, which counts the six companions in the :7999 database and prints no value, and then `... seed-companions`. The seed runs `export_test_companions.py` inside `lupin-rest-cloud-gpu`, which already holds the :7999 credentials. It pipes the SQL into the pgvector container, so that password never enters `lupin-rest-test`. The overlay sets `LUPIN_TEST_SEED_FROM_DEV=0` because `lupin_db_dev` is empty here. Run `seed-companions` again after a companion password changes.
+9. `lupin-vm.sh test-server idle`, then `lupin-vm.sh firewall check` and the tunnel above
 
-Known gap: the companion seed in `run-fastapi-lupin-test.sh` copies admin users from `lupin_db_dev`, which is empty here, so it skips and :8000 starts with no login. A tester user must be created in `lupin_db_test` before `submit-test-suite.py` can log in.
+The startup companion copy from `lupin_db_dev` is off here (`LUPIN_TEST_SEED_FROM_DEV=0`); the `seed-companions` verb in the bring-up list is what gives :8000 its companion logins. The tester login for `submit-test-suite.py` is still created separately with `create_test_mock_user.py` inside `lupin-rest-test`.
 
 ## IAP firewall ports
 The ports that need an IAP rule are listed in `src/conf/vm-iap-ports.tsv`: port, tier and purpose. Tier `block` means a missing rule fails the check. Tier `warn` means it only warns. 7999 is `block`.
