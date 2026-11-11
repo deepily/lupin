@@ -10,6 +10,9 @@ pins:
   - cosa.agents.podcast_generator.play_links.player_query@d03688e872
   - cosa.agents.podcast_generator.play_links.audio_triplet@f8e5467aae
   - cosa.agents.podcast_generator.play_links.script_link@00253a5fbf
+  - cosa.agents.podcast_generator.play_links.io_relative@cce4350262
+  - cosa.agents.podcast_generator.play_links.ordered_languages@d2c95462d9
+  - cosa.agents.podcast_generator.play_links.language_card_lines@4c92d3b583
 ---
 # Podcast card links
 
@@ -24,6 +27,9 @@ Builds the Play Here, Listen and Download links on a finished podcast card. `Pod
 - `source_ref` names the original document: `io/<rel>` under `io/`, `lupin/<rel>` for any other project file, None outside the project.
 
 - `script_link( script_rel )` returns the 📝 Script link: the doc viewer URL `/app/docs?path=lupin/io/<script_rel>`, or None with no script. It does not need audio.
+- `io_relative( path, io_base )` makes an artifact path relative to `io/`. It removes the `io_base` prefix, else a leading `io/`, else leading slashes. An empty path gives None.
+- `ordered_languages( languages, audio_by_lang, script_by_lang )` lists each language once. Requested languages that made an artifact come first, in request order. Extra languages that made one follow.
+- `language_card_lines( ordered_langs, names, audio_by_lang, script_by_lang, source_rel, io_base, drive_links )` builds one line per language that has a link. A line reads `**Label**: 📝 Script | ▶️ Play Here | 🎧 Listen | ⬇️ Download | ☁️ Drive`. The label falls back to the language code.
 
 ## Invariants
 - The job passes the script path. The script and mp3 carry different time stamps, so the player cannot pair them by file name.
