@@ -233,3 +233,23 @@ def test_offsets_load_swallows_unreadable( tmp_path ):
 
 def test_quick_smoke_test_passes():
     assert et.quick_smoke_test() is True
+
+
+def test_offsets_save_does_not_use_a_fixed_tmp_name( tmp_path ):
+    # The old writer staged through "<name>.tmp". A directory sitting on that name made it fail
+    # with False. A unique temp name does not collide with it, so the save lands.
+    path = tmp_path / "offsets.json"
+    ( tmp_path / "offsets.json.tmp" ).mkdir()
+    assert et.save_offsets( path, { "s1": 5 } ) is True
+    assert et.load_offsets( path ) == { "s1": 5 }
+
+
+def test_offsets_save_creates_a_missing_parent_folder( tmp_path ):
+    path = tmp_path / "not-yet" / "offsets.json"
+    assert et.save_offsets( path, { "s1": 7 } ) is True
+    assert et.load_offsets( path ) == { "s1": 7 }
+
+
+def test_offsets_save_swallows_an_unserialisable_key( tmp_path ):
+    # json.dump refuses a tuple key with TypeError; the swallow turns it into False
+    assert et.save_offsets( tmp_path / "offsets.json", { ( 1, 2 ): 3 } ) is False

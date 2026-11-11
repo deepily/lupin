@@ -29,6 +29,8 @@ import json
 import os
 from pathlib import Path
 
+from cosa.utils.atomic_json import write_json_atomic
+
 # Import the MODULE (not the FLEET_EVENTS_DIR value) so the fleet dir is read at
 # CALL time. A value-import binds the real ~/.claude path at import, and the test
 # conftest's FLEET_EVENTS_DIR→tmp monkeypatch would never reach us → the
@@ -169,16 +171,14 @@ def save_offsets( path, offsets ):
     Ensures:
         - writes offsets as JSON to `path` atomically; returns True on success
         - any OSError / serialization error → returns False (never raises)
-        - the write is temp file plus os.replace, so a mid-write crash never
-          leaves a torn file for the next startup to misread
+        - the write goes through write_json_atomic (a uniquely named temp file, then
+          a rename), so a mid-write crash never leaves a torn file for the next
+          startup to misread and two writers never share a temp name
         - swallow-safe: an offset-store hiccup must not crash the poll loop, and
           the next start falls back to the in-memory behavior
     """
-    path = Path( path )
-    tmp  = path.parent / ( path.name + ".tmp" )
     try:
-        tmp.write_text( json.dumps( offsets ) )
-        os.replace( tmp, path )
+        write_json_atomic( path, offsets )
         return True
     except ( OSError, TypeError, ValueError ):
         return False
