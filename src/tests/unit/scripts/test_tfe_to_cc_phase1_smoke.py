@@ -52,15 +52,6 @@ class _Proc:
 
 # ── _ts / _banner ─────────────────────────────────────────────────────────────────────────
 
-def test_the_timestamp_is_a_compact_utc_stamp():
-    """Reddens if the stamp stops being sortable or loses its Z — it names files on disk."""
-
-    ts = smoke._ts()
-
-    assert len( ts ) == 16 and ts[ 8 ] == "T" and ts.endswith( "Z" )
-    assert ts[ :8 ].isdigit() and ts[ 9:15 ].isdigit()
-
-
 def test_the_banner_prints_the_title_between_rules( capsys ):
     """Reddens if the banner stops naming its section — it is the only structure in the output."""
 

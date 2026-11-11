@@ -6,7 +6,7 @@ pins:
   - scripts.init_test_database.main@509ada703a
   - scripts.probe_cc_bounded_billing.main@ad108a48b6
   - scripts.run-heartbeat-arbiter.main@e0d44d386c
-  - scripts.tfe_to_cc_phase1_smoke.main@3c4b1e848d
+  - scripts.tfe_to_cc_phase1_smoke.main@292700d78e
 ---
 # One-shot operator scripts
 

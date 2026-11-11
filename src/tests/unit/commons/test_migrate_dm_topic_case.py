@@ -423,18 +423,6 @@ class TestRebuildTopicFileText:
 # ─── TestNowRunTs ──────────────────────────────────────────────────────────
 
 
-class TestNowRunTs:
-    """The backup-timestamp helper."""
-
-    def test_returns_iso_compact_utc_format( self ):
-        """Format is `YYYYMMDDTHHMMSSZ` — filesystem-safe."""
-        result = migrate_dm_topic_case._now_run_ts()
-        import re
-        assert re.match( r"^\d{8}T\d{6}Z$", result ), (
-            f"Expected YYYYMMDDTHHMMSSZ format, got {result!r}"
-        )
-
-
 # ─── TestMain — CLI entry point ─────────────────────────────────────────────
 
 

@@ -5,7 +5,7 @@ pins:
   - scripts.backfill_bridge_sender_id.classify@dfe6f18565
   - scripts.backfill_bridge_sender_id.main@beb4673fb5
   - scripts.migrate-dm-topic-case.migrate_directory@2d2bbfa600
-  - scripts.migrate-dm-topic-case.main@aae4c6a1d8
+  - scripts.migrate-dm-topic-case.main@924d29d2c5
   - scripts.observe_gate_b_admission.login@b69b8f0207
   - scripts.observe_gate_b_admission.check_mount@472b53c730
   - scripts.observe_gate_b_admission.check_prior_yaml@2ce9fe79b8
@@ -16,7 +16,7 @@ pins:
   - scripts.probe_broadcast_ack_two_sided.main@3fb79e9f05
   - scripts.probe_commons_post_direct.make_body@1bf88811d2
   - scripts.probe_commons_post_direct.run_probe@ec96b63b32
-  - scripts.tfe_to_cc_phase3_live.main@02ef6048cd
+  - scripts.tfe_to_cc_phase3_live.main@2117aa71ff
   - scripts.ws_job_listener.EvalIntegrityError@53a46fbfc7
   - scripts.ws_job_listener.parse_transitions@6f852c1448
   - scripts.ws_job_listener.WsJobEventListener@7e379de527

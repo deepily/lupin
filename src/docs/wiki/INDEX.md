@@ -49,6 +49,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[utils-speech-text]] — turns markdown links and bare addresses into speakable text for the TTS doors and the spoken-length cap. `cosa.utils` (speech_text)
 - [[utils-atomic-json]] — the whole-file atomic JSON write and the never-raising section read. `cosa.utils` (atomic_json)
 - [[utils-file-hash]] — the one sha256 of a file's bytes, read in chunks. `cosa.utils` (file_hash)
+- [[utils-utc-stamp]] — the compact UTC stamp for file and folder names. `cosa.utils` (utc_stamp)
 - [[utils-stoppable-daemon]] — the start and stop of a polling daemon thread, shared by the arbiter and watcher classes. `cosa.utils` (stoppable_daemon)
 
 ## Quality tooling
