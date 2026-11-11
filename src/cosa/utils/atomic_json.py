@@ -57,3 +57,23 @@ def load_json_section( path, key ) -> dict:
         return section if isinstance( section, dict ) else {}
     except ( OSError, ValueError ):
         return {}
+
+
+def load_json_dict( path ) -> dict:
+    """
+    Read a JSON file whose top level is an object.
+
+    Requires:
+        - path is a path-like or string
+
+    Ensures:
+        - returns the dict in the file
+        - returns {} when the file is absent, unreadable, not valid JSON, or not a JSON
+          object; it never raises
+    """
+    try:
+        with open( path, "r", encoding="utf-8" ) as fh:
+            data = json.load( fh )
+    except ( OSError, ValueError ):
+        return {}
+    return data if isinstance( data, dict ) else {}

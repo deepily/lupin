@@ -11,6 +11,7 @@ import types
 import pytest
 
 import lupin_arbiter_app.job_alert_watcher as jaw
+from cosa.utils.atomic_json import load_json_dict, write_json_atomic
 from lupin_arbiter_app.app import assemble_app, create_app
 
 T0 = datetime.datetime( 2026, 11, 9, 12, 0, tzinfo=datetime.timezone.utc )
@@ -115,12 +116,12 @@ def test_an_alert_that_reached_no_channel_is_not_saved_and_is_tried_again_at_the
     failed = [ { "channel": "durable", "outcome": "post_error" }, { "channel": "live", "outcome": "user_not_available" } ]
     jobs   = [ entry( interval=86400 ) ]
     loop   = jaw.JobAlertLoop( lambda: jobs, sender( sent, failed ), path, lambda e, **k: logged.append( e ), clock=clock )
-    assert loop.poll_once() == 0 and jaw.read_state( path ) == { }, "nothing delivered: nothing remembered"
+    assert loop.poll_once() == 0 and load_json_dict( path ) == { }, "nothing delivered: nothing remembered"
     assert "job_alert_undelivered" in logged
     clock.advance( 60 )
     loop.notify_fn = sender( sent, OK )
     assert loop.poll_once() == 1 and len( sent ) == 2, "the very next poll tries again, long before the 86400 second interval"
-    assert list( jaw.read_state( path ) ) == [ "dup" ]
+    assert list( load_json_dict( path ) ) == [ "dup" ]
 
 
 def test_a_failed_repeat_keeps_the_old_time_so_the_interval_still_counts_from_the_last_delivery(tmp_path):
@@ -128,10 +129,10 @@ def test_a_failed_repeat_keeps_the_old_time_so_the_interval_still_counts_from_th
     jobs = [ entry( interval=600 ) ]
     loop = jaw.JobAlertLoop( lambda: jobs, sender( [ ] ), path, lambda e, **k: None, clock=clock )
     loop.poll_once()
-    first = jaw.read_state( path )
+    first = load_json_dict( path )
     clock.advance( 600 )
     loop.notify_fn = sender( [ ], [ { "channel": "live", "outcome": "http_error" } ] )
-    assert loop.poll_once() == 0 and jaw.read_state( path ) == first
+    assert loop.poll_once() == 0 and load_json_dict( path ) == first
 
 
 def test_one_delivered_channel_is_enough_and_a_live_delivery_counts():
@@ -143,7 +144,7 @@ def test_one_delivered_channel_is_enough_and_a_live_delivery_counts():
 
 def test_a_send_that_raises_leaves_the_state_file_untouched(tmp_path):
     path = str( tmp_path / "state.json" )
-    jaw.write_state( path, { "old": T0.isoformat() } )
+    write_json_atomic( path, { "old": T0.isoformat() } )
     before = ( tmp_path / "state.json" ).read_text()
     def boom( message ): raise RuntimeError( "sink down" )
     loop = jaw.JobAlertLoop( lambda: [ entry() ], boom, path, lambda e, **k: None, clock=Clock() )
@@ -167,11 +168,11 @@ def test_the_default_clock_is_the_real_one_and_a_failing_summary_raises_for_the_
 
 def test_state_files_round_trip_and_bad_files_read_as_empty(tmp_path):
     path = str( tmp_path / "a" / "state.json" )
-    assert jaw.read_state( path ) == { }
-    jaw.write_state( path, { "k": "v" } )
-    assert jaw.read_state( path ) == { "k": "v" } and not ( tmp_path / "a" / "state.json.tmp" ).exists()
-    ( tmp_path / "a" / "state.json" ).write_text( "{not json" ); assert jaw.read_state( path ) == { }
-    ( tmp_path / "a" / "state.json" ).write_text( "[1, 2]" );    assert jaw.read_state( path ) == { }
+    assert load_json_dict( path ) == { }
+    write_json_atomic( path, { "k": "v" } )
+    assert load_json_dict( path ) == { "k": "v" } and not ( tmp_path / "a" / "state.json.tmp" ).exists()
+    ( tmp_path / "a" / "state.json" ).write_text( "{not json" ); assert load_json_dict( path ) == { }
+    ( tmp_path / "a" / "state.json" ).write_text( "[1, 2]" );    assert load_json_dict( path ) == { }
 
 
 def test_the_live_summary_builds_the_job_list_from_the_job_service(monkeypatch, tmp_path):
@@ -255,3 +256,35 @@ def test_the_lifespan_starts_and_stops_the_job_alert_loop_and_health_reports_it(
         assert loop.started and client.app.state.job_alert_loop is loop
         assert client.get( "/health" ).json()[ "loops" ] == { "job_alert_watcher": "alive" }
     assert loop.stopped
+
+
+def test_start_runs_the_poll_loop_on_a_named_daemon_thread_and_stop_joins_it():
+    import threading, time
+    polled = threading.Event()
+    def summary(): polled.set(); return [ ]
+    class Nap( Clock ):
+        def sleep( self, seconds ): time.sleep( 0.01 )
+    loop = jaw.JobAlertLoop( summary, print, "/x/state.json", print, clock=Nap() )
+    loop.start()
+    try:
+        assert polled.wait( 5 ), "the loop never polled"
+        assert [ t for t in threading.enumerate() if t.name == "job-alert-watcher" and t.daemon ], "no named daemon thread"
+    finally:
+        loop.stop()
+    assert not [ t for t in threading.enumerate() if t.name == "job-alert-watcher" ], "stop() left the thread running"
+    loop.stop()                                                            # a second stop is harmless
+
+
+@pytest.mark.parametrize( "last, expected", [
+    ( None,                        True ),
+    ( "",                          True ),
+    ( "not a time",                True ),
+    ( "2026-11-09T11:50:00+00:00", True ),                 # 600 s old, interval 600: exactly due
+    ( "2026-11-09T11:50:01+00:00", False ),                # 599 s old
+    ( "2026-11-09T11:50:00Z",      True ),
+    ( "2026-11-09T12:10:00+00:00", False ),                # a future stamp is not due
+] )
+def test_a_stored_time_is_due_when_missing_unreadable_or_at_least_one_interval_old( last, expected ):
+    jobs = [ entry( interval=600 ) ]
+    messages, _ = jaw.decide( jobs, { } if last is None else { "dup": last }, T0 )
+    assert bool( messages ) is expected

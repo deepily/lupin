@@ -41,6 +41,7 @@ from cosa.repo.symindex import paths
 from cosa.repo.symindex.librarian_queue import CORRELATION_KEY, MOBILE_CORRELATION_KEY, MOBILE_ROLLUP_PREFIX, Librarian
 from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
 from cosa.repo.symindex.wiki_lint import queue
+from cosa.utils.atomic_json import load_json_dict
 from lupin_mcp import job_summary_adapters as jsa
 
 CRON_TAG         = "# wiki-librarian-tick"
@@ -206,11 +207,7 @@ def read_state( path ):
     Ensures:
         - returns the dict in the file, or an empty dict when the file is absent or unreadable
     """
-    try:
-        with open( path, encoding="utf-8" ) as handle: state = json.load( handle )
-    except ( OSError, ValueError ):
-        return {}
-    return state if isinstance( state, dict ) else {}
+    return load_json_dict( path )
 
 
 def write_state( path, state ):
@@ -443,6 +440,18 @@ def crontab_command( environ, own_variable=None ):
     return [ environ.get( own_variable, "crontab" ) ] if own_variable else [ "crontab" ]
 
 
+def install_command( root ):
+    """
+    Say the one shell command that writes every Lupin cron line.
+
+    Requires:
+        - root is the main checkout path
+    Ensures:
+        - returns the cd, environment and cron_generate --install line, with no leading space and no newline
+    """
+    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install"
+
+
 def install_moved_text( root ):
     """
     Say where the cron installer went.
@@ -453,7 +462,7 @@ def install_moved_text( root ):
         - returns the text a retired --install prints: one tool writes every cron line, and the exact command that runs it
     """
     return ( "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:\n"
-             f"  cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+             f"  {install_command( root )}" )
 
 
 def cron_lines_for( run, schedule, boot_delay_seconds ):

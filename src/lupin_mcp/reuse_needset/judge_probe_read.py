@@ -120,8 +120,8 @@ def pairing_share( rows ):
     same = [ r[ "plant" ][ "p_overlap" ] for r in rows if r[ "label" ] == jp.SAME_JOB and r[ "plant" ][ "answered" ] ]
     nots = [ r[ "plant" ][ "p_overlap" ] for r in rows if r[ "label" ] == jp.NOT_SAME and r[ "plant" ][ "answered" ] ]
     if not same or not nots: return { "share": None, "pairings": 0 }
-    score = sum( 1.0 if s > n else 0.5 if s == n else 0.0 for s in same for n in nots )
-    return { "share": round( score / ( len( same ) * len( nots ) ), 6 ), "pairings": len( same ) * len( nots ) }
+    wins, pairings = stage_c_score.auc_counts( same, nots )
+    return { "share": round( wins / pairings, 6 ), "pairings": pairings }
 
 
 def duplicate_figures( cells, arm, repeat ):

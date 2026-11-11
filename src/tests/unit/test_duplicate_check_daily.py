@@ -1194,3 +1194,9 @@ def test_a_baseline_run_leaves_test_code_out_and_counts_it( repo ):
     got = dd.baseline_definitions( repo, dd.baseline_window( repo ) )
     assert [ d[ "name" ] for d in got[ "defs" ] ] == [ "real" ]
     assert got[ "test_dropped" ] == 2, "the smoke test and its local"
+
+
+def test_the_reinstall_text_is_pinned_to_a_literal():
+    assert dd.reinstall_command( "/m", "/py", 40, "/c", "b" ) == (
+        "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
+        "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install" )

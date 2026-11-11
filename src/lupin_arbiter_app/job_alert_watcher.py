@@ -17,12 +17,14 @@ All decisions are pure and work through injected seams: the summary reader, the 
 store, the clock and the logger. Unit tests drive them with a fake clock and need no server.
 """
 import datetime
-import json
 import os
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 from cosa.agents.heartbeat_arbiter.arbiter_journal import DELIVERED_OUTCOMES
+from cosa.agents.heartbeat_arbiter.operator_gate_routing import digest_due
+from cosa.utils.atomic_json import load_json_dict, write_json_atomic
+from cosa.utils.stoppable_daemon import StoppableDaemonMixin
 from lupin_arbiter_app.poll_loop import run_poll_loop
 from lupin_arbiter_app.health_watcher import SystemClock
 
@@ -72,22 +74,6 @@ def alert_message( entry: dict ) -> str:
     return text if len( text ) <= MAX_MESSAGE else text[ : MAX_MESSAGE - 1 ] + "…"
 
 
-def _due( last_iso: Optional[ str ], now: datetime.datetime, interval_seconds: int ) -> bool:
-    """
-    Say whether an alert is due.
-
-    Ensures:
-        - True when nothing was alerted before, when the stored time cannot be read, or when the interval has passed
-        - False when the last alert was less than the interval ago, or lies in the future (clock skew)
-    """
-    if last_iso is None: return True
-    try:
-        last = datetime.datetime.fromisoformat( last_iso )
-    except ValueError:
-        return True
-    return ( now - last ).total_seconds() >= interval_seconds
-
-
 def due_alerts( jobs: List[ dict ], state: Dict[ str, str ], now: datetime.datetime ) -> Tuple[ List[ Tuple[ str, str ] ], Dict[ str, str ] ]:
     """
     Pick the alerts due now and work out the state to keep if every one is delivered.
@@ -108,7 +94,7 @@ def due_alerts( jobs: List[ dict ], state: Dict[ str, str ], now: datetime.datet
         if entry[ "state" ] not in BAD_STATES: continue
         key  = alert_key( entry )
         last = state.get( key )
-        if _due( last, now, entry[ "notify_interval_seconds" ] ):
+        if digest_due( last, now, entry[ "notify_interval_seconds" ] ):
             messages.append( ( key, alert_message( entry ) ) )
             new_state[ key ] = now.isoformat()
         else:
@@ -141,36 +127,6 @@ def delivered( outcomes: Any ) -> bool:
     return isinstance( outcomes, list ) and any( isinstance( o, dict ) and o.get( "outcome" ) in DELIVERED for o in outcomes )
 
 
-def read_state( path: str ) -> Dict[ str, str ]:
-    """
-    Read the alert state file.
-
-    Ensures:
-        - returns the dict in the file, or an empty dict when the file is missing, unreadable or not a dict
-    """
-    try:
-        with open( path ) as handle:
-            got = json.load( handle )
-    except ( OSError, ValueError ):
-        return { }
-    return got if isinstance( got, dict ) else { }
-
-
-def write_state( path: str, state: Dict[ str, str ] ) -> None:
-    """
-    Write the alert state file in one step.
-
-    Ensures:
-        - the file holds the whole state or the previous state, never half of it
-        - the folder is made when it is missing
-    """
-    os.makedirs( os.path.dirname( path ), exist_ok=True )
-    tmp = f"{path}.tmp"
-    with open( tmp, "w" ) as handle:
-        json.dump( state, handle )
-    os.replace( tmp, path )
-
-
 def make_live_summary_fn( root: str ) -> Callable[ [], List[ dict ] ]:
     """
     Build the reader of the real job summary.
@@ -191,8 +147,10 @@ def make_live_summary_fn( root: str ) -> Callable[ [], List[ dict ] ]:
     return summary
 
 
-class JobAlertLoop:
+class JobAlertLoop( StoppableDaemonMixin ):
     """The poll loop: read the summary, alert what is due, keep the state."""
+
+    THREAD_NAME = "job-alert-watcher"
 
     def __init__(
         self,
@@ -202,8 +160,8 @@ class JobAlertLoop:
         log_fn           : Callable,
         interval_seconds : int = 300,
         clock            : Any = None,
-        read_state_fn    : Callable = read_state,
-        write_state_fn   : Callable = write_state,
+        read_state_fn    : Callable = load_json_dict,
+        write_state_fn   : Callable = write_json_atomic,
     ):
         """
         Hold the seams.
@@ -220,7 +178,7 @@ class JobAlertLoop:
         self.clock            = clock if clock is not None else SystemClock()
         self.read_state_fn    = read_state_fn
         self.write_state_fn   = write_state_fn
-        self._stop            = threading.Event()
+        self._stop_event      = threading.Event()
         self._thread          = None
 
     def poll_once( self ) -> int:
@@ -248,17 +206,10 @@ class JobAlertLoop:
         if new_state != state: self.write_state_fn( self.state_path, new_state )
         return sent
 
-    def start( self ) -> None:                                  # pragma: no cover - thread spawn boundary
-        """Ensures: the poll loop runs on a daemon thread until stop() is called."""
-        self._thread = threading.Thread(
-            target = run_poll_loop,
-            args   = ( self._stop, self.poll_once, self.log_fn, self.clock, self.interval_seconds ),
-            name   = "job-alert-watcher",
-            daemon = True,
-        )
-        self._thread.start()
+    def _enabled( self ) -> bool:
+        """Ensures: returns True; the arbiter builds this loop only when the watcher is on."""
+        return True
 
-    def stop( self ) -> None:                                   # pragma: no cover - thread join boundary
-        """Ensures: the loop is told to stop and its thread is joined briefly."""
-        self._stop.set()
-        if self._thread is not None: self._thread.join( timeout=5 )
+    def _loop( self ) -> None:
+        """Ensures: polls and sleeps until stop() sets the stop event; a raising poll is logged."""
+        run_poll_loop( self._stop_event, self.poll_once, self.log_fn, self.clock, self.interval_seconds )
