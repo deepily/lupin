@@ -351,3 +351,16 @@ test( "the legacy accordion draws a header row naming every column, sorts on a h
   assert.equal( states[ 0 ], "failing" );
   assert.equal( states[ states.length - 1 ], "healthy" );
 } );
+
+test( "both sheets size the line grid so it fits its container: only the first four tracks are fixed, every text track can shrink (row 4b807ffd)", () => {
+  for ( const sheet of [ "css/background-jobs-legacy.css", "css/multiplexer/background-jobs.css" ] ) {
+    const css = readFileSync( resolve( STATIC, sheet ), "utf8" );
+    const m   = css.match( /\.jobs-line,\s*\.jobs-line-grid \{[^}]*?grid-template-columns\s*:\s*([^;]+);/ );
+    assert.ok( m, sheet + " declares no line grid" );
+    const tracks = m![ 1 ]!.replace( /\/\*.*$/, "" ).match( /minmax\([^)]*\)|\S+/g )!;
+    assert.equal( tracks.length, 9, sheet );
+    assert.deepEqual( tracks.slice( 0, 2 ), [ "1rem", "1.25rem" ] );
+    assert.equal( tracks[ 3 ], "8rem", "the status column stays narrow" );
+    for ( const i of [ 2, 4, 5, 6, 7, 8 ] ) assert.match( tracks[ i ]!, /^minmax\(0, [\d.]+fr\)$/, sheet + " track " + i + " must shrink" );
+  }
+} );

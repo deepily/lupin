@@ -21,7 +21,7 @@
 .jobs-line,
 .jobs-line-grid {
     display               : grid;
-    grid-template-columns : 1rem 1.25rem 13rem 7rem minmax(12rem, 1.4fr) 9rem 9rem 10rem 11rem;
+    grid-template-columns : 1rem 1.25rem minmax(0, 1.3fr) 8rem minmax(0, 1.6fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.1fr);   /* fits the container: the text columns shrink and wrap, so no column runs off the right edge */
     align-items           : baseline;
     gap                   : 0.5rem;
     width                 : 100%;
@@ -32,6 +32,7 @@
     font-weight           : 400;
     text-align            : left;
     cursor                : pointer;
+    overflow-wrap         : anywhere;
 }
 
 /* Header row of the collapsed lines (row 4b807ffd): same grid as .jobs-line, so the names sit over their columns.
