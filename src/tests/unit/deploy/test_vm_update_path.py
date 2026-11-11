@@ -229,7 +229,7 @@ esac
 FAKE_SUDO = r'''#!/bin/bash
 [ "$1" = "-n" ] && shift
 case "$1" in
-  env) exit "${FAKE_ROLES_RC:-0}" ;;
+  env) echo "$*" >> "${FAKE_SUDO_LOG:-/dev/null}"; exit "${FAKE_ROLES_RC:-0}" ;;
   git) case "$*" in *rev-parse*) echo abc1234 ;; esac; exit 0 ;;
   *) exit 1 ;;
 esac
@@ -392,3 +392,12 @@ def test_install_refresh_cron_stops_when_the_registry_has_no_value( tmp_path ):
     snippet = "\n".join( l.strip() for l in lines[ start:start + 3 ] ).replace( "/mnt/lupin-data/lupin", str( tmp_path ) )
     done = subprocess.run( [ "bash", "-c", f"set -e\n{snippet}" ], capture_output=True, text=True, timeout=30 )
     assert done.returncode == 1 and "no LUPIN_CONFIG_MGR_CLI_ARGS" in done.stdout
+
+
+def test_the_roles_check_is_limited_to_lupin_db_test_so_an_empty_dev_database_cannot_block_it( venue ):
+    log = venue[ "tmp" ] / "sudo.log"
+    venue[ "env" ][ "FAKE_SUDO_LOG" ] = str( log )
+    _post( venue )
+    calls = [ l for l in log.read_text().splitlines() if "cosa.utils.db_roles" in l ]
+    assert len( calls ) == 1 and calls[ 0 ].endswith( "--check --database lupin_db_test" )
+    assert "--apply" not in calls[ 0 ] and "--grants-only" not in calls[ 0 ]

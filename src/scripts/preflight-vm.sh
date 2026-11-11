@@ -698,10 +698,11 @@ if pfv_overlay_present "$( docker ps -a --format '{{.Names}}' 2>/dev/null || pri
                          "docker exec $OVERLAY_APP python /var/lupin/src/scripts/check_schema_at_head.py" ;;
     esac
 
+    # --database lupin_db_test: lupin_db_dev is empty on the VM, so an unlimited --check exits 1 on a healthy overlay.
     if ( cd "$REPO_ROOT" && sudo -n env LUPIN_ROOT="$REPO_ROOT" PYTHONPATH=src python3 -m cosa.utils.db_roles \
             --app-pw-file "$OVERLAY_SECRETS/db_app_password" --host-pw-file "$OVERLAY_SECRETS/db_host_password" \
             --test-pw-file "$OVERLAY_SECRETS/db_test_password" \
-            --psql "docker exec -i $OVERLAY_DB psql -U lupin_dev -d lupin_db_dev" --check >/dev/null 2>&1 ); then
+            --psql "docker exec -i $OVERLAY_DB psql -U lupin_dev -d lupin_db_dev" --check --database lupin_db_test >/dev/null 2>&1 ); then
         report pass BLOCK "overlay database roles and grants read back clean"
     else
         report fail BLOCK "overlay database roles or grants are not clean (db_roles --check)" \
