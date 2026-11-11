@@ -7,12 +7,11 @@ Duplicate check status router: backlog, drain rate, tokens and the projected zer
 
 All three read the run history (runs.jsonl) of the daily duplicate check and nothing else. They hold only counts, so they need no sign-in.
 """
-import datetime
-
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 import cosa.utils.util as cu
+from cosa.rest.routers import job_summary
 from lupin_mcp import duplicate_check_history as history
 from lupin_mcp import duplicate_check_status as status
 
@@ -32,7 +31,6 @@ def installed_crontab():
         - returns ( text, zone ): the text of crontab -l or the host's fresh snapshot of it, and the host's tzinfo when the text came from the snapshot, else None
         - returns ( None, None ) when neither answers, so the page says its schedule is unknown
     """
-    from cosa.rest.routers import job_summary
     _root, _data, deps = job_summary.live_deps()
     return deps.crontab_text(), deps.host_zone()
 
@@ -46,13 +44,8 @@ def snapshot_now():
         - the time is in the zone the crontab's hours are written in, so a host snapshot read in a UTC container still lines up
     """
     text, zone = installed_crontab()
-    moment     = now()
+    moment     = job_summary.clock()
     return status.snapshot( runs_folder(), moment if zone is None else moment.astimezone( zone ), text )
-
-
-def now():
-    """Ensures: returns the present time as a timezone-aware datetime."""
-    return datetime.datetime.now().astimezone()
 
 
 @router.get( "/api/duplicate-check/status" )
@@ -64,7 +57,7 @@ def get_status():
 @router.get( "/api/duplicate-check/job-summary" )
 def get_job_summary():
     """Ensures: returns the job-summary/1 record of the run history as of now."""
-    return status.job_summary( history.read_lines( runs_folder() ), now() )
+    return status.job_summary( history.read_lines( runs_folder() ), job_summary.clock() )
 
 
 @router.get( "/app/duplicate-check", include_in_schema=False )

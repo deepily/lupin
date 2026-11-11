@@ -7,11 +7,10 @@ pins:
   - cosa.rest.routers.job_summary.jobs_summary@f5e91b0bff
   - cosa.rest.routers.job_summary.run_job_now@058084ebd7
   - cosa.rest.routers.duplicate_check_status.runs_folder@3f8453be3f
-  - cosa.rest.routers.duplicate_check_status.installed_crontab@98279af0ba
-  - cosa.rest.routers.duplicate_check_status.snapshot_now@b9cf8629b9
-  - cosa.rest.routers.duplicate_check_status.now@7a3baafbcd
+  - cosa.rest.routers.duplicate_check_status.installed_crontab@d42b4aa873
+  - cosa.rest.routers.duplicate_check_status.snapshot_now@17d50899e7
   - cosa.rest.routers.duplicate_check_status.get_status@f28fbf7f76
-  - cosa.rest.routers.duplicate_check_status.get_job_summary@e0fd790c01
+  - cosa.rest.routers.duplicate_check_status.get_job_summary@b47b92358b
   - cosa.rest.routers.duplicate_check_status.get_page@536b7bfbfc
 ---
 # Jobs and duplicate-check status endpoints
@@ -25,7 +24,7 @@ Two small routers over the job service in [[rest-job-service-assessment]] and [[
 
 ## Duplicate check
 - The three routes read only the run history of the daily check, which holds counts, so they need no sign-in.
-- `runs_folder` is the history folder under the project root. `now` is the aware local time.
+- `runs_folder` is the history folder under the project root. The aware local time comes from the jobs router's `clock`, so a test replaces one function for both routers.
 - `installed_crontab` gets the crontab text and its zone through the jobs router's live inputs. It returns nothing for both when neither source answers, and the page then says its schedule is unknown.
 - `snapshot_now` builds the status snapshot with that schedule, with the time shifted into the crontab's zone.
 - `get_status` serves `/api/duplicate-check/status`, `get_job_summary` serves `/api/duplicate-check/job-summary` as a job-summary/1 record, and `get_page` serves `/app/duplicate-check` as HTML that browsers revalidate on each load.
