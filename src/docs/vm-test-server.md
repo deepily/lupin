@@ -18,7 +18,7 @@ Files under `/etc/lupin/secrets` (root, host gid, 0440), written by `lupin-vm.sh
 ## Reaching VM :8000
 - `lupin-vm.sh test-server idle` runs `venue_idle --port 8000` on the VM; the exit code (0 idle, 1 busy, 2 unknown) comes back through ssh. No firewall rule needed.
 - `lupin-vm.sh test-server refresh` (or `refresh-test-server.sh --vm`) restarts the container and polls `/health` on the VM. It waits up to 180 seconds, because the app takes about a minute to start.
-- From this host (`submit-test-suite.py`, a browser): `lupin-vm.sh firewall open 8000` once, then `lupin-vm.sh tunnel 18000 8000`, then `submit-test-suite.py --base-url http://127.0.0.1:18000 ...`. Local 8000 belongs to this host's own test server, hence 18000.
+- From this host (`submit-test-suite.py`, a browser): run `lupin-vm.sh firewall ensure` once for the IAP rule. Then `lupin-vm.sh tunnel 18000 8000`, then `submit-test-suite.py --base-url http://127.0.0.1:18000 ...`. Local 8000 belongs to this host's own test server, hence 18000.
 
 ## Server update (one command)
 `lupin-vm.sh deploy` is the update. In order, it:
@@ -45,12 +45,21 @@ A Claude seat is refused a crontab install and Secret Manager writes, so these o
 `secrets-check` derives the secret names from the script's own `gcloud secrets` calls. A verb that starts reading a new secret is covered without editing a list. It prints names, never values.
 
 ## Bring-up order (a person runs these; nothing here starts by itself)
-1. `lupin-vm.sh deploy` (the overlay and init SQL must be on the VM checkout)
-2. `lupin-vm.sh push-test-server-secrets`
-3. `lupin-vm.sh test-server prep`
-4. `lupin-vm.sh test-server up-db` (the pgvector container alone; `roles` needs it running)
-5. `lupin-vm.sh test-server roles` (dry run), then `... roles --apply`
-6. `lupin-vm.sh test-server up`, then `lupin-vm.sh test-server roles --grants-only` and `... roles --check` once the app has created its tables
-7. `lupin-vm.sh test-server idle`, then `lupin-vm.sh firewall open 8000` and the tunnel above
+1. `lupin-vm.sh firewall ensure` (a person runs it; it creates every IAP rule in `src/conf/vm-iap-ports.tsv` that is missing)
+2. `lupin-vm.sh deploy` (the overlay and init SQL must be on the VM checkout)
+3. `lupin-vm.sh push-test-server-secrets`
+4. `lupin-vm.sh test-server prep`
+5. `lupin-vm.sh test-server up-db` (the pgvector container alone; `roles` needs it running)
+6. `lupin-vm.sh test-server roles` (dry run), then `... roles --apply`
+7. `lupin-vm.sh test-server up`, then `lupin-vm.sh test-server roles --grants-only` and `... roles --check` once the app has created its tables
+8. `lupin-vm.sh test-server idle`, then `lupin-vm.sh firewall check` and the tunnel above
 
 Known gap: the companion seed in `run-fastapi-lupin-test.sh` copies admin users from `lupin_db_dev`, which is empty here, so it skips and :8000 starts with no login. A tester user must be created in `lupin_db_test` before `submit-test-suite.py` can log in.
+
+## IAP firewall ports
+The ports that need an IAP rule are listed in `src/conf/vm-iap-ports.tsv`: port, tier and purpose. Tier `block` means a missing rule fails the check. Tier `warn` means it only warns. 7999 is `block`.
+
+- `lupin-vm.sh firewall check` is read-only. It marks each port ok, warn or fail and prints the ensure line as the remedy. It exits 1 when a `block` port has no rule.
+- `lupin-vm.sh firewall ensure` creates each missing rule and says `created` or `present` per port. A second run creates nothing. A person runs it, because auto mode refuses a seat's firewall change.
+- `lupin-vm.sh deploy` runs the check before the VM preflight (a miss stops the deploy) and after the restart (a miss is reported). `lupin-vm.sh preflight` runs it first. `LUPIN_SKIP_PREFLIGHT=1` skips it in `deploy`.
+- The check runs on the dev box, because the VM has no gcloud credentials. The VPC and the SSH rule belong to the terraforming-vms repo.

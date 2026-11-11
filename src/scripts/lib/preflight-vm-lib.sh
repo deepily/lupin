@@ -1534,3 +1534,70 @@ pfv_count_status() {
     if [ "$(( 10#$n ))" -ge 1 ]; then printf 'PRESENT'; return 0; fi
     printf 'ABSENT'; return 1
 }
+
+# ── pfv_iap_rule_covering ────────────────────────────────────────────────────
+# Find the firewall rule that lets the IAP range reach a TCP port.
+#
+# Requires:
+#   - $1 is a port number
+#   - $2 is the text of `gcloud compute firewall-rules list` printed with
+#     --format="value(name,direction,disabled,sourceRanges.list(separator=';'),allowed[].map().firewall_rule().list(separator=';'))"
+#     (one rule per line, tab-separated; the allowed list is comma-separated, as gcloud prints it)
+# Ensures:
+#   - prints the first matching rule name and returns 0
+#   - a rule matches when it is INGRESS, not disabled, lists 35.235.240.0/20 or 0.0.0.0/0, and allows
+#     the port as tcp, all, tcp:PORT or a tcp:LOW-HIGH range holding it
+#   - prints nothing and returns 1 when no rule matches
+pfv_iap_rule_covering() {
+    local port="$1" rules="$2" name direction disabled ranges allowed entry spec low high
+    while IFS='|' read -r name direction disabled ranges allowed; do
+        [ "$direction" = "INGRESS" ] || continue
+        [ "$disabled" = "True" ] && continue
+        case ";$ranges;" in
+            *";35.235.240.0/20;"*|*";0.0.0.0/0;"*) ;;
+            *) continue ;;
+        esac
+        for entry in ${allowed//,/ }; do
+            case "$entry" in
+                all|tcp) printf '%s' "$name"; return 0 ;;
+                tcp:*)
+                    spec="${entry#tcp:}"; low="${spec%-*}"; high="${spec#*-}"
+                    if [[ "$low" =~ ^[0-9]+$ && "$high" =~ ^[0-9]+$ ]] \
+                        && [ "$port" -ge "$low" ] && [ "$port" -le "$high" ]; then
+                        printf '%s' "$name"; return 0
+                    fi ;;
+            esac
+        done
+    done <<< "$( printf '%s' "$rules" | tr '\t' '|' )"
+    return 1
+}
+
+# ── pfv_iap_port_states ──────────────────────────────────────────────────────
+# Say, for every declared VM port, whether an IAP rule covers it.
+#
+# Requires:
+#   - $1 is a readable path to src/conf/vm-iap-ports.tsv
+#   - $2 is the rule listing described at pfv_iap_rule_covering (it may be empty)
+# Ensures:
+#   - prints one line per declared port: port|tier|PRESENT|rule-name or port|tier|ABSENT|
+#   - returns 0 when every block-tier port is present, 1 when one is absent
+#   - returns 2 (printing nothing) when the file is unreadable
+#   - returns 3 when a row has no numeric port or a tier other than block or warn; it names the row on stderr
+pfv_iap_port_states() {
+    local file="$1" rules="$2" row port tier rule rc=0 rows
+    rows="$( pfv_parse_manifest "$file" )" || return 2
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        port="$( pfv_row_field "$row" 1 3 )" || { printf 'bad row in %s: %s\n' "$file" "$row" >&2; return 3; }
+        tier="$( pfv_row_field "$row" 2 3 )"
+        [[ "$port" =~ ^[0-9]+$ ]] || { printf 'bad port in %s: %s\n' "$file" "$row" >&2; return 3; }
+        case "$tier" in block|warn) ;; *) printf 'bad tier in %s: %s\n' "$file" "$row" >&2; return 3 ;; esac
+        if rule="$( pfv_iap_rule_covering "$port" "$rules" )"; then
+            printf '%s|%s|PRESENT|%s\n' "$port" "$tier" "$rule"
+        else
+            printf '%s|%s|ABSENT|\n' "$port" "$tier"
+            [ "$tier" = "block" ] && rc=1
+        fi
+    done <<< "$rows"
+    return $rc
+}
