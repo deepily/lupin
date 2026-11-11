@@ -122,8 +122,8 @@ def test_the_duplicate_check_line_and_panel_read_as_the_design_shows_them( logge
     item = _dup( _open( page, client ) )
     line = item.get_by_test_id( "jobs-line" )
     assert item.get_by_test_id( "jobs-badge" ).inner_text() == "FAILING · BEHIND"
-    assert item.get_by_test_id( "jobs-last-run" ).inner_text() == "last run 19:31 failed (stale_branch)"
-    assert item.get_by_test_id( "jobs-clears-cell" ).inner_text() == "clears: never at this rate"
+    assert item.get_by_test_id( "jobs-last-run" ).inner_text() == "19:31 failed (stale_branch)"
+    assert item.get_by_test_id( "jobs-clears-cell" ).inner_text() == "never at this rate"
     line.click()
     assert line.get_attribute( "aria-expanded" ) == "true"
     panel = item.get_by_test_id( "jobs-panel" )

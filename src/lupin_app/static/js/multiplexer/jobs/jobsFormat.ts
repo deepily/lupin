@@ -8,7 +8,7 @@
 import type { JobEntry, JobPoint, JobScanDebt, JobState } from "./types";
 
 /** The states, worst first. The accordion sorts by this order. */
-export const STATE_ORDER: readonly JobState[] = [ "healthy", "behind", "failing", "silent", "unknown" ];   // active first (Rick, 9 Nov, row 300af681); a running job goes above all of them
+export const STATE_ORDER: readonly JobState[] = [ "healthy", "behind", "failing", "silent", "unknown" ];   // the order of the header line's counts
 
 const STATE_LABEL: Record<JobState, string> = {
   unknown : "UNKNOWN",
@@ -76,14 +76,14 @@ export interface SortOrder {
   compare : ( a: JobEntry, b: JobEntry ) => number;
 }
 
-/** No header picked: the active-first order. */
+/** No header picked: service name A to Z. */
 export const DEFAULT_SORT: JobSort = { id: null, direction: "asc" };
 
 // Failing is the most urgent state (Rick, 11 Nov, row 4b807ffd).
 /**
  * The states by urgency, least urgent first.
  *
- * It is not STATE_ORDER, which ranks the default active-first order.
+ * It is not STATE_ORDER, which orders the header line.
  */
 export const HEALTH_URGENCY: readonly JobState[] = [ "healthy", "behind", "silent", "unknown", "failing" ];
 
@@ -105,21 +105,20 @@ function attemptTime( j: JobEntry ): number {
  * ascending, a job that never ran first.
  */
 export const SORT_ORDERS: readonly SortOrder[] = [
-  { id: "name",   label: "Service", compare: ( a, b ) => a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" ) },
+  { id: "name",   label: "Service", compare: defaultCompare },
   { id: "health", label: "Status",  compare: ( a, b ) => HEALTH_URGENCY.indexOf( a.state ) - HEALTH_URGENCY.indexOf( b.state ) },
   { id: "last-run", label: "Last run", compare: ( a, b ) => attemptTime( a ) - attemptTime( b ) },
 ];
 
+// Rick, 11 Nov, row 1ac04991: the default order is service name A to Z, not active first.
 function defaultCompare( a: JobEntry, b: JobEntry ): number {
-  const rank    = ( j: JobEntry ): number => j.running ? -1 : STATE_ORDER.indexOf( j.state );
-  return rank( a ) - rank( b ) || attemptTime( b ) - attemptTime( a ) || a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" );
+  return a.title.localeCompare( b.title ) || ( a.target ?? "" ).localeCompare( b.target ?? "" );
 }
 
 /**
- * Sort the jobs, active first when no sort is picked.
+ * Sort the jobs, by service name A to Z when no sort is picked.
  *
- * The default order is running now, then healthy, behind, failing, silent, never reported.
- * Inside a rank the newest attempt leads, then title, then target. A picked order uses its
+ * The default order is title, then target. A picked order uses its
  * own comparator, reversed for "desc", with ties in the default order. The input is kept.
  *
  * Raises:
@@ -186,27 +185,27 @@ export function lastRunText( job: JobEntry, todayIso: string ): string {
   if ( attempt === null ) return job.state === "unknown" ? "never reported" : "no run recorded";
   const at = formatWhen( attempt.started_at, todayIso );
   if ( attempt.outcome === "failed" ) {
-    return attempt.failure === null ? `last run ${ at } failed` : `last run ${ at } failed (${ attempt.failure })`;
+    return attempt.failure === null ? `${ at } failed` : `${ at } failed (${ attempt.failure })`;
   }
-  if ( attempt.outcome === "skipped" ) return `last run ${ at } skipped`;
+  if ( attempt.outcome === "skipped" ) return `${ at } skipped`;
   if ( attempt.outcome === "clean" && job.work_found_last_run === 0 ) return `ran ${ at }, found nothing`;
-  return `last run ${ at } ${ attempt.outcome }`;
+  return `${ at } ${ attempt.outcome }`;
 }
 
-/** "last finished 11-06 19:06", or "last finished: not reported". */
+/** "11-06 19:06", or "not reported". The column heading says "Last finished". */
 export function lastFinishedText( job: JobEntry, todayIso: string ): string {
-  if ( job.last_finished === null ) return `last finished: ${ NOT_REPORTED }`;
-  return `last finished ${ formatWhen( job.last_finished.started_at, todayIso ) }`;
+  if ( job.last_finished === null ) return NOT_REPORTED;
+  return formatWhen( job.last_finished.started_at, todayIso );
 }
 
 /** The scan column text, or an empty string when scan debt does not apply. */
 export function scanText( job: JobEntry ): string {
   if ( !job.applies.scan_debt ) return "";
   const debt = job.scan_debt;
-  if ( debt === null ) return `scan: ${ NOT_REPORTED }`;
+  if ( debt === null ) return NOT_REPORTED;
   if ( debt.freshness !== null ) return freshnessText( debt );
-  if ( debt.count === null ) return `scan: ${ NOT_REPORTED }`;
-  return `scan ${ formatCount( debt.count ) } ${ trendArrow( debt.points ) }`.trimEnd();
+  if ( debt.count === null ) return NOT_REPORTED;
+  return `${ formatCount( debt.count ) } ${ trendArrow( debt.points ) }`.trimEnd();
 }
 
 /** "age 2 h of 36" for a refresh job, or "age: not reported". */
@@ -233,10 +232,10 @@ export function fixText( job: JobEntry ): string {
 export function clearsText( job: JobEntry ): string {
   const clears = job.scan_debt === null ? null : job.scan_debt.clears_in;
   if ( !job.applies.scan_debt || clears === null ) return "";
-  if ( clears.kind === "never_at_this_rate" ) return "clears: never at this rate";
-  if ( clears.kind === "not_enough_runs" ) return "clears: not enough runs";
-  if ( clears.days === null ) return `clears: ${ NOT_REPORTED }`;
-  return `clears: ${ clears.days === 1 ? "1 day" : `${ clears.days } days` }`;
+  if ( clears.kind === "never_at_this_rate" ) return "never at this rate";
+  if ( clears.kind === "not_enough_runs" ) return "not enough runs";
+  if ( clears.days === null ) return NOT_REPORTED;
+  return clears.days === 1 ? "1 day" : `${ clears.days } days`;
 }
 
 /**

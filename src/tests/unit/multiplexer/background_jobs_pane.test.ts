@@ -75,7 +75,7 @@ test( "trendArrow compares the first and last point", () => {
   assert.equal( F.trendArrow( p( 4, 9, 4 ) ), "=" );
 } );
 
-test( "sortJobs goes active first (running, healthy, behind, failing, silent, unknown), then latest attempt, then title, then target, without touching its input", () => {
+test( "sortJobs defaults to service name A to Z, then target, whatever the state, without touching its input (row 1ac04991)", () => {
   const a = { ...find( "duplicate-check" ), state : "healthy" as const, title : "B" };
   const b = { ...find( "duplicate-check" ), state : "failing" as const, title : "Z" };
   const c = { ...find( "duplicate-check" ), state : "healthy" as const, title : "A", target : "y" };
@@ -85,11 +85,12 @@ test( "sortJobs goes active first (running, healthy, behind, failing, silent, un
   const out   = F.sortJobs( input );
   assert.deepEqual( out.map( ( j ) => `${ j.state }/${ j.title }/${ j.target }` ), [ "healthy/A/null", "healthy/A/x", "healthy/A/y", "healthy/B/null", "failing/Z/null" ] );
   assert.equal( input[ 0 ], a );
-  const real = F.sortJobs( FIXTURE.jobs ).map( ( j ) => j.state );
-  assert.deepEqual( real, [ ...real ].sort( ( x, y ) => F.STATE_ORDER.indexOf( x ) - F.STATE_ORDER.indexOf( y ) ) );
+  const real = F.sortJobs( FIXTURE.jobs ).map( ( j ) => j.title );
+  assert.deepEqual( real.slice( 0, 2 ), [ "Commons archival", "Context tick" ] );
+  assert.deepEqual( real, [ ...real ].sort( ( x, y ) => x.localeCompare( y ) ), "title order; no job has a target in the fixture that changes it" );
 } );
 
-test( "sortJobs ranks one job of each state and a running job above them all, ties broken by the newest attempt and a job with none last (row 300af681)", () => {
+test( "sortJobs ignores state, running and attempt time by default: the names alone decide (row 1ac04991, replacing row 300af681)", () => {
   const mk = ( name: string, state: JobEntry[ "state" ], at: string | null, running = false ): JobEntry => {
     const base = find( "duplicate-check" );
     const attempt = at === null ? null : { ...( base.last_attempt as NonNullable<JobEntry[ "last_attempt" ]> ), started_at : at };
@@ -102,7 +103,7 @@ test( "sortJobs ranks one job of each state and a running job above them all, ti
     mk( "h-utc", "healthy", "2026-11-09T14:30:00+00:00" ),
   ];
   assert.deepEqual( F.sortJobs( jobs ).map( ( j ) => j.job ),
-    [ "z-run", "h-utc", "h-new", "h-old", "h-bad", "h-none", "b", "f", "s", "u" ] );     // 14:30Z is 09:30 in New York: newer than h-new at 09:00 there, so the zone is compared, not the text
+    [ "b", "f", "h-bad", "h-new", "h-none", "h-old", "h-utc", "s", "u", "z-run" ] );
   assert.deepEqual( F.STATE_ORDER, [ "healthy", "behind", "failing", "silent", "unknown" ] );
 } );
 
@@ -126,17 +127,17 @@ test( "badgeText names the first state, any other state a reason names, and UNSC
 
 test( "lastRunText covers liveness, silent, no attempt, failed, skipped, quiet and carried", () => {
   const j = find( "duplicate-check" );
-  assert.equal( F.lastRunText( j, TODAY ), "last run 19:31 failed (stale_branch)" );
+  assert.equal( F.lastRunText( j, TODAY ), "19:31 failed (stale_branch)" );
   j.last_attempt!.failure = null;
-  assert.equal( F.lastRunText( j, TODAY ), "last run 19:31 failed" );
+  assert.equal( F.lastRunText( j, TODAY ), "19:31 failed" );
   j.last_attempt!.outcome = "skipped";
-  assert.equal( F.lastRunText( j, TODAY ), "last run 19:31 skipped" );
+  assert.equal( F.lastRunText( j, TODAY ), "19:31 skipped" );
   j.last_attempt!.outcome = "clean"; j.work_found_last_run = 0;
   assert.equal( F.lastRunText( j, TODAY ), "ran 19:31, found nothing" );
   j.work_found_last_run = 4;
-  assert.equal( F.lastRunText( j, TODAY ), "last run 19:31 clean" );
+  assert.equal( F.lastRunText( j, TODAY ), "19:31 clean" );
   j.last_attempt!.outcome = "carried";
-  assert.equal( F.lastRunText( j, TODAY ), "last run 19:31 carried" );
+  assert.equal( F.lastRunText( j, TODAY ), "19:31 carried" );
   j.last_attempt = null;
   assert.equal( F.lastRunText( j, TODAY ), "no run recorded" );
   j.state = "unknown";
@@ -154,23 +155,23 @@ test( "lastRunText covers liveness, silent, no attempt, failed, skipped, quiet a
 } );
 
 test( "lastFinishedText prints the time or not reported", () => {
-  assert.equal( F.lastFinishedText( find( "duplicate-check" ), TODAY ), "last finished 11-06 19:06" );
-  assert.equal( F.lastFinishedText( find( "reuse-behaviour" ), TODAY ), "last finished: not reported" );
+  assert.equal( F.lastFinishedText( find( "duplicate-check" ), TODAY ), "11-06 19:06" );
+  assert.equal( F.lastFinishedText( find( "reuse-behaviour" ), TODAY ), "not reported" );
 } );
 
 test( "scanText: absent when it does not apply, and each way a figure can be missing", () => {
   assert.equal( F.scanText( find( "reuse-behaviour" ) ), "" );
-  assert.equal( F.scanText( find( "duplicate-check" ) ), "scan 2,124 ▲" );
+  assert.equal( F.scanText( find( "duplicate-check" ) ), "2,124 ▲" );
   const j = find( "duplicate-check" );
   j.scan_debt!.points = [];
-  assert.equal( F.scanText( j ), "scan 2,124" );
+  assert.equal( F.scanText( j ), "2,124" );
   j.scan_debt!.count = null;
-  assert.equal( F.scanText( j ), "scan: not reported" );
+  assert.equal( F.scanText( j ), "not reported" );
   j.scan_debt!.count = 7; j.scan_debt!.unit = null;
-  assert.equal( F.scanText( j ), "scan 7" );
+  assert.equal( F.scanText( j ), "7" );
   j.scan_debt!.count = null;
   j.scan_debt = null;
-  assert.equal( F.scanText( j ), "scan: not reported" );
+  assert.equal( F.scanText( j ), "not reported" );
   assert.equal( F.scanText( find( "vector-refresh" ) ), "age 2 h of 36" );
 } );
 
@@ -202,14 +203,14 @@ test( "fixText covers rows, reported piles, and every missing figure", () => {
 } );
 
 test( "clearsText covers never, not enough runs, days, one day and missing", () => {
-  assert.equal( F.clearsText( find( "duplicate-check" ) ), "clears: never at this rate" );
-  assert.equal( F.clearsText( find( "wiki-librarian" ) ), "clears: not enough runs" );
+  assert.equal( F.clearsText( find( "duplicate-check" ) ), "never at this rate" );
+  assert.equal( F.clearsText( find( "wiki-librarian" ) ), "not enough runs" );
   const j = find( "hook-log-sweep" );
-  assert.equal( F.clearsText( j ), "clears: 1 day" );
+  assert.equal( F.clearsText( j ), "1 day" );
   j.scan_debt!.clears_in = { kind : "days", days : 3.2 };
-  assert.equal( F.clearsText( j ), "clears: 3.2 days" );
+  assert.equal( F.clearsText( j ), "3.2 days" );
   j.scan_debt!.clears_in = { kind : "days", days : null };
-  assert.equal( F.clearsText( j ), "clears: not reported" );
+  assert.equal( F.clearsText( j ), "not reported" );
   j.scan_debt!.clears_in = null;
   assert.equal( F.clearsText( j ), "" );
   j.scan_debt = null;
@@ -262,12 +263,13 @@ function drawAll( summary: JobsSummary = FIXTURE ): HTMLElement {
   return byId( "jobs-accordion" );
 }
 
-test( "the accordion draws all 23 jobs (plus nested targets) active first, each collapsed", () => {
+test( "the accordion draws all 23 jobs (plus nested targets) by service name A to Z, each collapsed", () => {
   const mount = drawAll();
   const top   = ( [ ...mount.children ] as HTMLElement[] ).filter( ( c ) => c.getAttribute( "data-testid" ) === "jobs-item" );   // the header row is the first child
   assert.equal( top.length, 23 );
-  const states = top.map( ( t ) => t.getAttribute( "data-state" ) as string );
-  assert.deepEqual( states, [ ...states ].sort( ( a, b ) => F.STATE_ORDER.indexOf( a as never ) - F.STATE_ORDER.indexOf( b as never ) ) );
+  const titles = top.map( ( t ) => ( t.querySelector( "[data-testid=jobs-title]" ) as HTMLElement ).textContent as string );
+  assert.deepEqual( titles.slice( 0, 2 ), [ "Commons archival", "Context tick" ] );
+  assert.deepEqual( titles, [ ...titles ].sort( ( a, b ) => a.localeCompare( b ) ) );
   for ( const line of mount.querySelectorAll( "[data-testid=jobs-line]" ) ) assert.equal( line.getAttribute( "aria-expanded" ), "false" );
   for ( const panel of mount.querySelectorAll( "[data-testid=jobs-panel]" ) ) assert.equal( ( panel as HTMLElement ).hidden, true );
   assert.equal( mount.querySelectorAll( "[data-job=side-services]" ).length, 4, "the side-services job and its three targets" );
@@ -278,11 +280,11 @@ test( "the duplicate check's collapsed line reads as design 6 shows it", () => {
   const text = ( id: string ) => ( item.querySelector( `[data-testid=${ id }]` ) as HTMLElement ).textContent;
   assert.equal( text( "jobs-title" ), "Duplicate check" );
   assert.equal( text( "jobs-badge" ), "FAILING · BEHIND" );
-  assert.equal( text( "jobs-last-run" ), "last run 19:31 failed (stale_branch)" );
-  assert.equal( text( "jobs-last-finished" ), "last finished 11-06 19:06" );
-  assert.equal( text( "jobs-scan-cell" ), "scan 2,124 ▲" );
+  assert.equal( text( "jobs-last-run" ), "19:31 failed (stale_branch)" );
+  assert.equal( text( "jobs-last-finished" ), "11-06 19:06" );
+  assert.equal( text( "jobs-scan-cell" ), "2,124 ▲" );
   assert.equal( text( "jobs-fix-cell" ), "unfiled 107 ▲" );
-  assert.equal( text( "jobs-clears-cell" ), "clears: never at this rate" );
+  assert.equal( text( "jobs-clears-cell" ), "never at this rate" );
 } );
 
 test( "clicking a line expands its panel and clicking again collapses it; lines are independent", () => {
@@ -669,7 +671,7 @@ test( "the accordion draws a header row naming every column, sorts on a heading 
   const heads = () => Array.from( mount.querySelectorAll( "[data-testid=jobs-header] [role=columnheader]" ) ).map( ( h ) => h.textContent );
   assert.deepEqual( heads(), [ "", "", "Service", "Status", "Last run", "Last finished", "Scan", "Fix", "Clears" ] );
   const order = () => Array.from( mount.querySelectorAll( ":scope > [data-testid=jobs-item]" ) ).map( ( i ) => i.getAttribute( "data-job" ) );
-  assert.deepEqual( order(), [ "cc", "aa", "bb" ], "default order is active first: healthy, failing, unknown" );
+  assert.deepEqual( order(), [ "aa", "bb", "cc" ], "default order is service name A to Z" );
   ( mount.querySelector( "[data-testid=jobs-sort-name]" ) as HTMLElement ).click();
   assert.deepEqual( order(), [ "aa", "bb", "cc" ] );
   assert.equal( mount.querySelector( "[data-testid=jobs-sort-name]" )!.textContent, "Service ▲" );
@@ -680,7 +682,7 @@ test( "the accordion draws a header row naming every column, sorts on a heading 
   renderAccordion( document, mount, summary, NO_ACTIONS );                       // a poll redraws: the pick stays
   assert.deepEqual( order(), [ "cc", "bb", "aa" ] );
   ( mount.querySelector( "[data-testid=jobs-sort-name]" ) as HTMLElement ).click();   // third click: back to default
-  assert.deepEqual( order(), [ "cc", "aa", "bb" ] );
+  assert.deepEqual( order(), [ "aa", "bb", "cc" ] );
   ( mount.querySelector( "[data-testid=jobs-sort-health]" ) as HTMLElement ).click();
   ( mount.querySelector( "[data-testid=jobs-sort-health]" ) as HTMLElement ).click();
   assert.deepEqual( order(), [ "aa", "bb", "cc" ], "health descending: failing, unknown, healthy" );
