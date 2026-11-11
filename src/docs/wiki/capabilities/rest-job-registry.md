@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.job_registry.load_registry@2331e4912c
   - cosa.rest.job_registry.reporting_on@b552249ccd
-  - cosa.rest.job_registry.load_overrides@a2a9df9337
+  - cosa.rest.job_registry.load_overrides@b208e13540
   - cosa.rest.job_registry.effective@4f47d2d9ff
   - cosa.rest.job_registry.crontab_schedule@89dd95c36b
   - cosa.rest.job_registry.with_installed_schedule@11f2ffedb8
@@ -20,7 +20,7 @@ pins:
 - `reporting_on` is false only for a job that says `off`. Switching reporting off hides the job from the list and the counts and does not stop it.
 
 ## Overrides
-- `load_overrides` reads the small overrides file on every call. It keeps only positive numbers for `grace_minutes` and `notify_interval_minutes`. A missing or broken file means no overrides, and one bad entry is dropped alone.
+- `load_overrides` reads the small overrides file on every call, through `load_json_dict` ([[utils-atomic-json]]). It keeps only positive numbers for `grace_minutes` and `notify_interval_minutes`. A missing or broken file means no overrides, and one bad entry is dropped alone.
 - `effective` resolves each of the two numbers by override, then the job, then the defaults, and returns a copy of the job.
 
 ## Installed schedule

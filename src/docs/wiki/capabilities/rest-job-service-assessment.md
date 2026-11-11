@@ -7,7 +7,7 @@ pins:
   - cosa.rest.job_service.LiveDeps@d3145e67da
   - cosa.rest.job_service.assess_read@4bbc6599e7
   - cosa.rest.job_service.assess_target@996e91dc41
-  - cosa.rest.job_service.worst@6d22d57a75
+  - cosa.rest.job_service.worst@7295d96237
   - cosa.rest.job_service.assess_job@3f0f3b8c6c
   - cosa.rest.job_service.build_response@22d0eb1b20
 ---
@@ -24,5 +24,5 @@ The service behind `GET /api/jobs/summary`. The registry is in [[rest-job-regist
 ## Assessing
 - `assess_read` probes the lock only for a job that has reported, and the store only for a job with a mark that has reported. It then calls `job_health.assess`.
 - `assess_target` assesses one job or one target. A target without its own summary path reads the same summary file name inside a folder named for the target. A record that is unreadable or of a foreign schema reads as unknown with its own reason.
-- `worst` picks the worst state among entries. `assess_job` gives a job with targets the worst state of its targets, with each reason prefixed by the target name.
+- `worst` picks the worst state among entries, using `lowest` of the candidate scorer. `assess_job` gives a job with targets the worst state of its targets, with each reason prefixed by the target name.
 - `build_response` returns the schema, time, the jobs worst first then by title, and the count of jobs with reporting switched off with a one-line note. Cron hours are read in the crontab's zone, and overrides are read on each call. An unreadable registry raises.

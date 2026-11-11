@@ -2,7 +2,6 @@
 capability: job-backfill
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.job_backfill.aware@d01c29f925
   - lupin_mcp.job_backfill.is_file@512d237ed5
   - lupin_mcp.job_backfill.mtime_of@a0a07f82d6
   - lupin_mcp.job_backfill.attempt@17149fe91c
@@ -30,7 +29,7 @@ One-time backfill of `job-summary.json` from the records jobs already leave. The
 - `step` pairs an attempt with scan debt, fix debt and the work count.
 - `replay` writes steps oldest first and returns the last record, or None when the file cannot be written.
 - `last_json_line` returns the last line of a file that parses as a JSON object, or None.
-- `mtime_of` gives the file's last write as an aware time; `aware` takes a naive time as local.
+- `mtime_of` gives the file's last write as an aware time; It uses `aware` of [[job-summary-adapters]], which takes a naive time as local.
 - `is_file` returns False for a missing file or an unreadable folder.
 
 ## Invariants

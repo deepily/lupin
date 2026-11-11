@@ -2,7 +2,7 @@
 capability: rest-routers-job-summary-and-duplicate-check
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.routers.job_summary.live_deps@656d9dfb40
+  - cosa.rest.routers.job_summary.live_deps@af8fa149b3
   - cosa.rest.routers.job_summary.clock@f5fed70979
   - cosa.rest.routers.job_summary.jobs_summary@f5e91b0bff
   - cosa.rest.routers.job_summary.run_job_now@058084ebd7
@@ -18,7 +18,7 @@ pins:
 Two small routers over the job service in [[rest-job-service-assessment]] and [[rest-job-service-run-now]].
 
 ## Background jobs
-- `live_deps` builds the root, the data folder (an environment variable first) and the live inputs. `clock` returns the aware local time. Tests replace both.
+- `live_deps` builds the root, the data folder (`data_root` of the reuse candidates router, an environment variable first) and the live inputs. `clock` returns the aware local time. Tests replace both.
 - `jobs_summary`, `GET /api/jobs/summary`, needs an API key or login. It returns the service's answer plus `caller_is_operator`, true only for the operator login. An unusable registry is a 500 with the cause.
 - `run_job_now`, `POST /api/jobs/{job}/run`, is 403 for anyone but the operator login, and an API-key caller has no login. It checks that before reading the registry. Otherwise it returns the status and body of `run_now`.
 
