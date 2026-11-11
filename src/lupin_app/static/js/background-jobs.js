@@ -483,7 +483,8 @@
         return job.target === null ? base : base + "?target=" + encodeURIComponent( job.target );
     }
 
-    function runNowFailureText( status ) {
+    function runNowFailureText( status, detail ) {
+        if ( status === 422 && typeof detail === "string" && detail !== "" ) return detail;
         if ( status === 403 ) return "Only Rick's login can run a job by hand.";
         if ( status === 404 ) return "The reader does not know this job.";
         if ( status === 409 ) return "Not started: the job's run lock is held, so a run is already going.";
@@ -494,7 +495,10 @@
     async function runNow( job ) {
         try {
             const resp = await authFetch( runNowPath( job ), { method : "POST" } );
-            if ( !resp.ok ) return runNowFailureText( resp.status );
+            if ( !resp.ok ) {
+                const refused = await resp.json().catch( () => null );
+                return runNowFailureText( resp.status, refused === null ? null : refused.detail );
+            }
             const started = await resp.json();
             return "Started at " + started.started_at + " (pid " + started.pid + ").";
         } catch ( err ) {

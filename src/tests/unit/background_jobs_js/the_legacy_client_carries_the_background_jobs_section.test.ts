@@ -172,6 +172,21 @@ test( "Run now posts to the job's own door and prints the outcome beside the but
   assert.equal( btn.disabled, false );
 } );
 
+test( "a 422 with a detail shows the detail on the button's status line; one without falls back", async () => {
+  const api = await load();
+  assert.equal( api.runNowFailureText( 422, "Not started: cannot launch /x.sh" ), "Not started: cannot launch /x.sh" );
+  assert.match( api.runNowFailureText( 422, "" ), /cannot be run by hand/ );
+  const dup = byId( "background-jobs-container" ).querySelector( "[data-job=duplicate-check]" ) as HTMLElement;
+  const btn = dup.querySelector( "[data-testid=jobs-run-now]" ) as HTMLButtonElement;
+  const status = () => ( dup.querySelector( "[data-testid=jobs-run-status]" ) as HTMLElement ).textContent;
+  net.reply = () => ( { ok : false, status : 422, json : async () => ( { detail : "Not started: cannot launch /var/pip/x.sh" } ) } );
+  btn.click(); await flush();
+  assert.equal( status(), "Not started: cannot launch /var/pip/x.sh" );
+  net.reply = () => ( { ok : false, status : 422, json : async () => { throw new Error( "no body" ); } } );
+  btn.click(); await flush();
+  assert.match( status() as string, /cannot be run by hand/ );
+} );
+
 test( "each Run now refusal gets its own plain sentence, and a network failure is named", async () => {
   const api = await load();
   const cases: Array<[ number, RegExp ]> = [ [ 403, /Only Rick's login/ ], [ 404, /does not know/ ], [ 409, /run lock is held/ ], [ 422, /cannot be run by hand/ ] ];

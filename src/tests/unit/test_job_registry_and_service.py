@@ -296,6 +296,22 @@ def test_run_now_refuses_unknown_unrunnable_and_locked_jobs_and_starts_nothing(t
     assert svc.run_now( root2, tmp_path, "p", "t1", Deps(), NOW, spawn )[ 0 ] == 200 and spawn.calls[ 0 ][ 0 ] == [ "x" ]
 
 
+def test_run_now_refuses_a_command_whose_script_is_missing_and_names_the_path_instead_of_raising(tmp_path):
+    missing = "/var/planning-is-prompting/workflow/scripts/context-pressure-tick.sh"
+    root = write_registry( tmp_path, [ job( "ctx", run={ "argv": [ missing ] } ) ] )
+    def spawn( argv, **kw ): return subprocess.Popen( argv, **kw )          # the real launcher: the OS raises FileNotFoundError
+    status, body = svc.run_now( root, tmp_path, "ctx", None, Deps(), NOW, spawn )
+    assert status == 422 and body[ "status" ] == "refused" and body[ "reason" ] == "launch_failed"
+    assert missing in body[ "detail" ] and body[ "detail" ].startswith( "Not started" )
+
+
+def test_run_now_names_argv_zero_when_the_launch_error_carries_no_filename(tmp_path):
+    root = write_registry( tmp_path, [ job( "ctx", run={ "argv": [ "/x/y.sh" ] } ) ] )
+    def spawn( argv, **kw ): raise PermissionError( "denied" )
+    status, body = svc.run_now( root, tmp_path, "ctx", None, Deps(), NOW, spawn )
+    assert status == 422 and "/x/y.sh" in body[ "detail" ] and "denied" in body[ "detail" ]
+
+
 def test_a_record_with_the_right_schema_and_a_missing_field_reads_as_unreadable_not_a_500(tmp_path):
     root = write_registry( tmp_path, [ job( "bad" ) ] )
     path = pathlib.Path( root ) / "s" / "bad.json"

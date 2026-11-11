@@ -26,6 +26,7 @@ RUN_NOW_LOG     = "io/jobs/run-now.log"
 NOT_RUNNABLE    = "not_runnable"
 LOCK_HELD       = "lock_held"
 UNKNOWN_JOB     = "unknown_job"
+LAUNCH_FAILED   = "launch_failed"
 
 
 def boot_time_from( stat_text ):
@@ -340,6 +341,7 @@ def run_now( root, data, job, target, deps, now, spawn=subprocess.Popen ):
         - 404 { reason: unknown_job } when the registry has no such job
         - 422 { reason: not_runnable } when the job has no run command
         - 409 { status: refused, reason: lock_held } when its run lock is held: Run now never queues behind or jumps a live run
+        - 422 { status: refused, reason: launch_failed, detail } when the command cannot be started (for example its script is not on this machine); detail names the path the operating system could not open, and nothing is left running
         - 200 { job, target, status: started, trigger: hand, pid, started_at } otherwise; the run's output is appended to RUN_NOW_LOG
         - the child starts with LUPIN_JOB_TRIGGER=hand, so its summary records trigger hand
     """
@@ -351,7 +353,11 @@ def run_now( root, data, job, target, deps, now, spawn=subprocess.Popen ):
     argv, env = run_command( registry, ent, root, data, "hand" )
     log    = pathlib.Path( root ) / RUN_NOW_LOG
     log.parent.mkdir( parents=True, exist_ok=True )
-    with open( log, "a" ) as sink:
-        proc = spawn( argv, env=env, cwd=str( root ), stdout=sink, stderr=sink, stdin=subprocess.DEVNULL, start_new_session=True )
+    try:
+        with open( log, "a" ) as sink:
+            proc = spawn( argv, env=env, cwd=str( root ), stdout=sink, stderr=sink, stdin=subprocess.DEVNULL, start_new_session=True )
+    except OSError as error:
+        missing = error.filename if error.filename is not None else argv[ 0 ]
+        return 422, { "status": "refused", "reason": LAUNCH_FAILED, "detail": f"Not started: this server cannot launch {missing} ({error.strerror or error})." }
     threading.Thread( target=proc.wait, daemon=True ).start()           # reap the child when it ends, so Run now leaves no zombie
     return 200, { "job": job, "target": target, "status": "started", "trigger": "hand", "pid": proc.pid, "started_at": now.isoformat() }

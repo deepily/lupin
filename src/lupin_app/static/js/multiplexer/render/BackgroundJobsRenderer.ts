@@ -55,18 +55,29 @@ export function runNowPath( job: JobEntry ): string {
   return job.target === null ? base : `${ base }?target=${ encodeURIComponent( job.target ) }`;
 }
 
+/** The `detail` sentence of a refusal body, or null. */
+function refusalDetail( err: ApiError ): string | null {
+  const start = err.message.indexOf( "{" );
+  if ( start < 0 ) return null;
+  try {
+    const body = JSON.parse( err.message.slice( start ) ) as { detail?: unknown };
+    return typeof body.detail === "string" && body.detail !== "" ? body.detail : null;
+  } catch { return null; }
+}
+
 /**
  * Turn the answer to a Run now request into one sentence for the panel.
  *
  * Ensures:
  *   - 403, 404, 409 and 422 each get their own plain-words line; anything else shows its status
+ *   - a 422 whose body carries a `detail` (a launch that failed, naming the path) shows that detail instead of the generic line
  */
 export function runNowFailureText( err: unknown ): string {
   if ( !( err instanceof ApiError ) ) return `Run now failed: ${ String( err ) }`;
   if ( err.status === 403 ) return "Only Rick's login can run a job by hand.";
   if ( err.status === 404 ) return "The reader does not know this job.";
   if ( err.status === 409 ) return "Not started: the job's run lock is held, so a run is already going.";
-  if ( err.status === 422 ) return "This job cannot be run by hand.";
+  if ( err.status === 422 ) return refusalDetail( err ) ?? "This job cannot be run by hand.";
   return `Run now failed (HTTP ${ err.status }).`;
 }
 
