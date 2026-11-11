@@ -3164,6 +3164,8 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
 
     Re-spinning? Pass `respin_personas=["cheech","rio"]` for every seat you are bringing back; their rows keep owner. By default a reap moves each worker's open store rows off them (closed if receipted, else reassigned to the accountable or reaping manager), so a re-spin that omits the name leaves its rows on YOU. The result echoes `retained_owner_personas` (skipped) and `retained_unmatched` (named but not reaped in this batch: a typo protects nothing: check it). A named seat that does not return leaves its rows on a persona with no live session, and nothing checks. Retention is keyed on the persona NAME and freed names are re-granted, so a re-granted name can retain the wrong seat's rows: reap and re-spin in one batch.
 
+    Rows the reaped session never touched stay put and appear in `reconciliation.skipped_other_session`.
+
     Mementos: `write_memento` (None = INI `cc session spawn write memento default`, else a bool) makes the reap prove each seat has a fresh, complete memento at `io/mementos/<persona-slug>.md` before killing it; if none is there it DMs the live child to write one and waits (bounded). Pass that path back as `seed_memento` on respawn. Read `memento_alarm` first: names each seat killed without a proven memento, `None` if none. A seat with a fresh memento is not asked again.
 
     `memento_outcomes` gives one verdict per seat: verified, written, skipped, or a visible failure:

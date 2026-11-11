@@ -460,11 +460,11 @@ def test_reap_invokes_reconcile_seam_once_per_session():
             emit_reap_fn=lambda ident, reason="": None, emit_reaped_fn=lambda ident: None,
             clear_hold_fn=lambda ident: True,
             reconcile_items_fn=lambda ident, dead, mgr_p, reason="": seen.append( ident ) or
-                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] },
+                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [], "skipped_other_session": [] },
         )
         assert len( seen ) == 1
         assert seen[ 0 ][ "session_id" ] == "abcd1234-aaaa-bbbb"           # captured pre-unlink
-        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] }
+        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_reap_reconcile_receives_batch_context():
@@ -480,7 +480,7 @@ def test_reap_reconcile_receives_batch_context():
         def recon( ident, dead, mgr_p, reason="" ):
             got[ "dead" ] = dead
             got[ "mgr" ]  = mgr_p
-            return { "closed": [], "reassigned": [], "unclassifiable": [] }
+            return { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
         ss.dismiss_sessions(
             mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
@@ -503,7 +503,7 @@ def test_reap_reconcile_failure_never_breaks_reap():
         assert res[ "bridges_deleted" ] == 1
         assert bridge.exists() is False
         assert res[ "dismissed" ][ 0 ][ "status" ] == "killed"
-        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [] }
+        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_reap_no_bridge_skips_reconcile():
@@ -514,7 +514,7 @@ def test_reap_no_bridge_skips_reconcile():
             mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
             reconcile_items_fn=lambda *a, **k: seen.append( 1 ) or {} )
         assert seen == []                                                   # no identity → no reconcile call
-        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [] }
+        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_reap_reconcile_default_none_skips_cleanly():
@@ -526,7 +526,7 @@ def test_reap_reconcile_default_none_skips_cleanly():
             mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
             clear_hold_fn=lambda i: True )                                  # reconcile_items_fn omitted
-        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [] }
+        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_reap_reconcile_none_default_makes_zero_store_calls( monkeypatch ):
@@ -542,7 +542,7 @@ def test_reap_reconcile_none_default_makes_zero_store_calls( monkeypatch ):
             mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
             clear_hold_fn=lambda i: True )                                  # default → no reconcile
-        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [] }
+        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_reap_reconcile_nondict_summary_ignored():
@@ -553,7 +553,7 @@ def test_reap_reconcile_nondict_summary_ignored():
             mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
             clear_hold_fn=lambda i: True, reconcile_items_fn=lambda *a, **k: None )
-        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [] }
+        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_reap_reconcile_aggregates_across_sessions():
@@ -570,8 +570,8 @@ def test_reap_reconcile_aggregates_across_sessions():
                 "voice_persona": { "name": "W" } } ) )
         def recon( ident, dead, mgr_p, reason="" ):
             if ident[ "session_id" ] == "aaaa1111":
-                return { "closed": [ "c1" ], "reassigned": [ "r1" ], "unclassifiable": [] }
-            return { "closed": [], "reassigned": [ "r2" ], "unclassifiable": [ "u1" ] }
+                return { "closed": [ "c1" ], "reassigned": [ "r1" ], "unclassifiable": [], "skipped_other_session": [] }
+            return { "closed": [], "reassigned": [ "r2" ], "unclassifiable": [ "u1" ], "skipped_other_session": [ "f1" ] }
         res = ss.dismiss_sessions(
             mgr, runner=_OK_RUNNER, session_dir=sd,
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
@@ -580,6 +580,7 @@ def test_reap_reconcile_aggregates_across_sessions():
         assert sorted( rc[ "closed" ] )         == [ "c1" ]
         assert sorted( rc[ "reassigned" ] )     == [ "r1", "r2" ]
         assert sorted( rc[ "unclassifiable" ] ) == [ "u1" ]
+        assert rc[ "skipped_other_session" ]    == [ "f1" ]
 
 
 # ── reap_stale_spawned threads the reconciler through to dismiss_sessions ──────
@@ -683,7 +684,7 @@ def test_default_reconcile_reassigns_to_alive_accountable_manager( monkeypatch )
     assert len( reassigns ) == 1
     assert reassigns[ 0 ][ 0 ] == "t-1" and reassigns[ 0 ][ 1 ] == "mr radio"   # alive accountable_manager
     assert isinstance( reassigns[ 0 ][ 2 ], str ) and reassigns[ 0 ][ 2 ]       # non-empty actor
-    assert summary == { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] }
+    assert summary == { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_default_reconcile_self_owned_stub_goes_to_reaping_manager( monkeypatch ):
@@ -737,7 +738,7 @@ def test_default_reconcile_dead_target_no_reaping_manager_is_unclassifiable( mon
     monkeypatch.setattr( tst, "task_reassign_impl", lambda *a, **k: pytest.fail( "no live target to reassign to" ) )
     summary = ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager=None )
-    assert summary == { "closed": [], "reassigned": [], "unclassifiable": [ "orphan-1" ] }
+    assert summary == { "closed": [], "reassigned": [], "unclassifiable": [ "orphan-1" ], "skipped_other_session": [] }
 
 
 def test_default_reconcile_empty_accountable_goes_to_reaping_manager( monkeypatch ):
@@ -779,7 +780,7 @@ def test_default_reconcile_closes_item_with_orphaned_receipt( monkeypatch ):
     summary = ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" )
     assert closes == [ ( "t-9", "done", { "commit": "abc1234" } ) ]
-    assert summary == { "closed": [ "t-9" ], "reassigned": [], "unclassifiable": [] }
+    assert summary == { "closed": [ "t-9" ], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_default_reconcile_latest_event_no_receipt_reassigns( monkeypatch ):
@@ -867,7 +868,7 @@ def test_default_reconcile_close_store_error_is_unclassifiable( monkeypatch ):
         lambda *a, **k: { "status": "error", "http_status": 422, "errors": [ "bad receipt" ] } )
     summary = ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" )
-    assert summary == { "closed": [], "reassigned": [], "unclassifiable": [ "t-7" ] }
+    assert summary == { "closed": [], "reassigned": [], "unclassifiable": [ "t-7" ], "skipped_other_session": [] }
 
 
 def test_default_reconcile_reassign_store_error_is_unclassifiable( monkeypatch ):
@@ -924,13 +925,13 @@ def test_default_reconcile_skips_terminal_items( monkeypatch ):
     monkeypatch.setattr( tst, "task_reassign_impl",   lambda *a, **k: pytest.fail( "no reassign on terminal" ) )
     summary = ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" )
-    assert summary == { "closed": [], "reassigned": [], "unclassifiable": [] }
+    assert summary == { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_default_reconcile_no_persona_name_is_noop( monkeypatch ):
     import lupin_mcp.task_store_tools as tst
     monkeypatch.setattr( tst, "task_query_impl", lambda *a, **k: pytest.fail( "no query without an owner" ) )
-    empty = { "closed": [], "reassigned": [], "unclassifiable": [] }
+    empty = { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
     assert ss._default_reconcile_store_items( { "persona": {} },   dead_owner_slugs=set(), reaping_manager=None ) == empty
     assert ss._default_reconcile_store_items( { "persona": None }, dead_owner_slugs=set(), reaping_manager=None ) == empty
 
@@ -954,7 +955,7 @@ def test_default_reconcile_no_items_empty_summary( monkeypatch ):
     monkeypatch.setattr( tst, "task_reassign_impl",   lambda *a, **k: pytest.fail() )
     assert ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" ) == \
-        { "closed": [], "reassigned": [], "unclassifiable": [] }
+        { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_default_reconcile_query_nondict_empty( monkeypatch ):
@@ -964,7 +965,7 @@ def test_default_reconcile_query_nondict_empty( monkeypatch ):
     monkeypatch.setattr( tst, "task_query_impl", lambda api_url, api_key, **kw: [ "unexpected" ] )
     assert ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" ) == \
-        { "closed": [], "reassigned": [], "unclassifiable": [] }
+        { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_default_reconcile_query_error_dict_empty( monkeypatch ):
@@ -975,7 +976,7 @@ def test_default_reconcile_query_error_dict_empty( monkeypatch ):
         lambda api_url, api_key, **kw: { "status": "error", "http_status": 500, "detail": "x" } )
     assert ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" ) == \
-        { "closed": [], "reassigned": [], "unclassifiable": [] }
+        { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_default_reconcile_query_raises_swallowed( monkeypatch ):
@@ -986,7 +987,7 @@ def test_default_reconcile_query_raises_swallowed( monkeypatch ):
         lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "GET /api/tasks down" ) ) )
     assert ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" ) == \
-        { "closed": [], "reassigned": [], "unclassifiable": [] }
+        { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 def test_default_reconcile_config_failure_is_noop( monkeypatch ):
@@ -999,7 +1000,7 @@ def test_default_reconcile_config_failure_is_noop( monkeypatch ):
     monkeypatch.setattr( tst, "task_query_impl", lambda *a, **k: pytest.fail( "no query if config failed" ) )
     assert ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" ) == \
-        { "closed": [], "reassigned": [], "unclassifiable": [] }
+        { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1042,10 +1043,10 @@ def test_respin_persona_is_not_reconciled_and_is_surfaced():
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
             clear_hold_fn=lambda i: True,
             reconcile_items_fn=lambda ident, dead, mgr_p, reason="": seen.append( ident ) or
-                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] },
+                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [], "skipped_other_session": [] },
             respin_personas=[ "Tiffany" ] )
         assert seen == []                                        # reconciler never ran for a re-spin
-        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [] }
+        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
         assert res[ "retained_owner_personas" ] == [ "tiffany" ] # surfaced, not silent
         assert res[ "retained_unmatched" ]      == []
 
@@ -1082,7 +1083,7 @@ def test_respin_retention_is_per_persona_not_per_batch():
         seen = []
         def recon( ident, dead, mgr_p, reason="" ):
             seen.append( ident[ "persona" ][ "name" ] )
-            return { "closed": [], "reassigned": [ "r-1" ], "unclassifiable": [] }
+            return { "closed": [], "reassigned": [ "r-1" ], "unclassifiable": [], "skipped_other_session": [] }
         res = ss.dismiss_sessions(
             mgr, runner=_OK_RUNNER, session_dir=sd,
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
@@ -1105,7 +1106,7 @@ def test_true_reap_still_reconciles_control():
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
             clear_hold_fn=lambda i: True,
             reconcile_items_fn=lambda ident, dead, mgr_p, reason="": seen.append( ident ) or
-                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] } )
+                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [], "skipped_other_session": [] } )
         assert len( seen ) == 1                                  # reconcile STILL fires on a true reap
         assert res[ "reconciliation" ][ "reassigned" ] == [ "t-1" ]
         assert res[ "retained_owner_personas" ] == []
@@ -1123,7 +1124,7 @@ def test_respin_naming_a_persona_not_in_this_batch_is_surfaced_not_silent():
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
             clear_hold_fn=lambda i: True,
             reconcile_items_fn=lambda ident, dead, mgr_p, reason="": seen.append( ident ) or
-                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] },
+                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [], "skipped_other_session": [] },
             respin_personas=[ "Nobody" ] )
         assert len( seen ) == 1                                  # unchanged: still reconciled
         assert res[ "reconciliation" ][ "reassigned" ] == [ "t-1" ]
@@ -1149,7 +1150,7 @@ def test_respin_persona_stays_in_dead_owner_slugs():
         got = {}
         def recon( ident, dead, mgr_p, reason="" ):
             got[ "dead" ] = dead
-            return { "closed": [], "reassigned": [], "unclassifiable": [] }
+            return { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
         ss.dismiss_sessions(
             mgr, runner=_OK_RUNNER, session_dir=sd,
             emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
@@ -1169,3 +1170,92 @@ def test_respin_default_none_changes_nothing():
             clear_hold_fn=lambda i: True )
         assert res[ "retained_owner_personas" ] == []
         assert res[ "retained_unmatched" ]      == []
+
+
+# ── a reap must not move another session's rows that share the persona name ──
+
+_REAPED_SID = "1a2b3c4d-0000-4000-8000-000000000000"
+
+
+def _reconcile_with_rows( monkeypatch, rows, events_by_id=None, *, reaping_manager="Mr Radio", session_id=_REAPED_SID ):
+    """Run the reconciler over fake rows and return the summary, reassigns and closes."""
+    import lupin_mcp.task_store_tools as tst
+    _mock_store_config( monkeypatch )
+    monkeypatch.setattr( tst, "task_query_impl", lambda api_url, api_key, **kw: { "tasks": rows, "count": len( rows ) } )
+    monkeypatch.setattr( tst, "task_store_request",
+        lambda method, path, api_url, api_key, **kw:
+            { "events": ( events_by_id or {} ).get( path.split( "/" )[ 3 ], [] ) } )
+    reassigns = []
+    closes    = []
+    monkeypatch.setattr( tst, "task_reassign_impl",
+        lambda api_url, api_key, actor, task_id, new_owner, reason, **kw:
+            reassigns.append( ( task_id, new_owner ) ) or { "item": {} } )
+    monkeypatch.setattr( tst, "task_transition_impl",
+        lambda api_url, api_key, actor, task_id, to_status, receipt_refs=None, **kw:
+            closes.append( task_id ) or { "item": {} } )
+    identity = { "persona": { "name": "Tiffany" }, "session_id": session_id }
+    summary  = ss._default_reconcile_store_items( identity, { "tiffany" }, reaping_manager )
+    return summary, reassigns, closes
+
+
+def test_reaping_a_seat_named_tiffany_leaves_another_tiffanys_rows_unmoved( monkeypatch ):
+    """Another Tiffany's rows are skipped, and a receipted one is not closed."""
+    rows = [
+        { "id": "mob-1", "status": "in_progress", "created_by": "tiffany 99999999", "accountable_manager": "tiffany" },
+        { "id": "mob-2", "status": "queued",      "created_by": "tiffany 99999999", "accountable_manager": "tiffany" } ]
+    events = { "mob-2": [ { "actor": "tiffany 99999999", "receipt_refs": { "commit": "abc" } } ] }
+    summary, reassigns, closes = _reconcile_with_rows( monkeypatch, rows, events )
+    assert reassigns == [] and closes == []
+    assert summary == { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [ "mob-1", "mob-2" ] }
+
+
+def test_row_created_by_the_reaped_session_is_still_reconciled( monkeypatch ):
+    """A created_by token that prefixes the reaped session id marks the seat's own row."""
+    rows = [ { "id": "own-1", "status": "queued", "created_by": "tiffany 1a2b3c4d", "accountable_manager": "tiffany" } ]
+    summary, reassigns, closes = _reconcile_with_rows( monkeypatch, rows )
+    assert reassigns == [ ( "own-1", "Mr Radio" ) ]
+    assert summary[ "skipped_other_session" ] == []
+
+
+def test_row_touched_by_the_reaped_session_event_actor_is_still_reconciled( monkeypatch ):
+    """An event actor naming the reaped session marks the seat's row."""
+    rows   = [ { "id": "ev-1", "status": "queued", "created_by": "mr radio 24d257d2", "accountable_manager": "tiffany" } ]
+    events = { "ev-1": [ { "actor": "system" }, { "actor": "tiffany 1a2b3c4d" } ] }
+    summary, reassigns, closes = _reconcile_with_rows( monkeypatch, rows, events )
+    assert reassigns == [ ( "ev-1", "Mr Radio" ) ]
+    assert summary[ "skipped_other_session" ] == []
+
+
+def test_foreign_row_accountable_to_the_reaping_manager_is_still_reconciled( monkeypatch ):
+    """A row accountable to the reaping manager is not skipped."""
+    rows = [ { "id": "mine-1", "status": "queued", "created_by": "somebody 99999999", "accountable_manager": "Mr. Radio" } ]
+    summary, reassigns, closes = _reconcile_with_rows( monkeypatch, rows )
+    assert reassigns == [ ( "mine-1", "Mr. Radio" ) ]
+    assert summary[ "skipped_other_session" ] == []
+
+
+def test_foreign_row_with_no_accountable_manager_or_no_reaping_manager_is_skipped( monkeypatch ):
+    """A row with no accountable manager, or no reaping manager, is skipped."""
+    rows = [ { "id": "na-1", "status": "queued", "created_by": "x 99999999" } ]
+    summary, reassigns, closes = _reconcile_with_rows( monkeypatch, rows )
+    assert summary[ "skipped_other_session" ] == [ "na-1" ] and reassigns == []
+    rows = [ { "id": "nm-1", "status": "queued", "created_by": "x 99999999", "accountable_manager": "mr radio" } ]
+    summary, reassigns, closes = _reconcile_with_rows( monkeypatch, rows, reaping_manager=None )
+    assert summary[ "skipped_other_session" ] == [ "nm-1" ] and reassigns == []
+
+
+def test_row_without_created_by_or_with_nonstring_actor_is_foreign( monkeypatch ):
+    """A blank created_by and non-string event actors name no session."""
+    rows   = [ { "id": "nb-1", "status": "queued", "created_by": "   ", "accountable_manager": "tiffany" },
+               { "id": "nb-2", "status": "queued", "accountable_manager": "tiffany" } ]
+    events = { "nb-1": [ { "actor": None }, { "actor": 7 } ] }
+    summary, _, _ = _reconcile_with_rows( monkeypatch, rows, events )
+    assert summary[ "skipped_other_session" ] == [ "nb-1", "nb-2" ]
+
+
+def test_identity_without_session_id_keeps_the_name_keyed_behaviour( monkeypatch ):
+    """Without a session id nothing is skipped."""
+    rows = [ { "id": "old-1", "status": "queued", "created_by": "tiffany 99999999", "accountable_manager": "tiffany" } ]
+    summary, reassigns, _ = _reconcile_with_rows( monkeypatch, rows, session_id=None )
+    assert reassigns == [ ( "old-1", "Mr Radio" ) ] and summary[ "skipped_other_session" ] == []
+
