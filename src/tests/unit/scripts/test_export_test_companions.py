@@ -70,22 +70,54 @@ def test_a_missing_primary_admin_exports_nothing_and_exits_2():
     assert code == 2 and out == [] and any( "PRIMARY ADMIN" in e for e in err ) and any( mod.ADMIN_EMAIL in e for e in err )
 
 
-def test_another_missing_companion_is_named_but_the_export_still_goes_out():
+def test_another_missing_companion_gets_a_placeholder_and_is_named():
     users = [ u for u in _all_users() if u[ "email" ] != mod.COMPANION_EMAILS[ -1 ] ]
     code, out, err = _run( [], users, [] )
-    assert code == 0 and len( out ) == 1 and err == [ f"companion {mod.COMPANION_EMAILS[ -1 ]} not found in the source database" ]
+    assert code == 0 and len( out ) == 1 and err == [ f"companion {mod.COMPANION_EMAILS[ -1 ]} not found in the source database; a disabled placeholder stands in" ]
+    assert out[ 0 ].count( "INSERT INTO users" ) == 2 and "ON CONFLICT DO NOTHING;" in out[ 0 ] and mod.COMPANION_EMAILS[ -1 ] in out[ 0 ]
+
+
+def test_a_present_companion_gets_no_placeholder():
+    code, out, _ = _run( [], _all_users(), [] )
+    assert code == 0 and out[ 0 ].count( "INSERT INTO users" ) == 1 and "DO NOTHING" not in out[ 0 ]
 
 
 def test_check_prints_counts_and_no_row_value_and_exits_0_when_all_six_are_there():
     code, out, _ = _run( [ "--check" ], _all_users(), [ _key( 1 ), _key( 2 ) ] )
-    assert code == 0 and out == [ "companions: users=6 api_keys=2 missing=[]" ]
+    assert code == 0 and out == [ "companions: users=6 api_keys=2 missing=[] placeholders=0" ]
     assert "ash" not in out[ 0 ] and "BEGIN" not in out[ 0 ]
 
 
-def test_check_exits_2_and_lists_whoever_is_missing():
-    users = [ u for u in _all_users() if u[ "email" ] != mod.COMPANION_EMAILS[ 2 ] ]
+def test_check_exits_0_and_counts_placeholders_when_only_non_admin_companions_are_missing():
+    gone  = [ mod.COMPANION_EMAILS[ 2 ], mod.COMPANION_EMAILS[ -1 ] ]
+    users = [ u for u in _all_users() if u[ "email" ] not in gone ]
     code, out, _ = _run( [ "--check" ], users, [] )
-    assert code == 2 and mod.COMPANION_EMAILS[ 2 ] in out[ 0 ] and "users=5" in out[ 0 ]
+    assert code == 0 and out == [ f"companions: users=4 api_keys=0 missing={gone} placeholders=2" ]
+
+
+def test_check_exits_2_when_the_primary_admin_is_missing():
+    users = [ u for u in _all_users() if u[ "email" ] != mod.ADMIN_EMAIL ]
+    code, out, _ = _run( [ "--check" ], users, [] )
+    assert code == 2 and mod.ADMIN_EMAIL in out[ 0 ] and "placeholders=0" in out[ 0 ]
+
+
+def test_a_placeholder_is_inactive_unverified_user_only_with_a_stable_id_and_a_hash_nothing_matches():
+    rows = mod.placeholder_rows( [ "a@x.y", "b@x.y" ] )
+    assert [ r[ "email" ] for r in rows ] == [ "a@x.y", "b@x.y" ] and rows[ 0 ][ "id" ] != rows[ 1 ][ "id" ]
+    assert rows == mod.placeholder_rows( [ "a@x.y", "b@x.y" ] )
+    from cosa.rest.user_id_generator import email_to_user_uuid
+    assert [ r[ "id" ] for r in rows ] == [ email_to_user_uuid( "a@x.y" ), email_to_user_uuid( "b@x.y" ) ]
+    assert all( r[ "is_active" ] is False and r[ "email_verified"] is False and r[ "roles" ] == [ "user" ] for r in rows )
+    from cosa.rest.password_service import verify_password
+    assert not any( verify_password( pw, rows[ 0 ][ "password_hash" ] ) for pw in ( "", mod.PLACEHOLDER_HASH, "password", "!placeholder-no-login" ) )
+    assert mod.placeholder_rows( [] ) == []
+
+
+def test_the_placeholder_statement_is_protected_and_never_updates_an_existing_row():
+    sql = mod.build_sql( _all_users(), [], mod.placeholder_rows( [ "p@x.y" ] ) )
+    holder = sql.split( "INSERT INTO users" )[ 2 ]
+    assert "is_protected" in holder and "ON CONFLICT DO NOTHING;" in holder and "DO UPDATE" not in holder
+    assert sql.index( "p@x.y" ) > sql.index( "INSERT INTO users" ) and sql.rstrip().endswith( "COMMIT;" )
 
 
 def test_main_reads_argv_from_the_process_when_none_is_given( monkeypatch ):
