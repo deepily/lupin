@@ -5,7 +5,7 @@ pins:
   - cosa.rest.podcast_proxy.DoorRefusal@3ecda4611b
   - cosa.rest.podcast_proxy.refusal_detail@799cdd1eb5
   - cosa.rest.podcast_proxy.check_source@063bcebc7e
-  - cosa.rest.podcast_proxy.viewer_claim_id@fa85c639ff
+  - cosa.rest.podcast_proxy.viewer_claim_id@e107b9a6f2
   - cosa.rest.podcast_proxy.human_size@bbb3e899df
   - cosa.rest.podcast_proxy.file_changed_refusal@af2c93ee5c
   - cosa.rest.podcast_proxy.write_copy@92e23682bf
@@ -27,7 +27,7 @@ A seat asks for a podcast of a document on the operator's behalf. The server jud
 - `file_changed_refusal( payload, facts )` is `None` only when the hash, size and server path all match the card. Otherwise it is a 409 `hash_mismatch`.
 - `write_copy( directory, card_id, name, content )` writes the bytes the door judged, mode 0640, into a folder for that card. `content` comes from `check_source( ..., keep_content=True )`. It removes a stale copy and creates the file exclusively.
 - `remove_copy( directory, card_id )` removes that folder and never raises.
-- `viewer_claim_id( user_id, scope_path, sha256 )` is a stable uuid for one person, one file and one set of bytes. `human_size` prints bytes, KiB or MiB.
+- `viewer_claim_id( user_id, scope_path, sha256, variant )` is a stable uuid for one person, one file, one set of bytes and one option choice. An empty `variant` keeps the earlier id. `human_size` prints bytes, KiB or MiB.
 
 ## Don't
 - Don't send a host path. Only the scope form is accepted.

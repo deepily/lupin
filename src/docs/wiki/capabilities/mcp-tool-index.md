@@ -15,7 +15,7 @@ pins:
   - lupin_mcp.cosa_voice_mcp.get_session_info@1e77edc0fc
   - lupin_mcp.cosa_voice_mcp.list_spawned_sessions@0a73688883
   - lupin_mcp.cosa_voice_mcp.notify@c08eb71a9d
-  - lupin_mcp.cosa_voice_mcp.podcast_for_rick@b486e62b05
+  - lupin_mcp.cosa_voice_mcp.podcast_for_rick@50b9a9499a
   - lupin_mcp.cosa_voice_mcp.self_respin@2857736ee0
   - lupin_mcp.cosa_voice_mcp.set_session_topic@7b22719296
   - lupin_mcp.cosa_voice_mcp.spawn_sessions@2e3e6c1741
@@ -37,4 +37,4 @@ Which tool of the cosa-voice server ([[cosa-voice-mcp-server]]) does what, and w
 - Peers: `commons_post`, `commons_read` and `commons_who` write, tail and list the blackboard. `commons_ask_async` posts a question and returns, and `commons_ask_sync` blocks for a reply ([[mcp-commons-and-dm]], [[mcp-commons-ask-async]]).
 - Seats: `spawn_sessions`, `dismiss_sessions` and `list_spawned_sessions` start, end and list a manager's seats. `self_respin` schedules a `/clear` into the seat's own pane ([[mcp-session-spawn-and-reap]]).
 - Task store: `task_create`, `task_query`, `task_get` and `task_promotion_status` write and read rows. `task_correlate` re-keys one, `task_amend` appends to its body, and `task_edit` changes five free-edit fields ([[mcp-task-store-tools]]).
-- Rick: `task_request` and `task_ask_unpark` ask him to move a row and never move it. `podcast_for_rick` asks about a podcast of one file and starts it on a yes ([[mcp-server-plumbing]]).
+- Rick: `task_request` and `task_ask_unpark` ask him to move a row and never move it. `podcast_for_rick` asks about a podcast of one file, with an optional `script_type`, `languages` and `review`, and starts it on a yes ([[mcp-server-plumbing]]).

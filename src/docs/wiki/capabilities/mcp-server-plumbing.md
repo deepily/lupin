@@ -15,7 +15,7 @@ pins:
   - lupin_mcp.config_write_lock.lock_path@a95592c4e2
   - lupin_mcp.config_write_lock.write_lock@bf55f94153
   - lupin_mcp.podcast_for_rick.translate_host_path@fcc8189298
-  - lupin_mcp.podcast_for_rick.podcast_for_rick_impl@9a5195b98c
+  - lupin_mcp.podcast_for_rick.podcast_for_rick_impl@18cc5f647c
 ---
 # MCP server plumbing
 
@@ -37,4 +37,4 @@ Small helpers behind the cosa-voice MCP server ([[cosa-voice-mcp-server]]): the 
 
 ## Podcast tool body
 - `translate_host_path( host_path )` turns a seat's absolute path into `<scope>/<relative>`. It refuses a relative path, a missing file, a file in no git repository and a file in a linked worktree.
-- `podcast_for_rick_impl` asks for the podcast card, polls it and starts the job on a yes. It returns `started`, `dry run`, `declined`, `default_used`, `expired` or an `error` with a reason. See [[rest-core-podcast-cards]].
+- `podcast_for_rick_impl` asks for the podcast card, polls it and starts the job on a yes. It takes optional `script_type`, `languages` and `review`, sent in the ask body only when given so the card records them. It returns `started`, `dry run`, `declined`, `default_used`, `expired` or an `error` with a reason. See [[rest-core-podcast-cards]].
