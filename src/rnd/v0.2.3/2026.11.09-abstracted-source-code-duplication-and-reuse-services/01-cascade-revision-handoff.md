@@ -330,3 +330,10 @@ REUSE-OUTCOME 33c6ec441564c732 :: rs-266ff92ce5 :: WROTE_NEW derives repo names 
 
 RULING cosa.repo.code_health_settings.name_mismatches :: DISTINCT compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: reuse-receipt: 2e232146ad501898 :: search: rs-08457a253f
 REUSE-OUTCOME 2e232146ad501898 :: rs-08457a253f :: WROTE_NEW compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+## Reuse review: duplicate-check ceiling from the INI (row 98615d7a, step ph1-s3)
+
+`resolve_ceiling` is the one new definition. The lookup's nearest symbols are `code_health_settings.read_positive_int` and `duplicate_check_ceiling`, which `resolve_ceiling` calls for the key itself; it adds only the rule that a hand-run `--ceiling` or `--cap` wins.
+
+RULING lupin_mcp.duplicate_check_daily.resolve_ceiling :: DISTINCT applies the command-line precedence (a given ceiling or cap wins) and otherwise calls code_health_settings.duplicate_check_ceiling for the lupin key; that wrapper reads the key and has no flag rule :: reuse-receipt: f570e484e03b91a3 :: search: rs-0021280a4c
+REUSE-OUTCOME f570e484e03b91a3 :: rs-0021280a4c :: WROTE_NEW applies the command-line precedence (a given ceiling or cap wins) and otherwise calls code_health_settings.duplicate_check_ceiling for the lupin key; that wrapper reads the key and has no flag rule :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s3

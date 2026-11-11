@@ -67,8 +67,6 @@
           "-m",
           "lupin_mcp.duplicate_check_daily",
           "--adaptive",
-          "--ceiling",
-          "800",
           "--branch",
           "auto",
           "--claude-cli-path",

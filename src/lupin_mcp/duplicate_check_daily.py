@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 
+from cosa.repo import code_health_settings as chs
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.duplicate_check import cluster, extract, pipeline
 from cosa.repo.duplicate_check import config as cfg_mod
@@ -968,12 +969,35 @@ def run_lock( data_dir ):
         finally: fcntl.flock( handle, fcntl.LOCK_UN )
 
 
-def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, crontab_cmd=None ):
+def resolve_ceiling( ceiling, cap, config=None ):
+    """
+    Give the run its judge-call ceiling when the command line named no limit.
+
+    Requires:
+        - config is None for the live ConfigurationManager, or an object with the same get method
+
+    Ensures:
+        - returns ceiling unchanged when a ceiling or a cap was given, so a hand-run flag wins over the key
+        - otherwise returns the lupin repo's `duplicate check ceiling` key as a positive int
+
+    Raises:
+        - CodeHealthSettingError naming the key when the key is blank, missing or not a positive whole number
+    """
+    if ceiling is not None or cap is not None: return ceiling
+    if config is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return chs.duplicate_check_ceiling( config, chs.DEFAULT_REPO )
+
+
+def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, crontab_cmd=None, config=None ):
     """
     Run the daily check from the command line.
 
     Requires:
-        - argv holds one of --cap ( a fixed number of judge calls ) and --ceiling ( the most judge calls an adaptive run may make ), neither with a default, needed to run or to print or install the cron lines
+        - argv holds at most one of --cap ( a fixed number of judge calls ) and --ceiling ( the most judge calls an adaptive run may make )
+        - with neither, the ceiling is the lupin `duplicate check ceiling` INI key, and a blank or missing key refuses the run naming the key
+        - config is None for the live ConfigurationManager, or an object with the same get method
         - --adaptive ( with --ceiling ) runs the hourly slot: the day's owed definitions, then the baseline with the rest of the chunk, then a note to Rick
         - --branch auto judges the newest local wip-* branch
         - argv also holds --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch, --parallel, --baseline ( judge every definition of the tree ), --rise-limit ( default RISE_LIMIT ) and, with the cron modes, --with-baseline ( add the baseline line )
@@ -1002,8 +1026,10 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     for flag in ( "--install", "--uninstall", "--status", "--print-install" ): mode.add_argument( flag, action="store_true" )
     args = ap.parse_args( argv )
     cron = args.install or args.uninstall or args.status or args.print_install
+    if not ( args.uninstall or args.status ):
+        try: args.ceiling = resolve_ceiling( args.ceiling, args.cap, config )
+        except chs.CodeHealthSettingError as error: ap.error( str( error ) )
     if args.adaptive and ( args.ceiling is None or args.baseline ) and not ( args.uninstall or args.status ): ap.error( "--adaptive needs --ceiling and cannot be combined with --baseline: the slot drains the baseline itself" )
-    if args.cap is None and args.ceiling is None and not ( args.uninstall or args.status ): ap.error( "--cap or --ceiling is required: the daily check has no default limit" )
     if cron: return install_mode( args, os.environ if environ is None else environ, now or datetime.datetime.now(), out, err or ( lambda line: print( line, file=sys.stderr ) ), crontab_cmd )
     model_transport.configure( args.claude_cli_path )
     root = args.root or git( ".", "rev-parse", "--show-toplevel" )

@@ -187,7 +187,7 @@ def test_the_real_registry_generates_a_line_set_with_the_gates_demands():
     assert managed[ "hook-link-tick" ][ "clean_exit_codes" ] == [ 0, 2, 4, 5 ], "its exit codes 2, 4 and 5 are outcomes, not failures; 1 and 3 stay failures"
     assert registry[ "defaults" ][ "run_env" ][ "LUPIN_CONFIG_MGR_CLI_ARGS" ] and registry[ "defaults" ][ "run_env" ][ "COSA_VOICE_MANAGERS__LUPIN" ]
     dup = managed[ "duplicate-check" ][ "run" ][ "argv" ]
-    assert dup[ dup.index( "--ceiling" ) + 1 ] == "800" and "--adaptive" in dup and dup[ dup.index( "--branch" ) + 1 ] == "auto"
+    assert "--ceiling" not in dup and "--adaptive" in dup and dup[ dup.index( "--branch" ) + 1 ] == "auto", "the ceiling is the INI key, not a registry argument"
     assert managed[ "duplicate-check" ].get( "cron_enabled", True ) is True, "filing fixes D3 and D4 merged on 9 Nov, so the hourly adaptive line ships enabled"
     assert managed[ "duplicate-check" ][ "schedule" ] == [ { "cron": "0 10-22 * * *" }, { "after_boot_seconds": 300 } ]
     assert managed[ "host-snapshot" ][ "schedule" ] == [ { "cron": "*/5 * * * *" } ]

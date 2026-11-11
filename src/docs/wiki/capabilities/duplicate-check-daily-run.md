@@ -11,7 +11,8 @@ pins:
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
   - lupin_mcp.duplicate_check_daily.live_filer@ae7b324cde
   - lupin_mcp.duplicate_check_daily.live_auditor@4cc714910e
-  - lupin_mcp.duplicate_check_daily.main@7182ace7dc
+  - lupin_mcp.duplicate_check_daily.main@183e409cd2
+  - lupin_mcp.duplicate_check_daily.resolve_ceiling@8514765a03
   - lupin_mcp.duplicate_check_daily.record@0c6e420b03
   - lupin_mcp.duplicate_check_daily.rising_guard@9bf675aa57
   - lupin_mcp.duplicate_check_daily.limit_flag@4dc500630b
@@ -30,11 +31,10 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - The result holds `test_code_dropped` with `owed` and `pool`: the test-code definitions left out of the owed set and of the comparison pool.
 - Otherwise status is `ok`, or `carried` when the cap left definitions. `last-success.json` advances to the last commit fully judged and records the branch.
 - A filer or auditor that raises is caught and recorded with an `error`; the run still advances. Findings stay in the result file, and [[duplicate-check-refile]] can file them again.
-- With `ceiling` (`--ceiling N`) the cap is the number of definitions to judge, up to N. With `baseline` (`--baseline`) the definitions are every one in the tree, drained over runs; `baseline.json` says `in_progress` or `complete`.
+- With `ceiling` (`--ceiling N`) the cap is the number of definitions to judge, up to N. `limit_flag` gives `--ceiling N` when a ceiling is set, else `--cap N`, for the cron lines. With `baseline` (`--baseline`) the definitions are every one in the tree, drained over runs; `baseline.json` says `in_progress` or `complete`.
 - `rising_guard` alerts through the notifier when the carried count rose on the last `--rise-limit` (3) measured daily runs. It alerts on the first crossing only; later runs hold `rising` with `repeat`.
 - `record` adds `schema_version`, `started_at` and `None` for each measure the run never reached, writes the file, then appends the run's line to `runs.jsonl` ([[duplicate-check-run-history]]).
-- `limit_flag` gives `--ceiling N` when a ceiling is set, else `--cap N`. The cron lines use it.
 - `cron_lines` returns a 10:00 daily line and a reboot line 300 seconds after boot, which catches up from the last successful run. `--with-baseline` adds an 11:07 line. With `adaptive` it returns an hourly line (10:00 to 22:00) and the reboot line, both with `--adaptive`. A branch other than `main` is added as `--branch`.
 - `install_mode` handles `--print-install`, `--uninstall` and `--status` through the librarian's locked crontab editor. `--install` is retired: it prints where the installer went on stderr and returns 1, because `cron_generate` writes every cron line now. The cron work is done by `manage_cron` of [[repo-tools-symindex-librarian-tick-run]].
 - `live_parts` builds the real parts without a call. `live_filer` files the run's one triage row over HTTP, with the configured `duplicate check triage owner` and the project's manager roster. It raises `NoTriageOwner` when there are findings and the owner is unset or not on the roster. The findings stay in the result file for a refile, and `run` records that as the filer's error. `live_auditor` queues known-miss audits ([[duplicate-check-audit]]) with no model call. It names each finding by its id in the symbol index the sweep reads. That is not the checker's own `d-` id, so the sweep knows every queued item.
-- `main` needs `--cap` or `--ceiling`, unless it only removes or reports the cron lines. `--adaptive` needs `--ceiling`. Verdict lines are in [[duplicate-check-verdict-lines]].
+- `main` takes at most one of `--cap` and `--ceiling`. With neither, `resolve_ceiling` reads the lupin ceiling key; a blank or invalid key refuses the run naming it. A flag wins over the key. `--adaptive` needs a ceiling. Verdict lines are in [[duplicate-check-verdict-lines]].
