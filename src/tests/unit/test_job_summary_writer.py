@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from cosa.rest import job_health
 from lupin_mcp import job_summary as js
 
 T0 = "2026-11-06T19:06:59-05:00"
@@ -50,6 +51,45 @@ def test_scan_debt_points_arrivals_are_derived_and_a_failed_run_carries_the_old_
     assert two[ "scan_debt" ][ "points" ][ -1 ][ "drained" ] == 304
     three = js.build_summary( "j", attempt( "failed", "2026-11-08T10:00:00-05:00" ), previous=two )
     assert three[ "scan_debt" ] == two[ "scan_debt" ]
+
+
+def series( counts, drained=0 ):
+    """Ensures: returns the scan block after one finished run per count."""
+    prev = None
+    for n, count in enumerate( counts ):
+        prev = js.build_summary( "j", attempt( "clean", f"2026-11-{n + 1:02d}T19:00:00-05:00" ), scan_debt=scan( count, drained ), previous=prev )
+    return prev[ "scan_debt" ]
+
+
+def test_a_falling_count_is_drained_by_the_fall_when_the_job_reports_zero_and_arrivals_are_zero():
+    block = series( [ 526, 168, 3 ] )
+    assert [ p[ "drained" ] for p in block[ "points" ] ] == [ 0, 358, 165 ]
+    assert ( block[ "drained_last_run" ], block[ "arrived_last_interval" ] ) == ( 165, 0 )
+    assert not job_health.no_drain( block, block[ "points" ] )
+
+
+def test_a_job_that_reports_its_own_non_zero_drained_keeps_it_even_when_the_fall_is_larger():
+    block = series( [ 10, 2 ], drained=2 )
+    assert ( block[ "drained_last_run" ], block[ "points" ][ -1 ][ "drained" ] ) == ( 2, 2 )
+
+
+def test_a_job_that_reports_nothing_stays_none_when_the_count_did_not_fall():
+    block = series( [ 10, 15 ], drained=None )
+    assert ( block[ "drained_last_run" ], block[ "points" ][ -1 ][ "drained" ], block[ "arrived_last_interval" ] ) == ( None, None, None )
+    assert not job_health.no_drain( block, block[ "points" ] )
+
+
+def test_a_job_that_reports_nothing_is_given_the_fall_when_the_count_fell():
+    block = series( [ 10, 4 ], drained=None )
+    assert ( block[ "drained_last_run" ], block[ "arrived_last_interval" ] ) == ( 6, 0 )
+
+
+def test_a_growing_or_flat_count_with_no_drain_is_still_behind():
+    grow = series( [ 3, 10, 20 ] )
+    assert [ p[ "drained" ] for p in grow[ "points" ] ] == [ 0, 0, 0 ] and grow[ "arrived_last_interval" ] == 10
+    assert job_health.no_drain( grow, grow[ "points" ] )
+    flat = series( [ 5, 5, 5 ] )
+    assert job_health.no_drain( flat, flat[ "points" ] )
 
 
 def test_a_job_that_gives_an_arrival_figure_keeps_it_and_a_null_count_adds_no_point():
