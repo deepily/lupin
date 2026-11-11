@@ -13,7 +13,6 @@ Covers:
   - _extract_last_json_object / _extract_last_json_array : found / no-close / unbalanced
   - _fallback_diagnosis / _fallback_proposal / _auto_select_fix
   - _build_diagnosis_abstract / _build_proposal_abstract  (evidence/components/selected variants)
-  - _summarize_tool_use    : Bash(±cmd) / Read-Edit-Write(±fp) / Grep-Glob(±pattern) / other
   - render_worktree_artifacts_abstract : empty / strategy+branch+commit variants
   - _generate_slug / _resolve_trust_level (delegate to GitStrategist)
   - _build_{lead,proposal,coder,tester}_options
@@ -335,26 +334,6 @@ class TestStaticHelpers( unittest.TestCase ):
     def test_proposal_abstract_no_selection( self ):
         out = BFEOrchestrator._build_proposal_abstract( [ _fix( title="A" ) ] )
         self.assertNotIn( "[SELECTED]", out )
-
-    def test_summarize_tool_use_bash_with_and_without_command( self ):
-        b1 = MagicMock(); b1.name = "Bash"; b1.input = { "command": "ls -la\nsecond" }
-        self.assertEqual( BFEOrchestrator._summarize_tool_use( b1 ), "Bash: ls -la" )
-        b2 = MagicMock(); b2.name = "Bash"; b2.input = { "command": "" }
-        self.assertEqual( BFEOrchestrator._summarize_tool_use( b2 ), "Bash" )
-
-    def test_summarize_tool_use_file_tools( self ):
-        b1 = MagicMock(); b1.name = "Edit"; b1.input = { "file_path": "/a/b/c.py" }
-        self.assertIn( "c.py", BFEOrchestrator._summarize_tool_use( b1 ) )
-        b2 = MagicMock(); b2.name = "Read"; b2.input = {}
-        self.assertEqual( BFEOrchestrator._summarize_tool_use( b2 ), "Read" )
-
-    def test_summarize_tool_use_search_tools_and_other( self ):
-        b1 = MagicMock(); b1.name = "Grep"; b1.input = { "pattern": "foo" }
-        self.assertEqual( BFEOrchestrator._summarize_tool_use( b1 ), "Grep: foo" )
-        b2 = MagicMock(); b2.name = "Glob"; b2.input = None
-        self.assertEqual( BFEOrchestrator._summarize_tool_use( b2 ), "Glob" )
-        b3 = MagicMock(); b3.name = "WebSearch"; b3.input = {}
-        self.assertEqual( BFEOrchestrator._summarize_tool_use( b3 ), "WebSearch" )
 
     def test_render_worktree_artifacts_empty_when_nothing_to_report( self ):
         fr = FixResult( applied=False, success=False )
