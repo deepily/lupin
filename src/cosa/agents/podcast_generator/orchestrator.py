@@ -16,6 +16,7 @@ TTS audio generation and stitching is the later stage.
 """
 
 import asyncio
+import dataclasses
 import time
 import logging
 import os
@@ -230,6 +231,7 @@ class PodcastOrchestratorAgent:
         self.user_id           = user_id
         self.config            = config or PodcastConfig()
         self.profile           = get_profile( self.config.script_type )
+        self._script_type_unknown = False
         self.max_segments      = max_segments
         self.debug             = debug
         self.verbose           = verbose
@@ -322,6 +324,7 @@ class PodcastOrchestratorAgent:
         config           : Optional[ PodcastConfig ] = None,
         max_segments     : Optional[ int ] = None,
         target_languages : Optional[ List[ str ] ] = None,
+        script_type      : Optional[ str ] = None,
         debug            : bool = False,
         verbose          : bool = False
     ) -> "PodcastOrchestratorAgent":
@@ -346,8 +349,13 @@ class PodcastOrchestratorAgent:
             config: Podcast configuration (uses defaults if None)
             max_segments: Limit TTS to first N segments (for cost control)
             target_languages: List of ISO language codes (default: from config or ["en"])
+            script_type: Type to run the script as; beats the type the saved script records
             debug: Enable debug output
             verbose: Enable verbose output
+
+        Ensures:
+            - the orchestrator runs the explicit script_type, else the type the file records
+            - a script that records no type and gets none runs as research_critical, but review-only refuses it
 
         Returns:
             PodcastOrchestratorAgent: Ready for review workflow
@@ -364,6 +372,12 @@ class PodcastOrchestratorAgent:
 
         script = PodcastScript.from_markdown( markdown_content )
 
+        # Request beats the type the file records. An untyped script with no request keeps the
+        # config's type, and review-only refuses it: it cannot know which prompts to revise with.
+        resolved = script_type if script_type is not None else script.script_type
+        if resolved is not None:
+            config = dataclasses.replace( config or PodcastConfig(), script_type=get_profile( resolved ).name )
+
         # Create orchestrator with dummy research path (not used in edit mode)
         agent = cls(
             research_doc_path = script.research_source or "edit-mode",
@@ -376,6 +390,7 @@ class PodcastOrchestratorAgent:
         )
 
         # Pre-populate state
+        agent._script_type_unknown                  = resolved is None
         agent._podcast_state[ "draft_script" ]      = script
         agent._podcast_state[ "draft_script_path" ] = script_path
         agent._podcast_state[ "revision_count" ]    = script.revision_count
@@ -942,9 +957,12 @@ class PodcastOrchestratorAgent:
 
         Raises:
             - ValueError when the config runs one shot, since this mode exists only to review
+            - ValueError when the loaded script records no script type and none was given
         """
         if self._one_shot():
             raise ValueError( "review=one_shot cannot be used with review-only mode: that mode exists only to review a script" )
+        if self._script_type_unknown:
+            raise ValueError( "This saved script records no script type, so review-only cannot choose its prompts. Pass script_type (--script-type)." )
 
         self.metrics[ "start_time" ] = time.time()
 

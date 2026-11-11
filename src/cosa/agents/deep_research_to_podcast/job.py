@@ -26,6 +26,7 @@ from typing import Optional, List
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.deep_research.seed_context import normalize_source_document
+from cosa.agents.podcast_generator.script_types import get_profile, validate_review
 from cosa.rest.job_state import JobState
 
 
@@ -85,6 +86,8 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
         source_document: Optional[ list ] = None,
+        script_type: Optional[ str ] = None,
+        review: Optional[ str ] = None,
         debug: bool = False,
         verbose: bool = False
     ) -> None:
@@ -117,9 +120,16 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 has already scope-validated and resolved them. This constructor receives
                 real paths and does not re-decide whether they may be read. None or []
                 means no seed documents.
+            script_type: Script type name (research_critical or status_report); None means research_critical
+            review: Review mode (ask or one_shot); None means the script type's default
             debug: Enable debug output
             verbose: Enable verbose output
+
+        Raises:
+            - ValueError when script_type or review is unknown
         """
+        get_profile( script_type )
+        validate_review( review )
         super().__init__(
             user_id    = user_id,
             user_email = user_email,
@@ -137,6 +147,8 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
         self.audience         = audience
         self.audience_context = audience_context
         self.source_document  = normalize_source_document( source_document )
+        self.script_type      = script_type
+        self.review           = review
 
         # Results (populated after execution)
         self.research_path = None
@@ -189,6 +201,8 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             audience_context = self.audience_context,
             source_document  = self.source_document,
             target_languages = self.target_languages,
+            script_type      = self.script_type,
+            review           = self.review,
             max_segments     = self.max_segments,
             cli_mode         = False,  # Voice-driven mode for queue
             debug            = self.debug,

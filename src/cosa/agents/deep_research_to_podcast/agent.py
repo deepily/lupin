@@ -69,6 +69,8 @@ class DeepResearchToPodcastAgent( ChainedDeepResearchAgent ):
         # Podcast Generator options
         target_languages: Optional[ List[ str ] ] = None,
         max_segments: Optional[ int ] = None,
+        script_type: Optional[ str ] = None,
+        review: Optional[ str ] = None,
         # Common options
         cli_mode: bool = False,
         debug: bool = False,
@@ -94,6 +96,8 @@ class DeepResearchToPodcastAgent( ChainedDeepResearchAgent ):
             # Podcast Generator options
             target_languages: List of ISO language codes (default: ["en"])
             max_segments: Limit TTS to first N segments (cost control)
+            script_type: Script type name (research_critical or status_report); None means research_critical
+            review: Review mode (ask or one_shot); None means the script type's default
 
             # Common options
             cli_mode: Force CLI text mode (default: voice-driven)
@@ -114,6 +118,8 @@ class DeepResearchToPodcastAgent( ChainedDeepResearchAgent ):
         # Podcast Generator options
         self.target_languages = target_languages or [ "en" ]
         self.max_segments     = max_segments
+        self.script_type      = script_type
+        self.review           = review
 
         # Common options
         self.cli_mode         = cli_mode
@@ -270,7 +276,7 @@ class DeepResearchToPodcastAgent( ChainedDeepResearchAgent ):
 
         # Import Podcast Generator components
         from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        from cosa.agents.podcast_generator.config import PodcastConfig
+        from cosa.agents.podcast_generator.script_types import resolve_podcast_config
         import cosa.utils.util as cu
 
         # Validate research document exists
@@ -283,8 +289,16 @@ class DeepResearchToPodcastAgent( ChainedDeepResearchAgent ):
             if self.max_segments:
                 print( f"[PG] Max segments: {self.max_segments}" )
 
-        # Create config
-        config = PodcastConfig()
+        # Request beats script-type profile beats INI
+        from cosa.config.configuration_manager import ConfigurationManager
+        config = resolve_podcast_config(
+            ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ),
+            script_type      = self.script_type,
+            review           = self.review,
+            audience         = self.audience,
+            audience_context = self.audience_context,
+            debug            = self.debug,
+        )
 
         # Create orchestrator
         agent = PodcastOrchestratorAgent(
