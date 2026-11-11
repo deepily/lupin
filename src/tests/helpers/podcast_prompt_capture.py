@@ -89,12 +89,13 @@ def _replies():
     return { "analysis": analysis, "script": script, "revision": script, "translation": script }
 
 
-def capture_prompts( config=None, **agent_kw ):
+def capture_prompts( config=None, replies=None, **agent_kw ):
     """
     Drive the four real call sites and return { site: { system, user } }.
 
     Requires:
         - config is a PodcastConfig or None (None means PodcastConfig())
+        - replies maps a site name to the text that site's fake call returns
     Ensures:
         - returns a dict keyed by every name in CALL_SITES
     """
@@ -105,7 +106,7 @@ def capture_prompts( config=None, **agent_kw ):
         target_languages  = [ "en" ],
         **agent_kw,
     )
-    client              = RecordingClient( _replies() )
+    client              = RecordingClient( { **_replies(), **( replies or {} ) } )
     agent._api_client   = client
     agent._podcast_state[ "revision_count" ] = 1
 

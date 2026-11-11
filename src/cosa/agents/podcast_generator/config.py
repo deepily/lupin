@@ -344,6 +344,12 @@ class PodcastConfig:
     stream_thoughts_to_voice   : bool  = True
     narrate_progress           : bool  = True
 
+    # === Script Type ===
+    # Names a profile in script_types.py. review is None until resolved: the profile's
+    # default applies then. Values: "ask" (stop for script review) or "one_shot".
+    script_type                : str = "research_critical"
+    review                     : Optional[ str ] = None
+
     # === Language Configuration ===
     target_languages           : List[ str ] = field( default_factory=lambda: [ "en" ] )
     # Examples: ["en"], ["en", "es"], ["en", "es-MX", "es-AR"]

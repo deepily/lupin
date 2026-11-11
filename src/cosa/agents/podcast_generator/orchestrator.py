@@ -31,6 +31,7 @@ from .state import (
     PodcastScript,
     ScriptSegment,
     ContentAnalysis,
+    StatusDigest,
     PodcastMetadata,
     create_initial_state,
     validate_prosody_preservation,
@@ -42,7 +43,6 @@ from .api_client import PodcastAPIClient
 from .tts_client import PodcastTTSClient, TTSSegmentResult
 from .audio_stitcher import PodcastAudioStitcher, StitchingResult
 from .prompts import (
-    SCRIPT_GENERATION_SYSTEM_PROMPT,
     CONTENT_ANALYSIS_SYSTEM_PROMPT,
     get_script_generation_prompt,
     get_content_analysis_prompt,
@@ -51,6 +51,8 @@ from .prompts import (
     parse_analysis_response,
     get_dynamic_duo_description,
 )
+from .prompts.status_report import get_status_analysis_prompt, get_status_script_prompt
+from .script_types import ANALYSIS_DIGEST, get_profile
 
 logger = logging.getLogger( __name__ )
 
@@ -212,6 +214,7 @@ class PodcastOrchestratorAgent:
         self.research_doc_path = research_doc_path
         self.user_id           = user_id
         self.config            = config or PodcastConfig()
+        self.profile           = get_profile( self.config.script_type )
         self.max_segments      = max_segments
         self.debug             = debug
         self.verbose           = verbose
@@ -1345,6 +1348,9 @@ class PodcastOrchestratorAgent:
         """
         try:
             response = None   # bound before the API call so the except can read stop_reason safely (bug e0bb5a94 B)
+            if self.profile.analysis_kind == ANALYSIS_DIGEST:
+                return await self._analyze_status_async( research_content )
+
             prompt = get_content_analysis_prompt(
                 research_content = research_content,
                 max_topics       = self.config.key_topics_to_extract,
@@ -1390,6 +1396,42 @@ class PodcastOrchestratorAgent:
                 f"Podcast generation failed while analyzing the research document: {e}{stop}"
             ) from e
 
+    async def _analyze_status_async( self, research_content: str ) -> StatusDigest:
+        """
+        Ask for a status digest and parse it with the shared analysis parser.
+
+        Requires:
+            - the profile's analysis kind is the status digest
+
+        Ensures:
+            - returns a StatusDigest whose items name the source lines they came from
+            - items whose source line is not in the document are logged as a warning
+
+        Raises:
+            - pydantic.ValidationError when the reply holds no digest, so the caller fails the job
+        """
+        prompt = get_status_analysis_prompt(
+            research_content = research_content,
+            audience         = self.config.audience,
+            audience_context = self.config.audience_context,
+            max_source_chars = self.config.max_source_chars,
+        )
+        response = await self.api_client.call_for_analysis(
+            system_prompt = self.profile.analysis_system_prompt,
+            user_message  = prompt,
+        )
+        self.metrics[ "api_calls" ] += 1
+
+        digest      = StatusDigest.model_validate( parse_analysis_response( response.content ) )
+        unsupported = digest.unsupported_items( research_content )
+        if unsupported:
+            logger.warning( f"Status digest holds {len( unsupported )} item(s) whose source line is not in the document" )
+        return digest
+
+    def _script_system_prompt( self ) -> str:
+        """Return the system prompt for script writing, revision and translation."""
+        return self.profile.system_prompt
+
     async def _generate_script_async(
         self,
         research_content: str,
@@ -1412,10 +1454,11 @@ class PodcastOrchestratorAgent:
                 host_a = self.config.host_a_personality,
                 host_b = self.config.host_b_personality,
             )
-            system_prompt = SCRIPT_GENERATION_SYSTEM_PROMPT + "\n\n" + duo_description
+            system_prompt = self._script_system_prompt() + "\n\n" + duo_description
 
             # Build user prompt
-            user_prompt = get_script_generation_prompt(
+            prompt_builder = get_status_script_prompt if self.profile.analysis_kind == ANALYSIS_DIGEST else get_script_generation_prompt
+            user_prompt = prompt_builder(
                 content_analysis       = analysis.model_dump(),
                 research_content       = research_content,
                 host_a_personality     = self.config.host_a_personality,
@@ -1468,6 +1511,7 @@ class PodcastOrchestratorAgent:
                 segments                   = segments,
                 estimated_duration_minutes = result.get( "estimated_duration_minutes", 10.0 ),
                 key_topics                 = result.get( "key_topics", analysis.key_subtopics ),
+                script_type                = self.profile.name,
             )
 
         except Exception as e:
@@ -1512,7 +1556,7 @@ class PodcastOrchestratorAgent:
             )
 
             response = await self.api_client.call_for_revision(
-                system_prompt = SCRIPT_GENERATION_SYSTEM_PROMPT,
+                system_prompt = self._script_system_prompt(),
                 user_message  = revision_prompt,
             )
             self.metrics[ "api_calls" ] += 1
@@ -1553,6 +1597,7 @@ class PodcastOrchestratorAgent:
                                                           current_script.estimated_duration_minutes ),
                 key_topics                 = result.get( "key_topics", current_script.key_topics ),
                 revision_count             = current_script.revision_count + 1,
+                script_type                = current_script.script_type,
             )
 
             return revised
@@ -1640,7 +1685,7 @@ class PodcastOrchestratorAgent:
             def write_file():
                 os.makedirs( output_dir, exist_ok=True )
                 with open( output_path, "w", encoding="utf-8" ) as f:
-                    f.write( script.to_markdown() )
+                    f.write( script.to_markdown( include_script_type=True ) )
                 return output_path
 
             path = await asyncio.to_thread( write_file )
@@ -1833,7 +1878,7 @@ Generate the {language_name} script in JSON format with the same structure:
 }}"""
 
             response = await self.api_client.call_for_script(
-                system_prompt = SCRIPT_GENERATION_SYSTEM_PROMPT,
+                system_prompt = self._script_system_prompt(),
                 user_message  = translation_prompt,
             )
             self.metrics[ "api_calls" ] += 1
@@ -1875,6 +1920,7 @@ Generate the {language_name} script in JSON format with the same structure:
                                                           english_script.estimated_duration_minutes ),
                 key_topics                 = result.get( "key_topics", english_script.key_topics ),
                 revision_count             = 0,  # Start fresh for translated version
+                script_type                = english_script.script_type,
             )
 
             # Validate prosody preservation
