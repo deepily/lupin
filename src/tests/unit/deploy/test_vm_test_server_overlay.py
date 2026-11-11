@@ -210,7 +210,7 @@ def test_roles_refuses_any_other_argument_and_so_does_an_unknown_action( vm ):
     bad, _ = vm( SCRIPT, "test-server", "roles", "--reassign" )
     assert bad.returncode != 0 and "--apply, --check or --grants-only" in bad.stderr
     unknown, _ = vm( SCRIPT, "test-server", "bogus" )
-    assert unknown.returncode != 0 and "prep | up | recreate" in unknown.stderr
+    assert unknown.returncode != 0 and "prep | up-db | up | recreate" in unknown.stderr
 
 
 def test_dry_run_prints_the_remote_script_and_calls_gcloud_for_nothing_but_the_network_lookup( vm ):
