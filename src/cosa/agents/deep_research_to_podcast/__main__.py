@@ -43,6 +43,7 @@ Example:
 import argparse
 
 import cosa.utils.util as cu
+from cosa.agents.podcast_generator.__main__ import parse_languages_arg
 from cosa.agents.utils.chained_cli import add_deep_research_arguments, add_mode_arguments, run_chained_cli
 
 # User-visible args: the canonical list of args that end users should see
@@ -116,24 +117,9 @@ Mode Options:
     return parser.parse_args()
 
 
-def parse_languages( languages_str: str ) -> list:
-    """
-    Parse comma-separated language codes into a list.
-
-    Args:
-        languages_str: Comma-separated ISO codes (e.g., "en,es-MX")
-
-    Returns:
-        list: List of language codes, or None if empty
-    """
-    if not languages_str:
-        return None
-    return [ lang.strip() for lang in languages_str.split( "," ) if lang.strip() ]
-
-
 def show_dry_run( args: argparse.Namespace ) -> None:
     """Show what the pipeline would do without executing."""
-    target_languages = parse_languages( args.languages ) or [ "en" ]
+    target_languages = parse_languages_arg( args.languages ) or [ "en" ]
 
     print( "\n[DRY RUN MODE - No API calls will be made]\n" )
     print( "Pipeline Configuration:" )
@@ -194,7 +180,7 @@ async def run_pipeline( args: argparse.Namespace ) -> int:
     cu.print_banner( "Deep Research → Podcast Pipeline", prepend_nl=True )
 
     # Parse language codes
-    target_languages = parse_languages( args.languages )
+    target_languages = parse_languages_arg( args.languages )
 
     # Show configuration
     print( f"Query: {args.query}" )
