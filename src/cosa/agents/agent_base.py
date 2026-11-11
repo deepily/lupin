@@ -175,9 +175,9 @@ class AgentBase( RunnableCode, abc.ABC ):
             - nothing is read from file_path
 
         Raises:
-            - NotImplementedError always, naming the class
+            - NotImplementedError always, naming the class and file_path
         """
-        raise NotImplementedError( f"{cls.__name__}.restore_from_serialized_state() not implemented" )
+        raise NotImplementedError( f"{cls.__name__}.restore_from_serialized_state() not implemented, asked to restore from {file_path}" )
     
     @staticmethod
     def _restore_from_data( agent_cls, data: dict, positional_keys: tuple, keyword_keys: tuple ) -> 'AgentBase':

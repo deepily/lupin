@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.bug_injector.BugInjector@51918dba62
   - cosa.agents.bug_injector.BugInjector.run_prompt@6863e7a4d2
-  - cosa.agents.agent_base.AgentBase.restore_from_serialized_state@e4560568d2
+  - cosa.agents.agent_base.AgentBase.restore_from_serialized_state@f31d4ddd36
   - cosa.utils.util_code_runner.assemble_and_run_solution@84dbc3d3b4
   - cosa.agents.io_models.xml_models.BugInjectionResponse@e92f686130
 ---

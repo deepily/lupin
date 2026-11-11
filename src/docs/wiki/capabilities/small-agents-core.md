@@ -2,7 +2,7 @@
 capability: small-agents-core
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.agent_base.AgentBase@1b6e192562
+  - cosa.agents.agent_base.AgentBase@a40cb1d200
   - cosa.agents.agent_base.AgentBase.do_all@7cdb641a9f
   - cosa.agents.agent_base.AgentBase.run_code@5d9d45ccfb
   - cosa.agents.math_agent.MathAgent@770b08c5e7

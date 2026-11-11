@@ -214,7 +214,7 @@ class TestAgentBase( unittest.TestCase ):
 
         with self.assertRaises( NotImplementedError ) as ctx:
             NoRestoreAgent.restore_from_serialized_state( "/some/path.json" )
-        self.assertEqual( str( ctx.exception ), "NoRestoreAgent.restore_from_serialized_state() not implemented" )
+        self.assertEqual( str( ctx.exception ), "NoRestoreAgent.restore_from_serialized_state() not implemented, asked to restore from /some/path.json" )
 
     def test_restore_default_is_callable_on_an_instance( self ):
         """
@@ -230,6 +230,26 @@ class TestAgentBase( unittest.TestCase ):
         with self.assertRaises( NotImplementedError ) as ctx:
             agent.restore_from_serialized_state( "/some/path.json" )
         self.assertIn( "NoRestoreAgent.restore_from_serialized_state()", str( ctx.exception ) )
+
+    def test_a_subclass_without_a_restore_still_instantiates( self ):
+        """
+        Test AgentBase is not abstract on restore: dropping the abstract marker was deliberate.
+
+        The nine retired stubs already let their classes construct and failed only on restore.
+        Ensures:
+            - a subclass with no override constructs without TypeError
+            - its restore then raises NotImplementedError naming the class and the file path
+        """
+        class NoRestoreAgent( AgentBase ):
+            def __init__( self ):
+                pass
+
+        agent = NoRestoreAgent()
+        self.assertIsInstance( agent, AgentBase )
+        with self.assertRaises( NotImplementedError ) as ctx:
+            agent.restore_from_serialized_state( "/some/path.json" )
+        self.assertIn( "NoRestoreAgent.restore_from_serialized_state()", str( ctx.exception ) )
+        self.assertIn( "/some/path.json", str( ctx.exception ) )
 
     def test_restore_default_does_not_read_the_file( self ):
         """
