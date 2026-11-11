@@ -210,7 +210,7 @@ def test_roles_refuses_any_other_argument_and_so_does_an_unknown_action( vm ):
     bad, _ = vm( SCRIPT, "test-server", "roles", "--reassign" )
     assert bad.returncode != 0 and "--apply, --check or --grants-only" in bad.stderr
     unknown, _ = vm( SCRIPT, "test-server", "bogus" )
-    assert unknown.returncode != 0 and "prep | up-db | up | recreate" in unknown.stderr
+    assert unknown.returncode != 0 and "prep | node-modules | seed-companions | up-db | up | recreate" in unknown.stderr
 
 
 def test_dry_run_prints_the_remote_script_and_calls_gcloud_for_nothing_but_the_network_lookup( vm ):
@@ -336,3 +336,44 @@ def test_refresh_local_path_restarts_the_local_container_and_polls_health( vm, t
     assert failed.returncode == 1 and "docker restart failed" in failed.stderr
     stuck, _ = vm( REFRESH, stub_curl_fails="1", refresh_timeout_secs="1" )
     assert stuck.returncode == 1 and "health check did not pass within 1s" in stuck.stderr and "docker logs --tail 50" in stuck.stderr
+
+
+# ---------------------------------------------------------------- row 8d67e474: node_modules and the companions
+
+
+def test_node_modules_is_a_named_volume_the_overlay_declares_and_the_test_service_mounts():
+    overlay = yaml.safe_load( OVERLAY.read_text() )
+    assert "node-modules-test:/var/lupin/node_modules" in overlay[ "services" ][ "lupin-rest-test" ][ "volumes" ]
+    assert "node-modules-test" in overlay[ "volumes" ]
+
+
+def test_the_node_modules_verb_installs_without_scripts_as_root_and_proves_esbuild_last( vm ):
+    done, calls = vm( SCRIPT, "test-server", "node-modules" )
+    cmd = _ssh_command( calls )
+    assert done.returncode == 0 and "run --rm --no-deps -u root lupin-rest-test" in cmd and "-f docker-compose.vm-test-overlay.yml" in cmd
+    assert cmd.index( "npm ci --ignore-scripts" ) < cmd.index( "node_modules/.bin/esbuild --version" )
+
+
+def test_the_overlay_turns_the_dev_database_companion_copy_off():
+    env = yaml.safe_load( OVERLAY.read_text() )[ "services" ][ "lupin-rest-test" ][ "environment" ]
+    assert env[ "LUPIN_TEST_SEED_FROM_DEV" ] == "0"
+
+
+def test_seed_companions_pipes_the_export_from_the_app_container_into_the_test_database_and_holds_no_password( vm ):
+    done, calls = vm( SCRIPT, "test-server", "seed-companions" )
+    cmd = _ssh_command( calls )
+    export = "docker exec -e LUPIN_ROOT=/var/lupin lupin-rest-cloud-gpu python3 /var/lupin/src/scripts/export_test_companions.py"
+    assert done.returncode == 0 and cmd.startswith( "set -o pipefail; sudo " + export )
+    assert cmd.index( export ) < cmd.index( "| sudo docker exec -i lupin-pgvector-test psql -U lupin_dev -d lupin_db_test -v ON_ERROR_STOP=1 -q" )
+    assert "PASSWORD" not in cmd and "--check" not in cmd
+
+
+def test_seed_companions_check_only_counts_and_never_names_the_test_database( vm ):
+    done, calls = vm( SCRIPT, "test-server", "seed-companions", "--check" )
+    cmd = _ssh_command( calls )
+    assert done.returncode == 0 and cmd.endswith( "export_test_companions.py --check" ) and "psql" not in cmd
+
+
+def test_seed_companions_refuses_any_other_argument( vm ):
+    bad, _ = vm( SCRIPT, "test-server", "seed-companions", "--force" )
+    assert bad.returncode != 0 and "takes --check or nothing" in bad.stderr
