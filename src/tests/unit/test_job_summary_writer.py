@@ -84,6 +84,11 @@ def test_a_job_that_reports_nothing_stays_none_when_the_count_did_not_fall():
     assert not job_health.no_drain( block, block[ "points" ] )
 
 
+def test_a_job_that_reports_nothing_stays_none_when_the_count_stayed_flat():
+    block = series( [ 5, 5 ], drained=None )
+    assert ( block[ "drained_last_run" ], block[ "points" ][ -1 ][ "drained" ], block[ "arrived_last_interval" ] ) == ( None, None, None )
+
+
 def test_a_job_that_reports_nothing_is_given_the_fall_when_the_count_fell():
     block = series( [ 10, 4 ], drained=None )
     assert ( block[ "drained_last_run" ], block[ "arrived_last_interval" ] ) == ( 6, 0 )
