@@ -93,8 +93,10 @@ EOF
 }
 
 do_status() {
-    if $CRONTAB_CMD -l 2>/dev/null | grep -Fq "$CRON_TAG"; then
-        echo "INSTALLED:"; $CRONTAB_CMD -l 2>/dev/null | grep -F "$CRON_TAG"; return 0
+    local cron_now
+    cron_now="$( $CRONTAB_CMD -l 2>/dev/null )"
+    if grep -Fq "$CRON_TAG" <<< "$cron_now"; then
+        echo "INSTALLED:"; grep -F "$CRON_TAG" <<< "$cron_now"; return 0
     fi
     echo "NOT INSTALLED: run $HERE/hook-link-tick.sh --print-install"; return 1
 }
@@ -112,7 +114,7 @@ do_install() {
 do_uninstall() {
     local existing backup
     existing="$( $CRONTAB_CMD -l 2>/dev/null )"
-    if ! printf '%s\n' "$existing" | grep -Fq "$CRON_TAG"; then echo "not installed, nothing removed"; return 0; fi
+    if ! grep -Fq "$CRON_TAG" <<< "$existing"; then echo "not installed, nothing removed"; return 0; fi
     backup="$HOME/.claude/crontab-backup-$( date +%Y%m%d-%H%M%S ).txt"
     mkdir -p "$( dirname "$backup" )" 2>/dev/null
     printf '%s\n' "$existing" > "$backup" || { echo "UNINSTALL ABORTED: could not write backup $backup" >&2; return 1; }

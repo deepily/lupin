@@ -92,7 +92,7 @@ echo "-- sweep exit: $SWEEP_RC --"
 # anything else in that block is a finding. Parsed from the report rather than re-derived,
 # so this file and the sweep can never disagree about what category (i) means.
 CAT_I="$( printf '%s\n' "$REPORT" | sed -n '/(i) UNREACHABLE/,/(ii)/p' )"
-if printf '%s\n' "$CAT_I" | grep -q "CLEAN —"; then
+if grep -q "CLEAN —" <<< "$CAT_I"; then
     echo "category (i): clean — nothing to deliver"
     [ "$SWEEP_RC" -eq 2 ] && { echo "…but the sweep reported a category it could NOT compute"; exit 2; }
     exit 0
