@@ -30,6 +30,8 @@ import cosa.utils.util as cu
 from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
+from cosa.agents.shared.diagnosis_json import parse_diagnosis_json
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_object
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
     TFEPhase,
@@ -555,53 +557,21 @@ class TFEOrchestrator:
         Handles clean JSON, markdown-fenced JSON, and JSON embedded in prose.
         Returns a low-confidence fallback on any parse failure.
         """
-        text = raw_response.strip()
-
-        # Strip markdown code fences if present
-        if "```json" in text:
-            text = text.split( "```json" )[ -1 ]
-        if "```" in text:
-            text = text.split( "```" )[ 0 ]
-
-        json_str = self._extract_last_json_object( text )
-        if json_str is None:
-            logger.warning(
-                f"[TFE] No JSON object in response for {cluster_id} — fallback"
-            )
+        data, failure = parse_diagnosis_json( raw_response )
+        if data is None:
+            logger.warning( f"[TFE] {failure} for {cluster_id} — fallback" )
             return self._fallback_diagnosis( cluster_id, raw_response[ :500 ] )
 
         try:
-            data = json.loads( json_str )
             # Ensure cluster_id is populated even if the LLM omitted it
             if "cluster_id" not in data or not data[ "cluster_id" ]:
                 data[ "cluster_id" ] = cluster_id
             return TestDiagnosisResult( **data )
-        except ( json.JSONDecodeError, ValueError, TypeError ) as e:
+        except ( ValueError, TypeError ) as e:
             logger.warning( f"[TFE] JSON parse failed for {cluster_id}: {e}" )
             return self._fallback_diagnosis( cluster_id, raw_response[ :500 ] )
 
-    @staticmethod
-    def _extract_last_json_object( text: str ) -> Optional[ str ]:
-        """
-        Extract the last balanced JSON object from text.
-
-        Walks backward from the last `}` to find the matching `{`.
-        Returns None if no balanced object is found.
-        """
-        close_idx = text.rfind( "}" )
-        if close_idx == -1:
-            return None
-
-        depth = 0
-        for i in range( close_idx, -1, -1 ):
-            if text[ i ] == "}":
-                depth += 1
-            elif text[ i ] == "{":
-                depth -= 1
-                if depth == 0:
-                    return text[ i : close_idx + 1 ]
-
-        return None
+    _extract_last_json_object = staticmethod( extract_json_object )
 
     @staticmethod
     def _fallback_diagnosis( cluster_id: str, reason: str ) -> TestDiagnosisResult:
