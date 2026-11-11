@@ -91,3 +91,20 @@ def test_the_web_search_rate_limiter_drops_records_older_than_its_window_and_kee
     limiter._cleanup_old_records( 1000.0 )
     assert [ r.timestamp for r in limiter._records ] == [ 940.0, 999.0 ]
     assert isinstance( limiter._records, deque )
+
+
+def test_the_arbiter_drops_a_ping_exactly_one_window_old_and_the_restart_tracker_keeps_a_rise_that_old():
+    from collections import deque
+    from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+    from lupin_arbiter_app.health_watcher import RestartLoopTracker
+    class _Quiet:
+        def now_iso( self ): return NOW.isoformat()
+        def monotonic( self ): return 0.0
+    job = ArbiterConsumerJob( commons=object(), poll_seconds=5, manager_recipient="Mgr", clock=_Quiet(), ping_cap_window_seconds=3600 )
+    job._recent_pings = [ _ago( 3600 ), _ago( 3599 ) ]
+    job._prune_recent_pings( NOW )
+    assert job._recent_pings == [ _ago( 3599 ) ]
+    tracker       = RestartLoopTracker( window_seconds=3600, threshold=3 )
+    tracker.rises = deque( [ _ago( 3600 ), _ago( 3601 ) ] )
+    tracker._prune( NOW )
+    assert list( tracker.rises ) == [ _ago( 3600 ) ]
