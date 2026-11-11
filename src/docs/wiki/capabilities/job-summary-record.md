@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.job_summary.check_attempt@e674f456a4
   - lupin_mcp.job_summary.trigger_from_env@19ef499d42
   - lupin_mcp.job_summary.trimmed@6e4b8751ff
-  - lupin_mcp.job_summary.scan_block@5709a79136
+  - lupin_mcp.job_summary.scan_block@846436d66f
   - lupin_mcp.job_summary.fix_block@6c6588c557
   - lupin_mcp.job_summary.build_summary@c3e4376087
   - lupin_mcp.job_summary.write_atomic@04964a1f37
@@ -33,7 +33,7 @@ The shared writer of the `job-summary/1` file each background job leaves after a
 - `build_summary` moves `last_finished` only on clean or carried. Failures grow on failed, reset on clean or carried and hold on skipped.
 - `scan_block` and `fix_block` keep the previous block when the run gave none or did not finish. A finished run adds one point; `trimmed` keeps the newest 14.
 - A failed or skipped run keeps the old scan block and time: stale, not zero. Fix debt points add the opened rows to the previous total.
-- Arrivals are derived only when the job left them null and a previous count exists: count now minus count before plus drained.
+- Drained is never below the fall in the count: 168 to 3 drained at least 165, whatever the job reported. The wiki librarian reports 0. Arrivals are derived only when the job left them null and a previous count exists: count now minus count before plus drained. They are never negative.
 
 ## Writing
 - `write_summary` returns the record, or None with a message when the file cannot be written. A write failure never fails the job. A malformed attempt still raises.

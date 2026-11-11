@@ -100,11 +100,14 @@ def scan_block( given, previous, attempt, as_of ):
         - a run that gave no block, or did not finish, returns the previous block (None when there is none)
         - a failed or skipped run carries the previous block forward with its old as_of: the count is stale, not zero
         - a finished run gets a new as_of and appends one point when it reported a count
-        - arrived_last_interval is derived (count now - count before + drained) only when the job left it null and a previous count exists
+        - drained_last_run is never below the fall in the count: a count that went from 168 to 3 drained at least 165 whatever the job reported, because the count cannot fall unless work leaves it (a job whose debt others clear reports 0)
+        - arrived_last_interval is derived (count now - count before + drained) only when the job left it null and a previous count exists, so it is never negative
     """
     if given is None or attempt[ "outcome" ] not in FINISHED: return previous
     block  = { key: given.get( key ) for key in SCAN_KEYS }
     points = list( previous[ "points" ] ) if previous is not None else []
+    if block[ "count" ] is not None and points and points[ -1 ][ "count" ] is not None:
+        block[ "drained_last_run" ] = max( block[ "drained_last_run" ] or 0, points[ -1 ][ "count" ] - block[ "count" ] )
     if block[ "arrived_last_interval" ] is None and block[ "count" ] is not None and block[ "drained_last_run" ] is not None and points:
         block[ "arrived_last_interval" ] = block[ "count" ] - points[ -1 ][ "count" ] + block[ "drained_last_run" ]
     if block[ "count" ] is not None: points.append( { "at": as_of, "count": block[ "count" ], "drained": block[ "drained_last_run" ] } )
