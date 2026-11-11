@@ -6,9 +6,11 @@ pins:
   - cosa.agents.podcast_generator.prompts.personality.get_dynamic_duo_description@4593091a9d
   - cosa.agents.podcast_generator.prompts.personality.get_personality_prompt_section@8306cbfff7
   - cosa.agents.podcast_generator.prompts.personality.get_prosody_guidelines@8f571b6fc5
+  - cosa.agents.podcast_generator.prompts.script_generation.audience_block@7531927bdc
+  - cosa.agents.podcast_generator.prompts.script_generation.clip_to_ceiling@69701f40f0
   - cosa.agents.podcast_generator.prompts.script_generation.extract_prosody_from_text@2c2718cd53
-  - cosa.agents.podcast_generator.prompts.script_generation.get_content_analysis_prompt@d514cf537a
-  - cosa.agents.podcast_generator.prompts.script_generation.get_script_generation_prompt@bec05bfe8a
+  - cosa.agents.podcast_generator.prompts.script_generation.get_content_analysis_prompt@41331aafb4
+  - cosa.agents.podcast_generator.prompts.script_generation.get_script_generation_prompt@0295f71485
   - cosa.agents.podcast_generator.prompts.script_generation.get_script_revision_prompt@727242410f
   - cosa.agents.podcast_generator.prompts.script_generation.parse_analysis_response@224e303f42
   - cosa.agents.podcast_generator.prompts.script_generation.parse_script_response@88d3adb6e3
@@ -19,6 +21,7 @@ The functions in `prompts/personality.py` and `prompts/script_generation.py` bui
 
 ## What it does
 - `get_content_analysis_prompt` builds the analysis request. It clips the research to `max_source_chars` when given, and adds audience guidelines and context.
+- `clip_to_ceiling( text, max_source_chars )` is the one clip rule: the text unchanged when the ceiling is `None` or not exceeded, else its first `max_source_chars` characters. `audience_block( audience, context )` is the one audience block: the audience's guidelines, then the additional context, or `""` when neither is given. The analysis and script prompts here and the two status prompts in [[podcast-script-types]] all call them.
 - `get_script_generation_prompt` builds the script request from the analysis, the two host profiles, a target duration and an exchange range. For a language other than `en` it adds a native-writing instruction that keeps pacing markers and host names unchanged.
 - `get_script_revision_prompt` embeds the current script, the user's feedback and the revision number, and asks for the same JSON format back.
 - `parse_analysis_response` recovers a JSON object leniently. When none is found it returns a default analysis with the topic "Unknown Topic".
