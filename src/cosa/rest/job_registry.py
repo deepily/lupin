@@ -10,6 +10,8 @@ import json
 import pathlib
 import re
 
+from cosa.utils.atomic_json import load_json_dict
+
 REGISTRY_SCHEMA  = "job-registry/1"
 REGISTRY_FILE    = "src/conf/job-registry.json"
 OVERRIDES_FILE   = "io/jobs/registry-overrides.json"
@@ -73,11 +75,7 @@ def load_overrides( root ):
         - returns {} when the file is missing or unreadable: no override is the normal state
         - an entry that is not a dict, an unknown key, or a non-positive or non-numeric value is ignored, so one bad edit cannot take the page down
     """
-    try:
-        doc = json.loads( ( pathlib.Path( root ) / OVERRIDES_FILE ).read_text() )
-    except ( OSError, ValueError ):
-        return {}
-    if not isinstance( doc, dict ): return {}
+    doc   = load_json_dict( pathlib.Path( root ) / OVERRIDES_FILE )
     clean = {}
     for job, values in doc.items():
         if not isinstance( values, dict ): continue
