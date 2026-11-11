@@ -313,6 +313,8 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
         if r_rel:
             lines.append( f"**Research Report**: [📄 View](/app/docs?path={urllib.parse.quote( r_rel )})" )
         lines.extend( per_language_lines )
+        for lang, reason in ( result.pg_artifacts.get( "failed_translations" ) or {} ).items():
+            lines.append( f"**Translation failed (not produced)**: {_LANGUAGE_NAMES.get( lang, lang )}. {reason}" )
         lines.extend( drive[ "extra_lines" ] )
         skipped_names = self._skipped_topic_names( result )
         if skipped_names:

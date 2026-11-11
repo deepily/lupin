@@ -227,3 +227,62 @@ def test_the_job_card_lists_both_languages_when_nothing_failed():
     assert "**Languages**: en, es-MX\n" in card
     assert "Translation failed" not in card
     assert "2 languages" in spoken
+
+
+async def _research_card( failed ):
+    """Run the research-to-podcast job over a stub pipeline; return its completion abstract."""
+    from types import SimpleNamespace
+    from cosa.agents.deep_research_to_podcast.job import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_podcast.state import PipelineState
+    job = DeepResearchToPodcastJob( query="q", user_id="u", user_email="card@test.com", session_id="s",
+                                    target_languages=[ "en", "es-MX" ] )
+    io  = "/proj/io/podcasts/u/"
+    result = SimpleNamespace(
+        state=PipelineState.COMPLETED, error=None, research_path="io/deep-research/u/report.md", research_abstract="a",
+        audio_path=io + "en.mp3", script_path=io + "en-script.md",
+        pg_artifacts={ "audio_paths_by_language": { "en": io + "en.mp3" }, "script_paths_by_language": { "en": io + "en-script.md" },
+                       "failed_translations": failed },
+        dr_cost=1.0, pg_cost=1.0, total_cost=2.0, dr_artifacts={} )
+    agent = MagicMock( run_async=AsyncMock( return_value=result ) )
+    with patch( "cosa.agents.deep_research.voice_io.notify", new_callable=AsyncMock ) as notify, \
+         patch( "cosa.agents.deep_research.voice_io.set_job_id" ), \
+         patch( "cosa.agents.deep_research.voice_io.clear_job_id" ), \
+         patch( "cosa.agents.deep_research.cosa_interface" ), \
+         patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+         patch.object( type( job ), "_make_agent", return_value=agent ):
+        await job._execute()
+    return next( c.kwargs[ "abstract" ] for c in notify.call_args_list
+                 if c.kwargs.get( "abstract" ) and "Research → Podcast Complete" in c.kwargs[ "abstract" ] )
+
+
+def test_the_research_to_podcast_card_names_a_language_whose_translation_failed():
+    card = asyncio.run( _research_card( { "es-MX": "came back untranslated" } ) )
+    assert "**Translation failed (not produced)**: Mexican Spanish. came back untranslated" in card
+    assert "**Mexican Spanish**:" not in card
+
+
+def test_the_research_to_podcast_card_has_no_failure_line_when_nothing_failed():
+    card = asyncio.run( _research_card( { } ) )
+    assert "Translation failed" not in card
+
+
+def test_the_chained_agent_carries_the_failed_translations_to_the_card():
+    from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
+    agent = DeepResearchToPodcastAgent( query="q", user_email="u@t.com", target_languages=[ "en", "es-MX" ] )
+
+    class _Orch:
+        podcast_id = "pg-x"
+        _api_client = None
+
+        def __init__( self, **kw ):
+            self._podcast_state     = { "final_audio_path": "a.mp3", "script_path": "s.md" }
+            self._failed_translations = { "es-MX": "came back untranslated" }
+
+        async def do_all_async( self ):
+            return _english()
+
+    with patch( "cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent", _Orch ), \
+         patch( "os.path.exists", return_value=True ), \
+         patch( "cosa.agents.podcast_generator.voice_io.reconfigure" ):
+        out = asyncio.run( agent._run_podcast_generator( "/io/r.md" ) )
+    assert out[ "artifacts" ][ "failed_translations" ] == { "es-MX": "came back untranslated" }
