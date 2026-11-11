@@ -1,0 +1,19 @@
+# vm-iap-ports.tsv — the VM-side TCP ports that need an IAP firewall rule.
+#
+# Google's IAP forwarder (35.235.240.0/20) reaches a VM port only through a VPC rule for that exact
+# port, one rule per port. The rules are named lupin-iap-<port>. This file is the single list.
+#
+# Readers:
+#   src/scripts/lupin-vm.sh firewall ensure   creates each missing rule (a person runs it)
+#   src/scripts/lupin-vm.sh firewall check    read-only: every port below has a rule
+#   src/scripts/lupin-vm.sh deploy            runs the check before and after a deploy
+#
+# Format: tab-separated, 3 columns. '#' comments and blank lines are ignored.
+#   port      the VM-side TCP port
+#   tier      block = a missing rule fails the check; warn = a missing rule only warns
+#   purpose   what the port serves
+7999	block	app server (lupin-rest); the default tunnel target and the VM health probes
+8000	warn	test server (lupin-rest-test); submit-test-suite.py and a browser reach it through a tunnel
+8080	warn	spare tunnel port (the tunnel help text uses 8080 as its example)
+8888	warn	spare tunnel port, opened by hand on the test VM
+8889	warn	spare tunnel port, opened by hand on the test VM

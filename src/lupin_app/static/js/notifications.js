@@ -21288,7 +21288,8 @@ class NotificationsUI {
      */
     _normalizeDocLinkHref( href ) {
         if ( !href ) return href;
-        return href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, "" );
+        const lib = this._approveLinkLib();
+        return lib ? lib.normalizeDocLinkHref( href ) : href;
     }
 
     /**

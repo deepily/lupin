@@ -93,7 +93,7 @@ def test_live_deps_and_clock_are_the_real_ones( monkeypatch, tmp_path ):
     monkeypatch.setattr( paths, "data_dir", lambda root: tmp_path / "d" )
     monkeypatch.delenv( "LUPIN_REUSE_REVIEW_DATA_ROOT" )
     root, data, deps = router.live_deps()
-    assert str( root ) == str( tmp_path ) and data == tmp_path / "d" and isinstance( deps, svc.LiveDeps )
+    assert str( root ) == str( tmp_path ) and data == str( tmp_path / "d" ) and isinstance( deps, svc.LiveDeps )
     monkeypatch.setenv( "LUPIN_REUSE_REVIEW_DATA_ROOT", str( tmp_path / "mounted" ) )                  # the container's own variable wins
     assert router.live_deps()[ 1 ] == str( tmp_path / "mounted" )
     assert router.clock().tzinfo is not None

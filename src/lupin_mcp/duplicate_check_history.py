@@ -115,9 +115,9 @@ def line_of( doc, run_file, backfilled=False ):
              "calls_per_hour": round( calls / secs * 3600 ) if calls and secs else None }
 
 
-def append_line( folder, line ):
+def append_line( folder, line, name=RUNS_FILE ):
     """
-    Append one line to runs.jsonl, making the folder.
+    Append one line to runs.jsonl (or to the file called name), making the folder.
 
     Requires:
         - line is a dict of JSON values
@@ -125,7 +125,7 @@ def append_line( folder, line ):
         - earlier lines are untouched
         - returns the path
     """
-    path = pathlib.Path( folder ) / RUNS_FILE
+    path = pathlib.Path( folder ) / name
     path.parent.mkdir( parents=True, exist_ok=True )
     with path.open( "a", encoding="utf-8" ) as fh: fh.write( json.dumps( line, sort_keys=True ) + "\n" )
     return path

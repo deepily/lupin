@@ -181,6 +181,48 @@ def _persona( environ ):
     return environ.get( "HOOK_LINK_DM", "" ).strip()
 
 
+def notify_route( environ, base_var, default_base=DEFAULT_API_BASE, api_key=None, target_of=None ):
+    """
+    Resolve where and as whom one notification is sent.
+
+    Requires:
+        - environ is a mapping of environment variables
+        - api_key and target_of are None, or callables that match _api_key and _notify_target
+
+    Ensures:
+        - returns ( base, key, target ), the base without a trailing slash, read from environ[ base_var ] or default_base
+
+    Raises:
+        - ValueError when no notification recipient is configured
+        - whatever the key or recipient lookup raises
+    """
+    base   = environ.get( base_var, default_base ).rstrip( "/" )
+    key    = ( api_key or _api_key )()
+    target = ( target_of or _notify_target )( environ )
+    if not target: raise ValueError( "no notification recipient" )
+    return base, key, target
+
+
+def send_notify( base, key, target, message, abstract, sender_id, priority="high", kind="alert", query=post_query ):
+    """
+    Post one notification to /api/notify.
+
+    Requires:
+        - query is a callable ( base, key, path, params ) returning ( status, text )
+
+    Ensures:
+        - returns ( status, text ) as query answered
+        - every call carries a fresh idempotency key
+
+    Raises:
+        - whatever query raises
+    """
+    return query( base, key, "/api/notify", {
+        "message": message, "type": kind, "priority": priority, "target_user": target,
+        "sender_id": sender_id, "abstract": abstract, "idempotency_key": str( uuid.uuid4() ),
+    } )
+
+
 def deliver( findings, why, drill, environ, err, channels=( "notify", ), query=post_query, body=post_json, api_key=_api_key, target_of=_notify_target ):
     """
     Send to each named channel; returns a dict of channel name to whether it arrived.
@@ -209,10 +251,7 @@ def deliver( findings, why, drill, environ, err, channels=( "notify", ), query=p
             results[ "notify" ] = False
             print( "  DELIVERY FAILED: notify has no target user (set LUPIN_DEV_EMAIL or global_notification_recipient)", file=err )
         else:
-            status, detail = query( base, key, "/api/notify", {
-                "message": spoken, "type": "alert", "priority": "high", "target_user": target,
-                "sender_id": f"claude.code@{PROJECT}.deepily.ai#hook-link-tick", "abstract": abstract, "idempotency_key": str( uuid.uuid4() ),
-            } )
+            status, detail = send_notify( base, key, target, spoken, abstract, f"claude.code@{PROJECT}.deepily.ai#hook-link-tick", query=query )
             results[ "notify" ] = status == 200
             if status == 200: print( f"  notify to {target}: delivered (HTTP 200)" )
             else:             print( f"  DELIVERY FAILED: notify to {target}: HTTP {status} {detail}", file=err )

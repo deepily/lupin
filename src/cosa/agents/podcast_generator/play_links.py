@@ -189,3 +189,88 @@ def script_link( script_rel ):
     """
     if not script_rel: return None
     return f"[📝 Script](/app/docs?path={urllib.parse.quote( 'lupin/io/' + script_rel )})"
+
+
+def io_relative( path, io_base ):
+    """
+    Turn an artifact path into the form the io viewer endpoints take, relative to io/.
+
+    Matches the receiving logic in get_io_file ( cosa/rest/routers/io_files.py ), which accepts absolute,
+    "io/" and slash-led forms.
+
+    Requires:
+        - path is a string or None
+        - io_base is the absolute io directory with a trailing slash
+
+    Ensures:
+        - returns None for an empty path
+        - strips the io_base prefix, else a leading "io/", else any leading slashes
+
+    Raises:
+        - nothing
+    """
+    if not path: return None
+    if path.startswith( io_base ): return path[ len( io_base ): ]
+    if path.startswith( "io/" ):   return path[ 3: ]
+    return path.lstrip( "/" )
+
+
+def ordered_languages( languages, audio_by_lang, script_by_lang ):
+    """
+    List the languages that produced an artifact: requested order first, then any extras.
+
+    Requires:
+        - languages is a list of language codes
+        - audio_by_lang and script_by_lang are dicts keyed by language code
+
+    Ensures:
+        - returns each language once
+        - requested languages come first, in request order, and only when they produced an artifact
+        - extra languages that produced an artifact follow
+
+    Raises:
+        - nothing
+    """
+    ordered = [ l for l in languages if l in audio_by_lang or l in script_by_lang ]
+    for l in list( audio_by_lang ) + list( script_by_lang ):
+        if l not in ordered:
+            ordered.append( l )
+    return ordered
+
+
+def language_card_lines( ordered_langs, names, audio_by_lang, script_by_lang, source_rel, io_base, drive_links ):
+    """
+    Build the per-language link lines of a finished podcast card.
+
+    Each line reads "**Label**: 📝 Script | ▶️ Play Here | 🎧 Listen | ⬇️ Download | ☁️ Drive".
+
+    Requires:
+        - ordered_langs is a list of language codes
+        - names maps a language code to its label
+        - audio_by_lang and script_by_lang map a language code to an artifact path
+        - source_rel is the player's source reference, or None
+        - io_base is the absolute io directory with a trailing slash
+        - drive_links maps a language code to its Drive link
+
+    Ensures:
+        - one line per language that has at least one link, in ordered_langs order
+        - the label falls back to the language code
+
+    Raises:
+        - nothing
+    """
+    lines = []
+    for lang in ordered_langs:
+        label  = names.get( lang, lang )
+        a_rel  = io_relative( audio_by_lang.get( lang ), io_base )
+        s_rel  = io_relative( script_by_lang.get( lang ), io_base )
+        parts  = []
+        s_link = script_link( s_rel )
+        if s_link: parts.append( s_link )
+        if a_rel:
+            title = read_script_title( io_base + s_rel ) if s_rel else None
+            parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
+        if lang in drive_links: parts.append( f"[☁️ Drive]({drive_links[ lang ]})" )
+        if parts:
+            lines.append( f"**{label}**: " + " | ".join( parts ) )
+    return lines

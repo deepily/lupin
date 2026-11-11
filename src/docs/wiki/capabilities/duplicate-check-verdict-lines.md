@@ -7,7 +7,9 @@ pins:
   - lupin_mcp.duplicate_check_verdicts.VerdictRefused@8abf07bd31
   - lupin_mcp.duplicate_check_verdicts.put_back@9629c3aa81
   - lupin_mcp.duplicate_check_verdicts.write_verdict@f1844da0d1
-  - lupin_mcp.duplicate_check_verdicts.main@6507b26c37
+  - lupin_mcp.duplicate_check_verdicts.main@17d1a5bfcc
+  - lupin_mcp.duplicate_check_verdicts.seat_actor@e2029f1991
+  - lupin_mcp.duplicate_check_verdicts.SeatStore@e1fe8da4c8
 ---
 # Duplicate check: verdict lines and their writer
 The triage seat rules on each finding of a run with one line. `python -m lupin_mcp.duplicate_check_verdicts` writes it. The run is in [[duplicate-check-daily-run]]. The weekly page that counts the lines is in [[reuse-behaviour-duplicate-check-table]].
@@ -27,7 +29,8 @@ The triage seat rules on each finding of a run with one line. `python -m lupin_m
 - If the amend is refused or raises, `put_back` cuts the file to its earlier size, or removes it if it was new. It returns the error text instead of raising, so the refusal still reaches the caller. The file is put back as it was, so the file and the row cannot disagree.
 - A file that cannot be written is refused with the row untouched. Every refusal names what was and was not written.
 - `--file-only` writes the file alone, for a back-fill. The command needs exactly one of `--row` and `--file-only`.
-- The amend goes through `LiveStore.amend` of [[duplicate-check-filing]], the hooks' own client over HTTP.
+- The amend goes through `LiveStore.amend` of [[duplicate-check-filing]], the hooks' own client over HTTP. A live `--row` amend uses `SeatStore`. It is a `LiveStore` whose every amend carries the calling seat as its `actor`, because the store refuses an amend with none.
+- `seat_actor` names that seat the way the `task_amend` tool does: `<persona key> <8-hex session id>`, read from the session bridge. It raises `VerdictRefused` when the session id came from a fallback, which could name another seat. It also raises when the bridge holds no voice persona for the session.
 - Exit 0 means the line was written. Exit 3 means it was refused and nothing was written.
 
 ## Back-fill

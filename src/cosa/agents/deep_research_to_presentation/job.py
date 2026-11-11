@@ -21,7 +21,6 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.deep_research.seed_context import normalize_source_document
 from cosa.rest.job_state import JobState
@@ -261,18 +260,9 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         Ensures:
             - returns ( abstract, spoken_suffix ) with an empty suffix
         """
-        import urllib.parse
-        io_base = cu.get_project_root() + "/io/"
-
-        def _doc_link( path, label ):
-            if path and path.startswith( io_base ):
-                rel = path.replace( io_base, "" )
-                return f"[{label}](/app/docs?path={urllib.parse.quote( rel )})"
-            return path
-
-        research_link = _doc_link( result.research_path, "📄 View" )
-        yaml_link     = _doc_link( result.yaml_path,     "View YAML" )
-        marp_link     = _doc_link( result.marp_path,     "View Presentation" )
+        research_link = self._io_view_link( result.research_path, "📄 View" )
+        yaml_link     = self._io_view_link( result.yaml_path,     "View YAML" )
+        marp_link     = self._io_view_link( result.marp_path,     "View Presentation" )
 
         completion_abstract = f"""**Research → Presentation Complete!**
 
@@ -286,9 +276,9 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
 
 **Cost**: ${result.total_cost:.4f}"""
 
-        skipped_names = [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
+        skipped_names = self._skipped_topic_names( result )
         if skipped_names:
-            completion_abstract += f"\n\n**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names )
+            completion_abstract += "\n\n" + self._skipped_topics_line( skipped_names )
 
         return completion_abstract, ""
 
@@ -301,12 +291,10 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
             - the slide count artifact is 0, because no presentation is built
             - returns the dry-run completion abstract
         """
-        self.research_path = f"/io/deep-research/{self.user_email}/dry-run-{self.id_hash}/report.md"
-        self.yaml_path     = f"/io/presentations/{self.user_email}/dry-run-{self.id_hash}/presentation.yaml"
-        self.marp_path     = f"/io/presentations/{self.user_email}/dry-run-{self.id_hash}/presentation.md"
+        self._store_dry_run_research()
+        self.yaml_path     = self._dry_run_io_path( "presentations", "presentation.yaml" )
+        self.marp_path     = self._dry_run_io_path( "presentations", "presentation.md" )
 
-        self.artifacts[ "research_path" ]     = self.research_path
-        self.artifacts[ "research_abstract" ] = "Mock abstract from dry-run mode."
         self.artifacts[ "yaml_path" ]         = self.yaml_path
         self.artifacts[ "marp_path" ]         = self.marp_path
         self.artifacts[ "slide_count" ]       = 0

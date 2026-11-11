@@ -13,6 +13,8 @@ import os
 import pathlib
 import sys
 
+from cosa.utils.atomic_json import write_json_atomic
+
 SCHEMA          = "job-summary/1"
 MAX_POINTS      = 14
 OUTCOMES        = ( "clean", "carried", "failed", "skipped" )
@@ -185,22 +187,6 @@ def build_summary( job, attempt, scan_debt=None, fix_debt=None, previous=None, w
     }
 
 
-def write_atomic( path, doc ):
-    """
-    Write a JSON document whole, by rename.
-
-    Requires:
-        - path is writable; its folder is created when missing
-    Ensures:
-        - a reader sees the old file or the new one, never half of either
-    """
-    path = pathlib.Path( path )
-    path.parent.mkdir( parents=True, exist_ok=True )
-    tmp = path.with_name( f".{path.name}.{os.getpid()}.tmp" )
-    tmp.write_text( json.dumps( doc, indent=2, sort_keys=False ) + "\n" )
-    os.replace( tmp, path )
-
-
 def write_summary( path, job, attempt, scan_debt=None, fix_debt=None, work_found_last_run=None, now=None, target=None, err=None ):
     """
     Write the summary of a run.
@@ -220,7 +206,7 @@ def write_summary( path, job, attempt, scan_debt=None, fix_debt=None, work_found
     check_attempt( attempt )
     try:
         doc = build_summary( job, attempt, scan_debt, fix_debt, read_summary( path ), work_found_last_run, now, target )
-        write_atomic( path, doc )
+        write_json_atomic( path, doc, indent=2, trailing_newline=True )
         return doc
     except OSError as error:
         print( f"job-summary: could not write {path}: {error}", file=sys.stderr if err is None else err )
@@ -239,10 +225,10 @@ def append_run( runs_path, attempt, extra=None ):
         - returns True when the line was appended, False when the file could not be written (never raises for I/O)
     """
     line = { "schema_version": 1, **check_attempt( attempt ), **( extra or {} ) }
+    from lupin_mcp.duplicate_check_history import append_line
     try:
         path = pathlib.Path( runs_path )
-        path.parent.mkdir( parents=True, exist_ok=True )
-        with path.open( "a" ) as handle: handle.write( json.dumps( line, sort_keys=True ) + "\n" )
+        append_line( path.parent, line, path.name )
         return True
     except OSError:
         return False

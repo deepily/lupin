@@ -13,24 +13,12 @@ that is failing and also growing says both.
 import datetime
 
 import cosa.rest.job_cron as jc
+from cosa.repo.symindex.vector_status import age_hours
+from lupin_mcp.reap_memento import _parse_iso_aware as parse_time
 
 STATE_ORDER = ( "unknown", "silent", "failing", "behind", "healthy" )
 FINISHED    = ( "clean", "carried" )
 STRIP_MAX   = 14
-
-
-def parse_time( text ):
-    """
-    Read an aware time out of a summary string.
-
-    Ensures:
-        - returns the aware datetime, or None for None, an unparseable value or a time with no offset
-    """
-    try:
-        when = datetime.datetime.fromisoformat( text )
-    except ( TypeError, ValueError ):
-        return None
-    return when if when.tzinfo is not None else None
 
 
 def grace_of( entry ):
@@ -168,9 +156,8 @@ def freshness_of( fresh, now ):
         - returns age_hours computed from built_at at read time, never stored; None when the job gave no block
     """
     if fresh is None: return None
-    built = parse_time( fresh.get( "built_at" ) )
     return { "built_at": fresh.get( "built_at" ), "stale_after_hours": fresh.get( "stale_after_hours" ),
-             "age_hours": None if built is None else round( ( now - built ).total_seconds() / 3600, 2 ) }
+             "age_hours": age_hours( fresh.get( "built_at" ), now ) }
 
 
 def fix_piling( store ):

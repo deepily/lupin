@@ -13,6 +13,7 @@
 # the IAP range 35.235.240.0/20 -> tcp:VM_PORT (SSH works because tcp:22 already has one; 7999 and
 # any other VM-side port may not — one rule PER port). See runbook §"Tunnel firewall" for the
 # one-time `gcloud compute firewall-rules create`, or run `lupin-vm.sh firewall open VM_PORT`.
+# The ports a fresh VM needs are listed in src/conf/vm-iap-ports.tsv; `firewall ensure` creates them all.
 #
 # Runbook: src/rnd/v0.1.9/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
 #
@@ -145,6 +146,11 @@ Tunnel:
 Firewall (one-time — the tunnel needs IAP allowed to the VM-side port):
   firewall status        list all VPC firewall rules (scan sourceRanges for 35.235.240.0/20)
   firewall open [PORT]   allow IAP range -> tcp:PORT (default $APP_PORT); network auto-derived
+  firewall ensure        create every missing IAP rule for the ports in src/conf/vm-iap-ports.tsv; says created / present
+                         per port and is safe to re-run. A person runs it: auto mode refuses a seat's firewall change
+  firewall check         read-only: every port in that file has an IAP rule. Exit 1 when a block-tier port lacks one
+                         (7999); a warn-tier port only warns. Prints the ensure line as the remedy. deploy and
+                         preflight run it too
 
 Deployment contract (task 47c4801b):
   preflight [pre|post|full]
@@ -612,7 +618,7 @@ case "$SUBCMD" in
         # read-only lookup of the VM's network (basename of the network URL); fine to run in dry-run
         NETWORK="$( gcloud compute instances describe "$VM_NAME" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
-            --format='value(networkInterfaces[0].network)' 2>/dev/null )"
+            --format='value(networkInterfaces[0].network)' 2>/dev/null )" || NETWORK=""
         NETWORK="${NETWORK##*/}"
         case "$action" in
             status)
@@ -630,7 +636,57 @@ case "$SUBCMD" in
                     --direction=INGRESS --action=ALLOW --rules="tcp:$port" \
                     --source-ranges=35.235.240.0/20
                 ;;
-            *) die "firewall needs: status | open [PORT]" ;;
+            ensure|check)
+                # The declared ports are src/conf/vm-iap-ports.tsv; the matching logic is the pure
+                # pfv_iap_port_states in the preflight lib, so the unit tests cover it without gcloud.
+                DEV_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+                IAP_PORTS_FILE="$DEV_ROOT/src/conf/vm-iap-ports.tsv"
+                [ -r "$IAP_PORTS_FILE" ] || die "IAP port list not readable: $IAP_PORTS_FILE"
+                PFV_LIB="$DEV_ROOT/src/scripts/lib/preflight-vm-lib.sh"
+                [ -r "$PFV_LIB" ] || die "preflight lib not readable: $PFV_LIB"
+                # shellcheck source=lib/preflight-vm-lib.sh
+                . "$PFV_LIB"
+                # Read-only listing, so it runs in a dry run too (the network lookup above does the same).
+                IAP_RULES="$( gcloud compute firewall-rules list --project="$LUPIN_GCP_PROJECT_ID" \
+                    --format="value(name,direction,disabled,sourceRanges.list(separator=';'),allowed[].map().firewall_rule().list(separator=';'))" )" \
+                    || die "could not list the firewall rules of project $LUPIN_GCP_PROJECT_ID"
+                iap_rc=0
+                IAP_STATES="$( pfv_iap_port_states "$IAP_PORTS_FILE" "$IAP_RULES" )" || iap_rc=$?
+                [ "$iap_rc" -le 1 ] || die "could not read the IAP port list $IAP_PORTS_FILE (pfv_iap_port_states exit $iap_rc)"
+                if [ "$action" = "ensure" ]; then
+                    [ -n "$NETWORK" ] || die "could not derive the VM network (is $VM_NAME running / correct project?)"
+                    while IFS='|' read -r iap_port iap_tier iap_state iap_rule; do
+                        [ -n "$iap_port" ] || continue
+                        if [ "$iap_state" = "PRESENT" ]; then
+                            log "firewall ensure: $iap_port present ($iap_rule)"
+                        else
+                            runit gcloud compute firewall-rules create "lupin-iap-$iap_port" \
+                                --project="$LUPIN_GCP_PROJECT_ID" --network="$NETWORK" \
+                                --direction=INGRESS --action=ALLOW --rules="tcp:$iap_port" \
+                                --source-ranges=35.235.240.0/20
+                            if [ "$DRY_RUN" -eq 1 ]; then log "firewall ensure: $iap_port would be created (lupin-iap-$iap_port)"
+                            else log "firewall ensure: $iap_port created (lupin-iap-$iap_port)"; fi
+                        fi
+                    done <<< "$IAP_STATES"
+                else
+                    iap_missing=0
+                    while IFS='|' read -r iap_port iap_tier iap_state iap_rule; do
+                        [ -n "$iap_port" ] || continue
+                        if [ "$iap_state" = "PRESENT" ]; then
+                            log "[OK]    IAP rule for tcp:$iap_port ($iap_rule)"
+                        elif [ "$iap_tier" = "block" ]; then
+                            log "[FAIL]  no IAP rule for tcp:$iap_port (blocking)"; iap_missing=1
+                        else
+                            log "[WARN]  no IAP rule for tcp:$iap_port"
+                        fi
+                    done <<< "$IAP_STATES"
+                    if grep -q '|ABSENT|' <<< "$IAP_STATES"; then
+                        log "remedy: LUPIN_GCP_PROJECT_ID=$LUPIN_GCP_PROJECT_ID src/scripts/lupin-vm.sh firewall ensure"
+                    fi
+                    [ "$iap_missing" -eq 0 ] || exit 1
+                fi
+                ;;
+            *) die "firewall needs: status | open [PORT] | ensure | check" ;;
         esac
         ;;
 
@@ -832,6 +888,14 @@ case "$SUBCMD" in
         [ "$DRY_RUN" -eq 1 ] && PP_ARGS=( --dry-run push-project-id )
         bash "${BASH_SOURCE[0]}" "${PP_ARGS[@]}" \
             || die "could not put LUPIN_GCP_PROJECT_ID in the VM's $ENV_FILE; every compose call there would abort. Fix that, then re-run."
+        # 0b. The dev-side IAP firewall check (read-only): a VM whose :7999 rule is gone cannot be reached or tunnelled.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) PRE-deploy IAP firewall check: lupin-vm.sh firewall check"
+        elif [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+            log "PRE-deploy IAP firewall check"
+            bash "${BASH_SOURCE[0]}" firewall check \
+                || die "PRE-deploy IAP firewall check FAILED — a blocking port has no rule. Run the remedy line above, or re-run with LUPIN_SKIP_PREFLIGHT=1 to override."
+        fi
         if [ "$DRY_RUN" -eq 1 ]; then
             # --dry-run prints and runs nothing; this step goes over IAP SSH, so it must not run.
             log "(dry-run) PRE-deploy preflight on VM: bash src/scripts/preflight-vm.sh --phase pre"
@@ -923,6 +987,14 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
                 --command "$RESTART_CMD"
+        fi
+        # POST-deploy dev-side IAP firewall check (read-only). It reports and never rolls back, like the VM-side post preflight.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) POST-deploy IAP firewall check: lupin-vm.sh firewall check"
+        elif [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+            log "POST-deploy IAP firewall check"
+            bash "${BASH_SOURCE[0]}" firewall check \
+                || log "POST-deploy IAP firewall check reported a blocking port with no rule (above). Nothing was rolled back. Run the remedy line."
         fi
         ;;
 
@@ -1150,10 +1222,19 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
             "") die "preflight: --phase given with no value. Usage: lupin-vm.sh preflight [pre|post|full]" ;;
             *)  die "preflight: unknown phase '$PF_PHASE'. Expected one of: pre, post, full (or --phase <one of those>)." ;;
         esac
+        # The dev-side IAP firewall check runs first and is read-only. It cannot run on the VM, which has no gcloud
+        # credentials. A blocking miss is remembered and the exit code is raised after the VM-side check has run.
+        PF_FW_RC=0
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) dev-side IAP firewall check: lupin-vm.sh firewall check"
+        else
+            bash "${BASH_SOURCE[0]}" firewall check || PF_FW_RC=1
+        fi
         runit gcloud compute ssh "$VM_NAME" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
             $SSH_KEEPALIVE \
-            --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase $PF_PHASE"
+            --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase $PF_PHASE" || PF_FW_RC=1
+        [ "$PF_FW_RC" -eq 0 ] || exit 1
         ;;
 
     install-hooks)

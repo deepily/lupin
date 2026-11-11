@@ -11,16 +11,17 @@ import uuid
 from pathlib import Path
 
 
-def write_json_atomic( path, data ) -> None:
+def write_json_atomic( path, data, indent=None, trailing_newline=False ) -> None:
     """
     Write `data` to `path` as JSON, replacing the file whole.
 
     Requires:
         - path is a path-like or string
         - data is JSON-serialisable, or str() of each non-serialisable value is acceptable
+        - indent is None for compact JSON, or the spaces per level
 
     Ensures:
-        - the file holds exactly `data`
+        - the file holds exactly `data`, one newline after it when trailing_newline is true
         - the parent directory is created if absent
         - the write is atomic: a temp file named with a per-writer pid and uuid is
           written, then renamed over the target, so concurrent writers never share a
@@ -33,7 +34,8 @@ def write_json_atomic( path, data ) -> None:
     path.parent.mkdir( parents=True, exist_ok=True )
     tmp  = path.parent / f"{path.name}.{os.getpid()}-{uuid.uuid4().hex}.tmp"
     with open( tmp, "w" ) as f:
-        json.dump( data, f, default=str )
+        json.dump( data, f, default=str, indent=indent )
+        if trailing_newline: f.write( "\n" )
     tmp.replace( path )
 
 

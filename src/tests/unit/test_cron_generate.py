@@ -310,7 +310,7 @@ def test_cron_job_sh_under_env_i_gets_past_environment_loading_and_runs_the_job(
     done = subprocess.run( [ "env", "-i", f"HOME={tmp_path}", f"DEEPILY_DATA_DIR={tmp_path / 'data'}", f"LUPIN_ROOT={tree}", str( real / "src/scripts/cron-job.sh" ), "probe", "cron" ],
                            capture_output=True, text=True, cwd=str( tmp_path ), timeout=120 )
     assert done.returncode == 0, done.stderr[ -600: ]
-    assert "ran Tiberius, Mr. Radio" in done.stdout, "the registry's settings reached the job"
+    assert "ran Cheech, Mr. Radio" in done.stdout, "the registry's settings reached the job"
     record = json.loads( ( tree / "io" / "jobs" / "probe" / "job-summary.json" ).read_text() )
     assert record[ "last_attempt" ][ "outcome" ] == "clean" and record[ "last_attempt" ][ "trigger" ] == "cron"
 

@@ -45,3 +45,20 @@ test( "with no window.LUPIN_APPROVE_LINK every handler declines, nothing throws,
   assert.equal( errors.length, 1, "one console error, not one per click" );
   assert.match( String( errors[ 0 ]![ 0 ] ), /shared\/approve-link\.js did not load/ );
 } );
+
+test( "the legacy href normalizer hands a loopback href to the shared one, passes empty through, and leaves the href alone when the module is missing", async () => {
+  const w    = window as never as { LUPIN_APPROVE_LINK?: unknown };
+  const Ctor = ( globalThis as Record<string, unknown> ).NotificationsUI as { prototype: object };
+  const ui   = Object.create( Ctor.prototype ) as { _normalizeDocLinkHref( href: string | null ): string | null; _approveLinkMissingReported?: boolean };
+  const seen: string[] = [];
+  ui._approveLinkMissingReported = true;   // the missing-module error is asserted above; this case reads the return value
+  assert.equal( ui._normalizeDocLinkHref( "http://localhost:7999/app/docs?path=a" ), "http://localhost:7999/app/docs?path=a", "no module: unchanged" );
+  w.LUPIN_APPROVE_LINK = { normalizeDocLinkHref: ( h: string ): string => { seen.push( h ); return "shared:" + h; } };
+  try {
+    assert.equal( ui._normalizeDocLinkHref( "http://localhost:7999/x" ), "shared:http://localhost:7999/x", "routed through the shared function" );
+    assert.deepEqual( seen, [ "http://localhost:7999/x" ] );
+    assert.equal( ui._normalizeDocLinkHref( "" ), "", "an empty href is returned as-is and never reaches the shared function" );
+    assert.equal( ui._normalizeDocLinkHref( null ), null );
+    assert.equal( seen.length, 1 );
+  } finally { delete w.LUPIN_APPROVE_LINK; }
+} );
