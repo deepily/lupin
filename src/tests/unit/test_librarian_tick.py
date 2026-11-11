@@ -846,3 +846,9 @@ def test_main_records_a_crashed_tick_as_failed_and_still_raises( cron, tmp_path,
         run_main( [], cron, tmp_path, monkeypatch, make_librarian=lambda env, pending, log: FakeLibrarian(), export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
     last = _summaries( tmp_path )[ 0 ][ "last_attempt" ]
     assert last[ "outcome" ] == "failed" and last[ "failure" ] == "RuntimeError: boom" and last[ "stage" ] == "tick"
+
+
+def test_the_retired_install_text_is_pinned_to_a_literal():
+    assert lt.install_moved_text( "/m" ) == (
+        "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:\n"
+        "  cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install" )

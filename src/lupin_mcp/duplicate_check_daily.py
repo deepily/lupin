@@ -535,7 +535,7 @@ def reinstall_command( root, python, cap, cli_path, branch, ceiling=None, with_b
         - the cron lines read the registry's duplicate-check entry when they run, so the branch edit needs no reinstall; the generator command is for a changed schedule
     """
     return ( f"In {root}/src/conf/job-registry.json, set \"--branch\" to {shlex.quote( branch )} in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
-             f"If the schedule changed too, run: cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+             f"If the schedule changed too, run: {lt.install_command( root )}" )
 
 
 def refusal_message( refusal, command ):

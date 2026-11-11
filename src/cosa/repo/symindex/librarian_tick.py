@@ -440,6 +440,18 @@ def crontab_command( environ, own_variable=None ):
     return [ environ.get( own_variable, "crontab" ) ] if own_variable else [ "crontab" ]
 
 
+def install_command( root ):
+    """
+    Say the one shell command that writes every Lupin cron line.
+
+    Requires:
+        - root is the main checkout path
+    Ensures:
+        - returns the cd, environment and cron_generate --install line, with no leading space and no newline
+    """
+    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install"
+
+
 def install_moved_text( root ):
     """
     Say where the cron installer went.
@@ -450,7 +462,7 @@ def install_moved_text( root ):
         - returns the text a retired --install prints: one tool writes every cron line, and the exact command that runs it
     """
     return ( "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:\n"
-             f"  cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+             f"  {install_command( root )}" )
 
 
 def cron_lines_for( run, schedule, boot_delay_seconds ):
