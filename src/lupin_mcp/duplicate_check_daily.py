@@ -932,13 +932,13 @@ def live_filer( findings, folder ):
     Requires:
         - the environment holds LUPIN_ROOT, the configuration manager's argument and the project's declared manager roster
     Ensures:
-        - returns file_findings' answer, made with the HTTP store, the configured manager on duty and the roster
+        - returns file_findings' answer, made with the HTTP store, the configured triage owner (empty when unset) and the roster
     Raises:
-        - NoTriageOwner when there are findings and the roster is empty; run records that as the filer's error
+        - NoTriageOwner when there are findings and the owner is unset or not on the roster; the findings stay in the run's result file for a refile; run records that as the filer's error
     """
     from cosa.rest.voice_persona_helpers import pick_declared_managers_from_env
     from cosa.config.configuration_manager import ConfigurationManager
-    declared = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty"
+    declared = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( "duplicate check triage owner", default="" ) or ""
     return filing.file_findings( findings, folder, filing.LiveStore(), declared, pick_declared_managers_from_env( filing.PROJECT ) )
 
 

@@ -73,18 +73,17 @@ def triage_owner( declared, roster ):
     Pick the persona that owns a run's triage row.
 
     Requires:
-        - declared is the configured manager on duty, a persona name or a role label; roster is the declared manager names of the project
+        - declared is the configured duplicate-check triage owner, a persona name; roster is the declared manager names of the project
     Ensures:
-        - returns { owner, note }: owner is the lowercase persona key of the roster entry that matches declared, whatever the case or accent, else of the first roster entry
-        - note says which of the two it was
+        - returns { owner, note }: owner is the lowercase persona key of the roster entry that matches declared, whatever the case or accent
     Raises:
-        - NoTriageOwner when the roster is empty, so a row never lands on a role label
+        - NoTriageOwner when the roster is empty, or when declared is blank, a role label or any name not on the roster; the filer never guesses an owner, so a row cannot land on a seat of another project
     """
     names = [ n for n in roster if n ]
-    if not names: raise NoTriageOwner( f"no manager on the roster to own the triage row (configured manager on duty: {declared!r})" )
-    match = [ n for n in names if canonical_persona_key( n ) == canonical_persona_key( declared ) ]
-    if match: return { "owner": canonical_persona_key( match[ 0 ] ), "note": f"the configured manager on duty, {declared}, is on the roster" }
-    return { "owner": canonical_persona_key( names[ 0 ] ), "note": f"the configured manager on duty, {declared!r}, is not a persona on the roster; the first roster persona owns it" }
+    if not names: raise NoTriageOwner( f"no manager on the roster to own the triage row (configured triage owner: {declared!r})" )
+    match = [ n for n in names if canonical_persona_key( declared ) and canonical_persona_key( n ) == canonical_persona_key( declared ) ]
+    if not match: raise NoTriageOwner( f"the configured triage owner, {declared!r}, is not a persona on the {PROJECT} manager roster {names!r}; set 'duplicate check triage owner' to one of them" )
+    return { "owner": canonical_persona_key( match[ 0 ] ), "note": f"the configured triage owner, {declared}, is on the roster" }
 
 
 def run_key( finding_keys ):
@@ -252,7 +251,7 @@ def file_findings( findings, folder, store, declared, roster, day=None ):
         - a spooled row is tried before the new ones; the spool afterwards holds only the rows still queued
         - only the findings of a row the store took, or already held, are written to the triaged file; the findings of a queued row stay unmarked in its spooled payload
     Raises:
-        - NoTriageOwner when there are findings to file and the roster is empty, before anything is sent
+        - NoTriageOwner when there are findings to file and the owner is not on the roster, before anything is sent
     """
     if day is None: day = datetime.date.fromisoformat( findings[ 0 ][ "day" ] ) if findings and "day" in findings[ 0 ] else datetime.date.today()
     out     = { FILED: [], ALREADY: [], QUEUED: [], REFUSED: [], RETIRED: [], OVERSIZE: [] }

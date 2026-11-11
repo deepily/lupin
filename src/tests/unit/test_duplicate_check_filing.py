@@ -61,9 +61,14 @@ def test_the_owner_is_the_roster_persona_that_matches_the_configured_manager_wha
     assert got[ "owner" ] == "maria" and "is on the roster" in got[ "note" ]
 
 
-def test_a_role_label_that_is_not_on_the_roster_falls_to_the_first_roster_persona_and_says_so():
-    got = ff.triage_owner( "manager-on-duty", [ "Cheech", "Tiberius" ] )
-    assert got[ "owner" ] == "cheech" and "'manager-on-duty'" in got[ "note" ] and "first roster persona" in got[ "note" ]
+def test_a_role_label_that_is_not_on_the_roster_is_refused_and_never_falls_to_the_first_roster_persona():
+    with pytest.raises( ff.NoTriageOwner, match="not a persona on the lupin manager roster" ): ff.triage_owner( "manager-on-duty", [ "Tiberius", "Cheech" ] )
+
+
+def test_a_run_whose_owner_is_not_on_the_roster_sends_nothing_so_no_row_lands_on_a_seat_of_another_project( tmp_path ):
+    store = Store()
+    with pytest.raises( ff.NoTriageOwner ): run_once( tmp_path, [ finding() ], store, declared="manager-on-duty", roster=( "Tiberius", "Cheech" ) )
+    assert store.created == []
 
 
 def test_an_empty_roster_fails_loudly_and_a_blank_entry_is_not_a_persona():
@@ -134,7 +139,7 @@ def test_the_day_comes_from_the_findings_when_none_is_given_and_a_given_day_wins
 
 def test_the_default_day_is_today_and_the_row_is_owned_by_the_roster_persona( tmp_path ):
     store = Store()
-    ff.file_findings( [ finding() ], tmp_path, store, "manager-on-duty", [ "Cheech" ] )
+    ff.file_findings( [ finding() ], tmp_path, store, "Cheech", [ "Cheech" ] )
     row = store.created[ 0 ]
     assert row[ "owner_persona" ] == "cheech" and f"{datetime.date.today().day} {datetime.date.today().strftime( '%b' )}" in row[ "title" ]
 
