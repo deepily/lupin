@@ -2,7 +2,7 @@
 capability: duplicate-check-daily-slots
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.duplicate_check_daily.adaptive_run@20ffe171f8
+  - lupin_mcp.duplicate_check_daily.adaptive_run@9ef5851f1f
   - lupin_mcp.duplicate_check_daily.chunk_for@77597b14ca
   - lupin_mcp.duplicate_check_daily.announce@aca958e049
   - lupin_mcp.duplicate_check_daily.backoff_until@934c9d09e7
@@ -19,7 +19,7 @@ The hourly mode of `lupin_mcp.duplicate_check_daily` (`--adaptive`), the alerts 
 
 ## Hourly slots
 - `chunk_for( folder, ceiling )` sizes one slot's judge calls to fill 80 percent of an hour at the recent speed of a call. The speed is the median of the last five sizeable runs ([[duplicate-check-status-rates]]), or 3.5 seconds with none. The answer is at least 1 and at most the ceiling.
-- `adaptive_run` runs a daily run with that chunk as its ceiling. A baseline run takes what is left only if all three hold. The daily run finished everything owed (`ok`). The baseline is not complete. At least 20 calls are left. A backed-off, failed or carried daily run is not followed by a baseline run.
+- `adaptive_run` runs a daily run with that chunk as its ceiling. A baseline run takes what is left only if all three hold. The daily run finished everything owed (`ok`). The baseline is not complete. At least 20 calls are left. A backed-off, failed or carried daily run is not followed by a baseline run. A baseline run that raises does not take the daily record with it. It is recorded as its own failed run: stage `baseline`, the error text, `judge_calls` None. The daily record and its last-success stand. `announce` and the job summary still happen, and `exit_code` reads 1.
 - With nothing owed the daily run ends in seconds with no judge call. The two result files get distinct names, one second apart. `announce` runs once after both.
 - `backoff_until( folder, now )` looks at the newest run that was not itself skipped. It returns that run's `backoff_until` when it is later than now, else None. A run that hits a rate limit sets it 90 minutes ahead, and the next slots are recorded `skipped`.
 - `usage_since( before, after, calls )` is the difference of two usage tallies, with the cost rounded to four places. It returns None when calls were made and the SDK reported none, because then the tokens are unknown, not zero.
