@@ -14,12 +14,12 @@ import threading
 
 import cosa.rest.job_health as jh
 import cosa.rest.job_registry as jr
+from cosa.rest.task_store_rules import TERMINAL_STATUSES
 from lupin_mcp import host_snapshot as hs
 from lupin_mcp import job_summary as js
 from lupin_mcp.reuse_needset.stage_c_score import lowest
 
 SCHEMA          = "jobs-summary/1"
-TERMINAL        = ( "done", "dropped" )
 MARK_PREFIX     = "prefix:"
 MARK_PROJECT    = "lupin"
 RUN_NOW_LOG     = "io/jobs/run-now.log"
@@ -56,7 +56,7 @@ def store_counts_from_rows( rows, now, days ):
         - open_at_window_start counts rows created before the window that were not yet closed then
     """
     start = now - datetime.timedelta( days=days )
-    closed = lambda r: r.status in TERMINAL
+    closed = lambda r: r.status in TERMINAL_STATUSES
     return { "open_now": sum( not closed( r ) for r in rows ),
              "opened_in_window": sum( r.created_ts >= start for r in rows ),
              "closed_in_window": sum( closed( r ) and r.updated_ts >= start for r in rows ),

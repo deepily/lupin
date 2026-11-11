@@ -118,6 +118,12 @@ def test_store_counts_from_rows_counts_only_what_each_name_says():
     assert svc.store_counts_from_rows( rows, NOW, 7 ) == { "open_now": 2, "opened_in_window": 2, "closed_in_window": 2, "open_at_window_start": 2 }
 
 
+def test_store_counts_treat_wont_fix_as_closed_like_the_store_does():
+    row = lambda status: types.SimpleNamespace( status=status, created_ts=NOW - datetime.timedelta( days=1 ), updated_ts=NOW - datetime.timedelta( days=1 ) )
+    got = svc.store_counts_from_rows( [ row( "wont_fix" ), row( "wont_fix" ), row( "queued" ) ], NOW, 7 )
+    assert got[ "open_now" ] == 1 and got[ "closed_in_window" ] == 2
+
+
 def test_the_response_has_one_entry_per_job_worst_first_with_a_target_job_taking_the_worst_target(tmp_path):
     ok = job( "ok" ); gone = job( "gone" ); fails = job( "fails" )
     tar = job( "tar", targets=[ { "target": "t1" }, { "target": "t2", "summary_path": "{root}/s/t2.json" } ] )
