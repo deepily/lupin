@@ -37,9 +37,11 @@ def test_a_pid_that_exists_but_is_not_ours_counts_as_alive( monkeypatch ):
     assert cp._pid_alive( 4242 ) is True
 
 
-def test_none_and_text_are_not_alive():
+def test_none_text_and_floats_are_not_alive_even_when_they_name_a_live_process():
     assert cp._pid_alive( None ) is False
     assert cp._pid_alive( "123" ) is False
+    assert cp._pid_alive( str( os.getpid() ) ) is False
+    assert cp._pid_alive( float( os.getpid() ) ) is False
 
 
 def test_zero_and_negative_pids_are_not_alive_because_kill_would_signal_a_process_group( monkeypatch ):
