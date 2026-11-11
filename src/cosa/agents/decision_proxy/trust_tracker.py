@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 import time
 from typing import Dict, List, Optional, Tuple
 
+from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
 from cosa.agents.decision_proxy.config import (
     DEFAULT_BETA_L2_RATE_THRESHOLD,
     DEFAULT_BETA_L3_RATE_THRESHOLD,
@@ -392,8 +393,7 @@ class CategoryTrust:
 
     def _prune_rolling_window( self ):
         """Remove decisions older than the rolling window."""
-        cutoff = time.time() - ( self.rolling_window_days * 86400 )
-        self.decisions = [ ( t, s ) for t, s in self.decisions if t >= cutoff ]
+        self.decisions = prune_window( self.decisions, time.time(), self.rolling_window_days * 86400, stamp=lambda decision: decision[ 0 ] )
 
     def _effective_decision_count( self ):
         """

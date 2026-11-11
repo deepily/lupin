@@ -92,6 +92,40 @@ def under_global_cap( recent_ping_count, cap ):
     return recent_ping_count < cap
 
 
+def prune_window( entries, now, window_seconds, stamp=None, strict=False, drop_future=False ):
+    """
+    Keep the entries whose age is within the trailing window.
+
+    This is the one rolling-window prune. Six callers keep what happened in the last N seconds.
+    They are the arbiter's ping history, two health trackers, the token rate limiter,
+    the trust tracker and the job-health points.
+
+    Requires:
+        - entries is an iterable of entries, or None
+        - now and each stamp are both aware datetimes, or both numbers
+        - window_seconds is a number
+        - stamp is None, so the entry is its own stamp, or a function returning an entry's stamp or None
+
+    Ensures:
+        - returns the list of entries with age <= window_seconds, in input order, where age is now minus the stamp
+        - with strict, an entry is kept only when age < window_seconds
+        - a future-dated entry (negative age) is kept unless drop_future is set
+        - an entry whose stamp is None or cannot be subtracted from now is dropped, so a junk stamp can never inflate a count
+        - None or empty entries return [ ]; never raises
+    """
+    kept = [ ]
+    for entry in ( entries or [ ] ):
+        try:
+            age = now - ( entry if stamp is None else stamp( entry ) )
+            age = age.total_seconds() if hasattr( age, "total_seconds" ) else age
+        except ( TypeError, AttributeError ):
+            continue                                    # unusable stamp → drop (fail-safe)
+        if drop_future and age < 0: continue
+        if age < window_seconds or ( age == window_seconds and not strict ):
+            kept.append( entry )
+    return kept
+
+
 def in_window( sent_ts, now, window_seconds ):
     """
     Keep the send timestamps whose age is within the trailing window.
@@ -109,15 +143,7 @@ def in_window( sent_ts, now, window_seconds ):
           in input order
         - None / empty / all-unusable → [ ]; never raises
     """
-    kept = [ ]
-    for ts in ( sent_ts or [ ] ):
-        try:
-            age = ( now - ts ).total_seconds()
-        except ( TypeError, AttributeError ):
-            continue                                    # unusable ts → drop (fail-safe)
-        if 0 <= age <= window_seconds:
-            kept.append( ts )
-    return kept
+    return prune_window( sent_ts, now, window_seconds, drop_future=True )
 
 
 def trailing_window_allows( sent_ts, now, max_messages, window_seconds ):

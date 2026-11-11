@@ -2321,11 +2321,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     def _prune_recent_pings( self, now ):
         """Drop recorded pings older than the global-cap window (rolling cap)."""
-        cutoff = self.ping_cap_window_seconds
-        self._recent_pings = [
-            ts for ts in self._recent_pings
-            if ( now - ts ).total_seconds() < cutoff
-        ]
+        self._recent_pings = ping_throttle.prune_window( self._recent_pings, now, self.ping_cap_window_seconds, strict=True )
 
     # NOTE (2b-2 Part-6 #6): the per-tick roster broadcast (formerly
     # `_surface_to_manager` → post(ROSTER_TOPIC)) is DROPPED. A roster is PULL
