@@ -19,9 +19,10 @@ store, the clock and the logger. Unit tests drive them with a fake clock and nee
 import datetime
 import os
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 from cosa.agents.heartbeat_arbiter.arbiter_journal import DELIVERED_OUTCOMES
+from cosa.agents.heartbeat_arbiter.operator_gate_routing import digest_due
 from cosa.utils.atomic_json import load_json_dict, write_json_atomic
 from cosa.utils.stoppable_daemon import StoppableDaemonMixin
 from lupin_arbiter_app.poll_loop import run_poll_loop
@@ -73,22 +74,6 @@ def alert_message( entry: dict ) -> str:
     return text if len( text ) <= MAX_MESSAGE else text[ : MAX_MESSAGE - 1 ] + "…"
 
 
-def _due( last_iso: Optional[ str ], now: datetime.datetime, interval_seconds: int ) -> bool:
-    """
-    Say whether an alert is due.
-
-    Ensures:
-        - True when nothing was alerted before, when the stored time cannot be read, or when the interval has passed
-        - False when the last alert was less than the interval ago, or lies in the future (clock skew)
-    """
-    if last_iso is None: return True
-    try:
-        last = datetime.datetime.fromisoformat( last_iso )
-    except ValueError:
-        return True
-    return ( now - last ).total_seconds() >= interval_seconds
-
-
 def due_alerts( jobs: List[ dict ], state: Dict[ str, str ], now: datetime.datetime ) -> Tuple[ List[ Tuple[ str, str ] ], Dict[ str, str ] ]:
     """
     Pick the alerts due now and work out the state to keep if every one is delivered.
@@ -109,7 +94,7 @@ def due_alerts( jobs: List[ dict ], state: Dict[ str, str ], now: datetime.datet
         if entry[ "state" ] not in BAD_STATES: continue
         key  = alert_key( entry )
         last = state.get( key )
-        if _due( last, now, entry[ "notify_interval_seconds" ] ):
+        if digest_due( last, now, entry[ "notify_interval_seconds" ] ):
             messages.append( ( key, alert_message( entry ) ) )
             new_state[ key ] = now.isoformat()
         else:

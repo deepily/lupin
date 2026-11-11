@@ -273,3 +273,18 @@ def test_start_runs_the_poll_loop_on_a_named_daemon_thread_and_stop_joins_it():
         loop.stop()
     assert not [ t for t in threading.enumerate() if t.name == "job-alert-watcher" ], "stop() left the thread running"
     loop.stop()                                                            # a second stop is harmless
+
+
+@pytest.mark.parametrize( "last, expected", [
+    ( None,                        True ),
+    ( "",                          True ),
+    ( "not a time",                True ),
+    ( "2026-11-09T11:50:00+00:00", True ),                 # 600 s old, interval 600: exactly due
+    ( "2026-11-09T11:50:01+00:00", False ),                # 599 s old
+    ( "2026-11-09T11:50:00Z",      True ),
+    ( "2026-11-09T12:10:00+00:00", False ),                # a future stamp is not due
+] )
+def test_a_stored_time_is_due_when_missing_unreadable_or_at_least_one_interval_old( last, expected ):
+    jobs = [ entry( interval=600 ) ]
+    messages, _ = jaw.decide( jobs, { } if last is None else { "dup": last }, T0 )
+    assert bool( messages ) is expected
