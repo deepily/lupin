@@ -60,29 +60,53 @@ class TestInitLlmClient:
 
 
 CALLERS = [
-    ( "cosa.agents.dm_quality_judge.judge",                          "DmQualityJudge",     "DmQualityJudge",    {} ),
-    ( "cosa.agents.dm_quality_judge.judge_v2",                       "DmQualityJudgeV2",   "DmQualityJudgeV2",  {} ),
-    ( "cosa.agents.notification_proxy.verification",                 "LlmAnswerVerifier",  "AnswerVerifier",    {} ),
+    ( "cosa.agents.dm_quality_judge.judge",                          "DmQualityJudge",              "DmQualityJudge" ),
+    ( "cosa.agents.dm_quality_judge.judge_v2",                       "DmQualityJudgeV2",            "DmQualityJudgeV2" ),
+    ( "cosa.agents.notification_proxy.verification",                 "LlmAnswerVerifier",           "AnswerVerifier" ),
+    ( "cosa.agents.notification_proxy.strategies.llm_script_matcher", "LlmScriptMatcherStrategy",   "LlmScriptMatcher" ),
 ]
 
 
-@pytest.mark.parametrize( "module, cls, tag, kwargs", CALLERS )
-class TestCallersUseIt:
-    """Each class still ends up available with a client, or unavailable with none."""
+def _build( module, cls, factory, tmp_path, debug=False ):
+    """
+    Build one caller class with its module's LlmClientFactory name replaced.
 
-    def test_available_when_the_factory_builds( self, module, cls, tag, kwargs ):
-        import importlib
-        mod = importlib.import_module( module )
-        with patch.object( mod, "LlmClientFactory", _Factory ):
-            obj = getattr( mod, cls )( **kwargs )
+    Ensures:
+        - the script matcher gets a real one-entry script file, since its constructor reads one
+        - returns the built object
+    """
+    import importlib
+    import json
+    mod    = importlib.import_module( module )
+    kwargs = { "debug": debug }
+    if cls == "LlmScriptMatcherStrategy":
+        script = tmp_path / "script.json"
+        script.write_text( json.dumps( { "entries": [], "sender_ids": [ "x" ], "profile_name": "p" } ) )
+        kwargs[ "script_path" ] = str( script )
+    with patch.object( mod, "LlmClientFactory", factory ):
+        return getattr( mod, cls )( **kwargs )
+
+
+@pytest.mark.parametrize( "module, cls, tag", CALLERS )
+class TestCallersUseIt:
+    """Each class ends up available with a client, or unavailable with none, under its tag."""
+
+    def test_available_when_the_factory_builds( self, module, cls, tag, tmp_path ):
+        obj = _build( module, cls, _Factory, tmp_path )
         assert obj.available is True
         assert obj._client.startswith( "client-for-" )
 
-    def test_unavailable_and_tagged_when_it_fails( self, module, cls, tag, kwargs, capsys ):
-        import importlib
-        mod = importlib.import_module( module )
-        with patch.object( mod, "LlmClientFactory", _BrokenFactory ):
-            obj = getattr( mod, cls )( **kwargs )
+    def test_unavailable_and_tagged_when_it_fails( self, module, cls, tag, tmp_path, capsys ):
+        obj = _build( module, cls, _BrokenFactory, tmp_path )
         assert obj.available is False
         assert obj._client is None
         assert f"[{tag}] LLM client unavailable: no such model" in capsys.readouterr().out
+
+    def test_debug_prints_the_ready_line_under_its_tag( self, module, cls, tag, tmp_path, capsys ):
+        _build( module, cls, _Factory, tmp_path, debug=True )
+        assert f"[{tag}] LLM client ready (" in capsys.readouterr().out
+
+    def test_debug_flag_reaches_the_factory( self, module, cls, tag, tmp_path ):
+        _Factory.calls = []
+        _build( module, cls, _Factory, tmp_path, debug=True )
+        assert _Factory.calls[ 0 ][ 0 ][ 0 ] is True
