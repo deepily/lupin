@@ -1500,9 +1500,10 @@ def _token_names_session( text, session_id ):
 
     Ensures:
         - a blank or non-string label gives False
+        - a last word under eight characters gives False
     """
     tokens = text.split() if isinstance( text, str ) else []
-    return bool( tokens ) and session_id.startswith( tokens[ -1 ] )
+    return bool( tokens ) and len( tokens[ -1 ] ) >= 8 and session_id.startswith( tokens[ -1 ] )
 
 
 def _row_is_other_sessions( item, events, session_id, reaping_manager ):

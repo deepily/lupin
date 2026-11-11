@@ -1259,3 +1259,17 @@ def test_identity_without_session_id_keeps_the_name_keyed_behaviour( monkeypatch
     summary, reassigns, _ = _reconcile_with_rows( monkeypatch, rows, session_id=None )
     assert reassigns == [ ( "old-1", "Mr Radio" ) ] and summary[ "skipped_other_session" ] == []
 
+
+
+def test_short_trailing_token_does_not_name_a_session():
+    """A last word under eight characters never names a session, even as a prefix."""
+    assert ss._token_names_session( "tiffany a", _REAPED_SID ) is False
+    assert ss._token_names_session( "tiffany 1a2b3c4", _REAPED_SID ) is False
+    assert ss._token_names_session( "tiffany 1a2b3c4d", _REAPED_SID ) is True
+
+
+def test_row_with_a_stray_short_created_by_token_is_foreign( monkeypatch ):
+    """A created_by ending in "a" must not claim the reaped session's row."""
+    rows = [ { "id": "stray-1", "status": "queued", "created_by": "tiffany a", "accountable_manager": "tiffany" } ]
+    summary, reassigns, _ = _reconcile_with_rows( monkeypatch, rows )
+    assert reassigns == [] and summary[ "skipped_other_session" ] == [ "stray-1" ]
