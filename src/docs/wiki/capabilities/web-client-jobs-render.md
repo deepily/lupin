@@ -17,8 +17,10 @@ pins:
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.notReportedBlock@0c64a8d338
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.runNowBlock@3c0553f301
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.itemId@e66f8d44b3
-  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.renderJob@5338749753
-  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.renderAccordion@541f72a746
+  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.renderJob@416c3c130d
+  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.renderAccordion@ddc4e1b574
+  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.arrow@cd1868139e
+  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.headerRow@4a4e543a3f
 ---
 # Web client: jobs accordion DOM
 
@@ -35,4 +37,4 @@ Builds the accordion of jobs from a summary. The wording comes from [[web-client
 - `sparkline` draws a small SVG trend line. Fewer than two points draws nothing, and a flat series draws a level line.
 - `runNowBlock` appears only for the operator and a runnable job. A click disables the button, shows "Starting...", then the message or the failure, and re-enables it.
 - `itemId` makes a safe element id from the job and target.
-- `renderAccordion` clears the mount and draws one item per job, active first. A job with two targets stays two items. It ends with the server's "switched off" line when there is one.
+- `renderAccordion` clears the mount and draws a header row (`headerRow`) and then one item per job. A job with two targets stays two items. The header names the nine columns. Service, Status and Last run are sort buttons. The pick is kept per mount, so a poll redraws in the chosen order. Rows are ordinary weight, and only the header is bold. It ends with the server's "switched off" line when there is one.

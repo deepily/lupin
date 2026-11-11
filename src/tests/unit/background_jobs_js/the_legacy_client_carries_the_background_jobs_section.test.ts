@@ -120,7 +120,7 @@ test( "the refresh button reloads without collapsing the section; a failed reloa
   btn.click(); await flush();
   assert.equal( byId( "background-jobs-error" ).hidden, false );
   assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: HTTP 503" );
-  assert.equal( byId( "background-jobs-container" ).children.length, 23 );
+  assert.equal( byId( "background-jobs-container" ).children.length, 24 );   // header row + 23 jobs
   g.fetch = async () => { throw new Error( "network down" ); };
   btn.click(); await flush();
   assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: network down" );
@@ -276,7 +276,7 @@ test( "the legacy accordion ends with the switched-off line when the server send
   const last = mount.lastElementChild as HTMLElement;
   assert.equal( last.getAttribute( "data-testid" ), "background-jobs-off-line" );
   assert.equal( last.textContent, "8 jobs have reporting switched off" );
-  assert.equal( mount.children.length, 24 );
+  assert.equal( mount.children.length, 25 );   // header row + 23 jobs + the off line
 } );
 
 test( "row 399a266f: with notificationsUI present the request goes through its authedFetch, so a stale stored token is refreshed before it is sent", async () => {
@@ -304,4 +304,63 @@ test( "row 399a266f: without notificationsUI the fallback still sends the stored
   try { await load(); } finally { console.error = orig; }
   assert.deepEqual( net.urls, [ "/api/jobs/summary" ] );
   assert.ok( errs.some( ( e ) => e.includes( "UNREFRESHED" ) ), "no loud console error" );
+} );
+
+// ─── Sort by name and by health, header row (row 4b807ffd) ─────────────────
+
+test( "the legacy sort orders: name A-Z and Z-A, health healthy-to-unknown and back, unknown ids refused, input untouched", async () => {
+  const api = await load();
+  const base = FIXTURE.jobs[ 0 ]!;
+  const mk = ( name: string, state: string, target: string | null = null, running = false ) => ( { ...clone( base ), job : name, title : name, target, state, running } );
+  const jobs = [ mk( "beta", "unknown" ), mk( "alpha", "healthy", "y" ), mk( "alpha", "silent", "x", true ), mk( "Gamma", "failing" ), mk( "d", "behind" ) ];
+  const before = jobs.map( ( j ) => j.job + ( j.target ?? "" ) );
+  const label = ( out: Array<{ title: string; target: string | null }> ) => out.map( ( j ) => j.title + ( j.target === null ? "" : "/" + j.target ) );
+  assert.deepEqual( api.SORT_ORDERS.map( ( o: { id: string; label: string } ) => [ o.id, o.label ] ), [ [ "name", "Service" ], [ "health", "Status" ], [ "last-run", "Last run" ] ] );
+  assert.deepEqual( label( api.sortJobs( jobs, "name", "asc" ) ), [ "alpha/x", "alpha/y", "beta", "d", "Gamma" ] );
+  assert.deepEqual( label( api.sortJobs( jobs, "name", "desc" ) ), [ "Gamma", "d", "beta", "alpha/y", "alpha/x" ] );
+  assert.deepEqual( api.sortJobs( jobs, "health", "asc" ).map( ( j: { state: string } ) => j.state ), [ "healthy", "behind", "silent", "unknown", "failing" ] );
+  assert.deepEqual( api.sortJobs( jobs, "health", "desc" ).map( ( j: { state: string } ) => j.state ), [ "failing", "unknown", "silent", "behind", "healthy" ] );
+  const at = ( name: string, when: string | null ) => ( { ...clone( base ), job : name, title : name, target : null, state : "healthy", running : false,
+    last_attempt : when === null ? null : { ...clone( base.last_attempt! ), started_at : when } } );
+  const runs = [ at( "new", "2026-11-09T12:00:00-05:00" ), at( "none", null ), at( "old", "2026-11-01T12:00:00-05:00" ), at( "bad", "not a time" ), at( "utc", "2026-11-09T18:00:00+00:00" ) ];
+  assert.deepEqual( api.sortJobs( runs, "last-run", "asc" ).map( ( j: { job: string } ) => j.job ), [ "bad", "none", "old", "new", "utc" ] );
+  assert.deepEqual( api.sortJobs( runs, "last-run", "desc" ).map( ( j: { job: string } ) => j.job ), [ "utc", "new", "old", "bad", "none" ] );
+  assert.throws( () => api.sortJobs( jobs, "nope", "asc" ), /unknown sort order: nope/ );
+  assert.deepEqual( jobs.map( ( j ) => j.job + ( j.target ?? "" ) ), before );
+} );
+
+test( "the legacy accordion draws a header row naming every column, sorts on a heading click, and keeps the pick across a refresh", async () => {
+  const api = await load();
+  const mount = byId( "background-jobs-container" );
+  const heads = Array.from( mount.querySelectorAll( "[data-testid=jobs-header] [role=columnheader]" ) ).map( ( h ) => h.textContent );
+  assert.deepEqual( heads, [ "", "", "Service", "Status", "Last run", "Last finished", "Scan", "Fix", "Clears" ] );
+  const titles = () => Array.from( mount.querySelectorAll( ":scope > [data-testid=jobs-item] > .jobs-heading [data-testid=jobs-title]" ) ).map( ( t ) => t.textContent );
+  const click  = ( id: string ) => ( mount.querySelector( "[data-testid=" + id + "]" ) as HTMLElement ).click();
+  click( "jobs-sort-name" );
+  const asc = titles();
+  assert.deepEqual( asc, [ ...asc ].sort( ( a, b ) => a!.localeCompare( b! ) ) );
+  assert.equal( mount.querySelector( "[data-testid=jobs-sort-name]" )!.textContent, "Service ▲" );
+  click( "jobs-sort-name" );
+  assert.deepEqual( titles(), [ ...asc ].reverse() );
+  await api.refresh(); await flush();                                             // a poll redraws: the pick stays
+  assert.deepEqual( titles(), [ ...asc ].reverse() );
+  click( "jobs-sort-name" );
+  assert.equal( mount.querySelector( "[aria-sort=ascending]" ), null, "third click returns to the default order" );
+  click( "jobs-sort-health" ); click( "jobs-sort-health" );
+  const states = Array.from( mount.querySelectorAll( ":scope > [data-testid=jobs-item]" ) ).map( ( i ) => i.getAttribute( "data-state" ) );
+  assert.equal( states[ 0 ], "failing" );
+  assert.equal( states[ states.length - 1 ], "healthy" );
+} );
+
+test( "both sheets size the line grid so it fits its container: only the first four tracks are fixed, every text track can shrink (row 4b807ffd)", () => {
+  for ( const sheet of [ "css/background-jobs-legacy.css", "css/multiplexer/background-jobs.css" ] ) {
+    const css = readFileSync( resolve( STATIC, sheet ), "utf8" );
+    const m   = css.match( /\.jobs-line,\s*\.jobs-line-grid \{[^}]*?grid-template-columns\s*:\s*([^;]+);/ );
+    assert.ok( m, sheet + " declares no line grid" );
+    const tracks = m![ 1 ]!.replace( /\/\*.*$/, "" ).match( /minmax\([^)]*\)|\S+/g )!;
+    assert.equal( tracks.length, 9, sheet );
+    assert.deepEqual( tracks.slice( 0, 2 ), [ "1rem", "1.25rem" ] );
+    assert.equal( tracks[ 3 ], "8rem", "the status column stays narrow" );
+    for ( const i of [ 2, 4, 5, 6, 7, 8 ] ) assert.match( tracks[ i ]!, /^minmax\(0, [\d.]+fr\)$/, sheet + " track " + i + " must shrink" );
+  }
 } );

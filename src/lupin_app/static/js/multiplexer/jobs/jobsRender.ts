@@ -7,8 +7,9 @@
 
 import {
   NOT_REPORTED, badgeText, clearsText, fixText, formatCount, formatWhen, graceText, isSafeHref,
-  lastFinishedText, lastRunText, notReportedNames, notifyIntervalText, scanText, sortJobs,
+  lastFinishedText, lastRunText, notReportedNames, notifyIntervalText, scanText, sortJobs, nextSort, DEFAULT_SORT,
 } from "./jobsFormat";
+import type { JobSort } from "./jobsFormat";
 import type { JobEntry, JobPoint, JobsSummary } from "./types";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -257,7 +258,7 @@ function itemId( job: JobEntry ): string {
  *   - the panel starts hidden and the button's aria-expanded tracks it
  *   - targets of a job are drawn as nested items inside the panel
  */
-export function renderJob( doc: Document, job: JobEntry, todayIso: string, actions: JobsActions ): HTMLElement {
+export function renderJob( doc: Document, job: JobEntry, todayIso: string, actions: JobsActions, sort: JobSort = DEFAULT_SORT ): HTMLElement {
   const id      = itemId( job );
   const item    = el( doc, "section", "jobs-item", null, "jobs-item" );
   item.setAttribute( "data-job", job.job );
@@ -306,7 +307,7 @@ export function renderJob( doc: Document, job: JobEntry, todayIso: string, actio
   panel.appendChild( notReportedBlock( doc, job ) );
   const run = runNowBlock( doc, job, actions );
   if ( run !== null ) panel.appendChild( run );
-  for ( const target of sortJobs( job.targets ) ) panel.appendChild( renderJob( doc, target, todayIso, actions ) );
+  for ( const target of sortJobs( job.targets, sort ) ) panel.appendChild( renderJob( doc, target, todayIso, actions, sort ) );
   item.appendChild( panel );
 
   button.addEventListener( "click", () => {
@@ -318,16 +319,59 @@ export function renderJob( doc: Document, job: JobEntry, todayIso: string, actio
   return item;
 }
 
+/** The columns of one line, in grid order; `sortId` names the entry a click picks. */
+const COLUMNS: ReadonlyArray<{ cls: string; label: string; sortId: string | null }> = [
+  { cls: "jobs-caret",         label: "",              sortId: null },
+  { cls: "jobs-dot",           label: "",              sortId: null },
+  { cls: "jobs-title",         label: "Service",       sortId: "name" },
+  { cls: "jobs-badge",         label: "Status",        sortId: "health" },
+  { cls: "jobs-last-run",      label: "Last run",      sortId: "last-run" },
+  { cls: "jobs-last-finished", label: "Last finished", sortId: null },
+  { cls: "jobs-scan-cell",     label: "Scan",          sortId: null },
+  { cls: "jobs-fix-cell",      label: "Fix",           sortId: null },
+  { cls: "jobs-clears-cell",   label: "Clears",        sortId: null },
+];
+
+function arrow( sort: JobSort ): string { return sort.direction === "asc" ? " ▲" : " ▼"; }
+
+function headerRow( doc: Document, sort: JobSort, onSort: ( next: JobSort ) => void ): HTMLElement {
+  const row = el( doc, "div", "jobs-header jobs-line-grid", null, "jobs-header" );
+  row.setAttribute( "role", "row" );
+  for ( const col of COLUMNS ) {
+    const cell = el( doc, "span", `jobs-head-cell ${ col.cls }`, null, null );
+    cell.setAttribute( "role", "columnheader" );
+    if ( col.sortId === null ) cell.textContent = col.label;
+    else {
+      const sortId = col.sortId, active = sort.id === sortId;
+      const button = el( doc, "button", "jobs-sort-button", col.label + ( active ? arrow( sort ) : "" ), `jobs-sort-${ sortId }` ) as HTMLButtonElement;
+      button.type = "button";
+      button.addEventListener( "click", () => onSort( nextSort( sort, sortId ) ) );
+      cell.setAttribute( "aria-sort", active ? ( sort.direction === "asc" ? "ascending" : "descending" ) : "none" );
+      cell.appendChild( button );
+    }
+    row.appendChild( cell );
+  }
+  return row;
+}
+
+/** The pick each mount carries, so a refresh redraws in the order the reader chose. */
+const picked = new WeakMap<HTMLElement, JobSort>();
+
 /**
- * Replace the accordion's children with one item per job, active first.
+ * Replace the accordion's children with a header row and one item per job.
  *
  * Ensures:
  *   - the same job id with two targets stays two items; nothing is merged or dropped
+ *   - with no `sort` given, the mount's last pick is used, or the active-first order when it has none
+ *   - a click on the Service or Status heading redraws the accordion in the next order
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: the never-run CJS export annotation maps onto the last function.
-export function renderAccordion( doc: Document, mount: HTMLElement, summary: JobsSummary, actions: JobsActions ): void {
+export function renderAccordion( doc: Document, mount: HTMLElement, summary: JobsSummary, actions: JobsActions, sort?: JobSort ): void {
+  const use = sort ?? picked.get( mount ) ?? DEFAULT_SORT;
+  picked.set( mount, use );
   mount.replaceChildren();
-  for ( const job of sortJobs( summary.jobs ) ) mount.appendChild( renderJob( doc, job, summary.generated_at, actions ) );
+  mount.appendChild( headerRow( doc, use, ( next ) => renderAccordion( doc, mount, summary, actions, next ) ) );
+  for ( const job of sortJobs( summary.jobs, use ) ) mount.appendChild( renderJob( doc, job, summary.generated_at, actions, use ) );
   if ( summary.reporting_off_line ) {                        // row 4aa0ba1b: the server drops a switched-off job and says how many
     const line = doc.createElement( "p" );
     line.className = "jobs-off-line";
