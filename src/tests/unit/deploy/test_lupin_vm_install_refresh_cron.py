@@ -51,6 +51,44 @@ def test_the_vm_install_creates_the_handoff_folder_for_both_users_before_install
     assert text.index( create ) < text.index( "cron_generate --only vector-refresh --install" )
 
 
+def _backup_step():
+    lines = vm( "install-refresh-cron", "vm" ).stdout.splitlines()
+    start = next( i for i, l in enumerate( lines ) if l.strip().startswith( "BDIR=" ) )
+    end   = next( i for i, l in enumerate( lines ) if i > start and l.strip().startswith( "for BPART" ) )
+    return "\n".join( l.strip() for l in lines[ start : end + 1 ] )
+
+
+def test_the_vm_install_creates_the_crontab_backup_folders_before_cron_generate_installs():
+    text = vm( "install-refresh-cron", "vm" ).stdout
+    assert "cron_generate --backup-dir" in text and "cron-generate" not in _backup_step()
+    assert text.index( "cron_generate --backup-dir" ) < text.index( "sudo install -d -m 2775 -o 1001", text.index( "BPARTS" ) ) < text.index( "cron_generate --only vector-refresh --install" )
+
+
+def test_the_backup_step_creates_each_level_below_io_group_writable_and_setgid( tmp_path ):
+    # Run the printed step with sudo stubbed and a fake interpreter that answers like cron_generate --backup-dir.
+    ( tmp_path / "bin" ).mkdir()
+    ( tmp_path / "bin" / "sudo" ).write_text( '#!/bin/bash\necho "SUDO $*"\n' )
+    ( tmp_path / "bin" / "sudo" ).chmod( 0o755 )
+    fake = tmp_path / "py"
+    fake.write_text( '#!/bin/bash\necho io/jobs/crontab-backups\n' )
+    fake.chmod( 0o755 )
+    script = f'LUPIN_ROOT=/x; CGPY={fake}\n' + _backup_step()
+    done = subprocess.run( [ "bash", "-ec", script ], capture_output=True, text=True, env={ "PATH": f"{tmp_path / 'bin'}:{os.environ[ 'PATH' ]}" } )
+    paths = [ l.rsplit( " ", 1 )[ 1 ] for l in done.stdout.splitlines() ]
+    assert done.returncode == 0 and paths == [ "/mnt/lupin-data/lupin/io/jobs", "/mnt/lupin-data/lupin/io/jobs/crontab-backups" ]
+    assert all( l.startswith( "SUDO install -d -m 2775 -o 1001 -g " ) for l in done.stdout.splitlines() )
+    empty = tmp_path / "py2"
+    empty.write_text( "#!/bin/bash\n:\n" )
+    empty.chmod( 0o755 )
+    bad = subprocess.run( [ "bash", "-ec", script.replace( str( fake ), str( empty ) ) ], capture_output=True, text=True, env={ "PATH": f"{tmp_path / 'bin'}:{os.environ[ 'PATH' ]}" } )
+    assert bad.returncode == 1 and "printed nothing" in bad.stdout and "SUDO" not in bad.stdout
+
+
+def test_the_local_install_creates_no_backup_folders():
+    done = vm( "install-refresh-cron", "local", env={ "DEEPILY_DATA_DIR": "/d", "PLANNING_IS_PROMPTING_ROOT": "/p" } )
+    assert "BPARTS" not in done.stdout + done.stderr
+
+
 def test_the_handoff_step_reads_the_real_ini_key_and_refuses_when_it_is_absent( tmp_path ):
     # Run the printed lines in a scratch checkout with sudo stubbed, once with the key and once without.
     printed = vm( "install-refresh-cron", "vm" ).stdout
