@@ -789,8 +789,8 @@ PY
     # C3 — the claude-creds VOLUME mounts over the whole .claude dir and SHADOWS the
     #      host's sessions bind unless both are present. That shadowing was persona-404.
     has_creds=false; has_sessions=false
-    printf '%s\n' "$running_mounts" | grep -qx "/home/rruiz/.claude"          && has_creds=true
-    printf '%s\n' "$running_mounts" | grep -qx "/home/rruiz/.claude/sessions" && has_sessions=true
+    grep -qx "/home/rruiz/.claude" <<< "$running_mounts"          && has_creds=true
+    grep -qx "/home/rruiz/.claude/sessions" <<< "$running_mounts" && has_sessions=true
     if [ "$has_creds" = true ] && [ "$has_sessions" = true ]; then
         report pass BLOCK "both CC mounts present (creds volume + sessions bind)"
     else

@@ -1326,7 +1326,7 @@ done"
 
         # Direction 2 — no value may exist without a contract row declaring it.
         for ev_name in "${!PUSH_ENV_VALUES[@]}"; do
-            printf '%s\n' "$CONTRACT_NAMES" | grep -qxF "$ev_name" || die \
+            grep -qxF "$ev_name" <<< "$CONTRACT_NAMES" || die \
                 "lupin-vm.sh would export $ev_name, but no row in $CONTRACT_FILE declares it as push-env-written (surface HOST/BOTH + writer mentioning push-env). Add the contract row, or drop it from PUSH_ENV_VALUES."
         done
 
