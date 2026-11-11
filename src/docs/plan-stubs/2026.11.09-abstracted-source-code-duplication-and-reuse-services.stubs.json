@@ -175,10 +175,10 @@
             "steps": [
                 {
                     "key": "ph2-s1",
-                    "name": "File the lupin-mobile owner and manager row",
+                    "name": "lupin-mobile owner row e1778814 is live",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "EXECUTOR: AI. The Step 9 author names the lupin-mobile session's owner and manager and files the store row; done when the row exists with both named",
+                    "acceptance": "EXECUTOR: AI. Row e1778814-f4fa-4def-a222-402d64379f07 (owner tiffany) is approved and not blocked; done when its status is queued or in_progress with Tiffany as owner",
                     "owner_role": "tiffany (lupin-mobile session)",
                     "depends_on": [
                         "ph1-s11"

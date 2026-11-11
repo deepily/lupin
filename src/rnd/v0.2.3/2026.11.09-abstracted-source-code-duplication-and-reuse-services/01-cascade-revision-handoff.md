@@ -133,8 +133,8 @@ None of these is a decision for Rick. Each has an owner and a done-signal in the
 | §7 item 10: route `vector_build.py:61` through `EmbeddingProvider` | §6.2, C-AC4 | The step 1 builder; lands before or with C-AC4 |
 | **Pocholo's leftover 1:** what `reinstall_command` prints for the ceiling | `duplicate_check_daily.py:523-528` (`limit_flag`, `reinstall_command` print `--ceiling N`) | Not decided. After the ceiling moves to the INI, the printed install text must either omit `--ceiling` or print the INI key; the step 1 builder chooses and adds a test |
 | **Pocholo's leftover 2:** a negative control for B-AC6 | §6.1 | Not written. B-AC6 needs a case that fails on purpose (a registry row whose repo name differs from its directory) to prove the check can find a mismatch |
-| The `lupin-mobile` owner and manager row | §6.3 step 2 | María files it at Step 9; Phase 2 step 1 in the manifest |
-| ~~Whether the 1 Oct change to `rule_lists.py` (`34988c0f7`) carried Rick's word~~ | §6.2 | **Closed:** Rick ruled keep (row `6b65f04e`). The plan's §6.2 paragraph still says the question is filed as a separate row; that wording is now stale and is left for the next plan edit |
+| The `lupin-mobile` owner and manager row | §6.3 step 2 | **Filed:** row `e1778814-f4fa-4def-a222-402d64379f07`, owned by Tiffany. Phase 2 step 1 in the manifest checks it is live |
+| ~~Whether the 1 Oct change to `rule_lists.py` (`34988c0f7`) carried Rick's word~~ | §6.2 | **Closed:** Rick ruled keep (row `6b65f04e`). The plan's §6.2 paragraph now says so too |
 
 ## 6. Workflow-guidance index (candidates; each cites its anchor)
 
@@ -151,7 +151,7 @@ The deeper redline in planning-is-prompting is not written; the Manager files it
 
 ## 7. Hand-off statement
 
-**Who builds what.** A **lupin-resident session** builds §6.3 step 1 (Phases 0 and 1 in the manifest): row `898c93d8` is Rick's order that the build is lupin-resident. A **`lupin-mobile` session** owns step 2 (Phase 2); María files that row at Step 9. Steps 3 and 4 (Phases 3 and 4) are built after two repos run cleanly, by a lupin-resident session. **Owners in the manifest:** `owner_persona` is `cheech` for Phases 0, 1, 3 and 4. Phase 2 belongs to `tiffany`, but the importer takes one owner per manifest (`plan_stub_import.py` writes `m["owner_persona"]` on every row, and its phase fields have no owner), so Phase 2's steps carry `owner_role: tiffany (lupin-mobile session)` and the manager reassigns those rows after the import. **The correlation key `epic:code-health-abstraction-build` is kept** (María, 11 Nov).
+**Who builds what.** A **lupin-resident session** builds §6.3 step 1 (Phases 0 and 1 in the manifest): row `898c93d8` is Rick's order that the build is lupin-resident. A **`lupin-mobile` session** owns step 2 (Phase 2); that row is filed as `e1778814-f4fa-4def-a222-402d64379f07`, owned by Tiffany. Steps 3 and 4 (Phases 3 and 4) are built after two repos run cleanly, by a lupin-resident session. **Owners in the manifest:** `owner_persona` is `cheech` for Phases 0, 1, 3 and 4. Phase 2 belongs to `tiffany`, but the importer takes one owner per manifest (`plan_stub_import.py` writes `m["owner_persona"]` on every row, and its phase fields have no owner), so Phase 2's steps carry `owner_role: tiffany (lupin-mobile session)` and the manager reassigns those rows after the import. **The correlation key `epic:code-health-abstraction-build` is kept** (María, 11 Nov).
 
 **Order and gates.** Hold any third repo until two weeks of green scheduled runs on Lupin and `lupin-mobile` (Rick's decision 1; the window is defined in §6.3 step 2). Nothing in the plan is built yet; nothing in Lupin changes behaviour until step 1's ACs pass.
 
@@ -178,7 +178,7 @@ Section 6.3 step 1. Steps `ph1-s1` to `ph1-s11`: the keys, the ledger sync, the 
 
 ## Phase 2: lupin-mobile as repo 2
 
-Section 6.3 step 2. Steps `ph2-s1` to `ph2-s3`: the owner row, the registry rows and keys, and the two-week green gate.
+Section 6.3 step 2. Steps `ph2-s1` to `ph2-s3`: a check that the owner row is live, the registry rows and keys, and the two-week green gate.
 
 ## Phase 3: Installable package and installer
 
