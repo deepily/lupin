@@ -1466,3 +1466,71 @@ pfv_test_login_env_status() {
         *) printf 'UNREADABLE'; return 3 ;;
     esac
 }
+
+# ── pfv_cron_status ──────────────────────────────────────────────────────────
+# Is the reuse-vector-refresh cron line in the crontab text? (row c22e5ec1)
+# `lupin-vm.sh install-refresh-cron vm` is a separate by-hand step and nothing said whether it had run.
+# cron_generate writes `<schedule> <entry script> vector-refresh cron >> <log> 2>&1 # reuse-vector-refresh`;
+# the predicate is a line that is not a comment, runs `vector-refresh cron`, and ends in that tag.
+#
+# Requires:
+#   - $1 is the output of `crontab -l` (empty when there is no crontab)
+# Ensures:
+#   - prints PRESENT and returns 0 when such a line exists
+#   - prints ABSENT and returns 1 otherwise, including for empty text and for a commented-out line
+pfv_cron_status() {
+    if printf '%s\n' "${1:-}" | grep -Eq '^[[:space:]]*[^#[:space:]].* vector-refresh cron .*# reuse-vector-refresh[[:space:]]*$'; then
+        printf 'PRESENT'; return 0
+    fi
+    printf 'ABSENT'; return 1
+}
+
+# ── pfv_overlay_present ──────────────────────────────────────────────────────
+# Does the test-server overlay exist on this host? Its checks run only when it does.
+#
+# Requires:
+#   - $1 is the output of `docker ps -a --format '{{.Names}}'`, one name per line
+#   - $2 is the overlay's app container name
+# Ensures:
+#   - returns 0 when a line equals $2 exactly (a longer name that merely contains it does not count), else 1
+pfv_overlay_present() {
+    printf '%s\n' "${1:-}" | grep -Fxq -- "$2"
+}
+
+# ── pfv_test_login_email ─────────────────────────────────────────────────────
+# The tester login's address, read from the compose secret file push-test-server-secrets writes.
+#
+# Requires:
+#   - $1 is a path; the file holds `export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='<address>'`
+# Ensures:
+#   - prints the address and returns 0 when it is there and has only letters, digits and . _ % + @ -
+#     (it is placed in a SQL string, so any other character is refused)
+#   - returns 1 printing nothing when the file is unreadable, the line is missing, or the address has another character
+#   - never prints the password line
+pfv_test_login_email() {
+    local email
+    email="$( sed -n "s/^export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='\(.*\)'\$/\1/p" "$1" 2>/dev/null | head -1 )"
+    case "$email" in
+        ""|*[!A-Za-z0-9._%+@-]*) return 1 ;;
+    esac
+    printf '%s' "$email"
+}
+
+# ── pfv_count_status ─────────────────────────────────────────────────────────
+# Read a `select count(*)` answer.
+#
+# Requires:
+#   - $1 is the text psql -tA printed
+# Ensures:
+#   - prints PRESENT and returns 0 for a whole number of 1 or more
+#   - prints ABSENT and returns 1 for 0
+#   - prints UNKNOWN and returns 3 for anything else (empty, an error), so a failed query is never read as absent
+pfv_count_status() {
+    local n
+    n="$( printf '%s' "${1:-}" | tr -d '[:space:]' )"
+    case "$n" in
+        ""|*[!0-9]*) printf 'UNKNOWN'; return 3 ;;
+    esac
+    if [ "$(( 10#$n ))" -ge 1 ]; then printf 'PRESENT'; return 0; fi
+    printf 'ABSENT'; return 1
+}
