@@ -10,16 +10,15 @@ pins:
   - lupin_mcp.job_summary.scan_block@452acaf9a9
   - lupin_mcp.job_summary.fix_block@6c6588c557
   - lupin_mcp.job_summary.build_summary@c3e4376087
-  - lupin_mcp.job_summary.write_atomic@04964a1f37
-  - lupin_mcp.job_summary.write_summary@cdf5e287f2
-  - lupin_mcp.job_summary.append_run@31fc796bb7
+  - lupin_mcp.job_summary.write_summary@a3c34e8116
+  - lupin_mcp.job_summary.append_run@0a95cab347
 ---
 # Job summary record
 
 The shared writer of the `job-summary/1` file each background job leaves after a run. See [[job-summary-adapters]], [[job-run-wrapper]] and [[job-backfill]] for the callers.
 
 ## The record
-- One small file per job, replaced whole by rename (`write_atomic`), so a reader never sees half a file.
+- One small file per job, replaced whole by rename (`write_json_atomic` of [[utils-atomic-json]]), so a reader never sees half a file.
 - It holds the last attempt, the last finished run, consecutive failures, a scan debt block, a fix debt block and the last 7 attempts.
 - It has no health field. The reader works health out, because a dead job cannot write that it is dead. Null means not reported, never zero.
 - `read_summary` returns None for a file that is missing, unreadable or of another schema.
@@ -37,4 +36,4 @@ The shared writer of the `job-summary/1` file each background job leaves after a
 
 ## Writing
 - `write_summary` returns the record, or None with a message when the file cannot be written. A write failure never fails the job. A malformed attempt still raises.
-- `append_run` adds one line to a job's `runs.jsonl` and returns False on an I/O error.
+- `append_run` adds one line to a job's `runs.jsonl` through `append_line` ([[duplicate-check-run-history]]). It returns False on an I/O error.

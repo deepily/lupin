@@ -2,7 +2,6 @@
 capability: rest-job-health-rules
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.job_health.parse_time@76aedca8a4
   - cosa.rest.job_health.grace_of@7d36fde368
   - cosa.rest.job_health.covered@b1d1c08698
   - cosa.rest.job_health.recents@9f1d8f3fdd
@@ -20,7 +19,7 @@ Decides the state of one job from its registry entry and its summary record. The
 - The reader decides a job is silent, not the job, because a dead job cannot say so.
 
 ## Helpers
-- `parse_time` returns an aware datetime, or `None` for a missing, unparseable or offset-less value.
+- `parse_time` is the memento reaper's `_parse_iso_aware`, imported under that name. It returns an aware datetime, or `None` for a missing, unparseable or offset-less value.
 - `grace_of` uses `grace_seconds` when the entry has it, else `grace_minutes`.
 - `recents` returns the summary's recent attempts, or only its last attempt when there is no list.
 - `covered( recent, due, mode, before )` is true when some attempt began at or after the due time. Any outcome counts. With `before`, a later run does not cover an earlier hole, and an attempt of another mode does not cover a named mode.

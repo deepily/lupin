@@ -3,7 +3,7 @@ capability: reuse-run-harness-server
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_harness.server.port_is_free@603d8c79fd
-  - lupin_mcp.reuse_harness.server.answers_health@7778a3f827
+  - lupin_mcp.reuse_harness.server.answers_health@b5582782ef
   - lupin_mcp.reuse_harness.server.Servers@d3d0b48dc6
   - lupin_mcp.reuse_harness.server.Servers.start@33d8132258
   - lupin_mcp.reuse_harness.server.Servers.seed@2ffeb04bf3
@@ -33,7 +33,7 @@ This page covers the container and database each run owns. See [[reuse-run-harne
 - `is_fresh` is true when `users` and `notifications` hold no rows.
 - `seed` runs after that check. It stores one service account and the bcrypt hash of the run's sender key.
 - `maintenance_url` uses the test-role login only. It never falls back to the dev or prod login.
-- `port_is_free` and `answers_health` are the default port probe and health probe.
+- `port_is_free` and `answers_health` are the default port probe and health probe. `answers_health( url, path, timeout, opener )` asks `<url><path>`, `/health` and 5 seconds by default. It is true only for an HTTP 200. The host snapshot calls it with an empty path.
 
 ## Don't
 - Don't seed before the fresh check. The account would make the database look used.

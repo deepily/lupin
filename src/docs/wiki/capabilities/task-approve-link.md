@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_approve_link.approve_link_line@5d3c5732e8
   - src.lupin_app.static.js.shared.approve-link.approveRowId@411733b4a9
-  - src.lupin_app.static.js.shared.approve-link.handleApproveLinkClick@012dbe8b98
+  - src.lupin_app.static.js.shared.approve-link.handleApproveLinkClick@d406e9f12d
   - src.lupin_app.static.js.shared.approve-link.handleViewLinkClick@52822adda8
   - src.lupin_app.static.js.shared.approve-link.markApproveLinks@43ccfdc951
   - src.lupin_app.static.js.shared.approve-link.observeApproveLinks@111e61ca09

@@ -6,7 +6,7 @@ pins:
   - lupin_mcp.cron_generate.lines_for_job@044de13325
   - lupin_mcp.cron_generate.generate@87c0ac7fe8
   - lupin_mcp.cron_generate.make_log_folders@484230930c
-  - lupin_mcp.cron_generate.main@478ea67409
+  - lupin_mcp.cron_generate.main@26fbdbe578
 ---
 # Job cron generator
 
@@ -25,6 +25,7 @@ Writes the cron lines for the background jobs; see [[job-run-wrapper]] for what 
 
 ## Modes of `main`
 - `--only JOB` limits any mode to one job. The test VM uses it for `vector-refresh`. With `--status` it counts that job's installed lines. An unknown job name prints the reason and returns 1.
+- `--backup-dir` prints the crontab backup folder, relative to the root, and does nothing else.
 - `--print` (default) writes the block and changes nothing. `--diff` writes the unified diff an install would make.
 - `--status` says how many block lines are installed.
 - `--install` and `--uninstall` use the librarian's locked crontab editor, with a timestamped backup under `io/jobs/crontab-backups` first. No backup, no write.
