@@ -1,0 +1,216 @@
+# ============================================================================
+# Lupin — destructive-test server on the CPU test VM (overlay, row 8d67e474).
+#
+# Adds `lupin-rest-test` (host :8000) and its own local pgvector database to the
+# topology docker-compose.cloud-gpu.yml already runs. It is an OVERLAY on purpose:
+#   · docker-compose.cloud-gpu.yml stays the one-app-service file its guards assert
+#     about, and a VM that never applies this file keeps today's topology exactly.
+#   · `lupin-vm.sh deploy` and `svc` name the base file alone, so they never touch
+#     the test server. Only `lupin-vm.sh test-server ...` names both files.
+#   · The services below join the base file's lupin-cloud-network and share its
+#     project, so one `docker compose -f base -f overlay ...` sees the whole VM.
+#
+# Differences from the dev host's lupin-rest-test (docker-compose.yml):
+#   · NO GPU. The model server is the Cloud Run one (LUPIN_MODEL_SERVER_URL).
+#   · The database is lupin-pgvector-test, a local pgvector pg16 container (Rick,
+#     10 Nov 2026), not Cloud SQL. LUPIN_CLOUD_BACKED is deliberately NOT set, so
+#     get_database_url() takes its `testing` branch (DB_HOST, DB_NAME).
+#   · The image is the registry image, not the dev host's local candidate tag.
+#   · group_add is the VM host user's gid (LUPIN_BRIDGE_GID), never the dev host's
+#     1002, which does not exist on the VM.
+#   · Not mounted: node_modules (so the typescript tier cannot run here), the dev
+#     host's dm-corpus, reuse-review, lora and worktree folders, and five of the
+#     seven external-project scopes (only lupin and planning-is-prompting).
+#
+# Secrets are files under /etc/lupin/secrets, written by `lupin-vm.sh
+# push-test-server-secrets` from Secret Manager over ssh stdin. No value is in this
+# file, in git, in a command line or in a log.
+#
+# Run it with:  lupin-vm.sh test-server up     (names both files, same --env-file)
+# Env (all already in the VM's cloud-gpu.env): LUPIN_BRIDGE_GID, JWT_SECRET_KEY,
+#   LUPIN_MODEL_SERVER_URL, LUPIN_GCP_PROJECT_ID.  Optional: LUPIN_TEST_IMAGE
+#   (default: the same image as lupin-rest).
+# One-time host folders: `lupin-vm.sh test-server prep` makes them.
+# ⚠️ Env, groups and mounts resolve at container CREATE: use `up -d --force-recreate`.
+# ============================================================================
+
+services:
+  # --- Local pgvector database (superuser lupin_dev; the roles come from db_roles) ----
+  lupin-pgvector-test:
+    image: pgvector/pgvector:pg16
+    container_name: lupin-pgvector-test
+    restart: unless-stopped
+    environment:
+      # lupin_db_dev must exist because init-db-roles.sql connects to it as well as to
+      # lupin_db_test. It stays empty here: nothing runs against it.
+      POSTGRES_DB: lupin_db_dev
+      POSTGRES_USER: lupin_dev
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_admin_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
+    secrets:
+      - db_admin_password
+    # No `ports:` — only containers on lupin-cloud-network and `docker exec` reach it.
+    volumes:
+      - pgvector-test-data:/var/lib/postgresql/data
+      - ./src/scripts/sql/init-vm-test-db.sql:/docker-entrypoint-initdb.d/01-init-vm-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lupin_dev -d lupin_db_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lupin-cloud-network
+
+  # --- Lupin REST API — Testing (host :8000, container :7999) ---------------------
+  lupin-rest-test:
+    image: ${LUPIN_TEST_IMAGE:-${LUPIN_IMAGE:-lupin:1.1.0}}
+    container_name: lupin-rest-test
+    # Row 3c86391e: the server is PID 1, so without an init the Playwright chrome and
+    # pytest orphans of a finished suite reparent to it and sit as zombies.
+    init: true
+    restart: unless-stopped
+    user: "1001:1001"
+    # The host user's gid, as in lupin-rest. It reads the root:<gid> 0440 password files below.
+    group_add:
+      - "${LUPIN_BRIDGE_GID:?set LUPIN_BRIDGE_GID (host gid owning ~/.claude/sessions)}"
+    secrets:
+      - db_app_password
+      - db_test_password
+      # The tester login the suites need (LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD) as a
+      # sourced file: run-fastapi-lupin-test.sh sources /home/rruiz/.lupin/test-env.sh before it
+      # starts the server, so every suite subprocess inherits the two variables.
+      - source: test_env
+        target: /home/rruiz/.lupin/test-env.sh
+    command: ["/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"]
+    ports:
+      - "8000:7999"
+    # The in-container reverse proxy pulls /state from the HOST-side arbiter on :8001.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    tmpfs:
+      - "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
+    volumes:
+      # The repo root, so root-level files the suites read exist (row 1661ece3). .env is
+      # masked and .venv is an empty tmpfs, as on the dev host's test service.
+      - .:/var/lupin
+      - /dev/null:/var/lupin/.env:ro
+      - type: tmpfs
+        target: /var/lupin/.venv
+      - ./src:/var/lupin/src
+      - ./io:/var/lupin/io
+      - ./src/conf/keys:/var/lupin/src/conf/keys:ro
+      - ./pytest.ini:/var/lupin/pytest.ini:ro
+      - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
+      - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
+      - ./docker-compose.vm-test-overlay.yml:/var/lupin/docker-compose.vm-test-overlay.yml:ro
+      - ./docker:/var/lupin/docker:ro
+      - ./.dockerignore:/var/lupin/.dockerignore:ro
+      - ./.docview.yml:/var/lupin/.docview.yml:ro
+      - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
+      - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
+      - ./alembic.ini:/var/lupin/alembic.ini:ro
+      - ./package.json:/var/lupin/package.json:ro
+      - ./package-lock.json:/var/lupin/package-lock.json:ro
+      - ./pyproject.toml:/var/lupin/pyproject.toml:ro
+      - ./tsconfig.json:/var/lupin/tsconfig.json:ro
+      - ./tsconfig.diagnostic.json:/var/lupin/tsconfig.diagnostic.json:ro
+      - ./tsconfig.nav.json:/var/lupin/tsconfig.nav.json:ro
+      - ./.git:/var/lupin/.git
+      # This container's OWN CC login store: a separate volume from lupin-rest's, so two
+      # containers never renew one credential (row c7c60896).
+      - claude-creds-test:/home/rruiz/.claude
+      # The test server's OWN sessions folder, never the host's (row d849a6d9): the fleet
+      # census counts manager bridges, and integration fixtures write them. Below
+      # claude-creds-test on purpose. `test-server prep` makes the folder (2775, setgid).
+      - type: bind
+        source: /mnt/lupin-data/projects-data/lupin/sessions-test
+        target: /home/rruiz/.claude/sessions
+        bind:
+          create_host_path: false
+      # Flow-ratio operator settings, the same host folder as lupin-rest; the heartbeat
+      # and skeleton-crew files below are test-only names inside it.
+      - type: bind
+        source: /mnt/lupin-data/projects-data/lupin/flow-ratio
+        target: /var/lupin/flow-ratio
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /mnt/lupin-data/lupin
+        target: /var/external-projects/lupin
+        read_only: false
+        bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/planning-is-prompting
+        target: /var/external-projects/planning-is-prompting
+        read_only: false
+        bind: { create_host_path: false }
+    environment:
+      LUPIN_ROOT: /var/lupin
+      LUPIN_ENV: testing
+      LUPIN_SERVER_PORT: "8000"
+      LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in the host env file — see row adce3547}
+      # Local pgvector. LUPIN_CLOUD_BACKED and CLOUD_SQL_CONNECTION_NAME are NOT set on
+      # purpose: either one would send get_database_url() to Cloud SQL.
+      DB_HOST: lupin-pgvector-test
+      DB_USER: lupin_app
+      DB_NAME: lupin_db_test
+      DB_PASSWORD_FILE: /run/secrets/db_app_password
+      LUPIN_TEST_DB_USER: lupin_test
+      LUPIN_TEST_DB_PASSWORD_FILE: /run/secrets/db_test_password
+      LUPIN_API_URL: http://localhost:7999
+      LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      # The Cloud Run model server; no GPU on this VM. Key name = Terraform api_key_name.
+      LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:?set LUPIN_MODEL_SERVER_URL to the Cloud Run service URL}
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
+      LUPIN_INTERACTIVE_TESTS: "true"
+      # Test-only files in the shared flow-ratio folder, never the fleet's real ones.
+      LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
+      LUPIN_HEARTBEAT_POKE_MUTE_FILE: /var/lupin/flow-ratio/heartbeat-poke-mute.test.json
+      LUPIN_SKELETON_CREW_INI: /var/lupin/flow-ratio/skeleton-crew.test.ini
+      GIT_CONFIG_COUNT: "2"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /var/external-projects/lupin
+      GIT_CONFIG_KEY_1: safe.directory
+      GIT_CONFIG_VALUE_1: /var/external-projects/planning-is-prompting
+      # Claude Code on Vertex AI Model Garden, as in lupin-rest (row d3550878, row 3ed25e12).
+      CLAUDE_CODE_USE_VERTEX: "1"
+      CLOUD_ML_REGION: ${LUPIN_VERTEX_REGION:-global}
+      ANTHROPIC_VERTEX_PROJECT_ID: ${LUPIN_GCP_PROJECT_ID:?set LUPIN_GCP_PROJECT_ID in the host env file (row d3550878)}
+      ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-4-8
+      ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-5-5
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-sonnet-5-5
+      PYTHONUNBUFFERED: "1"
+      PYTHONPYCACHEPREFIX: /tmp/pycache
+    # The e2e tier's chromium needs headroom, and a runaway must not take the VM's other
+    # services down. Swap is zero (memswap_limit equals mem_limit); the VM has 29 GB free.
+    mem_limit: 12g
+    memswap_limit: 12g
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    depends_on:
+      lupin-pgvector-test:
+        condition: service_healthy
+    networks:
+      - lupin-cloud-network
+
+# Compose secrets from host files: a read-only bind that keeps the file's owner and mode. A
+# missing source fails the `up` instead of docker creating a root-owned directory there.
+secrets:
+  db_admin_password:
+    file: /etc/lupin/secrets/db_admin_password
+  db_app_password:
+    file: /etc/lupin/secrets/db_app_password
+  db_test_password:
+    file: /etc/lupin/secrets/db_test_password
+  test_env:
+    file: /etc/lupin/secrets/test_env.sh
+
+volumes:
+  pgvector-test-data:
+  claude-creds-test:
