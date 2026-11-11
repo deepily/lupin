@@ -348,3 +348,19 @@ def test_sample_is_none_when_docker_does_not_answer_or_the_answer_cannot_be_read
 def test_sample_is_none_when_docker_fails_even_if_its_output_looks_like_a_stats_line():
     servers, _, _ = make( docker=Docker( stats_code=1, stats_text="12.5MiB / 31GiB|1.50%" ) )
     assert servers.sample( { "container" : "c", "db_name" : "d" } ) is None
+
+
+def test_answers_health_takes_a_whole_address_a_timeout_and_an_opener():
+    seen = []
+
+    class Answer:
+        def __init__( self, status ): self.status = status
+        def __enter__( self ): return self
+        def __exit__( self, *a ): return False
+
+    def opener( address, timeout ):
+        seen.append( ( address, timeout ) )
+        return Answer( 200 )
+
+    assert server.answers_health( "http://h/up", path="", timeout=3, opener=opener ) is True and seen == [ ( "http://h/up", 3 ) ]
+    assert server.answers_health( "http://h", opener=opener ) is True and seen[ -1 ] == ( "http://h/health", 5 )

@@ -15,11 +15,7 @@ import sys
 
 import cosa.rest.job_registry as jr
 from lupin_mcp import job_summary as js
-
-
-def aware( naive ):
-    """Ensures: returns an aware datetime; a naive time is taken as the host's local time."""
-    return naive.astimezone()
+from lupin_mcp.job_summary_adapters import aware
 
 
 def is_file( path ):

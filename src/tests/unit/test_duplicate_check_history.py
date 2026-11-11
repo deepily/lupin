@@ -158,3 +158,8 @@ def test_the_table_reader_prints_the_series_and_then_the_numbers_of_the_lines_it
     said = []
     assert hist.main( [ "--folder", str( tmp_path ) ], said.append ) == 0
     assert said[ 0 ].count( "\n" ) == 1 and said[ 1 ] == "skipped 1 unreadable line(s) of runs.jsonl: 2"
+
+
+def test_append_line_writes_to_the_named_file_when_given_one(tmp_path):
+    assert hist.append_line( tmp_path, { "a": 1 }, "own.jsonl" ) == tmp_path / "own.jsonl" and not ( tmp_path / hist.RUNS_FILE ).exists()
+    assert ( tmp_path / "own.jsonl" ).read_text() == '{"a": 1}\n'
