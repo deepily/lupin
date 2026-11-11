@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_filing.correlation_key@0c74ec30fe
   - lupin_mcp.duplicate_check_filing.for_record@630a473baf
   - lupin_mcp.duplicate_check_filing.NoTriageOwner@022bda2814
-  - lupin_mcp.duplicate_check_filing.triage_owner@0b90ebd7c1
+  - lupin_mcp.duplicate_check_filing.triage_owner@3dd54aeadb
   - lupin_mcp.duplicate_check_filing.run_key@176353e748
   - lupin_mcp.duplicate_check_filing.triage_payload@0e998a8fdb
   - lupin_mcp.duplicate_check_filing.triage_payloads@d5742c7adc
@@ -24,7 +24,7 @@ pins:
 
 ## What it does
 - `correlation_key( id, text )` is `epic:dupcheck-` and 16 hex digits of the sha256 of the id and the sha256 of the definition's text. It holds no date. `for_record( finding )` drops the text and adds the key, so a result file can be refiled with no source to hand.
-- `triage_owner( declared, roster )` returns the lowercase persona key of the roster entry that matches the configured manager, whatever the case or accent. Otherwise it returns the first roster persona and the note says so. An empty roster raises `NoTriageOwner`: a row never lands on a role label.
+- `triage_owner( declared, roster )` returns the lowercase persona key of the roster entry that matches the configured manager, whatever the case or accent. It never guesses. An empty roster raises `NoTriageOwner`, and so does a configured name that is blank, a role label or not on the roster. A row never lands on a role label or on a seat of another project.
 - `run_key( keys )` is `epic:dupcheck-run-` and 16 hex digits of the sha256 of the sorted finding keys. The same findings give the same row key.
 - `triage_payload( findings, owner, day )` builds one P5 task with no status, so the store's holding default applies. The title starts with `[LUPIN] Duplicate check <day>:` and asks whether the new functions should reuse existing ones.
 - The body says why the row exists and what to do: a `DUPCHECK-VERDICT` line per function, see [[duplicate-check-verdict-lines]]. It names the owner. It lists up to 200 findings, each with up to 5 of the definitions it repeats and a count of the rest. `created_by` is "<owner> (duplicate-check-daily)" with no session id.

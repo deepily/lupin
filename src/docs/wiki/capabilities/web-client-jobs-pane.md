@@ -2,7 +2,7 @@
 capability: web-client-jobs-pane
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.BackgroundJobsRendererImpl@8b596ba627
+  - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.BackgroundJobsRendererImpl@505564eac5
   - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.createBackgroundJobsRenderer@5fb9926bb5
   - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.runNowPath@911df302b4
   - src.lupin_app.static.js.multiplexer.render.BackgroundJobsRenderer.runNowFailureText@fea4d99968
@@ -17,7 +17,7 @@ The collapsible section in the multiplexer that shows the jobs accordion, and th
 - `mount` throws if the pane is already mounted. It draws a header with the 🔁 icon, a count and a refresh button, then an error line and the accordion. It starts a 60 second poll and asks at once.
 - `refresh` fetches `/api/jobs/summary`, redraws, sets the count, hides the error and puts the headline on the header title. It never rejects: a failure shows "Could not load the jobs" with the status.
 - A refresh that returns after `unmount` is dropped.
-- `unmount` stops the poll, removes the collapse listener and clears the root. Calling it twice is safe.
+- `unmount` stops the poll, then calls `teardownScaffold` ([[web-client-render-dom-and-doc-links]]) to remove the collapse listener and clear the root. Calling it twice is safe.
 - The pane works out no health itself. The server's summary decides the states, and the operator flag decides whether Run now shows.
 - `runNowPath` is `/api/jobs/<job>/run`, with `?target=` for a target. The Run now action posts there and reports the start time and process id.
 - `runNowFailureText` turns 403, 404, 409 and 422 into plain sentences and shows the status for anything else.
