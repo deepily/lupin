@@ -886,24 +886,9 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
     log_dir = f"{root}{proof_cli.DATA_RELATIVE}/{FOLDER[ 0 ]}"
     cmd     = crontab_cmd or lt.crontab_command( environ, "DUPLICATE_CHECK_DAILY_CRONTAB" )
-    if args.install:
-        err( lt.install_moved_text( root ) )
-        return 1
-    try:
-        if args.status:
-            read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
-            out( lt.status_text( read.stdout if read.returncode == 0 else "", CRON_TAG, INSTALLED_LINES ) )
-            return 0
-        if args.uninstall:
-            lt.edit_crontab( [], environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
-            out( "uninstalled" )
-            return 0
-        lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) }, args.branch, args.ceiling, args.with_baseline, args.adaptive )
-        out( "\n".join( lines ) )                                    # the one mode left is --print-install
-        return 0
-    except ( lt.InstallRefused, RuntimeError ) as e:
-        err( f"duplicate-check-daily: {e}" )
-        return 1
+    carried = { n: environ[ n ] for n in CARRIED if environ.get( n ) }
+    return lt.manage_cron( args, root, environ, now, out, err, cmd, f"{log_dir}/crontab-backups", CRON_TAG, LOCK_OWNER, INSTALLED_LINES, "duplicate-check-daily",
+                           lambda: "\n".join( cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, carried, args.branch, args.ceiling, args.with_baseline, args.adaptive ) ) )
 
 
 def live_parts():

@@ -219,23 +219,8 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     root = args.root or environ.get( "LUPIN_ROOT" ) or os.getcwd()
     cmd  = crontab_cmd or lt.crontab_command( environ )
     logs = f"{root}/io/jobs"
-    if args.install:
-        err( lt.install_moved_text( root ) )
-        return 1
-    try:
-        if args.status:
-            read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
-            out( lt.status_text( read.stdout if read.returncode == 0 else "", CRON_TAG, 1 ) )
-            return 0
-        if args.uninstall:
-            lt.edit_crontab( [], environ, cmd, f"{logs}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
-            out( "uninstalled" )
-            return 0
-        out( cron_line( root, args.python, f"{logs}/host-snapshot.log", environ ) )    # the one mode left is --print-install
-        return 0
-    except ( lt.InstallRefused, RuntimeError ) as error:
-        err( f"job-host-snapshot: {error}" )
-        return 1
+    return lt.manage_cron( args, root, environ, now, out, err, cmd, f"{logs}/crontab-backups", CRON_TAG, LOCK_OWNER, 1, "job-host-snapshot",
+                           lambda: cron_line( root, args.python, f"{logs}/host-snapshot.log", environ ) )
 
 
 def main( argv=None, environ=None, now=None, run=None, out=print, err=None, crontab_cmd=None ):

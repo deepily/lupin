@@ -586,6 +586,39 @@ def status_text( crontab_text, tag=CRON_TAG, expected=2 ):
     return f"installed: {count} lines" if count in full else f"partly installed: {count} lines"
 
 
+def manage_cron( args, root, environ, now, out, err, cmd, backup_dir, tag, owner, expected, label, print_text ):
+    """
+    Run one per-job cron verb: print, retired install, uninstall or status.
+
+    Requires:
+        - args has install, status and uninstall flags; none set means --print-install
+        - cmd is the crontab command list; backup_dir is where uninstall backs up first; tag, owner and expected are the job's own
+        - print_text is a callable returning the text --print-install shows; label starts an error line; out and err take one line
+    Ensures:
+        - --install is retired: install_moved_text goes to err and 1 is returned, with the crontab untouched
+        - --status reports through status_text; --uninstall goes through edit_crontab with tag and owner, after a backup, then says "uninstalled"
+        - otherwise print_text() goes to out and nothing changes
+        - returns 0, or 1 with "label: reason" on err when the install is refused or the crontab call fails
+    """
+    if args.install:
+        err( install_moved_text( root ) )
+        return 1
+    try:
+        if args.status:
+            read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
+            out( status_text( read.stdout if read.returncode == 0 else "", tag, expected ) )
+            return 0
+        if args.uninstall:
+            edit_crontab( [], environ, cmd, backup_dir, now, tag=tag, owner=owner )
+            out( "uninstalled" )
+            return 0
+        out( print_text() )
+        return 0
+    except ( InstallRefused, RuntimeError ) as error:
+        err( f"{label}: {error}" )
+        return 1
+
+
 def _live_store():
     """Build the store adapter over the live task-store client."""
     from lupin_cli.claude_code.hooks.lib import task_store_client as client
