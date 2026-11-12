@@ -20,6 +20,19 @@ from cosa.agents.podcast_generator import drive_hook
 from cosa.agents.podcast_generator.config import PodcastConfig
 
 
+@pytest.fixture( autouse=True )
+def _config_singleton_built_with_the_real_project_root():
+    """
+    Build the process-wide ConfigurationManager before a test fakes the project root.
+
+    Building a job reads the time zone through that singleton. Several tests here fake
+    get_project_root as /var/lupin first, so a test that ran before any other in its
+    process failed reading /var/lupin/src/conf/lupin-app.ini.
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+
+
 def _config( **overrides ):
     config = PodcastConfig()
     config.publish_to_google_drive = True
