@@ -1,14 +1,14 @@
 """
 Load a config dataclass from ConfigurationManager INI keys.
 
-BugFixExpediterConfig, SweTeamConfig and TestFixExpediterConfig each map their fields to INI
-keys and coerce by the field's type; this is the one loop they share.
+BugFixExpediterConfig, SweTeamConfig, TestFixExpediterConfig and ResearchConfig each map their
+fields to INI keys and coerce by the field's type; this is the one loop they share.
 """
 
 from dataclasses import fields
 
 
-def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None ):
+def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None, silent=False ):
     """
     Read one INI value per mapped field of a config dataclass, as constructor kwargs.
 
@@ -17,6 +17,7 @@ def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None ):
         - config_mgr is a ConfigurationManager
         - key_map maps field names of cls to INI key names
         - label is the name shown in debug lines; it defaults to cls.__name__
+        - silent=True is passed to every config_mgr.get call, so the manager prints no banner for a key the INI lacks; with silent=False the argument is left out
 
     Ensures:
         - returns { field_name: value } with one entry per key_map entry
@@ -30,6 +31,7 @@ def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None ):
         - KeyError if a key_map name is not a field of cls
     """
     label     = cls.__name__ if label is None else label
+    get_extra = { "silent": True } if silent else {}
     kwargs    = {}
     dc_fields = { f.name: f for f in fields( cls ) }
 
@@ -47,7 +49,7 @@ def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None ):
         else:
             return_type = "string"
 
-        value = config_mgr.get( ini_key, default=default, return_type=return_type )
+        value = config_mgr.get( ini_key, default=default, return_type=return_type, **get_extra )
         kwargs[ field_name ] = value
 
         if debug: print( f"  [{label}] {field_name} = {value} (from INI: {ini_key})" )
@@ -55,7 +57,7 @@ def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None ):
     return kwargs
 
 
-def load_dataclass_from_ini( cls, config_mgr, key_map, debug=False, label=None ):
+def load_dataclass_from_ini( cls, config_mgr, key_map, debug=False, label=None, silent=False ):
     """
     Build a config dataclass from INI values, one key per mapped field.
 
@@ -65,4 +67,4 @@ def load_dataclass_from_ini( cls, config_mgr, key_map, debug=False, label=None )
     Ensures:
         - returns cls( **load_kwargs_from_ini( ... ) )
     """
-    return cls( **load_kwargs_from_ini( cls, config_mgr, key_map, debug=debug, label=label ) )
+    return cls( **load_kwargs_from_ini( cls, config_mgr, key_map, debug=debug, label=label, silent=silent ) )

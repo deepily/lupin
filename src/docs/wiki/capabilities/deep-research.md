@@ -7,7 +7,7 @@ pins:
   - cosa.agents.deep_research.cli.generate_abstract_for_cli@802bfc04b2
   - cosa.agents.deep_research.cli.save_report_with_frontmatter@3805e7087f
   - cosa.agents.deep_research.cli.skipped_topics_section@e4502c2378
-  - cosa.agents.deep_research.config.ResearchConfig@fcd3ee4805
+  - cosa.agents.deep_research.config.ResearchConfig@b6e0958c6d
   - cosa.agents.deep_research.cost_tracker.CostTracker@acea766158
   - cosa.agents.deep_research.cost_tracker.BudgetExceededError@d9783d68d7
   - cosa.agents.deep_research.search_cache.normalize_query@68ff568bca
