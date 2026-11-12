@@ -3,8 +3,8 @@ capability: expeditor-cli-and-mock-submit
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.runtime_argument_expeditor.cli_help.build_parser@b969abeca4
-  - cosa.agents.runtime_argument_expeditor.xml_models.ExpeditorResponse@f2d6583f7a
-  - cosa.agents.runtime_argument_expeditor.xml_models.ArgConfirmationResponse@700d581ef8
+  - cosa.agents.runtime_argument_expeditor.xml_models.ExpeditorResponse@87c2d88b25
+  - cosa.agents.runtime_argument_expeditor.xml_models.ArgConfirmationResponse@840683fd69
   - cosa.agents.test_harness.mock_submit.MockJobArgs@265b135e36
   - cosa.agents.test_harness.mock_submit.match_voice_command@305128e7af
   - cosa.agents.test_harness.mock_submit.validate_ranges@518aa0fbc3

@@ -11,7 +11,7 @@ pins:
   - cosa.agents.calculator.dispatcher.dispatch@82a1c77171
   - cosa.agents.calculator.dispatcher.extract_calc_intent_xml@ceecc80a1a
   - cosa.agents.calculator.dispatcher.format_result_for_voice@4065d1225e
-  - cosa.agents.calculator.xml_models.CalcIntent@4ed5b2ecb3
+  - cosa.agents.calculator.xml_models.CalcIntent@a866f7cee9
 ---
 # Calculator operations
 

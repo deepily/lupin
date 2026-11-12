@@ -14,6 +14,7 @@ References:
 import json
 import xmltodict
 from pydantic import Field, field_validator, model_validator
+from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
@@ -331,9 +332,7 @@ class BatchScriptMatcherResponse( BaseXMLModel ):
             - Returns "" for None values
             - Passes through non-None values unchanged
         """
-        if v is None:
-            return ""
-        return v
+        return none_to_empty( v )
 
     def get_answers_dict( self ):
         """
@@ -557,9 +556,7 @@ class VerificationResponse( BaseXMLModel ):
             - Returns "" for None values on optional fields (confidence, reasoning)
             - Passes through non-None values and required fields unchanged
         """
-        if v is None and info.field_name != "match":
-            return ""
-        return v
+        return none_to_empty( v, info.field_name, keep_none=( "match", ) )
 
     @classmethod
     def get_example_for_template( cls ):

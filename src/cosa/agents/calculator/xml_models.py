@@ -12,6 +12,7 @@ import json
 from typing import ClassVar, List
 
 from pydantic import Field, field_validator
+from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
@@ -80,9 +81,7 @@ class CalcIntent( BaseXMLModel ):
         xmltodict returns None for empty XML tags like <value_2></value_2>.
         Pydantic str fields reject None, so we convert at the boundary.
         """
-        if v is None and info.field_name != "operation":
-            return ""
-        return v
+        return none_to_empty( v, info.field_name, keep_none=( "operation", ) )
 
     # Valid operations (ClassVar to avoid Pydantic treating as fields)
     VALID_OPERATIONS: ClassVar[ List[ str ] ] = [

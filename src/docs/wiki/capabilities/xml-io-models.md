@@ -8,7 +8,7 @@ pins:
   - cosa.agents.io_models.utils.xml_parser_factory.XmlParserFactory.parse_agent_response@254bd01546
   - cosa.agents.io_models.utils.xml_parser_factory.PydanticXmlParser.parse_xml_response@e49c7ce400
   - cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor@01f5a736f5
-  - cosa.agents.io_models.xml_models.CodeResponse@c81386e483
+  - cosa.agents.io_models.xml_models.CodeResponse@b7416eccea
   - cosa.agents.io_models.utils.json_object_recovery.recover_json_object@7c795037c9
   - cosa.agents.io_models.utils.json_object_recovery.save_raw_response@c4033ec0f4
   - cosa.agents.io_models.utils.json_object_recovery.extract_json_object@d7acf5ea59
