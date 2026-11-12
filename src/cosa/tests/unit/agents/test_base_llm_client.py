@@ -83,6 +83,25 @@ class TestLlmClientInterface( unittest.TestCase ):
         with patch( "cosa.agents.base_llm_client.du.print_banner" ), patch( "builtins.print" ):
             inst._print_metadata( prompt_tokens=1, completion_tokens=2, duration=0.0 )
 
+    def _duration_line( self, duration ):
+        """Run the interface's _print_metadata and return its duration line."""
+        inst = _ConcreteInterface()
+        with patch( "cosa.agents.base_llm_client.du.print_banner" ), patch( "builtins.print" ) as printed:
+            inst._print_metadata( prompt_tokens=5, completion_tokens=10, duration=duration )
+        lines = [ call.args[ 0 ] for call in printed.call_args_list if "Duration" in call.args[ 0 ] ]
+        self.assertEqual( len( lines ), 1 )
+        return lines[ 0 ]
+
+    def test_print_metadata_prints_the_duration_in_whole_milliseconds( self ):
+        """The interface formats its duration through format_duration_ms: 1.5 seconds prints 1500ms."""
+        self.assertTrue( self._duration_line( 1.5 ).endswith( ": 1500ms" ) )
+
+    def test_print_metadata_prints_na_when_there_is_no_duration( self ):
+        self.assertTrue( self._duration_line( None ).endswith( ": N/A" ) )
+
+    def test_print_metadata_prints_zero_milliseconds_for_a_zero_duration( self ):
+        self.assertTrue( self._duration_line( 0.0 ).endswith( ": 0ms" ) )
+
 
 class TestBaseLlmClient( unittest.TestCase ):
     """__init__, abstract bodies, complete_sync arms, __str__/__repr__."""
