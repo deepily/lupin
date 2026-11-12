@@ -353,3 +353,14 @@ REUSE-OUTCOME 090844e8b855494d :: rs-4c68a5a910 :: WROTE_NEW a two-verb command 
 
 RULING lupin_mcp.reuse_tools._refuse_drifted_ledger :: DISTINCT an adapter that calls reuse_ledger_sync.check_repo for the repo's own ledger before a packed run and turns LedgerDrift into ReuseError LEDGER_DRIFT; it skips a missing ledger so begin_run still refuses it as before :: reuse-receipt: c0bbb5bbb36ef985 :: search: rs-2ba294c1e1
 REUSE-OUTCOME c0bbb5bbb36ef985 :: rs-2ba294c1e1 :: WROTE_NEW an adapter that calls reuse_ledger_sync.check_repo for the repo's own ledger before a packed run and turns LedgerDrift into ReuseError LEDGER_DRIFT; it skips a missing ledger so begin_run still refuses it as before :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s2
+
+## Reuse review: B-AC6 negative control (row 383be1d4, step ph1-s14)
+
+`check_registry_names( registry, config )` composes the two readers step 1 added. `registry_repo_names` lists the repos with a row, and `name_mismatches` compares each name to its checkout's directory name. The one thing it adds is the join: it reads each repo's `external repo <name> path` key, refuses a repo with no path, and refuses an empty registry so the check cannot pass on nothing. It raises `CodeHealthSettingError`, naming every failing repo.
+
+SEARCHED cosa.repo.code_health_settings.check_registry_names :: rs-b6052eaced :: cosa.rest.routers._scope_registry.build_scope_registry :: UNRELATED :: builds the doc-viewer scope map and drops a scope whose path is missing on disk; this check must fail on a missing path
+SEARCHED cosa.repo.code_health_settings.check_registry_names :: rs-b6052eaced :: lupin_arbiter_app.fleet_arbiter_loop._registry_container_paths :: RELATED :: returns the configured paths without their names, and a name with no path drops out silently
+
+RULING cosa.repo.code_health_settings.check_registry_names :: EXTEND cosa.repo.code_health_settings.name_mismatches :: reuse-receipt: a0e97d596ca2d49f :: search: rs-b6052eaced
+
+REUSE-OUTCOME a0e97d596ca2d49f :: rs-b6052eaced :: EXTENDED cosa.repo.code_health_settings.name_mismatches :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s14
