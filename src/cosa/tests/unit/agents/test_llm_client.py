@@ -169,6 +169,7 @@ class TestFormatAndMetadata:
         assert "Duration" in out and "2000ms" in out
         assert "Total tokens" in out and "30" in out
         assert "Tokens/sec" in out and "10.00" in out    # 20 / 2.0
+        assert "⚡ Tokens/sec         : 10.00" in out         # the shared printer's exact line
 
     def test_print_metadata_duration_none_uses_na_and_inf( self, capsys ):
         c, _ = _client()

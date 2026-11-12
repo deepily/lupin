@@ -3,9 +3,8 @@ import time
 from typing import Optional, Any
 
 import cosa.utils.util as du
-from cosa.agents.base_llm_client import format_duration_ms
 from cosa.agents.llm_completion import LlmCompletion
-from cosa.agents.base_llm_client import collect_stream_text
+from cosa.agents.base_llm_client import collect_stream_text, print_request_summary
 
 from cosa.agents.token_counter import TokenCounter
 
@@ -308,18 +307,7 @@ class LlmClient:
             - Formats duration appropriately
             - Displays a formatted summary of metrics
         """
-        total_tokens = prompt_tokens + completion_tokens
-        tps          = completion_tokens / duration if ( duration and duration > 0 ) else float( 'inf' )
-        duration_str = format_duration_ms( duration ) if duration is not None else "N/A"
-
-        du.print_banner( "📊 Stream Summary", prepend_nl=True )
-        print( f"🧠 Model              : {self.model_name}" )
-        print( f"⏱️ Duration           : {duration_str}" )
-        print( f"🔢 Prompt tokens      : {prompt_tokens}" )
-        print( f"💬 Completion tokens  : {completion_tokens}" )
-        print( f"🧮 Total tokens       : {total_tokens}" )
-        print( f"⚡ Tokens/sec          : {tps:.2f}" )
-        print( "=" * 40 )
+        print_request_summary( self.model_name, prompt_tokens, completion_tokens, duration, "📊 Stream Summary" )
 
 
 def quick_smoke_test():
