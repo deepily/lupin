@@ -33,6 +33,7 @@ from pydantic import Field
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 from cosa.agents.dm_quality_judge.xml_models import WEIGHT_TO_EMOJI, normalize_grade_label
+from cosa.utils.expect_raises import expect_raises
 
 
 # ── Structural codes (GPT expert's table) ─────────────────────────────────────
@@ -548,22 +549,22 @@ def quick_smoke_test():
     print( "\n3. Controls — each MUST be rejected..." )
     body = "Phase one is done. I read the ticket history. The timeout is wrong."
     sents = split_sentences( body )
-    check( "fabricated quote", lambda: _assert_raises(
+    check( "fabricated quote", lambda: expect_raises( ExtractionError,
         lambda: validate_extraction( "I invented this sentence.", 1, [], sents ) ) )
-    check( "wrong index", lambda: _assert_raises(
+    check( "wrong index", lambda: expect_raises( ExtractionError,
         lambda: validate_extraction( "Phase one is done.", 2, [], sents ) ) )
-    check( "sub-clause, not whole sentence", lambda: _assert_raises(
+    check( "sub-clause, not whole sentence", lambda: expect_raises( ExtractionError,
         lambda: validate_extraction( "Phase one", 1, [], sents ) ) )
-    check( "stray before the payload", lambda: _assert_raises(
+    check( "stray before the payload", lambda: expect_raises( ExtractionError,
         lambda: validate_extraction( "The timeout is wrong.", 3, [ 1 ], sents ) ) )
-    check( "stray out of range", lambda: _assert_raises(
+    check( "stray out of range", lambda: expect_raises( ExtractionError,
         lambda: validate_extraction( "Phase one is done.", 1, [ 99 ], sents ) ) )
-    check( "duplicate stray", lambda: _assert_raises(
+    check( "duplicate stray", lambda: expect_raises( ExtractionError,
         lambda: validate_extraction( "Phase one is done.", 1, [ 2, 2 ], sents ) ) )
-    check( "quote given with index 0", lambda: _assert_raises(
+    check( "quote given with index 0", lambda: expect_raises( ExtractionError,
         lambda: validate_extraction( "Phase one is done.", 0, [], sents ) ) )
     dup = split_sentences( "Same line. Other line. Same line." )
-    check( "second copy of a repeated sentence", lambda: _assert_raises(
+    check( "second copy of a repeated sentence", lambda: expect_raises( ExtractionError,
         lambda: validate_extraction( "Same line.", 3, [], dup ) ) )
 
     print( "\n4. A valid extraction passes..." )
@@ -599,14 +600,6 @@ def quick_smoke_test():
 
 def _assert( condition ):
     if not condition: raise AssertionError( "condition was false" )
-
-
-def _assert_raises( fn ):
-    try:
-        fn()
-    except ExtractionError:
-        return
-    raise AssertionError( "expected ExtractionError, none raised" )
 
 
 if __name__ == "__main__":

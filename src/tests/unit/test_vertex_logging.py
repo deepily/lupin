@@ -33,7 +33,6 @@ from cosa.utils.vertex_logging import (
     ProbePlan,
     ProbeResult,
     VertexLoggingError,
-    _expect_raises,
     _FakeReadout,
     _refusing_query_fn,
     assert_bigquery_location_legal,
@@ -728,16 +727,6 @@ def test_live_call_manifest_refuses_an_uncertified_pairing():
 # ---------------------------------------------------------------------------
 # The smoke test and its helpers
 # ---------------------------------------------------------------------------
-
-def test_expect_raises_returns_the_exception_when_the_guard_fires():
-    raised = _expect_raises( VertexLoggingError, assert_bigquery_location_legal, "global" )
-    assert isinstance( raised, VertexLoggingError )
-
-
-def test_expect_raises_fails_loud_when_a_guard_stays_asleep():
-    with pytest.raises( AssertionError, match="the guard is asleep" ):
-        _expect_raises( VertexLoggingError, mint_sentinel )
-
 
 def test_fake_readout_lags_then_lands():
     fake = _FakeReadout( lands_on_poll=2 )

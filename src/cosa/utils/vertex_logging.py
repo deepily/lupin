@@ -38,6 +38,8 @@ explicit authorization. The live calls it needs are listed by `describe_live_cal
 import re
 import uuid
 
+from cosa.utils.expect_raises import expect_raises
+
 
 class VertexLoggingError( RuntimeError ):
     """Raised when the logging config or its verification cannot proceed safely. Fail loud."""
@@ -905,28 +907,6 @@ class _FakeReadout:
         return ( READOUT_NO_MATCH, () )
 
 
-def _expect_raises( exception_type, fn, *args, **kwargs ):
-    """
-    Assert that `fn` fails loud with `exception_type`.
-
-    A guard never seen to fire is not a proven guard. The smoke test uses this so that "the guard works" is an observation, not a claim.
-
-    Requires:
-        - exception_type is an exception class; fn is callable
-
-    Ensures:
-        - returns the raised exception when fn raises exception_type
-
-    Raises:
-        - AssertionError when fn does not raise; a guard that stayed silent is a failure
-    """
-    try:
-        fn( *args, **kwargs )
-    except exception_type as raised:
-        return raised
-    raise AssertionError( f"{fn.__name__} did NOT raise {exception_type.__name__} — the guard is asleep." )
-
-
 def quick_smoke_test():
     """Exercise the canary law end-to-end against a fake readout. No network. No spend."""
     import cosa.utils.util as du
@@ -949,13 +929,13 @@ def quick_smoke_test():
     assert result.verdict == VERDICT_INADMISSIBLE, result
     print( f"✓ canary NEVER lands  -> {result.verdict} (NOT 'logging is broken' — the instrument never spoke)" )
 
-    _expect_raises( VertexLoggingError, build_full_config_write_body, None, { "loggingConfig" : { "enabled" : False } } )
+    expect_raises( VertexLoggingError, build_full_config_write_body, None, { "loggingConfig" : { "enabled" : False } } )
     print( "✓ clobber trap        -> a write body CANNOT be built without a prior fetch" )
 
-    _expect_raises( VertexLoggingError, assert_traffic_config_coupling, "us-central1", "global" )
+    expect_raises( VertexLoggingError, assert_traffic_config_coupling, "us-central1", "global" )
     print( "✓ region-coupling     -> traffic/config location mismatch fails loud" )
 
-    _expect_raises( VertexLoggingError, assert_bigquery_location_legal, "global" )
+    expect_raises( VertexLoggingError, assert_bigquery_location_legal, "global" )
     print( "✓ location namespaces -> `global` is refused as a BigQuery dataset location" )
 
     du.print_banner( "vertex_logging smoke test PASSED", prepend_nl=True )
