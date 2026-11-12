@@ -2,7 +2,7 @@
 capability: voice-persona-allocation
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.voice_persona_helpers.load_persona_pool_from_config@3194ca9821
+  - cosa.rest.voice_persona_helpers.load_persona_pool_from_config@1d86174387
   - cosa.rest.voice_persona_helpers.pick_unallocated_persona@3a5cf8dba3
   - cosa.rest.voice_persona_helpers.borrowed_persona_for_sid@8afa17e241
   - cosa.rest.voice_persona_helpers.allocate_persona_chain_for_session@423b5d8f3d

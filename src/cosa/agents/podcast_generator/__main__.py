@@ -25,6 +25,7 @@ import sys
 
 from cosa.agents.podcast_generator.script_types import PROFILES, REVIEW_MODES
 from cosa.agents.utils.smoke_suite import run_import_smoke_suite
+from cosa.utils.csv_text import split_csv
 
 # User-visible args: the canonical list of args that end users should see
 # and interact with. Engineering params (models, debug, etc.) are excluded.
@@ -90,7 +91,7 @@ def parse_languages_arg( languages_str: str ) -> list:
     """
     if not languages_str:
         return None
-    return [ lang.strip() for lang in languages_str.split( "," ) if lang.strip() ]
+    return split_csv( languages_str )
 
 
 async def run_podcast_generation( args ):

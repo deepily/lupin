@@ -5,7 +5,7 @@ pins:
   - cosa.rest.pytest_args_policy.PytestArgsRejected@c0efc34408
   - cosa.rest.pytest_args_policy.parse_and_validate@0650014a67
   - cosa.rest.pytest_args_policy.find_per_test_timeout@e15fca9765
-  - cosa.rest.pytest_args_policy.validate_timeout_against_suite_budget@5aca5735a3
+  - cosa.rest.pytest_args_policy.validate_timeout_against_suite_budget@c18c8a03c9
   - cosa.rest.suite_run_token.token_enabled@6ff7f11f50
   - cosa.rest.suite_run_token.issue@1293ddf4df
   - cosa.rest.suite_run_token.check@a3fbd661f8

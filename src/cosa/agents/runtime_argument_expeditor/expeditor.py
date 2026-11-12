@@ -40,6 +40,7 @@ from cosa.utils.notification_utils import (
     format_open_ended_batch_for_tts,
     convert_open_ended_batch_for_api
 )
+from cosa.utils.csv_text import split_csv
 
 
 # --------------------------------------------------------------------------- #
@@ -1611,7 +1612,7 @@ class RuntimeArgumentExpeditor:
         search_paths_key = declaration.get( "search_paths_key" ) or "podcast generator source search paths"
         search_paths_raw = config_mgr.get( search_paths_key, default="/src" )
         if self.debug: print( f"[Expeditor] Extra search paths from {search_paths_key!r}" )
-        search_dirs = [ d.strip() for d in search_paths_raw.split( "," ) if d.strip() ]
+        search_dirs = split_csv( search_paths_raw )
         source_extensions = DEFAULT_FILE_EXTENSIONS
 
         for search_dir in search_dirs:

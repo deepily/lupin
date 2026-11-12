@@ -11,7 +11,7 @@ pins:
   - lupin_app.lifespan_steps.load_models@9aa910e39b
   - lupin_app.lifespan_steps.build_commons_owner_resolver@2c98c6c832
   - lupin_app.lifespan_steps.install_llm_disambiguator@36e675b3c5
-  - lupin_app.lifespan_steps.start_commons@7d41f9acde
+  - lupin_app.lifespan_steps.start_commons@0ef527805a
   - lupin_app.lifespan_steps.init_commons@09de028eab
   - lupin_app.lifespan_steps.start_websocket_maintenance_tasks@c5a6fbd19e
   - lupin_app.lifespan_steps.start_notification_sweep_task@d9254f3b5e

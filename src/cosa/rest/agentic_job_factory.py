@@ -20,6 +20,7 @@ import shlex
 from typing import Optional
 
 from cosa.rest.v2.refusal import SubmitRefused
+from cosa.utils.csv_text import split_csv
 
 _SEMANTIC_NONE = { "default", "no limit", "none", "skip", "no", "" }
 
@@ -538,7 +539,7 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
     # Parse test_types: comma-separated string → list
     test_types_raw = args_dict.get( "test_types", "integration,e2e" )
     if isinstance( test_types_raw, str ):
-        test_types = [ t.strip() for t in test_types_raw.split( "," ) if t.strip() ]
+        test_types = split_csv( test_types_raw )
     else:
         test_types = test_types_raw
 
@@ -689,7 +690,7 @@ def _build_test_fix_expediter( command, args_dict, user_id, user_email, session_
     # Parse optional original_test_types / original_pytest_args (comma-separated)
     test_types_arg = args_dict.get( "original_test_types", [] )
     if isinstance( test_types_arg, str ):
-        test_types_arg = [ s.strip() for s in test_types_arg.split( "," ) if s.strip() ]
+        test_types_arg = split_csv( test_types_arg )
     pytest_args_arg = args_dict.get( "original_pytest_args", [] )
     if isinstance( pytest_args_arg, str ):
         pytest_args_arg = [ s.strip() for s in pytest_args_arg.split( " " ) if s.strip() ]

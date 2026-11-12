@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.__main__.extract_user_id_from_path@8b67e6a3e6
   - cosa.agents.podcast_generator.__main__.main@3c298f16f4
-  - cosa.agents.podcast_generator.__main__.parse_languages_arg@3e2fd92963
+  - cosa.agents.podcast_generator.__main__.parse_languages_arg@fba0fc9441
   - cosa.agents.podcast_generator.__main__.run_all_smoke_tests@834c9f5708
   - cosa.agents.podcast_generator.__main__.run_audio_generation@a2612993c1
   - cosa.agents.podcast_generator.__main__.run_podcast_generation@51633ca4cf

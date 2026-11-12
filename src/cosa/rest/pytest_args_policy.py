@@ -35,6 +35,7 @@ This module is the control that holds even for a caller who is authorised and wr
 
 import os
 import shlex
+from cosa.utils.csv_text import split_csv
 
 
 # ---- The legitimate surface -------------------------------------------------
@@ -351,7 +352,7 @@ def validate_timeout_against_suite_budget( tokens, test_types, suite_budgets, de
     if per_test is None: return None
 
     if isinstance( test_types, str ):
-        suites = [ s.strip() for s in test_types.split( "," ) if s.strip() ]
+        suites = split_csv( test_types )
     else:
         suites = [ str( s ).strip() for s in ( test_types or [] ) if str( s ).strip() ]
 

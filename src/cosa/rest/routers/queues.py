@@ -26,6 +26,7 @@ from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 from cosa.rest.job_persistence import persist_job_cancelled, CANCELLABLE_QUEUES
 from cosa.rest.queue_util import emit_job_state_transition
+from cosa.utils.csv_text import split_csv
 
 router = APIRouter(prefix="/api", tags=["queues"])
 
@@ -1334,7 +1335,7 @@ async def get_job_history(
             user_id = authorized_filter
 
     # Parse comma-separated exclude_ids into a list
-    exclude_list = [ eid.strip() for eid in exclude_ids.split( "," ) if eid.strip() ] if exclude_ids else None
+    exclude_list = split_csv( exclude_ids ) if exclude_ids else None
 
     result = query_job_history(
         user_id         = user_id,

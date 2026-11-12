@@ -5,7 +5,7 @@ pins:
   - cosa.rest.routers.commons.get_active_sessions@64c093d240
   - cosa.rest.routers.commons.project_session_response@fad8f23c7b
   - cosa.rest.routers.commons.filter_and_project_sessions@cc499b5280
-  - cosa.rest.routers.commons.get_broadcast_history@2fdef003bf
+  - cosa.rest.routers.commons.get_broadcast_history@0f6aade697
   - cosa.rest.routers.commons.execute_broadcast_history@56a0cbe71f
   - cosa.rest.routers.commons.RecipientResolutionError@e4ee8ae6e9
 ---

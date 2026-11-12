@@ -17,6 +17,7 @@ from typing import Literal, Optional, List
 # `from cosa.agents.podcast_generator.config import LANGUAGE_NAMES`.
 from cosa.agents.language_names import LANGUAGE_NAMES
 from cosa.agents.shared.config_loader import load_kwargs_from_ini
+from cosa.utils.csv_text import split_csv
 
 
 @dataclass
@@ -500,7 +501,7 @@ class PodcastConfig:
 
         # Parse target_languages from comma-separated INI value
         langs_raw = config_mgr.get( "podcast target languages", default="en", silent=True )
-        target_languages = [ lang.strip() for lang in langs_raw.split( "," ) if lang.strip() ]
+        target_languages = split_csv( langs_raw )
 
         kwargs = load_kwargs_from_ini( cls, config_mgr, PODCAST_INI_KEYS, silent=True )
 
