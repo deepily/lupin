@@ -8,6 +8,25 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.11 - Session 67412f28 (Cheech 🌿, manager; crew Rio, Rachel, Chloé, Sam, John, Pocholo, Tiberius, Clayton, Arnold, Extra 1) | Reuse backlog row 2448ae19 closed; code-health rows a24acda1, 6fd6fc0c and 5bb97718 merged; four reviewed bug fixes wait on Rick's admit
+
+**Resume here**: memento `.claude-memento-cheech-67412f28.md`. Claims list and merge tools live in `projects-data/lupin/cheech-tools/` (`followups-2448ae19-pending.md`, `merge_check.sh`).
+1. **Merged 21:52 to 22:34**, each followed by a passing reuse gate:
+   - Rio: d8518023f (lazy_exports, sort_keys, send_json for five POSTs) and caa547e1a (send_json call-site pins).
+   - Clayton: fa7214d88 (gate observer), a0052cf21 (typed config fake) and 436bb3b3e (boolean flag reads).
+   - Pocholo: 9bbd066f8 (test pins) and 84aab5ba6 (main_checkout). Extra 1: 79fcc3090 (read_jsonl).
+   - Arnold: ba2eaf45e (iter_bridge_paths) and 7fd126173 (reaper fold). Tiberius: eec067f58 (row 5bb97718).
+   - Earlier today: d8037019f (row a24acda1) and 779cc159d (row 6fd6fc0c); the memento lists the morning merges.
+2. **Merge pyramid** (row d2a18b64): rows 1 to 4 and 8 are green at a0052cf21. Rows 5 to 7, 10 to 12, 14 and 15 did not run.
+3. **Ready on admit**, each fix approved and each row held for Rick:
+   - ba3ba6c0 → 1007d4557, 635d6535 → 92825b91d, c7e5ee2c → 7df8a624c, 10f45f52 → 442ade25d.
+   - 10f45f52 was filed tonight; 53fef4192 introduced it.
+   - 07091c63 has one measured cause of three cases (Arnold's amendment); no fix yet.
+   - Row bf103bde (the cron reinstall) is Rick's own action; its chase is at 10:30.
+4. **Measured, not caused by tonight's merges**: the websocket_router teardown errors exist unchanged at 97be8fad9. The default_log_fn flake fails at the same rate at the parent commit.
+5. The merge helper now refuses a duplicate outcome key only when it appears on both sides of a conflict.
+6. Last Call row ae7d2742 filed and installed for Rick's broadcast b079341b.
+
 ## 2026.11.11 - Session f55fd006 (Mr. Radio 🦉, manager; crew Maya, Sam, Krishna) | VM e2e_a 503/8/25 to 532/3/0; podcast auto-play merged; duplicate check found running on Fable
 
 **Resume here**: memento `.claude-memento-mr-radio-f55fd006.md` (22:27 amend). Three items wait on Rick: rows 92076977 and 4fc04cb5, and the crontab pause.
