@@ -19,11 +19,13 @@ import shlex
 import sys
 
 import cosa.rest.job_registry as jr
+from cosa.repo import code_health_settings as chs
 from lupin_mcp import host_snapshot as hs
 from cosa.repo.symindex import librarian_tick as lt
 from cosa.rest.job_service import expand, paths_of
 
 ENTRY_SCRIPT = "src/scripts/cron-job.sh"
+CONFIG_ENV   = "LUPIN_CONFIG_MGR_CLI_ARGS"
 BLOCK_TAG    = lt.GENERATED_BLOCK_TAG                                 # ends the header comment, so a re-run removes the old header too
 LOCK_OWNER   = "cron-generate"
 BACKUP_DIR   = "io/jobs/crontab-backups"
@@ -40,6 +42,7 @@ def managed_jobs( registry ):
         - returns the jobs with cron_managed true, in registry order
         - raises ValueError for a managed job with no cron_tag, because its old lines could not be found again
         - raises ValueError for a job that has a run block, a cron_tag or a cron or after-boot schedule entry and is neither managed nor given a cron_exclusion_reason, so no job is left out without a stated reason
+        - raises ValueError for a managed job whose repo is not lupin and that has no repo_root, because its lines could not name the checkout
     """
     for job in registry[ "jobs" ]:
         scheduled = any( "cron" in entry or "after_boot_seconds" in entry for entry in job.get( "schedule", [] ) )
@@ -48,10 +51,29 @@ def managed_jobs( registry ):
     jobs = [ job for job in registry[ "jobs" ] if job.get( "cron_managed" ) ]
     for job in jobs:
         if not job.get( "cron_tag" ): raise ValueError( f"job {job[ 'job' ]} is cron_managed but has no cron_tag" )
+        if chs.repo_of( job ) != chs.DEFAULT_REPO and not ( job.get( "repo_root" ) or "" ).strip(): raise ValueError( f"job {job[ 'job' ]} names repo {chs.repo_of( job )} but has no repo_root" )
     return jobs
 
 
-def lines_for_job( job, root, data, environ ):
+def repo_parts( job, root, data, defaults ):
+    """
+    Work out what differs in the lines of a job that belongs to another repo.
+
+    Requires:
+        - job is a managed registry job; root is the Lupin checkout; defaults is the registry's defaults block
+    Ensures:
+        - returns ( base, data, assign, flag ): the checkout that placeholders and the log path expand against, the data folder, the config assignment placed before the script, and the --root flag placed after the trigger
+        - a Lupin job returns ( root, data, "", "" ), so its lines are the ones written before the repo key existed
+        - another repo's job returns its own repo_root, that checkout's data folder, the config its row names (run.env, else the registry default), and --root with the repo_root
+    """
+    if chs.repo_of( job ) == chs.DEFAULT_REPO: return root, data, "", ""
+    from cosa.repo.symindex.paths import data_dir
+    base   = job[ "repo_root" ]
+    config = job.get( "run", {} ).get( "env", {} ).get( CONFIG_ENV ) or defaults[ "run_env" ][ CONFIG_ENV ]
+    return base, data_dir( base ), f"{CONFIG_ENV}={shlex.quote( config )} ", f" --root {shlex.quote( base )}"
+
+
+def lines_for_job( job, root, data, environ, defaults=None ):
     """
     Build the cron lines of one job.
 
@@ -62,18 +84,20 @@ def lines_for_job( job, root, data, environ ):
         - returns one line per schedule entry that has a cron or after_boot_seconds value; every_seconds entries have no cron form and add none
         - a cron entry is "<schedule> <command> # <tag>"; a boot entry is "@reboot sleep <n> && <command> # <tag>", or "@reboot <command> # <tag>" for n 0
         - the command is the entry script with the job name and cron or boot, appending to the job's cron_log (default io/jobs/<job>/cron.log)
+        - a job of another repo adds that repo's config assignment before the script and --root <repo_root> after the trigger, and expands its log path against that repo's checkout; see repo_parts
     """
     if job.get( "cron_enabled", True ) is False: return []
-    values = paths_of( root, data )
+    base, base_data, assign, flag = repo_parts( job, root, data, defaults )
+    values = paths_of( base, base_data )
     log    = expand( job.get( "cron_log", "{root}/io/jobs/" + job[ "job" ] + "/cron.log" ), *values )
     script = shlex.quote( f"{root}/{ENTRY_SCRIPT}" )
     out    = []
     for entry in job[ "schedule" ]:
         if "cron" in entry:
-            out.append( f"{entry[ 'cron' ]} {script} {job[ 'job' ]} cron >> {shlex.quote( log )} 2>&1 # {job[ 'cron_tag' ]}" )
+            out.append( f"{entry[ 'cron' ]} {assign}{script} {job[ 'job' ]} cron{flag} >> {shlex.quote( log )} 2>&1 # {job[ 'cron_tag' ]}" )
         elif "after_boot_seconds" in entry:
             wait = f"sleep {entry[ 'after_boot_seconds' ]} && " if entry[ "after_boot_seconds" ] else ""
-            out.append( f"@reboot {wait}{script} {job[ 'job' ]} boot >> {shlex.quote( log )} 2>&1 # {job[ 'cron_tag' ]}" )
+            out.append( f"@reboot {wait}{assign}{script} {job[ 'job' ]} boot{flag} >> {shlex.quote( log )} 2>&1 # {job[ 'cron_tag' ]}" )
     return out
 
 
@@ -98,7 +122,7 @@ def generate( root, environ, only=None ):
         jobs = [ job for job in jobs if job[ "job" ] == only ]
         if not jobs: raise ValueError( f"--only names {only}, which is not a cron_managed job" )
     lines    = [] if only is not None else [ HEADER ]
-    for job in jobs: lines.extend( lines_for_job( job, root, data, environ ) )
+    for job in jobs: lines.extend( lines_for_job( job, root, data, environ, registry[ "defaults" ] ) )
     tags     = ( *( () if only is not None else ( BLOCK_TAG, ) ), *( f"# {job[ 'cron_tag' ]}" for job in jobs ) )
     legacy   = tuple( word for job in jobs for word in job.get( "cron_replaces", [] ) )
     return lines, tags, legacy

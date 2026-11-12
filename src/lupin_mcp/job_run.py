@@ -137,6 +137,7 @@ def main( argv=None, environ=None, runner=stream_run ):
 
     Ensures:
         - returns the command's exit code, or EXIT_NO_JOB when the job is not registered or no command was given
+        - with --from-registry and --root, the registry command gets --root <value> appended, so a job of another repo runs against that repo's checkout
     """
     environ = os.environ if environ is None else environ
     parser  = argparse.ArgumentParser( description="Run a command and write its job-summary/1 record." )
@@ -146,6 +147,7 @@ def main( argv=None, environ=None, runner=stream_run ):
     parser.add_argument( "--drained-re", default=None )
     parser.add_argument( "--from-registry", action="store_true", help="take the command and its environment from the job's registry entry, as Run now does" )
     parser.add_argument( "--trigger", default="cron", choices=sorted( TRIGGER_WORDS ), help="with --from-registry: how this run was started" )
+    parser.add_argument( "--root", default=None, help="with --from-registry: the checkout of the repo this row belongs to, passed to the command as --root" )
     parser.add_argument( "command", nargs=argparse.REMAINDER )
     args    = parser.parse_args( argv )
     command = args.command[ 1: ] if args.command[ :1 ] == [ "--" ] else args.command
@@ -162,6 +164,7 @@ def main( argv=None, environ=None, runner=stream_run ):
     if args.from_registry and not command:
         command, environ = run_command( registry, entry, root, data, args.trigger, environ )
         command = with_trigger( command, args.trigger )
+        if args.root is not None: command = [ *command, "--root", args.root ]
     path = jr.resolve_path( entry[ "summary_path" ], root, data )
     return run_and_report( path, args.job, command, args.mode, args.count_re, args.drained_re, environ, runner, write_record=not entry.get( "own_summary" ), clean_codes=tuple( entry.get( "clean_exit_codes", [ 0 ] ) ) )
 

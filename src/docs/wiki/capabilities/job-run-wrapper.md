@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.job_run.recorded_since@780f57c2a5
   - lupin_mcp.job_run.run_and_report@f90c309b7d
   - lupin_mcp.job_run.with_trigger@3bf3b60abf
-  - lupin_mcp.job_run.main@4809ee4156
+  - lupin_mcp.job_run.main@9b49da7fa3
 ---
 # Job run wrapper
 
@@ -20,6 +20,7 @@ Runs a shell job and leaves it a job-summary record; the record format is in [[j
 - A command that cannot start is failed with exit 127.
 - `last_int` reads the last integer the first group of a pattern captures, commas removed, or None. `--count-re` gives the scan debt; `--drained-re` gives what the run drained.
 - `with_trigger` swaps the value after a `--trigger` flag in the command: cron stays cron, boot becomes `reboot`.
+- With `--from-registry`, a `--root <checkout>` flag is appended to the registry command, so a job of another repo runs against that repo's checkout.
 - After the record, it asks [[job-host-snapshot]] for a fresh crontab copy.
 
 ## Jobs that write their own record
