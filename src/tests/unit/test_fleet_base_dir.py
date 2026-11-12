@@ -33,3 +33,9 @@ def test_the_marker_writer_keys_on_the_seats_own_repo( tmp_path, monkeypatch ):
     assert src._resolve_base_dir( "/x/seatrepo" ) == str( tmp_path / "seatrepo" )
     monkeypatch.setattr( src, "resolve_repo_root", lambda: "/x/livered" )
     assert src._resolve_base_dir( None ) == str( tmp_path / "livered" )
+
+
+def test_an_explicit_empty_directory_is_returned_as_given_by_the_helper_and_the_observer( tmp_path, monkeypatch ):
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path ) )
+    assert fleet_base_dir( "" ) == "" and obs._resolve_base_dir( "" ) == ""
+    assert fleet_base_dir( "", "/x/r" ) == ""
