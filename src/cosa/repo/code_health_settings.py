@@ -261,6 +261,16 @@ def repo_settings( config, name ):
              "wiki_dir": wiki_dir( config, name ), "filed_title_prefix": filed_title_prefix( config, name ) }
 
 
+def repo_of( job ):
+    """
+    Name the repo a registry job belongs to.
+
+    Ensures:
+        - returns the job's repo key, or lupin when it has none, so every row written before the key existed stays Lupin's
+    """
+    return job[ "repo" ] if "repo" in job else DEFAULT_REPO
+
+
 def registry_repo_names( registry ):
     """
     List the repos that carry a row in the job registry.
@@ -271,7 +281,7 @@ def registry_repo_names( registry ):
     Ensures:
         - returns a sorted list of names: each job's `repo` value, or lupin for a job with no `repo` key
     """
-    return sorted( { job[ "repo" ] if "repo" in job else DEFAULT_REPO for job in registry[ "jobs" ] } )
+    return sorted( { repo_of( job ) for job in registry[ "jobs" ] } )
 
 
 def name_mismatches( checkouts ):

@@ -199,3 +199,8 @@ def test_data_dir_follows_the_ini_key_and_refuses_a_path( config, tmp_path, monk
 def test_data_dir_builds_the_process_config_when_none_is_given( config, tmp_path, monkeypatch ):
     monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "d" ) )
     assert chs.data_dir( tmp_path / "myrepo" ) == tmp_path / "d" / "myrepo" / "code-health"
+
+
+def test_repo_of_names_the_repo_a_job_belongs_to_and_defaults_to_lupin():
+    assert chs.repo_of( { "job": "x" } ) == "lupin"
+    assert chs.repo_of( { "job": "x", "repo": "other" } ) == "other"

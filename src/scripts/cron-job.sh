@@ -2,7 +2,7 @@
 #
 # cron-job.sh — the one entry point every generated Lupin cron line runs.
 #
-# Usage:  cron-job.sh <job> [cron|boot]
+# Usage:  cron-job.sh <job> [cron|boot] [job_run flags, for example --root <checkout> for a job of another repo]
 #
 # Cron's environment is bare. This script gives every job the same one: it names the checkout,
 # the interpreter and PYTHONPATH, reads the secrets file if there is one, then hands over to
@@ -45,4 +45,4 @@ fi
 export LUPIN_ROOT="$ROOT"
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 cd "$ROOT" || exit 1
-exec "$PYTHON" -m lupin_mcp.job_run --job "$JOB" --from-registry --trigger "$TRIGGER"
+exec "$PYTHON" -m lupin_mcp.job_run --job "$JOB" --from-registry --trigger "$TRIGGER" "${@:3}"
