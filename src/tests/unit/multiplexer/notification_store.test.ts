@@ -775,3 +775,39 @@ test("F0-d: a re-arrival (same id_hash) does NOT re-emit — dedup via the byId.
   emitRaw(bus, { id_hash: "t-dup", sender_id: "cc@x#s7", message: "once", priority: "urgent" });
   assert.equal(intents.length, 1, "the second arrival returns at byId.has — no double-speak");
 });
+
+// ===========================================================================
+// Row 802c94d3 — store_podcast_autoplay_intent: a finished podcast's Play Here link, on live arrivals only.
+// ===========================================================================
+
+const PLAY_HERE_ABSTRACT = "**Podcast Activity Report**\n\n**English**: [📝 Script](/api/io/file?path=a.md) | [▶️ Play Here](/app/audio?path=%2Fio%2Fa.mp3&title=Release%20notes&embed=1) | [🎧 Listen](/app/audio?path=%2Fio%2Fa.mp3&title=Release%20notes)";
+
+function capturePodcastIntents(bus: ReturnType<typeof createEventBusForTesting>): Array<{ id_hash: string; embedUrl: string; title: string }> {
+  const out: Array<{ id_hash: string; embedUrl: string; title: string }> = [];
+  bus.on<{ id_hash: string; embedUrl: string; title: string }>("store_podcast_autoplay_intent", (e) => out.push(e.payload));
+  return out;
+}
+
+test("802c94d3: a live arrival whose abstract carries a Play Here link emits one podcast intent with its URL and clean title", () => {
+  const { bus } = setupStore();
+  const intents = capturePodcastIntents(bus);
+  emitRaw(bus, { id_hash: "pod-1", sender_id: "cc@x#p1", message: "Podcast complete.", priority: "medium", abstract: PLAY_HERE_ABSTRACT });
+  assert.deepEqual(intents, [ { id_hash: "pod-1", embedUrl: "/app/audio?path=%2Fio%2Fa.mp3&title=Release%20notes&embed=1", title: "Release notes" } ]);
+});
+
+test("802c94d3: a re-arrival of the same id does not emit a second podcast intent", () => {
+  const { bus } = setupStore();
+  const intents = capturePodcastIntents(bus);
+  const frame = { id_hash: "pod-2", sender_id: "cc@x#p2", message: "Podcast complete.", priority: "medium", abstract: PLAY_HERE_ABSTRACT };
+  emitRaw(bus, frame);
+  emitRaw(bus, frame);
+  assert.equal(intents.length, 1, "the byId re-arrival guard returns before the emit");
+});
+
+test("802c94d3: an abstract with no Play Here link, or none at all, emits no podcast intent", () => {
+  const { bus } = setupStore();
+  const intents = capturePodcastIntents(bus);
+  emitRaw(bus, { id_hash: "pod-3", sender_id: "cc@x#p3", message: "listen only", abstract: "[🎧 Listen](/app/audio?path=%2Fio%2Fa.mp3)" });
+  emitRaw(bus, { id_hash: "pod-4", sender_id: "cc@x#p4", message: "no abstract" });
+  assert.deepEqual(intents, []);
+});

@@ -1508,6 +1508,8 @@ class NotificationsUI {
                 this.appTimezone = config.app_timezone || null;
                 if ( !this.appTimezone ) this.error( "Client config carries no app_timezone: times show in UTC" );
                 this.tfeAutoFixDefault = !!config.test_fix_expediter_auto_fix_enabled;
+                // Row 802c94d3: a finished podcast starts in the Play Here player by itself when this is true.
+                this.podcastAutoPlayHereOnFinish = config.podcast_auto_play_here_on_finish === true;
                 this.envLabel = config.env_label || "DEVELOPMENT";
                 this.updateElement( "env-label", `[${this.envLabel}]: ` );
 
@@ -1578,6 +1580,7 @@ class NotificationsUI {
             this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
             this.appTimezone = null;                                // No default: the zone comes from the server, so time displays show UTC
             this.tfeAutoFixDefault = false;                         // Conservative fallback
+            this.podcastAutoPlayHereOnFinish = false;               // A failed fetch leaves a finished podcast to the Play Here link
 
             // TTS preview-and-pause fallbacks — conservative: feature DISABLED
             // on config-fetch failure so we don't accidentally truncate audio.
@@ -6848,6 +6851,9 @@ class NotificationsUI {
             this.log( "No notification data in WebSocket event" );
             return;
         }
+
+        // A finished podcast's Play Here link starts by itself (row 802c94d3); live arrivals only.
+        this._maybeAutoPlayPodcast( notification );
 
         // Manager-lineage badge — live-path parity with the full-load (senders-visible)
         // hydration (Tiffany 2026-06-17). The server now stamps top-level
@@ -21100,6 +21106,8 @@ class NotificationsUI {
         // /app/audio?path= link is deliberately left alone and still opens a
         // new tab (Rick wants both paths).
         document.addEventListener( "click", ( ev ) => this._handleEmbeddedAudioClick( ev ) );
+        // The player page says when its audio plays or ends, so a finished podcast can queue behind it (row 802c94d3).
+        window.addEventListener( "message", ( ev ) => this._onPodcastPlayerMessage( ev ) );
 
         // Authenticated-download interception. /api/io/file is guarded by a
         // Bearer-token dependency that reads the Authorization HEADER only, and
@@ -21372,7 +21380,7 @@ class NotificationsUI {
      * @returns {HTMLElement} the overlay element (for tests / callers)
      */
     _showPodcastOverlay( audioUrl, title ) {
-        // Single instance — replace any existing overlay.
+        // Single instance — replace any existing overlay (silently: a replacement is not a close).
         const existing = document.getElementById( "podcast-overlay" );
         if ( existing ) existing.remove();
 
@@ -21470,7 +21478,108 @@ class NotificationsUI {
      */
     _dismissPodcastOverlay() {
         const overlay = document.getElementById( "podcast-overlay" );
-        if ( overlay ) overlay.remove();
+        if ( !overlay ) return;
+        overlay.remove();
+        this._onPodcastOverlayClosed();
+    }
+
+    // ---- Podcast auto-play (row 802c94d3) -------------------------------------------------------
+    // A finished podcast job's notification carries a Play Here link in its abstract. When the INI
+    // setting `podcast auto play here on finish` is true the first such link opens in the Play Here
+    // overlay at once. Audio already playing is never cut off, and two podcasts finishing together
+    // play one after the other: a podcast that finishes meanwhile waits in a queue. A browser that
+    // blocks the start gets a visible Play button inside the player page (audio-player.html).
+
+    /**
+     * The queue state of the auto-play, created on first use.
+     *
+     * @returns {{waiting: Array<{url: string, title: string}>, ended: boolean, seen: Set<string>}}
+     */
+    _podcastAutoState() {
+        if ( !this._podcastAuto ) this._podcastAuto = { waiting: [], ended: false, seen: new Set() };
+        return this._podcastAuto;
+    }
+
+    /**
+     * The first Play Here URL in a markdown abstract, or null.
+     *
+     * It is an `/app/audio?path=` link that carries embed=1.
+     *
+     * @param {string|null|undefined} abstract
+     * @returns {string|null}
+     */
+    _firstPlayHereLink( abstract ) {
+        if ( typeof abstract !== "string" ) return null;
+        for ( const match of abstract.matchAll( /\]\((\/app\/audio\?[^)\s]*)\)/g ) ) {
+            if ( /[?&]embed=1(?:&|$)/.test( match[ 1 ] ) ) return match[ 1 ];
+        }
+        return null;
+    }
+
+    /**
+     * Offer a live notification to the auto-play: start its podcast now, queue it, or ignore it.
+     *
+     * @param {Object} notification - the notification of a notification_queue_update frame
+     */
+    _maybeAutoPlayPodcast( notification ) {
+        if ( this.podcastAutoPlayHereOnFinish !== true ) return;
+        const url = this._firstPlayHereLink( notification.abstract );
+        if ( url === null ) return;
+        const id    = notification.id_hash || notification.id;
+        const state = this._podcastAutoState();
+        if ( id ) {
+            if ( state.seen.has( id ) ) return;
+            state.seen.add( id );
+        }
+        const title = this._podcastUrlTitle( url ) || "Podcast";
+        const busy  = document.getElementById( "podcast-overlay" ) !== null && !state.ended;
+        if ( busy ) { state.waiting.push( { url, title } ); return; }
+        this._startAutoPlayPodcast( { url, title } );
+    }
+
+    /**
+     * Show one podcast in the Play Here overlay and mark the player busy.
+     *
+     * @param {{url: string, title: string}} podcast
+     */
+    _startAutoPlayPodcast( podcast ) {
+        this._podcastAutoState().ended = false;
+        this._showPodcastOverlay( podcast.url, podcast.title );
+    }
+
+    /**
+     * Start the next waiting podcast, if there is one.
+     */
+    _startNextAutoPlayPodcast() {
+        const next = this._podcastAutoState().waiting.shift();
+        if ( next ) this._startAutoPlayPodcast( next );
+    }
+
+    /**
+     * Called when the overlay was dismissed: the player is free, so the next podcast starts.
+     */
+    _onPodcastOverlayClosed() {
+        this._podcastAutoState().ended = false;
+        this._startNextAutoPlayPodcast();
+    }
+
+    /**
+     * Handle a window message from the player page.
+     *
+     * `playing` marks the player busy; `ended` frees it and starts the next podcast.
+     * Only same-origin messages that carry the player's source are acted on.
+     *
+     * @param {MessageEvent} ev
+     */
+    _onPodcastPlayerMessage( ev ) {
+        const data = ev.data;
+        if ( ev.origin !== window.location.origin || !data || typeof data !== "object" || data.source !== "lupin-audio-player" ) return;
+        if ( data.event === "playing" ) {
+            this._podcastAutoState().ended = false;
+        } else if ( data.event === "ended" ) {
+            this._podcastAutoState().ended = true;
+            this._startNextAutoPlayPodcast();
+        }
     }
 
     /**

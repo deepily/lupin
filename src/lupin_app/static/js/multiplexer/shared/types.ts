@@ -242,6 +242,9 @@ export type LupinEventType =
   // fire-and-forget default-contextualized derivation (legacy :5987-5989 +
   // formatter :4176-4187). Payload: StoreNotificationTtsIntentPayload.
   | "store_notification_tts_intent"
+  // A finished podcast job's notification arrived live and its abstract carries a Play Here link: the page may start it
+  // in the Play Here player (row 802c94d3). Payload: StorePodcastAutoplayIntentPayload.
+  | "store_podcast_autoplay_intent"
   // store_audio_ended — 00c (Phase-6 playback engine) emits this signal-OUT-only
   // on NATURAL utterance completion. F0's TtsQueueStore SUBSCRIBES and self-
   // advances (COND-2 ownership boundary: P6 never calls advance() / touches the
@@ -1311,6 +1314,13 @@ export interface StoreTtsModeChangedPayload {
 // the store, as the Q&A pane does.
 /** Payload of `store_submit_jobs_changed`, which carries nothing. The pane reads the store. */
 export type StoreSubmitJobsChangedPayload = Record<string, never>;
+
+/** A finished podcast to play: the notification id, its Play Here URL and the title to show. */
+export interface StorePodcastAutoplayIntentPayload {
+  id_hash  : string;
+  embedUrl : string;
+  title    : string;
+}
 
 // store_notification_tts_intent payload (F0-d producer seam). Emitted by
 // NotificationStore on every SPOKEN new-arrival (high/urgent). `id_hash` is the
