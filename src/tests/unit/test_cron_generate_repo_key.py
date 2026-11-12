@@ -113,6 +113,17 @@ def test_job_run_appends_the_root_flag_after_the_trigger_only_when_it_is_given( 
     assert other == [ *plain, "--root", "/work/other" ]
 
 
+def test_a_second_repos_data_placeholder_expands_to_its_own_data_folder_not_lupins( tmp_path, monkeypatch ):
+    """The patched data_dir answers root/data, so Lupin's and the other repo's folders differ."""
+    root = second_repo_tree( tmp_path, monkeypatch, cron_log="{data}/librarian/librarian.log" )
+    lines, _tags, _legacy = cg.generate( root, { } )
+    other = [ l for l in lines if l.endswith( "# dup-other-tag" ) ]
+    assert len( other ) == 2, "one cron line and one boot line"
+    for line in other:
+        assert ">> /work/other/data/librarian/librarian.log 2>&1" in line
+        assert str( tmp_path ) not in line.split( ">>" )[ 1 ], "no part of the log path is Lupin's data folder"
+
+
 def entry_script_run( tmp_path, *extra ):
     """Run cron-job.sh under cron's empty environment on a probe job; return its stdout lines."""
     real = pathlib.Path( REAL_ROOT )
