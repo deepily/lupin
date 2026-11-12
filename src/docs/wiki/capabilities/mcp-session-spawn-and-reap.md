@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.session_spawner.dismiss_sessions@5a0fcfbaba
   - lupin_mcp.session_spawner.list_spawned_sessions@47ba7c5ac6
   - lupin_mcp.reap_memento.seats_to_withhold@253ba85cda
-  - lupin_mcp.self_respin_core.perform_self_respin@7b69144c56
+  - lupin_mcp.self_respin_core.perform_self_respin@26c890bc9e
 ---
 # MCP session spawn and reap
 

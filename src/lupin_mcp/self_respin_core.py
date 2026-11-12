@@ -1089,7 +1089,7 @@ def perform_self_respin(
     base            = base_dir if base_dir is not None else _resolve_base_dir( repo_root )
     bridge_path     = resolve_bridge_path_fn( session_id ) if wake_nonce else None
     do_wake         = bool( wake_nonce and bridge_path )
-    wake_proof_path = os.path.join( base, f"{_WAKE_PROOF_PREFIX}{session_id}.marker" ) if do_wake else None
+    wake_proof_path = _wake_proof_path( base, session_id ) if do_wake else None
     # A stale proof from a PRIOR cycle must not pre-satisfy this cycle's oracle; remove
     # it so only the seat's THIS-cycle proof (mtime >= this fired_at) can confirm RETURNED.
     if wake_proof_path:
@@ -1111,7 +1111,7 @@ def perform_self_respin(
     # The send stamp the fire point creates (row 855e4dd0). A stamp left over from a
     # PRIOR cycle would anchor this cycle's window on a send that already happened —
     # a deadline in the past — so it is cleared here, exactly as the wake proof is.
-    keys_sent_path  = os.path.join( base, f"{KEYS_SENT_PREFIX}{session_id}.marker" )
+    keys_sent_path  = _keys_sent_path( base, session_id )
     _best_effort_remove( keys_sent_path )
 
     write_json_fn( marker_path, marker )
@@ -1581,13 +1581,13 @@ def _default_ask( persona ):   # pragma: no cover - live MCP ask boundary (tests
 
 # The observer's marker + wake-proof + send-stamp names — imported by name so the two
 # files agree on the ONE shape each: the marker filename (MARKER_PREFIX), the wake-proof
-# artifact filename (WAKE_PROOF_PREFIX), the proof's nonce line (WAKE_PROOF_NONCE_LINE)
-# the seat echoes and the observer reads back, and the send-stamp filename
-# (KEYS_SENT_PREFIX) this injector creates and the observer times its window from.
+# path (wake_proof_path), the proof's nonce line (WAKE_PROOF_NONCE_LINE) the seat echoes
+# and the observer reads back, and the send-stamp path (keys_sent_path) this injector
+# creates and the observer times its window from.
 from cosa.agents.heartbeat_arbiter.self_respin_observer import (
     MARKER_PREFIX as _MARKER_PREFIX,
-    WAKE_PROOF_PREFIX as _WAKE_PROOF_PREFIX,
+    wake_proof_path as _wake_proof_path,
     WAKE_PROOF_NONCE_LINE as _WAKE_PROOF_NONCE_LINE,
     DISPUTE_PREFIX as _DISPUTE_PREFIX,
-    KEYS_SENT_PREFIX,
+    keys_sent_path as _keys_sent_path,
 )
