@@ -4,9 +4,10 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.presentation_generator.renderers.visual_registry.VisualRenderer@bc1d480c23
   - cosa.agents.presentation_generator.renderers.visual_registry.VisualRendererRegistry@36a7db9119
-  - cosa.agents.presentation_generator.renderers.mermaid.MermaidRenderer@09cc6bafec
-  - cosa.agents.presentation_generator.renderers.matplotlib_renderer.MatplotlibRenderer@c124ca14ce
-  - cosa.agents.presentation_generator.renderers.d2_renderer.D2Renderer@33b2e925bc
+  - cosa.agents.presentation_generator.renderers.mermaid.MermaidRenderer@cdbe0d4aa8
+  - cosa.agents.presentation_generator.renderers.matplotlib_renderer.MatplotlibRenderer@abddf60832
+  - cosa.agents.presentation_generator.renderers.d2_renderer.D2Renderer@27f8d8bdf3
+  - cosa.agents.presentation_generator.renderers.fenced_block.extract_fenced_block@f0dc503f2b
   - cosa.agents.presentation_generator.renderers.nano_banana.NanoBananaRenderer@c9d573383b
   - cosa.agents.presentation_generator.renderers.veo_renderer.VeoRenderer@dda275290e
   - cosa.agents.presentation_generator.renderers.placeholder.PlaceholderRenderer@e1854f7122
@@ -29,6 +30,7 @@ The seventh phase of [[presentation-generation]] finds each `<!-- VISUAL: type |
 - `MatplotlibRenderer` runs the generated code in a separate `python3` process with a 30-second timeout and the system temp directory as its working directory. It inherits the environment and has no other restriction. `D2Renderer` needs the `d2` program on `PATH` and gives up after 30 seconds.
 - `GeminiImageClient` budgets per presentation: 1.00 for images (0.067 each) and 5.00 for video (0.20 a second). Past the limit it returns `False` and the type falls back. Every image call prints a loud notice to stderr.
 - `VeoRenderer` writes an MP4. It adds a still-frame `<img>` inside the `<video>` tag only if `ffmpeg` is on `PATH` and the extraction (15-second timeout) leaves the frame file. Otherwise the tag holds no image. A deck gets at most `max_videos` (default 5, which the orchestrator keeps): the sixth returns `None` and falls back to a placeholder.
+- The mermaid, matplotlib and d2 renderers read the first fenced block of the reply with `extract_fenced_block`. Each keeps its own fallback for a reply with no fence.
 - `PptxDeckRenderer` embeds raster images only: d2 SVGs and mermaid blocks are a known gap, and those slides keep their text.
 
 ## How to extend
