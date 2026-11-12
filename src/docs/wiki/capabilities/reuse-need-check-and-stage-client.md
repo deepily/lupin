@@ -17,7 +17,7 @@ pins:
   - lupin_mcp.reuse_need_check.load_index@9fae1cc3ff
   - lupin_mcp.reuse_need_check.main@e9bfcadee0
   - lupin_mcp.reuse_candidates.canonical@335bf66db1
-  - lupin_mcp.reuse_candidates.CandidateStage@22a0a9c8a2
+  - lupin_mcp.reuse_candidates.CandidateStage@0516ff9f08
 ---
 # Reuse need check and candidate stage client
 Two pieces of the end-to-end run ([[reuse-end-to-end-run]]). The need check tests that a need sentence describes its member without handing Jev the answer. The stage client asks the Lupin server for a shortlist.

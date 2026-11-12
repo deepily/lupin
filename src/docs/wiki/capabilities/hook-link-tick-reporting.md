@@ -7,7 +7,7 @@ pins:
   - cosa.utils.hook_link_tick.deliver@e4728759a7
   - cosa.utils.hook_link_tick.fingerprint@9e70573955
   - cosa.utils.hook_link_tick.main@0f6fdf5342
-  - cosa.utils.hook_link_tick.post_json@36a047e0be
+  - cosa.utils.hook_link_tick.post_json@c9ee83425b
   - cosa.utils.hook_link_tick.post_query@59a641fd22
   - cosa.utils.hook_link_tick.read_findings@a012f52fe0
   - cosa.utils.hook_link_tick.report_lines@7cdf20e578
