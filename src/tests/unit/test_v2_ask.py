@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from cosa.rest.routers import v2_ask
+from tests.helpers.typed_config import TypedConfigFake
 
 
 # ────────────────────────────────────────────────────────────── result fixture
@@ -356,12 +357,7 @@ def test_resume_422_on_missing_pending_id():
 
 # ────────────────────────────────────────────────────────────── build_ask_flow
 
-class _FakeConfig:
-    def __init__( self, values ):
-        self._values = values
-
-    def get( self, key, default=None, return_type="string", silent=False ):
-        return self._values.get( key, default )
+_FakeConfig = TypedConfigFake
 
 
 def _patch_stack( monkeypatch, captured ):
