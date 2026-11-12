@@ -41,6 +41,28 @@ class BoundedCCCostEstimate:
         )
 
 
+def temperature_to_steer( temperature: float, high: float, low: float, high_steer: str, low_steer: str ) -> str:
+    """
+    Turn a legacy sampling temperature into a system-prompt creativity steer.
+
+    `ClaudeAgentOptions` exposes no per-call temperature, so each bounded-CC client folds the old
+    per-call value into its system prompt as a sentence. The clients differ in where the cut-offs
+    sit and in the wording, so both are arguments.
+
+    Requires:
+        - temperature, high and low are floats, with low below high
+        - high_steer and low_steer are the sentences to use
+
+    Ensures:
+        - returns high_steer when temperature >= high
+        - returns low_steer when temperature <= low
+        - returns "" for a mid-range temperature, where no steer is needed
+    """
+    if temperature >= high: return high_steer
+    if temperature <= low: return low_steer
+    return ""
+
+
 class BoundedCCClientBase:
     """
     Construction, typed calls and strict JSON output for a bounded-CC client.

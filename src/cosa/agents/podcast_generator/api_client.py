@@ -27,9 +27,10 @@ Notes:
 import logging
 from typing import Optional, Any
 from dataclasses import dataclass
+from functools import partial
 
 from .config import PodcastConfig
-from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate
+from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate, temperature_to_steer
 from cosa.agents.shared.sdk_error_result import raise_error_result
 # D6-LENIENT JSON recovery — single source of truth lives in the parsing module
 from .prompts.script_generation import lenient_json_loads
@@ -73,27 +74,10 @@ PODCAST_SCRIPT_TOOLS = []
 PODCAST_PERMISSION_MODE = "default"
 
 
-def _temperature_to_steer( temperature: float ) -> str:
-    """
-    Map a legacy per-call temperature into a system-prompt creativity steer.
-
-    `ClaudeAgentOptions` exposes no per-call temperature, so the creativity
-    intent is expressed in the prompt instead. Higher temperature means more
-    creative dialogue; lower means more focused, precise output.
-
-    Requires:
-        - temperature is a float
-
-    Ensures:
-        - returns a non-empty steer string for high (>= 0.75) or low (<= 0.55)
-          temperatures
-        - returns "" for mid-range temperatures (no explicit steer)
-    """
-    if temperature >= 0.75:
-        return "Write with creative, natural, varied phrasing."
-    if temperature <= 0.55:
-        return "Write with precise, focused, deterministic phrasing."
-    return ""
+# The cut-offs and wording are this client's own; the rule is the shared one.
+_temperature_to_steer = partial( temperature_to_steer, high=0.75, low=0.55,
+                                 high_steer="Write with creative, natural, varied phrasing.",
+                                 low_steer="Write with precise, focused, deterministic phrasing." )
 
 
 @dataclass

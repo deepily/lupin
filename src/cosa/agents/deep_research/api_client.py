@@ -28,10 +28,12 @@ import json
 import logging
 from typing import Optional, Any
 from dataclasses import dataclass, field
+from functools import partial
 
 from .config import ResearchConfig
 from .cost_tracker import CostTracker, BudgetExceededError
 from .rate_limiter import WebSearchRateLimiter
+from cosa.agents.shared.bounded_cc_client import temperature_to_steer
 from cosa.agents.shared.sdk_error_result import raise_error_result
 
 # Claude Agent SDK — graceful fallback (mirrors the BFE/TFE/Podcast import guard)
@@ -97,33 +99,10 @@ RESEARCH_PERMISSION_MODE_WITH_TOOLS = "plan"
 RESEARCH_PERMISSION_MODE_NO_TOOLS   = "default"
 
 
-def _temperature_to_steer( temperature: float ) -> str:
-    """
-    Translate a legacy sampling temperature into a system-prompt steer.
-
-    `ClaudeAgentOptions` exposes no per-call temperature, so the historical
-    per-call value is folded into the system prompt as a qualitative creativity
-    instruction.
-
-    Requires:
-        - temperature is a float
-
-    Ensures:
-        - returns a non-empty steer string for clearly-creative (>= 0.9) or
-          clearly-precise (<= 0.5) temperatures
-        - returns "" for mid-range temperatures (no steer needed)
-
-    Args:
-        temperature: The legacy sampling temperature (typically 0.0–1.0)
-
-    Returns:
-        str: A creativity-steer sentence, or "" when no steer is warranted
-    """
-    if temperature >= 0.9:
-        return "Be expansive and creative in your reasoning; explore multiple angles."
-    if temperature <= 0.5:
-        return "Be precise, literal, and deterministic; avoid speculation."
-    return ""
+# The cut-offs and wording are this client's own; the rule is the shared one.
+_temperature_to_steer = partial( temperature_to_steer, high=0.9, low=0.5,
+                                 high_steer="Be expansive and creative in your reasoning; explore multiple angles.",
+                                 low_steer="Be precise, literal, and deterministic; avoid speculation." )
 
 
 def extract_json_object( text: str ) -> dict:
