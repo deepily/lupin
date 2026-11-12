@@ -50,6 +50,7 @@ from enum        import Enum
 from pathlib     import Path
 
 from cosa.utils.atomic_json import load_json_dict
+from cosa.utils.fleet_base_dir import fleet_base_dir
 
 
 # The on-disk receipt filename shape: <RECEIPT_PREFIX><session_id>.json, living
@@ -360,10 +361,7 @@ def _resolve_base_dir( base_dir ):
         - returns base_dir unchanged when given
         - returns fleet_data_root() (lazily imported, to keep this leaf pure) when None
     """
-    if base_dir:
-        return base_dir
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root   # lazy: keep the leaf pure
-    return str( fleet_data_root() )
+    return fleet_base_dir( base_dir or None )
 
 
 def write_boot_receipt( *, session_id, persona=None, tmux_session=None,

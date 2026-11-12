@@ -31,6 +31,7 @@ import threading
 from dataclasses import dataclass
 from enum        import Enum
 
+from cosa.utils.fleet_base_dir import fleet_base_dir
 from cosa.utils.stoppable_daemon import StoppableDaemonMixin
 
 
@@ -673,10 +674,7 @@ def _resolve_base_dir( base_dir ):
         - returns base_dir when provided (tests + explicit callers win)
         - returns fleet_data_root() (lazily imported to keep this leaf pure) when None
     """
-    if base_dir is not None:
-        return base_dir
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root   # lazy: keep the leaf pure
-    return str( fleet_data_root() )
+    return fleet_base_dir( base_dir )
 
 
 def wake_proof_path( base, session_id ):
