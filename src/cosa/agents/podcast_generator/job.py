@@ -26,7 +26,6 @@ from typing import Optional, List
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.podcast_generator.script_types import apply_script_type, get_profile, validate_review
-from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from cosa.rest.job_state import JobState
 
 
@@ -236,10 +235,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             raise FileNotFoundError( f"Research document not found: {self.research_path}" )
 
         # Set sender_id and target_user for notifications
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
+        self._set_chain_identity( cosa_interface )
 
         # Set job_id for auto-injection into all orchestrator notify() calls
         voice_io.set_job_id( self.id_hash )
@@ -447,10 +443,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
         import urllib.parse
 
         # Set sender_id and target_user for notifications
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
+        self._set_chain_identity( cosa_interface )
 
         filename = os.path.basename( self.research_path )
 

@@ -2,7 +2,7 @@
 capability: podcast-generation
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.podcast_generator.job.PodcastGeneratorJob@3b7ea7f9f9
+  - cosa.agents.podcast_generator.job.PodcastGeneratorJob@d2da877bd3
   - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent@8633e1f5ba
   - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.do_all_async@abdf9f3367
   - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.from_saved_script@c8ab07d7ed
