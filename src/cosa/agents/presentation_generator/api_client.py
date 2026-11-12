@@ -105,39 +105,24 @@ class CostEstimate( BoundedCCCostEstimate ):
     and the SDK-reported telemetry (`total_sdk_cost_usd`). Under bounded Claude
     Code the SDK telemetry is covered by the fixed Max plan, not billed per token.
     """
-    # Pricing per million tokens (as of 2026-04)
-    OPUS_INPUT_PRICE    : float = 15.0
-    OPUS_OUTPUT_PRICE   : float = 75.0
-    SONNET_INPUT_PRICE  : float = 3.0
-    SONNET_OUTPUT_PRICE : float = 15.0
+    # Pricing per million tokens (as of 2026-04); Opus and Sonnet are in the base class
     HAIKU_INPUT_PRICE   : float = 0.80
     HAIKU_OUTPUT_PRICE  : float = 4.0
 
-    def add_usage( self, model: str, input_tokens: int, output_tokens: int ):
+    def price_pair( self, model: str ):
         """
-        Add token usage from an LLM call (token-based price estimate).
+        Pick the per-million-token prices for a model name, with a Haiku tier.
 
-        Args:
-            model: Model name used
-            input_tokens: Input tokens consumed
-            output_tokens: Output tokens generated
+        Requires:
+            - model is a string
+
+        Ensures:
+            - returns the Haiku prices for a name holding "haiku" and not "opus"
+            - returns the base class's prices for any other name
         """
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_api_calls += 1
-
-        model_lower = model.lower()
-        if "opus" in model_lower:
-            cost = ( input_tokens * self.OPUS_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.OPUS_OUTPUT_PRICE / 1_000_000 )
-        elif "haiku" in model_lower:
-            cost = ( input_tokens * self.HAIKU_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.HAIKU_OUTPUT_PRICE / 1_000_000 )
-        else:  # Sonnet or other
-            cost = ( input_tokens * self.SONNET_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.SONNET_OUTPUT_PRICE / 1_000_000 )
-
-        self.estimated_cost_usd += cost
+        lower = model.lower()
+        if "opus" not in lower and "haiku" in lower: return self.HAIKU_INPUT_PRICE, self.HAIKU_OUTPUT_PRICE
+        return super().price_pair( model )
 
 
 class PresentationAPIClient( BoundedCCClientBase ):
