@@ -22,5 +22,6 @@ The one loop the expediter, swe-team and deep research config dataclasses share 
 ## Invariants
 - Every mapped field must have a default, because the default is passed to the reader.
 - `BugFixExpediterConfig`, `SweTeamConfig` and `TestFixExpediterConfig` use it.
+- `PodcastConfig` reads its 31 scalar fields through it with `silent=True`; hosts, voices, languages and owner email stay its own.
 - `PresentationConfig` reads through `load_kwargs_from_ini` with a module key map, then turns a blank slide count into `None`.
 - `ResearchConfig` reads through `load_kwargs_from_ini` with `silent=True`, then turns a blank `audience_context` into `None` and prints its own one debug line.

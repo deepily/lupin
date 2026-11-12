@@ -13,10 +13,12 @@ quick_smoke_test() and __main__ are coverage-excluded.
 
 import pytest
 
+from cosa.agents.shared.config_loader import load_kwargs_from_ini
 from cosa.agents.podcast_generator.config import (
     HostPersonality,
     VoiceProfile,
     PodcastConfig,
+    PODCAST_INI_KEYS,
     LANGUAGE_NAMES,
     DEFAULT_CURIOUS_HOST,
     DEFAULT_EXPERT_HOST,
@@ -239,6 +241,44 @@ class TestPodcastConfigFromConfig:
         assert config.target_languages        == [ "en", "es-MX", "fr" ]   # blanks dropped
         assert config.audience_context        == "ML architects"
         assert config.target_duration_minutes == 25
+
+    def test_every_default_matches_the_dataclass_default( self ):
+        config   = PodcastConfig.from_config( FakeCfg() )
+        expected = PodcastConfig()
+        for field_name in PODCAST_INI_KEYS:
+            assert getattr( config, field_name ) == getattr( expected, field_name ), field_name
+
+    def test_every_mapped_key_reaches_its_own_field( self ):
+        assert len( PODCAST_INI_KEYS ) == 31
+        values = {}
+        for i, ( field_name, ini_key ) in enumerate( PODCAST_INI_KEYS.items() ):
+            values[ ini_key ] = f"v{i}"
+        raw = load_kwargs_from_ini( PodcastConfig, RawCfg( values ), PODCAST_INI_KEYS, silent=True )
+        assert raw == { field_name : values[ ini_key ] for field_name, ini_key in PODCAST_INI_KEYS.items() }
+
+    def test_max_source_chars_reads_the_shared_unprefixed_key( self ):
+        config = PodcastConfig.from_config( FakeCfg( values={ "agent source content max chars": "123" } ) )
+        assert config.max_source_chars == 123
+
+    def test_every_read_is_silent( self ):
+        seen = []
+        class SilentSpy( FakeCfg ):
+            def get( self, key, default=None, silent=False, return_type="string" ):
+                if key in PODCAST_INI_KEYS.values(): seen.append( silent )
+                return super().get( key, default=default, silent=silent, return_type=return_type )
+        PodcastConfig.from_config( SilentSpy() )
+        assert len( seen ) == 31
+        assert all( seen )
+
+
+class RawCfg:
+    """Returns each key's value as stored, ignoring the requested type."""
+
+    def __init__( self, values ):
+        self.values = values
+
+    def get( self, key, default=None, silent=False, return_type="string" ):
+        return self.values[ key ]
 
 
 # ----------------------------------------------------------------------------
