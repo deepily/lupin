@@ -68,3 +68,61 @@ def test_the_injected_runner_gets_the_path_as_its_cwd():
     assert mc.main_checkout_of( Path( "/some/tree" ), run ) == "/r/main"
     assert seen[ "cwd" ] == "/some/tree"
     assert seen[ "argv" ][ -1 ] == "--git-common-dir"
+
+
+def test_the_default_timeout_is_ten_seconds_and_a_caller_can_change_it():
+    """The timeout reaches the runner unchanged, so a slow caller can ask for more."""
+    seen = []
+    def run( argv, cwd=None, timeout=None ):
+        seen.append( timeout )
+        return SimpleNamespace( returncode=0, stdout="/r/.git\n" )
+    mc.main_checkout_of( "/x", run )
+    mc.main_checkout_of( "/x", run, timeout=60 )
+    assert seen == [ 10, 60 ]
+
+
+def test_a_runner_that_returns_no_stdout_answers_none():
+    """A runner that leaves stdout as None is not a path."""
+    run = lambda argv, cwd=None, timeout=None: SimpleNamespace( returncode=0, stdout=None )
+    assert mc.main_checkout_of( "/x", run ) is None
+
+
+def test_a_runner_that_raises_anything_answers_none():
+    """The teardown's injected runner could raise any error, and it still must not raise."""
+    def run( argv, cwd=None, timeout=None ): raise RuntimeError( "boom" )
+    assert mc.main_checkout_of( "/x", run ) is None
+
+
+def test_the_teardown_keeps_its_sixty_second_limit_and_its_never_raises_contract():
+    """_main_root hands the runner a 60 second limit and answers None when the runner raises."""
+    from cosa.agents.shared import seat_teardown as st
+    seen = []
+    def run( argv, cwd=None, timeout=None ):
+        seen.append( timeout )
+        return SimpleNamespace( returncode=0, stdout="/r/main/.git\n" )
+    def bad( argv, cwd=None, timeout=None ): raise RuntimeError( "boom" )
+    assert st._main_root( "/t", run ) == "/r/main"
+    assert seen == [ 60 ]
+    assert st._main_root( "/t", bad ) is None
+
+
+def test_seat_worktree_resolves_a_symlinked_owner_to_its_real_path( tmp_path, monkeypatch ):
+    """The provisioning guard compares real paths, so a symlinked answer must be resolved."""
+    from cosa.utils import seat_worktree as sw
+    real = ( tmp_path / "real" ).resolve()
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to( real )
+    monkeypatch.setattr( sw, "main_checkout_of", lambda path: str( link ) )
+    assert sw._main_checkout_of( "/anywhere" ) == str( real )
+
+
+def test_session_spawner_resolves_a_symlinked_owner_to_its_real_path( tmp_path, monkeypatch ):
+    """The spawner's main checkout is the resolved path, not the symlink git printed."""
+    from lupin_mcp import session_spawner as sp
+    real = ( tmp_path / "real" ).resolve()
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to( real )
+    monkeypatch.setattr( sp, "main_checkout_of", lambda start: str( link ) )
+    assert sp._main_checkout_of( Path( "/anywhere" ) ) == real

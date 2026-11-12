@@ -59,7 +59,7 @@ def _main_root( top: str, run: Callable ) -> Optional[ str ]:
         - returns the directory holding the shared .git, as an absolute path
         - returns None when git cannot say; never raises
     """
-    return main_checkout_of( top, run )
+    return main_checkout_of( top, run, timeout=60 )
 
 
 def _wait_until_gone( seat_name: str, path: str, alive_fn: Callable, wait_seconds: float,
