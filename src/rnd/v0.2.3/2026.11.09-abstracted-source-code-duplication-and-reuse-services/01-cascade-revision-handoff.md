@@ -381,3 +381,17 @@ MUTATION-ARM 2026-11-11 ph1-s4 (C-AC3, one-time): detached worktree at a5f30efe0
 
 RULING cosa.repo.symindex.spec.check_module_base :: DISTINCT refuses a configured Python source set whose dirs all lie under src/ when module_base is the repo root; _src_root in import_origin finds a checkout's src directory from a module file and refuses nothing :: reuse-receipt: e28ac31764647f6e :: search: rs-bb74ff8565
 REUSE-OUTCOME e28ac31764647f6e :: rs-bb74ff8565 :: WROTE_NEW refuses a configured Python source set whose dirs all lie under src/ when module_base is the repo root; _src_root in import_origin finds a checkout's src directory from a module file and refuses nothing :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.2-ph1s5
+
+## Reuse review: duplicate-check ceiling from the INI (row 98615d7a, step ph1-s3)
+
+`resolve_ceiling` is the one new definition. The lookup's nearest symbols are `code_health_settings.read_positive_int` and `duplicate_check_ceiling`, which `resolve_ceiling` calls for the key itself; it adds only the rule that a hand-run `--ceiling` or `--cap` wins.
+
+RULING lupin_mcp.duplicate_check_daily.resolve_ceiling :: DISTINCT applies the command-line precedence (a given ceiling or cap wins) and otherwise calls code_health_settings.duplicate_check_ceiling for the lupin key; that wrapper reads the key and has no flag rule :: reuse-receipt: f570e484e03b91a3 :: search: rs-0021280a4c
+REUSE-OUTCOME f570e484e03b91a3 :: rs-0021280a4c :: WROTE_NEW applies the command-line precedence (a given ceiling or cap wins) and otherwise calls code_health_settings.duplicate_check_ceiling for the lupin key; that wrapper reads the key and has no flag rule :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s3
+
+## Reuse review: what reinstall_command prints for the ceiling (row 6ea1421d, step ph1-s13)
+
+`reinstall_command` printed no limit after the ceiling moved to the INI, so it said nothing about where the ceiling is. `ceiling_note` is the one new definition: it names the key and never prints a flag or a literal that could go stale. The lookup found nothing that words such a note.
+
+RULING lupin_mcp.duplicate_check_daily.ceiling_note :: DISTINCT builds the sentence that names the INI key holding the ceiling, with its current value or a blank warning; no existing symbol words that note, and the settings reader it calls only returns the number :: reuse-receipt: aeb9f0c563c38835 :: search: rs-e7e9277ef1
+REUSE-OUTCOME aeb9f0c563c38835 :: rs-e7e9277ef1 :: WROTE_NEW builds the sentence that names the INI key holding the ceiling, with its current value or a blank warning; no existing symbol words that note, and the settings reader it calls only returns the number :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s13

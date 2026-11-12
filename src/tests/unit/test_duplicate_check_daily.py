@@ -277,9 +277,10 @@ def test_main_finds_the_root_from_the_working_directory_when_none_is_given( repo
     assert json.loads( out[ 0 ] )[ "window" ][ "end" ] == git( repo, "rev-parse", "main" )
 
 
-def test_main_needs_a_cap():
+def test_main_with_no_limit_and_a_blank_key_refuses( capsys ):
     with pytest.raises( SystemExit ):
-        dd.main( [ "--root", "." ] )
+        dd.main( [ "--root", "." ], config=KeyConfig( { } ) )
+    assert "external repo lupin duplicate check ceiling" in capsys.readouterr().err
 
 
 def test_the_counting_backend_counts_each_call_and_passes_the_answer_through():
@@ -352,6 +353,14 @@ def test_no_slot_is_after_last_call_and_the_baseline_slot_sits_between_the_daily
     assert not hasattr( dd, "SECOND_SCHEDULE" ), "the 18:07 slot is gone"
 
 
+class KeyConfig:
+    """A config that answers get from a dict, honouring the key and the default."""
+
+    def __init__( self, values ): self.values = values
+
+    def get( self, key, default="", silent=False, return_type="string" ): return self.values[ key ] if key in self.values else default
+
+
 def cron_main( tmp_path, argv, cron, environ=None ):
     """Ensures: runs main in a cron mode and returns ( code, stdout lines, stderr lines )."""
     out, err = [], []
@@ -376,6 +385,23 @@ def test_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron
     assert list( ( tmp_path / "io" / "duplicate-check-daily" / "crontab-backups" ).iterdir() ), "a backup is written before each change"
 
 
+def blank_key_main( tmp_path, cron, flag ):
+    """Run main in a cron mode with a blank ceiling key; return ( code, stdout lines )."""
+    cron[ "file" ].write_text( f"0 * * * * other\n0 10 * * * a {dd.CRON_TAG}\n@reboot b {dd.CRON_TAG}\n" )
+    out = []
+    code = dd.main( [ flag ], environ={ "LUPIN_ROOT": str( tmp_path ), **cron[ "env" ] }, out=out.append, err=lambda t: None, crontab_cmd=cron[ "cmd" ], config=KeyConfig( { } ) )
+    return code, out
+
+
+def test_status_works_with_a_blank_ceiling_key( tmp_path, cron ):
+    assert blank_key_main( tmp_path, cron, "--status" ) == ( 0, [ "installed: 2 lines" ] )
+
+
+def test_uninstall_works_with_a_blank_ceiling_key_and_removes_the_cron_lines( tmp_path, cron ):
+    assert blank_key_main( tmp_path, cron, "--uninstall" ) == ( 0, [ "uninstalled" ] )
+    assert cron[ "file" ].read_text().strip() == "0 * * * * other"
+
+
 def test_status_says_not_installed_when_there_is_no_crontab( tmp_path, cron ):
     assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "not installed" ]
 
@@ -388,7 +414,7 @@ def test_an_uninstall_without_the_shared_lock_is_refused_with_one_and_the_reason
 def test_the_cron_modes_that_build_lines_need_a_limit_and_status_and_uninstall_do_not( tmp_path, cron ):
     for mode in ( "--print-install", "--install" ):
         with pytest.raises( SystemExit ):
-            cron_main( tmp_path, [ mode ], cron, cron[ "env" ] )
+            dd.main( [ mode ], environ=cron[ "env" ], config=KeyConfig( { } ) )
     assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 0 ] == 0
 
 
@@ -1039,7 +1065,8 @@ def test_the_reinstall_text_is_the_same_whatever_the_baseline_or_limit_a_run_had
     asked = dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: False ), branch="wip-old", ceiling=1500, baseline=True )
     assert plain[ "reinstall" ] == held[ "reinstall" ] == asked[ "reinstall" ], "the registry holds the limit, the binary and the baseline, so the text does not carry them"
     text = dd.reinstall_command( "/m", "/py", 40, "/c", "b" )
-    first, second = text.split( "\n" )
+    first, second, third = text.split( "\n" )
+    assert third == dd.ceiling_note(), "no config means no printed value"
     assert first == "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time."
     assert second.startswith( "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src " ) and second.endswith( " -m lupin_mcp.cron_generate --install" )
 
@@ -1199,4 +1226,5 @@ def test_a_baseline_run_leaves_test_code_out_and_counts_it( repo ):
 def test_the_reinstall_text_is_pinned_to_a_literal():
     assert dd.reinstall_command( "/m", "/py", 40, "/c", "b" ) == (
         "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
-        "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+        "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install\n"
+        "The judge-call ceiling is not in the registry: it is the INI key `external repo lupin duplicate check ceiling` in src/conf/lupin-app.ini." )
