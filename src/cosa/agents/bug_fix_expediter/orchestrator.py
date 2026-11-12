@@ -46,7 +46,7 @@ from cosa.agents.shared.git_strategist import GitStrategist
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.fix_executor import FixExecutor
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
-from cosa.agents.shared.diagnosis_json import parse_diagnosis_json
+from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
 from cosa.agents.io_models.utils.json_object_recovery import extract_json_object
 
 # SWE Team reuse — safety, hooks, test runner (kept for back-compat;
@@ -570,14 +570,7 @@ class BFEOrchestrator:
         Returns:
             DiagnosisResult: Low-confidence fallback
         """
-        return DiagnosisResult(
-            root_cause          = reason,
-            error_category      = "unknown",
-            confidence          = 0.1,
-            evidence            = [ "Failed to parse structured diagnosis" ],
-            affected_components = [],
-            is_transient        = False,
-        )
+        return DiagnosisResult( **fallback_diagnosis_fields( reason ) )
 
     # =========================================================================
     # Phase 3: Proposal

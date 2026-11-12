@@ -108,6 +108,16 @@ class TestInit( unittest.TestCase ):
             )
         self.assertIsNone( orch.proxy )
 
+    def test_proxy_unknown_trust_model_is_refused_not_defaulted( self ):
+        from cosa.agents.decision_proxy.errors import InvalidTrustModelError
+        with patch( "cosa.agents.swe_team.strategy_builder.build_ini_engineering_strategy",
+                    MagicMock( side_effect=InvalidTrustModelError( "gaussian" ) ) ):
+            with self.assertRaisesRegex( InvalidTrustModelError, "gaussian" ):
+                BFEOrchestrator(
+                    dead_job_context=_ctx(), extra_context="", config=BugFixExpediterConfig(),
+                    session_id="s", job_id="bfe-1",
+                )
+
     def test_proxy_generic_exception_defaults_none( self ):
         with patch( "cosa.agents.swe_team.proxy.EngineeringStrategy",
                     MagicMock( side_effect=ValueError( "boom" ) ) ):
