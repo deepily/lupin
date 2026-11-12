@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.11 - Session f55fd006 (Mr. Radio 🦉, manager; crew Maya, Sam, Krishna) | VM e2e_a 503/8/25 to 532/3/0; podcast auto-play merged; duplicate check found running on Fable
+
+**Resume here**: memento `.claude-memento-mr-radio-f55fd006.md` (22:27 amend). Three items wait on Rick: rows 92076977 and 4fc04cb5, and the crontab pause.
+1. **VM test server** (row 8d67e474): merged 21dc74a43 (deploy recreates lupin-rest-test), f97b2bb00 (login wait leaves /auth/), 51a8730bf (half budgets 3300 s) and fa989d64d (mp3 fixture). The login fix cleared the admin_users red seen in 3 of 3 runs. The remaining reds are VM gaps: the Cloud Run embedding server answers 503, and claude-plans and skills-distillation are absent.
+2. **Podcast auto-play in Play Here** (row 802c94d3): Maya's 7279a0925. Typecheck and stylelint green, 103/103 TypeScript tests. Its e2e test runs on the VM next.
+3. **Duplicate check** (row 556238f5, closed): the drain stopped at 17:40 on Fable's 429. The judge is hard-coded `claude-fable-5-1`: 45,100 calls, about $2,014 notional. Rick ruled Sonnet out, and an Opus inter-rater study is proposed (row 4fc04cb5).
+4. **Quiet workers** (row 92076977): the multiplexer speaks every high-priority notify. Krishna's server-side downgrade d95a1b5e5 is green but held, because it also quiets Cheech and maria.
+5. **Pushed** 36a3e7da8..9c07a4aaa on Rick's yes. A chained command misses the `Bash(git push:*)` rule.
+
+**Checkpoint**: 2026.11.11 22:35; history and memento only, the code landed as reviewed merges.
+
 ## 2026.11.10 - Session 24d257d2 (Mr. Radio 🦉, manager; crew Sam, Krishna, Rio, Clayton, John, Tiffany, all reaped with verified mementos) | Push and VM install done; VM test server up; reuse back-fill A to F merged; next server update now checks itself
 
 - **Rick's end-of-session push** (row aadb5e4b): reuse gate exit 0, then `git push` to `340084718`. On the VM: code sync, an idle check, and a restart so the app migrated its schema. Preflight post read 78 passed, 0 blocking, then the VM was stopped. Rows 1dcecdb9 (the ~/.lupin file-modes check) and aadb5e4b closed.
