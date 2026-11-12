@@ -162,8 +162,19 @@ def test_a_missing_fleet_ledger_is_left_for_begin_run_to_refuse( config, tmp_pat
     assert rt.context_from_environment( make_lupin_repo( tmp_path ) ).ledger.path == tmp_path / "none.jsonl"
 
 
-def test_a_ledger_named_by_the_variable_is_not_held_to_the_key( config, tmp_path, monkeypatch, limit ):
-    led = make_ledger( tmp_path, limit + 1 )
+def test_a_run_on_a_drifted_ledger_named_by_the_variable_is_refused_before_it_sends_or_spends( config, tmp_path, monkeypatch, limit ):
+    led   = make_ledger( tmp_path, limit + 1 )
+    posts = []
+    _pack_env( monkeypatch )
+    monkeypatch.setenv( "LUPIN_REUSE_LEDGER_PATH", str( led.path ) )
+    monkeypatch.setenv( jt.KEY_VARIABLE, "fake-key" )
+    monkeypatch.setattr( jt, "_post", lambda *a: posts.append( a ) )
+    with pytest.raises( rt.ReuseError, match="LEDGER_DRIFT" ): rt.context_from_environment( make_lupin_repo( tmp_path ) )
+    assert posts == [] and led.total() == 0
+
+
+def test_a_ledger_named_by_the_variable_that_matches_the_key_is_admitted( config, tmp_path, monkeypatch, limit ):
+    led = make_ledger( tmp_path, limit )
     _pack_env( monkeypatch )
     monkeypatch.setenv( "LUPIN_REUSE_LEDGER_PATH", str( led.path ) )
     assert rt.context_from_environment( make_lupin_repo( tmp_path ) ).ledger.path == led.path

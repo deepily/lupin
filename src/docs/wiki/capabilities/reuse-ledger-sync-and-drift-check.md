@@ -19,6 +19,6 @@ pins:
 - `check_repo` reads the key through `code_health_settings` and runs the check on the repo's ledger. A blank key is refused with the key named; there is no code default.
 - `repo_root` finds lupin's root from the project root and any other repo's from its `external repo <name> path` key, refused when blank with `CodeHealthSettingError`.
 - `main` is `python -m lupin_mcp.reuse_ledger_sync sync|check --repo <name>`. Exit 0 done, 1 drift, 2 refused.
-- A packed live run on the repo's own ledger runs the check first, in `reuse_tools._packed_settings`. A drifted key refuses the run with `LEDGER_DRIFT` before the ledger admits it.
-- A ledger named by `LUPIN_REUSE_LEDGER_PATH` is not checked. A missing ledger is refused later by `begin_run`.
+- A packed live run checks the ledger it will read first, in `reuse_tools._packed_settings`. That is the repo's own, or the one `LUPIN_REUSE_LEDGER_PATH` names.
+- A drifted key refuses the run with `LEDGER_DRIFT` before the ledger admits it. A missing ledger is refused later by `begin_run`.
 - The installer's onboarding check (step ph1-s7 onward) is not wired yet.

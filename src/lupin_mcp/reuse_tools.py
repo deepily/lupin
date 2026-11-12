@@ -366,14 +366,14 @@ def _packed_settings( top ):
         raise ReuseError( "BAD_SPEND_LIMIT", f"a packed live run needs {CEILING_VARIABLE} (a positive whole number of tokens)" )
     run  = os.environ.get( RUN_NAME_VARIABLE ) or reuse_ledger.make_run_name( LOOKUP_RUN_PREFIX )
     path = os.environ.get( LEDGER_VARIABLE ) or reuse_ledger.ledger_path( top )
-    if not os.environ.get( LEDGER_VARIABLE ): _refuse_drifted_ledger( path )
+    _refuse_drifted_ledger( path )
     return { "pack_size": size, "sweeper": reuse_pack.packed_sweeper( size, shape=reuse_pack.SHAPE_WHOLE ), "request_shape": reuse_pack.SHAPE_WHOLE, "token_ceiling": ceiling,
              "run_name": run, "ledger": reuse_ledger.AccountLedger( path ), "single_use": True, "candidate_stage": _candidate_stage( top ) }
 
 
 def _refuse_drifted_ledger( path ):
     """
-    Refuse a run on the repo's own ledger when its limit row differs from the INI key.
+    Refuse a run whose ledger limit differs from the INI key.
 
     Ensures:
         - returns None when the key and the ledger agree; runs before the run asks the ledger to admit it, so nothing is spent
