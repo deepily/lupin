@@ -9,8 +9,10 @@ Design decisions:
 - Configurable limits to prevent runaway execution
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Literal, Optional
+
+from cosa.agents.shared.config_loader import load_kwargs_from_ini
 
 
 @dataclass
@@ -156,32 +158,12 @@ class ResearchConfig:
             "cancel_when_no_topics_ticked": "deep research cancel when no topics ticked",
         }
 
-        # Build kwargs from INI, falling back to dataclass defaults
-        kwargs       = {}
-        dc_fields    = { f.name: f for f in fields( cls ) }
+        # The shared loop reads each key, coerces by field type and falls back to the dataclass default.
+        # silent keeps the manager from printing a banner for every key the INI lacks.
+        kwargs = load_kwargs_from_ini( cls, config_mgr, key_map, silent=True )
 
-        for field_name, ini_key in key_map.items():
-            dc_field = dc_fields[ field_name ]
-            default  = dc_field.default
-
-            # Determine return_type based on field type
-            field_type = dc_field.type
-            if field_type == "bool" or field_type is bool:
-                return_type = "boolean"
-            elif field_type == "int" or field_type is int:
-                return_type = "int"
-            elif field_type == "float" or field_type is float:  # pragma: no cover - no float-typed ResearchConfig field + fixed key_map of the 23 real fields; this defensive coercion arm is unreachable
-                return_type = "float"
-            else:
-                return_type = "string"
-
-            value = config_mgr.get( ini_key, default=str( default ) if default is not None else "", silent=True, return_type=return_type )
-
-            # Handle empty string for Optional[str] fields
-            if field_name == "audience_context" and ( value == "" or value is None ):
-                value = None
-
-            kwargs[ field_name ] = value
+        # A blank audience_context means none was given
+        if kwargs[ "audience_context" ] == "": kwargs[ "audience_context" ] = None
 
         if debug: print( f"[ResearchConfig.from_config] Loaded {len( kwargs )} fields from INI" )
 

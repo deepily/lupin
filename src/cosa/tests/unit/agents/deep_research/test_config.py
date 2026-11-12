@@ -106,5 +106,65 @@ class TestFromConfig( unittest.TestCase ):
         self.assertIsInstance( cfg, ResearchConfig )
 
 
+class TestFromConfigReadsThroughTheSharedLoader( unittest.TestCase ):
+    """from_config reads through the shared loader: silently, with one debug line."""
+
+    def _recording_mgr( self ):
+        mgr = Mock()
+        mgr.get.side_effect = lambda ini_key, default=None, silent=False, return_type="string": default
+        return mgr
+
+    def test_every_key_is_read_once_with_silent_true( self ):
+        mgr = self._recording_mgr()
+        ResearchConfig.from_config( mgr )
+        self.assertEqual( mgr.get.call_count, 26 )
+        self.assertEqual( { call.kwargs[ "silent" ] for call in mgr.get.call_args_list }, { True } )
+        self.assertEqual( len( { call.args[ 0 ] for call in mgr.get.call_args_list } ), 26 )
+
+    def test_each_key_carries_the_field_default_and_a_type_coerced_return_type( self ):
+        mgr = self._recording_mgr()
+        ResearchConfig.from_config( mgr )
+        asked = { call.args[ 0 ]: ( call.kwargs[ "default" ], call.kwargs[ "return_type" ] ) for call in mgr.get.call_args_list }
+        self.assertEqual( asked[ "deep research lead model" ], ( "claude-opus-4-6", "string" ) )
+        self.assertEqual( asked[ "deep research max subagents complex" ], ( 10, "int" ) )
+        self.assertEqual( asked[ "deep research prefer primary sources" ][ 1 ], "boolean" )
+        self.assertEqual( asked[ "deep research audience context" ], ( None, "string" ) )
+
+    def test_debug_prints_one_summary_line_and_no_per_field_lines( self ):
+        import io
+        from contextlib import redirect_stdout
+        out = io.StringIO()
+        with redirect_stdout( out ):
+            ResearchConfig.from_config( self._recording_mgr(), debug=True )
+        self.assertEqual( out.getvalue().splitlines(), [ "[ResearchConfig.from_config] Loaded 26 fields from INI" ] )
+
+    def test_a_missing_audience_context_key_stays_none( self ):
+        self.assertIsNone( ResearchConfig.from_config( self._recording_mgr() ).audience_context )
+
+
+class TestFromConfigThroughTheRealManager( unittest.TestCase ):
+    """The real manager over the real INI returns each field as its annotated type."""
+
+    ARGS = ( "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini "
+             "config_block_id=Lupin:+Development" )
+
+    def test_every_field_has_its_annotated_type_and_an_empty_audience_context_is_none( self ):
+        import os
+        from dataclasses import fields
+        from cosa.config.configuration_manager import ConfigurationManager
+        os.environ[ "LUPIN_CONFIG_MGR_CLI_ARGS" ] = self.ARGS
+        mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", _reset_singleton=True )
+        try:
+            cfg = ResearchConfig.from_config( mgr )
+        finally:
+            ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", _reset_singleton=True )
+        typed = [ f for f in fields( ResearchConfig ) if f.type in ( int, bool ) ]
+        self.assertGreater( len( typed ), 5 )
+        for f in typed:
+            self.assertIs( type( getattr( cfg, f.name ) ), f.type, f.name )
+        self.assertIsInstance( cfg.lead_model, str )
+        self.assertNotEqual( cfg.audience_context, "" )
+
+
 if __name__ == "__main__":
     unittest.main()

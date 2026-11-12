@@ -87,3 +87,32 @@ def test_debug_prints_one_line_per_field_with_the_class_name_or_the_label( capsy
     load_kwargs_from_ini( _Cfg, _Mgr( {} ), { "count": "x count" } )
     out = capsys.readouterr().out.splitlines()
     assert out == [ "  [_Cfg] count = 9 (from INI: x count)", "  [Custom] count = 3 (from INI: x count)" ]
+
+
+class _SilentMgr:
+    """A manager whose get accepts silent and records the keywords it was given."""
+
+    def __init__( self ):
+        self.extra = []
+
+    def get( self, key, default=None, return_type=None, **extra ):
+        self.extra.append( extra )
+        return default
+
+
+def test_silent_left_false_leaves_the_argument_out_of_every_get():
+    mgr = _SilentMgr()
+    load_kwargs_from_ini( _Cfg, mgr, KEY_MAP )
+    assert mgr.extra == [ {}, {}, {}, {} ]
+
+
+def test_silent_true_is_passed_to_every_get():
+    mgr = _SilentMgr()
+    load_kwargs_from_ini( _Cfg, mgr, KEY_MAP, silent=True )
+    assert mgr.extra == [ { "silent": True } ] * 4
+
+
+def test_load_dataclass_passes_silent_through():
+    mgr = _SilentMgr()
+    load_dataclass_from_ini( _Cfg, mgr, KEY_MAP, silent=True )
+    assert mgr.extra == [ { "silent": True } ] * 4
