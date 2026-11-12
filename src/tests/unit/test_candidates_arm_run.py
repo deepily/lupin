@@ -222,6 +222,9 @@ class TestPage:
         text = ( tmp_path / "out" / "page.md" ).read_text()
         assert "abc123" in text and "## Arms not measured yet" in text and "| C1 |" in text
         assert "| all | 5 | " in text
+        import hashlib
+        assert f"| manifest_hash | {hashlib.sha256( manifest.read_bytes() ).hexdigest()} |" in text
+        assert f"| needs_sha | {hashlib.sha256( open( needs, 'rb' ).read() ).hexdigest()} |" in text
 
     def test_main_wires_the_real_environment( self, tmp_path, monkeypatch, capsys ):
         held = cache_for( [ "n1", "n2" ], { "n1": "parse_config" } )
