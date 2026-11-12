@@ -37,6 +37,7 @@ import time
 import cosa.utils.util as cu
 from cosa.utils.dm_text import dm_word_count
 from cosa.agents.llm_client_factory import LlmClientFactory
+from cosa.agents.llm_client_init import init_llm_client
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 
 # Everything deterministic is v1's and is IMPORTED, never re-declared. The repair layer
@@ -205,14 +206,7 @@ class DmQualityJudgeV2:
         if not self.qualitative_enabled:
             print( "[DmQualityJudgeV2] qualitative judging OFF — Length only (row ca7a2cbf)" )
 
-        try:
-            factory         = LlmClientFactory( debug=debug, verbose=verbose )
-            self._client    = factory.get_client( llm_spec_key, debug=debug, verbose=verbose )
-            self._available = True
-            if self.debug: print( f"[DmQualityJudgeV2] LLM client ready ({llm_spec_key})" )
-        except Exception as e:
-            print( f"[DmQualityJudgeV2] LLM client unavailable: {e}" )
-            self._available = False
+        self._client, self._available = init_llm_client( LlmClientFactory, llm_spec_key, "DmQualityJudgeV2", debug, verbose )
 
         self._processor = PromptTemplateProcessor( debug=debug, verbose=verbose )
 

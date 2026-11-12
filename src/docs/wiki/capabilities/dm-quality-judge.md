@@ -3,11 +3,11 @@ capability: dm-quality-judge
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.dm_quality_judge.get_dm_quality_judge@b060034101
-  - cosa.agents.dm_quality_judge.judge.DmQualityJudge@06245fe53c
+  - cosa.agents.dm_quality_judge.judge.DmQualityJudge@2ac1069f5e
   - cosa.agents.dm_quality_judge.judge.combine_overall@fe19fdce27
   - cosa.agents.dm_quality_judge.judge.length_bucket@3bfa371a1e
   - cosa.agents.dm_quality_judge.judge.round_half_up@20a8a00706
-  - cosa.agents.dm_quality_judge.judge_v2.DmQualityJudgeV2@f945264422
+  - cosa.agents.dm_quality_judge.judge_v2.DmQualityJudgeV2@d4e1570e41
 ---
 # DM quality judge
 

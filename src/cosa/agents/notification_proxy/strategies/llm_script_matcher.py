@@ -19,6 +19,7 @@ from typing import Optional
 
 import cosa.utils.util as cu
 from cosa.agents.llm_client_factory import LlmClientFactory
+from cosa.agents.llm_client_init import init_llm_client
 from cosa.agents.notification_proxy.config import DEFAULT_ACCEPTED_SENDERS
 from cosa.agents.notification_proxy.scalar_answers import drop_non_scalar_answers
 from cosa.agents.notification_proxy.xml_models import ScriptMatcherResponse, BatchScriptMatcherResponse
@@ -107,14 +108,7 @@ class LlmScriptMatcherStrategy:
             print( f"[LlmScriptMatcher] Loaded script '{profile}' with {len( self._entries )} entries" )
 
         # Create LLM client
-        try:
-            factory = LlmClientFactory( debug=debug, verbose=verbose )
-            self._client = factory.get_client( llm_spec_key, debug=debug, verbose=verbose )
-            self._available = True
-            if self.debug: print( f"[LlmScriptMatcher] LLM client ready ({llm_spec_key})" )
-        except Exception as e:
-            print( f"[LlmScriptMatcher] LLM client unavailable: {e}" )
-            self._available = False
+        self._client, self._available = init_llm_client( LlmClientFactory, llm_spec_key, "LlmScriptMatcher", debug, verbose )
 
         # Prompt template processor
         self._processor = PromptTemplateProcessor( debug=debug, verbose=verbose )
