@@ -367,3 +367,11 @@ REUSE-OUTCOME a0e97d596ca2d49f :: rs-b6052eaced :: EXTENDED cosa.repo.code_healt
 
 RULING cosa.memory.embedding_provider.EmbeddingProvider.read_info :: DISTINCT reads the whole info body pinned to the FastAPI server with the FastAPI key; _describe_engines_via_http reads only the engines block, from the model server, with its own key and config timeout :: reuse-receipt: ac764d07031009eb :: search: rs-6ba420a8d7
 REUSE-OUTCOME ac764d07031009eb :: rs-6ba420a8d7 :: WROTE_NEW reads the whole info body pinned to the FastAPI server with the FastAPI key; _describe_engines_via_http reads only the engines block, from the model server, with its own key and config timeout :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.10-ph1s9
+
+### Reuse review: stop-flag setters and agent __init__ copies (row 2448ae19, follow-ups 78431d50)
+
+Section anchor `6.1-agent-init-and-stop`. Both rulings are on existing code, so no REUSE-OUTCOME line is owed.
+
+RULING cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.request_stop :: DISTINCT only one real twin exists, PresentationOrchestratorAgent.request_stop, which also prints under debug; the stop methods of deep_research, podcast and swe_team also cancel tasks, set their own states and return results, and BFE goes through AgenticJobBase.request_cancel :: reuse-receipt: 494627436c81a85a :: search: rs-f679ff0c09
+
+RULING cosa.agents.math_agent.MathAgent.__init__ :: DISTINCT each agent forwards the explicit 12-argument signature to AgentBase.__init__ and then builds its own prompt placeholder and attributes, and sharing the forward needs kwargs that hide the signature; the one repeated fragment is the seven-tag response list in MathAgent and DateAndTimeAgent, which a constant could share but which is not an __init__ copy :: reuse-receipt: 837207f3cdfb93a3 :: search: rs-72e02143ed
