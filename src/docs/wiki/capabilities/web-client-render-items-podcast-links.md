@@ -7,8 +7,8 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.podcastLinks.filenameForIoDownload@255e66e283
   - src.lupin_app.static.js.multiplexer.render.podcastLinks.podcastUrlTitle@cdd2b9cee9
   - src.lupin_app.static.js.multiplexer.render.podcastLinks.podcastFullFaceUrl@9359679c48
-  - src.lupin_app.static.js.multiplexer.render.podcastLinks.dismissPodcastOverlay@f7b16a731e
-  - src.lupin_app.static.js.multiplexer.render.podcastLinks.showPodcastOverlay@f2d6086b89
+  - src.lupin_app.static.js.multiplexer.render.podcastLinks.dismissPodcastOverlay@3a7cfc6d69
+  - src.lupin_app.static.js.multiplexer.render.podcastLinks.showPodcastOverlay@391b7c13f0
   - src.lupin_app.static.js.multiplexer.render.podcastLinks.defaultDeps@9b7a644ec5
   - src.lupin_app.static.js.multiplexer.render.podcastLinks.downloadIoFileWithAuth@dc78229b1d
   - src.lupin_app.static.js.multiplexer.render.podcastLinks.handlePodcastLinkClick@3697d725fa
@@ -27,7 +27,7 @@ Claims the Play Here and Download links on a finished podcast card so they work 
 - `showPodcastOverlay( embedUrl, title )` appends one `#podcast-overlay` div with a title, a ⤢ button, a ✕ button and an iframe. The iframe shows the player's mini face, described in [[audio-player-page]].
 - The header shows the link's `title=` value, else the link text. `podcastUrlTitle( audioUrl )` returns it trimmed, or null.
 - ⤢ opens `podcastFullFaceUrl( audioUrl )` in a new tab and closes the widget. That URL drops `embed` and `autoplay`.
-- `dismissPodcastOverlay()` removes the div, which stops the audio. A second player replaces the first.
+- `dismissPodcastOverlay()` removes the div, which stops the audio, and tells the close listeners. A second player replaces the first without telling them. See [[web-client-podcast-autoplay]].
 ## Download
 - `downloadIoFileWithAuth( url, deps )` reads `lupin_access_token` from local storage and fetches with a bearer header. With no token it alerts and fetches nothing.
 - On success it saves the blob through a hidden anchor. A failed answer or thrown error is shown by alert.

@@ -748,6 +748,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-render-cards-tts]] — the speech queue pane: transport controls, active and waiting cards and the preview slider. `src.lupin_app.static.js.multiplexer.render` (ttsChrome, ttsCardShared, ttsActiveCard, ttsMinimizedCard, ttsPreviewSlider)
 - [[web-client-render-items-notification-item]] — one notification chat-bubble row and its prediction vote buttons. `src.lupin_app.static.js.multiplexer.render.templates` (notificationItem, predictionVoteControls)
 - [[web-client-render-items-podcast-links]] — making the Play Here and Download links of a finished podcast card work inside the multiplexer page. `src.lupin_app.static.js.multiplexer.render` (podcastLinks)
+- [[web-client-podcast-autoplay]] — a finished podcast starting in the Play Here player by itself, queued so audio never overlaps. `src.lupin_app.static.js.multiplexer` (wirePodcastAutoplay)
 - [[audio-player-page]] — the player page's mini face and full face, and the query values it reads. `src/lupin_app/static/html`
 - [[web-client-render-items-request-chips]] — a manager's pending promote or demote request on a board row, with Approve and Deny and a header count badge. `src.lupin_app.static.js.multiplexer.render` (requestChips)
 - [[web-client-render-items-status-badges]] — poke mute switch, listener error badge, missed badge and truncated-board banner. `src.lupin_app.static.js.multiplexer.render` (pokeMuteSwitch, listenerErrorBadge, missedBadge, truncationBanner)

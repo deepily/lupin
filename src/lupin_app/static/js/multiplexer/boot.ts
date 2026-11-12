@@ -40,6 +40,8 @@ import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
 import { createAwaitingResponseHydration } from "./stores/awaitingResponseHydration";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
+import { PodcastAutoplay, wirePodcastAutoplay } from "./wirePodcastAutoplay";
+import { isPodcastOverlayOpen, onPodcastOverlayClosed, showPodcastOverlay } from "./render/podcastLinks";
 import { wireTtsPlayback } from "./wireTtsPlayback";
 import { wireQaMetrics } from "./wireQaMetrics";
 import { resolveTransportSessionIds } from "./shared/transportSessionIds";
@@ -369,12 +371,16 @@ function bootMultiplexer(): void {
   // paint chorus until the answer lands, for the same reason the auto-fix box paints
   // unchecked: showing solo iconography before anyone has read the setting would claim a
   // monopoly mode nobody has confirmed.
+  // Row 802c94d3 — the same fetch carries `podcast_auto_play_here_on_finish`. A finished podcast starts in the Play Here
+  // player by itself when it is true. It is off until the answer lands (a failed fetch leaves it off), like the other flags.
+  const podcastAutoplayConfig = { enabled: false };
   apiClient.get<{
     tts_preview_enabled?                 : boolean;
     tts_preview_min_chars?               : number;
     app_timezone?                        : string;
     test_fix_expediter_auto_fix_enabled? : boolean;
     tts_interaction_mode?                : string;
+    podcast_auto_play_here_on_finish?    : boolean;
   }>("/api/config/client")
     .then((c) => {
       ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
@@ -386,12 +392,16 @@ function bootMultiplexer(): void {
         console.error("multiplexer: /api/config/client carries no app_timezone, so times show in UTC");
       }
       stores.submitJobs.setAutoFixDefault(!!c.test_fix_expediter_auto_fix_enabled);
+      podcastAutoplayConfig.enabled = c.podcast_auto_play_here_on_finish === true;
       renderer.setTtsInteractionMode(c.tts_interaction_mode === "solo" ? "solo" : "chorus");
     })
     .catch((err) => {
       // Keep legacy's defaults (disabled, 100 chars, chorus icons). With no app_timezone, times show in UTC.
       console.error("multiplexer: the client config fetch failed, so app_timezone is unset and times show in UTC", err);
     });
+  const podcastAutoplay = new PodcastAutoplay( { show: showPodcastOverlay, isOpen: isPodcastOverlayOpen }, () => podcastAutoplayConfig.enabled );
+  onPodcastOverlayClosed( () => podcastAutoplay.onClosed() );
+  wirePodcastAutoplay( eventBus, podcastAutoplay, window );
   wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({
     fraction : readLiveTtsFraction(),
     enabled  : ttsPreviewConfig.enabled,

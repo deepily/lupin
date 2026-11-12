@@ -771,7 +771,8 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
             "token_expiry_threshold_secs": 300,           # 5 mins in seconds
             "token_refresh_dedup_window_ms": 60000,       # 60 secs in milliseconds
             "websocket_heartbeat_interval_secs": 30,      # Reference value (secs)
-            "app_timezone": "America/New_York"            # IANA timezone for display
+            "app_timezone": "America/New_York",           # IANA timezone for display
+            "podcast_auto_play_here_on_finish": true      # a finished podcast starts in the Play Here player
         }
     """
     # Note: user_id parameter required by Depends() - validates JWT token
@@ -814,6 +815,12 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
     tts_preview_min_chars = config_mgr.get(
         "tts preview min chars",
         default=100, return_type="int"
+    )
+
+    # Podcast auto-play: a finished podcast job starts in the Play Here player by itself (row 802c94d3)
+    podcast_auto_play_here_on_finish = config_mgr.get(
+        "podcast auto play here on finish",
+        default=True, return_type="boolean"
     )
 
     # Commons Traffic Visibility — broadcast-card Recent Activity feature flag (2026-05-14)
@@ -872,6 +879,9 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
         "tts_preview_enabled"            : bool( tts_preview_enabled ),
         "tts_preview_fraction"           : float( tts_preview_fraction ),
         "tts_preview_min_chars"          : int( tts_preview_min_chars ),
+
+        # Podcast auto-play: the page starts a finished podcast's audio in the Play Here player when true
+        "podcast_auto_play_here_on_finish"                : bool( podcast_auto_play_here_on_finish ),
 
         # TTS interaction mode (chorus / solo) — drives mode-conditional icon
         # rendering for the per-session DND toggle on each sender card. Added

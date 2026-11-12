@@ -80,6 +80,7 @@ src/tests/e2e_ui/test_doc_viewer_folder_roots_upload.py
 src/tests/e2e_ui/test_poke_mute_switch.py
 src/tests/e2e_ui/test_multiplexer_podcast_play_here_and_download.py
 src/tests/e2e_ui/test_multiplexer_podcast_card_filed_before_load.py
+src/tests/e2e_ui/test_podcast_auto_play_here.py
 src/tests/e2e_ui/test_legacy_keep_place_holds_the_view_on_arrival.py
 src/tests/e2e_ui/test_legacy_keep_place_holds_the_history_pane.py
 src/tests/e2e_ui/test_legacy_focus_bar_toggles_row.py

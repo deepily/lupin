@@ -2,7 +2,7 @@
 capability: web-client-transport-and-auth
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.boot.bootMultiplexer@ef3d811699
+  - src.lupin_app.static.js.multiplexer.boot.bootMultiplexer@5398edc03b
   - src.lupin_app.static.js.multiplexer.transport.QueueTransport.BaseTransportImpl@65b2a06f2b
   - src.lupin_app.static.js.multiplexer.transport.AudioTransport.AudioTransportImpl@fd6e89149c
   - src.lupin_app.static.js.multiplexer.transport.ConnectionStateMachine.ConnectionStateMachineImpl@87cd2fa536
@@ -16,6 +16,7 @@ The multiplexer page opens two WebSockets, keeps a refreshable login token, and 
 
 ## What it does
 - `bootMultiplexer` sends a visitor with no access token to `/app/auth/login`. Otherwise it builds the transports with `createTransports` and starts them last, queue first. It also asks `/api/notifications/awaiting-response` for response cards filed while the page was closed and adds them to the action-required store. It gives the action-required renderer the prediction vote store, which mounts the thumbs controls on a card's hint. It gives the reading pane the holding-area store as the sender behind one-click approve links ([[task-approve-link]]). The pane also gets a row reader built on the api client (`taskReaderFor`) and the abstract tooltip for the 📋 ticket link. It mounts the Background Jobs pane ([[web-client-jobs-pane]]) on `#background-jobs-pane` and throws if that element is missing.
+- The same `/api/config/client` answer sets `podcast_auto_play_here_on_finish` for the podcast auto-play. It stays off until the answer lands and when the fetch fails.
 - Each transport extends `BaseTransportImpl`. It opens `/ws/queue/<id>` or `/ws/audio/<id>` and sends `auth_request` with the access token and its fixed event list.
 - A JSON frame goes on the bus under its `type`, with the frame minus `type` and `timestamp` as payload. Binary frames go to the handler given to `AudioTransportImpl.start`.
 - `ConnectionStateMachineImpl` gives each transport its own states: connecting, connected, reconnecting, backoff, offline, failed. Backoff is full jitter up to `min(1000 * 2^n, 30000)` ms, and 20 attempts end in failed.
