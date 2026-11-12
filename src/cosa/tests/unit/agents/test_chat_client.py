@@ -180,6 +180,14 @@ def test_stream_async_quiet_dot_progress_with_newline( capsys ):
     assert "." in capsys.readouterr().out
 
 
+def test_stream_async_leaves_the_dot_line_open( capsys ):
+    """The chat client prints no line break once its stream ends."""
+    _FakeAgent.stream_chunks = [ "a", "b" ]
+    c = _make( debug=False )
+    asyncio.run( c._stream_async( "prompt" ) )
+    assert capsys.readouterr().out == ".."
+
+
 # =========================================================================== #
 # run — sync + async context dispatch
 # =========================================================================== #

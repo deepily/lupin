@@ -5,6 +5,7 @@ from typing import Optional, Any
 import cosa.utils.util as du
 from cosa.agents.base_llm_client import format_duration_ms
 from cosa.agents.llm_completion import LlmCompletion
+from cosa.agents.base_llm_client import collect_stream_text
 
 from cosa.agents.token_counter import TokenCounter
 
@@ -149,40 +150,9 @@ class LlmClient:
         Returns:
             - Complete response string from the LLM
         """
-        output = [ ]
-        
-        if self.completion_mode:
-            # Use run_stream for LlmCompletion
-            # Wrap generation parameters in ModelSettings for pydantic_ai API
-            runtime_settings = ModelSettings( **generation_args )
-            async with self.model.run_stream( prompt, model_settings=runtime_settings ) as result:
-                # Stream text as deltas
-                counter = 0
-                async for chunk in result.stream_text( delta=True ):
-                    if self.debug and self.verbose:
-                        print( chunk, end="", flush=True )
-                    else:
-                        counter += 1
-                        if counter % 128 == 0: print()
-                        print( ".", end="", flush=True )
-                    output.append( chunk )
-        else:
-            # Use run_stream for Agent (Chat)
-            # Wrap generation parameters in ModelSettings for pydantic_ai API
-            runtime_settings = ModelSettings( **generation_args )
-            async with self.model.run_stream( prompt, model_settings=runtime_settings ) as result:
-                # Stream text as deltas
-                counter = 0
-                async for chunk in result.stream_text( delta=True ):
-                    if self.debug and self.verbose:
-                        print( chunk, end="", flush=True )
-                    else:
-                        counter += 1
-                        if counter % 128 == 0: print()
-                        print( ".", end="", flush=True )
-                    output.append( chunk )
-        
-        return "".join( output )
+        # Both LlmCompletion and Agent answer run_stream the same way; wrap generation parameters in ModelSettings for pydantic_ai API
+        runtime_settings = ModelSettings( **generation_args )
+        return await collect_stream_text( self.model.run_stream( prompt, model_settings=runtime_settings ), self.debug, self.verbose )
     
     async def run_async( self, prompt: str, stream: bool=False, **kwargs: Any ) -> str:
         """

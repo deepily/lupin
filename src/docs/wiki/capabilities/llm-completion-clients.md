@@ -2,7 +2,7 @@
 capability: llm-completion-clients
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.llm_client.LlmClient@f8d0767741
+  - cosa.agents.llm_client.LlmClient@e471e66b2e
   - cosa.agents.llm_completion.LlmCompletion@91250e5345
   - cosa.agents.llm_completion.CompletionStreamingContext@d2a8afebda
   - cosa.agents.llm_client_factory.LlmClientFactory.AgentWrapper@ca8ae7ddbc
