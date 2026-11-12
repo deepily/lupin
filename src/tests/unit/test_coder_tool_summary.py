@@ -35,7 +35,7 @@ def test_bash_truncates_long_command():
     for f in SUMMARIZERS:
         out = f( _block( "Bash", command=long_cmd ) )
         assert out.startswith( "Bash: " )
-        assert len( out[ len( "Bash: " ): ] ) <= 100
+        assert len( out[ len( "Bash: " ): ] ) == 100
 
 
 def test_bash_uses_only_first_line_of_multiline_command():

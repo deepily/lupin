@@ -113,27 +113,6 @@ class TestTheIsolationGuard:
 
 
 # ────────────────────────────────────────────────────────────────────────
-# _ts
-# ────────────────────────────────────────────────────────────────────────
-
-class TestTimestamp:
-
-    def test_ts_is_a_compact_utc_stamp( self ):
-        assert re.fullmatch( r"\d{8}T\d{6}Z", mod._ts() )
-
-    def test_ts_reads_the_clock_rather_than_returning_a_constant( self, monkeypatch ):
-        """Pins the stamp to a known instant so a hardcoded return value cannot pass."""
-        class _FixedDatetime:
-            @staticmethod
-            def now( tz ):
-                import datetime as _dt
-                return _dt.datetime( 2026, 8, 29, 22, 15, 30, tzinfo=tz )
-
-        monkeypatch.setattr( mod, "datetime", _FixedDatetime )
-        assert mod._ts() == "20260829T221530Z"
-
-
-# ────────────────────────────────────────────────────────────────────────
 # _banner
 # ────────────────────────────────────────────────────────────────────────
 

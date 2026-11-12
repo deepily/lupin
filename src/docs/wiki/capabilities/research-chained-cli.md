@@ -4,9 +4,8 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research_to_podcast.__main__.main@b4c655a2b5
   - cosa.agents.deep_research_to_podcast.__main__.parse_args@85d916d281
-  - cosa.agents.deep_research_to_podcast.__main__.parse_languages@541471daf4
-  - cosa.agents.deep_research_to_podcast.__main__.run_pipeline@ff3e840d54
-  - cosa.agents.deep_research_to_podcast.__main__.show_dry_run@6b122dce27
+  - cosa.agents.deep_research_to_podcast.__main__.run_pipeline@cb7158f826
+  - cosa.agents.deep_research_to_podcast.__main__.show_dry_run@86b85b571d
   - cosa.agents.deep_research_to_presentation.__main__.main@b4c655a2b5
   - cosa.agents.deep_research_to_presentation.__main__.parse_args@3cfb850589
   - cosa.agents.deep_research_to_presentation.__main__.run_pipeline@75ae99e310
@@ -23,7 +22,7 @@ Terminal entry points for the two chained pipelines in [[research-chained-pipeli
 ## What it does
 - `parse_args` reads the query, user email, budget, lead model, audience, audience context and the CLI-mode and dry-run switches. `add_deep_research_arguments` adds the first seven and `add_mode_arguments` adds the mode and debug switches, for both packages. Each package adds its own options: languages and segments, or duration, slide count and theme.
 - `main` calls `run_chained_cli`. That answers `--user-visible-args` first, before argparse checks the required options. It runs `show_dry_run` for a dry run, and otherwise exits with the code from `run_pipeline`.
-- `parse_languages` splits a comma list of language codes. It returns `None` when the string is empty.
+- The language list is read with `parse_languages_arg` from the podcast generator's CLI, which returns `None` when the string is empty.
 - `show_dry_run` prints the settings and the planned phases and output paths. It makes no model calls.
 - `run_pipeline` builds the chained agent and awaits `run_async`. It prints the paths and the cost split on success.
 - A partial result (research done, second step failed) prints the report path and a retry command and exits 1. Failure, interrupt or error also exits 1.

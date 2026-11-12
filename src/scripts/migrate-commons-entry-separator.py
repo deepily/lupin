@@ -32,7 +32,6 @@ import os
 import re
 import shutil
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
 
@@ -55,6 +54,7 @@ from lupin_mcp.commons_store import (
     LEGACY_ENTRY_SEPARATOR,
     _split_frontmatter,
 )
+from cosa.utils.utc_stamp import utc_compact_stamp
 
 
 # Regex matching the legacy `\n---\n` separator ONLY when followed by a valid
@@ -63,11 +63,6 @@ from lupin_mcp.commons_store import (
 _ENTRY_BOUNDARY_RE = re.compile(
     r"\n---\n(?=## \S+ \| .+? \S+ #[A-Za-z0-9_-]+)"
 )
-
-
-def _now_run_ts() -> str:
-    """ISO-style timestamp safe for use in directory names."""
-    return datetime.now( timezone.utc ).strftime( "%Y%m%dT%H%M%SZ" )
 
 
 def _migrate_body( body: str ) -> Tuple[ str, int ]:
@@ -188,7 +183,7 @@ def migrate_directory(
         - When with_backup is True and dry_run is False, backups land under
           `commons_dir/.pre-separator-migration-backup/<run-ts>/`
     """
-    run_ts       = _now_run_ts()
+    run_ts       = utc_compact_stamp()
     backup_dir   = commons_dir / ".pre-separator-migration-backup" / run_ts if with_backup else None
     files        = _enumerate_topic_files( commons_dir )
     per_file     : List[ dict ] = [ ]

@@ -60,6 +60,7 @@ from lupin_mcp.commons_store import (
     _split_frontmatter,
 )
 from lupin_mcp.cosa_voice_mcp import _derive_dm_topic
+from cosa.utils.utc_stamp import utc_compact_stamp
 
 
 # Short-form aliases that don't auto-derive via `_derive_dm_topic`. Keys are
@@ -68,11 +69,6 @@ from lupin_mcp.cosa_voice_mcp import _derive_dm_topic
 ALIAS_MAP : Dict[ str, str ] = {
     "radio": "mr_radio",   # Tiberius's manual workaround topic from 2026-05-17 Sub-bug C
 }
-
-
-def _now_run_ts() -> str:
-    """Timestamp for the backup-dir name (filesystem-safe)."""
-    return datetime.now( timezone.utc ).strftime( "%Y%m%dT%H%M%SZ" )
 
 
 def _derive_canonical_stem( filename: str ) -> str:
@@ -295,7 +291,7 @@ def main() -> int:
 
     backup_root : Optional[ Path ] = None
     if not args.no_backup and not args.dry_run:
-        backup_root = commons_dir / ".pre-migration-backup" / _now_run_ts()
+        backup_root = commons_dir / ".pre-migration-backup" / utc_compact_stamp()
         print( f"Backup dir: {backup_root}" )
 
     print( f"=== Migrating {commons_dir} ===" )

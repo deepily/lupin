@@ -6,7 +6,7 @@ pins:
   - cosa.utils.worktree_artifacts.provision_worktree_artifacts@fd62ae8430
   - cosa.agents.shared.worktree_context.WorktreeContext@f26451f4ff
   - cosa.agents.shared.seat_teardown.retire_seat_worktree@dd06d0a3d6
-  - cosa.agents.shared.worktree_reaper.drain_then_remove@5c58cfdd7d
+  - cosa.agents.shared.worktree_reaper.drain_then_remove@3d4638ca10
   - cosa.agents.shared.worktree_reaper.reconcile_worktrees@d7ff867a1c
   - cosa.agents.shared.worktree_reaper.sweep_merged_branches@02e1d8c83d
   - cosa.agents.shared.worktree_refusal_ledger.report_refusals@08e4b0b1dd

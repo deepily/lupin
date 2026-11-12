@@ -45,6 +45,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 import cosa.utils.util as cu
+from cosa.utils.utc_stamp import utc_compact_stamp
 
 
 WIP_COMMIT_PREFIX = "WIP: auto-saved at reap"
@@ -129,12 +130,6 @@ def _git( run: Callable, cwd: str, *args: str, timeout: int = 60 ) -> dict:
         "stderr"     : stderr,
         "returncode" : proc.returncode,
     }
-
-
-def _utc_stamp( now: Optional[ datetime ] ) -> str:
-    """Return an ISO-ish UTC stamp for the WIP commit / rescue-branch label."""
-    dt = now if now is not None else datetime.now( timezone.utc )
-    return dt.strftime( "%Y%m%dT%H%M%SZ" )
 
 
 # ==========================================================================
@@ -409,7 +404,7 @@ def evacuate_blockers( worktree_path: str, blockers: list, evacuation_root: str,
         - blockers are tree-relative paths from find_ignored_blockers (a trailing "/"
           marks a directory that could not be expanded; it moves whole)
         - evacuation_root is a directory outside worktree_path
-        - stamp is _utc_stamp()'s value for this reap
+        - stamp is utc_compact_stamp()'s value for this reap
 
     Ensures:
         - destination is <evacuation_root>/<YYYY-MM-DD>-<tree name>-<stamp>, created new;
@@ -532,7 +527,7 @@ def drain_then_remove(
         if debug: print( f"[worktree_reaper] could not list ignored files, refusing: {worktree_path}" )
         return result
     if ignored[ "blockers" ] and evacuation_root is not None:
-        moved = evacuate_blockers( worktree_path, ignored[ "blockers" ], evacuation_root, _utc_stamp( now ) )
+        moved = evacuate_blockers( worktree_path, ignored[ "blockers" ], evacuation_root, utc_compact_stamp( now ) )
         result[ "evacuated_to" ] = moved[ "dest" ]
         result[ "evacuated" ]    = moved[ "moved" ]
         if not moved[ "ok" ]:
@@ -555,7 +550,7 @@ def drain_then_remove(
 
     branch    = head[ "stdout" ]
     detached  = ( branch == "HEAD" )
-    stamp     = _utc_stamp( now )
+    stamp     = utc_compact_stamp( now )
 
     # 2. If HEAD is detached, mint a rescue branch so any WIP commit (and the
     #    current HEAD) stays reachable after the worktree dir is gone.
