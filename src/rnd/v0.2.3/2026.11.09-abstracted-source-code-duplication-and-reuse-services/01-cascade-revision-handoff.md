@@ -487,3 +487,11 @@ REUSE-OUTCOME 5bbf1a855ce26730 :: rs-16b84ca2ee :: WROTE_NEW the one reader of t
 
 RULING cosa.utils.container_env.running_in_container :: DISTINCT scripts.v2_eval.running_in_container reads only /.dockerenv in a standalone script, the hook-library session_bridge check must not import cosa, and stale-process-scan resolves a pid's container name from its cgroup :: reuse-receipt: 502981be6eef94fe :: search: rs-ad1ff29aeb
 REUSE-OUTCOME 502981be6eef94fe :: rs-ad1ff29aeb :: WROTE_NEW the sentinel-or-/.dockerenv check, moved here from the test-suite job so the reaper and the job share one sentinel reader; the script copy checks the file only and the hook copy is kept separate because a hook must not import cosa :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-containerenv
+
+## Reuse review: one main-checkout resolver (row 2448ae19, follow-up adf50584)
+
+RULING cosa.utils.main_checkout.main_checkout_of :: EXTEND lupin_mcp.session_spawner._main_checkout_of :: reuse-receipt: 0bb520fbda463712 :: search: rs-bad25d73e6
+REUSE-OUTCOME 0bb520fbda463712 :: rs-bad25d73e6 :: EXTENDED lupin_mcp.session_spawner._main_checkout_of :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-maincheckout
+
+RULING cosa.utils.main_checkout._run_git :: DISTINCT a plain subprocess.run wrapper for a read-only rev-parse; worktree_reaper._default_run sets BRANCH_GUARD_ALLOW=reaper, which this must not carry, and importing it would make a utils module depend on the agents package; the other candidates raise, return dicts, or run in another package :: reuse-receipt: 3b2f1e9d6880133f :: search: rs-375a327194
+REUSE-OUTCOME 3b2f1e9d6880133f :: rs-375a327194 :: WROTE_NEW a plain subprocess.run wrapper without the branch-guard override of worktree_reaper._default_run, so a utils module does not import the agents package :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-rungit

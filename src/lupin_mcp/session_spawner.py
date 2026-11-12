@@ -38,6 +38,7 @@ from lupin_mcp import reap_branch
 from cosa.agents.shared import seat_teardown
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
+from cosa.utils.main_checkout import main_checkout_of
 from cosa.utils.worktree_venv import provision_worktree_venv
 from cosa.utils.worktree_artifacts import provision_worktree_artifacts
 from cosa.utils.seat_worktree  import provision_seat_worktree, drift_disclosure
@@ -627,16 +628,8 @@ def _main_checkout_of( start ):
     Returns:
         Path
     """
-    try:
-        out = subprocess.run(
-            [ "git", "-C", str( start ), "rev-parse", "--path-format=absolute", "--git-common-dir" ],
-            capture_output=True, text=True, timeout=10
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return Path( out.stdout.strip() ).resolve().parent
-    except ( OSError, subprocess.SubprocessError ):
-        pass
-    return start
+    owner = main_checkout_of( start )
+    return Path( owner ).resolve() if owner is not None else start
 
 
 def _credit_held( respin_credit_fn ):
