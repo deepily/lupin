@@ -628,3 +628,9 @@ REUSE-OUTCOME 0bb520fbda463712 :: rs-bad25d73e6 :: EXTENDED lupin_mcp.session_sp
 
 RULING cosa.utils.main_checkout._run_git :: DISTINCT a plain subprocess.run wrapper for a read-only rev-parse; worktree_reaper._default_run sets BRANCH_GUARD_ALLOW=reaper, which this must not carry, and importing it would make a utils module depend on the agents package; the other candidates raise, return dicts, or run in another package :: reuse-receipt: 3b2f1e9d6880133f :: search: rs-375a327194
 REUSE-OUTCOME 3b2f1e9d6880133f :: rs-375a327194 :: WROTE_NEW a plain subprocess.run wrapper without the branch-guard override of worktree_reaper._default_run, so a utils module does not import the agents package :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-rungit
+
+### Reuse follow-up: the reaper's bridge listing onto iter_bridge_paths (row 2448ae19, follow-up adf50584)
+
+Cheech asked first whether cosa already imports from `lupin_cli.claude_code.hooks.lib`. Measured 2026-11-11 at ba2eaf45e by `git grep` over tracked non-test files under `src/cosa`: it does, from 53 import lines in 33 files. The reaper itself already imports `session_bridge` four times, inside its own function bodies. So the fold is allowed.
+
+`orphan_bridge_reaper._default_list_bridges` was the SAME_JOB hit of search rs-af054bab05 (`SEARCHED` lines in the section on the hook-library iterator, above). It listed `cc-*.json` and dropped names holding "buffer" or "listener", the same rule, from a private `_NON_SESSION_BRIDGE_TOKENS`. It now returns `list( iter_bridge_paths( session_dir ) )` after the same existence check, and the private constant is gone. It stays a list because the sweep indexes and re-reads it. No new definition, so no new outcome line.
