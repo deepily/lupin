@@ -4,6 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.bounded_cc_client.BoundedCCClientBase@85d379ed23
   - cosa.agents.shared.bounded_cc_client.BoundedCCCostEstimate@4dc4f69132
+  - cosa.agents.shared.bounded_cc_client.temperature_to_steer@9717f6c47b
 ---
 # Bounded Claude Code client base
 
@@ -15,6 +16,7 @@ The shared base of the podcast and presentation clients in [[generator-sdk-clien
 - `_call_typed` forwards one named call to the client's `_call_api` with the model, call type, prompts, token limit and temperature.
 - `call_with_json_output` calls the `JSON_MODEL_FIELD` model at temperature 0.5 with call type `json_output`. It returns the object the client's `_recover_json` finds.
 - `BoundedCCCostEstimate` holds token, call and cost totals. `add_sdk_cost` adds the SDK's per-call cost. `get_summary` returns one line of text that says the figure is covered by the Max plan.
+- `temperature_to_steer( temperature, high, low, high_steer, low_steer )` turns the old per-call temperature into one prompt sentence. It returns `high_steer` at or above `high`, `low_steer` at or below `low`, and an empty string between. The deep research, podcast and presentation clients each bind their own cut-offs and wording to it as `_temperature_to_steer`.
 
 ## Don't
 - Don't read `total_sdk_cost_usd` as a bill. It is telemetry, and the plan covers it.

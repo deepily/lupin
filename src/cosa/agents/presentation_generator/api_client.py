@@ -31,9 +31,10 @@ malformed result is a real defect, not cosmetic drift.
 import logging
 from typing import Optional, Any
 from dataclasses import dataclass
+from functools import partial
 
 from .config import PresentationConfig
-from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate
+from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate, temperature_to_steer
 from .prompts.json_recovery import recover_json_object
 from cosa.agents.shared.sdk_error_result import raise_error_result
 
@@ -72,26 +73,10 @@ PRESENTATION_CONTENT_TOOLS = []
 PRESENTATION_PERMISSION_MODE = "default"
 
 
-def _temperature_to_steer( temperature: float ) -> str:
-    """
-    Map a legacy per-call temperature into a system-prompt creativity steer.
-
-    `ClaudeAgentOptions` exposes no per-call temperature, so the creativity
-    intent is expressed in the prompt. Higher temperature meant more creative
-    prose; lower meant more deterministic output such as diagram code.
-
-    Requires:
-        - temperature is a float
-
-    Ensures:
-        - returns a non-empty steer for high (>= 0.75) or low (<= 0.55)
-          temperatures; "" for mid-range
-    """
-    if temperature >= 0.75:
-        return "Write with creative, natural, varied phrasing."
-    if temperature <= 0.55:
-        return "Write with precise, focused, deterministic output."
-    return ""
+# The cut-offs and wording are this client's own; the rule is the shared one.
+_temperature_to_steer = partial( temperature_to_steer, high=0.75, low=0.55,
+                                 high_steer="Write with creative, natural, varied phrasing.",
+                                 low_steer="Write with precise, focused, deterministic output." )
 
 
 @dataclass

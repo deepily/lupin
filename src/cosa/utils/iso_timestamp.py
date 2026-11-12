@@ -12,19 +12,17 @@ keeps its own twin. Code that must refuse a zone-less stamp keeps its own strict
 import datetime
 
 
-def parse_iso( value, naive=False ):
+def parse_iso( value ):
     """
     Parse an ISO-8601 timestamp string into a datetime, or None.
 
     Requires:
         - value is anything; only a non-blank str can parse
-        - naive is a bool
 
     Ensures:
         - a trailing "Z" reads as "+00:00"; surrounding whitespace is ignored
         - a stamp with no zone is read as UTC
-        - naive False: returns an aware datetime
-        - naive True: returns the same instant as a naive datetime in UTC, with the zone dropped
+        - returns an aware datetime
         - returns None for None, a blank or non-string value, and unparseable text
         - never raises
     """
@@ -36,5 +34,4 @@ def parse_iso( value, naive=False ):
     except ValueError:
         return None
     if parsed.tzinfo is None: parsed = parsed.replace( tzinfo=datetime.timezone.utc )
-    if naive: return parsed.astimezone( datetime.timezone.utc ).replace( tzinfo=None )
     return parsed
