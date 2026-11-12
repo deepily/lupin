@@ -5,7 +5,7 @@ pins:
   - cosa.agents.presentation_generator.job.PresentationGeneratorJob@9e4eebfddc
   - cosa.agents.presentation_generator.job.resolve_source_path@f8ce01e248
   - cosa.agents.presentation_generator.job.source_path_is_inside_the_project@8c961318e6
-  - cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent@e2694fb0dd
+  - cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent@446b223012
   - cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent.do_all_async@3a74dac461
   - cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent.render_from_yaml_async@ec3c03c31d
   - cosa.agents.presentation_generator.orchestrator.VoiceGateNotAnsweredError@610a429f17
