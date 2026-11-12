@@ -117,3 +117,100 @@ def test_run_chained_cli_exits_with_pipeline_code( monkeypatch, pipeline_code ):
     assert code == pipeline_code
     assert rec.shown == []
     assert len( rec.ran ) == 1 and isinstance( rec.ran[ 0 ], argparse.Namespace )
+
+
+class _Result:
+    """Just enough of a ChainedResult for the report."""
+
+    def __init__( self, success=False, partial=False ):
+        self.success, self.partial = success, partial
+        self.research_path, self.research_abstract = "/io/r.md", "A" * 150
+        self.dr_cost, self.error, self.duration_seconds = 1.25, "boom", 12.34
+        self.state = type( "S", ( ), { "value": "failed" } )()
+
+    def is_success( self ): return self.success
+    def is_partial( self ): return self.partial
+
+
+class _Agent:
+    """An agent whose run_async returns a result, or raises what it was given."""
+
+    def __init__( self, outcome ): self.outcome = outcome
+
+    async def run_async( self ):
+        if isinstance( self.outcome, BaseException ): raise self.outcome
+        return self.outcome
+
+
+def _report( agent, debug=False ):
+    import asyncio
+    shown = [ ]
+    code  = asyncio.run( chained_cli.run_agent_and_report(
+        argparse.Namespace( debug=debug ), agent, "Podcast Generation", shown.append, "retry --research {research_path}" ) )
+    return code, shown
+
+
+def test_a_complete_run_prints_the_report_then_the_stage_lines_then_the_duration( capsys ):
+    result = _Result( success=True )
+    code, shown = _report( _Agent( result ) )
+    out = capsys.readouterr().out
+    assert code == 0 and shown == [ result ]
+    assert "Research Report: /io/r.md" in out and f"Abstract: {'A' * 100}..." in out and "A" * 101 not in out
+    assert "Duration: 12.3 seconds" in out
+
+
+def test_a_complete_run_without_an_abstract_prints_no_abstract_line( capsys ):
+    result = _Result( success=True )
+    result.research_abstract = None
+    code, _shown = _report( _Agent( result ) )
+    assert code == 0 and "Abstract:" not in capsys.readouterr().out
+
+
+def test_a_partial_run_names_the_stage_and_the_formatted_retry_command( capsys ):
+    code, shown = _report( _Agent( _Result( partial=True ) ) )
+    out = capsys.readouterr().out
+    assert code == 1 and shown == [ ]
+    assert "Podcast Generation failed:" in out and "  Error: boom" in out
+    assert "retry podcast generation separately with:" in out
+    assert "  retry --research /io/r.md" in out and "Cost: $1.2500" in out
+
+
+def test_any_other_result_prints_its_state_and_error( capsys ):
+    code, shown = _report( _Agent( _Result() ) )
+    out = capsys.readouterr().out
+    assert code == 1 and shown == [ ]
+    assert "State: failed" in out and "Error: boom" in out
+
+
+def test_ctrl_c_and_an_exception_each_return_one( capsys ):
+    assert _report( _Agent( KeyboardInterrupt() ) )[ 0 ] == 1
+    assert "Interrupted by user" in capsys.readouterr().out
+    assert _report( _Agent( RuntimeError( "bad" ) ) )[ 0 ] == 1
+    out = capsys.readouterr().out
+    assert "Pipeline error: bad" in out and "Traceback" not in out
+
+
+def test_an_exception_prints_a_traceback_only_under_debug( capsys ):
+    assert _report( _Agent( RuntimeError( "bad" ) ), debug=True )[ 0 ] == 1
+    captured = capsys.readouterr()
+    assert "Pipeline error: bad" in captured.out and "RuntimeError: bad" in captured.err
+
+
+def test_each_package_prints_its_own_artifact_lines_and_cost_summary( capsys ):
+    from cosa.agents.deep_research_to_podcast import __main__ as podcast_main
+    from cosa.agents.deep_research_to_presentation import __main__ as presentation_main
+    result = _Result( success=True )
+    result.pg_cost, result.total_cost = 2.5, 3.75
+    result.audio_path, result.script_path = "/io/a.mp3", "/io/s.md"
+    podcast_main._show_success( result )
+    assert capsys.readouterr().out == (
+        "\nPodcast Audio: /io/a.mp3\nPodcast Script: /io/s.md\n\nCost Summary:\n"
+        "  Deep Research:     $1.2500\n  Podcast Generator: $2.5000\n  Total:             $3.7500\n" )
+    result.script_path = None
+    podcast_main._show_success( result )
+    assert "Podcast Script" not in capsys.readouterr().out
+    result.yaml_path, result.marp_path = "/io/d.yaml", "/io/d.md"
+    presentation_main._show_success( result )
+    assert capsys.readouterr().out == (
+        "\nPresentation YAML: /io/d.yaml\nPresentation Marp: /io/d.md\n\nCost Summary:\n"
+        "  Deep Research:            $1.2500\n  Presentation Generator:   $2.5000\n  Total:                    $3.7500\n" )

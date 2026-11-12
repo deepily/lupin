@@ -76,3 +76,17 @@ class TestBothResultClasses:
         import dataclasses
         assert "PARTIAL_STATES" not in { f.name for f in dataclasses.fields( PodcastResult ) }
         assert "PRIMARY_ARTIFACT" not in { f.name for f in dataclasses.fields( PresentationResult ) }
+
+
+def test_the_shared_init_keeps_every_option_and_starts_an_empty_result_of_its_own_class():
+    from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
+    from cosa.agents.deep_research_to_presentation.agent import DeepResearchToPresentationAgent
+    for agent_class, result_class in ( ( DeepResearchToPodcastAgent, PodcastResult ), ( DeepResearchToPresentationAgent, PresentationResult ) ):
+        bare = agent_class( query="q", user_email="a@x.com" )
+        assert bare.source_document == [ ]
+        assert type( bare.result ) is result_class
+        assert bare._start_time is None
+        full = agent_class( "q", "a@x.com", budget=2.5, lead_model="m", no_confirm=True, audience="expert",
+                            audience_context="ctx", source_document=[ "/d.md" ], cli_mode=True, debug=False, verbose=True )
+        assert ( full.budget, full.lead_model, full.no_confirm, full.audience ) == ( 2.5, "m", True, "expert" )
+        assert ( full.audience_context, full.source_document, full.cli_mode, full.verbose ) == ( "ctx", [ "/d.md" ], True, True )

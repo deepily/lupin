@@ -4,13 +4,13 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@07297bd4b4
   - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@1b18bbe364
-  - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@00e8649115
-  - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@a3f55a5904
+  - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@24d1adecb3
+  - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@16f1a98147
   - cosa.agents.deep_research_to_podcast.state.ChainedResult@69c6756c1a
   - cosa.agents.deep_research_to_presentation.state.ChainedResult@5d8d002f2d
   - cosa.agents.deep_research_to_podcast.state.PipelineState@4b3355bdf0
   - cosa.agents.chained_pipeline_state.ChainedResultMixin@043deeda1d
-  - cosa.agents.chained_pipeline_state.ChainedDeepResearchAgent@025d75c750
+  - cosa.agents.chained_pipeline_state.ChainedDeepResearchAgent@fd26841e00
 ---
 # Research chained pipelines
 
@@ -24,7 +24,7 @@ Two queue jobs run [[deep-research]] and then hand its saved report to [[podcast
 
 ## How to call it
 - Submit through `POST /api/v2/submit` with command `agent router go to research to podcast` or `agent router go to research to presentation`. The factory builds the job from `args`; job ids start `rp-` (podcast) and `rx-` (presentation).
-- `dry_run` sends only breadcrumb notifications and mock paths; it builds no agent and reports zero cost. The jobs share one frame, `_run_chained_pipeline` and `_run_chained_dry_run` in `AgenticJobBase`, and the agents share the research leg in `ChainedDeepResearchAgent`.
+- `dry_run` sends only breadcrumb notifications and mock paths; it builds no agent and reports zero cost. The jobs share one frame, `_run_chained_pipeline` and `_run_chained_dry_run` in `AgenticJobBase`, and the agents share one base, `ChainedDeepResearchAgent`. It holds the research leg, the options, the voice setup and the `run_async` frame. Each agent supplies its second stage and the artifacts it keeps.
 - `source_document` (a list of absolute paths, or one string; `/api/v2/submit` takes it as `<scope>/<path>`) reaches only the research prompt. It is kept out of the session-name gist, the notifications and the saved report's query field.
 - `budget` limits research only. A `BudgetExceededError` is re-raised as a plain exception, which ends the run `FAILED`.
 - On success the job stores `artifacts["abstract"]`, a card with links to the report and the generated files. A language whose translation failed has no files and no links. The agent passes the generator's `failed_translations` through `pg_artifacts`. The card names each one as "Translation failed (not produced)", with its reason.
