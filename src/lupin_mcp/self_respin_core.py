@@ -65,6 +65,7 @@ from dataclasses import dataclass, field
 
 from cosa.agents.heartbeat_arbiter.self_respin_observer import (
     build_marker_dict, missing_marker_fields, _parse_iso )
+from cosa.utils.fleet_base_dir import fleet_base_dir
 from lupin_mcp.memento_slot import (
     SELF_RESPIN_SLOT,
     SLOT_IO,
@@ -1276,9 +1277,7 @@ def _resolve_base_dir( repo_root=None ):
           it, which is why the fallback exists rather than an assert.
         - never raises
     """
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
-    root = repo_root if repo_root is not None else resolve_repo_root()
-    return str( fleet_data_root( root ) )
+    return fleet_base_dir( None, repo_root if repo_root is not None else resolve_repo_root() )
 
 
 def self_respin_from_bridge(
