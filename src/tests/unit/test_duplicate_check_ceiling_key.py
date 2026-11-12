@@ -62,3 +62,11 @@ def test_the_cron_lines_carry_the_ceiling_the_key_gave( tmp_path, cron ):
     code = dd.main( [ "--print-install", "--adaptive", "--claude-cli-path", "/bin/claude", "--python", "/py" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append,
                     err=lambda t: None, crontab_cmd=cron[ "cmd" ], config=KeyConfig( { KEY: "1500" } ) )
     assert code == 0 and "--ceiling 1500" in out[ 0 ]
+
+
+def test_the_reinstall_text_names_the_key_and_the_value_it_holds_now_and_never_a_flag():
+    on  = dd.reinstall_command( "/m", "/py", None, "/c", "b", ceiling=1500, config=KeyConfig( { KEY: "800" } ) )
+    off = dd.reinstall_command( "/m", "/py", None, "/c", "b", ceiling=1500, config=KeyConfig( { KEY: "" } ) )
+    assert on.endswith( f"`{KEY}` in src/conf/lupin-app.ini and is 800 now." )
+    assert off.endswith( f"`{KEY}` in src/conf/lupin-app.ini, which is blank or invalid now, so a run with no --ceiling refuses until it is set." )
+    assert "--ceiling" not in on.replace( "no --ceiling", "" ) and "1500" not in on and "1500" not in off

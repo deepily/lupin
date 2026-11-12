@@ -1065,7 +1065,8 @@ def test_the_reinstall_text_is_the_same_whatever_the_baseline_or_limit_a_run_had
     asked = dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: False ), branch="wip-old", ceiling=1500, baseline=True )
     assert plain[ "reinstall" ] == held[ "reinstall" ] == asked[ "reinstall" ], "the registry holds the limit, the binary and the baseline, so the text does not carry them"
     text = dd.reinstall_command( "/m", "/py", 40, "/c", "b" )
-    first, second = text.split( "\n" )
+    first, second, third = text.split( "\n" )
+    assert third == dd.ceiling_note(), "no config means no printed value"
     assert first == "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time."
     assert second.startswith( "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src " ) and second.endswith( " -m lupin_mcp.cron_generate --install" )
 
@@ -1225,4 +1226,5 @@ def test_a_baseline_run_leaves_test_code_out_and_counts_it( repo ):
 def test_the_reinstall_text_is_pinned_to_a_literal():
     assert dd.reinstall_command( "/m", "/py", 40, "/c", "b" ) == (
         "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
-        "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+        "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install\n"
+        "The judge-call ceiling is not in the registry: it is the INI key `external repo lupin duplicate check ceiling` in src/conf/lupin-app.ini." )

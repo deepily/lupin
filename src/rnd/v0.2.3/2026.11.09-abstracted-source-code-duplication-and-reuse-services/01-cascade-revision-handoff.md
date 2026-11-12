@@ -337,3 +337,10 @@ REUSE-OUTCOME 2e232146ad501898 :: rs-08457a253f :: WROTE_NEW compares a register
 
 RULING lupin_mcp.duplicate_check_daily.resolve_ceiling :: DISTINCT applies the command-line precedence (a given ceiling or cap wins) and otherwise calls code_health_settings.duplicate_check_ceiling for the lupin key; that wrapper reads the key and has no flag rule :: reuse-receipt: f570e484e03b91a3 :: search: rs-0021280a4c
 REUSE-OUTCOME f570e484e03b91a3 :: rs-0021280a4c :: WROTE_NEW applies the command-line precedence (a given ceiling or cap wins) and otherwise calls code_health_settings.duplicate_check_ceiling for the lupin key; that wrapper reads the key and has no flag rule :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s3
+
+## Reuse review: what reinstall_command prints for the ceiling (row 6ea1421d, step ph1-s13)
+
+`reinstall_command` printed no limit after the ceiling moved to the INI, so it said nothing about where the ceiling is. `ceiling_note` is the one new definition: it names the key and never prints a flag or a literal that could go stale. The lookup found nothing that words such a note.
+
+RULING lupin_mcp.duplicate_check_daily.ceiling_note :: DISTINCT builds the sentence that names the INI key holding the ceiling, with its current value or a blank warning; no existing symbol words that note, and the settings reader it calls only returns the number :: reuse-receipt: aeb9f0c563c38835 :: search: rs-e7e9277ef1
+REUSE-OUTCOME aeb9f0c563c38835 :: rs-e7e9277ef1 :: WROTE_NEW builds the sentence that names the INI key holding the ceiling, with its current value or a blank warning; no existing symbol words that note, and the settings reader it calls only returns the number :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s13

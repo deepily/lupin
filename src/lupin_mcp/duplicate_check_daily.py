@@ -526,16 +526,37 @@ def limit_flag( cap, ceiling ):
     return f"--ceiling {ceiling}" if ceiling is not None else f"--cap {cap}"
 
 
-def reinstall_command( root, python, cap, cli_path, branch, ceiling=None, with_baseline=False ):
+def ceiling_note( config=None ):
+    """
+    Say where the duplicate check's judge-call ceiling comes from.
+
+    Requires:
+        - config is None, or an object with the ConfigurationManager get method
+
+    Ensures:
+        - returns one sentence naming the INI key; the registry holds no ceiling
+        - with a config, the sentence also says the key's current value, or that it is blank or invalid and a run with no --ceiling refuses
+        - without a config, no value is printed, so the text can never go stale
+    """
+    head = f"The judge-call ceiling is not in the registry: it is the INI key `{chs.repo_key( chs.DEFAULT_REPO, chs.CEILING_KIND )}` in src/conf/lupin-app.ini"
+    if config is None: return head + "."
+    try: value = chs.duplicate_check_ceiling( config, chs.DEFAULT_REPO )
+    except chs.CodeHealthSettingError: return head + ", which is blank or invalid now, so a run with no --ceiling refuses until it is set."
+    return head + f" and is {value} now."
+
+
+def reinstall_command( root, python, cap, cli_path, branch, ceiling=None, with_baseline=False, config=None ):
     """
     Say how to move the check to another branch.
 
     Ensures:
-        - returns the registry edit and the generator command; the limit, binary and baseline arguments are kept so callers need no change, because the registry now holds them
+        - returns the registry edit, the generator command and the ceiling note; the limit, binary and baseline arguments are kept so callers need no change, because the registry now holds them
         - the cron lines read the registry's duplicate-check entry when they run, so the branch edit needs no reinstall; the generator command is for a changed schedule
+        - the ceiling is named as an INI key, never printed as a literal flag (see ceiling_note)
     """
     return ( f"In {root}/src/conf/job-registry.json, set \"--branch\" to {shlex.quote( branch )} in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
-             f"If the schedule changed too, run: {lt.install_command( root )}" )
+             f"If the schedule changed too, run: {lt.install_command( root )}\n"
+             f"{ceiling_note( config )}" )
 
 
 def refusal_message( refusal, command ):
