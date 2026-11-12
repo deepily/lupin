@@ -41,3 +41,12 @@ def test_the_label_is_matched_as_text_not_as_a_pattern():
 def test_each_renderer_reads_its_own_fence_and_keeps_its_own_fallback( extract, label, body ):
     assert extract( f"Here:\n```{label}\n{body}\n```" ) == body
     assert extract( "" ) is None
+
+
+def test_an_empty_block_gives_an_empty_string_not_none():
+    assert extract_fenced_block( "```d2\n```", "d2" ) == ""
+
+
+def test_a_renderer_does_not_fall_back_past_an_empty_block():
+    assert D2Renderer._extract_d2_code( "```d2\n```\na -> b" ) == ""
+    assert MermaidRenderer._extract_mermaid( "```mermaid\n```\ngraph TD\n  A-->B" ) == ""
