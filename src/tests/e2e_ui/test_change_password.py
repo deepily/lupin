@@ -10,6 +10,7 @@ Requires:
 """
 
 from .conftest import (
+    wait_for_login_redirect,
     BASE_URL,
     fill_login_form, fill_register_form,
     assert_error_message, assert_success_message,
@@ -40,7 +41,7 @@ def _setup_authenticated_change_password( page, email="changepwd@example.com", p
     # Login
     page.goto( f"{BASE_URL}/app/auth/login" )
     fill_login_form( page, email, password )
-    page.wait_for_url( "**/app**", timeout=10000 )
+    wait_for_login_redirect( page )
 
     # Wait for localStorage tokens to be populated
     page.wait_for_function(
@@ -187,7 +188,7 @@ class TestSuccessfulPasswordChange:
 
         # Login with new password should work
         fill_login_form( page, email, new_password )
-        page.wait_for_url( "**/app**", timeout=10000 )
+        wait_for_login_redirect( page )
         assert "/app" in page.url
 
 
