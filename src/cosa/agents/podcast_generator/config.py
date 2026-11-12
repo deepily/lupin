@@ -16,6 +16,7 @@ from typing import Literal, Optional, List
 # ONE label map that cannot drift (row 81040071). Consumers keep importing it as
 # `from cosa.agents.podcast_generator.config import LANGUAGE_NAMES`.
 from cosa.agents.language_names import LANGUAGE_NAMES
+from cosa.utils.csv_text import split_csv
 
 
 @dataclass
@@ -467,7 +468,7 @@ class PodcastConfig:
 
         # Parse target_languages from comma-separated INI value
         langs_raw = config_mgr.get( "podcast target languages", default="en", silent=True )
-        target_languages = [ lang.strip() for lang in langs_raw.split( "," ) if lang.strip() ]
+        target_languages = split_csv( langs_raw )
 
         # Build kwargs
         config = cls(

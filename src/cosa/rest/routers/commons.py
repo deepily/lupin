@@ -42,6 +42,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 )
 from lupin_mcp.commons_persona_matcher import match_persona
 from lupin_mcp.commons_store import CommonsStore
+from cosa.utils.csv_text import split_csv
 
 router = APIRouter( prefix="/api/commons", tags=[ "commons" ] )
 
@@ -1107,7 +1108,7 @@ async def get_broadcast_history(   # pragma: no cover
         } )
 
     excluded_topics_raw = config_mgr.get( "commons traffic visibility exclude topics" ) or ""
-    excluded_topics     = [ t.strip() for t in excluded_topics_raw.split( "," ) if t.strip() ]
+    excluded_topics     = split_csv( excluded_topics_raw )
     max_entries_ceiling = int( config_mgr.get( "commons traffic visibility max entries per response", return_type="int" ) )
 
     # FM-7 mitigation: the one-pass bridge enumeration + the all-topics history read

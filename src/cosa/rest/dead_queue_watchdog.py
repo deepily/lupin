@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional
 
 import cosa.utils.util as cu
+from cosa.utils.csv_text import split_csv
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +261,7 @@ class DeadQueueWatchdog:
         """Reload auto-fix configuration from INI."""
         self.enabled        = self.config_mgr.get( "auto fix enabled", default=False, return_type="boolean" )
         eligible_raw        = self.config_mgr.get( "auto fix eligible job types", default="presentation, deep_research, podcast, test_suite" )
-        self.eligible_types = [ t.strip() for t in eligible_raw.split( "," ) if t.strip() ]
+        self.eligible_types = split_csv( eligible_raw )
         self.max_attempts   = self.config_mgr.get( "auto fix max attempts per job", default=3, return_type="int" )
         self.max_cost_usd   = self.config_mgr.get( "auto fix max cost usd", default=10.0, return_type="float" )
         self.max_wall_clock = self.config_mgr.get( "auto fix max wall clock seconds", default=1800, return_type="int" )

@@ -12,7 +12,7 @@ pins:
   - cosa.agents.podcast_generator.state.PodcastScript@2bd4d3d944
   - cosa.agents.podcast_generator.tts_client.PodcastTTSClient@b609170958
   - cosa.agents.podcast_generator.audio_stitcher.PodcastAudioStitcher@7a56300067
-  - cosa.agents.podcast_generator.config.PodcastConfig@7e28175dd9
+  - cosa.agents.podcast_generator.config.PodcastConfig@50289d6ac6
   - cosa.agents.podcast_generator.config.read_owner_email@5549eda88a
 ---
 # Podcast generation

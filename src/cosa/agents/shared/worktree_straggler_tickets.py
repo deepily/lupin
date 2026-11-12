@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from cosa.utils.atomic_json import load_json_section
+from cosa.utils.csv_text import split_csv
 
 STRAGGLER_KEY_PREFIX  = "worktree:"
 STRAGGLER_AGE_HOURS   = 24.0
@@ -191,7 +192,7 @@ def registered_persona_slugs() -> list:
     try:
         from cosa.config.configuration_manager import ConfigurationManager
         pool = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( "cc session voice persona pool", default="", silent=True )
-        return [ n.strip() for n in ( pool or "" ).split( "," ) if n.strip() ]
+        return split_csv( pool )
     except Exception:
         return []
 

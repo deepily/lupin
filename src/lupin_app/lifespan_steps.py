@@ -13,6 +13,7 @@ import asyncio
 import os
 import sys
 import time
+from cosa.utils.csv_text import split_csv
 
 
 def print_migration_banner( migrate_result, stream=None ):
@@ -344,7 +345,7 @@ def start_commons( state, config_mgr, notification_queue ):
         and config_mgr.get( "commons traffic visibility ws push enabled", default=True, return_type="boolean" )
     ):
         excluded_raw     = config_mgr.get( "commons traffic visibility exclude topics", default="presence, system-events" )
-        excluded_topics  = [ t.strip() for t in excluded_raw.split( "," ) if t.strip() ]
+        excluded_topics  = split_csv( excluded_raw )
 
         state.commons_activity_watcher = CommonsActivityWatcher(
             store                    = state.commons_store,

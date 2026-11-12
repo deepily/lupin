@@ -3,7 +3,7 @@ capability: arbiter-app-service
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_arbiter_app.app.create_app@fb2897778e
-  - lupin_arbiter_app.app.assemble_app@0b3de3a971
+  - lupin_arbiter_app.app.assemble_app@2fe17d9305
   - lupin_arbiter_app.app.resolve_arbiter_project@fe9b6e048a
   - lupin_arbiter_app.app.build_dm_push_fn@0377eefee0
   - lupin_arbiter_app.app.create_production_app@d0cd09bc21

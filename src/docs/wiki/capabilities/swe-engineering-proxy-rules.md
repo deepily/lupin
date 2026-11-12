@@ -2,7 +2,7 @@
 capability: swe-engineering-proxy-rules
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.swe_team.proxy.config.swe_proxy_config_from_config_mgr@1940be9eac
+  - cosa.agents.swe_team.proxy.config.swe_proxy_config_from_config_mgr@b998418ea1
   - cosa.agents.swe_team.proxy.engineering_categories.get_category_cap_level@d39407b242
   - cosa.agents.swe_team.proxy.engineering_categories.get_category_names@6c1cdea90c
   - cosa.agents.swe_team.proxy.engineering_classifier.EngineeringClassifier@00b73f5baf

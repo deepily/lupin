@@ -2,7 +2,7 @@
 capability: worktree-straggler-persona-lookup
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.shared.worktree_straggler_tickets.registered_persona_slugs@904d8c11a0
+  - cosa.agents.shared.worktree_straggler_tickets.registered_persona_slugs@48e147d05a
   - cosa.agents.shared.worktree_straggler_tickets.leading_persona@c5aaf68eec
   - cosa.agents.shared.worktree_straggler_tickets.live_unspawned_persona@34a8635a49
 ---

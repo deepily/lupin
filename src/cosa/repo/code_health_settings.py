@@ -13,6 +13,7 @@ import pathlib
 import re
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+from cosa.utils.csv_text import split_csv
 
 LANGUAGES_KIND   = "index languages"
 SOURCE_DIRS_KIND = "index source dirs"
@@ -71,7 +72,7 @@ def read_entries( config, key ):
         - returns the stripped, non-empty entries in file order
         - a blank or absent key returns an empty list
     """
-    return [ entry.strip() for entry in read_text( config, key ).split( "," ) if entry.strip() ]
+    return split_csv( read_text( config, key ) )
 
 
 def read_positive_int( config, key ):

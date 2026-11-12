@@ -42,6 +42,7 @@ from ..db.repositories.notification_repository import NotificationRepository
 # reader cannot tell a DM's stamp from an arbiter ping's stamp.
 from cosa.config.app_timezone import read_arbiter_journal_timezone
 from cosa.utils.edt_timestamp import format_edt_timestamp, is_already_stamped
+from cosa.utils.csv_text import split_csv
 # The notification queue dependency lives with the notifications router; reuse it
 # so /api/dm/send pushes onto the same FIFO queue as /api/notify.
 from .notifications import get_notification_queue
@@ -1705,7 +1706,7 @@ def _attribution_personas():
     try:
         cm   = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         pool = cm.get( "cc session voice persona pool", default="" )
-        return [ name.strip().lower() for name in ( pool or "" ).split( "," ) if name.strip() ]
+        return split_csv( pool, lower=True )
     except Exception:
         return []
 

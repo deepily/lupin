@@ -10,7 +10,7 @@ pins:
   - cosa.rest.job_state.validate_transition@e52a308c3e
   - cosa.rest.job_persistence.persist_job_completed_from_metadata@70e1cb34aa
   - cosa.rest.job_persistence.mark_interrupted_jobs@dbe7ae3549
-  - cosa.rest.dead_queue_watchdog.DeadQueueWatchdog@58bfca263c
+  - cosa.rest.dead_queue_watchdog.DeadQueueWatchdog@a69150d13a
 ---
 # CJ Flow queue
 

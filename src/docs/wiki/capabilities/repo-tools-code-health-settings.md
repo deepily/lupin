@@ -5,7 +5,7 @@ pins:
   - cosa.repo.code_health_settings.CodeHealthSettingError@3886071770
   - cosa.repo.code_health_settings.repo_key@30bc8ac55c
   - cosa.repo.code_health_settings.read_text@4dbb975cea
-  - cosa.repo.code_health_settings.read_entries@6ebd7bf72f
+  - cosa.repo.code_health_settings.read_entries@33aa6dc865
   - cosa.repo.code_health_settings.read_positive_int@d3ba262ce5
   - cosa.repo.code_health_settings.check_relative@cc2a90655b
   - cosa.repo.code_health_settings.index_languages@22d62174b6

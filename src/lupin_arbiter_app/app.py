@@ -27,6 +27,7 @@ from fastapi import FastAPI
 
 from lupin_arbiter_app import __version__
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
+from cosa.utils.csv_text import split_csv
 
 
 def _utcnow() -> datetime.datetime:
@@ -600,7 +601,7 @@ def assemble_app(
 
     def _csv( key, default ):
         raw = cfg.get( key, default=default ) or default
-        return [ c.strip() for c in raw.split( "," ) if c.strip() ]
+        return split_csv( raw )
 
     watch_containers  = _csv( "arbiter health watch containers", "lupin-rest-dev,lupin-rest-test,lupin-model-server,lupin-postgres" )
     inspect_timeout   = int( cfg.get( "arbiter health inspect timeout seconds", default=5, return_type="int" ) )

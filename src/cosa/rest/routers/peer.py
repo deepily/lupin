@@ -52,6 +52,7 @@ from pydantic import BaseModel, Field
 from cosa.rest.auth_middleware import require_admin
 from cosa.config.configuration_manager import ConfigurationManager
 import cosa.utils.util as du
+from cosa.utils.csv_text import split_csv
 
 # Session-level default: a peer call that forgets its own per-request timeout is still bounded (row f6ce66f1).
 _PEER_SESSION_TIMEOUT_SECONDS = 30.0
@@ -86,7 +87,7 @@ def _get_allowed_hosts() -> List[ str ]:
     """Parse 'peer queue allowed hosts' config into a clean list."""
     raw = _config_mgr.get( "peer queue allowed hosts", default="", return_type="string" )
     if not raw: return []
-    return [ h.strip() for h in raw.split( "," ) if h.strip() ]
+    return split_csv( raw )
 
 
 def _is_host_allowed( host: str, whitelist: Optional[ List[ str ] ] = None ) -> bool:
