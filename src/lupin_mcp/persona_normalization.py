@@ -170,6 +170,33 @@ def persona_slug( name, sep="-" ) -> str:
     return key.replace( " ", sep ) if key else ""
 
 
+def memento_slugs( name ) -> list:
+    """
+    Every slug a persona's mementos might be filed under, best first.
+
+    Accents are why this returns a list: "María" naively slugs to "mar-a", which misses the
+    accent-folded files writers produce. The folded form comes first, and the naive form is
+    appended so legacy records stay reachable.
+
+    Requires:
+        - name is a persona name string, or anything, defensively
+
+    Ensures:
+        - returns [ ascii_slug, ... ] of lowercase [a-z0-9-] slugs, the accent-folded form first
+        - the naive form follows only when it differs from the folded one
+        - returns [] for a non-string, an empty string, or a name with no letters or digits
+        - never raises
+    """
+    if not isinstance( name, str ): return []
+    lowered = name.strip().lower()
+    folded  = "".join( ch for ch in unicodedata.normalize( "NFKD", lowered ) if not unicodedata.combining( ch ) )
+    out     = []
+    for candidate in ( folded, lowered ):
+        slug = re.sub( r"[^a-z0-9]+", "-", candidate ).strip( "-" )
+        if slug and slug not in out: out.append( slug )
+    return out
+
+
 def dm_topic_for( name ) -> str:
     """
     Derive the commons DM-topic name for a persona.

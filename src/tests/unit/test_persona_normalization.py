@@ -182,3 +182,34 @@ class TestCrossPrimitiveConsistency:
 
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
+
+
+# ---------------------------------------------------------------------------
+# memento_slugs: the one spelling list the hook and the arbiter share
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "name,expected", [
+    ( "María",    [ "maria", "mar-a" ] ),
+    ( "Mr. Radio", [ "mr-radio" ]      ),
+    ( "  RIO  ",   [ "rio" ]           ),
+    ( "",          []                  ),
+    ( "!!!",       []                  ),
+    ( "😎",        []                  ),
+] )
+def test_memento_slugs_lists_the_folded_form_first_and_the_naive_form_after( name, expected ):
+    from lupin_mcp.persona_normalization import memento_slugs
+    assert memento_slugs( name ) == expected
+
+
+@pytest.mark.parametrize( "value", [ None, 5, [ "maria" ], b"maria" ] )
+def test_memento_slugs_is_empty_for_a_non_string( value ):
+    from lupin_mcp.persona_normalization import memento_slugs
+    assert memento_slugs( value ) == []
+
+
+def test_the_hook_and_the_arbiter_use_the_one_definition():
+    from cosa.agents.heartbeat_arbiter.respin_wake_check import persona_slugs
+    from lupin_cli.claude_code.hooks.register_session import _persona_slugs
+    from lupin_mcp.persona_normalization import memento_slugs
+    assert _persona_slugs is memento_slugs
+    assert persona_slugs( "María" ) == frozenset( memento_slugs( "María" ) ) == frozenset( { "maria", "mar-a" } )

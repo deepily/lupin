@@ -29,7 +29,6 @@ import signal
 import subprocess
 import sys
 import time
-import unicodedata
 from datetime import datetime, timezone
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
@@ -48,6 +47,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json, bu
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.listener_processes import LISTENER_MODULE_NAME, find_live_listener_pids, listener_spawn_lock
 from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
+from lupin_mcp.persona_normalization import memento_slugs
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
 from cosa.rest.voice_persona_helpers import resolve_session_start_persona_chain, pick_declared_managers_from_env
@@ -989,38 +989,7 @@ _MEMENTO_MAX_BYTES        = 8000
 _MEMENTO_BODY_LEAD_BYTES  = 3000
 
 
-def _persona_slugs( persona_name ):
-    """
-    Every slug a persona's mementos might be filed under, best first.
-
-    Accents are why this returns a list: "María" naively slugs to "mar-a", which
-    misses the accent-folded files writers produce. The folded form (maria) comes
-    first, and the mangled form is also returned so legacy records stay reachable.
-
-    Requires:
-        - persona_name is a string or None
-
-    Ensures:
-        - Returns [ ascii_slug, … ] with the accent-folded form first, the
-          naive form appended only when it differs
-        - Returns [] for an empty/None name or a name with no alphanumerics
-        - Never raises
-    """
-    if not persona_name: return []
-
-    lowered = persona_name.strip().lower()
-
-    # Accent-folded: "maría" -> "maria". NFKD splits the letter from its accent;
-    # dropping combining marks leaves the base letter.
-    folded  = "".join( ch for ch in unicodedata.normalize( "NFKD", lowered )
-                       if not unicodedata.combining( ch ) )
-
-    out = []
-    for candidate in ( folded, lowered ):
-        slug = re.sub( r"[^a-z0-9]+", "-", candidate ).strip( "-" )
-        if slug and slug not in out: out.append( slug )
-
-    return out
+_persona_slugs = memento_slugs                      # one definition, in lupin_mcp.persona_normalization
 
 
 def _written_at_of( header ):
