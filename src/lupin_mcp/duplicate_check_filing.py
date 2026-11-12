@@ -15,6 +15,7 @@ from cosa.repo.symindex import librarian_queue as lq
 from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
 from cosa.rest.task_store_rules import filer_created_by
 from cosa.utils import secret_drift
+from cosa.utils.jsonl_file import read_jsonl
 from lupin_mcp.persona_normalization import canonical_persona_key
 
 KEY_PREFIX     = "epic:dupcheck-"
@@ -158,8 +159,7 @@ def triage_payloads( findings, owner, day ):
 
 def read_pending( folder ):
     """Ensures: returns the spooled payloads, oldest first, or an empty list."""
-    path = pathlib.Path( folder ) / PENDING_FILE
-    return [ json.loads( line ) for line in path.read_text( encoding="utf-8" ).splitlines() if line.strip() ] if path.exists() else []
+    return read_jsonl( pathlib.Path( folder ) / PENDING_FILE, missing_ok=True )
 
 
 def write_pending( folder, payloads ):
@@ -223,8 +223,7 @@ def send_row( payload, store ):
 
 def read_triaged( folder ):
     """Ensures: returns the set of finding keys already on a triage row, or an empty set."""
-    path = pathlib.Path( folder ) / TRIAGED_FILE
-    return { json.loads( line )[ "key" ] for line in path.read_text( encoding="utf-8" ).splitlines() if line.strip() } if path.exists() else set()
+    return { row[ "key" ] for row in read_jsonl( pathlib.Path( folder ) / TRIAGED_FILE, missing_ok=True ) }
 
 
 def append_triaged( folder, keys, row_key, day ):

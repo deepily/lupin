@@ -575,3 +575,31 @@ REUSE-OUTCOME 5bbf1a855ce26730 :: rs-16b84ca2ee :: WROTE_NEW the one reader of t
 
 RULING cosa.utils.container_env.running_in_container :: DISTINCT scripts.v2_eval.running_in_container reads only /.dockerenv in a standalone script, the hook-library session_bridge check must not import cosa, and stale-process-scan resolves a pid's container name from its cgroup :: reuse-receipt: 502981be6eef94fe :: search: rs-ad1ff29aeb
 REUSE-OUTCOME 502981be6eef94fe :: rs-ad1ff29aeb :: WROTE_NEW the sentinel-or-/.dockerenv check, moved here from the test-suite job so the reaper and the job share one sentinel reader; the script copy checks the file only and the hook copy is kept separate because a hook must not import cosa :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-containerenv
+
+### Reuse review: one JSONL file reader (row 2448ae19, follow-up adf50584)
+
+Census 2026-11-11 at d8037019f, by reading every tracked `src/*.py` hit for `json.loads( line )` that loads a whole file into a list. Five readers had one behaviour: skip blank lines, parse each line, raise on a line that is not JSON. They are `labelled_pairs._read_jsonl`, `labelled_set_seeder.read_jsonl` (the two were byte-identical), the `rows` method of the reuse need-set rejection ledger in `stage_parts.py`, `duplicate_check_filing.read_pending` and `read_triaged`. The last three return an empty result for a missing file; the first two raise. `cosa.utils` held no such reader: `transcript_tail.tail_jsonl` reads from a byte offset and reports rotation.
+
+`cosa.utils.jsonl_file.read_jsonl( path, missing_ok=False )` is the one reader. `read_pending` and `read_triaged` split lines with `str.splitlines`, which also cuts at U+2028; the helper reads the file by newline, so a record holding that character is no longer split.
+
+Two readers share the shape and are left alone, run side by side on one file holding a valid line then `not json`, and on a missing file:
+
+| What | `read_jsonl` | `attestation.read_records` | `analyze_arms.load_rows` |
+|---|---|---|---|
+| A line that is not JSON | `JSONDecodeError`, message `Expecting value: line 1 column 1`, with no file name or line number | `ValueError` naming `<file>:2` and saying the ledger is corrupt, not empty | `JSONDecodeError`, same message as `read_jsonl` |
+| A missing file | `FileNotFoundError` (an empty list with `missing_ok`) | `[]` | `FileNotFoundError` |
+| Imports | `cosa.utils` | `cosa.utils` | none from cosa; its header says the analysis logic imports no cosa, so the tests run in isolation |
+
+Not folded, by their own contracts: `freeze_corpus.read_corpus_rows` counts unparseable lines instead of raising, `reuse_behaviour.read_refusals` skips lines that are not JSON objects, and `transcript_reader.read_transcript` in the hook library never raises and must not import cosa.
+
+RULING cosa.utils.jsonl_file.read_jsonl :: DISTINCT the one reader of a whole JSON Lines file that skips blank lines, raises on a missing file or a line that is not JSON, and returns an empty list for a missing file when missing_ok is set; the nearest hits are the copies it replaces, while read_corpus_rows counts bad lines, read_refusals skips them and tail_jsonl reads from a byte offset :: reuse-receipt: e921ffbb22b7a824 :: search: rs-6fba458659
+SEARCHED cosa.utils.jsonl_file.read_jsonl :: rs-6fba458659 :: cosa.agents.test_suite.attestation.read_records :: RELATED :: ruled below: a bad line raises a ValueError naming the file and line, which the ledger needs
+SEARCHED cosa.utils.jsonl_file.read_jsonl :: rs-6fba458659 :: scripts.dm-experiment.analyze_arms.load_rows :: RELATED :: ruled below: a standalone script that imports nothing from cosa
+SEARCHED cosa.utils.jsonl_file.read_jsonl :: rs-6fba458659 :: cosa.utils.transcript_tail.tail_jsonl :: RELATED :: reads new records from a byte offset and reports rotation
+SEARCHED cosa.utils.jsonl_file.read_jsonl :: rs-6fba458659 :: cosa.rest.routers.notifications.notify_user :: UNRELATED :: a notification endpoint
+SEARCHED cosa.utils.jsonl_file.read_jsonl :: rs-6fba458659 :: lupin_mcp.session_spawner.dismiss_sessions :: UNRELATED :: reaps seats
+REUSE-OUTCOME e921ffbb22b7a824 :: rs-6fba458659 :: WROTE_NEW the one reader of a whole JSON Lines file that skips blank lines, raises on a missing file or a line that is not JSON, and returns an empty list for a missing file when missing_ok is set; the nearest hits are the copies it replaces, while read_corpus_rows counts bad lines, read_refusals skips them and tail_jsonl reads from a byte offset :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-jsonlreader
+
+RULING cosa.agents.test_suite.attestation.read_records :: DISTINCT a bad line raises a ValueError naming the file and line and saying the ledger is corrupt, where read_jsonl raises a JSONDecodeError with neither, and the ledger exists to refuse a corrupt record loudly :: reuse-receipt: e921ffbb22b7a824 :: search: rs-6fba458659
+
+RULING scripts.dm-experiment.analyze_arms.load_rows :: DISTINCT a standalone analysis script whose header says it imports no cosa so its tests run in isolation; it raises on a missing file and on a bad line, as read_jsonl does :: reuse-receipt: e921ffbb22b7a824 :: search: rs-6fba458659

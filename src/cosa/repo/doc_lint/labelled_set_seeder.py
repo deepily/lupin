@@ -38,6 +38,7 @@ import sys
 
 import cosa.utils.util as cu
 from cosa.utils.file_hash import file_sha256
+from cosa.utils.jsonl_file import read_jsonl
 from cosa.repo.doc_lint import claim_extractor, labelled_pairs, model_transport
 from cosa.repo.doc_lint import labelled_set_rules as rules
 from cosa.repo.doc_lint.labelled_set_rules import EDGE_PUNCT, PRONOUNS, sentences_of, words_of
@@ -88,12 +89,6 @@ VERB_SUFFIXES = ( "s", "ed", "ing" )
 
 DEFAULT_STOPLIST = os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), "labelled_set_stoplist.txt" )
 GATE_SPLITS      = ( "gate", "gate-reserve" )
-
-
-def read_jsonl( path ):
-    """Return the records of a JSON Lines file, skipping blank lines."""
-    with open( path, encoding="utf-8" ) as f:
-        return [ json.loads( line ) for line in f if line.strip() ]
 
 
 def write_jsonl( path, rows ):

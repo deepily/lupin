@@ -10,11 +10,11 @@ pins:
   - lupin_mcp.duplicate_check_filing.triage_payload@0e998a8fdb
   - lupin_mcp.duplicate_check_filing.triage_payloads@d5742c7adc
   - lupin_mcp.duplicate_check_filing.fit_body@88ea131cfc
-  - lupin_mcp.duplicate_check_filing.read_pending@3fed62ce79
+  - lupin_mcp.duplicate_check_filing.read_pending@90d2acdec8
   - lupin_mcp.duplicate_check_filing.write_pending@593f4e0294
   - lupin_mcp.duplicate_check_filing.send_row@935ac438df
   - lupin_mcp.duplicate_check_filing.gated@eaa079cb6c
-  - lupin_mcp.duplicate_check_filing.read_triaged@453a0be918
+  - lupin_mcp.duplicate_check_filing.read_triaged@d0fab6e23f
   - lupin_mcp.duplicate_check_filing.append_triaged@f2f7870125
   - lupin_mcp.duplicate_check_filing.file_findings@c568749ba4
   - lupin_mcp.duplicate_check_filing.LiveStore@e40bee82b7

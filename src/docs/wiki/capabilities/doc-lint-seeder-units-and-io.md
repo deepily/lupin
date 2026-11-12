@@ -2,7 +2,6 @@
 capability: doc-lint-seeder-units-and-io
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.doc_lint.labelled_set_seeder.read_jsonl@e002204e38
   - cosa.repo.doc_lint.labelled_set_seeder.write_jsonl@5610f5accf
   - cosa.repo.doc_lint.labelled_set_seeder.write_json@b6397e77a3
   - cosa.repo.doc_lint.labelled_set_seeder.load_stoplist@de499ed34f
@@ -23,7 +22,7 @@ pins:
 The file helpers, strata and split partition of the labelled-set seeding script. A script, never a model, chooses what is removed or weakened in a real docstring. Each phase is its own command.
 
 ## Files
-- `read_jsonl` returns the records of a JSON Lines file, skipping blank lines. `write_jsonl` and `write_json` sort keys, so the same rows give the same bytes. It hashes files with `file_sha256` from [[utils-file-hash]].
+- `read_jsonl` is imported from `cosa.utils.jsonl_file` ([[util-jsonl-file]]). `write_jsonl` and `write_json` sort keys, so the same rows give the same bytes. It hashes files with `file_sha256` from [[utils-file-hash]].
 - `load_stoplist` reads one lowercased word per line and ignores `#` lines and blanks.
 
 ## Strata and quotas
