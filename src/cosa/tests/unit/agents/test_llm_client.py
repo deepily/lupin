@@ -225,6 +225,22 @@ class TestStreamAsync:
         assert out == "Answer"
         assert "Answer" in capsys.readouterr().out
 
+    @pytest.mark.parametrize( "completion_mode", [ True, False ] )
+    def test_run_stream_gets_the_prompt_and_settings_in_either_mode( self, completion_mode ):
+        c, mocks = _client( completion_mode=completion_mode )
+        self._attach_stream( c, [ "a" ] )
+        _run( c._stream_async( "the prompt", temperature=0.25 ) )
+        mocks[ "ModelSettings" ].assert_called_with( temperature=0.25 )
+        c.model.run_stream.assert_called_once_with( "the prompt", model_settings=mocks[ "ModelSettings" ].return_value )
+
+    @pytest.mark.parametrize( "completion_mode", [ True, False ] )
+    def test_quiet_output_is_one_dot_per_chunk_and_no_closing_line_break( self, completion_mode, capsys ):
+        c, _ = _client( completion_mode=completion_mode, debug=False, verbose=False )
+        self._attach_stream( c, [ "a", "b" ] )
+        capsys.readouterr()                               # the constructor's banner is not the stream's output
+        _run( c._stream_async( "p" ) )
+        assert capsys.readouterr().out == ".."
+
     def test_agent_mode_dot_progress( self, capsys ):
         c, _ = _client( completion_mode=False, debug=False, verbose=False )
         self._attach_stream( c, [ "a", "b", "c" ] )

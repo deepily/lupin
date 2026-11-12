@@ -8,7 +8,7 @@ from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
 
 import cosa.utils.util as du
-from cosa.agents.base_llm_client import LlmClientInterface
+from cosa.agents.base_llm_client import LlmClientInterface, collect_stream_text
 from cosa.agents.token_counter import TokenCounter
 
 
@@ -100,23 +100,10 @@ class ChatClient( LlmClientInterface ):
         Returns:
             - Complete response string from the LLM
         """
-        output = [ ]
-
         # Wrap generation parameters in ModelSettings for pydantic_ai API
         runtime_settings = ModelSettings( **generation_args )
-        async with self.model.run_stream( prompt, model_settings=runtime_settings ) as result:
-            counter = 0
-            async for chunk in result.stream_text( delta=True ):
-                if self.debug and self.verbose:
-                    print( chunk, end="", flush=True )
-                else:
-                    counter += 1
-                    if counter % 128 == 0: print()
-                    print( ".", end="", flush=True )
-                output.append( chunk )
+        return await collect_stream_text( self.model.run_stream( prompt, model_settings=runtime_settings ), self.debug, self.verbose )
 
-        return "".join( output )
-    
     async def run_async( self, prompt: str, stream: bool = False, **kwargs: Any ) -> str:
         """
         Async version to send a prompt to the chat model and get the response.

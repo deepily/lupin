@@ -19,6 +19,35 @@ def format_duration_ms( seconds: float ) -> str:
     return f"{int( seconds * 1000 )}ms"
 
 
+async def collect_stream_text( stream_context, debug, verbose, newline_after=False ):
+    """
+    Join the text deltas of one streamed model reply, showing progress as they arrive.
+
+    Requires:
+        - stream_context is an async context manager whose result has stream_text( delta=True )
+        - debug and verbose are booleans
+
+    Ensures:
+        - returns the deltas joined in arrival order
+        - with debug and verbose, each delta is echoed as it arrives
+        - otherwise prints one dot per delta, and a line break after every 128th
+        - with newline_after, one more line break is printed once the stream ends
+    """
+    output = [ ]
+    async with stream_context as result:
+        counter = 0
+        async for chunk in result.stream_text( delta=True ):
+            if debug and verbose:
+                print( chunk, end="", flush=True )
+            else:
+                counter += 1
+                if counter % 128 == 0: print()
+                print( ".", end="", flush=True )
+            output.append( chunk )
+    if newline_after: print()
+    return "".join( output )
+
+
 class LlmClientInterface( ABC ):
     """
     Common interface for all LLM client implementations.
