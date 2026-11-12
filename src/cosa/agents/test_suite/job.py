@@ -36,6 +36,7 @@ from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 from cosa.rest.pytest_args_policy import validate_pytest_args, validate_timeout_against_suite_budget
 import cosa.utils.util as cu
+from cosa.utils.container_env import running_in_container
 
 
 # Valid suite types and their script paths (relative to project root)
@@ -253,18 +254,6 @@ HOST_COMMANDS    = {
     "docker_smoke" : "`src/tests/run-docker-smoke-gate.sh`",
 }
 NOT_RUN_HERE     = "not run here, host tier"
-
-
-def running_in_container() -> bool:
-    """
-    Say whether this server process runs inside a container.
-
-    Ensures:
-        - returns True when LUPIN_IN_CONTAINER is 1, true or yes (any case), or when /.dockerenv exists
-        - returns False otherwise; a falsy sentinel does not hide the file check, it simply adds nothing
-    """
-    if os.environ.get( "LUPIN_IN_CONTAINER", "" ).strip().lower() in ( "1", "true", "yes" ): return True
-    return os.path.exists( "/.dockerenv" )
 
 
 def container_refusal( test_types: List[ str ] ) -> Optional[ str ]:

@@ -479,3 +479,11 @@ Measured 2026-11-11 at 1fa51d68f, by calling each writer's own slug code on the 
 Each writer also dates its file differently: the plan uses the day, the report and presentation use `YYYY.MM.DD-at-HH:MM-zone`, and the podcast uses `YYYY.MM.DD-HHMMSS`. The one real finding is that the podcast slug keeps a tab or newline in the file name, because its filter keeps whitespace and replaces only spaces.
 
 RULING cosa.agents.shared.report_writer.ReportWriter._sanitize_slug :: DISTINCT the plan, report, presentation and podcast slugs differ on hyphens, underscores, whitespace, word count and fallback, so one helper would rename files; the dated prefixes also differ :: reuse-receipt: ee74000c2fcea0a3 :: search: rs-384945a220
+
+## Reuse review: one container check (row 2448ae19, follow-up adf50584)
+
+RULING cosa.utils.container_env.container_sentinel_set :: DISTINCT is_flag_on reads true, 1, yes or on, so it also accepts on, which the LUPIN_IN_CONTAINER sentinel never did; the other candidates parse a general boolean or read a docker env list :: reuse-receipt: 5bbf1a855ce26730 :: search: rs-16b84ca2ee
+REUSE-OUTCOME 5bbf1a855ce26730 :: rs-16b84ca2ee :: WROTE_NEW the one reader of the LUPIN_IN_CONTAINER sentinel with its 1, true or yes word set, replacing the copy in worktree_reaper and the one in the test-suite job; is_flag_on accepts on as well, so reusing it would change which values count as a container :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-containerenv
+
+RULING cosa.utils.container_env.running_in_container :: DISTINCT scripts.v2_eval.running_in_container reads only /.dockerenv in a standalone script, the hook-library session_bridge check must not import cosa, and stale-process-scan resolves a pid's container name from its cgroup :: reuse-receipt: 502981be6eef94fe :: search: rs-ad1ff29aeb
+REUSE-OUTCOME 502981be6eef94fe :: rs-ad1ff29aeb :: WROTE_NEW the sentinel-or-/.dockerenv check, moved here from the test-suite job so the reaper and the job share one sentinel reader; the script copy checks the file only and the hook copy is kept separate because a hook must not import cosa :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-containerenv
