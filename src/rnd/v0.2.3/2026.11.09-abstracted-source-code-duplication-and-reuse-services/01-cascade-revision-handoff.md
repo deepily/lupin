@@ -432,8 +432,6 @@ RULING cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.request_stop 
 
 RULING cosa.agents.math_agent.MathAgent.__init__ :: DISTINCT each agent forwards the explicit 12-argument signature to AgentBase.__init__ and then builds its own prompt placeholder and attributes, and sharing the forward needs kwargs that hide the signature; the one repeated fragment is the seven-tag response list in MathAgent and DateAndTimeAgent, which a constant could share but which is not an __init__ copy :: reuse-receipt: 837207f3cdfb93a3 :: search: rs-72e02143ed
 
-REUSE-OUTCOME a8e8b71259524924 :: rs-7047f9a841 :: WROTE_NEW overrides the base price_pair to add a Haiku tier that only the presentation client prices, and defers to the base for every other name; the base method is the one it extends :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-cost-estimate
-
 RULING cosa.agents.base_llm_client.collect_stream_text :: DISTINCT one consumer of a streamed reply that the three clients' own loops are now thin callers of; CompletionStreamingContext.stream_text produces the text and does not consume it :: reuse-receipt: a15559bedf7c7241 :: search: rs-a9592152ec
 REUSE-OUTCOME a15559bedf7c7241 :: rs-a9592152ec :: WROTE_NEW one consumer of a streamed reply that the three clients' own loops are now thin callers of; CompletionStreamingContext.stream_text produces the text and does not consume it :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#diff
 
