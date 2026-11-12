@@ -76,3 +76,15 @@ def test_the_two_real_packages_use_the_shared_hook():
     assert repositories._LAZY_EXPORTS[ "TrustStateRepository" ] == "proxy_decision_repository"
     assert db.__getattr__.__module__ == "cosa.utils.lazy_exports"
     assert repositories.__getattr__.__module__ == "cosa.utils.lazy_exports"
+
+
+@pytest.mark.parametrize( "package_name", [ "cosa.rest.db", "cosa.rest.db.repositories" ] )
+def test_each_real_package_caches_a_read_name_in_its_own_vars_and_dir_keeps_real_attributes( package_name, monkeypatch ):
+    package = importlib.import_module( package_name )
+    name    = sorted( package._LAZY_EXPORTS )[ 0 ]
+    monkeypatch.delitem( vars( package ), name, raising=False )
+    assert name not in vars( package )
+    value = getattr( package, name )
+    assert vars( package )[ name ] is value
+    listed = dir( package )
+    assert "_LAZY_EXPORTS" in listed and "__name__" in listed and name in listed
