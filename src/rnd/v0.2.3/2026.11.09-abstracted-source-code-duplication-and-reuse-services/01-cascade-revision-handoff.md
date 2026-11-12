@@ -330,3 +330,12 @@ REUSE-OUTCOME 33c6ec441564c732 :: rs-266ff92ce5 :: WROTE_NEW derives repo names 
 
 RULING cosa.repo.code_health_settings.name_mismatches :: DISTINCT compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: reuse-receipt: 2e232146ad501898 :: search: rs-08457a253f
 REUSE-OUTCOME 2e232146ad501898 :: rs-08457a253f :: WROTE_NEW compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.repo.symindex.spec.detected_spec :: DISTINCT the old body of spec_for moved unchanged so spec_for can layer the INI override on it; no other function builds an IndexSpec from a root :: reuse-receipt: a4dc54e9cc11ff5c :: search: rs-38aa26aabc
+REUSE-OUTCOME a4dc54e9cc11ff5c :: rs-38aa26aabc :: WROTE_NEW the old body of spec_for moved unchanged so spec_for can layer the INI override on it; no other function builds an IndexSpec from a root :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.2-ph1s4
+
+RULING cosa.repo.symindex.spec.configured_dirs :: DISTINCT turns relative INI entries into existing directories and refuses a missing one naming the key; resolve_within_root follows symlinks for a served file and check_relative only judges the text :: reuse-receipt: 7031b99265e99cd5 :: search: rs-fe1284e345
+REUSE-OUTCOME 7031b99265e99cd5 :: rs-fe1284e345 :: WROTE_NEW turns relative INI entries into existing directories and refuses a missing one naming the key; resolve_within_root follows symlinks for a served file and check_relative only judges the text :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.2-ph1s4
+
+RULING cosa.repo.symindex.spec.override_spec :: DISTINCT applies the four index keys to a detected IndexSpec field by field; spec_for only calls it and no other function rewrites roots by language :: reuse-receipt: 2999a1ea969ea180 :: search: rs-becd524660
+REUSE-OUTCOME 2999a1ea969ea180 :: rs-becd524660 :: WROTE_NEW applies the four index keys to a detected IndexSpec field by field; spec_for only calls it and no other function rewrites roots by language :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.2-ph1s4

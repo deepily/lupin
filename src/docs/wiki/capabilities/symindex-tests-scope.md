@@ -2,7 +2,7 @@
 capability: symindex-tests-scope
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.symindex.spec.tests_spec@737879df38
+  - cosa.repo.symindex.spec.tests_spec@7859cb1016
   - cosa.repo.symindex.spec.skip_rule@03f8eb9a6e
 ---
 # Symbol index: the tests scope

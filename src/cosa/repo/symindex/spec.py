@@ -9,6 +9,8 @@ import os
 import pathlib
 import subprocess
 
+from cosa.repo import code_health_settings as chs
+
 LUPIN_PY_PACKAGES = ( "cosa", "lupin_cli", "lupin_mcp", "lupin_app", "lupin_arbiter_app", "lupin_model_server", "scripts" )
 LUPIN_JS_DIRS     = ( "src/lupin_app/static/js", "src/scripts", "src/cosa/repo/symindex", "src/conf", "src/lupin_app/static/html" )          # the script roots of a lupin tree; test_script_files_census names what is left out
 SKIP_PARTS        = frozenset( { "tests", "migrations", ".venv", "vendor", "node_modules", "rnd", "__pycache__", ".git" } )
@@ -85,9 +87,9 @@ def is_lupin_tree( root ):
     return ( root / "src" / "cosa" ).is_dir() and ( root / "src" / "lupin_mcp" ).is_dir()
 
 
-def spec_for( root ):
+def detected_spec( root ):
     """
-    Build the IndexSpec for a repository root.
+    Build the IndexSpec detection gives for a repository root, with no INI override.
 
     Ensures:
         - a lupin tree indexes the lupin packages and the script roots of LUPIN_JS_DIRS (the web client's js directory, src/scripts, the index's own extractors, src/conf and the admin and auth page scripts under static/html)
@@ -105,21 +107,98 @@ def spec_for( root ):
     return IndexSpec( root, root.name, [ root ], [ root ], [], root, skip )
 
 
-def tests_spec( root ):
+def configured_dirs( root, key, entries ):
+    """
+    Resolve the repo-relative directories a key lists.
+
+    Requires:
+        - entries are relative paths already checked by code_health_settings
+
+    Ensures:
+        - returns absolute directories under root, in the key's order
+
+    Raises:
+        - CodeHealthSettingError naming the key for an entry that is not an existing directory
+    """
+    dirs = [ root / entry for entry in entries ]
+    for entry, path in zip( entries, dirs ):
+        if not path.is_dir(): raise chs.CodeHealthSettingError( f"{key}: {entry!r} is not a directory under {root}" )
+    return dirs
+
+
+def override_spec( detected, settings, name ):
+    """
+    Apply a repo's INI settings to a detected IndexSpec, field by field.
+
+    Requires:
+        - settings is the dict cosa.repo.code_health_settings.repo_settings returns
+
+    Ensures:
+        - a blank `index languages` keeps the languages whose detected roots are not empty
+        - a language not listed gets no roots; a listed language keeps its detected roots
+        - a non-blank `index source dirs` replaces the roots of every listed language: py goes to py_roots, ts to js_roots, dart to dart_roots
+        - a non-blank `index exclude` replaces skip_parts; a blank one keeps the detected set
+        - root, name, module_base and scopes are the detected ones
+
+    Raises:
+        - CodeHealthSettingError naming `index source dirs` for an entry that is not a directory
+    """
+    found  = { "py": detected.py_roots, "ts": detected.js_roots, "dart": detected.dart_roots }
+    listed = settings[ "index_languages" ] or [ lang for lang, roots in found.items() if roots ]
+    dirs   = configured_dirs( detected.root, chs.repo_key( name, chs.SOURCE_DIRS_KIND ), settings[ "index_source_dirs" ] )
+    roots  = { lang: ( dirs or found[ lang ] ) if lang in listed else () for lang in found }
+    skip   = frozenset( settings[ "index_exclude" ] ) or detected.skip_parts
+    return IndexSpec( detected.root, detected.name, roots[ "py" ], roots[ "ts" ], roots[ "dart" ], detected.module_base, skip, scopes=detected.scopes )
+
+
+def spec_for( root, config=None, name=None ):
+    """
+    Build the IndexSpec for a repository root.
+
+    Requires:
+        - config is None, or a ConfigurationManager
+
+    Ensures:
+        - with no config the result is detected_spec( root )
+        - with a config, the repo's `external repo <name> index *` keys override detection field by field (override_spec); name defaults to the root's directory name
+
+    Raises:
+        - CodeHealthSettingError naming the key for a language outside py, ts and dart, a path in `index exclude`, or a source dir that does not exist
+    """
+    detected = detected_spec( root )
+    if config is None: return detected
+    name = detected.name if name is None else name
+    return override_spec( detected, chs.repo_settings( config, name ), name )
+
+
+def tests_spec( root, config=None, name=None ):
     """
     Build the IndexSpec of a repository's test files.
+
+    Requires:
+        - config is None, or a ConfigurationManager
 
     Ensures:
         - a lupin tree reads Python and script files under src/tests and src/cosa/tests, whichever exist
         - any other tree reads a `tests` or `src/tests` directory when it has one, and nothing otherwise
-        - skip_parts is the main set less `tests`, so a test file is indexed here and nowhere else
+        - with a config, a non-blank `index test dirs` replaces those directories
+        - skip_parts is the main set less `tests`, so a test file is indexed here and nowhere else; a non-blank `index exclude` replaces the main set
         - the spec publishes the scope `test` as its searchable scope
+
+    Raises:
+        - CodeHealthSettingError naming the key for a test dir that does not exist or a path in `index exclude`
     """
     root  = pathlib.Path( root ).resolve()
     names = TESTS_DIRS if is_lupin_tree( root ) else ( "tests", "src/tests" )
     dirs  = [ root / n for n in names if ( root / n ).is_dir() ]
     base  = root / "src" if is_lupin_tree( root ) else root
-    return IndexSpec( root, root.name, dirs, dirs, [], base, set( SKIP_PARTS ) - { "tests" }, scopes=( "test", ) )
+    skip  = set( SKIP_PARTS )
+    if config is not None:
+        name     = root.name if name is None else name
+        settings = chs.repo_settings( config, name )
+        dirs     = configured_dirs( root, chs.repo_key( name, chs.TEST_DIRS_KIND ), settings[ "index_test_dirs" ] ) or dirs
+        skip     = set( settings[ "index_exclude" ] ) or skip
+    return IndexSpec( root, root.name, dirs, dirs, [], base, skip - { "tests" }, scopes=( "test", ) )
 
 
 def is_test_path( rel_path ):
