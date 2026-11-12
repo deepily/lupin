@@ -41,8 +41,8 @@ def test_the_page_is_html_that_browsers_revalidate( client ):
 
 
 def test_the_folder_is_the_servers_own( monkeypatch ):
-    monkeypatch.setattr( dcs.cu, "get_project_root", lambda: "/r" )
-    assert str( dcs.runs_folder() ) == "/r/io/duplicate-check-daily"
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", "/d" )
+    assert str( dcs.runs_folder() ) == "/d/lupin/code-health/duplicate-check-daily"
 
 
 def test_the_status_endpoint_carries_the_installed_schedule_and_is_not_silent_for_this_mornings_daily_run( client ):

@@ -101,6 +101,11 @@ def test_overrides_are_read_each_time_win_over_the_registry_and_bad_edits_are_ig
     assert jr.effective( reg[ "jobs" ][ 1 ], reg[ "defaults" ], {} )[ "grace_minutes" ] == 30
 
 
+def test_resolve_path_code_health_prefix_lands_under_the_fleet_data_root_not_io( tmp_path, monkeypatch ):
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path ) )
+    assert jr.resolve_path( "{code_health}/duplicate-check-daily/run.lock", "/x/myrepo", "/d" ) == tmp_path / "myrepo" / "code-health" / "duplicate-check-daily" / "run.lock"
+
+
 def test_resolve_path_prefixes():
     assert jr.resolve_path( "{data}/x/y.json", "/r", "/d" ) == pathlib.Path( "/d/x/y.json" )
     assert jr.resolve_path( "{root}/x.json", "/r", "/d" ) == pathlib.Path( "/r/x.json" )
@@ -249,6 +254,13 @@ def test_the_registry_mark_for_duplicate_check_is_the_key_prefix_the_filer_write
     dup = next( j for j in jr.load_registry( REAL_ROOT )[ "jobs" ] if j[ "job" ] == "duplicate-check" )
     assert dup[ "fix_debt_key" ] == svc.MARK_PREFIX + filing.KEY_PREFIX
     assert filing.RUN_KEY_PREFIX.startswith( filing.KEY_PREFIX ) and filing.correlation_key( "d", "t" ).startswith( filing.KEY_PREFIX )
+
+
+def test_expand_fills_the_code_health_placeholder_and_only_asks_for_it_when_present( tmp_path, monkeypatch ):
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path ) )
+    assert svc.expand( "{code_health}/duplicate-check-daily/daily.log", "/x/myrepo", "/D", "/H", "/P", "/E" ) == f"{tmp_path}/myrepo/code-health/duplicate-check-daily/daily.log"
+    monkeypatch.setattr( svc.chs, "data_dir", lambda root: pytest.fail( "no placeholder, no lookup" ) )
+    assert svc.expand( "{root}/x", "/R", "/D", "/H", "/P", "/E" ) == "/R/x"
 
 
 def test_expand_fills_every_placeholder_inside_strings_lists_and_dicts():

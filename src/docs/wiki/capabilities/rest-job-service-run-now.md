@@ -2,7 +2,7 @@
 capability: rest-job-service-run-now
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.job_service.expand@631c5f17e9
+  - cosa.rest.job_service.expand@da8696b6d6
   - cosa.rest.job_service.home_and_pip@4fa2e3db51
   - cosa.rest.job_service.paths_of@6a2f351cb1
   - cosa.rest.job_service.run_command@c6fb608f03

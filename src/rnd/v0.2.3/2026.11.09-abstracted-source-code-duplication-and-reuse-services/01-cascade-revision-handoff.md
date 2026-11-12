@@ -423,3 +423,14 @@ REUSE-OUTCOME a8e8b71259524924 :: rs-7047f9a841 :: WROTE_NEW overrides the base 
 
 RULING lupin_mcp.persona_normalization.memento_slugs :: DISTINCT returns the accent-folded slug first and the naive slug after it, where persona_slug and canonical_persona_key return a single slug and extending them would change the contract of the DM-topic and store-key callers; it is the moved body of the two copies, not a third :: reuse-receipt: 8b5a876a33056852 :: search: rs-a15d1cdce2
 REUSE-OUTCOME 8b5a876a33056852 :: rs-a15d1cdce2 :: WROTE_NEW returns the accent-folded slug first and the naive slug after it, where persona_slug and canonical_persona_key return a single slug and extending them would change the contract of the DM-topic and store-key callers; it is the moved body of the two copies, not a third :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-mementoslugs
+
+## Reuse review: code-health data folder (row 6fd6fc0c, step ph1-s12)
+
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.rest.task_approval_settings.refusal_for_admission :: UNRELATED :: a task-approval refusal
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: lupin_app.main.lifespan :: UNRELATED :: server start-up
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.memory.solution_manager_factory.SolutionSnapshotManagerFactory.create_from_config_manager :: UNRELATED :: builds a solution-snapshot manager
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.memory.solution_manager_factory.SolutionSnapshotManagerFactory.create_manager :: UNRELATED :: builds a solution-snapshot manager by type
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.rest.routers.speech.stream_tts_elevenlabs :: UNRELATED :: streams speech
+
+RULING cosa.repo.code_health_settings.data_dir :: DISTINCT joins fleet_data_root and the code health data subdir key, so every code-health job resolves one folder; symindex.paths.data_dir does the same join for the reuse-review key and raises CandidateError, and the two folders do not move together :: reuse-receipt: a92e08d48a04c6a9 :: search: rs-6325c24278
+REUSE-OUTCOME a92e08d48a04c6a9 :: rs-6325c24278 :: WROTE_NEW joins fleet_data_root and the code health data subdir key, so every code-health job resolves one folder; symindex.paths.data_dir does the same join for the reuse-review key and raises CandidateError, and the two folders do not move together :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s12

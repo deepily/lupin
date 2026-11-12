@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
   - lupin_mcp.duplicate_check_daily.run@0e3d95bce3
   - lupin_mcp.duplicate_check_daily.cron_lines@5d30783eec
-  - lupin_mcp.duplicate_check_daily.install_mode@4c5ac279ec
+  - lupin_mcp.duplicate_check_daily.install_mode@8a07fed64c
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
   - lupin_mcp.duplicate_check_daily.live_filer@ae7b324cde
   - lupin_mcp.duplicate_check_daily.live_auditor@4cc714910e

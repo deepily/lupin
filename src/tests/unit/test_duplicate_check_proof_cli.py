@@ -332,6 +332,7 @@ def test_live_parts_wires_the_run_folder_the_pools_and_the_ledger_beside_the_pro
         def cleanup( self ): seen[ "cleaned" ] = True
 
     monkeypatch.setattr( pc.cu, "get_project_root", lambda: str( tmp_path / "proj" ) )
+    monkeypatch.setattr( pc.chs, "data_dir", lambda root, config=None: tmp_path / "data" / pathlib.Path( root ).name )
     monkeypatch.setattr( pc.frozen, "live_config", lambda: world.toy.cfg )
     monkeypatch.setattr( pc.frozen, "frozen_path", lambda: "frozen.json" )
     monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: "9.9" )
@@ -341,7 +342,7 @@ def test_live_parts_wires_the_run_folder_the_pools_and_the_ledger_beside_the_pro
     w       = parts[ "wiring" ]
     assert seen[ "cleaned" ] and seen[ "n" ] == world.toy.cfg[ "min_nodes" ] and seen[ "vectors" ] == world.run_dir / "vectors"
     assert [ d[ "name" ] for d in parts[ "distractors" ] ] == [ "o1", "d1" ] and parts[ "mono_defs" ] == [ world.toy.m[ "m1" ] ]
-    assert w[ "client" ] == "C" and w[ "parallel" ] == 2 and w[ "data_dir" ] == str( tmp_path / "proj" ) + "/io" and w[ "frozen_path" ] == "frozen.json"
+    assert w[ "client" ] == "C" and w[ "parallel" ] == 2 and w[ "data_dir" ] == str( tmp_path / "data" / "proj" ) and w[ "frozen_path" ] == "frozen.json"
     assert w[ "cache_dir" ] == world.run_dir / "vectors" and w[ "clock" ]() [ 4 ] == "-"
     assert callable( w[ "structural_pairs" ] ) and "ledger" not in w and not ( tmp_path / "proj" ).exists()
 

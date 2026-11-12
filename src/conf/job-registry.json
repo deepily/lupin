@@ -31,12 +31,12 @@
           "after_boot_seconds": 300
         }
       ],
-      "summary_path": "{root}/io/duplicate-check-daily/job-summary.json",
+      "summary_path": "{code_health}/duplicate-check-daily/job-summary.json",
       "scan_debt": true,
       "fix_debt": true,
       "fix_debt_key": "prefix:epic:dupcheck-",
       "detail_link": "/app/duplicate-check",
-      "lock_path": "{root}/io/duplicate-check-daily/run.lock",
+      "lock_path": "{code_health}/duplicate-check-daily/run.lock",
       "rows": [
         {
           "id": "350d43c8",
@@ -52,12 +52,12 @@
       "evidence": [
         {
           "label": "Run ledger",
-          "path": "io/duplicate-check-daily/runs.jsonl",
+          "path": "code-health/duplicate-check-daily/runs.jsonl",
           "href": null
         },
         {
           "label": "Daily log",
-          "path": "io/duplicate-check-daily/daily.log",
+          "path": "code-health/duplicate-check-daily/daily.log",
           "href": null
         }
       ],
@@ -78,7 +78,7 @@
       },
       "cron_tag": "duplicate-check-daily",
       "cron_managed": true,
-      "cron_log": "{root}/io/duplicate-check-daily/daily.log",
+      "cron_log": "{code_health}/duplicate-check-daily/daily.log",
       "own_summary": true
     },
     {

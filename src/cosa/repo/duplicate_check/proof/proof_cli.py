@@ -18,6 +18,7 @@ import cosa.utils.util as cu
 from cosa.repo.doc_lint import harness_runner, model_transport
 from cosa.repo.labelling import packets as lb_packets
 from cosa.repo.duplicate_check import blind, extract, frozen, judge, structural
+from cosa.repo import code_health_settings as chs
 from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check.proof import label_load, label_prep, proof_run
 from cosa.repo.symindex import spec as sp
@@ -30,7 +31,6 @@ REWRITES_DIR     = "rewrites"
 VECTORS_DIR      = "vectors"
 TREE_PREFIX      = "tree"
 NEW_PREFIX       = "proof-new"
-DATA_RELATIVE    = "/io"
 LEDGER_NAME      = "judge-ledger.jsonl"
 DEFAULT_PARALLEL = 4
 
@@ -353,12 +353,12 @@ def base_wiring( cache_dir, structural_pairs, parallel, client ):
 
     Ensures:
         - returns { client, cache_dir, scrub, structural_pairs, backend, parallel, frozen_path, live, data_dir, clock }
-        - the backend is the Claude Code one, the scrub list is the frozen arm labels' own, and the data root is the project's io folder
+        - the backend is the Claude Code one, the scrub list is the frozen arm labels' own, and the data root is the code-health data folder under the fleet data root
         - writes nothing
     """
     return { "client": client, "cache_dir": pathlib.Path( cache_dir ), "scrub": blind.scrub_tokens( frozen.ARM_LABELS ), "structural_pairs": structural_pairs,
              "backend": judge.MaxPlanBackend(), "parallel": parallel, "frozen_path": frozen.frozen_path(), "live": frozen.live_config(),
-             "data_dir": cu.get_project_root() + DATA_RELATIVE, "clock": lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }
+             "data_dir": str( chs.data_dir( cu.get_project_root() ) ), "clock": lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }
 
 
 def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring, monolith=label_prep.monolith_definitions, jscpd=structural.run_jscpd ):

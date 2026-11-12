@@ -902,7 +902,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
         - returns 0, or 1 with the reason on err when the install is refused or the crontab call fails
     """
     root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
-    log_dir = f"{root}{proof_cli.DATA_RELATIVE}/{FOLDER[ 0 ]}"
+    log_dir = f"{chs.data_dir( root )}/{FOLDER[ 0 ]}"
     cmd     = crontab_cmd or lt.crontab_command( environ, "DUPLICATE_CHECK_DAILY_CRONTAB" )
     carried = { n: environ[ n ] for n in CARRIED if environ.get( n ) }
     return lt.manage_cron( args, root, environ, now, out, err, cmd, f"{log_dir}/crontab-backups", CRON_TAG, LOCK_OWNER, INSTALLED_LINES, "duplicate-check-daily",

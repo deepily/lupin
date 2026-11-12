@@ -223,6 +223,27 @@ def data_subdir( config ):
     return text
 
 
+def data_dir( root=None, config=None ):
+    """
+    Resolve the folder that holds one repo's code-health data.
+
+    Requires:
+        - root is the repo checkout, or None for the project root
+        - config has a ConfigurationManager `get` method, or None to build the process's own
+
+    Ensures:
+        - returns `<fleet_data_root( root )>/<code health data subdir>` as a Path, outside the repo tree
+        - never returns a path under the checkout's `io/` folder
+
+    Raises:
+        - CodeHealthSettingError naming the key when the subdir is a path
+    """
+    if config is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return fleet_data_root( root ) / data_subdir( config )
+
+
 def repo_settings( config, name ):
     """
     Read every per-repo setting for one repo.

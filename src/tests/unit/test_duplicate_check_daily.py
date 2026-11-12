@@ -382,7 +382,7 @@ def test_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron
     assert cron[ "log" ].read_text().count( "lock-exit" ) == 1, "and lets it go"
     text = cron[ "file" ].read_text()
     assert text.strip() == "0 * * * * other", "only the other line is left, and nothing was added"
-    assert list( ( tmp_path / "io" / "duplicate-check-daily" / "crontab-backups" ).iterdir() ), "a backup is written before each change"
+    assert list( ( tmp_path / "fleet-data" / tmp_path.name / "code-health" / "duplicate-check-daily" / "crontab-backups" ).iterdir() ), "a backup is written before each change"
 
 
 def blank_key_main( tmp_path, cron, flag ):
@@ -431,7 +431,8 @@ def test_the_root_of_the_cron_lines_falls_back_to_the_working_directory( tmp_pat
 
 
 def test_the_default_err_goes_to_standard_error_and_the_default_cron_command_is_crontab( tmp_path, cron, capsys, monkeypatch ):
-    monkeypatch.setattr( dd.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess( cmd, 0, stdout="", stderr="" ) if cmd[ 0 ] == "crontab" else pytest.fail( cmd ) )
+    real = subprocess.run                                                  # the data folder's git lookup is real; only crontab is faked
+    monkeypatch.setattr( dd.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess( cmd, 0, stdout="", stderr="" ) if cmd[ 0 ] == "crontab" else real( cmd, **k ) if cmd[ 0 ] == "git" else pytest.fail( str( cmd ) ) )
     out = []
     assert dd.main( [ "--status" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append ) == 0 and out == [ "not installed" ]
     assert dd.main( [ "--uninstall" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append, crontab_cmd=cron[ "cmd" ] ) == 1

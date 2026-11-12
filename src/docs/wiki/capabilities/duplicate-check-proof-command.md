@@ -17,7 +17,7 @@ pins:
   - cosa.repo.duplicate_check.proof.proof_cli.label_state@fa6cd34b7d
   - cosa.repo.duplicate_check.proof.proof_cli.read_supplement@df61e47244
   - cosa.repo.duplicate_check.proof.proof_cli.trial_state@d160c5852a
-  - cosa.repo.duplicate_check.proof.proof_cli.base_wiring@0f168546a6
+  - cosa.repo.duplicate_check.proof.proof_cli.base_wiring@5622376323
   - cosa.repo.duplicate_check.proof.proof_cli.live_parts@c864c0e78c
   - cosa.repo.duplicate_check.proof.proof_cli.proof_ledger@a993799e54
   - cosa.repo.duplicate_check.proof.proof_cli.rotate_ledger_for_new_cli@61f078cab2

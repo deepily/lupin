@@ -13,6 +13,7 @@ import os
 import pathlib
 import statistics
 
+from cosa.repo import code_health_settings as chs
 from cosa.rest import job_cron
 from cosa.rest import job_registry
 from lupin_mcp import duplicate_check_history as history
@@ -228,7 +229,7 @@ def snapshot( folder, now, crontab_text=None ):
 
 def _evidence( lines, i ):
     """Ensures: names ledger line i (0-based) as the summary's evidence field does."""
-    return f"io/{history.FOLDER}/{history.RUNS_FILE}:{i + 1}"
+    return f"{chs.DATA_SUBDIR}/{history.FOLDER}/{history.RUNS_FILE}:{i + 1}"
 
 
 def _points( key, finished ):
@@ -348,7 +349,7 @@ def render_html( snap ):
 
 def folder_of( root ):
     """Ensures: returns the folder the runs are recorded in, under the given project root."""
-    return pathlib.Path( root ) / "io" / history.FOLDER
+    return chs.data_dir( root ) / history.FOLDER
 
 
 def median_seconds_per_call( lines, floor=20, last=5 ):
