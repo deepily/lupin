@@ -620,3 +620,9 @@ SEARCHED lupin_cli.claude_code.hooks.lib.sessions_dir.iter_bridge_paths :: rs-af
 SEARCHED lupin_cli.claude_code.hooks.lib.sessions_dir.iter_bridge_paths :: rs-af054bab05 :: lupin_mcp.session_spawner._scan_persona_by_tmux_session :: UNRELATED :: not read in full; it globs the pattern itself and was outside the hook library
 SEARCHED lupin_cli.claude_code.hooks.lib.sessions_dir.iter_bridge_paths :: rs-af054bab05 :: lupin_cli.claude_code.hooks.lib.cc_notification_listener.CCNotificationListener._buffer_message :: UNRELATED :: writes a notification buffer, not a bridge listing
 REUSE-OUTCOME 0b3a3dfd1c5323de :: rs-af054bab05 :: WROTE_NEW the one lazy listing of bridge files that skips buffer and listener names, with no pid test and no read, which seven scans in session_bridge and one in memento_verify_tick now call :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-bridgescan
+
+### Reuse follow-up: the reaper's bridge listing onto iter_bridge_paths (row 2448ae19, follow-up adf50584)
+
+Cheech asked first whether cosa already imports from `lupin_cli.claude_code.hooks.lib`. Measured 2026-11-11 at ba2eaf45e by `git grep` over tracked non-test files under `src/cosa`: it does, from 53 import lines in 33 files. The reaper itself already imports `session_bridge` four times, inside its own function bodies. So the fold is allowed.
+
+`orphan_bridge_reaper._default_list_bridges` was the SAME_JOB hit of search rs-af054bab05 (`SEARCHED` lines in the section on the hook-library iterator, above). It listed `cc-*.json` and dropped names holding "buffer" or "listener", the same rule, from a private `_NON_SESSION_BRIDGE_TOKENS`. It now returns `list( iter_bridge_paths( session_dir ) )` after the same existence check, and the private constant is gone. It stays a list because the sweep indexes and re-reads it. No new definition, so no new outcome line.
