@@ -22,6 +22,7 @@ from cosa.crud_for_dataframes.todo_crud_agent import TodoCrudAgent
 from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.agent_base import AgentBase
 from cosa.rest.job_state import JobState
+from tests.helpers.typed_config import TypedConfigFake
 
 
 # ============================================================================
@@ -38,9 +39,7 @@ def tmp_storage_dir():
 @pytest.fixture
 def mock_config_mgr():
     """Provide a mock ConfigurationManager."""
-    mgr = MagicMock()
-    mgr.get.return_value = "true"
-    return mgr
+    return TypedConfigFake( every_key="true" )
 
 
 def _create_mock_agent( tmp_dir=None, operation="add", needs_confirm=False ):
@@ -96,7 +95,7 @@ class TestCrudQueueRouting:
 
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
-        mock_config_mgr.get.return_value = "true"
+        mock_config_mgr.set_every_key( "true" )
 
         assert queue._crud_agents_enabled() is True
 
@@ -106,7 +105,7 @@ class TestCrudQueueRouting:
 
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
-        mock_config_mgr.get.return_value = "false"
+        mock_config_mgr.set_every_key( "false" )
 
         assert queue._crud_agents_enabled() is False
 
@@ -117,7 +116,7 @@ class TestCrudQueueRouting:
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
         # Simulate missing key — default= param in get() returns "true"
-        mock_config_mgr.get.return_value = "true"
+        mock_config_mgr.set_every_key( "true" )
 
         assert queue._crud_agents_enabled() is True
 
@@ -127,7 +126,7 @@ class TestCrudQueueRouting:
 
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
-        mock_config_mgr.get.return_value = "  True  "
+        mock_config_mgr.set_every_key( "  True  " )
 
         assert queue._crud_agents_enabled() is True
 

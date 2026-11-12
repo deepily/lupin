@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from cosa.rest import job_persistence as jp
 from cosa.rest.job_state import JobState
+from tests.helpers.typed_config import TypedConfigFake
 
 
 def _mock_get_db( session ):
@@ -52,12 +53,12 @@ class TestIsAgenticJobType( unittest.TestCase ):
 
 class TestConfigHelpers( unittest.TestCase ):
     def test_persistence_enabled_true( self ):
-        cfg = Mock(); cfg.get.return_value = "true"
+        cfg = TypedConfigFake( every_key="true" )
         with patch.object( jp, "ConfigurationManager", return_value=cfg ):
             self.assertTrue( jp._is_persistence_enabled() )
 
     def test_persistence_enabled_false( self ):
-        cfg = Mock(); cfg.get.return_value = "false"
+        cfg = TypedConfigFake( every_key="false" )
         with patch.object( jp, "ConfigurationManager", return_value=cfg ):
             self.assertFalse( jp._is_persistence_enabled() )
 
