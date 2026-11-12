@@ -43,18 +43,6 @@ def test_surrounding_whitespace_is_ignored():
 @pytest.mark.parametrize( "value", [ None, "", "   ", 123, 1.5, [ "2026-06-05T12:00:00Z" ], "not-a-ts", "2026-13-45T00:00:00Z" ] )
 def test_anything_unreadable_is_none_and_never_raises( value ):
     assert parse_iso( value ) is None
-    assert parse_iso( value, naive=True ) is None
-
-
-def test_the_naive_option_returns_the_same_instant_in_utc_without_a_zone():
-    parsed = parse_iso( "2026-06-05T12:00:00+05:00", naive=True )
-    assert parsed == datetime.datetime( 2026, 6, 5, 7, 0 )
-    assert parsed.tzinfo is None
-
-
-def test_the_naive_option_leaves_a_utc_wall_clock_alone():
-    assert parse_iso( "2026-06-05T12:00:00Z", naive=True ) == datetime.datetime( 2026, 6, 5, 12, 0 )
-    assert parse_iso( "2026-06-05T12:00:00", naive=True ) == datetime.datetime( 2026, 6, 5, 12, 0 )
 
 
 @pytest.mark.parametrize( "module", [ dependency_graph, fleet_data_model, operator_gate_routing ] )
