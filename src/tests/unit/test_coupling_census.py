@@ -92,7 +92,7 @@ def test_run_on_a_small_tree_gives_the_table_and_a_failed_control_refuses(tmp_pa
 
 def test_the_real_tree_finds_both_known_couplings_before_it_prints_anything():
     out = cc.run( cu.get_project_root(), NOW )
-    assert "`src/cosa/repo/symindex/spec.py:77`" in out and "`src/cosa/repo/duplicate_check/proof/proof_cli.py:33`" in out
+    assert "`src/cosa/repo/symindex/spec.py:79`" in out and "`src/cosa/repo/duplicate_check/proof/proof_cli.py:33`" in out
     assert cc.SELF_PATH not in out                                         # no first-location list names the script that holds the needles
     assert "| 1 | `def is_lupin_tree` | 1 | 1 |" in out
 

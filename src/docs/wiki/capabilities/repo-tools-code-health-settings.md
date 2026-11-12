@@ -20,6 +20,10 @@ pins:
   - cosa.repo.code_health_settings.registry_repo_names@17742a2b75
   - cosa.repo.code_health_settings.name_mismatches@07f8a1b7c2
   - cosa.repo.code_health_settings.check_registry_names@c4061ea4ba
+  - cosa.repo.symindex.spec.detected_spec@7a0be26984
+  - cosa.repo.symindex.spec.configured_dirs@c4d697d6ed
+  - cosa.repo.symindex.spec.check_module_base@3c8c9be41b
+  - cosa.repo.symindex.spec.override_spec@f7380a240d
 ---
 # Code-health settings: per-repo keys in Lupin's INI
 
@@ -30,6 +34,7 @@ pins:
 - `filed title prefix` falls back to the repo name in capitals inside brackets. `data_subdir` falls back to `code-health`.
 - `duplicate check ceiling` and `jev token limit` have no code default. `read_positive_int` refuses a blank, zero, negative or non-numeric value and names the key.
 - A path entry is refused when it is absolute or holds `..`. An `index exclude` entry is refused when it holds a slash. A language outside py, ts and dart is refused.
-- `registry_repo_names` lists the repos with a row in `src/conf/job-registry.json`, and `name_mismatches` reports a name that differs from its checkout's directory name.
-- `check_registry_names( registry, config )` is the directory-name check. It raises, naming every repo with a row whose name differs from its checkout's directory name or has no `external repo <name> path`. An empty registry also raises.
-- Nothing calls these readers yet. The index, librarian, filing and daily-check modules adopt them in later steps of the code-health plan.
+- `registry_repo_names` lists the repos with a row in `src/conf/job-registry.json`, and `name_mismatches` reports a name that differs from its checkout's directory name. `check_registry_names( registry, config )` raises, naming each repo whose name differs from its directory name or that lacks `external repo <name> path`. An empty registry also raises.
+- `spec_for( root, config, name )` and `tests_spec( root, config, name )` read the four `index` keys. With no config they return the detected spec, `detected_spec`.
+- `override_spec` applies the keys field by field. Source dirs go to the roots of each listed language: py to `py_roots`, ts to `js_roots`, dart to `dart_roots`. A source or test dir that is not a directory is refused, naming the key.
+- Exclude names replace the skip set, and `tests_spec` still lets `tests` through. The librarian, filing and daily-check modules adopt the other keys in later steps. `module_base` stays derived: `src` for a lupin tree, the root otherwise, with no INI key. `check_module_base` refuses source dirs that all lie under `src/` in another tree.

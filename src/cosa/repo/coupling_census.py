@@ -48,7 +48,7 @@ NEEDLES = (
 )
 
 CONTROLS = (
-    { "needle": "def is_lupin_tree", "path": "src/cosa/repo/symindex/spec.py",                 "line": 77 },
+    { "needle": "def is_lupin_tree", "path": "src/cosa/repo/symindex/spec.py",                 "line": 79 },
     { "needle": "DATA_RELATIVE",     "path": "src/cosa/repo/duplicate_check/proof/proof_cli.py", "line": 33 },
 )
 

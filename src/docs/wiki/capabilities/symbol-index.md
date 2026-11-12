@@ -8,7 +8,7 @@ pins:
   - cosa.repo.symindex.build.ensure@2e71eb83d8
   - cosa.repo.symindex.build.environment@a85e449992
   - cosa.repo.symindex.py_index.pin@c0bd7387a7
-  - cosa.repo.symindex.spec.spec_for@56fd75b4ea
+  - cosa.repo.symindex.spec.spec_for@92552901ca
   - cosa.repo.symindex.paths.default_out_dir@f298ce42ab
   - cosa.repo.symindex.wiki_lint.queue@89c508ab1c
   - lupin_mcp.reuse_tools.prepare@793f35c0eb
