@@ -8,7 +8,7 @@ pins:
   - cosa.agents.podcast_generator.prompts.personality.get_prosody_guidelines@8f571b6fc5
   - cosa.agents.podcast_generator.prompts.script_generation.audience_block@7531927bdc
   - cosa.agents.podcast_generator.prompts.script_generation.clip_to_ceiling@69701f40f0
-  - cosa.agents.podcast_generator.prompts.script_generation.extract_prosody_from_text@2c2718cd53
+  - cosa.agents.podcast_generator.prompts.script_generation.extract_prosody_from_text@f7369e73dc
   - cosa.agents.podcast_generator.prompts.script_generation.get_content_analysis_prompt@41331aafb4
   - cosa.agents.podcast_generator.prompts.script_generation.get_script_generation_prompt@0295f71485
   - cosa.agents.podcast_generator.prompts.script_generation.get_script_revision_prompt@727242410f
@@ -27,7 +27,7 @@ The functions in `prompts/personality.py` and `prompts/script_generation.py` bui
 - `parse_analysis_response` recovers a JSON object leniently. When none is found it returns a default analysis with the topic "Unknown Topic".
 - `parse_script_response` returns the recovered object with `segments` and `title` filled in when missing. It raises `ValueError` when no JSON object can be recovered, so an empty script never reaches approval.
 - On that failure the full raw reply is saved under `io/json-recovery-failures/`, named by the `label` argument. The `ValueError` text gives the saved path.
-- `extract_prosody_from_text` returns the text with `*[note]*` markers removed and spaces collapsed, plus the lowercased notes.
+- `extract_prosody_from_text` returns the text with `*[note]*` markers removed and spaces collapsed, plus the lowercased notes. It calls `strip_prosody_markers` and `extract_prosody_markers` ([[podcast-script-state]]) and holds no pattern of its own.
 - `get_personality_prompt_section` renders one host's profile with the curious or expert behaviour block and up to five example phrases. `get_dynamic_duo_description` joins both hosts with an interaction-dynamics block.
 - `create_personality_from_description` picks tone, expertise and curiosity from keywords in a free-text description.
 - `get_prosody_guidelines` returns the marker guide: `<break time="x.xs"/>` pauses, ellipsis, dash and capitalised emphasis. It says bracketed emotion tags are ignored.

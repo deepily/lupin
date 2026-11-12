@@ -11,6 +11,7 @@ pins:
   - cosa.agents.podcast_generator.state.ScriptSegment@9b17585b17
   - cosa.agents.podcast_generator.state.create_initial_state@7777631492
   - cosa.agents.podcast_generator.state.extract_prosody_markers@7d478bede1
+  - cosa.agents.podcast_generator.state.strip_prosody_markers@41025c85ca
   - cosa.agents.podcast_generator.state.validate_prosody_preservation@0e6ee10b7a
 ---
 # Podcast script state
@@ -22,7 +23,7 @@ pins:
 - `PodcastState` is a typed dict with the whole run. Its `content_analysis` is a `ContentAnalysis` or a `StatusDigest` ([[podcast-script-types]]). It also holds input paths, the draft script, approval, feedback, revision count, audio paths, `metadata` and `current_state`. `create_initial_state( research_doc_path, user_id )` fills it with `LOADING_RESEARCH`, zero counters and empty lists.
 - `ContentAnalysis` is the analysis result: main topic, subtopics, facts, questions, analogies, an inferred audience, a complexity level and an estimated length. `PodcastMetadata` records ids, paths, call counts, tokens and an estimated cost.
 - `ScriptSegment` is one turn: speaker, role (`curious` or `expert`), text and an optional topic. `to_markdown()` returns `**[Speaker - Role]**: text`.
-- `ProsodyAnnotation` lists 13 marker names. `extract_prosody_markers( text )` returns the lowercased names of every `*[name]*` marker in the text, in order, and `[]` for `None`.
+- `ProsodyAnnotation` lists 13 marker names. `extract_prosody_markers( text )` returns the lowercased names of every `*[name]*` marker in the text, in order, and `[]` for `None`. `strip_prosody_markers( text )` is its other half: the same pattern, every marker removed and whitespace collapsed and trimmed; it raises `TypeError` for `None`. `extract_prosody_from_text` and the TTS text cleaner both call these two, and the pattern lives only in `state.py`.
 - `validate_prosody_preservation( english, translated )` compares the marker names found in the text of each script. It returns `( preserved, details )`; it fails if a name is missing or extra. Counts may differ.
 - `build_auto_continue_disclosure( timeout_seconds )` returns the sentence added to the script-review question: the wait in whole minutes (at least 1) and that silence continues the run. It raises `ValueError` unless the timeout is a positive int.
 

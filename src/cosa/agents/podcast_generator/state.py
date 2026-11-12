@@ -96,6 +96,28 @@ def extract_prosody_markers( text ):
     return [ m.group( 1 ).lower().strip() for m in _PROSODY_MARKER_PATTERN.finditer( text or "" ) ]
 
 
+def strip_prosody_markers( text ):
+    """
+    Remove every `*[annotation]*` marker from dialogue text and tidy the spaces.
+
+    The other half of extract_prosody_markers: the same pattern, so a marker the
+    extractor counts is a marker this removes.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - every `*[...]*` marker is removed
+        - runs of whitespace, including those a removal leaves behind, become one space
+        - the result has no leading or trailing whitespace
+        - <break ...> tags, ellipsis, dashes and upper-case words are left as they were
+
+    Raises:
+        - TypeError if text is not a string (None included)
+    """
+    return re.sub( r'\s+', ' ', _PROSODY_MARKER_PATTERN.sub( '', text ) ).strip()
+
+
 class ScriptSegment( BaseModel ):
     """
     A single dialogue segment in the podcast script.

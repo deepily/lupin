@@ -13,6 +13,7 @@ import re
 from typing import Optional
 
 from ..config import HostPersonality, LANGUAGE_NAMES
+from ..state import extract_prosody_markers, strip_prosody_markers
 from cosa.agents.io_models.utils.json_object_recovery import (
     extract_json_object,
     recover_json_object,
@@ -529,18 +530,9 @@ def extract_prosody_from_text( text: str ) -> tuple[ str, list[ str ] ]:
     Returns:
         tuple: (clean_text, list_of_annotations)
     """
-    # Pattern matches *[anything]*
-    pattern = r'\*\[([^\]]+)\]\*'
-
-    annotations = []
-    for match in re.finditer( pattern, text ):
-        annotation = match.group( 1 ).lower().strip()
-        annotations.append( annotation )
-
-    # Remove annotations from text for clean version
-    clean_text = re.sub( pattern, '', text ).strip()
-    # Clean up extra whitespace
-    clean_text = re.sub( r'\s+', ' ', clean_text )
+    # The pattern lives in state.py, with the helpers that use it
+    clean_text  = strip_prosody_markers( text )
+    annotations = extract_prosody_markers( text )
 
     return clean_text, annotations
 

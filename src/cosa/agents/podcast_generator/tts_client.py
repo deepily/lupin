@@ -23,7 +23,7 @@ from typing import Optional, Callable, Awaitable, List, Tuple
 
 import websockets
 
-from .state import ScriptSegment, PodcastScript
+from .state import ScriptSegment, PodcastScript, strip_prosody_markers
 
 logger = logging.getLogger( __name__ )
 
@@ -592,16 +592,9 @@ class PodcastTTSClient:
         Returns:
             str: Clean text ready for TTS, with pause markers intact
         """
-        import re
-
-        # Remove ONLY the dead *[...]* audio-tag vocabulary. <break>, ellipsis,
-        # dashes and CAPS are intentionally left untouched.
-        clean = re.sub( r'\*\[[^\]]+\]\*', '', text )
-
-        # Clean up extra whitespace (does not affect <break time="x.xs"/> tags).
-        clean = re.sub( r'\s+', ' ', clean ).strip()
-
-        return clean
+        # Removes only the dead *[...]* audio-tag vocabulary and collapses whitespace.
+        # <break>, ellipsis, dashes and upper-case words are intentionally left untouched.
+        return strip_prosody_markers( text )
 
     async def generate_all_segments(
         self,

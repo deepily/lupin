@@ -23,6 +23,7 @@ from cosa.agents.podcast_generator.state import (
     ScriptSegment,
     PodcastScript,
     extract_prosody_markers,
+    strip_prosody_markers,
     validate_prosody_preservation,
 )
 
@@ -52,6 +53,59 @@ def _script( segments ):
 ] )
 def test_extract_prosody_markers( text, expected ):
     assert extract_prosody_markers( text ) == expected
+
+
+# ---- the strip helper, and the one place the pattern lives ----------------
+
+@pytest.mark.parametrize( "text,expected", [
+    ( "",                                    "" ),
+    ( "plain  text",                         "plain text" ),
+    ( "*[pause]* hi",                        "hi" ),
+    ( "So *[pause]* what *[excited]* now",   "So what now" ),
+    ( "tail *[laughs]*",                     "tail" ),
+    ( "  *[x]*  ",                           "" ),
+    ( "a\n*[x]*\tb",                        "a b" ),                  # a tab or newline is whitespace too
+    ( 'keep <break time="1.0s"/> and WOW...', 'keep <break time="1.0s"/> and WOW...' ),
+    ( "*[]* stays, *[a]b* stays",            "*[]* stays, *[a]b* stays" ),   # not a marker: empty or unclosed
+] )
+def test_strip_prosody_markers( text, expected ):
+    assert strip_prosody_markers( text ) == expected
+
+
+@pytest.mark.parametrize( "text", [ "a *[pause]* b *[Excited]* c", "*[x]* y", "no markers here" ] )
+def test_strip_removes_exactly_what_extract_counts( text ):
+    # The two helpers share one pattern: whatever extract counts, strip removes, and nothing else goes.
+    assert ( "*[" in strip_prosody_markers( text ) ) is False
+    assert len( extract_prosody_markers( text ) ) == text.count( "*[" )
+
+
+def test_strip_prosody_markers_refuses_none():
+    with pytest.raises( TypeError ):
+        strip_prosody_markers( None )
+
+
+def test_both_callers_go_through_the_shared_helpers():
+    from cosa.agents.podcast_generator.prompts.script_generation import extract_prosody_from_text
+    from cosa.agents.podcast_generator.tts_client import PodcastTTSClient
+    text = "So *[pause]* what *[Excited]* now"
+    assert extract_prosody_from_text( text ) == ( "So what now", [ "pause", "excited" ] )
+    assert PodcastTTSClient._clean_text_for_tts( None, text ) == "So what now"
+
+
+def test_every_prosody_marker_pattern_lives_in_state():
+    # Census: one copy of the marker regex under podcast_generator. A second copy is how the three drifted apart.
+    import subprocess, os
+    root  = os.environ[ "LUPIN_ROOT" ]
+    files = subprocess.run( [ "git", "ls-files", "src/cosa/agents/podcast_generator/*.py" ],
+                            cwd=root, capture_output=True, text=True, check=True ).stdout.split()
+    assert len( files ) > 5, "the census walked the wrong population"
+    holders = []
+    for rel in files:
+        if "/tests/" in rel: continue
+        with open( os.path.join( root, rel ), encoding="utf-8" ) as fh:
+            if r"\*\[" in fh.read(): holders.append( rel )
+    # state.py also holds the segment-header pattern, which has the same opening; it is the only holder.
+    assert holders == [ "src/cosa/agents/podcast_generator/state.py" ]
 
 
 # ---- the validator counts TEXT, not the list ------------------------------
