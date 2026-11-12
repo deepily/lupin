@@ -6,14 +6,14 @@ pins:
 ---
 # JSON request over urllib
 
-One helper that five modules share to send a JSON body and read the answer. The hook library keeps its own copies, because a hook must not import `cosa`.
+One helper that six callers share to send a JSON body and read the answer. The hook library keeps its own copies, because a hook must not import `cosa`.
 
 ## What it does
 - `send_json( url, payload, headers, timeout, method, opener )` sends one request and returns `( status, text, reply_headers )`.
 - `payload` may be `None` for an empty body, a dict or list encoded as JSON, or text or bytes already encoded.
 - It sets `Content-Type: application/json` unless the caller's headers name another type.
 - `opener` replaces `urllib.request.urlopen`, which is the test seam.
-- `model_window`, `jev_transport`, `hook_link_tick`, `arbiter_live_notify` and `reuse_candidates` call it. Each keeps its own return or error contract on top.
+- `model_window`, `jev_transport`, `hook_link_tick`, `arbiter_live_notify`, `reuse_candidates` and the `observe_gate_b_admission` script call it. Each keeps its own return or error contract on top.
 
 ## Don't
 - Don't expect it to raise on a 4xx or 5xx. Read `status`.

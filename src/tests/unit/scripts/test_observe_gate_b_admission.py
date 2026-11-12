@@ -32,6 +32,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -44,11 +46,12 @@ import observe_gate_b_admission as obs
 # ── doubles ───────────────────────────────────────────────────────────────────────────────
 
 class _Resp:
-    """The three things `_http` reads off a urlopen result, as a context manager."""
+    """The things `_http` reads off a urlopen result, as a context manager."""
 
     def __init__( self, status, raw ):
-        self.status = status
-        self._raw   = raw
+        self.status  = status
+        self.headers = { }
+        self._raw    = raw
 
     def read( self ):
         return self._raw.encode()
@@ -122,7 +125,7 @@ def test_a_body_is_sent_as_json_and_a_token_becomes_a_bearer_header( monkeypatch
         seen[ "timeout" ] = timeout
         return _Resp( 200, '{"ok": true}' )
 
-    monkeypatch.setattr( obs.urllib.request, "urlopen", fake_urlopen )
+    monkeypatch.setattr( urllib.request, "urlopen", fake_urlopen )
 
     status, payload = obs._http( "POST", "/some/path", token="tok123", body={ "a": 1 } )
 
@@ -141,14 +144,16 @@ def test_no_body_and_no_token_sends_neither_data_nor_an_auth_header( monkeypatch
     seen = { }
 
     def fake_urlopen( req, timeout=None ):
+        seen[ "method" ]  = req.method
         seen[ "data" ]    = req.data
         seen[ "headers" ] = dict( req.headers )
         return _Resp( 200, "{}" )
 
-    monkeypatch.setattr( obs.urllib.request, "urlopen", fake_urlopen )
+    monkeypatch.setattr( urllib.request, "urlopen", fake_urlopen )
 
     obs._http( "GET", "/api/queue/pool-status" )
 
+    assert seen[ "method" ] == "GET"
     assert seen[ "data" ] is None
     assert "Authorization" not in seen[ "headers" ]
 
@@ -156,7 +161,7 @@ def test_no_body_and_no_token_sends_neither_data_nor_an_auth_header( monkeypatch
 def test_a_non_json_success_body_comes_back_as_raw_text( monkeypatch ):
     """Reddens if a plain-text 200 raises instead of being handed back for the caller to print."""
 
-    monkeypatch.setattr( obs.urllib.request, "urlopen",
+    monkeypatch.setattr( urllib.request, "urlopen",
                          lambda req, timeout=None: _Resp( 200, "not json at all" ) )
 
     assert obs._http( "GET", "/x" ) == ( 200, "not json at all" )
@@ -166,10 +171,10 @@ def test_an_http_error_is_returned_as_its_code_and_json_body_not_raised( monkeyp
     """Reddens if a 4xx starts propagating — the script prints the payload and returns 2."""
 
     def fake_urlopen( req, timeout=None ):
-        raise obs.urllib.error.HTTPError( "http://x", 422, "unprocessable", { },
+        raise urllib.error.HTTPError( "http://x", 422, "unprocessable", { },
                                           io.BytesIO( b'{"detail": "string_type"}' ) )
 
-    monkeypatch.setattr( obs.urllib.request, "urlopen", fake_urlopen )
+    monkeypatch.setattr( urllib.request, "urlopen", fake_urlopen )
 
     assert obs._http( "POST", "/x", body={ } ) == ( 422, { "detail": "string_type" } )
 
@@ -178,10 +183,10 @@ def test_an_http_error_with_a_non_json_body_comes_back_as_raw_text( monkeypatch 
     """Reddens if an HTML error page raises JSONDecodeError instead of reaching the report."""
 
     def fake_urlopen( req, timeout=None ):
-        raise obs.urllib.error.HTTPError( "http://x", 502, "bad gateway", { },
+        raise urllib.error.HTTPError( "http://x", 502, "bad gateway", { },
                                           io.BytesIO( b"<html>nginx</html>" ) )
 
-    monkeypatch.setattr( obs.urllib.request, "urlopen", fake_urlopen )
+    monkeypatch.setattr( urllib.request, "urlopen", fake_urlopen )
 
     assert obs._http( "GET", "/x" ) == ( 502, "<html>nginx</html>" )
 
