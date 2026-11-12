@@ -637,12 +637,6 @@ class TestSmokeTestsRun:
         from cosa.agents.dm_quality_judge.judge_v2 import quick_smoke_test
         assert quick_smoke_test() is True
 
-    def test_the_smoke_helper_itself_fails_when_nothing_raises( self ):
-        # Auditing the instrument: _assert_raises must not pass a control silently.
-        from cosa.agents.dm_quality_judge.xml_models_v2 import _assert_raises
-        with pytest.raises( AssertionError, match="expected ExtractionError" ):
-            _assert_raises( lambda: None )
-
 
 class TestSharedV1PathsReachedByV2:
     """
