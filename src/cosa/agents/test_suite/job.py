@@ -162,8 +162,13 @@ SUITE_TIMEOUTS_SECONDS = {
                              # guard's observed figure were both last set 2026-06-12, exactly 91 days before this run.
                              # SINCE 2026-09-14 (row 2818dad7) "e2e" is no longer a merge-pyramid component: the
                              # gate runs "e2e_a" + "e2e_b" below. This budget covers a deliberate whole-suite run.
-    "e2e_a"        : 2500,   # 42 min. Half A (row 2818dad7). The halves were balanced on per-file JUnit time from the
-    "e2e_b"        : 2500,   # 42 min. Half B.  2026-09-12 full run: 1492.9s / 1492.5s of testcase time, before per-run
+    "e2e_a"        : 3300,   # 55 min, up from 2500 (Maya, approved by Mr. Radio, 11 November). The login-wait fix
+                             # makes every fixture login wait out the 1000 ms redirect in login.html's success handler.
+                             # Counted with pytest --setup-plan: half A has 436 fixture logins (371 logged_in_page + 65
+                             # admin_page), half B 378 (352 + 26). Projected 2395 + 436 = 2831 s (A) and 2395 + 378 =
+                             # 2773 s (B), at most 1.0 s per login, not timed on the VM. ts-7b0d15e8 was killed at 2500 s
+                             # with 87% done. Half A (row 2818dad7): the halves were balanced on per-file JUnit time from the
+    "e2e_b"        : 3300,   # 55 min, raised with half A (see above). Half B.  The 12 September full run: 1492.9s / 1492.5s of testcase time, before per-run
                              # overhead. Until each half is measured on :8000, observed uses the slower half of the
                              # 09-11 hand split (ts-6979205f, 1549.0s). 2500 is 1.61x that today. Scaling the 12-10
                              # projection above (3523.2s) by half gives 1761.6s, and 1.4x of that is 2466.2s,
