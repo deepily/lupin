@@ -98,6 +98,7 @@ def test_dry_run_completion_stats_report_slide_count_zero_not_a_fabricated_numbe
         debug              = False,
         yaml_path          = None,
         marp_path          = None,
+        _set_chain_identity = lambda cosa_interface: None,   # the base method; identity is not under test here
     )
     voice = _CaptureVoiceIO()
     asyncio.run(
@@ -134,6 +135,7 @@ def test_reachable_dry_run_writes_nothing_to_disk( monkeypatch, tmp_path ):
         debug              = False,
         yaml_path          = None,
         marp_path          = None,
+        _set_chain_identity = lambda cosa_interface: None,   # the base method; identity is not under test here
     )
     asyncio.run(
         pg_job.PresentationGeneratorJob._execute_dry_run( fake_self, _CaptureVoiceIO(), _FakeCosaInterface() )

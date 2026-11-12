@@ -330,7 +330,7 @@ class AgenticJobBase( ABC ):
         Point the notifications of this chained run at this job's sender and user.
 
         Requires:
-            - cosa_interface is the Deep Research interface module, with SENDER_ID and TARGET_USER
+            - cosa_interface is a COSA interface module with SENDER_ID, TARGET_USER and _get_sender_id
             - self.base_id and self.user_email are set
 
         Ensures:
