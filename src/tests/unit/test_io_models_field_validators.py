@@ -2,11 +2,14 @@
 The shared xml_models field checks: None to empty string, and refuse an empty field.
 """
 import pytest
+from pydantic import ValidationError
 
 from cosa.agents.calculator.xml_models import CalcIntent
 from cosa.agents.dm_compression.xml_models import DmCompressionResponse
+from cosa.agents.dm_tutor.xml_models import DmTutorResponse
 from cosa.agents.io_models.field_validators import none_to_empty, require_nonempty
 from cosa.agents.io_models.xml_models import ReceptionistResponse
+from cosa.crud_for_dataframes.xml_models import CRUDIntent
 
 
 def test_none_becomes_an_empty_string_and_other_values_pass_through():
@@ -32,3 +35,20 @@ def test_the_models_keep_their_own_behaviour_through_the_helpers():
     assert CalcIntent.model_validate( { "operation": "arithmetic", "value_2": None } ).value_2 == ""
     with pytest.raises( ValueError, match="thoughts cannot be empty" ): ReceptionistResponse( thoughts="  ", answer="a" )
     with pytest.raises( ValueError, match="compressed body is empty" ): DmCompressionResponse( thoughts=None, compressed=" " )
+
+
+def test_calculators_required_operation_stays_none_and_is_refused():
+    with pytest.raises( ValidationError, match="operation" ): CalcIntent.model_validate( { "operation": None } )
+
+
+def test_the_crud_required_operation_stays_none_and_is_refused():
+    with pytest.raises( ValidationError, match="operation" ): CRUDIntent.model_validate( { "operation": None } )
+
+
+def test_dm_compression_returns_a_padded_body_unstripped():
+    assert DmCompressionResponse( thoughts="t", compressed="  body \n" ).compressed == "  body \n"
+
+
+def test_dm_tutor_returns_padded_slots_unstripped():
+    r = DmTutorResponse.model_validate( { "declaration-or-question": " q ", "supporting-statement-1st": " a\n", "supporting-statement-2nd": "\tb" } )
+    assert ( r.declaration_or_question, r.supporting_1st, r.supporting_2nd ) == ( " q ", " a\n", "\tb" )
