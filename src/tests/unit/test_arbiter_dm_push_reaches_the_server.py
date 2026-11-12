@@ -123,6 +123,7 @@ def test_a_push_that_raised_logs_its_detail_without_a_status():
 # --- _http_post_json: urllib RAISES on a 4xx, which is how the body got lost ----------------------
 
 class _Resp:
+    headers = {}
     def __init__( self, status, raw ): self.status, self._raw = status, raw
     def read( self ): return self._raw
     def __enter__( self ): return self

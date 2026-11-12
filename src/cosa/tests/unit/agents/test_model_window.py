@@ -26,9 +26,11 @@ MODEL = "kaitchup/Phi-4-AutoRound-GPTQ-4bit"
 
 class _Reply:
     """Minimal stand-in for the file-like object urlopen returns."""
+    status  = 200
+    headers = {}
     def __init__( self, payload ): self._payload = json.dumps( payload ).encode()
     def read( self ): return self._payload
-    def __enter__( self ): return io.BytesIO( self._payload )
+    def __enter__( self ): return self
     def __exit__( self, *a ): return False
 
 

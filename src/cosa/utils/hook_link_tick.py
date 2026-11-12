@@ -31,6 +31,8 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from cosa.utils.http_json import send_json
+
 EXIT_CLEAN, EXIT_CANNOT_LOOK, EXIT_DELIVERED, EXIT_DELIVERY_FAILED, EXIT_UNCHANGED, EXIT_SWITCHED_OFF = 0, 1, 2, 3, 4, 5
 
 DEFAULT_API_BASE     = "http://localhost:7999"
@@ -159,9 +161,10 @@ def post_query( base, key, path, params ):
 
 def post_json( base, key, path, payload ):
     """POST a JSON body; returns ( status, text ) and never raises."""
-    request = urllib.request.Request( f"{base}{path}", data=json.dumps( payload ).encode(),
-                                      headers={ "X-API-Key": key, "Content-Type": "application/json" }, method="POST" )
-    return _http( request )
+    try:
+        status, text, _ = send_json( f"{base}{path}", payload, headers={ "X-API-Key": key }, timeout=HTTP_TIMEOUT_SECONDS )
+        return status, text[ :400 ]
+    except Exception as error: return 0, str( error )
 
 
 def _api_key():
