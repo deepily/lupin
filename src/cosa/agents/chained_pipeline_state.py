@@ -48,11 +48,217 @@ class ChainedDeepResearchAgent:
     """
     Base class for the chained agents whose first stage is Deep Research.
 
-    A subclass sets PIPELINE_STATE to its own PipelineState enum.
-    The second stage stays in the subclass, because the artifacts it makes differ.
+    A subclass sets four class attributes.
+    PIPELINE_STATE is its own PipelineState enum, and RESULT_CLASS is its own ChainedResult.
+    STAGE_LABEL names the second stage in notifications, for example "Podcast Generation".
+    A subclass also defines three methods.
+    The first returns the second stage's voice_io module, and it is named _stage_voice_io.
+    The second runs the stage, and it is named _run_second_stage.
+    The third keeps what the stage made, and it is named _store_second_stage_result.
     """
 
     PIPELINE_STATE = None
+    RESULT_CLASS   = None
+    STAGE_LABEL    = ""
+
+    def __init__(
+        self,
+        query: str,
+        user_email: str,
+        budget=None,
+        lead_model=None,
+        no_confirm: bool = False,
+        audience=None,
+        audience_context=None,
+        source_document=None,
+        cli_mode: bool = False,
+        debug: bool = False,
+        verbose: bool = False
+    ):
+        """
+        Keep the options both chained agents share and start an empty result.
+
+        Requires:
+            - the subclass sets RESULT_CLASS
+            - query is a non-empty string and user_email is an email address
+
+        Ensures:
+            - every argument is kept under its own name, and source_document is [] when None
+            - self.result is a new RESULT_CLASS and self._start_time is None
+            - with debug it prints the query, the user and the mode
+        """
+        self.query            = query
+        self.user_email       = user_email
+        self.budget           = budget
+        self.lead_model       = lead_model
+        self.no_confirm       = no_confirm
+        self.audience         = audience
+        self.audience_context = audience_context
+        self.source_document  = source_document or [ ]
+        self.cli_mode         = cli_mode
+        self.debug            = debug
+        self.verbose          = verbose
+        self.result           = self.RESULT_CLASS()
+        self._start_time      = None
+
+        if self.debug:
+            print( f"[{type( self ).__name__}] Initialized" )
+            print( f"  Query: {query[ :50 ]}..." )
+            print( f"  User: {user_email}" )
+            print( f"  Mode: {'CLI' if cli_mode else 'Voice-driven'}" )
+
+    def _set_modality( self ) -> None:
+        """
+        Set voice or CLI mode on Deep Research and on the second stage.
+
+        Requires:
+            - _stage_voice_io returns a voice_io module with set_cli_mode
+
+        Ensures:
+            - both voice_io modules carry self.cli_mode
+            - Deep Research is the default binding for the pipeline's notifications
+        """
+        from cosa.agents.deep_research import voice_io as dr_voice_io
+
+        dr_voice_io.set_cli_mode( self.cli_mode )
+        self._stage_voice_io().set_cli_mode( self.cli_mode )
+
+        # Re-establish DR binding as the default for pipeline notifications
+        dr_voice_io.reconfigure()
+
+        if self.debug:
+            mode = "CLI" if self.cli_mode else "Voice-driven"
+            print( f"[{type( self ).__name__}] Set modality to: {mode}" )
+
+    async def run_async( self ):
+        """
+        Execute the full chain: Deep Research, then the second stage.
+
+        Ensures:
+            - returns self.result, finalized, whether the run completed, was cancelled or failed
+            - the state is completed only when both stages made a result
+            - a stage's cancellation or a missing report path sets the cancelled or failed state and an error
+            - an exception sets the failed state, notifies at urgent priority and does not escape
+        """
+        self._start_time = time.time()
+        self.result.started_at = datetime.now().isoformat()
+        self.result.state = self.PIPELINE_STATE.INITIALIZED
+
+        # Set modality before running either agent
+        self._set_modality()
+
+        try:
+            # Step 1: Run Deep Research
+            await self._notify( "Starting Deep Research pipeline...", priority="medium" )
+            dr_result = await self._run_deep_research()
+
+            if dr_result.get( "cancelled" ):
+                self.result.state = self.PIPELINE_STATE.CANCELLED
+                self.result.error = "Deep Research was cancelled by user"
+                return self._finalize_result()
+
+            # Extract report path
+            report_path = dr_result.get( "report_path" )
+            if not report_path:
+                self.result.state = self.PIPELINE_STATE.FAILED
+                self.result.error = "Deep Research completed but no report_path returned"
+                return self._finalize_result()
+
+            # Store DR results
+            self.result.research_path = report_path
+            self.result.research_abstract = dr_result.get( "abstract" )
+            self.result.dr_cost = dr_result.get( "cost", 0.0 )
+            self.result.dr_artifacts = dr_result.get( "artifacts", {} )
+            self.result.state = self.PIPELINE_STATE.DEEP_RESEARCH_DONE
+
+            # Checkpoint: Confirm DR artifacts before the second-stage handoff
+            dr_artifacts = self.result.dr_artifacts
+            checkpoint_abstract = (
+                f"**Research Report**: {report_path}\n\n"
+                f"**Abstract**: {self.result.research_abstract[ :200 ] if self.result.research_abstract else 'N/A'}...\n\n"
+                f"**Cost**: ${self.result.dr_cost:.4f} | "
+                f"**Tokens**: {dr_artifacts.get( 'tokens_used', 'N/A' ):,} | "
+                f"**Duration**: {dr_artifacts.get( 'duration_seconds', 0 ):.0f}s"
+            )
+
+            skipped_names = self._skipped_topic_names( dr_artifacts )
+            if skipped_names:
+                checkpoint_abstract += f"\n\n**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names )
+
+            await self._notify(
+                f"Deep Research complete! Cost: ${self.result.dr_cost:.4f}" + ( f" ({len( skipped_names )} topics skipped)" if skipped_names else "" ),
+                priority="medium",
+                abstract=checkpoint_abstract
+            )
+
+            # Step 2: Run the second stage
+            await self._notify( f"Starting {self.STAGE_LABEL}...", priority="medium" )
+            pg_result = await self._run_second_stage( report_path )
+
+            if pg_result.get( "cancelled" ):
+                self.result.state = self.PIPELINE_STATE.CANCELLED
+                self.result.error = f"{self.STAGE_LABEL} was cancelled by user"
+                return self._finalize_result()
+
+            # Store second-stage results
+            self._store_second_stage_result( pg_result )
+            self.result.pg_cost = pg_result.get( "cost", 0.0 )
+            self.result.pg_artifacts = pg_result.get( "artifacts", {} )
+            self.result.state = self.PIPELINE_STATE.COMPLETED
+
+            await self._notify(
+                f"Pipeline complete! Total cost: ${self.result.total_cost:.4f}",
+                priority="medium"
+            )
+
+            return self._finalize_result()
+
+        except Exception as e:
+            self.result.state = self.PIPELINE_STATE.FAILED
+            self.result.error = str( e )
+
+            await self._notify(
+                f"Pipeline failed: {str( e )[ :100 ]}",
+                priority="urgent"
+            )
+
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+
+            return self._finalize_result()
+
+    def _skipped_topic_names( self, dr_artifacts: dict ) -> list:
+        """
+        Name the research topics Deep Research skipped, for the checkpoint notice.
+
+        Requires:
+            - dr_artifacts is the artifacts dict Deep Research returned
+
+        Ensures:
+            - returns a list of topic names, empty when the stage reports none or does not use them
+        """
+        return [ ]
+
+    async def _notify( self, message: str, priority: str = "medium", **kwargs ) -> None:
+        """
+        Send a notification using the Deep Research voice_io, which is already configured.
+
+        Ensures:
+            - the message is sent at the given priority with any extra keyword arguments
+        """
+        from cosa.agents.deep_research import voice_io
+
+        await voice_io.notify( message, priority=priority, **kwargs )
+
+    def get_state( self ):
+        """
+        Get the current pipeline state.
+
+        Ensures:
+            - returns self.result.state
+        """
+        return self.result.state
 
     async def _run_deep_research( self ) -> dict:
         """
