@@ -372,6 +372,6 @@ REUSE-OUTCOME ac764d07031009eb :: rs-6ba420a8d7 :: WROTE_NEW reads the whole inf
 
 Section anchor `6.1-agent-init-and-stop`. Both rulings are on existing code, so no REUSE-OUTCOME line is owed.
 
-RULING cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.request_stop :: DISTINCT only one real twin exists, PresentationOrchestratorAgent.request_stop, which also prints under debug; the stop methods of deep_research, podcast and swe_team also cancel tasks, set their own states and return results, and BFE goes through AgenticJobBase.request_cancel :: reuse-receipt: 494627436c81a85a :: search: rs-f679ff0c09
+RULING cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.request_stop :: DISTINCT only one real twin exists, PresentationOrchestratorAgent.request_stop, which also prints under debug; the stop methods of deep_research, podcast and swe_team set their own states and return results, and deep_research also cancels its sub-tasks, and BFE goes through AgenticJobBase.request_cancel :: reuse-receipt: 494627436c81a85a :: search: rs-f679ff0c09
 
 RULING cosa.agents.math_agent.MathAgent.__init__ :: DISTINCT each agent forwards the explicit 12-argument signature to AgentBase.__init__ and then builds its own prompt placeholder and attributes, and sharing the forward needs kwargs that hide the signature; the one repeated fragment is the seven-tag response list in MathAgent and DateAndTimeAgent, which a constant could share but which is not an __init__ copy :: reuse-receipt: 837207f3cdfb93a3 :: search: rs-72e02143ed
