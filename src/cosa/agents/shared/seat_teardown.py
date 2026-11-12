@@ -30,6 +30,8 @@ import sys
 import time
 from typing import Callable, Optional
 
+from cosa.utils.main_checkout import main_checkout_of
+
 from cosa.agents.shared.worktree_reaper import (
     SEAT_LOCK_PREFIX, _default_run, _git, delete_merged_branch, find_ignored_blockers,
     list_worktrees, main_worktree_branch, merge_verdict, seat_is_alive,
@@ -57,10 +59,7 @@ def _main_root( top: str, run: Callable ) -> Optional[ str ]:
         - returns the directory holding the shared .git, as an absolute path
         - returns None when git cannot say; never raises
     """
-    res = _git( run, top, "rev-parse", "--path-format=absolute", "--git-common-dir" )
-    if not res[ "success" ] or not res[ "stdout" ]:
-        return None
-    return os.path.dirname( res[ "stdout" ].rstrip( os.sep ) )
+    return main_checkout_of( top, run, timeout=60 )
 
 
 def _wait_until_gone( seat_name: str, path: str, alive_fn: Callable, wait_seconds: float,

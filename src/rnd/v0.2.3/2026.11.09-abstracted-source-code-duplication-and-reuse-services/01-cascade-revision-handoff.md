@@ -620,3 +620,11 @@ SEARCHED lupin_cli.claude_code.hooks.lib.sessions_dir.iter_bridge_paths :: rs-af
 SEARCHED lupin_cli.claude_code.hooks.lib.sessions_dir.iter_bridge_paths :: rs-af054bab05 :: lupin_mcp.session_spawner._scan_persona_by_tmux_session :: UNRELATED :: not read in full; it globs the pattern itself and was outside the hook library
 SEARCHED lupin_cli.claude_code.hooks.lib.sessions_dir.iter_bridge_paths :: rs-af054bab05 :: lupin_cli.claude_code.hooks.lib.cc_notification_listener.CCNotificationListener._buffer_message :: UNRELATED :: writes a notification buffer, not a bridge listing
 REUSE-OUTCOME 0b3a3dfd1c5323de :: rs-af054bab05 :: WROTE_NEW the one lazy listing of bridge files that skips buffer and listener names, with no pid test and no read, which seven scans in session_bridge and one in memento_verify_tick now call :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-bridgescan
+
+## Reuse review: one main-checkout resolver (row 2448ae19, follow-up adf50584)
+
+RULING cosa.utils.main_checkout.main_checkout_of :: EXTEND lupin_mcp.session_spawner._main_checkout_of :: reuse-receipt: 0bb520fbda463712 :: search: rs-bad25d73e6
+REUSE-OUTCOME 0bb520fbda463712 :: rs-bad25d73e6 :: EXTENDED lupin_mcp.session_spawner._main_checkout_of :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-maincheckout
+
+RULING cosa.utils.main_checkout._run_git :: DISTINCT a plain subprocess.run wrapper for a read-only rev-parse; worktree_reaper._default_run sets BRANCH_GUARD_ALLOW=reaper, which this must not carry, and importing it would make a utils module depend on the agents package; the other candidates raise, return dicts, or run in another package :: reuse-receipt: 3b2f1e9d6880133f :: search: rs-375a327194
+REUSE-OUTCOME 3b2f1e9d6880133f :: rs-375a327194 :: WROTE_NEW a plain subprocess.run wrapper without the branch-guard override of worktree_reaper._default_run, so a utils module does not import the agents package :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-rungit

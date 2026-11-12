@@ -9,6 +9,7 @@ pins:
   - cosa.agents.shared.worktree_reaper.live_process_cwds@f237252ada
   - cosa.agents.shared.worktree_reaper.cwd_inside@f7f0efddaa
   - cosa.agents.shared.worktree_context.WorktreeCollisionError@0f0064309e
+  - cosa.utils.main_checkout.main_checkout_of@1142bf94c7
 ---
 # Seat teardown and liveness
 
@@ -23,6 +24,7 @@ A seat removes its own worktree and merged branch when it ends. The janitor uses
 - `live_process_cwds` reads `/proc` once and returns the set of working directories of live processes.
 - `cwd_inside` is true when any of those directories is the path itself or below it. A sibling with a similar name does not count.
 - `seat_is_alive` is false only when tmux reports the session absent and `/proc` was readable. No process may stand inside the tree.
+- `main_checkout_of` names the main checkout that owns a path, from the parent of git's common dir. It answers `None` when git cannot say or the runner raises. Teardown and seat provisioning both ask it.
 - `WorktreeCollisionError` is raised when the target worktree path already exists on entry.
 
 ## Invariants
