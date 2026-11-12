@@ -423,3 +423,11 @@ REUSE-OUTCOME a8e8b71259524924 :: rs-7047f9a841 :: WROTE_NEW overrides the base 
 
 RULING lupin_mcp.persona_normalization.memento_slugs :: DISTINCT returns the accent-folded slug first and the naive slug after it, where persona_slug and canonical_persona_key return a single slug and extending them would change the contract of the DM-topic and store-key callers; it is the moved body of the two copies, not a third :: reuse-receipt: 8b5a876a33056852 :: search: rs-a15d1cdce2
 REUSE-OUTCOME 8b5a876a33056852 :: rs-a15d1cdce2 :: WROTE_NEW returns the accent-folded slug first and the naive slug after it, where persona_slug and canonical_persona_key return a single slug and extending them would change the contract of the DM-topic and store-key callers; it is the moved body of the two copies, not a third :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-mementoslugs
+
+### Reuse review: stop-flag setters and agent __init__ copies (row 2448ae19, follow-ups 78431d50)
+
+Section anchor `6.1-agent-init-and-stop`. Both rulings are on existing code, so no REUSE-OUTCOME line is owed.
+
+RULING cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.request_stop :: DISTINCT only one real twin exists, PresentationOrchestratorAgent.request_stop, which also prints under debug; the stop methods of deep_research, podcast and swe_team set their own states and return results, and deep_research also cancels its sub-tasks, and BFE goes through AgenticJobBase.request_cancel :: reuse-receipt: 494627436c81a85a :: search: rs-f679ff0c09
+
+RULING cosa.agents.math_agent.MathAgent.__init__ :: DISTINCT each agent forwards the explicit 12-argument signature to AgentBase.__init__ and then builds its own prompt placeholder and attributes, and sharing the forward needs kwargs that hide the signature; the one repeated fragment is the seven-tag response list in MathAgent and DateAndTimeAgent, which a constant could share but which is not an __init__ copy :: reuse-receipt: 837207f3cdfb93a3 :: search: rs-72e02143ed
