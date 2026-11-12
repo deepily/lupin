@@ -34,6 +34,7 @@ def real_ctx( tmp_path, monkeypatch ):
     monkeypatch.setenv( jt.KEY_VARIABLE, "fake-key" )
     monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", str( tmp_path / "data" ) ); monkeypatch.setenv( "LUPIN_REUSE_OUT_DIR", str( tmp_path / "out" ) )
     monkeypatch.setenv( "LUPIN_REUSE_LEDGER_PATH", str( led.path ) )
+    monkeypatch.setattr( rt, "_refuse_drifted_ledger", lambda path: None )              # this test is about the plan ledger, not the INI key
     for name, value in ( ( rt.PACK_SIZE_VARIABLE, "50" ), ( rt.CEILING_VARIABLE, "60000000" ), ( rt.RUN_NAME_VARIABLE, RUN_NAME ) ): monkeypatch.setenv( name, value )
     return lambda _root: rt.context_from_environment( root ), led.path
 

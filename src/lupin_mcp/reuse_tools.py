@@ -366,8 +366,27 @@ def _packed_settings( top ):
         raise ReuseError( "BAD_SPEND_LIMIT", f"a packed live run needs {CEILING_VARIABLE} (a positive whole number of tokens)" )
     run  = os.environ.get( RUN_NAME_VARIABLE ) or reuse_ledger.make_run_name( LOOKUP_RUN_PREFIX )
     path = os.environ.get( LEDGER_VARIABLE ) or reuse_ledger.ledger_path( top )
+    _refuse_drifted_ledger( path )
     return { "pack_size": size, "sweeper": reuse_pack.packed_sweeper( size, shape=reuse_pack.SHAPE_WHOLE ), "request_shape": reuse_pack.SHAPE_WHOLE, "token_ceiling": ceiling,
              "run_name": run, "ledger": reuse_ledger.AccountLedger( path ), "single_use": True, "candidate_stage": _candidate_stage( top ) }
+
+
+def _refuse_drifted_ledger( path ):
+    """
+    Refuse a run whose ledger limit differs from the INI key.
+
+    Ensures:
+        - returns None when the key and the ledger agree; runs before the run asks the ledger to admit it, so nothing is spent
+        - returns None for a ledger that does not exist, so begin_run refuses it with LedgerUnreadable as before
+    Raises:
+        - ReuseError LEDGER_DRIFT naming the key and both numbers when they differ
+    """
+    if not os.path.exists( path ): return
+    from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.repo import code_health_settings as chs
+    from lupin_mcp import reuse_ledger_sync
+    try: reuse_ledger_sync.check_repo( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ), chs.DEFAULT_REPO, path )
+    except reuse_ledger_sync.LedgerDrift as e: raise ReuseError( "LEDGER_DRIFT", str( e ) ) from e
 
 
 def _candidate_stage( top ):
