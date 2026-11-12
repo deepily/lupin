@@ -30,7 +30,7 @@ NEEDLES = (
     { "group": 1, "needle": "src/lupin_app/static/js",          "kind": "ini",      "maps_to": "external repo <name> index source dirs" },
     { "group": 1, "needle": "HELD_PREFIXES",                    "kind": "pin",      "maps_to": "doc-lint rule list (rule_lists.py, ruling b42eb0de)" },
     { "group": 1, "needle": "cosa|lupin_",                      "kind": "pin",      "maps_to": "reuse scope regex (reuse_tools.py), Lupin's package names" },
-    { "group": 2, "needle": "DATA_RELATIVE",                    "kind": "ini",      "maps_to": "code health data subdir" },
+    { "group": 2, "needle": "DATA_RELATIVE",                    "kind": "ini",      "maps_to": "code health data subdir (retired in step 11: the count is 0)" },
     { "group": 3, "needle": "LUPIN_CONFIG_MGR_CLI_ARGS",        "kind": "pin",      "maps_to": "settings loader is Lupin's: the new keys live in lupin-app.ini" },
     { "group": 4, "needle": "/api/embeddings",                  "kind": "pin",      "maps_to": "LUPIN_APP_SERVER_URL: the server is Lupin's own, no key" },
     { "group": 4, "needle": "LUPIN_APP_SERVER_URL",             "kind": "pin",      "maps_to": "LUPIN_APP_SERVER_URL: the server is Lupin's own, no key" },
@@ -49,7 +49,7 @@ NEEDLES = (
 
 CONTROLS = (
     { "needle": "def is_lupin_tree", "path": "src/cosa/repo/symindex/spec.py",                 "line": 79 },
-    { "needle": "DATA_RELATIVE",     "path": "src/cosa/repo/duplicate_check/proof/proof_cli.py", "line": 33 },
+    { "needle": "LUPIN_PY_PACKAGES", "path": "src/cosa/repo/symindex/spec.py",                 "line": 14 },
 )
 
 

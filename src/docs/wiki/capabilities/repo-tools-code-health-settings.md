@@ -16,6 +16,7 @@ pins:
   - cosa.repo.code_health_settings.duplicate_check_ceiling@43d8bd203d
   - cosa.repo.code_health_settings.jev_token_limit@1314be1287
   - cosa.repo.code_health_settings.data_subdir@074c3255ea
+  - cosa.repo.code_health_settings.data_dir@0e71aba9d8
   - cosa.repo.code_health_settings.repo_settings@298caa839f
   - cosa.repo.code_health_settings.registry_repo_names@17742a2b75
   - cosa.repo.code_health_settings.name_mismatches@07f8a1b7c2
@@ -26,12 +27,11 @@ pins:
   - cosa.repo.symindex.spec.override_spec@f7380a240d
 ---
 # Code-health settings: per-repo keys in Lupin's INI
-
 `cosa.repo.code_health_settings` reads the code-health settings of one repo through `ConfigurationManager`. Each per-repo key is named `external repo <name> <kind>`, and one global key, `code health data subdir`, names the data folder. Every key has a twin in `src/conf/lupin-app-splainer.ini`.
 
 ## Rules
 - A blank or absent detection key (`index languages`, `index source dirs`, `index test dirs`, `index exclude`, `wiki dir`) means detect. The reader returns an empty list, or None for `wiki dir`.
-- `filed title prefix` falls back to the repo name in capitals inside brackets. `data_subdir` falls back to `code-health`.
+- `filed title prefix` falls back to the repo name in capitals inside brackets. `data_subdir` falls back to `code-health`, and `data_dir( root )` is `<fleet data root>/<data subdir>`, outside the repo tree.
 - `duplicate check ceiling` and `jev token limit` have no code default. `read_positive_int` refuses a blank, zero, negative or non-numeric value and names the key.
 - A path entry is refused when it is absolute or holds `..`. An `index exclude` entry is refused when it holds a slash. A language outside py, ts and dart is refused.
 - `registry_repo_names` lists the repos with a row in `src/conf/job-registry.json`, and `name_mismatches` reports a name that differs from its checkout's directory name. `check_registry_names( registry, config )` raises, naming each repo whose name differs from its directory name or that lacks `external repo <name> path`. An empty registry also raises.

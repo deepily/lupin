@@ -10,6 +10,7 @@ import json
 import pathlib
 import re
 
+from cosa.repo import code_health_settings as chs
 from cosa.utils.atomic_json import load_json_dict
 
 REGISTRY_SCHEMA  = "job-registry/1"
@@ -145,10 +146,11 @@ def resolve_path( template, root, data ):
     Turn a registry path into a real one.
 
     Requires:
-        - template may start with {root} (the Lupin root) or {data} (the reuse-review data folder)
+        - template may start with {root} (the Lupin root), {data} (the reuse-review data folder) or {code_health} (the code-health data folder under the fleet data root)
     Ensures:
-        - returns a pathlib.Path; a template with neither prefix is taken as relative to root
+        - returns a pathlib.Path; a template with none of the three prefixes is taken as relative to root
     """
+    if template.startswith( "{code_health}" ): return chs.data_dir( root ) / template[ 14: ]
     if template.startswith( "{data}" ): return pathlib.Path( data ) / template[ 7: ]
     if template.startswith( "{root}" ): return pathlib.Path( root ) / template[ 7: ]
     return pathlib.Path( root ) / template

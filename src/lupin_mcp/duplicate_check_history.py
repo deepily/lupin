@@ -14,6 +14,7 @@ import re
 import sys
 
 import cosa.utils.util as cu
+from cosa.repo import code_health_settings as chs
 
 SCHEMA_VERSION = 2
 RUNS_FILE      = "runs.jsonl"
@@ -234,7 +235,7 @@ def main( argv=None, out=print ):
     ap.add_argument( "--folder", default=None )
     ap.add_argument( "--backfill", action="store_true" )
     args   = ap.parse_args( argv )
-    folder = args.folder or f"{cu.get_project_root()}/io/{FOLDER}"
+    folder = args.folder or f"{chs.data_dir( cu.get_project_root() )}/{FOLDER}"
     if args.backfill:
         done = backfill( folder )
         out( f"added {len( done[ 'added' ] )}, skipped {len( done[ 'skipped' ] )}" )

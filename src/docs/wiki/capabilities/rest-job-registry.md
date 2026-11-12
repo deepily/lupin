@@ -8,7 +8,7 @@ pins:
   - cosa.rest.job_registry.effective@4f47d2d9ff
   - cosa.rest.job_registry.crontab_schedule@89dd95c36b
   - cosa.rest.job_registry.with_installed_schedule@11f2ffedb8
-  - cosa.rest.job_registry.resolve_path@d473916ffc
+  - cosa.rest.job_registry.resolve_path@139ed813fa
 ---
 # Job registry and run-time overrides
 
@@ -26,4 +26,4 @@ pins:
 ## Installed schedule
 - `crontab_schedule( text, tag )` reads the schedule off `crontab -l`. A five-field line ending in the tag becomes a cron entry. An `@reboot` line becomes a boot delay taken from its leading sleep, else 0. Commented-out lines are ignored.
 - `with_installed_schedule` swaps in those lines for a job with a `cron_tag`. When the crontab is unreadable or has no tagged line, it keeps the registry schedule and marks it unverified.
-- `resolve_path` fills a leading `{root}` or `{data}` in a registry path, and treats any other path as relative to the root.
+- `resolve_path` fills a leading `{root}`, `{data}` or `{code_health}` in a registry path, and treats any other path as relative to the root.

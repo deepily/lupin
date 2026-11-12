@@ -11,11 +11,11 @@ pins:
   - lupin_mcp.duplicate_check_history.backfill@0454cced16
   - lupin_mcp.duplicate_check_history.rising_run@d0c7dbcf68
   - lupin_mcp.duplicate_check_history.table@adf6469d04
-  - lupin_mcp.duplicate_check_history.main@9582d0affc
+  - lupin_mcp.duplicate_check_history.main@1fccc8cd6c
   - lupin_mcp.duplicate_check_history.read_history@e721b5069d
 ---
 # Duplicate check run history
-`lupin_mcp.duplicate_check_history` keeps `runs.jsonl` in the check's record folder (`io/duplicate-check-daily`): one JSON line per run, failed runs included. The run itself is in [[duplicate-check-daily-run]].
+`lupin_mcp.duplicate_check_history` keeps `runs.jsonl` in the check's record folder (`duplicate-check-daily` under the code-health data folder, `<projects-data>/<repo>/code-health`): one JSON line per run, failed runs included. The run itself is in [[duplicate-check-daily-run]].
 
 ## What it does
 - `line_of( doc, run_file )` flattens a result file to one line with `schema_version` 2. The keys are the same for every run. A number the run could not measure is `None`, never zero.

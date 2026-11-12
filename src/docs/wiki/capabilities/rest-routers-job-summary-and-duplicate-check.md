@@ -10,7 +10,7 @@ pins:
   - cosa.rest.routers.duplicate_check_status.installed_crontab@d42b4aa873
   - cosa.rest.routers.duplicate_check_status.snapshot_now@17d50899e7
   - cosa.rest.routers.duplicate_check_status.get_status@f28fbf7f76
-  - cosa.rest.routers.duplicate_check_status.get_job_summary@b47b92358b
+  - cosa.rest.routers.duplicate_check_status.get_job_summary@7adc59ab3e
   - cosa.rest.routers.duplicate_check_status.get_page@536b7bfbfc
 ---
 # Jobs and duplicate-check status endpoints

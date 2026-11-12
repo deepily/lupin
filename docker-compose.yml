@@ -271,6 +271,10 @@ services:
       # because the caller (cosa-voice, on the host) sends `vectors_dir` as a host path and the router
       # confines that path under LUPIN_REUSE_REVIEW_DATA_ROOT below.
       - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:ro
+      # Code-health data (the duplicate check's run history, job summary, lock and daily log). It moved out of
+      # ./io to projects-data/<repo>/code-health (Q2, step 11): read-write, because :7999 and :8000 run the
+      # check's Run-now button and the job-summary writer. Same host path inside, so fleet_data_root resolves to it.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/code-health:/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/code-health
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -371,6 +375,10 @@ services:
       # every search answered 403 PATH_REFUSED. ⚠️ Env + mounts resolve at container CREATE: picking this
       # up needs `docker compose up -d --force-recreate`, never a plain restart.
       LUPIN_REUSE_REVIEW_DATA_ROOT: /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review
+      # The base the fleet data root derives from. WITHOUT THIS fleet_data_root() inside the container resolves to
+      # /projects-data/lupin, which is not mounted, and the jobs page and the duplicate-check page read nothing.
+      # ⚠️ Env + mounts resolve at container CREATE: picking this up needs `docker compose up -d --force-recreate`.
+      DEEPILY_DATA_DIR: /mnt/DATA01/include/www.deepily.ai/projects-data
       LUPIN_SERVER_PORT: "7999"
       DB_HOST: lupin-postgres
       # Row 80513825 (Rick, 2026-10-03): the app connects as its OWN role, `lupin_app`, not
@@ -570,6 +578,10 @@ services:
       # because the caller (cosa-voice, on the host) sends `vectors_dir` as a host path and the router
       # confines that path under LUPIN_REUSE_REVIEW_DATA_ROOT below.
       - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:ro
+      # Code-health data (the duplicate check's run history, job summary, lock and daily log). It moved out of
+      # ./io to projects-data/<repo>/code-health (Q2, step 11): read-write, because :7999 and :8000 run the
+      # check's Run-now button and the job-summary writer. Same host path inside, so fleet_data_root resolves to it.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/code-health:/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/code-health
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -677,6 +689,10 @@ services:
       # every search answered 403 PATH_REFUSED. ⚠️ Env + mounts resolve at container CREATE: picking this
       # up needs `docker compose up -d --force-recreate`, never a plain restart.
       LUPIN_REUSE_REVIEW_DATA_ROOT: /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review
+      # The base the fleet data root derives from. WITHOUT THIS fleet_data_root() inside the container resolves to
+      # /projects-data/lupin, which is not mounted, and the jobs page and the duplicate-check page read nothing.
+      # ⚠️ Env + mounts resolve at container CREATE: picking this up needs `docker compose up -d --force-recreate`.
+      DEEPILY_DATA_DIR: /mnt/DATA01/include/www.deepily.ai/projects-data
       # The heartbeat poke switch THIS server reads and writes: a test-only file in the shared
       # flow-ratio folder, never the fleet's real heartbeat-poke-mute.json. The folder is mounted
       # into both servers, and the Stop hook on the host reads the real file on every stop, so a

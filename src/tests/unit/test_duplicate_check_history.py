@@ -131,10 +131,13 @@ def test_main_prints_the_table_by_default_and_backfills_on_request( tmp_path ):
     assert hist.main( [ "--folder", str( tmp_path ) ], said.append ) == 0 and "2026-11-04" in said[ 0 ]
 
 
-def test_main_defaults_to_the_projects_duplicate_check_folder( tmp_path, monkeypatch ):
-    monkeypatch.setattr( hist.cu, "get_project_root", lambda: str( tmp_path ) )
+def test_main_defaults_to_the_code_health_folder_and_reads_the_moved_records( tmp_path ):
     said = []
     assert hist.main( [], said.append ) == 0 and said == [ "no runs recorded" ]
+    moved = tmp_path / "fleet-data" / "lupin" / "code-health" / "duplicate-check-daily"
+    hist.append_line( moved, hist.line_of( ok_doc(), "2026-11-06-190659-cron.json" ) )
+    said.clear()
+    assert hist.main( [], said.append ) == 0 and "2026-11-06" in said[ 0 ]
 
 
 def test_a_backfill_after_newer_runs_reads_back_in_time_order_so_the_rising_test_sees_the_real_series( tmp_path ):

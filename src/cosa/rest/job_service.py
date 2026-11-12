@@ -12,6 +12,7 @@ import pathlib
 import subprocess
 import threading
 
+from cosa.repo import code_health_settings as chs
 import cosa.rest.job_health as jh
 import cosa.rest.job_registry as jr
 from cosa.rest.task_store_rules import TERMINAL_STATUSES
@@ -169,9 +170,10 @@ def expand( value, root, data, home, pip, deepily_data ):
     Fill the placeholders of a run command.
 
     Ensures:
-        - returns value with {root}, {data}, {home}, {pip}, {deepily_data} and {python} replaced, inside lists and dicts too
+        - returns value with {root}, {data}, {home}, {pip}, {deepily_data}, {code_health} and {python} replaced, inside lists and dicts too
     """
     if isinstance( value, str ):
+        if "{code_health}" in value: value = value.replace( "{code_health}", str( chs.data_dir( root ) ) )
         for name, real in ( ( "root", root ), ( "data", data ), ( "home", home ), ( "pip", pip ), ( "deepily_data", deepily_data ), ( "python", f"{root}/.venv/bin/python" ) ):
             value = value.replace( "{" + name + "}", str( real ) )
         return value

@@ -57,7 +57,7 @@ def get_status():
 @router.get( "/api/duplicate-check/job-summary" )
 def get_job_summary():
     """Ensures: returns the job-summary/1 record of the run history as of now."""
-    return status.job_summary( history.read_lines( runs_folder() ), job_summary.clock() )
+    return status.job_summary( history.read_lines( runs_folder() ), job_summary.clock(), subdir=status.subdir_of( runs_folder() ) )
 
 
 @router.get( "/app/duplicate-check", include_in_schema=False )

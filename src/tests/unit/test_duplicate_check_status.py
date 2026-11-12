@@ -140,8 +140,8 @@ def test_the_summary_is_the_fleets_v1_record_with_a_null_for_what_the_ledger_can
     s = snapshot_of( tmp_path )[ "summary" ]
     assert ( s[ "schema" ], s[ "job" ], s[ "target" ], s[ "written_at" ], "health" in s ) == ( "job-summary/1", "duplicate-check", None, NOW.isoformat(), False )
     assert s[ "last_attempt" ] == { "started_at": at( 8, 11 ), "finished_at": datetime.datetime.fromisoformat( at( 8, 11 ) ).replace( minute=16, second=40 ).isoformat(), "trigger": "cron",
-                                    "outcome": "clean", "stage": None, "failure": None, "evidence": "io/duplicate-check-daily/runs.jsonl:5", "mode": "baseline" }
-    assert s[ "last_finished" ] == { "started_at": at( 8, 11 ), "outcome": "clean", "evidence": "io/duplicate-check-daily/runs.jsonl:5" } and s[ "consecutive_failures" ] == 0
+                                    "outcome": "clean", "stage": None, "failure": None, "evidence": "code-health/duplicate-check-daily/runs.jsonl:5", "mode": "baseline" }
+    assert s[ "last_finished" ] == { "started_at": at( 8, 11 ), "outcome": "clean", "evidence": "code-health/duplicate-check-daily/runs.jsonl:5" } and s[ "consecutive_failures" ] == 0
     assert s[ "scan_debt" ][ "count" ] == 0 and s[ "scan_debt" ][ "never_checked" ] == 700 and s[ "scan_debt" ][ "drained_last_run" ] == 300 and s[ "scan_debt" ][ "arrived_last_interval" ] == 150
     assert s[ "scan_debt" ][ "unit" ] == "definitions" and s[ "scan_debt" ][ "freshness" ] is None and s[ "scan_debt" ][ "as_of" ] == s[ "last_attempt" ][ "finished_at" ]
     assert s[ "scan_debt" ][ "points" ] == [ { "at": at( 7, 10 ), "count": 800, "drained": 0 }, { "at": at( 7, 11 ), "count": 300, "drained": 500 }, { "at": at( 8, 10 ), "count": 0, "drained": 300 } ]
@@ -201,8 +201,10 @@ def test_the_page_shows_the_backlog_by_kind_the_runs_and_the_days_and_escapes_wh
     assert "not at the present rates" in none and "<td>-</td>" in none
 
 
-def test_the_folder_of_a_root_is_the_runs_folder():
-    assert str( st.folder_of( "/r" ) ) == "/r/io/duplicate-check-daily"
+def test_the_folder_of_a_root_is_the_runs_folder_under_the_code_health_data_folder_not_io( tmp_path ):
+    folder = st.folder_of( tmp_path )
+    assert folder == tmp_path / "fleet-data" / tmp_path.name / "code-health" / "duplicate-check-daily"
+    assert "io" not in folder.parts
 
 
 def test_the_store_count_sits_beside_the_filed_total_and_the_gap_is_their_difference():

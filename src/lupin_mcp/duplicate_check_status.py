@@ -13,6 +13,7 @@ import os
 import pathlib
 import statistics
 
+from cosa.repo import code_health_settings as chs
 from cosa.rest import job_cron
 from cosa.rest import job_registry
 from lupin_mcp import duplicate_check_history as history
@@ -222,13 +223,19 @@ def snapshot( folder, now, crontab_text=None ):
     runs    = [ { **{ k: l.get( k ) for k in ( "started_at", "mode", "trigger", "status", "branch", "owed", "judged", "carried", "judge_calls", "elapsed_seconds", "calls_per_hour",
                                               "rate_limited", "cost_usd", *TOKEN_FIELDS ) }, "failure": l.get( "failure" ) } for l in reversed( lines[ -RECENT_RUNS: ] ) ]
     return { "job": JOB, "as_of": now.isoformat(), "backlog": { "carried": carried, "baseline_remaining": remains, "total": total, "inflow_per_day": inflow },
-             "drain": { "judged_per_day": drain }, "projected_zero": zero, "health": health, "schedule": { "cron": crons, "verified": bool( crons ) }, "runs": runs, "days": per_day_usage( lines )[ -INFLOW_DAYS: ], "summary": job_summary( lines, now ),
+             "drain": { "judged_per_day": drain }, "projected_zero": zero, "health": health, "schedule": { "cron": crons, "verified": bool( crons ) }, "runs": runs, "days": per_day_usage( lines )[ -INFLOW_DAYS: ], "summary": job_summary( lines, now, subdir=subdir_of( folder ) ),
              "unreadable_lines": read[ "bad" ] }
 
 
-def _evidence( lines, i ):
+def subdir_of( folder ):
+    """Ensures: returns the code-health folder name above the runs folder, else the default name."""
+    path = pathlib.Path( folder )
+    return path.parent.name if path.name == history.FOLDER else chs.DATA_SUBDIR
+
+
+def _evidence( lines, i, subdir=chs.DATA_SUBDIR ):
     """Ensures: names ledger line i (0-based) as the summary's evidence field does."""
-    return f"io/{history.FOLDER}/{history.RUNS_FILE}:{i + 1}"
+    return f"{subdir}/{history.FOLDER}/{history.RUNS_FILE}:{i + 1}"
 
 
 def _points( key, finished ):
@@ -236,12 +243,12 @@ def _points( key, finished ):
     return [ { "at": at, key: value } for at, value in finished if value is not None ][ -POINTS: ]
 
 
-def job_summary( lines, now, rows=None ):
+def job_summary( lines, now, rows=None, subdir=chs.DATA_SUBDIR ):
     """
     Build the job's summary record in the fleet's job-summary/1 format.
 
     Requires:
-        - lines are history lines in time order; now is a timezone-aware datetime
+        - lines are history lines in time order; now is a timezone-aware datetime; subdir names the code-health folder the evidence lines cite
     Ensures:
         - returns the record of section 1.1 of the reporting format, with None for what the ledger cannot give, never an omitted key and never a made-up zero
         - last_attempt is the newest line; outcome maps ok to clean; stage and failure are the two halves of the failure text before and after its first ": "; a boot trigger is named boot
@@ -269,8 +276,8 @@ def job_summary( lines, now, rows=None ):
     return { "schema": SUMMARY_SCHEMA, "job": JOB, "target": None, "written_at": now.isoformat(),
              "last_attempt": None if last is None else { "started_at": last[ "started_at" ], "finished_at": ended( last ), "trigger": SHAPE_TRIGGER.get( last[ "trigger" ], last[ "trigger" ] ),
                                                          "outcome": OUTCOME.get( last[ "status" ], last[ "status" ] ), "stage": stage or None, "failure": failure or None,
-                                                         "evidence": _evidence( lines, len( lines ) - 1 ), "mode": last[ "mode" ] },
-             "last_finished": None if fin is None else { "started_at": fin[ 1 ][ "started_at" ], "outcome": OUTCOME[ fin[ 1 ][ "status" ] ], "evidence": _evidence( lines, fin[ 0 ] ) },
+                                                         "evidence": _evidence( lines, len( lines ) - 1, subdir ), "mode": last[ "mode" ] },
+             "last_finished": None if fin is None else { "started_at": fin[ 1 ][ "started_at" ], "outcome": OUTCOME[ fin[ 1 ][ "status" ] ], "evidence": _evidence( lines, fin[ 0 ], subdir ) },
              "consecutive_failures": sum( 1 for l in after if l[ "status" ] == "failed" ),
              "work_found_last_run": fin[ 1 ][ "findings" ] if fin else None,
              "scan_debt": { "unit": "definitions", "count": daily[ -1 ][ "carried" ] if daily else None, "never_checked": baseline_remaining( lines ),
@@ -292,7 +299,7 @@ def write_job_summary( folder, now, rows=None ):
     """
     path = pathlib.Path( folder ) / SUMMARY_FILE
     tmp  = path.with_name( f".{SUMMARY_FILE}.{os.getpid()}.tmp" )
-    tmp.write_text( json.dumps( job_summary( history.read_lines( folder ), now, rows ), indent=2, sort_keys=True ), encoding="utf-8" )
+    tmp.write_text( json.dumps( job_summary( history.read_lines( folder ), now, rows, subdir_of( folder ) ), indent=2, sort_keys=True ), encoding="utf-8" )
     os.replace( tmp, path )
     return path
 
@@ -348,7 +355,7 @@ def render_html( snap ):
 
 def folder_of( root ):
     """Ensures: returns the folder the runs are recorded in, under the given project root."""
-    return pathlib.Path( root ) / "io" / history.FOLDER
+    return chs.data_dir( root ) / history.FOLDER
 
 
 def median_seconds_per_call( lines, floor=20, last=5 ):

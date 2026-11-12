@@ -436,3 +436,21 @@ REUSE-OUTCOME a8e8b71259524924 :: rs-7047f9a841 :: WROTE_NEW overrides the base 
 
 RULING cosa.agents.base_llm_client.collect_stream_text :: DISTINCT one consumer of a streamed reply that the three clients' own loops are now thin callers of; CompletionStreamingContext.stream_text produces the text and does not consume it :: reuse-receipt: a15559bedf7c7241 :: search: rs-a9592152ec
 REUSE-OUTCOME a15559bedf7c7241 :: rs-a9592152ec :: WROTE_NEW one consumer of a streamed reply that the three clients' own loops are now thin callers of; CompletionStreamingContext.stream_text produces the text and does not consume it :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#diff
+
+## Reuse review: code-health data folder (row 6fd6fc0c, step ph1-s12)
+
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.rest.task_approval_settings.refusal_for_admission :: UNRELATED :: a task-approval refusal
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: lupin_app.main.lifespan :: UNRELATED :: server start-up
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.memory.solution_manager_factory.SolutionSnapshotManagerFactory.create_from_config_manager :: UNRELATED :: builds a solution-snapshot manager
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.memory.solution_manager_factory.SolutionSnapshotManagerFactory.create_manager :: UNRELATED :: builds a solution-snapshot manager by type
+SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.rest.routers.speech.stream_tts_elevenlabs :: UNRELATED :: streams speech
+
+RULING cosa.repo.code_health_settings.data_dir :: DISTINCT joins fleet_data_root and the code health data subdir key, so every code-health job resolves one folder; symindex.paths.data_dir does the same join for the reuse-review key and raises CandidateError, and the two folders do not move together :: reuse-receipt: a92e08d48a04c6a9 :: search: rs-6325c24278
+REUSE-OUTCOME a92e08d48a04c6a9 :: rs-6325c24278 :: WROTE_NEW joins fleet_data_root and the code health data subdir key, so every code-health job resolves one folder; symindex.paths.data_dir does the same join for the reuse-review key and raises CandidateError, and the two folders do not move together :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s12
+
+SEARCHED lupin_mcp.duplicate_check_status.subdir_of :: rs-02748ecbc3 :: lupin_mcp.duplicate_check_daily.run :: UNRELATED :: runs the daily check
+SEARCHED lupin_mcp.duplicate_check_status.subdir_of :: rs-02748ecbc3 :: lupin_mcp.duplicate_check_daily.main :: UNRELATED :: the daily check's command line
+SEARCHED lupin_mcp.duplicate_check_status.subdir_of :: rs-02748ecbc3 :: lupin_mcp.duplicate_check_daily.announce :: UNRELATED :: announces a run's result
+
+RULING lupin_mcp.duplicate_check_status.subdir_of :: DISTINCT names the code-health folder from the runs folder's own path, so the evidence label needs no ConfigurationManager and follows whatever folder data_dir gave; code_health_settings.data_subdir reads the INI key :: reuse-receipt: b22aa880ab7236eb :: search: rs-02748ecbc3
+REUSE-OUTCOME b22aa880ab7236eb :: rs-02748ecbc3 :: WROTE_NEW names the code-health folder from the runs folder's own path, so the evidence label needs no ConfigurationManager and follows whatever folder data_dir gave; code_health_settings.data_subdir reads the INI key :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s12

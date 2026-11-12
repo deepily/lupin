@@ -181,3 +181,21 @@ def test_every_failing_repo_is_named_in_order( config, tmp_path ):
 def test_an_empty_registry_is_refused_rather_than_passed( config ):
     with pytest.raises( chs.CodeHealthSettingError, match="names no repo" ):
         chs.check_registry_names( { "jobs": [] }, config )
+
+def test_data_dir_is_the_subdir_under_the_fleet_data_root_and_never_under_io( config, tmp_path, monkeypatch ):
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "d" ) )
+    got = chs.data_dir( tmp_path / "myrepo", config )
+    assert got == tmp_path / "d" / "myrepo" / "code-health" and "io" not in got.parts
+
+
+def test_data_dir_follows_the_ini_key_and_refuses_a_path( config, tmp_path, monkeypatch ):
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "d" ) )
+    config.set_config( chs.DATA_SUBDIR_KEY, "elsewhere" )
+    assert chs.data_dir( tmp_path / "myrepo", config ) == tmp_path / "d" / "myrepo" / "elsewhere"
+    config.set_config( chs.DATA_SUBDIR_KEY, "a/b" )
+    with pytest.raises( chs.CodeHealthSettingError, match=chs.DATA_SUBDIR_KEY ): chs.data_dir( tmp_path / "myrepo", config )
+
+
+def test_data_dir_builds_the_process_config_when_none_is_given( config, tmp_path, monkeypatch ):
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "d" ) )
+    assert chs.data_dir( tmp_path / "myrepo" ) == tmp_path / "d" / "myrepo" / "code-health"
