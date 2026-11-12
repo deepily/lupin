@@ -358,6 +358,23 @@ def test_perform_schedules_wake_argv_when_bridge_resolves( tmp_path ):
     assert marker[ "wake_nonce" ] == "wn-1"
 
 
+def test_perform_names_the_wake_proof_file_for_this_session_and_clears_a_stale_one( tmp_path ):
+    """The wake text names this session's proof file, and a proof from a prior cycle is removed."""
+    mp        = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    stale     = tmp_path / ".self-respin-wake-proof-sid1.marker"
+    stale.write_text( "stale" )
+    scheduled = []
+    sr.perform_self_respin(
+        "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
+        wake_nonce="wn-1", resolve_bridge_path_fn=lambda sid: "/s/cc-42.json",
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
+    )
+    assert f"write {tmp_path}/.self-respin-wake-proof-sid1.marker containing" in scheduled[ 0 ][ 8 ]
+    assert not stale.exists()
+
+
 def test_perform_falls_back_to_plain_clear_when_bridge_unresolvable( tmp_path ):
     """A wake was requested but the bridge path can't be resolved → schedule the
     plain clear anyway (never block the re-spin on an un-resolvable wake)."""

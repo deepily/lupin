@@ -6,7 +6,7 @@ pins:
   - lupin_mcp.fleet_size_cap.refusal_for_spawn@fcde12d493
   - lupin_mcp.fleet_cap_admission.admit@ffa2c208c8
   - lupin_mcp.memento_slot.verify_memento_at_slot@2e43f572b6
-  - lupin_mcp.self_respin_core.perform_self_respin@7b69144c56
+  - lupin_mcp.self_respin_core.perform_self_respin@26c890bc9e
   - lupin_mcp.reap_memento.seats_to_withhold@253ba85cda
 ---
 # Seat lifecycle
