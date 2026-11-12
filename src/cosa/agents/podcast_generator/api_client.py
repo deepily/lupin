@@ -107,34 +107,6 @@ class CostEstimate( BoundedCCCostEstimate ):
     (`total_sdk_cost_usd`). Under the bounded-CC path the SDK telemetry is
     covered by the fixed Max plan and is not billed per token.
     """
-    # Pricing per million tokens (approximate, as of 2025)
-    OPUS_INPUT_PRICE    : float = 15.0
-    OPUS_OUTPUT_PRICE   : float = 75.0
-    SONNET_INPUT_PRICE  : float = 3.0
-    SONNET_OUTPUT_PRICE : float = 15.0
-
-    def add_usage( self, model: str, input_tokens: int, output_tokens: int ):
-        """
-        Add token usage from an LLM call (token-based price estimate).
-
-        Args:
-            model: Model name used
-            input_tokens: Input tokens consumed
-            output_tokens: Output tokens generated
-        """
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_api_calls += 1
-
-        # Estimate cost based on model
-        if "opus" in model.lower():
-            cost = ( input_tokens * self.OPUS_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.OPUS_OUTPUT_PRICE / 1_000_000 )
-        else:  # Sonnet or other
-            cost = ( input_tokens * self.SONNET_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.SONNET_OUTPUT_PRICE / 1_000_000 )
-
-        self.estimated_cost_usd += cost
 
 
 class PodcastAPIClient( BoundedCCClientBase ):

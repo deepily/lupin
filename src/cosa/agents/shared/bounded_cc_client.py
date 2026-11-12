@@ -13,13 +13,50 @@ from dataclasses import dataclass
 
 @dataclass
 class BoundedCCCostEstimate:
-    """Token and SDK-cost tallies for one client; subclasses add the price table and add_usage."""
+    """Token and SDK-cost tallies for one client; override price_pair to add a price tier."""
 
     total_input_tokens  : int   = 0
     total_output_tokens : int   = 0
     total_api_calls     : int   = 0
     estimated_cost_usd  : float = 0.0
     total_sdk_cost_usd  : float = 0.0
+
+    # Pricing per million tokens (approximate)
+    OPUS_INPUT_PRICE    : float = 15.0
+    OPUS_OUTPUT_PRICE   : float = 75.0
+    SONNET_INPUT_PRICE  : float = 3.0
+    SONNET_OUTPUT_PRICE : float = 15.0
+
+    def price_pair( self, model: str ):
+        """
+        Pick the per-million-token prices for a model name.
+
+        Requires:
+            - model is a string
+
+        Ensures:
+            - returns ( input price, output price ): Opus when the name holds "opus", Sonnet for any other name
+        """
+        if "opus" in model.lower(): return self.OPUS_INPUT_PRICE, self.OPUS_OUTPUT_PRICE
+        return self.SONNET_INPUT_PRICE, self.SONNET_OUTPUT_PRICE
+
+    def add_usage( self, model: str, input_tokens: int, output_tokens: int ):
+        """
+        Add token usage from an LLM call (token-based price estimate).
+
+        Requires:
+            - input_tokens and output_tokens are whole numbers of tokens
+
+        Ensures:
+            - adds both token counts and one call to the totals
+            - adds the cost at the prices price_pair gives for the model to estimated_cost_usd
+        """
+        self.total_input_tokens  += input_tokens
+        self.total_output_tokens += output_tokens
+        self.total_api_calls     += 1
+        in_price, out_price       = self.price_pair( model )
+        self.estimated_cost_usd  += ( input_tokens * in_price / 1_000_000 +
+                                      output_tokens * out_price / 1_000_000 )
 
     def add_sdk_cost( self, cost_usd: float ):
         """

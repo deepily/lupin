@@ -4,9 +4,9 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.api_client.PodcastAPIClient@3b9486000c
   - cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_script@92acc1bb1e
-  - cosa.agents.podcast_generator.api_client.CostEstimate@7c2fff6a57
+  - cosa.agents.podcast_generator.api_client.CostEstimate@5e964af54a
   - cosa.agents.presentation_generator.api_client.PresentationAPIClient@82a308bbe1
-  - cosa.agents.presentation_generator.api_client.CostEstimate@4a01d11bac
+  - cosa.agents.presentation_generator.api_client.CostEstimate@c2641c0514
   - cosa.agents.deep_research.api_client.ResearchAPIClient@46fa8d5e14
   - cosa.agents.deep_research.api_client.ResearchAPIClient.call_subagent@0ae9dd8678
   - cosa.agents.deep_research.api_client.ResearchAPIClient.call_with_json_output@dc6725397a
