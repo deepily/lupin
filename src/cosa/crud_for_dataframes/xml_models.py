@@ -10,13 +10,13 @@ Pattern follows ExpeditorResponse in
 src/cosa/agents/runtime_argument_expeditor/xml_models.py.
 """
 
-import json
 from typing import ClassVar, List, Optional
 
 from pydantic import Field, field_validator
 from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.json_fields import json_or_empty
 from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
 
 
@@ -201,13 +201,7 @@ class CRUDIntent( BaseXMLModel ):
             - Returns parsed dict if valid JSON object
             - Returns empty dict if empty, None, or invalid
         """
-        if not value or not value.strip() or value.strip() == "{}":
-            return {}
-        try:
-            parsed = json.loads( value )
-            return parsed if isinstance( parsed, dict ) else {}
-        except ( json.JSONDecodeError, TypeError ):
-            return {}
+        return json_or_empty( value, dict )
 
     def to_xml( self, root_tag="intent", pretty=True ):
         """

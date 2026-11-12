@@ -30,7 +30,7 @@ import cosa.utils.util as cu
 from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
-from cosa.agents.shared.diagnosis_json import parse_diagnosis_json
+from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
 from cosa.agents.io_models.utils.json_object_recovery import extract_json_object
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
@@ -576,16 +576,7 @@ class TFEOrchestrator:
     @staticmethod
     def _fallback_diagnosis( cluster_id: str, reason: str ) -> TestDiagnosisResult:
         """Low-confidence fallback diagnosis used on SDK/parse failures."""
-        return TestDiagnosisResult(
-            cluster_id          = cluster_id,
-            root_cause          = reason,
-            error_category      = "unknown",
-            confidence          = 0.1,
-            evidence            = [ "Failed to parse structured diagnosis" ],
-            affected_components = [],
-            is_transient        = False,
-            test_symptoms       = [],
-        )
+        return TestDiagnosisResult( cluster_id=cluster_id, test_symptoms=[], **fallback_diagnosis_fields( reason ) )
 
     # ───────────────────────────────────────────────────────────────
     # Phase 2 onward: full implementations (propose, fix, git, validation rerun)

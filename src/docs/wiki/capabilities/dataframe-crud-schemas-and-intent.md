@@ -11,7 +11,7 @@ pins:
   - cosa.crud_for_dataframes.schemas.get_columns_by_dtype@b9df42cc26
   - cosa.crud_for_dataframes.schemas.get_dedup_keys@f61fa40124
   - cosa.crud_for_dataframes.schemas.validate_schema_type@e65640cf71
-  - cosa.crud_for_dataframes.xml_models.CRUDIntent@5b41a6c967
+  - cosa.crud_for_dataframes.xml_models.CRUDIntent@bf8d02870f
   - cosa.crud_for_dataframes.intent_extractor.build_claude_prompt@a6a3156d22
 ---
 # DataFrame CRUD schemas and intent

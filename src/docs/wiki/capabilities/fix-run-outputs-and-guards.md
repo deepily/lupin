@@ -10,6 +10,7 @@ pins:
   - cosa.agents.shared.sdk_error_result.raise_error_result@de5e8eacd5
   - cosa.agents.shared.fix_executor.BFETimeoutError@0414fa1b5b
   - cosa.agents.shared.diagnosis_json.parse_diagnosis_json@42f2080b38
+  - cosa.agents.shared.diagnosis_json.fallback_diagnosis_fields@b6b6ad3701
 ---
 # Fix run outputs and guards
 
@@ -26,6 +27,7 @@ Small helpers shared by both fix expediters. They write the plan and the final r
 - `login_hint` appends the renew-your-login sentence when the text holds `API Error: 401`.
 - `raise_error_result` logs the failure and raises `RuntimeError` with the hint included.
 - `BFETimeoutError` is raised when one agent call outlives the wall-clock budget.
+- `fallback_diagnosis_fields( reason )` builds the fields both expediters give a fallback diagnosis: confidence 0.1, category `unknown`, one evidence line.
 
 ## Invariants
 - `BFETimeoutError` is not a `SafetyLimitError`. The fix executor re-raises it, so the job ends dead and the pool slot is released.
