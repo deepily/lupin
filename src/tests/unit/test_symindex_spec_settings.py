@@ -156,3 +156,35 @@ def test_a_test_dir_that_does_not_exist_is_refused_naming_the_key( tmp_path, con
     put( config, chs.TEST_DIRS_KIND, "nowhere" )
     with pytest.raises( chs.CodeHealthSettingError, match="external repo t index test dirs.*nowhere" ):
         sp.tests_spec( root, config, "t" )
+
+
+def test_module_base_is_derived_src_for_a_lupin_tree_and_the_root_for_any_other( tmp_path, config ):
+    """The derivation, pinned to literals; an INI override never moves it."""
+    lupin = make_lupin_repo( tmp_path )
+    assert sp.detected_spec( lupin ).module_base == lupin.resolve() / "src"
+    assert sp.spec_for( lupin, config, "lupin" ).module_base == lupin.resolve() / "src"
+    plain = make_repo( tmp_path / "plain" )
+    put( config, chs.SOURCE_DIRS_KIND, "pkg" )
+    assert sp.detected_spec( plain ).module_base == plain.resolve()
+    assert sp.spec_for( plain, config, "t" ).module_base == plain.resolve()
+
+
+def test_python_dirs_all_under_src_in_another_tree_are_refused_naming_the_key( tmp_path, config ):
+    """The known-wrong case: src/pkg/mod.py would get the module id src.pkg.mod."""
+    root = make_repo( tmp_path )
+    ( root / "src" / "pkg" ).mkdir( parents=True )
+    for entry in ( "src", "src/pkg", "src/pkg, src" ):
+        put( config, chs.SOURCE_DIRS_KIND, entry )
+        with pytest.raises( chs.CodeHealthSettingError, match="external repo t index source dirs.*start with `src`" ):
+            sp.spec_for( root, config, "t" )
+
+
+def test_a_dir_outside_src_or_no_python_dirs_passes_the_module_base_check( tmp_path, config ):
+    root = make_repo( tmp_path )
+    ( root / "src" ).mkdir( exist_ok=True )
+    ( root / "lib" ).mkdir()
+    put( config, chs.SOURCE_DIRS_KIND, "src, lib" )
+    assert rels( root, sp.spec_for( root, config, "t" ).py_roots ) == [ "src", "lib" ]
+    put( config, chs.LANGUAGES_KIND, "ts" )
+    put( config, chs.SOURCE_DIRS_KIND, "src" )
+    assert sp.spec_for( root, config, "t" ).py_roots == ()

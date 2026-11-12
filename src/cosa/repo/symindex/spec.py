@@ -126,6 +126,27 @@ def configured_dirs( root, key, entries ):
     return dirs
 
 
+def check_module_base( spec, name ):
+    """
+    Refuse a spec whose dotted Python module names would all start with `src`.
+
+    Requires:
+        - spec is an IndexSpec; name is the repo name used in the INI keys
+
+    Ensures:
+        - returns None for a lupin tree, whose module_base is its `src` directory
+        - returns None when the spec has no py_roots, or any py root lies outside <root>/src
+        - module_base stays derived from detection: the root, except for a lupin tree
+
+    Raises:
+        - CodeHealthSettingError naming `index source dirs` when module_base is the root and every py root is <root>/src or lies under it
+    """
+    src = spec.root / "src"
+    if spec.module_base != spec.root or not spec.py_roots: return
+    if all( root == src or src in root.parents for root in spec.py_roots ):
+        raise chs.CodeHealthSettingError( f"{chs.repo_key( name, chs.SOURCE_DIRS_KIND )}: every Python dir is under src/, so module names would start with `src`; module_base is the repo root outside a lupin tree" )
+
+
 def override_spec( detected, settings, name ):
     """
     Apply a repo's INI settings to a detected IndexSpec, field by field.
@@ -141,14 +162,16 @@ def override_spec( detected, settings, name ):
         - root, name, module_base and scopes are the detected ones
 
     Raises:
-        - CodeHealthSettingError naming `index source dirs` for an entry that is not a directory
+        - CodeHealthSettingError naming `index source dirs` for an entry that is not a directory, or for Python dirs all under src/ in a tree that is not a lupin tree (check_module_base)
     """
     found  = { "py": detected.py_roots, "ts": detected.js_roots, "dart": detected.dart_roots }
     listed = settings[ "index_languages" ] or [ lang for lang, roots in found.items() if roots ]
     dirs   = configured_dirs( detected.root, chs.repo_key( name, chs.SOURCE_DIRS_KIND ), settings[ "index_source_dirs" ] )
     roots  = { lang: ( dirs or found[ lang ] ) if lang in listed else () for lang in found }
     skip   = frozenset( settings[ "index_exclude" ] ) or detected.skip_parts
-    return IndexSpec( detected.root, detected.name, roots[ "py" ], roots[ "ts" ], roots[ "dart" ], detected.module_base, skip, scopes=detected.scopes )
+    spec   = IndexSpec( detected.root, detected.name, roots[ "py" ], roots[ "ts" ], roots[ "dart" ], detected.module_base, skip, scopes=detected.scopes )
+    check_module_base( spec, name )
+    return spec
 
 
 def spec_for( root, config=None, name=None ):

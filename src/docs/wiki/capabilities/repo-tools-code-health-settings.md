@@ -21,7 +21,8 @@ pins:
   - cosa.repo.code_health_settings.name_mismatches@07f8a1b7c2
   - cosa.repo.symindex.spec.detected_spec@7a0be26984
   - cosa.repo.symindex.spec.configured_dirs@c4d697d6ed
-  - cosa.repo.symindex.spec.override_spec@3c934b6ccf
+  - cosa.repo.symindex.spec.check_module_base@3c8c9be41b
+  - cosa.repo.symindex.spec.override_spec@f7380a240d
 ---
 # Code-health settings: per-repo keys in Lupin's INI
 
@@ -36,3 +37,4 @@ pins:
 - `spec_for( root, config, name )` and `tests_spec( root, config, name )` read the four `index` keys. With no config they return the detected spec, `detected_spec`.
 - `override_spec` applies the keys field by field. Source dirs go to the roots of each listed language: py to `py_roots`, ts to `js_roots`, dart to `dart_roots`. A source or test dir that is not a directory is refused, naming the key.
 - Exclude names replace the skip set, and `tests_spec` still lets `tests` through. The librarian, filing and daily-check modules adopt the other keys in later steps.
+- `module_base` stays derived: `src` for a lupin tree, the root otherwise, with no INI key. `check_module_base` refuses source dirs that all lie under `src/` in another tree.
