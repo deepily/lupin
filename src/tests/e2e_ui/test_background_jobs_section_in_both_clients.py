@@ -69,15 +69,17 @@ def _dup( accordion ):
     return accordion.locator( "[data-testid=jobs-item][data-job=duplicate-check]" )
 
 
-def test_the_section_shows_all_23_jobs_active_state_first_each_collapsed( logged_in_page, client ):
+def test_the_section_shows_all_23_jobs_by_service_name_a_to_z_each_collapsed( logged_in_page, client ):
     page = logged_in_page
     _, summaries = _stub( page )
     accordion = _open( page, client )
     items = accordion.locator( ":scope > [data-testid=jobs-item]" )
     assert items.count() == 23
     assert page.get_by_test_id( client[ "count" ] ).inner_text() == "23"
-    states = [ items.nth( i ).get_attribute( "data-state" ) for i in range( 23 ) ]
-    assert states == sorted( states, key=[ "healthy", "behind", "failing", "silent", "unknown" ].index )
+    titles = [ items.nth( i ).locator( "[data-testid=jobs-title]" ).first.inner_text() for i in range( 23 ) ]
+    assert titles[ :2 ] == [ "Commons archival", "Context tick" ], "the default order is service name A to Z (row 1ac04991)"
+    in_page = page.evaluate( "t => [ ...t ].sort( ( a, b ) => a.localeCompare( b ) )", titles )   # the page's own collation, which Python's sorted() does not share
+    assert titles == in_page
     assert accordion.locator( "[data-testid=jobs-line][aria-expanded=true]" ).count() == 0
     assert accordion.locator( ":scope > [data-testid=jobs-item] > [data-testid=jobs-panel]:visible" ).count() == 0
     assert summaries and all( a.startswith( "Bearer " ) for a in summaries ), "the summary request must carry the login token"
