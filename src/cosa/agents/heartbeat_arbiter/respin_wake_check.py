@@ -43,13 +43,13 @@ import os
 import re
 import threading
 import time
-import unicodedata
 
 from dataclasses import dataclass
 from enum        import Enum
 from pathlib     import Path
 
 from cosa.utils.atomic_json import load_json_dict
+from lupin_mcp.persona_normalization import memento_slugs
 
 
 # The on-disk receipt filename shape: <RECEIPT_PREFIX><session_id>.json, living
@@ -453,27 +453,13 @@ def persona_slugs( value ):
           identity must never be reported as a mismatched one
         - never raises
         - the set holds both spellings because `memento_io.slugify` does not fold
-          accents ("María" becomes "mar-a") while `register_session._persona_slugs`
+          accents ("María" becomes "mar-a") while `persona_normalization.memento_slugs`
           folds first and produces "maria"; both spellings name the same seat
         - reducing each side to one canonical slug would report a live roster persona
           as an impostor each time that persona re-spun, and a check that cries wolf
           on a real seat gets switched off
     """
-    lowered = _norm( value )
-    if not lowered:
-        return frozenset()
-
-    # Accent-fold first: NFKD splits a letter from its accent, dropping the
-    # combining marks leaves the base letter. This is the form writers produce.
-    folded = "".join( ch for ch in unicodedata.normalize( "NFKD", lowered )
-                      if not unicodedata.combining( ch ) )
-
-    out = set()
-    for candidate in ( folded, lowered ):
-        slug = re.sub( r"[^a-z0-9]+", "-", candidate ).strip( "-" )
-        if slug:
-            out.add( slug )
-    return frozenset( out )
+    return frozenset( memento_slugs( value ) )
 
 
 def find_receipt_by_identity( base_dir, *, persona=None, tmux_session=None, since=None ):

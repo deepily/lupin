@@ -8,7 +8,8 @@ pins:
   - cosa.agents.heartbeat_arbiter.respin_wake_check.build_receipt_dict@2f3f63b68d
   - cosa.agents.heartbeat_arbiter.respin_wake_check.write_boot_receipt@6171593e9a
   - cosa.agents.heartbeat_arbiter.respin_wake_check.read_receipt@c9a10cad03
-  - cosa.agents.heartbeat_arbiter.respin_wake_check.persona_slugs@f7ebe11b36
+  - cosa.agents.heartbeat_arbiter.respin_wake_check.persona_slugs@a63a8a724c
+  - lupin_mcp.persona_normalization.memento_slugs@bc41a4230a
   - cosa.agents.heartbeat_arbiter.respin_wake_check.find_receipt_by_identity@c3da97bf22
   - cosa.agents.heartbeat_arbiter.respin_wake_check.receipt_is_misplaced@777f7c8bb7
   - cosa.agents.heartbeat_arbiter.respin_wake_check.find_misplaced_receipts@1b9938ac32
@@ -24,7 +25,8 @@ A re-spun seat writes a boot receipt naming the memento it opened. The check in 
 - `build_receipt_dict` assembles the receipt: identity, boot time, memento path, written time, the persona the record declares, the slot and the block fields.
 - `write_boot_receipt` writes it, best effort, and returns the path or `None`. It needs a session id and never raises, so a boot cannot fail on it.
 - `read_receipt` returns the parsed receipt or `None`.
-- `persona_slugs` returns every slug a persona name could have been written as, both accent folded and not. An emoji-only name gives an empty set.
+- `persona_slugs` returns every slug a persona name could have been written as, both accent folded and not. An emoji-only name gives an empty set. The list comes from `memento_slugs` in `lupin_mcp.persona_normalization`.
+  `register_session` uses the same definition for its memento file names.
 - `find_receipt_by_identity` finds a successor's receipt by persona or tmux session when its session id is unknown. It returns the newest one booted at or after `since`.
 - `receipt_is_misplaced` is true when the file's parent is not the directory the finder reads. It returns false when it cannot tell.
 - `find_misplaced_receipts` searches recursively for a seat's receipts that the finder cannot see.
