@@ -85,3 +85,28 @@ def test_the_evidence_label_follows_the_folder_the_data_dir_gave_not_the_default
     summary = dcs.job_summary( hist.read_lines( folder ), datetime.datetime( 2026, 11, 7, tzinfo=datetime.timezone.utc ), subdir=dcs.subdir_of( folder ) )
     assert summary[ "last_attempt" ][ "evidence" ] == "elsewhere/duplicate-check-daily/runs.jsonl:1"
     assert dcs.subdir_of( tmp_path / "other-name" ) == "code-health"
+
+
+def elsewhere_folder( tmp_path ):
+    """A runs folder whose parent is `elsewhere`, holding one run."""
+    folder = tmp_path / "elsewhere" / "duplicate-check-daily"
+    hist.append_line( folder, hist.line_of( { "status": "carried", "trigger": "cron", "mode": "daily", "started_at": "2026-11-06T19:06:59-05:00", "carried": [ 1 ], "owed": 1, "judged": 1, "judge_calls": 1, "elapsed_seconds": 5.0 }, "r.json" ) )
+    return folder
+
+
+NOW_UTC = datetime.datetime( 2026, 11, 7, 12, 0, tzinfo=datetime.timezone.utc )
+
+
+def test_the_snapshot_cites_the_folder_it_was_given_in_its_evidence( tmp_path ):
+    assert dcs.snapshot( elsewhere_folder( tmp_path ), NOW_UTC )[ "summary" ][ "last_attempt" ][ "evidence" ] == "elsewhere/duplicate-check-daily/runs.jsonl:1"
+
+
+def test_the_written_summary_cites_the_folder_it_was_written_beside( tmp_path ):
+    path = dcs.write_job_summary( elsewhere_folder( tmp_path ), NOW_UTC )
+    assert json.loads( path.read_text() )[ "last_attempt" ][ "evidence" ] == "elsewhere/duplicate-check-daily/runs.jsonl:1"
+
+
+def test_the_job_summary_endpoint_cites_the_folder_the_router_reads( tmp_path, monkeypatch ):
+    folder = elsewhere_folder( tmp_path )
+    monkeypatch.setattr( router, "runs_folder", lambda: folder )
+    assert router.get_job_summary()[ "last_attempt" ][ "evidence" ] == "elsewhere/duplicate-check-daily/runs.jsonl:1"
