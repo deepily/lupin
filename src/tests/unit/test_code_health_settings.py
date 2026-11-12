@@ -1,8 +1,11 @@
 """Unit tests for the code-health settings reader, through the real ConfigurationManager."""
+import json
+import pathlib
+
 import pytest
 
 import cosa.utils.util as cu
-from cosa.rest.job_registry import load_registry
+from cosa.rest.job_registry import REGISTRY_FILE, load_registry
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo import code_health_settings as chs
 
@@ -128,3 +131,53 @@ def test_name_matches_the_checkout_directory_for_lupin_and_a_mismatch_is_caught(
     """The real name matches; a name that differs from its directory is reported."""
     assert chs.name_mismatches( { "lupin": cu.get_project_root() } ) == []
     assert chs.name_mismatches( { "par-pacific": "/nowhere/par-pacific-financials-er-442109" } ) == [ "par-pacific" ]
+
+
+def scratch_registry( tmp_path, repo ):
+    """Copy the real registry, add a row naming `repo`, and load it with the real reader."""
+    doc = json.loads( ( pathlib.Path( cu.get_project_root() ) / REGISTRY_FILE ).read_text() )
+    doc[ "jobs" ].append( { "job": "scratch-negative-control", "title": "Scratch row", "owner": "clayton", "repo": repo } )
+    ( tmp_path / REGISTRY_FILE ).parent.mkdir( parents=True )
+    ( tmp_path / REGISTRY_FILE ).write_text( json.dumps( doc ) )
+    return load_registry( tmp_path )
+
+
+def test_the_real_registry_passes_the_name_check_and_names_lupin( config ):
+    """Positive control: the live registry names lupin and every name matches its directory."""
+    registry = load_registry( cu.get_project_root() )
+    assert chs.registry_repo_names( registry ) == [ "lupin" ]
+    assert chs.check_registry_names( registry, config ) == [ "lupin" ]
+
+
+def test_a_row_whose_repo_differs_from_its_directory_name_fails_naming_the_repo( config, tmp_path ):
+    """Negative control: par-pacific lives in a differently named directory, so its row fails."""
+    registry = scratch_registry( tmp_path, "par-pacific" )
+    assert chs.registry_repo_names( registry ) == [ "lupin", "par-pacific" ]
+    with pytest.raises( chs.CodeHealthSettingError ) as raised:
+        chs.check_registry_names( registry, config )
+    assert str( raised.value ) == "repo name must equal its checkout's directory name; failing: par-pacific"
+
+
+def test_a_row_whose_repo_matches_its_directory_name_passes( config, tmp_path ):
+    """A row whose repo name equals its directory name passes."""
+    registry = scratch_registry( tmp_path, "cosa-voice" )
+    assert chs.check_registry_names( registry, config ) == [ "cosa-voice", "lupin" ]
+
+
+def test_a_row_for_a_repo_with_no_path_key_fails_naming_it( config, tmp_path ):
+    registry = scratch_registry( tmp_path, "none-such" )
+    with pytest.raises( chs.CodeHealthSettingError, match="failing: none-such$" ):
+        chs.check_registry_names( registry, config )
+
+
+def test_every_failing_repo_is_named_in_order( config, tmp_path ):
+    registry = scratch_registry( tmp_path, "par-pacific" )
+    registry[ "jobs" ].append( { "job": "second", "title": "t", "owner": "clayton", "repo": "claude-plans" } )
+    registry[ "jobs" ].append( { "job": "third", "title": "t", "owner": "clayton", "repo": "none-such" } )
+    with pytest.raises( chs.CodeHealthSettingError, match="failing: claude-plans, none-such, par-pacific$" ):
+        chs.check_registry_names( registry, config )
+
+
+def test_an_empty_registry_is_refused_rather_than_passed( config ):
+    with pytest.raises( chs.CodeHealthSettingError, match="names no repo" ):
+        chs.check_registry_names( { "jobs": [] }, config )

@@ -19,6 +19,7 @@ pins:
   - cosa.repo.code_health_settings.repo_settings@298caa839f
   - cosa.repo.code_health_settings.registry_repo_names@17742a2b75
   - cosa.repo.code_health_settings.name_mismatches@07f8a1b7c2
+  - cosa.repo.code_health_settings.check_registry_names@c4061ea4ba
 ---
 # Code-health settings: per-repo keys in Lupin's INI
 
@@ -30,4 +31,5 @@ pins:
 - `duplicate check ceiling` and `jev token limit` have no code default. `read_positive_int` refuses a blank, zero, negative or non-numeric value and names the key.
 - A path entry is refused when it is absolute or holds `..`. An `index exclude` entry is refused when it holds a slash. A language outside py, ts and dart is refused.
 - `registry_repo_names` lists the repos with a row in `src/conf/job-registry.json`, and `name_mismatches` reports a name that differs from its checkout's directory name.
+- `check_registry_names( registry, config )` is the directory-name check. It raises, naming every repo with a row whose name differs from its checkout's directory name or has no `external repo <name> path`. An empty registry also raises.
 - Nothing calls these readers yet. The index, librarian, filing and daily-check modules adopt them in later steps of the code-health plan.

@@ -23,6 +23,7 @@ TITLE_KIND       = "filed title prefix"
 CEILING_KIND     = "duplicate check ceiling"
 JEV_LIMIT_KIND   = "jev token limit"
 PER_REPO_KINDS   = ( LANGUAGES_KIND, SOURCE_DIRS_KIND, TEST_DIRS_KIND, EXCLUDE_KIND, WIKI_DIR_KIND, TITLE_KIND, CEILING_KIND, JEV_LIMIT_KIND )
+CHECKOUT_PATH_WORD = "path"
 DATA_SUBDIR_KEY  = "code health data subdir"
 DATA_SUBDIR      = "code-health"
 LANGUAGES        = ( "py", "ts", "dart" )
@@ -263,3 +264,32 @@ def name_mismatches( checkouts ):
         - a worktree path counts as its main checkout, the rule fleet_data_root already uses
     """
     return sorted( name for name, path in checkouts.items() if fleet_data_root( path ).name != name )
+
+
+def check_registry_names( registry, config ):
+    """
+    Refuse a registry whose repo names do not each equal their checkout's directory name.
+
+    The data folder and the manager roster variable derive from the directory name. A row whose
+    `repo` differs would read and write the wrong place. Only repos that carry a registry row are
+    checked. The whole `external repos` list is not, because par-pacific and claude-plans differ from their directories.
+
+    Requires:
+        - registry is the dict cosa.rest.job_registry.load_registry returns
+        - config has a ConfigurationManager `get` method, and each row's repo has `external repo <name> path`
+
+    Ensures:
+        - returns the sorted repo names that carry a row, at least one, when every name matches
+        - a repo with no path key counts as failing, because its checkout cannot be compared
+
+    Raises:
+        - CodeHealthSettingError when the registry names no repo, so the check never passes on nothing
+        - CodeHealthSettingError naming every repo whose name differs from its checkout's directory name or has no path
+    """
+    names = registry_repo_names( registry )
+    if not names: raise CodeHealthSettingError( "the registry names no repo, so the directory-name check would pass on nothing" )
+    paths   = { name: read_text( config, repo_key( name, CHECKOUT_PATH_WORD ) ) for name in names }
+    missing = [ name for name, path in paths.items() if path == "" ]
+    failing = sorted( missing + name_mismatches( { name: path for name, path in paths.items() if path != "" } ) )
+    if failing: raise CodeHealthSettingError( f"repo name must equal its checkout's directory name; failing: {', '.join( failing )}" )
+    return names

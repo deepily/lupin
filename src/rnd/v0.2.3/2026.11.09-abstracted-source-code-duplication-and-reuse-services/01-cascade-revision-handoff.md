@@ -330,3 +330,14 @@ REUSE-OUTCOME 33c6ec441564c732 :: rs-266ff92ce5 :: WROTE_NEW derives repo names 
 
 RULING cosa.repo.code_health_settings.name_mismatches :: DISTINCT compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: reuse-receipt: 2e232146ad501898 :: search: rs-08457a253f
 REUSE-OUTCOME 2e232146ad501898 :: rs-08457a253f :: WROTE_NEW compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+## Reuse review: B-AC6 negative control (row 383be1d4, step ph1-s14)
+
+`check_registry_names( registry, config )` composes the two readers step 1 added. `registry_repo_names` lists the repos with a row, and `name_mismatches` compares each name to its checkout's directory name. The one thing it adds is the join: it reads each repo's `external repo <name> path` key, refuses a repo with no path, and refuses an empty registry so the check cannot pass on nothing. It raises `CodeHealthSettingError`, naming every failing repo.
+
+SEARCHED cosa.repo.code_health_settings.check_registry_names :: rs-b6052eaced :: cosa.rest.routers._scope_registry.build_scope_registry :: UNRELATED :: builds the doc-viewer scope map and drops a scope whose path is missing on disk; this check must fail on a missing path
+SEARCHED cosa.repo.code_health_settings.check_registry_names :: rs-b6052eaced :: lupin_arbiter_app.fleet_arbiter_loop._registry_container_paths :: RELATED :: returns the configured paths without their names, and a name with no path drops out silently
+
+RULING cosa.repo.code_health_settings.check_registry_names :: EXTEND cosa.repo.code_health_settings.name_mismatches :: reuse-receipt: a0e97d596ca2d49f :: search: rs-b6052eaced
+
+REUSE-OUTCOME a0e97d596ca2d49f :: rs-b6052eaced :: EXTENDED cosa.repo.code_health_settings.name_mismatches :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s14
