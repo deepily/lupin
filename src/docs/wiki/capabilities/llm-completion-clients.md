@@ -2,7 +2,8 @@
 capability: llm-completion-clients
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.llm_client.LlmClient@e471e66b2e
+  - cosa.agents.llm_client.LlmClient@ee264b0170
+  - cosa.agents.base_llm_client.print_request_summary@67d334d012
   - cosa.agents.llm_completion.LlmCompletion@91250e5345
   - cosa.agents.llm_completion.CompletionStreamingContext@d2a8afebda
   - cosa.agents.llm_client_factory.LlmClientFactory.AgentWrapper@ca8ae7ddbc
@@ -18,7 +19,7 @@ Four classes call a model and two shape what goes in or comes out. Callers use `
 - `LlmCompletion` first asks the server for the prompt's token count and lowers `max_tokens` to fit the window. If the count cannot be had, it sends the request unchanged.
 - `run` takes an optional `timeout` that covers the whole call, both HTTP requests included. It raises the builtin `TimeoutError`.
 - `CompletionStreamingContext` is the async context manager that `run_stream` returns. Its `stream_text` yields the response in chunks.
-- `LlmClient` is the wider client. In completion mode it wraps `LlmCompletion`, otherwise a `pydantic_ai` agent. It counts tokens and prints timing.
+- `LlmClient` is the wider client. In completion mode it wraps `LlmCompletion`, otherwise a `pydantic_ai` agent. It counts tokens and prints timing through `print_request_summary` in `base_llm_client`, which `LlmClientInterface` clients print through too.
 - `LlmClient.run` works from sync and async code. From a running event loop it moves the work to a separate thread.
 - `LlmClientFactory.AgentWrapper` gives a `pydantic_ai` agent a plain synchronous `run` and returns the response data.
 - `PromptFormatter` picks one of three formats for a model: instruction completion, special token or JSON message. It fills a template file with instructions, input and output.

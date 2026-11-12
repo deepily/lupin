@@ -20,7 +20,7 @@ import asyncio
 import unittest
 from unittest.mock import Mock, patch
 
-from cosa.agents.base_llm_client import LlmClientInterface, BaseLlmClient, format_duration_ms
+from cosa.agents.base_llm_client import LlmClientInterface, BaseLlmClient, format_duration_ms, print_request_summary
 
 
 class _ConcreteInterface( LlmClientInterface ):
@@ -101,6 +101,48 @@ class TestLlmClientInterface( unittest.TestCase ):
 
     def test_print_metadata_prints_zero_milliseconds_for_a_zero_duration( self ):
         self.assertTrue( self._duration_line( 0.0 ).endswith( ": 0ms" ) )
+
+
+class TestPrintRequestSummary( unittest.TestCase ):
+    """The one summary printer both LLM client families call."""
+
+    def _run( self, **kwargs ):
+        with patch( "cosa.agents.base_llm_client.du.print_banner" ) as banner, patch( "builtins.print" ) as printed:
+            print_request_summary( **kwargs )
+        return banner, [ call.args[ 0 ] for call in printed.call_args_list ]
+
+    def test_prints_every_line_in_order_with_its_value( self ):
+        banner, lines = self._run( model_name="m-1", prompt_tokens=10, completion_tokens=20, duration=2.0, title="T" )
+        self.assertEqual( lines, [
+            "🧠 Model              : m-1",
+            "⏱️ Duration           : 2000ms",
+            "🔢 Prompt tokens      : 10",
+            "💬 Completion tokens  : 20",
+            "🧮 Total tokens       : 30",
+            "⚡ Tokens/sec         : 10.00",
+            "=" * 40,
+        ] )
+        banner.assert_called_once_with( "T", prepend_nl=True )
+
+    def test_no_duration_prints_na_and_inf( self ):
+        _, lines = self._run( model_name="m", prompt_tokens=1, completion_tokens=2, duration=None, title="T" )
+        self.assertEqual( lines[ 1 ], "⏱️ Duration           : N/A" )
+        self.assertEqual( lines[ 5 ], "⚡ Tokens/sec         : inf" )
+
+    def test_zero_duration_prints_zero_ms_and_inf( self ):
+        _, lines = self._run( model_name="m", prompt_tokens=1, completion_tokens=2, duration=0.0, title="T" )
+        self.assertEqual( lines[ 1 ], "⏱️ Duration           : 0ms" )
+        self.assertEqual( lines[ 5 ], "⚡ Tokens/sec         : inf" )
+
+    def test_negative_duration_prints_inf_not_a_negative_rate( self ):
+        _, lines = self._run( model_name="m", prompt_tokens=1, completion_tokens=2, duration=-1.0, title="T" )
+        self.assertEqual( lines[ 5 ], "⚡ Tokens/sec         : inf" )
+
+    def test_interface_method_titles_the_banner_with_its_client_type( self ):
+        inst = _ConcreteInterface()
+        with patch( "cosa.agents.base_llm_client.du.print_banner" ) as banner, patch( "builtins.print" ):
+            inst._print_metadata( prompt_tokens=1, completion_tokens=1, duration=1.0, client_type="Chat" )
+        banner.assert_called_once_with( "📊 Chat Summary", prepend_nl=True )
 
 
 class TestBaseLlmClient( unittest.TestCase ):
