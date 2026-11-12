@@ -50,3 +50,4 @@ def test_an_empty_block_gives_an_empty_string_not_none():
 def test_a_renderer_does_not_fall_back_past_an_empty_block():
     assert D2Renderer._extract_d2_code( "```d2\n```\na -> b" ) == ""
     assert MermaidRenderer._extract_mermaid( "```mermaid\n```\ngraph TD\n  A-->B" ) == ""
+    assert MatplotlibRenderer._extract_python_code( "```python\n```\nimport os" ) == ""
