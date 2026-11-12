@@ -457,6 +457,20 @@ def test_source_document_scopes_are_the_registry_plus_io_and_docs_rebuilt_per_ca
     assert second is not first
 
 
+@pytest.mark.parametrize( "raw,expected", [ ( "true", True ), ( "TRUE", True ), ( "  True  ", False ), ( "false", False ), ( "yes", False ) ] )
+def test_the_crud_flag_is_read_as_a_boolean_without_stripping( monkeypatch, raw, expected ):
+    """
+    The CRUD flag is a plain boolean read: true in any case is on, all else is off.
+
+    A value padded with spaces is off. The old read stripped first.
+    """
+    captured = {}
+    _patch_stack( monkeypatch, captured )
+    cfg = _FakeConfig( { "v2 flow enabled": True, "v2 executor": "inline", "v2 trace dir": "", "crud for dataframes agents enabled": raw } )
+    v2_ask.build_ask_flow( cfg )
+    assert captured[ "kwargs" ][ "crud_enabled" ] is expected
+
+
 def test_build_ask_flow_hands_the_queue_to_the_executor( monkeypatch ):
     """Step 12: `v2 executor = queued` needs the live todo queue, and build_ask_flow
     is the only place it can arrive. A build that read the name and dropped the queue

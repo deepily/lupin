@@ -122,8 +122,7 @@ def _is_persistence_enabled():
     """
     try:
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        value = config_mgr.get( "cj flow persistence enabled", default="true" )
-        return str( value ).lower() == "true"
+        return config_mgr.get( "cj flow persistence enabled", default="true", return_type="boolean" )
     except Exception:
         return True
 

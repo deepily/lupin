@@ -62,6 +62,17 @@ class TestConfigHelpers( unittest.TestCase ):
         with patch.object( jp, "ConfigurationManager", return_value=cfg ):
             self.assertFalse( jp._is_persistence_enabled() )
 
+    def test_persistence_enabled_missing_key_defaults_to_on( self ):
+        cfg = TypedConfigFake( {} )
+        with patch.object( jp, "ConfigurationManager", return_value=cfg ):
+            self.assertTrue( jp._is_persistence_enabled() )
+
+    def test_persistence_enabled_padded_true_reads_as_off( self ):
+        # return_type="boolean" does not strip, so " true " is not "true": off (the old read stripped nothing either).
+        cfg = TypedConfigFake( every_key=" true " )
+        with patch.object( jp, "ConfigurationManager", return_value=cfg ):
+            self.assertFalse( jp._is_persistence_enabled() )
+
     def test_persistence_enabled_except_defaults_true( self ):
         with patch.object( jp, "ConfigurationManager", side_effect=RuntimeError( "boom" ) ):
             self.assertTrue( jp._is_persistence_enabled() )

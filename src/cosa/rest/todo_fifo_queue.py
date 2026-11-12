@@ -1007,10 +1007,11 @@ class TodoFifoQueue( FifoQueue ):
             - self.config_mgr is a valid ConfigurationManager
 
         Ensures:
-            - Returns True if 'crud for dataframes agents enabled' is 'true'
+            - Returns True if 'crud for dataframes agents enabled' is 'true' in any letter case
+            - Returns False for a value with spaces around it, such as '  True  '
             - Returns True by default (flag missing = enabled)
         """
-        return self.config_mgr.get( "crud for dataframes agents enabled", default="true" ).strip().lower() == "true"
+        return self.config_mgr.get( "crud for dataframes agents enabled", default="true", return_type="boolean" )
 
     # Product name mapping for agentic command disambiguation
     CARD_LABELS = {
