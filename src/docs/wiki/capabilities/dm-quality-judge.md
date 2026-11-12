@@ -3,11 +3,12 @@ capability: dm-quality-judge
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.dm_quality_judge.get_dm_quality_judge@b060034101
-  - cosa.agents.dm_quality_judge.judge.DmQualityJudge@2ac1069f5e
+  - cosa.agents.dm_quality_judge.judge.DmQualityJudge@9d429ce088
   - cosa.agents.dm_quality_judge.judge.combine_overall@fe19fdce27
+  - cosa.agents.dm_quality_judge.judge.grade_body@7bcb142cc4
   - cosa.agents.dm_quality_judge.judge.length_bucket@3bfa371a1e
   - cosa.agents.dm_quality_judge.judge.round_half_up@20a8a00706
-  - cosa.agents.dm_quality_judge.judge_v2.DmQualityJudgeV2@d4e1570e41
+  - cosa.agents.dm_quality_judge.judge_v2.DmQualityJudgeV2@9485f91c87
 ---
 # DM quality judge
 
@@ -16,6 +17,7 @@ The DM quality judge grades a peer-DM body for length, directness and tone, and 
 ## What it does
 - `get_dm_quality_judge` reads `dm quality judge version`. Version 2 builds `DmQualityJudgeV2`. Anything else, or an unreadable config, builds `DmQualityJudge`. Version 2 is imported only when chosen.
 - Both judges expose `judge( body_text )`. It returns a dict with `length`, `directness`, `tone` and `overall`, and never raises.
+- Both `judge` methods call one `grade_body( body_text, qualitative_enabled, word_limit, grade_qualitative )`, which holds the length bucket, the off and too-long cases and the overall grade. Each judge passes its own module's word limit and its own qualitative grader.
 - `length_bucket` puts the word count in one of five bands, weight 2 down to -2. It also returns `overage`, the count divided by the target, to one decimal. The emoji repeats once per fixed word interval.
 - `DmQualityJudge` skips the model when `dm quality qualitative enabled` is false. That is the code default; the shipped INI turns it on. Directness and tone are then withheld, and the overall grade is the length grade.
 - Past the qualitative word ceiling the model is skipped as well, and both dimensions are marked too long.
