@@ -33,7 +33,7 @@ from functools import partial
 from .config import ResearchConfig
 from .cost_tracker import CostTracker, BudgetExceededError
 from .rate_limiter import WebSearchRateLimiter
-from cosa.agents.shared.bounded_cc_client import temperature_to_steer
+from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, temperature_to_steer
 from cosa.agents.shared.sdk_error_result import raise_error_result
 
 # Claude Agent SDK — graceful fallback (mirrors the BFE/TFE/Podcast import guard)
@@ -189,7 +189,7 @@ class APIResponse:
     raw_response   : Any   = None
 
 
-class ResearchAPIClient:
+class ResearchAPIClient( BoundedCCClientBase ):
     """
     In-process bounded-CC research client (Claude Agent SDK / Max-plan OAuth).
 
@@ -204,7 +204,18 @@ class ResearchAPIClient:
 
     No API key is required. `sdk_query` authenticates through the Claude Code
     Max-subscription OAuth session, not a firewalled API key.
+
+    Cost goes to the CostTracker, so the base's cost_estimate stays None. The client keeps its own
+    call_with_json_output, which takes a model and a call type, and its own _call_sdk.
     """
+
+    CONFIG_CLASS        = ResearchConfig
+    COST_ESTIMATE_CLASS = None
+    LABEL               = "ResearchAPIClient"
+    BANNER_NOUN         = "Lead"
+    BANNER_FIELD        = "lead_model"
+    JSON_MODEL_FIELD    = "lead_model"
+    _logger             = logger
 
     def __init__(
         self,
@@ -235,16 +246,8 @@ class ResearchAPIClient:
         Raises:
             ImportError: if claude_agent_sdk is not installed
         """
-        if not SDK_AVAILABLE:
-            raise ImportError(
-                "claude_agent_sdk not installed. "
-                "Install with: pip install claude-agent-sdk"
-            )
-
-        self.config       = config or ResearchConfig()
+        super().__init__( config, debug, verbose, SDK_AVAILABLE )
         self.cost_tracker = cost_tracker
-        self.debug        = debug
-        self.verbose      = verbose
 
         # Rate limiter retained for CLI progress/time-estimate UX (estimate_total_time).
         # NOT in the LLM call path under bounded CC — web search rides CC WebSearch,
@@ -278,9 +281,9 @@ class ResearchAPIClient:
             debug             = debug,
         )
 
-        if self.debug:
-            print( f"[ResearchAPIClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
-            print( f"[ResearchAPIClient] Models: lead={self.config.lead_model}, subagent={self.config.subagent_model}" )
+    def _banner_model_line( self ) -> str:
+        """Name both models for the debug banner: "Models: lead=<lead>, subagent=<subagent>"."""
+        return f"Models: lead={self.config.lead_model}, subagent={self.config.subagent_model}"
 
     async def _rate_limit_notify( self, message: str, priority: str ) -> None:
         """
