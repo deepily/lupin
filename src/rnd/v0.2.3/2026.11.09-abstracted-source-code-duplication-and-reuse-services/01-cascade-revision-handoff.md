@@ -434,3 +434,10 @@ SEARCHED cosa.repo.code_health_settings.data_dir :: rs-6325c24278 :: cosa.rest.r
 
 RULING cosa.repo.code_health_settings.data_dir :: DISTINCT joins fleet_data_root and the code health data subdir key, so every code-health job resolves one folder; symindex.paths.data_dir does the same join for the reuse-review key and raises CandidateError, and the two folders do not move together :: reuse-receipt: a92e08d48a04c6a9 :: search: rs-6325c24278
 REUSE-OUTCOME a92e08d48a04c6a9 :: rs-6325c24278 :: WROTE_NEW joins fleet_data_root and the code health data subdir key, so every code-health job resolves one folder; symindex.paths.data_dir does the same join for the reuse-review key and raises CandidateError, and the two folders do not move together :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s12
+
+SEARCHED lupin_mcp.duplicate_check_status.subdir_of :: rs-02748ecbc3 :: lupin_mcp.duplicate_check_daily.run :: UNRELATED :: runs the daily check
+SEARCHED lupin_mcp.duplicate_check_status.subdir_of :: rs-02748ecbc3 :: lupin_mcp.duplicate_check_daily.main :: UNRELATED :: the daily check's command line
+SEARCHED lupin_mcp.duplicate_check_status.subdir_of :: rs-02748ecbc3 :: lupin_mcp.duplicate_check_daily.announce :: UNRELATED :: announces a run's result
+
+RULING lupin_mcp.duplicate_check_status.subdir_of :: DISTINCT names the code-health folder from the runs folder's own path, so the evidence label needs no ConfigurationManager and follows whatever folder data_dir gave; code_health_settings.data_subdir reads the INI key :: reuse-receipt: b22aa880ab7236eb :: search: rs-02748ecbc3
+REUSE-OUTCOME b22aa880ab7236eb :: rs-02748ecbc3 :: WROTE_NEW names the code-health folder from the runs folder's own path, so the evidence label needs no ConfigurationManager and follows whatever folder data_dir gave; code_health_settings.data_subdir reads the INI key :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s12
