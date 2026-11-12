@@ -43,16 +43,28 @@ Rachel's emit f03bf73f. Unskipped + scheduled on :8000 after a bounce (cache-bus
 
 from __future__ import annotations
 
+import os
+import shutil
+
+import pytest
+
+import cosa.utils.util as cu
+
 from .conftest import BASE_URL
 
 # Real emit format — matches podcast_generator/job.py (unit-verified in
 # test_job.py::test_completion_abstract_emits_play_here_and_listen_links).
 # A REAL, playable podcast the test user can read (/api/io/file gates on auth +
-# path-traversal, NOT ownership — proven empirically by Rio: the test-user token
-# reads this 6.3MB mp3, 200). The player JS-injects <audio> only after a
+# path-traversal, NOT ownership). The player JS-injects <audio> only after a
 # successful auth'd byte-fetch (blob → object URL), so a non-existent path lands
 # in the loud error state and never mounts audio — the file must be real.
-ENC           = "podcasts/ricardo.felipe.ruiz@gmail.com/2026.01.21-172309-quantum-computing-when-reality-gets-wei.mp3"
+# The file is a committed 8 s silent mp3 (8 KB), copied under io/podcasts/ for the module and
+# removed after it. It replaced a 6.3 MB real podcast that existed only on the dev host, so
+# three tests failed on the VM, whose io/podcasts held no such file.
+FIXTURE_MP3  = "/src/tests/e2e_ui/fixtures/podcast-playhere-silence.mp3"
+FIXTURE_DIR  = "podcasts/e2e-fixture@lupin.deepily.ai"
+FIXTURE_NAME = "podcast-playhere-silence.mp3"
+ENC          = f"{FIXTURE_DIR}/{FIXTURE_NAME}"
 PLAY_HERE_URL = f"/app/audio?path={ENC}&embed=1"
 LISTEN_URL    = f"/app/audio?path={ENC}"
 ABSTRACT_MD   = (
@@ -63,6 +75,25 @@ ABSTRACT_MD   = (
     f"[🎧 Listen]({LISTEN_URL}) | "
     f"[⬇️ Download](/api/io/file?path={ENC}&download=true)"
 )
+
+@pytest.fixture( scope="module", autouse=True )
+def silent_podcast_in_io():
+    """
+    Put the committed silent mp3 where /api/io/file serves it, for this module only.
+
+    Requires:
+        - the test server reads io/ from the same tree as cu.get_project_root()
+
+    Ensures:
+        - io/podcasts/e2e-fixture@lupin.deepily.ai/ holds the mp3 while the tests run
+        - the directory is removed afterwards
+    """
+    target_dir = cu.get_project_root() + "/io/" + FIXTURE_DIR
+    os.makedirs( target_dir, exist_ok=True )
+    shutil.copyfile( cu.get_project_root() + FIXTURE_MP3, target_dir + "/" + FIXTURE_NAME )
+    yield
+    shutil.rmtree( target_dir, ignore_errors=True )
+
 
 OVERLAY   = '[data-testid="podcast-overlay"]'
 FRAME     = '[data-testid="podcast-overlay-frame"]'

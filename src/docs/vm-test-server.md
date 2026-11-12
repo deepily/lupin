@@ -45,6 +45,17 @@ A Claude seat is refused a crontab install and Secret Manager writes, so these o
 
 `secrets-check` derives the secret names from the script's own `gcloud secrets` calls. A verb that starts reading a new secret is covered without editing a list. It prints names, never values.
 
+## Known gap: two external repos are not on the VM
+
+`claude-plans` and `skills-distillation` are not mounted on the VM, so four doc-viewer e2e tests fail there. It is an environment gap, not a code defect, and it needs no code change.
+
+| Repo | Why absent | Where `docker-compose.cloud-gpu.yml` says so | Tests that fail on the VM |
+|---|---|---|---|
+| `claude-plans` | "absent from this VM" | lines 203-206 (anchor: `The OTHER eight scopes in the INI`) | `test_doc_viewer_multi_repo`: `test_claude_plans_root_lists_plans`, `test_external_scope_entry_href_carries_scope`; a third test in that file skips |
+| `skills-distillation` | measured absent from `/mnt/lupin-data/google/` over IAP | lines 217-221 (anchor: `skills-distillation is NOT on this VM`) | `test_doc_viewer_scope_discovery`: `test_late_registered_scope_renders`, `test_routes_to_docs_endpoint_not_the_legacy_io_fallback` |
+
+Read the anchor text, not the line numbers. If the anchor matches zero or two places in the compose file, the numbers have moved, so re-find them. The first e2e_b run on the VM after the login-wait fix showed these four reds. Its progress line read `F.Fs...` for the multi-repo file and `F.F.` for the scope-discovery file. Restore the mounts and the compose comment together if either repo is cloned to `/mnt/lupin-data/`.
+
 ## Bring-up order (a person runs these; nothing here starts by itself)
 1. `lupin-vm.sh firewall ensure` (a person runs it; it creates every IAP rule in `src/conf/vm-iap-ports.tsv` that is missing)
 2. `lupin-vm.sh deploy` (the overlay and init SQL must be on the VM checkout)
