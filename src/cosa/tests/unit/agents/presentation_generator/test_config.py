@@ -7,12 +7,34 @@ get_output_path() path builder. ConfigurationManager is mocked; no real INI
 read. get_project_root is patched so no environment dependency.
 """
 
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import cosa.utils.util as cu
 from cosa.agents.presentation_generator import config as config_mod
 from cosa.agents.presentation_generator.config import PresentationConfig
+
+
+EXPECTED_PRESENTATION_KEYS = {
+    "content_model"            : "presentation generator content model",
+    "automated_content_model"  : "presentation generator automated content model",
+    "content_max_turns"        : "presentation generator content max turns",
+    "target_duration_minutes"  : "presentation generator target duration minutes",
+    "slides_per_minute"        : "presentation generator slides per minute",
+    "target_slide_count"       : "presentation generator target slide count",
+    "title_style"              : "presentation generator title style",
+    "max_revisions"            : "presentation generator max revisions",
+    "default_theme"            : "presentation generator default theme",
+    "templates_path"           : "presentation generator templates path",
+    "output_dir_template"      : "presentation generator output dir template",
+    "audience"                 : "presentation generator audience",
+    "veo_model"                : "presentation generator veo model",
+    "pptx_export_enabled"      : "presentation generator pptx export enabled",
+    "review_timeout_seconds"   : "presentation generator review timeout seconds",
+    "max_source_chars"         : "agent source content max chars",
+}
 
 
 class TestDefaults:
@@ -52,12 +74,45 @@ class TestFromConfig:
         assert cfg.title_style             == "topic"
         assert cfg.max_revisions           == 5
         assert cfg.pptx_export_enabled     is False
-        assert "Config: presentation generator" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "[PresentationConfig] title_style = topic (from INI: presentation generator title style)" in out
 
     def test_from_config_falls_back_to_defaults_no_debug( self ):
         cfg = PresentationConfig.from_config( self._mgr( {} ), debug=False )
         assert cfg.content_model           == "claude-opus-4-6"
         assert cfg.target_duration_minutes == 15
+
+    def test_every_mapped_key_reaches_its_own_field( self ):
+        keys   = config_mod.PRESENTATION_INI_KEYS
+        values = { ini_key : f"v{i}" for i, ini_key in enumerate( keys.values() ) }
+        kwargs = config_mod.load_kwargs_from_ini( PresentationConfig, self._mgr( values ), keys )
+        assert len( keys ) == 16
+        assert kwargs == { field : values[ ini_key ] for field, ini_key in keys.items() }
+
+    def test_max_source_chars_reads_the_shared_unprefixed_key( self ):
+        cfg = PresentationConfig.from_config( self._mgr( { "agent source content max chars": 123 } ) )
+        assert cfg.max_source_chars == 123
+
+    def test_slide_count_is_int_when_set_and_none_when_blank_or_absent( self ):
+        key = "presentation generator target slide count"
+        assert PresentationConfig.from_config( self._mgr( { key: "12" } ) ).target_slide_count == 12
+        assert PresentationConfig.from_config( self._mgr( { key: "" } ) ).target_slide_count is None
+        assert PresentationConfig.from_config( self._mgr( {} ) ).target_slide_count is None
+
+    def test_every_default_matches_the_dataclass_default( self ):
+        cfg = PresentationConfig.from_config( self._mgr( {} ) )
+        assert cfg == PresentationConfig()
+
+    def test_each_field_is_read_with_the_type_of_its_annotation( self ):
+        types = {}
+        mgr   = MagicMock()
+        mgr.get.side_effect = lambda key, default=None, return_type="str": types.setdefault( key, return_type ) and default
+        PresentationConfig.from_config( mgr )
+        assert types[ "presentation generator pptx export enabled" ]   == "boolean"
+        assert types[ "presentation generator slides per minute" ]     == "float"
+        assert types[ "presentation generator content max turns" ]     == "int"
+        assert types[ "agent source content max chars" ]               == "int"
+        assert types[ "presentation generator target slide count" ]    == "string"
 
 
 class TestGetOutputPath:
@@ -101,3 +156,13 @@ class TestGetOutputPath:
 
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )
+
+
+def test_presentation_keys_are_the_literal_strings():
+    assert config_mod.PRESENTATION_INI_KEYS == EXPECTED_PRESENTATION_KEYS
+
+
+def test_presentation_keys_exist_in_the_real_ini():
+    ini_text = open( cu.get_project_root() + "/src/conf/lupin-app.ini" ).read()
+    for ini_key in EXPECTED_PRESENTATION_KEYS.values():
+        assert re.search( r"^" + re.escape( ini_key ) + r"\s*=", ini_text, re.M ), ini_key

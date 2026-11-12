@@ -16,6 +16,7 @@ from typing import Literal, Optional, List
 # ONE label map that cannot drift (row 81040071). Consumers keep importing it as
 # `from cosa.agents.podcast_generator.config import LANGUAGE_NAMES`.
 from cosa.agents.language_names import LANGUAGE_NAMES
+from cosa.agents.shared.config_loader import load_kwargs_from_ini
 
 
 @dataclass
@@ -263,6 +264,42 @@ def read_owner_email( config_mgr ) -> str:
     return config_mgr.get( OWNER_EMAIL_KEY, default="", silent=True ).strip()
 
 
+# Field name -> INI key for the scalar fields. max_source_chars reads the shared base key (not
+# podcast-prefixed), the identical key the presentation config reads.
+PODCAST_INI_KEYS = {
+    "script_model"                   : "podcast script model",
+    "target_duration_minutes"        : "podcast target duration minutes",
+    "min_exchanges"                  : "podcast min exchanges",
+    "min_spanish_stopword_ratio"     : "podcast translation min spanish stopword ratio",
+    "max_exchanges"                  : "podcast max exchanges",
+    "script_max_turns"               : "podcast script max turns",
+    "include_intro"                  : "podcast include intro",
+    "include_outro"                  : "podcast include outro",
+    "prosody_annotation_level"       : "podcast prosody annotation level",
+    "max_research_doc_tokens"        : "podcast max research doc tokens",
+    "max_source_chars"               : "agent source content max chars",
+    "key_topics_to_extract"          : "podcast key topics to extract",
+    "examples_per_topic"             : "podcast examples per topic",
+    "max_script_revisions"           : "podcast max script revisions",
+    "feedback_timeout_seconds"       : "podcast feedback timeout seconds",
+    "script_review_timeout_seconds"  : "podcast script review timeout seconds",
+    "output_dir_template"            : "podcast output dir template",
+    "script_filename_template"       : "podcast script filename template",
+    "audio_filename_template"        : "podcast audio filename template",
+    "audio_format"                   : "podcast audio format",
+    "audio_bitrate"                  : "podcast audio bitrate",
+    "silence_between_speakers_ms"    : "podcast silence between speakers ms",
+    "audience"                       : "podcast generator audience",
+    "stream_thoughts_to_voice"       : "podcast stream thoughts to voice",
+    "narrate_progress"               : "podcast narrate progress",
+    "publish_to_google_drive"        : "podcast publish to google drive",
+    "drive_folder_name"              : "podcast drive folder name",
+    "drive_upload_script"            : "podcast drive upload script",
+    "drive_upload_source_document"   : "podcast drive upload source document",
+    "drive_token_path"               : "podcast drive token path",
+    "drive_upload_users"             : "podcast drive upload users",
+}
+
 @dataclass
 class PodcastConfig:
     """
@@ -461,55 +498,20 @@ class PodcastConfig:
         voice_a = VoiceProfile.from_config( config_mgr, prefix="podcast voice female", debug=debug )
         voice_b = VoiceProfile.from_config( config_mgr, prefix="podcast voice male", debug=debug )
 
-        # Helper for typed reads with defaults
-        def _get( key, default, rtype="string" ):
-            return config_mgr.get( key, default=str( default ), silent=True, return_type=rtype )
-
         # Parse target_languages from comma-separated INI value
         langs_raw = config_mgr.get( "podcast target languages", default="en", silent=True )
         target_languages = [ lang.strip() for lang in langs_raw.split( "," ) if lang.strip() ]
 
-        # Build kwargs
+        kwargs = load_kwargs_from_ini( cls, config_mgr, PODCAST_INI_KEYS, silent=True )
+
         config = cls(
-            script_model              = _get( "podcast script model",              "claude-opus-4-6" ),
-            host_a_personality        = host_a,
-            host_b_personality        = host_b,
-            host_a_voice              = voice_a,
-            host_b_voice              = voice_b,
-            target_duration_minutes   = _get( "podcast target duration minutes",   "10",   "int" ),
-            min_exchanges             = _get( "podcast min exchanges",             "8",    "int" ),
-            min_spanish_stopword_ratio = _get( "podcast translation min spanish stopword ratio", "0.20", "float" ),
-            max_exchanges             = _get( "podcast max exchanges",             "20",   "int" ),
-            script_max_turns          = _get( "podcast script max turns",          "5",    "int" ),
-            include_intro             = _get( "podcast include intro",             "True", "boolean" ),
-            include_outro             = _get( "podcast include outro",             "True", "boolean" ),
-            prosody_annotation_level  = _get( "podcast prosody annotation level",  "moderate" ),
-            max_research_doc_tokens   = _get( "podcast max research doc tokens",   "100000", "int" ),
-            # SHARED base key (NOT podcast-prefixed) — identical key read by the
-            # presentation generator. Single source of truth for the char ceiling.
-            max_source_chars          = _get( "agent source content max chars",   "200000", "int" ),
-            key_topics_to_extract     = _get( "podcast key topics to extract",     "5",    "int" ),
-            examples_per_topic        = _get( "podcast examples per topic",        "2",    "int" ),
-            max_script_revisions      = _get( "podcast max script revisions",      "3",    "int" ),
-            feedback_timeout_seconds  = _get( "podcast feedback timeout seconds",  "300",  "int" ),
-            script_review_timeout_seconds = _get( "podcast script review timeout seconds", "600", "int" ),
-            output_dir_template       = _get( "podcast output dir template",       "io/podcasts/{user}" ),
-            script_filename_template  = _get( "podcast script filename template",  "{timestamp}-{topic}-script.md" ),
-            audio_filename_template   = _get( "podcast audio filename template",   "{timestamp}-{topic}.mp3" ),
-            audio_format              = _get( "podcast audio format",              "mp3" ),
-            audio_bitrate             = _get( "podcast audio bitrate",             "192k" ),
-            silence_between_speakers_ms = _get( "podcast silence between speakers ms", "300", "int" ),
-            audience                  = _get( "podcast generator audience",        "academic" ),
-            stream_thoughts_to_voice  = _get( "podcast stream thoughts to voice",  "True", "boolean" ),
-            narrate_progress          = _get( "podcast narrate progress",           "True", "boolean" ),
-            target_languages          = target_languages,
-            publish_to_google_drive      = _get( "podcast publish to google drive",           "False", "boolean" ),
-            drive_folder_name            = _get( "podcast drive folder name",                 "Lupin Podcasts" ),
-            drive_upload_script          = _get( "podcast drive upload script",               "False", "boolean" ),
-            drive_upload_source_document = _get( "podcast drive upload source document",      "True",  "boolean" ),
-            drive_token_path             = _get( "podcast drive token path",                  "/src/conf/keys/google-drive-oauth-token.json" ),
-            drive_upload_users           = _get( "podcast drive upload users",                "owner" ),
-            drive_owner_email            = read_owner_email( config_mgr ),
+            host_a_personality = host_a,
+            host_b_personality = host_b,
+            host_a_voice       = voice_a,
+            host_b_voice       = voice_b,
+            target_languages   = target_languages,
+            drive_owner_email  = read_owner_email( config_mgr ),
+            **kwargs
         )
 
         # Handle audience_context

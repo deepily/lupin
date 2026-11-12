@@ -11,7 +11,7 @@ pins:
   - cosa.agents.presentation_generator.orchestrator.VoiceGateNotAnsweredError@610a429f17
   - cosa.agents.presentation_generator.state.OrchestratorState@73d194de81
   - cosa.agents.presentation_generator.state.PresentationModel@97c44dc98c
-  - cosa.agents.presentation_generator.config.PresentationConfig@454dda8807
+  - cosa.agents.presentation_generator.config.PresentationConfig@509ac0b930
   - cosa.agents.presentation_generator.config.apply_job_overrides@88af849b33
   - cosa.agents.presentation_generator.deck_verdict.verify_presentation_deck@184b66fe08
 ---

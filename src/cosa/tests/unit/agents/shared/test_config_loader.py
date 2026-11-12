@@ -116,3 +116,11 @@ def test_load_dataclass_passes_silent_through():
     mgr = _SilentMgr()
     load_dataclass_from_ini( _Cfg, mgr, KEY_MAP, silent=True )
     assert mgr.extra == [ { "silent": True } ] * 4
+
+
+def test_load_dataclass_passes_debug_and_label_through( capsys ):
+    load_dataclass_from_ini( _Cfg, _Mgr( {} ), KEY_MAP, debug=True, label="Lbl" )
+    lines = [ l for l in capsys.readouterr().out.splitlines() if l.startswith( "  [Lbl] " ) ]
+    assert len( lines ) == 4
+    load_dataclass_from_ini( _Cfg, _Mgr( {} ), KEY_MAP )
+    assert capsys.readouterr().out == ""

@@ -11,16 +11,57 @@ return_type coercion (int/float/boolean/string) so NO real config file is read.
 quick_smoke_test() and __main__ are coverage-excluded.
 """
 
+import re
+
 import pytest
 
+import cosa.utils.util as cu
+
+from cosa.agents.shared.config_loader import load_kwargs_from_ini
 from cosa.agents.podcast_generator.config import (
     HostPersonality,
     VoiceProfile,
     PodcastConfig,
+    PODCAST_INI_KEYS,
     LANGUAGE_NAMES,
     DEFAULT_CURIOUS_HOST,
     DEFAULT_EXPERT_HOST,
 )
+
+
+EXPECTED_PODCAST_KEYS = {
+    "script_model"                   : "podcast script model",
+    "target_duration_minutes"        : "podcast target duration minutes",
+    "min_exchanges"                  : "podcast min exchanges",
+    "min_spanish_stopword_ratio"     : "podcast translation min spanish stopword ratio",
+    "max_exchanges"                  : "podcast max exchanges",
+    "script_max_turns"               : "podcast script max turns",
+    "include_intro"                  : "podcast include intro",
+    "include_outro"                  : "podcast include outro",
+    "prosody_annotation_level"       : "podcast prosody annotation level",
+    "max_research_doc_tokens"        : "podcast max research doc tokens",
+    "max_source_chars"               : "agent source content max chars",
+    "key_topics_to_extract"          : "podcast key topics to extract",
+    "examples_per_topic"             : "podcast examples per topic",
+    "max_script_revisions"           : "podcast max script revisions",
+    "feedback_timeout_seconds"       : "podcast feedback timeout seconds",
+    "script_review_timeout_seconds"  : "podcast script review timeout seconds",
+    "output_dir_template"            : "podcast output dir template",
+    "script_filename_template"       : "podcast script filename template",
+    "audio_filename_template"        : "podcast audio filename template",
+    "audio_format"                   : "podcast audio format",
+    "audio_bitrate"                  : "podcast audio bitrate",
+    "silence_between_speakers_ms"    : "podcast silence between speakers ms",
+    "audience"                       : "podcast generator audience",
+    "stream_thoughts_to_voice"       : "podcast stream thoughts to voice",
+    "narrate_progress"               : "podcast narrate progress",
+    "publish_to_google_drive"        : "podcast publish to google drive",
+    "drive_folder_name"              : "podcast drive folder name",
+    "drive_upload_script"            : "podcast drive upload script",
+    "drive_upload_source_document"   : "podcast drive upload source document",
+    "drive_token_path"               : "podcast drive token path",
+    "drive_upload_users"             : "podcast drive upload users",
+}
 
 
 class FakeCfg:
@@ -240,6 +281,44 @@ class TestPodcastConfigFromConfig:
         assert config.audience_context        == "ML architects"
         assert config.target_duration_minutes == 25
 
+    def test_every_default_matches_the_dataclass_default( self ):
+        config   = PodcastConfig.from_config( FakeCfg() )
+        expected = PodcastConfig()
+        for field_name in PODCAST_INI_KEYS:
+            assert getattr( config, field_name ) == getattr( expected, field_name ), field_name
+
+    def test_every_mapped_key_reaches_its_own_field( self ):
+        assert len( PODCAST_INI_KEYS ) == 31
+        values = {}
+        for i, ( field_name, ini_key ) in enumerate( PODCAST_INI_KEYS.items() ):
+            values[ ini_key ] = f"v{i}"
+        raw = load_kwargs_from_ini( PodcastConfig, RawCfg( values ), PODCAST_INI_KEYS, silent=True )
+        assert raw == { field_name : values[ ini_key ] for field_name, ini_key in PODCAST_INI_KEYS.items() }
+
+    def test_max_source_chars_reads_the_shared_unprefixed_key( self ):
+        config = PodcastConfig.from_config( FakeCfg( values={ "agent source content max chars": "123" } ) )
+        assert config.max_source_chars == 123
+
+    def test_every_read_is_silent( self ):
+        seen = []
+        class SilentSpy( FakeCfg ):
+            def get( self, key, default=None, silent=False, return_type="string" ):
+                if key in PODCAST_INI_KEYS.values(): seen.append( silent )
+                return super().get( key, default=default, silent=silent, return_type=return_type )
+        PodcastConfig.from_config( SilentSpy() )
+        assert len( seen ) == 31
+        assert all( seen )
+
+
+class RawCfg:
+    """Returns each key's value as stored, ignoring the requested type."""
+
+    def __init__( self, values ):
+        self.values = values
+
+    def get( self, key, default=None, silent=False, return_type="string" ):
+        return self.values[ key ]
+
 
 # ----------------------------------------------------------------------------
 # get_project_root patch helper
@@ -252,3 +331,13 @@ from unittest.mock import patch
 def _patch_root( root ):
     with patch( "cosa.utils.util.get_project_root", return_value=root ):
         yield
+
+
+def test_podcast_keys_are_the_literal_strings():
+    assert PODCAST_INI_KEYS == EXPECTED_PODCAST_KEYS
+
+
+def test_podcast_keys_exist_in_the_real_ini():
+    ini_text = open( cu.get_project_root() + "/src/conf/lupin-app.ini" ).read()
+    for ini_key in EXPECTED_PODCAST_KEYS.values():
+        assert re.search( r"^" + re.escape( ini_key ) + r"\s*=", ini_text, re.M ), ini_key
