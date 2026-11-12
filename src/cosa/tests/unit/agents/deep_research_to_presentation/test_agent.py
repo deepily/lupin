@@ -22,6 +22,12 @@ from cosa.agents.deep_research_to_presentation.agent import DeepResearchToPresen
 from cosa.agents.deep_research_to_presentation.state import PipelineState, ChainedResult
 from cosa.agents.presentation_generator.config import apply_job_overrides
 
+# The fake graphs below replace `cosa.agents.deep_research` (and the generator package) with a plain
+# module that has no __path__. Python can then import only submodules that are already in sys.modules,
+# so the ones the shared chain frame imports and the graph does not fake are loaded here, once, in every
+# order. Without these lines these files passed only when an earlier test on the worker had loaded them.
+import cosa.agents.deep_research.job  # noqa: F401
+
 
 def _make_module( name, **attrs ):
     mod = types.ModuleType( name )
