@@ -713,6 +713,20 @@ def test_assemble_joins_everything_and_the_set_loads_through_the_loader( written
     assert sum( v for k, v in info[ "counts" ][ "bands" ].items() ) == SMALL[ "delete" ] + SMALL[ "weaken" ]
 
 
+def test_assemble_records_the_sha256_of_the_pairs_and_keys_files_it_wrote( written ):
+    import hashlib
+    base = written / "out"
+    _, rows = verification_rows( base )
+    s.write_jsonl( str( written / "ver.jsonl" ), rows )
+    assert assemble( base, written / "ver.jsonl", written / "final" ) == 0
+    info  = json.loads( ( written / "final" / "dev-info.json" ).read_text() )
+    pairs = ( written / "final" / "dev" / "pairs.jsonl" ).read_bytes()
+    keys  = ( written / "final" / "keys" / "dev-keys.jsonl" ).read_bytes()
+    assert info[ "pairs_sha256" ] == hashlib.sha256( pairs ).hexdigest()
+    assert info[ "keys_sha256" ] == hashlib.sha256( keys ).hexdigest()
+    assert info[ "pairs_sha256" ] != info[ "keys_sha256" ]
+
+
 def test_assemble_refuses_on_a_missing_or_false_verification_row( written, capsys ):
     base = written / "out"
     plan, rows = verification_rows( base )

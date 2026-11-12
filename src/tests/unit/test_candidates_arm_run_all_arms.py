@@ -126,6 +126,14 @@ class TestRunAllArms:
         assert out[ "reference" ] == { "needs": 1, "items": 1, "per_need": { "n1": 1 } }       # n1 has one high answer, n2 has none
         for arm in arms.ARMS: assert set( out[ "reference" ][ "per_need" ] ) == set( out[ "measured" ][ arm ][ "t1_first" ][ 128 ][ "per_need" ] )
 
+    def test_the_run_records_the_sha256_of_the_needs_and_the_twin_manifest( self, tmp_path ):
+        import hashlib
+        w   = world( tmp_path )
+        out = self.run( tmp_path )
+        assert out[ "meta" ][ "needs_sha" ] == hashlib.sha256( open( w[ "needs" ], "rb" ).read() ).hexdigest()
+        assert out[ "twin_manifest_sha" ] == hashlib.sha256( open( w[ "manifest" ], "rb" ).read() ).hexdigest()
+        assert out[ "meta" ][ "needs_sha" ] != out[ "twin_manifest_sha" ]
+
     def test_the_vector_count_is_what_the_set_holds_of_the_snapshot( self, tmp_path ):
         out = self.run( tmp_path, vset=vset( IDS[ :4 ] + [ "not-in-the-index" ] ) )
         assert out[ "vector_entries" ] == 4
