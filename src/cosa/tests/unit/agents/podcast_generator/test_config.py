@@ -11,7 +11,11 @@ return_type coercion (int/float/boolean/string) so NO real config file is read.
 quick_smoke_test() and __main__ are coverage-excluded.
 """
 
+import re
+
 import pytest
+
+import cosa.utils.util as cu
 
 from cosa.agents.shared.config_loader import load_kwargs_from_ini
 from cosa.agents.podcast_generator.config import (
@@ -23,6 +27,41 @@ from cosa.agents.podcast_generator.config import (
     DEFAULT_CURIOUS_HOST,
     DEFAULT_EXPERT_HOST,
 )
+
+
+EXPECTED_PODCAST_KEYS = {
+    "script_model"                   : "podcast script model",
+    "target_duration_minutes"        : "podcast target duration minutes",
+    "min_exchanges"                  : "podcast min exchanges",
+    "min_spanish_stopword_ratio"     : "podcast translation min spanish stopword ratio",
+    "max_exchanges"                  : "podcast max exchanges",
+    "script_max_turns"               : "podcast script max turns",
+    "include_intro"                  : "podcast include intro",
+    "include_outro"                  : "podcast include outro",
+    "prosody_annotation_level"       : "podcast prosody annotation level",
+    "max_research_doc_tokens"        : "podcast max research doc tokens",
+    "max_source_chars"               : "agent source content max chars",
+    "key_topics_to_extract"          : "podcast key topics to extract",
+    "examples_per_topic"             : "podcast examples per topic",
+    "max_script_revisions"           : "podcast max script revisions",
+    "feedback_timeout_seconds"       : "podcast feedback timeout seconds",
+    "script_review_timeout_seconds"  : "podcast script review timeout seconds",
+    "output_dir_template"            : "podcast output dir template",
+    "script_filename_template"       : "podcast script filename template",
+    "audio_filename_template"        : "podcast audio filename template",
+    "audio_format"                   : "podcast audio format",
+    "audio_bitrate"                  : "podcast audio bitrate",
+    "silence_between_speakers_ms"    : "podcast silence between speakers ms",
+    "audience"                       : "podcast generator audience",
+    "stream_thoughts_to_voice"       : "podcast stream thoughts to voice",
+    "narrate_progress"               : "podcast narrate progress",
+    "publish_to_google_drive"        : "podcast publish to google drive",
+    "drive_folder_name"              : "podcast drive folder name",
+    "drive_upload_script"            : "podcast drive upload script",
+    "drive_upload_source_document"   : "podcast drive upload source document",
+    "drive_token_path"               : "podcast drive token path",
+    "drive_upload_users"             : "podcast drive upload users",
+}
 
 
 class FakeCfg:
@@ -292,3 +331,13 @@ from unittest.mock import patch
 def _patch_root( root ):
     with patch( "cosa.utils.util.get_project_root", return_value=root ):
         yield
+
+
+def test_podcast_keys_are_the_literal_strings():
+    assert PODCAST_INI_KEYS == EXPECTED_PODCAST_KEYS
+
+
+def test_podcast_keys_exist_in_the_real_ini():
+    ini_text = open( cu.get_project_root() + "/src/conf/lupin-app.ini" ).read()
+    for ini_key in EXPECTED_PODCAST_KEYS.values():
+        assert re.search( r"^" + re.escape( ini_key ) + r"\s*=", ini_text, re.M ), ini_key
