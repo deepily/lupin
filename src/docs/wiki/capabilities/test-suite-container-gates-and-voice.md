@@ -2,7 +2,8 @@
 capability: test-suite-container-gates-and-voice
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.test_suite.job.running_in_container@2ce99374e9
+  - cosa.utils.container_env.running_in_container@4bcf121a8d
+  - cosa.utils.container_env.container_sentinel_set@9cf20ea830
   - cosa.agents.test_suite.job.container_refusal@4b1bef40d6
   - cosa.agents.test_suite.job.suites_left_out@6bfe8203e6
   - cosa.agents.test_suite.job.tables_with_fk_into@6f46db0008
@@ -15,7 +16,8 @@ pins:
 Rules about which suites a containerized server offers, a check on the database reset list, and the voice functions of the test suite agent. Scheduling is in [[scheduled-test-suite]].
 
 ## What it does
-- `running_in_container` is true when `LUPIN_IN_CONTAINER` is `1`, `true` or `yes`, or when `/.dockerenv` exists.
+- `running_in_container` lives in `cosa.utils.container_env` and the job module imports it. It is true when `container_sentinel_set` is true, or when `/.dockerenv` exists.
+- `container_sentinel_set` is true when `LUPIN_IN_CONTAINER` is `1`, `true` or `yes`, in any case. The worktree reaper asks only this one.
 - `container_refusal` returns a message when a request names `unit` or `docker_smoke` and the process runs in a container. Otherwise it returns `None`.
 - The refusal names the host command that runs the suite and the suites offered here.
 - `suites_left_out` returns each host-only suite with the text `not run here, host tier`. It does so only for a container request that names `all`.

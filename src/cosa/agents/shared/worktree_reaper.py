@@ -46,6 +46,7 @@ from typing import Callable, Optional
 
 import cosa.utils.util as cu
 from cosa.utils.utc_stamp import utc_compact_stamp
+from cosa.utils.container_env import container_sentinel_set
 
 
 WIP_COMMIT_PREFIX = "WIP: auto-saved at reap"
@@ -74,9 +75,7 @@ def _is_in_container( project_root: str ) -> bool:
           insensitive) or project_root == CONTAINER_PROJECT_ROOT
         - never raises
     """
-    if os.environ.get( "LUPIN_IN_CONTAINER", "" ).strip().lower() in ( "1", "true", "yes" ):
-        return True
-    return project_root == CONTAINER_PROJECT_ROOT
+    return container_sentinel_set() or project_root == CONTAINER_PROJECT_ROOT
 
 
 def _default_run( argv, cwd=None, timeout=60 ):
