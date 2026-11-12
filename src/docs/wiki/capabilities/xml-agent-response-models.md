@@ -2,12 +2,12 @@
 capability: xml-agent-response-models
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.io_models.xml_models.ReceptionistResponse@dec4fce75e
-  - cosa.agents.io_models.xml_models.CalendarResponse@8943198010
-  - cosa.agents.io_models.xml_models.BrainstormIdeas@82a38763f8
-  - cosa.agents.io_models.xml_models.CodeBrainstormResponse@e1f829911b
-  - cosa.agents.io_models.xml_models.WeatherResponse@51e7acac7f
-  - cosa.agents.io_models.xml_models.FormatterResponse@7f46e81cbd
+  - cosa.agents.io_models.xml_models.ReceptionistResponse@0986fecdc1
+  - cosa.agents.io_models.xml_models.CalendarResponse@aa22e861e7
+  - cosa.agents.io_models.xml_models.BrainstormIdeas@41ccc18870
+  - cosa.agents.io_models.xml_models.CodeBrainstormResponse@db9264a1e7
+  - cosa.agents.io_models.xml_models.WeatherResponse@ce5993cd57
+  - cosa.agents.io_models.xml_models.FormatterResponse@c25be09ef6
   - cosa.agents.io_models.utils.util_xml_pydantic.XMLUtilities@a7e3a8d119
   - cosa.agents.io_models.utils.util_xml_pydantic.remove_xml_escapes@b037863946
   - cosa.agents.io_models.utils.xml_parser_factory.PydanticXmlParser@37fe447a10

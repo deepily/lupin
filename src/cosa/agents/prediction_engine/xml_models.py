@@ -9,6 +9,7 @@ Pattern follows CalcIntent in cosa.agents.calculator.xml_models.
 """
 
 from pydantic import Field, field_validator
+from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
@@ -46,9 +47,7 @@ class OpenEndedSynthesisResponse( BaseXMLModel ):
         xmltodict returns None for empty XML tags like <reasoning></reasoning>.
         Pydantic str fields reject None, so we convert at the boundary.
         """
-        if v is None and info.field_name != "predicted_answer":
-            return ""
-        return v
+        return none_to_empty( v, info.field_name, keep_none=( "predicted_answer", ) )
 
     def get_confidence_float( self ):
         """

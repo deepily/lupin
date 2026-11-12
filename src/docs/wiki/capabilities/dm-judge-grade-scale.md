@@ -2,7 +2,7 @@
 capability: dm-judge-grade-scale
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.dm_quality_judge.xml_models.DmQualityJudgeResponse@7375e03b7e
+  - cosa.agents.dm_quality_judge.xml_models.DmQualityJudgeResponse@d2d62b8ba5
   - cosa.agents.dm_quality_judge.xml_models.grade_emoji@535b726881
   - cosa.agents.dm_quality_judge.xml_models.grade_weight@66c2b1a0c1
   - cosa.agents.dm_quality_judge.xml_models.normalize_grade_label@17fb453f17

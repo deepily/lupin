@@ -45,6 +45,7 @@ is ever reached. This model always uses `<response>`, and the base class is left
 from typing import ClassVar
 
 from pydantic import Field, field_validator
+from cosa.agents.io_models.field_validators import none_to_empty, require_nonempty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import (
     BaseXMLModel, CdataSafeXMLMixin, CDATA_OPEN, CDATA_CLOSE, BARE_AMPERSAND
@@ -115,7 +116,7 @@ class DmTutorResponse( CdataSafeXMLMixin, BaseXMLModel ):
         Ensures:
             - returns "" for None; passes other values through unchanged
         """
-        return "" if v is None else v
+        return none_to_empty( v )
 
     @field_validator( "declaration_or_question", "supporting_1st", "supporting_2nd" )
     @classmethod
@@ -136,9 +137,7 @@ class DmTutorResponse( CdataSafeXMLMixin, BaseXMLModel ):
         Raises:
             - ValueError when v is empty or whitespace only
         """
-        if v is None or not v.strip():
-            raise ValueError( "a required slot came back empty — a dropped slot is not a rewrite" )
-        return v
+        return require_nonempty( v, "a required slot came back empty — a dropped slot is not a rewrite", strip=False )
 
     # ──────────────────────────────────────────────────────────────────────────
     # Delivery
