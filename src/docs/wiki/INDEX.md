@@ -611,6 +611,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[repo-tools-git-loc-delta-outputs]] — the daily LoC delta's console, JSON and CSV output, sidecar file and plot. `cosa.repo.git_loc_delta` (report_formatter, csv_writer, plotter)
 - [[repo-tools-coupling-census]] — the dated census of Lupin-specific assumptions: fixed-string needles over tracked files, a positive control and a stamped markdown table. `cosa.repo` (coupling_census)
 - [[repo-tools-code-health-settings]] — the per-repo code-health keys in the INI and their readers: detection on blank, refusals that name the key. `cosa.repo` (code_health_settings)
+- [[reuse-ledger-sync-and-drift-check]] — writes a repo's Jev ledger limit row from its INI key and fails loud on any drift. A drifted key refuses a live Jev run. `lupin_mcp` (reuse_ledger_sync)
 - [[repo-tools-loc-cli-entrypoints]] — the four line-count command lines, their flags, default output paths and exit codes. `cosa.repo` (run_branch_analyzer, run_directory_analyzer, run_git_loc_delta, run_git_loc_delta_global)
 - [[repo-tools-docker-smoke-report]] — reading the docker smoke junit report so that a skip counts as a failure. `cosa.repo.docker_smoke_report`
 - [[repo-tools-symindex-core-build]] — the lower layer of the symbol index build and the readers of a published generation. `cosa.repo.symindex` (build)
