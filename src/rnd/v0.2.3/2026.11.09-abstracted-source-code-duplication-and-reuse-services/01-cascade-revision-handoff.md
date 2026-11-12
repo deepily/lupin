@@ -463,3 +463,19 @@ REUSE-OUTCOME 6319a50c42c99851 :: rs-1eadc743e4 :: WROTE_NEW reads a JSON list o
 
 RULING cosa.agents.shared.diagnosis_json.fallback_diagnosis_fields :: DISTINCT the one copy of the fields both expediters gave their low-confidence fallback, moved out of BFEOrchestrator._fallback_diagnosis and TFEOrchestrator._fallback_diagnosis, which now call it; nothing else builds these fields :: reuse-receipt: fad83144188fd605 :: search: rs-3fd1cdee95
 REUSE-OUTCOME fad83144188fd605 :: rs-3fd1cdee95 :: WROTE_NEW the one copy of the fields both expediters gave their low-confidence fallback, moved out of BFEOrchestrator._fallback_diagnosis and TFEOrchestrator._fallback_diagnosis, which now call it; nothing else builds these fields :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-fallbackfields
+
+### Reuse review: the dated-slug path of the four writers (row 2448ae19, follow-up adf50584)
+
+Measured 2026-11-11 at 1fa51d68f, by calling each writer's own slug code on the same nine inputs. The plan, report, presentation and podcast writers disagree on five of them. Folding them into one helper would rename files.
+
+| Input | Plan (5 words) | Report (6 words) | Presentation (5 words) | Podcast (50 characters) |
+|---|---|---|---|---|
+| `state-of-the-art plan` | `stateoftheart-plan` | `state-of-the-art-plan` | `state-of-the-art-plan` | `state-of-the-art-plan` |
+| `a_b c` | `ab-c` | `a-b-c` | `ab-c` | `ab-c` |
+| a tab or newline inside | words split | words split | words glued | the tab stays in the name |
+| `--x--` | `x` | `x` | `--x--` | `x` |
+| empty or `!!!` | `unknown-fix` | `unknown` | `untitled` | empty slug |
+
+Each writer also dates its file differently: the plan uses the day, the report and presentation use `YYYY.MM.DD-at-HH:MM-zone`, and the podcast uses `YYYY.MM.DD-HHMMSS`. The one real finding is that the podcast slug keeps a tab or newline in the file name, because its filter keeps whitespace and replaces only spaces.
+
+RULING cosa.agents.shared.report_writer.ReportWriter._sanitize_slug :: DISTINCT the plan, report, presentation and podcast slugs differ on hyphens, underscores, whitespace, word count and fallback, so one helper would rename files; the dated prefixes also differ :: reuse-receipt: ee74000c2fcea0a3 :: search: rs-384945a220
