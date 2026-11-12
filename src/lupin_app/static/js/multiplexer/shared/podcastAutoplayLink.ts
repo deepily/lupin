@@ -5,8 +5,9 @@
 // podcast_generator's play_links.py writes `[▶️ Play Here](/app/audio?path=…&embed=1)` once per language.
 // The first one is the first language the job produced, and it is the one that starts by itself.
 
+import { isEmbeddedAudioHref, podcastUrlTitle } from "../render/podcastLinks";
+
 const AUDIO_LINK_RE = /\]\((\/app\/audio\?[^)\s]*)\)/g;
-const EMBED_FLAG_RE     = /[?&]embed=1(?:&|$)/;
 
 /**
  * The first Play Here URL in a markdown abstract.
@@ -17,7 +18,7 @@ const EMBED_FLAG_RE     = /[?&]embed=1(?:&|$)/;
 export function firstPlayHereLink( abstract: string | null | undefined ): string | null {
   if ( typeof abstract !== "string" ) return null;
   for ( const match of abstract.matchAll( AUDIO_LINK_RE ) ) {
-    if ( EMBED_FLAG_RE.test( match[ 1 ] as string ) ) return match[ 1 ] as string;
+    if ( isEmbeddedAudioHref( match[ 1 ] as string ) ) return match[ 1 ] as string;
   }
   return null;
 }
@@ -29,6 +30,5 @@ export function firstPlayHereLink( abstract: string | null | undefined ): string
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line (same as TtsQueueStore.ts:221).
 export function playHereTitle( url: string ): string {
-  const title = new URLSearchParams( url.split( "?" )[ 1 ] ?? "" ).get( "title" );
-  return title !== null && title.trim() !== "" ? title.trim() : "Podcast";
+  return podcastUrlTitle( url ) ?? "Podcast";
 }
