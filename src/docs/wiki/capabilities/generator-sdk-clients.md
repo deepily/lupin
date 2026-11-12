@@ -7,7 +7,7 @@ pins:
   - cosa.agents.podcast_generator.api_client.CostEstimate@5e964af54a
   - cosa.agents.presentation_generator.api_client.PresentationAPIClient@82a308bbe1
   - cosa.agents.presentation_generator.api_client.CostEstimate@c2641c0514
-  - cosa.agents.deep_research.api_client.ResearchAPIClient@46fa8d5e14
+  - cosa.agents.deep_research.api_client.ResearchAPIClient@c940c82ba5
   - cosa.agents.deep_research.api_client.ResearchAPIClient.call_subagent@0ae9dd8678
   - cosa.agents.deep_research.api_client.ResearchAPIClient.call_with_json_output@dc6725397a
   - cosa.agents.deep_research.api_client.extract_json_object@5ff3564b7e
@@ -19,7 +19,7 @@ The podcast, presentation and deep-research agents each have one client class th
 ## What it does
 - `PodcastAPIClient`: `call_for_analysis`, `call_for_script`, `call_for_revision`, `call_with_json_output`; model `PodcastConfig.script_model`.
 - `PresentationAPIClient`: `call_for_analysis`, `call_for_outline`, `call_for_elaboration`, `call_for_mermaid`, `call_for_matplotlib`, `call_for_d2`, `call_with_json_output`; model `content_model`.
-- `ResearchAPIClient`: `call_lead_agent` (no tools), `call_subagent` (`WebSearch` and `WebFetch` unless `use_web_search=False`) and `call_with_json_output`; only the lead call can use extended thinking.
+- `ResearchAPIClient` subclasses `BoundedCCClientBase` and prints its own `Models: lead=..., subagent=...` banner line. It offers `call_lead_agent` (no tools), `call_subagent` (`WebSearch` and `WebFetch` unless `use_web_search=False`) and `call_with_json_output`; only the lead call can use extended thinking.
 - A result message with `is_error` raises `RuntimeError` through `raise_error_result`, with the SDK's failure text and a renew-login sentence on a 401. The three clients do this alike.
 - Each call returns an `APIResponse` (text, model, tokens, stop reason, `sdk_cost_usd`). Podcast and presentation total usage in a `CostEstimate`; research records it in `CostTracker`, which can raise `BudgetExceededError`.
 

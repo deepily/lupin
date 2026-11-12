@@ -105,7 +105,9 @@ class BoundedCCClientBase:
     Construction, typed calls and strict JSON output for a bounded-CC client.
 
     A subclass sets CONFIG_CLASS, COST_ESTIMATE_CLASS, BANNER_NOUN, BANNER_FIELD,
-    JSON_MODEL_FIELD, the label and _logger, and defines _call_api and _recover_json.
+    JSON_MODEL_FIELD, the label and _logger. It defines _call_api and _recover_json when it uses
+    _call_typed or call_with_json_output. A client that tracks cost elsewhere leaves
+    COST_ESTIMATE_CLASS as None, and one with its own banner overrides _banner_model_line.
     """
 
     CONFIG_CLASS        = None
@@ -127,7 +129,8 @@ class BoundedCCClientBase:
         Ensures:
             - self.config is `config`, or CONFIG_CLASS() when None
             - self.debug, self.verbose and self.cost_estimate are set
-            - with debug, prints two banner lines naming the class label and the banner-field model
+            - self.cost_estimate is COST_ESTIMATE_CLASS(), or None when that class is None
+            - with debug, prints a banner line, then the line _banner_model_line returns, each led by the class label
 
         Raises:
             - ImportError if the Claude Agent SDK is not installed
@@ -143,11 +146,20 @@ class BoundedCCClientBase:
         self.verbose = verbose
 
         # Cost tracking
-        self.cost_estimate = self.COST_ESTIMATE_CLASS()
+        self.cost_estimate = self.COST_ESTIMATE_CLASS() if self.COST_ESTIMATE_CLASS is not None else None
 
         if self.debug:
             print( f"[{self.LABEL}] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
-            print( f"[{self.LABEL}] {self.BANNER_NOUN} model: {getattr( self.config, self.BANNER_FIELD )}" )
+            print( f"[{self.LABEL}] {self._banner_model_line()}" )
+
+    def _banner_model_line( self ) -> str:
+        """
+        Name the model for the debug banner.
+
+        Ensures:
+            - returns "<BANNER_NOUN> model: <the BANNER_FIELD model>"; a subclass overrides this to say more
+        """
+        return f"{self.BANNER_NOUN} model: {getattr( self.config, self.BANNER_FIELD )}"
 
     async def _call_typed( self, model, call_type, system_prompt, user_message, max_tokens, temperature ):
         """

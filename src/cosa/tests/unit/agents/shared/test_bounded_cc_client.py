@@ -131,3 +131,28 @@ class TestSharedAddUsage:
         ce.add_usage( "opus", 3_000, 4_000 )
         assert ( ce.total_input_tokens, ce.total_output_tokens, ce.total_api_calls ) == ( 4_000, 6_000, 2 )
         assert ce.estimated_cost_usd == pytest.approx( 0.033 + 0.345 )
+
+
+class _NoCostClient( _Client ):
+    COST_ESTIMATE_CLASS = None
+
+
+def test_a_client_with_no_cost_estimate_class_keeps_cost_estimate_none():
+    assert _NoCostClient().cost_estimate is None
+
+
+class _OwnBannerClient( _Client ):
+    def _banner_model_line( self ):
+        return "Custom banner"
+
+
+def test_the_banner_model_line_is_the_subclass_hook( capsys ):
+    _OwnBannerClient( debug=True )
+    assert capsys.readouterr().out.splitlines() == [
+        "[StubClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)",
+        "[StubClient] Custom banner",
+    ]
+
+
+def test_the_default_banner_model_line_names_the_noun_and_the_field_model():
+    assert _Client()._banner_model_line() == "Fast model: FAST"
