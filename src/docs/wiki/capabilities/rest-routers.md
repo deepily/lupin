@@ -2,7 +2,7 @@
 capability: rest-routers
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.routers.v2_ask.build_ask_flow@b1951b74a7
+  - cosa.rest.routers.v2_ask.build_ask_flow@b262e00dda
   - cosa.rest.routers.v2_ask.install_ask_flow@b35d082dfd
   - cosa.rest.routers.v2_ask.get_ask_flow@d4e3989e83
   - cosa.rest.routers._retired_doors.refusal_detail@28e39ec43b

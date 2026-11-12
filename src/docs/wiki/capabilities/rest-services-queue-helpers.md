@@ -8,7 +8,7 @@ pins:
   - cosa.rest.queue_util.emit_job_state_transition@ba7483f9c6
   - cosa.rest.running_fifo_queue.compute_duration_seconds@8803f27d89
   - cosa.rest.salutations.parse_salutations@3ab075cb2b
-  - cosa.rest.todo_fifo_queue.TodoFifoQueue@12be5d9226
+  - cosa.rest.todo_fifo_queue.TodoFifoQueue@1ba477c5d5
   - cosa.rest.todo_fifo_queue.get_routing_command@a8a02fc1fe
   - cosa.rest.util_llm_client.StopOnTokens@d0c8d6208b
   - cosa.rest.util_llm_client.query_llm_in_memory@7353ead10a

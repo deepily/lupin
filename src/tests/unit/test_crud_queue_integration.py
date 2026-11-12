@@ -120,13 +120,38 @@ class TestCrudQueueRouting:
 
         assert queue._crud_agents_enabled() is True
 
-    def test_crud_agents_enabled_whitespace( self, mock_config_mgr ):
-        """_crud_agents_enabled() handles whitespace around value."""
+    def test_crud_agents_enabled_missing_key_defaults_to_on( self ):
+        """A key absent from the INI answers on: the read's default is "true"."""
+        from cosa.rest.todo_fifo_queue import TodoFifoQueue
+
+        queue = TodoFifoQueue.__new__( TodoFifoQueue )
+        queue.config_mgr = TypedConfigFake( {} )
+
+        assert queue._crud_agents_enabled() is True
+
+    def test_crud_agents_enabled_padded_true_reads_as_off( self, mock_config_mgr ):
+        """
+        A value padded with spaces, "  True  ", now reads as off.
+
+        The flag is read with return_type="boolean", which compares the text to "true" without
+        stripping. The old read stripped first and called it on. The INI reader strips its own
+        values, so only a padded ${ENV} expansion can reach this.
+        """
         from cosa.rest.todo_fifo_queue import TodoFifoQueue
 
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
         mock_config_mgr.set_every_key( "  True  " )
+
+        assert queue._crud_agents_enabled() is False
+
+    def test_crud_agents_enabled_unpadded_mixed_case_true_reads_as_on( self, mock_config_mgr ):
+        """The case does not matter, only the padding does: "TRUE" is on."""
+        from cosa.rest.todo_fifo_queue import TodoFifoQueue
+
+        queue = TodoFifoQueue.__new__( TodoFifoQueue )
+        queue.config_mgr = mock_config_mgr
+        mock_config_mgr.set_every_key( "TRUE" )
 
         assert queue._crud_agents_enabled() is True
 
