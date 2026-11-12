@@ -218,7 +218,7 @@ def check_engines( manifest, info ):
 
     Requires:
         - manifest holds engines, document_roles and query_roles as the build wrote them
-        - info is the body of GET /api/embeddings/info, with its engines block
+        - info is the body of the service's info read, with its engines block
 
     Ensures:
         - returns None when model, revision, dtype, device, device class, prefixes, dimensions and roles all agree

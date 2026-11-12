@@ -598,6 +598,32 @@ class EmbeddingProvider:
         if role == "document": return engine.encode_document( texts )
         return engine.encode_query( texts )
 
+    @classmethod
+    def read_info( cls, pin_fastapi=True, get=None ):
+        """
+        Read the embeddings service's info body: its engines, device class and libraries.
+
+        Requires:
+            - get is None, or stands in for requests.get with the same ( url, headers, timeout ) call
+
+        Ensures:
+            - returns the parsed JSON body of the service's info route
+            - pin_fastapi=True sends the FastAPI key to the FastAPI server, never to the model server
+            - loads no model and takes no GPU
+
+        Raises:
+            - RuntimeError when no API key resolves or the answer is not 200
+        """
+        base_url, api_key, prefix = cls._resolve_http_target( pin_fastapi )
+        if not api_key: raise RuntimeError( "embeddings info: no API key found" )
+        if get is None:
+            import requests
+            get = requests.get
+        response = get( f"{base_url}{prefix}/info", headers={ "X-API-Key": api_key }, timeout=30 )
+        if response.status_code != 200:
+            raise RuntimeError( f"embeddings info answered {response.status_code}: {response.text[ :200 ]}" )
+        return response.json()
+
     def _describe_engines_via_http( self ):
         """
         Read the engines block from lupin-model-server's /embeddings/info.

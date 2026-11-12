@@ -330,3 +330,6 @@ REUSE-OUTCOME 33c6ec441564c732 :: rs-266ff92ce5 :: WROTE_NEW derives repo names 
 
 RULING cosa.repo.code_health_settings.name_mismatches :: DISTINCT compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: reuse-receipt: 2e232146ad501898 :: search: rs-08457a253f
 REUSE-OUTCOME 2e232146ad501898 :: rs-08457a253f :: WROTE_NEW compares a registered name to the fleet data folder name and calls fleet_data_root, so the worktree-to-main rule is not re-derived :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s1
+
+RULING cosa.memory.embedding_provider.EmbeddingProvider.read_info :: DISTINCT reads the whole info body pinned to the FastAPI server with the FastAPI key; _describe_engines_via_http reads only the engines block, from the model server, with its own key and config timeout :: reuse-receipt: ac764d07031009eb :: search: rs-6ba420a8d7
+REUSE-OUTCOME ac764d07031009eb :: rs-6ba420a8d7 :: WROTE_NEW reads the whole info body pinned to the FastAPI server with the FastAPI key; _describe_engines_via_http reads only the engines block, from the model server, with its own key and config timeout :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.10-ph1s9
