@@ -14463,6 +14463,45 @@
                         "maxLength": 255,
                         "minLength": 1,
                         "title": "Actor"
+                    },
+                    "script_type": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Script Type"
+                    },
+                    "languages": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Languages"
+                    },
+                    "review": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Review"
                     }
                 },
                 "additionalProperties": false,
@@ -17830,6 +17869,45 @@
                         "maxLength": 1024,
                         "minLength": 1,
                         "title": "Path"
+                    },
+                    "script_type": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Script Type"
+                    },
+                    "languages": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Languages"
+                    },
+                    "review": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Review"
                     }
                 },
                 "additionalProperties": false,

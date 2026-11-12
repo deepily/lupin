@@ -381,6 +381,9 @@ def _patch_stack( monkeypatch, captured ):
                          lambda name, todo_queue=None: types.SimpleNamespace( tag=f"exe:{name}", queue=todo_queue ) )
     monkeypatch.setattr( "cosa.rest.v2.pending.PendingRequests", lambda *a, **k: types.SimpleNamespace( tag="pending" ) )
     monkeypatch.setattr( "cosa.rest.v2.flow.AskFlow", _FakeAskFlow )
+    # The real table builds the process-wide ConfigurationManager from get_project_root(). Alone in a
+    # process, a test that fakes the root as "/proj" then fails reading /proj/src/conf/lupin-app.ini.
+    monkeypatch.setattr( "cosa.memory.query_log_table.QueryLogTable", lambda *a, **k: types.SimpleNamespace( tag="query_log" ) )
 
 
 def test_build_ask_flow_wires_from_ini( monkeypatch ):
