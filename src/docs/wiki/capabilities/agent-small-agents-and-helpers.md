@@ -4,8 +4,8 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.agent_base.CodeGenerationFailedException@7b3dea2f9c
   - cosa.agents.runnable_code.RunnableCode@a166b37df7
-  - cosa.agents.calendaring_agent.CalendaringAgent@19a2dd1103
-  - cosa.agents.date_and_time_agent.DateAndTimeAgent@83be1df568
+  - cosa.agents.calendaring_agent.CalendaringAgent@9436d441ba
+  - cosa.agents.date_and_time_agent.DateAndTimeAgent@f1c18cab5e
   - cosa.agents.todo_list_agent.TodoListAgent@061888918c
   - cosa.agents.confirmation_dialog.ConfirmationDialogue@4ea86e3503
   - cosa.agents.receptionist_agent.fit_fragments_to_budget@d6aadcd96d

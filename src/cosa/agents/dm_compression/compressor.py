@@ -126,21 +126,6 @@ class DmCompressionAgent( AgentBase ):
 
         self.xml_response_tag_names = [ "thoughts", "compressed" ]
 
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Not implemented — this agent holds no state worth restoring.
-
-        Requires:
-            - file_path points to a JSON file
-
-        Ensures:
-            - raises NotImplementedError
-
-        Raises:
-            - NotImplementedError always
-        """
-        raise NotImplementedError( "DmCompressionAgent.restore_from_serialized_state() not implemented" )
-
 
 def quick_smoke_test():
     """Construct the agent and inspect the prompt it would send. No model call."""

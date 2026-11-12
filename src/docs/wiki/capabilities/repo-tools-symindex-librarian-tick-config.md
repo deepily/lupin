@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.librarian_tick.read_value@648038d6db
   - cosa.repo.symindex.librarian_tick.read_create_cap@07366a14f6
-  - cosa.repo.symindex.librarian_tick.read_enabled@48426a4325
+  - cosa.repo.symindex.librarian_tick.read_enabled@f632e48f61
   - cosa.repo.symindex.librarian_tick.read_persona@bfb1570e2a
   - cosa.repo.symindex.librarian_tick.read_mobile_corpus@3e5c46846d
   - cosa.repo.symindex.librarian_tick.crontab_command@1b83cbb8d8

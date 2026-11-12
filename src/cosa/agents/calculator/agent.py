@@ -295,18 +295,6 @@ class CalculatorAgent( AgentBase ):
 
         return self.answer_conversational
 
-    def restore_from_serialized_state( self, file_path ):
-        """
-        Restore agent from serialized state.
-
-        Requires:
-            - file_path is a valid path
-
-        Raises:
-            - NotImplementedError (not implemented for Calculator agents)
-        """
-        raise NotImplementedError( "CalculatorAgent.restore_from_serialized_state() not implemented" )
-
 
 def quick_smoke_test():
     """Module-level smoke test following CoSA convention."""

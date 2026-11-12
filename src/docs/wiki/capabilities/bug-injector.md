@@ -2,9 +2,9 @@
 capability: bug-injector
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.bug_injector.BugInjector@670fd390e9
+  - cosa.agents.bug_injector.BugInjector@51918dba62
   - cosa.agents.bug_injector.BugInjector.run_prompt@6863e7a4d2
-  - cosa.agents.bug_injector.BugInjector.restore_from_serialized_state@bf383c265e
+  - cosa.agents.agent_base.AgentBase.restore_from_serialized_state@f31d4ddd36
   - cosa.utils.util_code_runner.assemble_and_run_solution@84dbc3d3b4
   - cosa.agents.io_models.xml_models.BugInjectionResponse@e92f686130
 ---
@@ -23,7 +23,7 @@ A test aid. It asks an LLM to break working generated code with one runtime-fata
 - A line number of -1, 0 or past the end prints a banner and leaves the code unchanged. The original code then runs, so no bug was injected.
 - On success `run_prompt` prepends a blank line so the 1-based number lines up. The returned list is one line longer, and the caller runs that list.
 - The caller's list is not edited in place: the prepend builds a new list.
-- `restore_from_serialized_state` always raises `NotImplementedError`.
+- `restore_from_serialized_state` is the `AgentBase` default, which raises `NotImplementedError` naming the class.
 - `debug` and `verbose` both default to true in the constructor, so a bare call is noisy.
 
 ## How it is used

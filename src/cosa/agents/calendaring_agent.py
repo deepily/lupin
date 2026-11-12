@@ -84,21 +84,6 @@ class CalendaringAgent( AgentBase ):
         
         return column_names, unique_event_types, head
         
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Restore calendaring agent state from JSON file.
-        
-        Requires:
-            - file_path points to valid JSON file
-            
-        Ensures:
-            - Raises NotImplementedError (not implemented)
-            
-        Raises:
-            - NotImplementedError always
-        """
-        
-        raise NotImplementedError( f"CalendaringAgent.restore_from_serialized_state( file_path={file_path} ) not implemented" )
     
 def quick_smoke_test():
     """Quick smoke test to validate CalendaringAgent functionality."""

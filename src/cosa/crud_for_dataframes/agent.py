@@ -258,18 +258,6 @@ class CrudForDataFramesAgent( AgentBase ):
 
         return self.answer_conversational
 
-    def restore_from_serialized_state( self, file_path ):
-        """
-        Restore agent from serialized state.
-
-        Requires:
-            - file_path is a valid path
-
-        Raises:
-            - NotImplementedError (not implemented for CRUD agents)
-        """
-        raise NotImplementedError( "CrudForDataFramesAgent.restore_from_serialized_state() not implemented" )
-
     def _format_lists_for_prompt( self, metadata ):
         """
         Format list metadata for inclusion in the LLM prompt.

@@ -42,6 +42,7 @@ from cosa.repo.symindex.librarian_queue import CORRELATION_KEY, MOBILE_CORRELATI
 from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
 from cosa.repo.symindex.wiki_lint import queue
 from cosa.utils.atomic_json import load_json_dict
+from cosa.utils.flag_text import is_flag_on
 from lupin_mcp import job_summary_adapters as jsa
 
 CRON_TAG         = "# wiki-librarian-tick"
@@ -143,7 +144,7 @@ def read_enabled( reader=None, errors=None, key=ENABLED_KEY ):
         - a read failure appends its message to errors when errors is a list
         - never raises
     """
-    return ( read_value( key, reader, errors ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
+    return is_flag_on( read_value( key, reader, errors ) )
 
 
 def read_persona( key, reader=None, default=DEFAULT_PERSONA ):

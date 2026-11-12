@@ -3,6 +3,7 @@ import time
 from typing import Optional, Any
 
 import cosa.utils.util as du
+from cosa.agents.base_llm_client import format_duration_ms
 from cosa.agents.llm_completion import LlmCompletion
 
 from cosa.agents.token_counter import TokenCounter
@@ -320,21 +321,6 @@ class LlmClient:
             # Can run directly with a new event loop
             return run_in_new_loop()
     
-    def _format_duration( self, seconds: float ) -> str:
-        """
-        Format a duration in seconds to a readable string.
-
-        Requires:
-            - seconds: A float representing seconds
-
-        Ensures:
-            - Returns a formatted string in milliseconds
-
-        Returns:
-            - String in the format "XXXms"
-        """
-        return f"{int( seconds * 1000 )}ms"
-
     def _print_metadata( self, prompt_tokens: int, completion_tokens: int, duration: Optional[ float ] ):
         """
         Print performance metadata about an LLM request.
@@ -354,7 +340,7 @@ class LlmClient:
         """
         total_tokens = prompt_tokens + completion_tokens
         tps          = completion_tokens / duration if ( duration and duration > 0 ) else float( 'inf' )
-        duration_str = self._format_duration( duration ) if duration is not None else "N/A"
+        duration_str = format_duration_ms( duration ) if duration is not None else "N/A"
 
         du.print_banner( "📊 Stream Summary", prepend_nl=True )
         print( f"🧠 Model              : {self.model_name}" )

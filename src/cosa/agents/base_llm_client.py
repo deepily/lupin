@@ -5,6 +5,20 @@ import asyncio
 import cosa.utils.util as du
 
 
+def format_duration_ms( seconds: float ) -> str:
+    """
+    Format a duration in seconds as whole milliseconds.
+
+    Requires:
+        - seconds is a number
+
+    Ensures:
+        - returns a string such as "1500ms"
+        - the fraction of a millisecond is cut, not rounded
+    """
+    return f"{int( seconds * 1000 )}ms"
+
+
 class LlmClientInterface( ABC ):
     """
     Common interface for all LLM client implementations.
@@ -61,10 +75,6 @@ class LlmClientInterface( ABC ):
         """
         pass
     
-    def _format_duration( self, seconds: float ) -> str:
-        """Format a duration in seconds to a readable string."""
-        return f"{int( seconds * 1000 )}ms"
-    
     def _print_metadata( self, prompt_tokens: int, completion_tokens: int, duration: Optional[ float ], client_type: str = "LLM" ):
         """
         Print performance metadata about an LLM request.
@@ -82,7 +92,7 @@ class LlmClientInterface( ABC ):
         """
         total_tokens = prompt_tokens + completion_tokens
         tps = completion_tokens / duration if ( duration and duration > 0 ) else float( 'inf' )
-        duration_str = self._format_duration( duration ) if duration is not None else "N/A"
+        duration_str = format_duration_ms( duration ) if duration is not None else "N/A"
         
         du.print_banner( f"📊 {client_type} Summary", prepend_nl=True )
         print( f"🧠 Model              : {self.model_name}" )

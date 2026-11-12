@@ -8,7 +8,7 @@ run_stream async-context-manager (yielding an async stream_text generator).
 NO real LLM / network / token-model load / spend.
 
 Covers the corrected post-02232a9 behavior:
-  - bug #6: _print_metadata + _format_duration are live and called under
+  - bug #6: _print_metadata + format_duration_ms are live and called under
     debug+verbose (the "📊 Stream Summary" banner) — including the
     duration=None "N/A" branch and the tokens/sec inf branch (duration 0/None).
   - bug #7: _stream_async counter inits before the loop; the counter % 128
@@ -148,22 +148,17 @@ class TestInit:
 
 
 # ----------------------------------------------------------------------------
-# _format_duration + _print_metadata  (bug #6 corrected behavior)
+# _print_metadata  (bug #6 corrected behavior)
 # ----------------------------------------------------------------------------
 class TestFormatAndMetadata:
     """
-    _format_duration ms-formatting + _print_metadata summary (uncommented by the
+    format_duration_ms formatting + _print_metadata summary (uncommented by the
     02232a9 fix).
 
     Ensures ms formatting, the "📊 Stream Summary" banner + tokens/sec line, the
     duration=None "N/A" branch, and the inf tokens/sec branch when duration is
     None or zero.
     """
-
-    def test_format_duration_milliseconds( self ):
-        c, _ = _client()
-        assert c._format_duration( 1.5 )   == "1500ms"
-        assert c._format_duration( 0.042 ) == "42ms"
 
     def test_print_metadata_with_duration( self, capsys ):
         c, _ = _client( model_name="mymodel" )

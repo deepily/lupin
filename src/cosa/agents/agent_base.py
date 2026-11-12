@@ -43,23 +43,6 @@ class AgentBase( RunnableCode, abc.ABC ):
     STATE_STOPPED_DONE         = "done"
     
     
-    @abc.abstractmethod
-    def restore_from_serialized_state( file_path: str ) -> 'AgentBase':
-        """
-        Restore an agent from a serialized JSON state file.
-        
-        Requires:
-            - file_path is a valid path to an existing JSON file
-            - JSON file contains all necessary agent state information
-            
-        Ensures:
-            - Returns a new AgentBase instance with restored state
-            - All instance variables are properly initialized from the file
-            
-        Raises:
-            - NotImplementedError (must be implemented by subclasses)
-        """
-        pass  # pragma: no cover - shadowed duplicate abstractmethod (re-declared identically at the second definition below); this binding is unreachable. Flagged to Tiberius as a prod smell to de-duplicate.
 
     def __init__( self, df_path_key: Optional[str]=None, question: str="", question_gist: str="", last_question_asked: str="", push_counter: int=-1, routing_command: Optional[str]=None, user_id: str="ricardo_felipe_ruiz_6bdc", user_email: str="", session_id: str="", debug: bool=False, verbose: bool=False, auto_debug: bool=False, inject_bugs: bool=False ) -> None:
         """
@@ -178,23 +161,23 @@ class AgentBase( RunnableCode, abc.ABC ):
 
         self.execution_state = AgentBase.STATE_WAITING_TO_RUN
     
-    @abc.abstractmethod
-    def restore_from_serialized_state( file_path: str ) -> 'AgentBase':
+    @classmethod
+    def restore_from_serialized_state( cls, file_path: str ) -> 'AgentBase':
         """
-        Restore an agent from a serialized JSON state file.
-        
+        Restore an agent from a serialized JSON state file; the default says it cannot.
+
+        Agents that can be restored override this. Called on the class or on an instance.
+
         Requires:
-            - file_path is a valid path to an existing JSON file
-            - JSON file contains all necessary agent state information
-            
+            - file_path is a path string
+
         Ensures:
-            - Returns a new AgentBase instance with restored state
-            - All instance variables are properly initialized from the file
-            
+            - nothing is read from file_path
+
         Raises:
-            - NotImplementedError (must be implemented by subclasses)
+            - NotImplementedError always, naming the class and file_path
         """
-        pass
+        raise NotImplementedError( f"{cls.__name__}.restore_from_serialized_state() not implemented, asked to restore from {file_path}" )
     
     @staticmethod
     def _restore_from_data( agent_cls, data: dict, positional_keys: tuple, keyword_keys: tuple ) -> 'AgentBase':

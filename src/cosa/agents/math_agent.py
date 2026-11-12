@@ -37,22 +37,6 @@ class MathAgent( AgentBase ):
         self.xml_response_tag_names   = [ "thoughts", "brainstorm", "evaluation", "code", "example", "returns", "explanation" ]
     
     
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Restore math agent state from JSON file.
-
-        Requires:
-            - file_path points to valid JSON file
-
-        Ensures:
-            - Raises NotImplementedError (not implemented)
-
-        Raises:
-            - NotImplementedError always
-        """
-
-        raise NotImplementedError( "MathAgent.restore_from_serialized_state() not implemented" )
-
     @staticmethod
     def apply_formatting( raw_output: str, config_mgr, debug: bool = False, verbose: bool = False ):
         """

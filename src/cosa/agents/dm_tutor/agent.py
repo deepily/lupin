@@ -166,21 +166,6 @@ class DmTutorAgent( AgentBase ):
             if self.debug: print( f"[dm-tutor] rewrite failed — {self.error}" )
             return None
 
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Not implemented — this agent holds no state worth restoring.
-
-        Requires:
-            - file_path points to a JSON file
-
-        Ensures:
-            - raises NotImplementedError
-
-        Raises:
-            - NotImplementedError always
-        """
-        raise NotImplementedError( "DmTutorAgent.restore_from_serialized_state() not implemented" )
-
 
 def rewrite_dm( dm_body: str, include_stop_sentinel: bool=True,
                 debug: bool=False, verbose: bool=False ) -> str:

@@ -44,21 +44,6 @@ class WeatherAgent( AgentBase ):
         self.xml_response_tag_names   = []
     
     
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Restore agent from serialized state (not implemented).
-        
-        Requires:
-            - file_path is a valid path
-            
-        Ensures:
-            - Raises NotImplementedError
-            
-        Raises:
-            - NotImplementedError always
-        """
-        
-        raise NotImplementedError( "WeatherAgent.restore_from_serialized_state() not implemented" )
     
     def run_code( self, auto_debug: Optional[bool]=None, inject_bugs: Optional[bool]=None ) -> dict[str, Any]:
         """

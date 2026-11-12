@@ -3,7 +3,7 @@ capability: dm-compression-pipeline
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.dm_compression.pipeline.compress_dm@343e1ffe61
-  - cosa.agents.dm_compression.compressor.DmCompressionAgent@e95e554bc9
+  - cosa.agents.dm_compression.compressor.DmCompressionAgent@a6ccc55f55
   - cosa.agents.dm_compression.xml_models.DmCompressionResponse@0774de615f
 ---
 # DM compression pipeline
