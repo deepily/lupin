@@ -46,6 +46,7 @@ class _FakeAgent:
     async def run( self, prompt, model_settings=None ):
         return _FakeRunResult( type( self ).run_output )
     def run_stream( self, prompt, model_settings=None ):
+        type( self ).stream_call = ( prompt, model_settings )
         return _FakeStreamResult( type( self ).stream_chunks )
 
 
@@ -178,6 +179,14 @@ def test_stream_async_quiet_dot_progress_with_newline( capsys ):
     out = asyncio.run( c.run_async( "prompt", stream=True ) )
     assert out == "." * 130
     assert "." in capsys.readouterr().out
+
+
+def test_stream_async_hands_the_prompt_and_settings_to_run_stream():
+    """The stream opens with the prompt and the generation arguments as ModelSettings."""
+    _FakeAgent.stream_chunks = [ "a" ]
+    c = _make( debug=False )
+    asyncio.run( c._stream_async( "the prompt", temperature=0.25 ) )
+    assert _FakeAgent.stream_call == ( "the prompt", ( "settings", { "temperature": 0.25 } ) )
 
 
 def test_stream_async_leaves_the_dot_line_open( capsys ):
