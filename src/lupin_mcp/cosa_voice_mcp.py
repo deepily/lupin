@@ -2308,6 +2308,31 @@ def _validate_multiple_choice_default( default: dict, questions: list ) -> None:
                 )
 
 
+def _parse_answers_response( response_value: Optional[ str ], label: str ) -> dict:
+    """
+    Read the JSON answers a choice or batch notification returns.
+
+    Requires:
+        - response_value is None or a JSON string
+        - label names the kind of notification, for the warning
+
+    Ensures:
+        - returns { "answers": {} } for None or an empty string
+        - returns the parsed dict when the JSON is an object, and { "answers": parsed } for any other JSON value
+        - returns { "answers": { "response": response_value } } and logs a warning naming the label when the text is not JSON
+    """
+    import json
+    if not response_value:
+        return { "answers": {} }
+
+    try:
+        parsed = json.loads( response_value )
+        return parsed if isinstance( parsed, dict ) else { "answers": parsed }
+    except ( json.JSONDecodeError, TypeError ) as e:
+        logger.warning( f"Could not parse {label} response: {e}" )
+        return { "answers": { "response": response_value } }
+
+
 def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
     """
     Parse the response from multiple choice notification.
@@ -2327,17 +2352,7 @@ def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
     Returns:
         dict: Parsed answers or error
     """
-    if not response_value:
-        return { "answers": {} }
-
-    try:
-        import json
-        parsed = json.loads( response_value )
-        return parsed if isinstance( parsed, dict ) else { "answers": parsed }
-    except ( json.JSONDecodeError, TypeError ) as e:
-        logger.warning( f"Could not parse multiple choice response: {e}" )
-        # Return raw value wrapped in answers
-        return { "answers": { "response": response_value } }
+    return _parse_answers_response( response_value, "multiple choice" )
 
 
 @mcp.tool
@@ -2458,16 +2473,7 @@ def _parse_open_ended_batch_response( response_value: Optional[ str ] ) -> dict:
     Returns:
         dict: Parsed answers or error
     """
-    if not response_value:
-        return { "answers": {} }
-
-    try:
-        import json
-        parsed = json.loads( response_value )
-        return parsed if isinstance( parsed, dict ) else { "answers": parsed }
-    except ( json.JSONDecodeError, TypeError ) as e:
-        logger.warning( f"Could not parse open-ended batch response: {e}" )
-        return { "answers": { "response": response_value } }
+    return _parse_answers_response( response_value, "open-ended batch" )
 
 
 @mcp.tool
