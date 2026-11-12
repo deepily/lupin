@@ -12,6 +12,7 @@ Requires:
 import re
 
 from .conftest import (
+    wait_for_login_redirect,
     BASE_URL, PAGE_URLS,
     fill_login_form, fill_register_form,
     assert_error_message, assert_success_message,
@@ -69,7 +70,7 @@ class TestValidLogin:
         assert_success_message( page, "success" )
 
         # Should redirect to landing page
-        page.wait_for_url( "**/app**", timeout=10000 )
+        wait_for_login_redirect( page )
         assert "/app" in page.url
 
     def test_login_stores_tokens_in_localstorage( self, page, clean_test_db ):
@@ -90,7 +91,7 @@ class TestValidLogin:
 
         page.goto( f"{BASE_URL}/app/auth/login" )
         fill_login_form( page, email, password )
-        page.wait_for_url( "**/app**", timeout=10000 )
+        wait_for_login_redirect( page )
 
         # Wait for tokens to be stored
         page.wait_for_function(

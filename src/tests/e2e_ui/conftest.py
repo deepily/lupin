@@ -788,6 +788,31 @@ ADMIN_PAGES = [ "admin-dashboard", "admin-snapshots", "admin-users", "admin-rati
 # Browser Auth Helpers
 # ---------------------------------------------------------------------------
 
+def _left_the_auth_pages( url ):
+    """
+    Say whether a URL is past the login page.
+
+    Ensures:
+        - returns True when the URL has no "/auth/" in it
+        - so the login page's own URL, which "**/app**" matches, never ends the wait early
+    """
+    return "/auth/" not in url
+
+
+def wait_for_login_redirect( page, timeout=10000 ):
+    """
+    Wait until the page has left the auth pages after a login submit.
+
+    Requires:
+        - the login form was just submitted on page
+
+    Ensures:
+        - returns once the URL has no "/auth/" in it, after the page's own redirect
+        - raises the Playwright timeout error when it does not within timeout milliseconds
+    """
+    page.wait_for_url( _left_the_auth_pages, timeout=timeout )
+
+
 def fill_login_form( page, email, password ):
     """
     Fill and submit the login form via browser.
@@ -885,7 +910,7 @@ def logged_in_page( page, clean_test_db, test_user_credentials ):
     # Login via browser
     page.goto( f"{BASE_URL}/app/auth/login" )
     fill_login_form( page, email, password )
-    page.wait_for_url( "**/app**", timeout=10000 )
+    wait_for_login_redirect( page )
 
     # Wait for localStorage tokens to be populated
     page.wait_for_function(
@@ -935,7 +960,7 @@ def admin_page( page, clean_test_db, test_admin_credentials ):
     # Login via browser
     page.goto( f"{BASE_URL}/app/auth/login" )
     fill_login_form( page, email, password )
-    page.wait_for_url( "**/app**", timeout=10000 )
+    wait_for_login_redirect( page )
 
     # Wait for localStorage tokens to be populated
     page.wait_for_function(

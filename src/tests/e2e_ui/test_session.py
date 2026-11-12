@@ -13,6 +13,7 @@ Requires:
 import json
 
 from .conftest import (
+    wait_for_login_redirect,
     BASE_URL,
     fill_login_form, fill_register_form,
 )
@@ -40,7 +41,7 @@ def _register_and_login( page, email="session@example.com", password="TestPasswo
 
     page.goto( f"{BASE_URL}/app/auth/login" )
     fill_login_form( page, email, password )
-    page.wait_for_url( "**/app**", timeout=10000 )
+    wait_for_login_redirect( page )
 
     # Wait for localStorage tokens to be populated
     page.wait_for_function(
