@@ -1591,6 +1591,26 @@ def test_an_unreadable_config_answers_the_ini_default( monkeypatch ):
     assert ve._crud_agents_enabled() is True
 
 
+@pytest.mark.parametrize( "raw,expected", [ ( "true", True ), ( "TRUE", True ), ( "  True  ", False ), ( "false", False ), ( "yes", False ) ] )
+def test_the_crud_flag_is_read_as_a_boolean_like_the_queue_and_the_flow( monkeypatch, raw, expected ):
+    """
+    The eval reads the flag the way the queue and the flow do: true in any case is on.
+
+    Anything else is off, a value padded with spaces included.
+    """
+    import cosa.config.configuration_manager as cm
+    from tests.helpers.typed_config import TypedConfigFake
+    monkeypatch.setattr( cm, "ConfigurationManager", lambda **kw: TypedConfigFake( { "crud for dataframes agents enabled": raw } ) )
+    assert ve._crud_agents_enabled() is expected
+
+
+def test_a_missing_crud_flag_answers_on( monkeypatch ):
+    import cosa.config.configuration_manager as cm
+    from tests.helpers.typed_config import TypedConfigFake
+    monkeypatch.setattr( cm, "ConfigurationManager", lambda **kw: TypedConfigFake( {} ) )
+    assert ve._crud_agents_enabled() is True
+
+
 def test_the_summary_itself_follows_the_flag( monkeypatch ):
     """
     THROUGH the reader, which is the gap Pocholo found in my first pair of tests:

@@ -120,6 +120,15 @@ class TestCrudQueueRouting:
 
         assert queue._crud_agents_enabled() is True
 
+    def test_crud_agents_enabled_missing_key_defaults_to_on( self ):
+        """A key absent from the INI answers on: the read's default is "true"."""
+        from cosa.rest.todo_fifo_queue import TodoFifoQueue
+
+        queue = TodoFifoQueue.__new__( TodoFifoQueue )
+        queue.config_mgr = TypedConfigFake( {} )
+
+        assert queue._crud_agents_enabled() is True
+
     def test_crud_agents_enabled_padded_true_reads_as_off( self, mock_config_mgr ):
         """
         A value padded with spaces, "  True  ", now reads as off.

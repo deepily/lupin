@@ -545,12 +545,11 @@ def _crud_agents_enabled() -> bool:
     """
     try:
         from cosa.config.configuration_manager import ConfigurationManager
-        value = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
-            "crud for dataframes agents enabled", default="true"
+        return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
+            "crud for dataframes agents enabled", default="true", return_type="boolean"
         )
     except Exception:
         return True
-    return str( value ).strip().lower() == "true"
 
 
 def _is_cacheable_command( command: Optional[ str ], crud_enabled: Optional[ bool ]=None ) -> bool:

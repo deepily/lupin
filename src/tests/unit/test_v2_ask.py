@@ -471,6 +471,14 @@ def test_the_crud_flag_is_read_as_a_boolean_without_stripping( monkeypatch, raw,
     assert captured[ "kwargs" ][ "crud_enabled" ] is expected
 
 
+def test_a_missing_crud_flag_builds_the_flow_with_crud_on( monkeypatch ):
+    """A key absent from the INI answers on, the same default the queue reads."""
+    captured = {}
+    _patch_stack( monkeypatch, captured )
+    v2_ask.build_ask_flow( _FakeConfig( { "v2 flow enabled": True, "v2 executor": "inline", "v2 trace dir": "" } ) )
+    assert captured[ "kwargs" ][ "crud_enabled" ] is True
+
+
 def test_build_ask_flow_hands_the_queue_to_the_executor( monkeypatch ):
     """Step 12: `v2 executor = queued` needs the live todo queue, and build_ask_flow
     is the only place it can arrive. A build that read the name and dropped the queue
