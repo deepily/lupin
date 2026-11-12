@@ -13,7 +13,7 @@ from pathlib import Path
 _UNSET = object()
 
 
-def write_json_atomic( path, data, indent=None, trailing_newline=False ) -> None:
+def write_json_atomic( path, data, indent=None, trailing_newline=False, sort_keys=False ) -> None:
     """
     Write `data` to `path` as JSON, replacing the file whole.
 
@@ -21,9 +21,11 @@ def write_json_atomic( path, data, indent=None, trailing_newline=False ) -> None
         - path is a path-like or string
         - data is JSON-serialisable, or str() of each non-serialisable value is acceptable
         - indent is None for compact JSON, or the spaces per level
+        - sort_keys is a bool
 
     Ensures:
         - the file holds exactly `data`, one newline after it when trailing_newline is true
+        - with sort_keys true every object's keys are written in sorted order, so equal data gives equal bytes
         - the parent directory is created if absent
         - the write is atomic: a temp file named with a per-writer pid and uuid is
           written, then renamed over the target, so concurrent writers never share a
@@ -36,7 +38,7 @@ def write_json_atomic( path, data, indent=None, trailing_newline=False ) -> None
         - OSError if the target directory cannot be created or written; it is never swallowed
         - TypeError or ValueError if `data` cannot be serialised; the target is untouched
     """
-    text = json.dumps( data, default=str, indent=indent ) + ( "\n" if trailing_newline else "" )
+    text = json.dumps( data, default=str, indent=indent, sort_keys=sort_keys ) + ( "\n" if trailing_newline else "" )
     path = Path( path )
     path.parent.mkdir( parents=True, exist_ok=True )
     tmp  = path.parent / f"{path.name}.{os.getpid()}-{uuid.uuid4().hex}.tmp"

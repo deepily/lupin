@@ -42,7 +42,8 @@ class Bridge:
 
 def types_response( r ):
     class Out:
-        status = r.status_code
+        status  = r.status_code
+        headers = {}
         def read( self ): return r.content
         def __enter__( self ): return self
         def __exit__( self, *a ): return False

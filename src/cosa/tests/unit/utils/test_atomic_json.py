@@ -94,3 +94,12 @@ def test_a_failed_rename_removes_the_temp_file_and_reraises( tmp_path ):
     with pytest.raises( OSError ):
         aj.write_json_atomic( target, { "k": 1 } )
     assert [ p.name for p in tmp_path.iterdir() ] == [ "state.json" ], "a stray .tmp was left behind"
+
+
+def test_sort_keys_writes_every_level_in_sorted_order_and_default_keeps_insertion_order( tmp_path ):
+    target = tmp_path / "ledger.json"
+    data   = { "b": 1, "a": { "z": 1, "y": 2 } }
+    aj.write_json_atomic( target, data, sort_keys=True )
+    assert target.read_text() == '{"a": {"y": 2, "z": 1}, "b": 1}'
+    aj.write_json_atomic( target, data )
+    assert target.read_text() == '{"b": 1, "a": {"z": 1, "y": 2}}'

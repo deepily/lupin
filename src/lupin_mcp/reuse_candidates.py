@@ -17,6 +17,7 @@ from cosa.repo.symindex.candidates import search as cs_search
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates import wiki_list
 from cosa.repo.symindex.candidates.errors import CandidateError
+from cosa.utils.http_json import send_json
 from lupin_mcp.reuse_needset import expansion_replay
 
 CANDIDATE_SEARCH_FAILED = "CANDIDATE_SEARCH_FAILED"
@@ -146,14 +147,13 @@ class CandidateStage:
         Raises:
             - CandidateError CANDIDATE_SEARCH_FAILED when the server cannot be reached or answers something that is not JSON
         """
-        request = urllib.request.Request( self.base_url + path, data=canonical( body ).encode( "utf-8" ), method=method,
-                                          headers={ "Content-Type": "application/json", "X-API-Key": self.api_key or "" } )
         try:
-            with self._urlopen( request, timeout=self.timeout ) as response:
-                return response.status, json.loads( response.read() )
-        except urllib.error.HTTPError as e:
-            try: return e.code, json.loads( e.read() )
-            except ValueError: raise CandidateError( CANDIDATE_SEARCH_FAILED, f"the server answered {e.code} with a body that is not JSON" )
+            status, text, _ = send_json( self.base_url + path, canonical( body ), headers={ "X-API-Key": self.api_key or "" },
+                                         timeout=self.timeout, method=method, opener=self._urlopen )
+            try: return status, json.loads( text )
+            except ValueError:
+                if status >= 400: raise CandidateError( CANDIDATE_SEARCH_FAILED, f"the server answered {status} with a body that is not JSON" )
+                raise
         except ( urllib.error.URLError, OSError, ValueError ) as e:
             raise CandidateError( CANDIDATE_SEARCH_FAILED, f"{type( e ).__name__}: {e}" )
 

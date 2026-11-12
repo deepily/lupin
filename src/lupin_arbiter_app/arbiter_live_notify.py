@@ -35,6 +35,7 @@ from typing import Any, Callable, Optional
 from urllib.parse import urlencode
 
 from lupin_arbiter_app.health_watcher import SystemClock
+from cosa.utils.http_json import send_json
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn, DELIVERED_OUTCOMES
 
 
@@ -534,15 +535,8 @@ def _http_post_json( url, headers, payload, timeout_seconds=30 ):
     caller reads the reason out of the body. Only a failure with no HTTP answer
     (refused, timeout) still raises.
     """
-    import urllib.error
-    import urllib.request
-    data = json.dumps( payload ).encode( "utf-8" )
-    req  = urllib.request.Request( url, data=data, headers=headers, method="POST" )
-    try:
-        with urllib.request.urlopen( req, timeout=timeout_seconds ) as resp:
-            return resp.status, _parse_json_or_none( resp.read() )
-    except urllib.error.HTTPError as e:
-        return e.code, _parse_json_or_none( e.read() )
+    status, text, _ = send_json( url, payload, headers=headers, timeout=timeout_seconds )
+    return status, _parse_json_or_none( text )
 
 
 def quick_smoke_test():

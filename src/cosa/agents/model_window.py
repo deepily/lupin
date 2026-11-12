@@ -20,6 +20,8 @@ import json
 import urllib.error
 import urllib.request
 
+from cosa.utils.http_json import send_json
+
 # base_url -> { model_name -> window }; the window of a loaded model does not change
 # without a server restart, so one call per process per model is enough.
 _WINDOW_CACHE: dict = { }
@@ -48,12 +50,10 @@ def _post_json( url: str, payload: dict, timeout: int ) -> dict:
     Raises:
         - RuntimeError naming the url when the server cannot be reached or refuses
     """
-    request = urllib.request.Request(
-        url, data=json.dumps( payload ).encode(), headers={ "Content-Type": "application/json" }
-    )
     try:
-        with urllib.request.urlopen( request, timeout=timeout ) as response:
-            return json.load( response )
+        status, text, _ = send_json( url, payload, timeout=timeout )
+        if status >= 400: raise urllib.error.HTTPError( url, status, text[ :200 ], None, None )
+        return json.loads( text )
     except ( urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError ) as e:
         raise RuntimeError( f"model server did not answer {url}: {type( e ).__name__}: {e}" )
 

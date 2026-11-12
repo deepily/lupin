@@ -3,7 +3,7 @@ capability: utils-atomic-json
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.atomic_json.load_json_section@2f34252d1b
-  - cosa.utils.atomic_json.write_json_atomic@9bd982618d
+  - cosa.utils.atomic_json.write_json_atomic@736a247f07
   - cosa.utils.atomic_json.load_json_dict@33b46df3c0
 ---
 # Atomic JSON files
@@ -11,7 +11,7 @@ pins:
 Three helpers the arbiter and the worktree ledgers share to write a JSON file whole and read it back, whole or by section. The hook library keeps its own copies, because a hook must not import `cosa`.
 
 ## What it does
-- `write_json_atomic( path, data, indent, trailing_newline )` writes `data` to a temp file in the same folder, then renames it over the target. A reader sees the old file or the new one. `indent` gives indented JSON, and `trailing_newline` adds one newline after it.
+- `write_json_atomic( path, data, indent, trailing_newline, sort_keys )` writes `data` to a temp file in the same folder, then renames it over the target. A reader sees the old file or the new one. `indent` gives indented JSON, and `trailing_newline` adds one newline after it. `sort_keys` writes every object's keys in sorted order, so equal data gives equal bytes.
 - The temp name carries the writer's pid and a uuid, so two writers never share one.
 - It creates the parent folder when missing. A value that JSON cannot encode is written as its `str()`.
 - `load_json_section( path, key )` returns the dict stored under a top-level key.
