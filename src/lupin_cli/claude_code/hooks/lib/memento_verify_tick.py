@@ -38,7 +38,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir, iter_bridge_paths
 
 # One scan per day. See CADENCE above.
 MEMENTO_VERIFY_TTL_SECONDS = 24 * 3600
@@ -77,9 +77,7 @@ def fleet_repo_roots( bridges_dir=None ):
     roots = set()
     try:
         base = Path( bridges_dir ) if bridges_dir is not None else Path( sessions_dir() )
-        for path in base.glob( "cc-*.json" ):
-            if "buffer" in path.name or "listener" in path.name:
-                continue
+        for path in iter_bridge_paths( base ):
             try:
                 cwd = json.loads( path.read_text( encoding="utf-8" ) ).get( "cwd" )
             except Exception:

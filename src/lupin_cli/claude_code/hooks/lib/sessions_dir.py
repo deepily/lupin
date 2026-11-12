@@ -66,3 +66,29 @@ def sessions_dir():
     if override:
         return Path( override )
     return Path( os.path.expanduser( "~/.claude/sessions" ) )
+
+
+def iter_bridge_paths( base ):
+    """
+    Yield the path of each bridge file in a sessions directory, one lazy scan.
+
+    The one place that decides which `cc-*.json` names are bridges. A name that holds "buffer" or
+    "listener" is a sibling file, not a bridge, and is skipped. Each caller adds its own
+    liveness test and its own read after this, because those differ from one scan to the next.
+
+    Requires:
+        - base is a Path, or any object with a `glob( pattern )` method: tests stand in a fake directory, and the loops this replaced called `.glob` on whatever `SESSION_DIR` was
+
+    Ensures:
+        - yields the matches of `cc-*.json` under base, in glob order, one at a time
+        - skips every name containing "buffer" or "listener"
+        - reads no file and checks no pid
+        - a caller that deletes or rewrites a bridge while iterating sees the glob as it goes, as a bare glob loop did
+
+    Raises:
+        - nothing for a missing directory: it yields nothing
+    """
+    for path in base.glob( "cc-*.json" ):
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+        yield path

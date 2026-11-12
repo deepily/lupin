@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone@8a74cbad28
   - lupin_cli.claude_code.hooks.lib.session_bridge.set_speakerphone@51c4a7977d
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_speakerphone_sessions@6e8713dc35
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_speakerphone_sessions@9c83a17867
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_voice_persona@2ea96eeef2
   - lupin_cli.claude_code.hooks.lib.session_bridge.set_voice_persona@88c4a5d6d7
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions@f2ca237d8f
