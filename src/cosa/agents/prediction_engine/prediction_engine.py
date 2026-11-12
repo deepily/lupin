@@ -899,9 +899,29 @@ class PredictionEngine:
             - Falls back to cold_start if no embedding, store, or similar cases
             - Falls back to retrieval if LLM call fails
         """
+        return self._predict_two_tier( message, category, embedding, RESPONSE_TYPE_OPEN_ENDED, "OE", lambda value: value )
+
+    def _predict_two_tier( self, message: str, category: str, embedding: Optional[list],
+                           response_type: str, label: str, convert ) -> PredictionResult:
+        """
+        Two-tier retrieval then LLM synthesis, shared by the open-ended and batch predictors.
+
+        Requires:
+            - message, category and embedding are as for _predict_open_ended
+            - response_type is the store's response type to search and to stamp on the result
+            - label is the short tag for debug lines ( "OE" or "OEB" )
+            - convert maps a stored or synthesized answer text to the predicted value
+
+        Ensures:
+            - returns cold_start when there is no embedding, no store, no similar case, or every case was rejected
+            - Tier 1: an exact normalized match returns STRATEGY_CBR_RETRIEVAL with the match's similarity as confidence
+            - Tier 2: otherwise LLM synthesis returns STRATEGY_LLM_SYNTHESIS, confidence the lower of the top similarity and the model's
+            - a failed synthesis returns the top case as STRATEGY_CBR_RETRIEVAL, tier "llm_fallback"
+            - every predicted value goes through convert
+        """
         if embedding is None:
             return PredictionResult(
-                response_type = RESPONSE_TYPE_OPEN_ENDED,
+                response_type = response_type,
                 category      = category,
                 strategy      = STRATEGY_COLD_START,
                 metadata      = { "reason": "no_embedding" }
@@ -910,7 +930,7 @@ class PredictionEngine:
         store = self._get_embedding_store()
         if store is None:
             return PredictionResult(
-                response_type = RESPONSE_TYPE_OPEN_ENDED,
+                response_type = response_type,
                 category      = category,
                 strategy      = STRATEGY_COLD_START,
                 metadata      = { "reason": "no_embedding_store" }
@@ -923,15 +943,15 @@ class PredictionEngine:
                 category        = category,
                 limit           = self.open_ended_cbr_top_k,
                 threshold       = self.open_ended_cbr_threshold,
-                response_type   = RESPONSE_TYPE_OPEN_ENDED
+                response_type   = response_type
             )
         except Exception as e:
-            if self.debug: print( f"[PredictionEngine] find_similar error (OE): {e}" )
+            if self.debug: print( f"[PredictionEngine] find_similar error ({label}): {e}" )
             similar_cases = []
 
         if not similar_cases:
             return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED,
+                response_type      = response_type,
                 category           = category,
                 strategy           = STRATEGY_COLD_START,
                 similar_case_count = 0,
@@ -945,7 +965,7 @@ class PredictionEngine:
 
         if not candidate_cases:
             return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED,
+                response_type      = response_type,
                 category           = category,
                 strategy           = STRATEGY_COLD_START,
                 similar_case_count = len( similar_cases ),
@@ -962,14 +982,13 @@ class PredictionEngine:
             exact_question   = exact_case[ 1 ].get( "question", "" )
             decision_value   = exact_case[ 1 ].get( "decision_value", "" )
 
-            if self.debug:
-                print( f"[PredictionEngine] OE exact match: q='{exact_question[:60]}', answer='{decision_value[:60]}'" )
+            if self.debug: print( f"[PredictionEngine] {label} exact match: q='{exact_question[:60]}'" )
 
             return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED,
+                response_type      = response_type,
                 category           = category,
                 strategy           = STRATEGY_CBR_RETRIEVAL,
-                predicted_value    = decision_value,
+                predicted_value    = convert( decision_value ),
                 confidence         = exact_similarity,
                 similar_case_count = len( similar_cases ),
                 metadata           = {
@@ -983,8 +1002,8 @@ class PredictionEngine:
 
         # Tier 2 — LLM synthesis
         try:
-            prompt   = self._build_synthesis_prompt( message, similar_cases )
-            client   = self._get_llm_client()
+            prompt = self._build_synthesis_prompt( message, similar_cases )
+            client = self._get_llm_client()
             if client is None:
                 raise RuntimeError( "LLM client unavailable" )
 
@@ -993,39 +1012,37 @@ class PredictionEngine:
             from cosa.agents.prediction_engine.xml_models import OpenEndedSynthesisResponse
             parsed = OpenEndedSynthesisResponse.from_xml( response, root_tag="open_ended_synthesis_response" )
 
-            llm_confidence  = parsed.get_confidence_float()
+            llm_confidence   = parsed.get_confidence_float()
             final_confidence = min( max_similarity, llm_confidence )
 
-            if self.debug:
-                print( f"[PredictionEngine] OE LLM synthesis: answer='{parsed.predicted_answer[:60]}', conf={final_confidence:.3f}" )
+            if self.debug: print( f"[PredictionEngine] {label} LLM synthesis: conf={final_confidence:.3f}" )
 
             return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED,
+                response_type      = response_type,
                 category           = category,
                 strategy           = STRATEGY_LLM_SYNTHESIS,
-                predicted_value    = parsed.predicted_answer,
+                predicted_value    = convert( parsed.predicted_answer ),
                 confidence         = final_confidence,
                 similar_case_count = len( similar_cases ),
                 metadata           = {
-                    "max_similarity"       : round( max_similarity, 3 ),
-                    "top_case_question"    : top_question[ :100 ],
-                    "case_count"           : len( similar_cases ),
-                    "synthesis_reasoning"  : parsed.reasoning[ :200 ],
-                    "tier"                 : "llm_synthesis",
-                    "original_message"     : message,
+                    "max_similarity"      : round( max_similarity, 3 ),
+                    "top_case_question"   : top_question[ :100 ],
+                    "case_count"          : len( similar_cases ),
+                    "synthesis_reasoning" : parsed.reasoning[ :200 ],
+                    "tier"                : "llm_synthesis",
+                    "original_message"    : message,
                 }
             )
 
         except Exception as e:
             # Fallback to top case retrieval on LLM failure
-            if self.debug: print( f"[PredictionEngine] OE LLM synthesis failed, falling back to retrieval: {e}" )
+            if self.debug: print( f"[PredictionEngine] {label} LLM synthesis failed, falling back to retrieval: {e}" )
 
-            decision_value = top_case.get( "decision_value", "" )
             return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED,
+                response_type      = response_type,
                 category           = category,
                 strategy           = STRATEGY_CBR_RETRIEVAL,
-                predicted_value    = decision_value,
+                predicted_value    = convert( top_case.get( "decision_value", "" ) ),
                 confidence         = max_similarity,
                 similar_case_count = len( similar_cases ),
                 metadata           = {
@@ -1103,152 +1120,7 @@ class PredictionEngine:
             - Decision values are JSON-parsed to dicts when possible
             - Returns cold_start if insufficient data
         """
-        import json
-
-        if embedding is None:
-            return PredictionResult(
-                response_type = RESPONSE_TYPE_OPEN_ENDED_BATCH,
-                category      = category,
-                strategy      = STRATEGY_COLD_START,
-                metadata      = { "reason": "no_embedding" }
-            )
-
-        store = self._get_embedding_store()
-        if store is None:
-            return PredictionResult(
-                response_type = RESPONSE_TYPE_OPEN_ENDED_BATCH,
-                category      = category,
-                strategy      = STRATEGY_COLD_START,
-                metadata      = { "reason": "no_embedding_store" }
-            )
-
-        try:
-            similar_cases = store.find_similar(
-                query_embedding = embedding,
-                category        = category,
-                limit           = self.open_ended_cbr_top_k,
-                threshold       = self.open_ended_cbr_threshold,
-                response_type   = RESPONSE_TYPE_OPEN_ENDED_BATCH
-            )
-        except Exception as e:
-            if self.debug: print( f"[PredictionEngine] find_similar error (OEB): {e}" )
-            similar_cases = []
-
-        if not similar_cases:
-            return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED_BATCH,
-                category           = category,
-                strategy           = STRATEGY_COLD_START,
-                similar_case_count = 0,
-                metadata           = { "reason": "no_similar_cases" }
-            )
-
-        # Ratification-aware (Stage 3): rejected (thumbs-downed) cases can never BE the
-        # answer; approved exact matches are preferred. Rejected cases still reach LLM
-        # synthesis as anti-exemplars via user_verdict annotations (_build_synthesis_prompt).
-        candidate_cases, exact_case = self._select_retrieval_case( similar_cases, message )
-
-        if not candidate_cases:
-            return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED_BATCH,
-                category           = category,
-                strategy           = STRATEGY_COLD_START,
-                similar_case_count = len( similar_cases ),
-                metadata           = { "reason": "all_cases_rejected" }
-            )
-
-        max_similarity = candidate_cases[ 0 ][ 0 ] / 100.0
-        top_case       = candidate_cases[ 0 ][ 1 ]
-        top_question   = top_case.get( "question", "" )
-
-        # Tier 1 — Exact match (normalized; approved-preferred, rejected never)
-        if exact_case is not None:
-            exact_similarity = exact_case[ 0 ] / 100.0
-            exact_question   = exact_case[ 1 ].get( "question", "" )
-            decision_value   = exact_case[ 1 ].get( "decision_value", "" )
-
-            # Parse JSON to get dict with answers
-            predicted = self._parse_batch_decision_value( decision_value )
-
-            if self.debug:
-                print( f"[PredictionEngine] OEB exact match: q='{exact_question[:60]}'" )
-
-            return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED_BATCH,
-                category           = category,
-                strategy           = STRATEGY_CBR_RETRIEVAL,
-                predicted_value    = predicted,
-                confidence         = exact_similarity,
-                similar_case_count = len( similar_cases ),
-                metadata           = {
-                    "max_similarity"    : round( exact_similarity, 3 ),
-                    "top_case_question" : exact_question[ :100 ],
-                    "case_count"        : len( similar_cases ),
-                    "tier"              : "exact_match",
-                    "original_message"  : message,
-                }
-            )
-
-        # Tier 2 — LLM synthesis
-        try:
-            prompt = self._build_synthesis_prompt( message, similar_cases )
-            client = self._get_llm_client()
-            if client is None:
-                raise RuntimeError( "LLM client unavailable" )
-
-            response = client.run( prompt )
-
-            from cosa.agents.prediction_engine.xml_models import OpenEndedSynthesisResponse
-            parsed = OpenEndedSynthesisResponse.from_xml( response, root_tag="open_ended_synthesis_response" )
-
-            llm_confidence   = parsed.get_confidence_float()
-            final_confidence = min( max_similarity, llm_confidence )
-
-            # Try to JSON-parse the predicted_answer for batch format
-            predicted = self._parse_batch_decision_value( parsed.predicted_answer )
-
-            if self.debug:
-                print( f"[PredictionEngine] OEB LLM synthesis: conf={final_confidence:.3f}" )
-
-            return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED_BATCH,
-                category           = category,
-                strategy           = STRATEGY_LLM_SYNTHESIS,
-                predicted_value    = predicted,
-                confidence         = final_confidence,
-                similar_case_count = len( similar_cases ),
-                metadata           = {
-                    "max_similarity"      : round( max_similarity, 3 ),
-                    "top_case_question"   : top_question[ :100 ],
-                    "case_count"          : len( similar_cases ),
-                    "synthesis_reasoning" : parsed.reasoning[ :200 ],
-                    "tier"                : "llm_synthesis",
-                    "original_message"    : message,
-                }
-            )
-
-        except Exception as e:
-            if self.debug: print( f"[PredictionEngine] OEB LLM synthesis failed, falling back to retrieval: {e}" )
-
-            decision_value = top_case.get( "decision_value", "" )
-            predicted      = self._parse_batch_decision_value( decision_value )
-
-            return PredictionResult(
-                response_type      = RESPONSE_TYPE_OPEN_ENDED_BATCH,
-                category           = category,
-                strategy           = STRATEGY_CBR_RETRIEVAL,
-                predicted_value    = predicted,
-                confidence         = max_similarity,
-                similar_case_count = len( similar_cases ),
-                metadata           = {
-                    "max_similarity"    : round( max_similarity, 3 ),
-                    "top_case_question" : top_question[ :100 ],
-                    "case_count"        : len( similar_cases ),
-                    "tier"              : "llm_fallback",
-                    "llm_error"         : str( e )[ :200 ],
-                    "original_message"  : message,
-                }
-            )
+        return self._predict_two_tier( message, category, embedding, RESPONSE_TYPE_OPEN_ENDED_BATCH, "OEB", self._parse_batch_decision_value )
 
     @staticmethod
     def _parse_batch_decision_value( decision_value: str ) -> Any:
