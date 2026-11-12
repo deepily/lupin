@@ -29,7 +29,7 @@ Answers whether definition A is the same job as definition B, for the duplicate 
 Answers how to file a finding as a row, idempotently. `TaskStoreAdapter` is the shared base of the live adapters. The stamped defaults are `PROJECT = "lupin"` in the filing module and `sender_project` `lupin` in the librarian's direct message (`notify_owner`). Owner and managers are not part of this seam; each has one home in the settings.
 
 ## Notifier
-Answers how to tell a person that something failed or slipped. `notify_route` resolves the API base, key and recipient, and `send_notify` posts to `/api/notify`. The base comes from `LUPIN_API_BASE` and defaults to `http://localhost:7999`. The duplicate check posts under the sender id `claude.code@lupin.deepily.ai#duplicate-check-daily`.
+Answers how to tell a person that something failed or slipped. `notify_route` resolves the API base, key and recipient, and `send_notify` posts to `/api/notify`. The caller names the variable that holds the base: the duplicate check and librarian use `LUPIN_API_BASE`, the hook-link tick and the doc-lint gate use `HOOK_LINK_API_BASE`. The default is `http://localhost:7999`. The duplicate check posts under the sender id `claude.code@lupin.deepily.ai#duplicate-check-daily`.
 
 ## Scheduler
 Answers how the registry becomes cron lines and how each run gets its full environment. A registry row's `repo` key names its repo, and `repo_of` returns `lupin` when the key is absent. `lines_for_job` gives a row of another repo its own `--root`, config assignment and data folder; a Lupin row's lines are unchanged. Schedules live in the registry and limits live in the INI.
