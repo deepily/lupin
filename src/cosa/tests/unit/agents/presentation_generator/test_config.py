@@ -7,12 +7,34 @@ get_output_path() path builder. ConfigurationManager is mocked; no real INI
 read. get_project_root is patched so no environment dependency.
 """
 
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import cosa.utils.util as cu
 from cosa.agents.presentation_generator import config as config_mod
 from cosa.agents.presentation_generator.config import PresentationConfig
+
+
+EXPECTED_PRESENTATION_KEYS = {
+    "content_model"            : "presentation generator content model",
+    "automated_content_model"  : "presentation generator automated content model",
+    "content_max_turns"        : "presentation generator content max turns",
+    "target_duration_minutes"  : "presentation generator target duration minutes",
+    "slides_per_minute"        : "presentation generator slides per minute",
+    "target_slide_count"       : "presentation generator target slide count",
+    "title_style"              : "presentation generator title style",
+    "max_revisions"            : "presentation generator max revisions",
+    "default_theme"            : "presentation generator default theme",
+    "templates_path"           : "presentation generator templates path",
+    "output_dir_template"      : "presentation generator output dir template",
+    "audience"                 : "presentation generator audience",
+    "veo_model"                : "presentation generator veo model",
+    "pptx_export_enabled"      : "presentation generator pptx export enabled",
+    "review_timeout_seconds"   : "presentation generator review timeout seconds",
+    "max_source_chars"         : "agent source content max chars",
+}
 
 
 class TestDefaults:
@@ -134,3 +156,13 @@ class TestGetOutputPath:
 
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )
+
+
+def test_presentation_keys_are_the_literal_strings():
+    assert config_mod.PRESENTATION_INI_KEYS == EXPECTED_PRESENTATION_KEYS
+
+
+def test_presentation_keys_exist_in_the_real_ini():
+    ini_text = open( cu.get_project_root() + "/src/conf/lupin-app.ini" ).read()
+    for ini_key in EXPECTED_PRESENTATION_KEYS.values():
+        assert re.search( r"^" + re.escape( ini_key ) + r"\s*=", ini_text, re.M ), ini_key
