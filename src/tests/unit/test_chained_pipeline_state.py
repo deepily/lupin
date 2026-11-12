@@ -90,3 +90,29 @@ def test_the_shared_init_keeps_every_option_and_starts_an_empty_result_of_its_ow
                             audience_context="ctx", source_document=[ "/d.md" ], cli_mode=True, debug=False, verbose=True )
         assert ( full.budget, full.lead_model, full.no_confirm, full.audience ) == ( 2.5, "m", True, "expert" )
         assert ( full.audience_context, full.source_document, full.cli_mode, full.verbose ) == ( "ctx", [ "/d.md" ], True, True )
+
+
+def test_run_async_announces_the_second_stage_by_its_own_label():
+    import asyncio
+    from unittest.mock import patch, AsyncMock
+    from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
+    from cosa.agents.deep_research_to_presentation.agent import DeepResearchToPresentationAgent
+    for agent_class, label in ( ( DeepResearchToPodcastAgent, "Podcast Generation" ), ( DeepResearchToPresentationAgent, "Presentation Generation" ) ):
+        agent = agent_class( query="q", user_email="a@x.com", cli_mode=True )
+        notified = [ ]
+        async def _notify( message, priority="medium", **kwargs ): notified.append( message )
+        agent._notify = _notify
+        with patch.object( agent_class, "_set_modality" ), \
+             patch.object( agent_class, "_run_deep_research", AsyncMock( return_value={ "cancelled": True } ) ):
+            asyncio.run( agent.run_async() )
+        assert notified == [ "Starting Deep Research pipeline..." ]
+        agent = agent_class( query="q", user_email="a@x.com", cli_mode=True )
+        notified.clear()
+        agent._notify = _notify
+        dr = { "report_path": "/io/r.md", "abstract": "a", "cost": 0.5, "artifacts": { "tokens_used": 10, "duration_seconds": 1 }, "cancelled": False }
+        with patch.object( agent_class, "_set_modality" ), \
+             patch.object( agent_class, "_run_deep_research", AsyncMock( return_value=dr ) ), \
+             patch.object( agent_class, "_run_second_stage", AsyncMock( return_value={ "cancelled": True } ) ):
+            result = asyncio.run( agent.run_async() )
+        assert f"Starting {label}..." in notified
+        assert result.error == f"{label} was cancelled by user"

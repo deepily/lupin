@@ -199,6 +199,7 @@ def test_an_exception_prints_a_traceback_only_under_debug( capsys ):
 def test_each_package_prints_its_own_artifact_lines_and_cost_summary( capsys ):
     from cosa.agents.deep_research_to_podcast import __main__ as podcast_main
     from cosa.agents.deep_research_to_presentation import __main__ as presentation_main
+    capsys.readouterr()   # the imports above can log; start from an empty capture
     result = _Result( success=True )
     result.pg_cost, result.total_cost = 2.5, 3.75
     result.audio_path, result.script_path = "/io/a.mp3", "/io/s.md"
@@ -214,3 +215,42 @@ def test_each_package_prints_its_own_artifact_lines_and_cost_summary( capsys ):
     assert capsys.readouterr().out == (
         "\nPresentation YAML: /io/d.yaml\nPresentation Marp: /io/d.md\n\nCost Summary:\n"
         "  Deep Research:            $1.2500\n  Presentation Generator:   $2.5000\n  Total:                    $3.7500\n" )
+
+
+def _pipeline_args():
+    return argparse.Namespace(
+        query="q", user_email="a@x.com", budget=None, lead_model=None, no_confirm=False, audience=None,
+        audience_context=None, cli_mode=True, debug=False, verbose=False,
+        languages=None, max_segments=None, target_duration_minutes=None, target_slide_count=None, theme=None )
+
+
+@pytest.mark.parametrize( "package, agent_name, stage_label, retry_command", [
+    ( "deep_research_to_podcast",      "DeepResearchToPodcastAgent",      "Podcast Generation",
+      "python -m cosa.agents.podcast_generator --research {research_path}" ),
+    ( "deep_research_to_presentation", "DeepResearchToPresentationAgent", "Presentation Generation",
+      "python -m cosa.agents.presentation_generator --source {research_path}" ),
+] )
+def test_each_run_pipeline_hands_its_own_stage_label_and_retry_command_to_the_shared_runner(
+        monkeypatch, package, agent_name, stage_label, retry_command ):
+    import asyncio
+    import importlib
+    main_module = importlib.import_module( f"cosa.agents.{package}.__main__" )
+    agent_pkg   = importlib.import_module( f"cosa.agents.{package}" )
+    built       = [ ]
+    calls       = [ ]
+
+    class _FakeAgent:
+        def __init__( self, **kwargs ): built.append( kwargs )
+
+    async def _fake_runner( args, agent, label, show_success, retry ):
+        calls.append( ( agent, label, show_success, retry ) )
+        return 7
+
+    monkeypatch.setattr( agent_pkg, agent_name, _FakeAgent )
+    monkeypatch.setattr( main_module, "run_agent_and_report", _fake_runner )
+    assert asyncio.run( main_module.run_pipeline( _pipeline_args() ) ) == 7
+    assert len( built ) == 1 and len( calls ) == 1
+    agent, label, show_success, retry = calls[ 0 ]
+    assert isinstance( agent, _FakeAgent )
+    assert ( label, retry ) == ( stage_label, retry_command )
+    assert show_success is main_module._show_success
