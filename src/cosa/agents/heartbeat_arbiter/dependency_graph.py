@@ -34,6 +34,8 @@ read lives in the arbiter orchestrator seam (ArbiterConsumerJob._stale_hold_hold
 leaf stays pure.
 """
 import datetime
+
+from cosa.utils.iso_timestamp import parse_iso
 import re
 
 from lupin_mcp.persona_normalization import canonical_persona_key
@@ -103,20 +105,7 @@ def _parse_peer_target( holding_on ):
     return first
 
 
-def _parse_iso( value ):
-    """Parse an ISO-8601 timestamp → aware datetime, or None. Never raises."""
-    if not value or not isinstance( value, str ):
-        return None
-    text = value.strip()
-    if text.endswith( "Z" ):
-        text = text[ :-1 ] + "+00:00"
-    try:
-        parsed = datetime.datetime.fromisoformat( text )
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace( tzinfo=datetime.timezone.utc )
-    return parsed
+_parse_iso = parse_iso
 
 
 def hold_is_stale( hold, now ):
