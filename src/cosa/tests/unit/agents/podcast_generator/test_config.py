@@ -247,6 +247,13 @@ class TestGetOutputPath:
         assert ":" not in path and "?" not in path and "!" not in path
         assert "voice-computing-from-sci-fi-to-reality" in path
 
+    def test_tab_and_newline_become_hyphens_not_part_of_the_file_name( self ):
+        with _patch_root( "/proj" ):
+            path = self._cfg().get_output_path( user_id="u@test.com", topic="tab\there\nand more", file_type="script" )
+        name = path.rsplit( "/", 1 )[ -1 ]
+        assert "\t" not in name and "\n" not in name
+        assert name.endswith( "-tab-here-and-more-script.md" )
+
 
 # ----------------------------------------------------------------------------
 # PodcastConfig.from_config
