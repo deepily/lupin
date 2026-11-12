@@ -16,7 +16,7 @@ The public API is unchanged: `from cosa.rest.db.repositories import UserReposito
 submodule imports were never affected.
 """
 
-import importlib
+from cosa.utils.lazy_exports import lazy_exports
 
 # name -> submodule the name lives in (the single source of truth for the lazy map)
 _LAZY_EXPORTS = {
@@ -35,28 +35,4 @@ _LAZY_EXPORTS = {
 __all__ = list( _LAZY_EXPORTS.keys() )
 
 
-def __getattr__( name ):
-    """
-    Resolve a re-exported repository class on first access (`PEP 562` lazy attribute).
-
-    Requires:
-        - name is the attribute being accessed on this package
-
-    Ensures:
-        - a name in _LAZY_EXPORTS -> the class object, imported from its submodule
-          and cached as a package attribute (idempotent)
-        - any other name -> AttributeError (so a genuine submodule import, e.g.
-          `from cosa.rest.db.repositories import vector_search`, still falls
-          through to the normal submodule-import machinery)
-    """
-    submodule = _LAZY_EXPORTS.get( name )
-    if submodule is None:
-        raise AttributeError( f"module {__name__!r} has no attribute {name!r}" )
-    value = getattr( importlib.import_module( f".{submodule}", __name__ ), name )
-    globals()[ name ] = value                                # cache — next access skips __getattr__
-    return value
-
-
-def __dir__():
-    """Expose the lazy names to dir()/autocomplete alongside the real attributes."""
-    return sorted( set( globals() ) | set( _LAZY_EXPORTS ) )
+__getattr__, __dir__ = lazy_exports( __name__, globals(), _LAZY_EXPORTS )
