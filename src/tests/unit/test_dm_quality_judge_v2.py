@@ -771,3 +771,20 @@ class TestADeadPortDoesNotBuyRetries:
         assert judge._client_ever_responded is False
         judge._grade_directness( BODY )
         assert judge._client_ever_responded is True
+
+
+def test_each_judge_reads_its_own_modules_word_limit( monkeypatch ):
+    """Patching one module's limit steers that judge alone, the seam the ceiling probe uses."""
+    from cosa.agents.dm_quality_judge import judge as v1_module
+    from cosa.agents.dm_quality_judge import judge_v2 as v2_module
+    body = "word " * 11
+    v1   = DmQualityJudge( qualitative_enabled=True )
+    v2   = DmQualityJudgeV2( qualitative_enabled=True )
+    v1._available = v2._available = False                  # under the limit a judge answers with the unavailable fallback, with no model call
+    monkeypatch.setattr( v2_module, "QUALITATIVE_WORD_LIMIT", 10 )
+    assert v2.judge( body )[ "directness" ] == v1_module._too_long_dimension()
+    assert v1.judge( body )[ "directness" ] != v1_module._too_long_dimension(), "v1 still reads its own, unpatched, limit"
+    monkeypatch.setattr( v2_module, "QUALITATIVE_WORD_LIMIT", 150 )
+    monkeypatch.setattr( v1_module, "QUALITATIVE_WORD_LIMIT", 10 )
+    assert v1.judge( body )[ "directness" ] == v1_module._too_long_dimension()
+    assert v2.judge( body )[ "directness" ] != v1_module._too_long_dimension(), "v2 still reads its own, unpatched, limit"

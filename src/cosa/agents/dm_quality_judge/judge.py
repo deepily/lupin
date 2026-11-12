@@ -625,6 +625,47 @@ def _get_qualitative_enabled():
         return False
 
 
+def grade_body( body_text, qualitative_enabled, word_limit, grade_qualitative ):
+    """
+    Grade one DM body: Length in Python, then the qualitative half when it is allowed.
+
+    Requires:
+        - body_text is a string
+        - word_limit is the word count past which the qualitative pass is skipped; each judge passes its own module's value, so a test or probe that patches one module's limit still steers that judge
+        - grade_qualitative is a zero-argument callable returning ( directness_dict, tone_dict )
+
+    Ensures:
+        - returns {"length", "directness", "tone", "overall"}, always this shape
+        - qualitative off returns two withheld non-answers and never calls grade_qualitative
+        - a body past word_limit returns two too-long non-answers and never calls it
+        - otherwise the qualitative dicts are whatever grade_qualitative returns
+        - Overall is combined from Length and the two qualitative weights by combine_overall
+    """
+    word_count = dm_word_count( body_text )
+    length     = length_bucket( word_count )
+
+    # Length-only mode (Rick's ruling, row ca7a2cbf). The 24B model recognised just one of
+    # four message types: direct and plainly written. Jargony prose hid a leading verdict from
+    # it, and a buried verdict hid plain prose from jargon. Length is Python-computed and
+    # was never in doubt, so it stays; the qualitative half goes to fine-tuning on training
+    # data written for the purpose.
+    if not qualitative_enabled:
+        directness = _withheld_dimension()
+        tone       = _withheld_dimension()
+
+    # Qualitative ceiling (bug 2a41e141): past the word limit the model cannot reliably
+    # judge, so skip the LLM call and return the honest 🤷/0. Length (above) still
+    # penalizes the verbosity, which is what actually matters here.
+    elif word_count > word_limit:
+        directness = _too_long_dimension()
+        tone       = _too_long_dimension()
+    else:
+        directness, tone = grade_qualitative()
+
+    overall = combine_overall( length[ "weight" ], directness[ "weight" ], tone[ "weight" ], length[ "detail" ] )
+    return { "length": length, "directness": directness, "tone": tone, "overall": overall }
+
+
 class DmQualityJudge:
     """
     Grade a peer-DM body on Length (Python) + Directness/Tone (Mistral).
@@ -710,33 +751,7 @@ class DmQualityJudge:
         Returns:
             dict: the full quality grade
         """
-        word_count = dm_word_count( body_text )
-        length     = length_bucket( word_count )
-
-        # LENGTH-ONLY MODE (Rick, 2026-08-01, row ca7a2cbf). Measured that day, the 24B
-        # recognizes exactly ONE of four message types — a message that is direct AND
-        # plainly written. Hold the prose jargony and it cannot tell a leading verdict
-        # from a buried one; bury the verdict and it cannot tell plain prose from jargon.
-        # Everything not good-on-both collapses to `meh`. His ruling: keep Length, which
-        # is Python-computed and has never been in doubt, and pursue the qualitative half
-        # separately via fine-tuning on purpose-built training data.
-        if not self.qualitative_enabled:
-            directness = _withheld_dimension()
-            tone       = _withheld_dimension()
-
-        # Qualitative ceiling (bug 2a41e141): past QUALITATIVE_WORD_LIMIT the model
-        # cannot reliably judge — skip the LLM call and return the honest 🤷/0. Length
-        # (above) still penalizes the verbosity, which is what actually matters here.
-        elif word_count > QUALITATIVE_WORD_LIMIT:
-            directness = _too_long_dimension()
-            tone       = _too_long_dimension()
-        else:
-            directness, tone = self._grade_qualitative( body_text )
-
-        overall = combine_overall(
-            length[ "weight" ], directness[ "weight" ], tone[ "weight" ], length[ "detail" ]
-        )
-        return { "length": length, "directness": directness, "tone": tone, "overall": overall }
+        return grade_body( body_text, self.qualitative_enabled, QUALITATIVE_WORD_LIMIT, lambda: self._grade_qualitative( body_text ) )
 
     def _grade_qualitative( self, body_text ):
         """
