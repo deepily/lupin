@@ -2,7 +2,7 @@
 capability: prediction-engine
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@be1f386863
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@3a66666946
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.predict@399fd38a6c
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_outcome@c1eaa235d9
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_hint_vote@384d7e7edb

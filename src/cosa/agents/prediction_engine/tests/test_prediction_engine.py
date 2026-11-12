@@ -1247,3 +1247,24 @@ def test_enrich_batch_embedding_none_continues_loop_multi_header():
     actual = { "answers": { "H1": "x", "H2": "y" } }
     eng._enrich_with_embedding_similarity( actual, pr, RESPONSE_TYPE_OPEN_ENDED_BATCH )
     assert "_embedding_similarity" not in actual
+
+
+# ---------------------------------------------------------------------------
+# _predict_two_tier — what each caller passes into the shared skeleton
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "method, searched", [ ( "_predict_open_ended", "open_ended" ), ( "_predict_open_ended_batch", "open_ended_batch" ) ] )
+def test_each_predictor_searches_and_stamps_its_own_response_type( method, searched ):
+    eng   = _engine()
+    store = _store( cases=[ ( 95.0, { "question": "q?", "decision_value": "x" } ) ] )
+    eng._get_embedding_store = lambda: store
+    r = getattr( eng, method )( "q?", "input", [ 0.1 ] )
+    assert store.find_similar.call_args.kwargs[ "response_type" ] == searched and r.response_type == searched
+
+
+def test_open_ended_leaves_a_json_looking_answer_as_text_and_batch_parses_it():
+    dv = json.dumps( { "answers": { "Topic": "quantum" } } )
+    for method, expected in ( ( "_predict_open_ended", dv ), ( "_predict_open_ended_batch", { "answers": { "Topic": "quantum" } } ) ):
+        eng = _engine()
+        eng._get_embedding_store = lambda: _store( cases=[ ( 95.0, { "question": "q?", "decision_value": dv } ) ] )
+        assert getattr( eng, method )( "q?", "input", [ 0.1 ] ).predicted_value == expected
