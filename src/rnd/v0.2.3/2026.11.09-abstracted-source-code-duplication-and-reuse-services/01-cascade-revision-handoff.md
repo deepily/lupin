@@ -513,3 +513,35 @@ RULING cosa.agents.deep_research.cli.run_research :: DISTINCT the research CLI p
 SEARCHED cosa.agents.deep_research.cli.run_research :: rs-e1c4efc1de :: cosa.agents.deep_research.orchestrator.ResearchOrchestratorAgent.do_all_async :: RELATED :: the same six phases in name, with the differences in the table above
 SEARCHED cosa.agents.deep_research.cli.run_research :: rs-e1c4efc1de :: cosa.agents.deep_research.orchestrator.ResearchOrchestratorAgent._clarify_query_async :: RELATED :: calls `call_lead_agent` and falls back to no clarification, where the CLI calls `call_with_json_output`
 SEARCHED cosa.agents.deep_research.cli.run_research :: rs-e1c4efc1de :: cosa.agents.deep_research.cli.main :: UNRELATED :: argument parsing and report saving around `run_research`
+
+### Reuse review: four watcher loops against run_poll_loop (row 2448ae19, follow-up adf50584)
+
+Measured 2026-11-11 at 4e190c208, by running each loop's real `_loop` on a thread beside `run_poll_loop`, with a three-second tick and a fake sweep. The probe is not checked in.
+
+| What | `_loop` of follow_through, task_chase, turn_age, self_respin | `run_poll_loop` |
+|---|---|---|
+| Time from `stop()` to the thread ending | 0.0 s, because the nap is `Event.wait( timeout )` | 2.7 s, because the nap is `clock.sleep( interval_seconds )` |
+| Where the pause length comes from | `_tick_seconds()` or `_interval_seconds()`, asked once per cycle (3 times over 3 sweeps), so an INI edit applies on the next cycle | one number the caller passes in, read once |
+| An error out of a sweep | `du.print_banner` on stdout; self_respin calls its own `_log_skip` | `log_fn( "poll_error", error=... )` |
+| What one guard covers | one `sweep_once`; self_respin puts `sweep_once` and `record_once` inside the same guard | one `poll_once` |
+| Where it lives | `cosa` (needs the full app venv) | `lupin_arbiter_app`, standard library only, for the light :8001 venv |
+
+`run_poll_loop` has three users today (`context_pressure_writer`, `health_watcher`, `job_alert_watcher`), all inside `lupin_arbiter_app`. The four loops above share one more thing with each other: each class already gets its thread start and stop from `StoppableDaemonMixin`, which calls `_loop`.
+
+Folding the four onto `run_poll_loop` would change what they do: a stop would wait up to one tick (60 s for turn_age's default) where it now returns at once, an INI change to the tick would stop applying until restart, and the error line would move from stdout to a `log_fn` the four classes do not have. Avoiding those would mean changing `run_poll_loop` for its three existing users.
+
+RULING cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher._loop :: DISTINCT it naps with `Event.wait` so a stop ends the thread at once and re-reads the tick each cycle, while `run_poll_loop` sleeps the whole interval after a stop and takes one fixed number; it also reports a failed sweep on stdout, not through `log_fn` :: reuse-receipt: dc9d4b086201e9a1 :: search: rs-0492d2ae9f
+SEARCHED cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher._loop :: rs-0492d2ae9f :: cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog._loop :: RELATED :: the same wait-then-sweep loop, ruled with it below
+SEARCHED cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher._loop :: rs-0492d2ae9f :: cosa.rest.job_persistence.mark_interrupted_jobs :: UNRELATED :: marks jobs interrupted at start-up and runs no loop
+
+RULING cosa.rest.task_chase_consumer.TaskChaseConsumer._loop :: DISTINCT it naps with `Event.wait` so a stop ends the thread at once and re-reads the interval each cycle, while `run_poll_loop` sleeps the whole interval after a stop and takes one fixed number; it also reports a failed sweep on stdout, not through `log_fn` :: reuse-receipt: 2070fce70d6ead24 :: search: rs-287ade8960
+SEARCHED cosa.rest.task_chase_consumer.TaskChaseConsumer._loop :: rs-287ade8960 :: cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog._loop :: RELATED :: the same wait-then-sweep loop, ruled with it
+SEARCHED cosa.rest.task_chase_consumer.TaskChaseConsumer._loop :: rs-287ade8960 :: cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher._loop :: RELATED :: the same wait-then-sweep loop, ruled with it
+
+RULING cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog._loop :: DISTINCT it naps with `Event.wait` so a stop ends the thread at once and re-reads the tick each cycle, while `run_poll_loop` sleeps the whole interval after a stop and takes one fixed number; it also reports a failed sweep on stdout, not through `log_fn` :: reuse-receipt: 5b997c63f58a7409 :: search: rs-015083eaed
+SEARCHED cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog._loop :: rs-015083eaed :: cosa.rest.queue_consumer.start_todo_producer_run_consumer_thread :: UNRELATED :: starts the queue consumer thread and has no sweep or stop wait
+SEARCHED cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog._loop :: rs-015083eaed :: lupin_mcp.session_spawner.dismiss_sessions :: UNRELATED :: reaps seats and runs no loop
+
+RULING cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinObserverLoop._loop :: DISTINCT it naps with `Event.wait` so a stop ends the thread at once and re-reads the tick each cycle, runs `sweep_once` and `record_once` inside one guard, and reports a failure through its own `_log_skip`, where `run_poll_loop` sleeps the whole interval after a stop, guards one `poll_once` and logs through `log_fn` :: reuse-receipt: 73ddd975e411d3d5 :: search: rs-00fad19630
+SEARCHED cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinObserverLoop._loop :: rs-00fad19630 :: lupin_arbiter_app.app.assemble_app :: UNRELATED :: builds the arbiter app and runs no loop
+SEARCHED cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinObserverLoop._loop :: rs-00fad19630 :: cosa.rest.websocket_manager.WebSocketManager.heartbeat_check :: UNRELATED :: one connection check, with no loop and no stop wait
