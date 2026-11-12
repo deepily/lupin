@@ -6,7 +6,7 @@ pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.atomic_write_json@304ee933db
   - lupin_cli.claude_code.hooks.lib.session_bridge.canonical_persona_key@1f4c521dcb
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_path_by_id@2eb138d772
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_sessions@f16e8f60e0
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_sessions@004fcc2be6
   - lupin_cli.claude_code.hooks.lib.session_bridge.touch_bridge_mtime@6b55fa5d1b
 ---
 # Claude Code session bridge

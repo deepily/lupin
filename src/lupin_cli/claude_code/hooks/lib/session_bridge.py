@@ -44,7 +44,7 @@ import uuid
 from pathlib import Path
 from typing import Optional, Tuple
 from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
-from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir, iter_bridge_paths
 
 # The module a spawned idle waiter runs as (`python -m ...`), so it is on its command line.
 _IDLE_WAITER_MODULE = "lupin_cli.claude_code.hooks.lib.idle_waiter"
@@ -819,16 +819,12 @@ def find_session_by_id( session_id, exact=False, check_pid=True ):
     if not session_id or not SESSION_DIR.exists():
         return None
 
-    paths = SESSION_DIR.glob( "cc-*.json" )
+    paths = iter_bridge_paths( SESSION_DIR )
     if not check_pid:
         # Newest first, so the first match is the most recently written bridge.
         paths = sorted( paths, key=_mtime_or_zero, reverse=True )
 
     for path in paths:
-        # Skip non-bridge files (buffers, listeners, etc.)
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
         # PID liveness check
         file_pid = _extract_pid_from_filename( path.name )
         if check_pid and file_pid is not None and not _is_pid_alive( file_pid ):
@@ -920,10 +916,7 @@ def iter_live_bridges():
     """
     trust_host_pids = _can_trust_host_pids()
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         if trust_host_pids:
             file_pid = _extract_pid_from_filename( path.name )
             if file_pid is not None and not _is_pid_alive( file_pid ):
@@ -1031,9 +1024,7 @@ def find_dead_sessions( candidate_ids ):
         return set()
 
     dead = set()
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
+    for path in iter_bridge_paths( SESSION_DIR ):
         try:
             data = _load_bridge_object( path )
         except ( json.JSONDecodeError, OSError ):
@@ -1253,10 +1244,7 @@ def find_active_speakerphone_sessions( exclude_session_id=None ):
     trust_host_pids = _can_trust_host_pids()
     results = []
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         if trust_host_pids:
             file_pid = _extract_pid_from_filename( path.name )
             if file_pid is not None and not _is_pid_alive( file_pid ):
@@ -1835,10 +1823,7 @@ def prune_dead_persona_bridges():
         return 0
 
     pruned = 0
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         file_pid = _extract_pid_from_filename( path.name )
         if file_pid is None or _is_pid_alive( file_pid ):
             continue
@@ -1938,10 +1923,7 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
     now             = time.time()
     results         = []
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         pid_is_alive = False
         if trust_host_pids:
             file_pid = _extract_pid_from_filename( path.name )
@@ -2047,10 +2029,7 @@ def find_session_by_tmux( tmux_session ):
     if not tmux_session or not SESSION_DIR.exists():
         return None
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         file_pid = _extract_pid_from_filename( path.name )
         if file_pid is not None and not _is_pid_alive( file_pid ):
             continue

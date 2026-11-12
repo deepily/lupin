@@ -2,15 +2,17 @@
 capability: cc-session-bridge-liveness
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_dead_sessions@ca5dff8918
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_dead_sessions@bcd3f36154
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_bridge_mtime@681d5820fe
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_bridge_touch_failure_count@365d0e6864
-  - lupin_cli.claude_code.hooks.lib.session_bridge.prune_dead_persona_bridges@29cdc714df
+  - lupin_cli.claude_code.hooks.lib.session_bridge.prune_dead_persona_bridges@4c279009ca
+  - lupin_cli.claude_code.hooks.lib.sessions_dir.iter_bridge_paths@f6d7f7e317
   - lupin_mcp.bridge_liveness_middleware.BridgeLivenessMiddleware@9aa910aa7c
 ---
 # Claude Code session bridge liveness
 Readers and cleanup that tell whether a seat is still running, based on its bridge file. Layout and the live-bridge rules are in [[cc-session-bridge]].
 ## What it does
+- `iter_bridge_paths( base )` is the listing these scans start from. It lazily yields each `cc-*.json` under `base` and skips names containing `buffer` or `listener`. It checks no pid.
 - `find_dead_sessions()` takes candidate ids and returns those whose bridge is found and whose filename, listener and Claude pids are all confirmed dead.
 - A candidate with no readable bridge is not dead, because absence is not death. Inside a container the function returns an empty set.
 - `get_bridge_mtime()` returns a bridge file's mtime in epoch seconds, or `None`. The arbiter shows it as an honest age, not a boolean.
