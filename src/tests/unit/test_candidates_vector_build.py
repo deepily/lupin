@@ -471,7 +471,7 @@ def test_a_pass_stops_with_service_saturated_once_the_refusals_pass_the_limit_an
         vb.embed_all( client, [ "t" * n for n in range( 1, 9 ) ], "code", "document", 8, 0, lambda s: None, refusal_limit=3 )
     message = str( caught.value )
     assert caught.value.code == SERVICE_SATURATED and client.batches == [ 8, 4, 2, 1 ], "the fourth refusal passes the limit of three, so no fifth call is made"
-    assert "embeddings service" in message and "/api/embeddings" in message and "refused 4 calls" in message and "limit of 3" in message and "RuntimeError" in message
+    assert "embeddings service" in message and "FastAPI embeddings route" in message and "refused 4 calls" in message and "limit of 3" in message and "RuntimeError" in message
     assert "free" not in message.lower() and "GPU memory" not in message and "CUDA" not in message
     assert isinstance( caught.value.__cause__, RuntimeError ), "the client's own error stays on the chain"
 

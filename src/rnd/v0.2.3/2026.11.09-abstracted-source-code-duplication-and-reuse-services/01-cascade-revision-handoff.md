@@ -364,3 +364,6 @@ SEARCHED cosa.repo.code_health_settings.check_registry_names :: rs-b6052eaced ::
 RULING cosa.repo.code_health_settings.check_registry_names :: EXTEND cosa.repo.code_health_settings.name_mismatches :: reuse-receipt: a0e97d596ca2d49f :: search: rs-b6052eaced
 
 REUSE-OUTCOME a0e97d596ca2d49f :: rs-b6052eaced :: EXTENDED cosa.repo.code_health_settings.name_mismatches :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-ph1s14
+
+RULING cosa.memory.embedding_provider.EmbeddingProvider.read_info :: DISTINCT reads the whole info body pinned to the FastAPI server with the FastAPI key; _describe_engines_via_http reads only the engines block, from the model server, with its own key and config timeout :: reuse-receipt: ac764d07031009eb :: search: rs-6ba420a8d7
+REUSE-OUTCOME ac764d07031009eb :: rs-6ba420a8d7 :: WROTE_NEW reads the whole info body pinned to the FastAPI server with the FastAPI key; _describe_engines_via_http reads only the engines block, from the model server, with its own key and config timeout :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#7.10-ph1s9

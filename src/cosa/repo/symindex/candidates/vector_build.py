@@ -1,5 +1,5 @@
 """
-Build the stored vector set by posting batches of text to the embeddings endpoints.
+Build the stored vector set through the embedding provider, in batches of text.
 
 The build loads no model and makes no device choice: the GPU work runs in the server.
 No function body is embedded. The text is the name, path, signature, docstring and purpose line.
@@ -58,7 +58,7 @@ class EndpointClient:
 
     def info( self ):
         """
-        Read GET /api/embeddings/info.
+        Read the embeddings service's info body, through the provider.
 
         Ensures:
             - returns the parsed body, with its engines block
@@ -67,16 +67,7 @@ class EndpointClient:
             - RuntimeError when the key is missing or the answer is not 200
         """
         from cosa.memory.embedding_provider import EmbeddingProvider
-        base_url, api_key, prefix = EmbeddingProvider._resolve_http_target( True )
-        if not api_key: raise RuntimeError( "embeddings info: no API key found" )
-        get = self._get
-        if get is None:
-            import requests
-            get = requests.get
-        response = get( f"{base_url}{prefix}/info", headers={ "X-API-Key": api_key }, timeout=30 )
-        if response.status_code != 200:
-            raise RuntimeError( f"embeddings info answered {response.status_code}: {response.text[ :200 ]}" )
-        return response.json()
+        return EmbeddingProvider.read_info( pin_fastapi=True, get=self._get )
 
 
 def entry_texts( entry, purpose ):
@@ -141,7 +132,7 @@ def saturated_message( refusals, exc ):
           server's 500 body can speak of hardware, and it stays on the exception chain
         - says the run stops and may be run again once the service answers; it asks nobody to change the service or its hardware
     """
-    return ( f"the embeddings service (the FastAPI /api/embeddings endpoint and the model server behind it) refused {refusals[ 'count' ]} calls "
+    return ( f"the embeddings service (the FastAPI embeddings route and the model server behind it) refused {refusals[ 'count' ]} calls "
              f"in this pass. The pass stops at a single refused text or past the limit of {refusals[ 'limit' ]}, instead of retrying smaller batches. "
              f"Run it again once the service answers. Last refusal: {type( exc ).__name__}." )
 
@@ -194,7 +185,7 @@ def reuse_mismatches( old_manifest, info ):
 
     Requires:
         - old_manifest is the sealed manifest of the live set
-        - info is the body of GET /api/embeddings/info, with its engines block
+        - info is the body of the service's info read, with its engines block
 
     Ensures:
         - returns [] only when the code engine, the prose engine, the device class, the libraries and the
