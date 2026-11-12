@@ -489,3 +489,27 @@ REUSE-OUTCOME 5d354c90e6ef2ac7 :: rs-08eb98b4ba :: WROTE_NEW the one reader of a
 
 RULING lupin_mcp.cosa_voice_mcp._parse_answers_response :: DISTINCT the one reader of a choice or batch notification's JSON answers with a label for the warning: an empty value gives empty answers, a non-object JSON value is wrapped under answers, and text that is not JSON is kept under response; the nearest hits fail differently, PredictionEngine._parse_mc_decision_value returns None, _parse_batch_decision_value returns the raw string, ScriptMatcherResponse.get_answers_dict returns an empty dict, and CRUDIntent._parse_json_field returns an empty dict, and none of them wraps a non-object value or logs a warning :: reuse-receipt: 3e6c797350a85ae2 :: search: rs-7fc1acf98e
 REUSE-OUTCOME 3e6c797350a85ae2 :: rs-7fc1acf98e :: WROTE_NEW the one reader of a choice or batch notification's JSON answers with a label for the warning: an empty value gives empty answers, a non-object JSON value is wrapped under answers, and text that is not JSON is kept under response; the nearest hits fail differently, PredictionEngine._parse_mc_decision_value returns None, _parse_batch_decision_value returns the raw string, ScriptMatcherResponse.get_answers_dict returns an empty dict, and CRUDIntent._parse_json_field returns an empty dict, and none of them wraps a non-object value or logs a warning :: src/rnd/v0.2.3/2026.11.09-abstracted-source-code-duplication-and-reuse-services/01-cascade-revision-handoff.md#6.1-answersparser
+
+### Reuse review: the research CLI pipeline against the orchestrator (row 2448ae19, follow-up 78431d50)
+
+Measured 2026-11-11 at 642a616f2, by running `cli.run_research` and `ResearchOrchestratorAgent.do_all_async` side by side. Both ran against one fake model: a three-topic plan, topic 1 failing with `error_max_turns`, nobody answering the gates. The probe is not checked in.
+
+| What | `run_research` (cli.py) | `do_all_async` (orchestrator.py) |
+|---|---|---|
+| Model calls, in order | json clarification, json planning, 3 research, 1 synthesis | lead clarification, lead planning, 3 research, 1 synthesis, then a feedback ask |
+| Topics in flight at once | 1 (max in flight 1) | all of them, with no cap (3 in flight in the three-topic probe) |
+| The failed topic | dropped before synthesis, which never sees it; the report ends with a "Skipped topics" section naming `t1`; every topic failing raises | kept as a finding with confidence 0.0, the gap `Research could not be completed` and the text `Research failed: error_max_turns`, so synthesis is given it; the probe's fake synthesis returned fixed text, so what a real report shows of that gap is not measured |
+| A login expiry | aborts the run | swallowed into the same 0.0 finding |
+| Asks | none when `no_confirm`; tick-boxes for a document run | one plan gate, always asked (1 ask measured), and one draft-feedback ask (1 ask measured) |
+| Clarification answer | appended to the query | read and then discarded (`# TODO: Process clarification response in Phase 2`) |
+| Search cache, rate-limit partial report, cancel checkpoints, budget error | present | absent; it has stop and pause flags and a revise pass instead |
+| Result shape | JSON dicts | `SubagentFinding` and `ResearchPlan` models |
+
+One thing the two share: for the same query `get_planning_prompt` builds the identical 1231-character prompt on both paths, so the prompt is not a difference.
+
+Production reach, from `git grep`: `run_research` has three callers (`job.py`, `chained_pipeline_state.py`, `cli.main`). The orchestrator has none outside its tests, and the import in `cli.py` is unused. The orchestrator's own header says it is reserved and must stay until product intent is confirmed. So folding the two would change what a run does: its parallelism, how it treats a failed topic and when it asks.
+
+RULING cosa.agents.deep_research.cli.run_research :: DISTINCT the research CLI pipeline runs topics one at a time, drops a failed topic and names it in the report, and asks nothing under `no_confirm`; the orchestrator runs them all at once, feeds a failed topic to synthesis as a 0.0-confidence finding and always asks twice; the orchestrator is not wired into production, so there is no live duplicate to remove :: reuse-receipt: 74b50b07022fc3f5 :: search: rs-e1c4efc1de
+SEARCHED cosa.agents.deep_research.cli.run_research :: rs-e1c4efc1de :: cosa.agents.deep_research.orchestrator.ResearchOrchestratorAgent.do_all_async :: RELATED :: the same six phases in name, with the differences in the table above
+SEARCHED cosa.agents.deep_research.cli.run_research :: rs-e1c4efc1de :: cosa.agents.deep_research.orchestrator.ResearchOrchestratorAgent._clarify_query_async :: RELATED :: calls `call_lead_agent` and falls back to no clarification, where the CLI calls `call_with_json_output`
+SEARCHED cosa.agents.deep_research.cli.run_research :: rs-e1c4efc1de :: cosa.agents.deep_research.cli.main :: UNRELATED :: argument parsing and report saving around `run_research`
