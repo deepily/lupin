@@ -153,8 +153,8 @@ VERTEX_REGION_CERTIFICATIONS = {
 # configuration teaches people to disable guards (C4, one bucket over). Only DRIFT IN THE KEYS
 # is an error; a drift in the version number is merely news.
 PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
-    "cc_version" : "2.1.293",
-    "harvested"  : "2026-10-07",
+    "cc_version" : "2.1.323",
+    "harvested"  : "2026-11-13",
     "instrument" : "strings $(readlink -f $(which claude)) | grep -oE 'VERTEX_REGION_CLAUDE_[A-Z0-9_]+'",
 }
 
@@ -188,6 +188,13 @@ PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
 # instrument across every version on disk before touching the tuple: 19 keys in 2.1.284
 # against 18 guarded, exactly one unguarded and ZERO phantom, so the tuple was correct
 # until the upgrade rather than merely stale. Key added first, stamp moved second.
+#
+# Moved again on 13 November 2026 (row d2a18b64, unit-tier red on main and the branch): the installed
+# binary moved to 2.1.323 and honors VERTEX_REGION_CLAUDE_FABLE_5_2. Re-harvested with the
+# documented instrument across the four versions on disk: 20 keys in 2.1.319, 21 in 2.1.321,
+# .322 and .323; the new key is absent from .319 and present in .321, .322 and .323 (2.1.320 is
+# not on disk, so the entry says "present by"). 21 keys against 20 guarded, exactly one
+# unguarded and no phantom. Key added first, stamp moved second.
 #
 # ⚠️ AN ENTRY'S COMMENT SAYS "present by", NOT "added in", AND THE DIFFERENCE IS A
 # CLAIM NOBODY HERE CAN MAKE. A harvest reads the versions that happen to be ON
@@ -235,6 +242,7 @@ PER_MODEL_REGION_OVERRIDES = (
     "VERTEX_REGION_CLAUDE_5_SONNET",
     "VERTEX_REGION_CLAUDE_FABLE_5",
     "VERTEX_REGION_CLAUDE_FABLE_5_1",       # added 2.1.258 (2026-09-01)
+    "VERTEX_REGION_CLAUDE_FABLE_5_2",       # present by 2.1.321 — absent in 2.1.319, measured; 2.1.320 not on disk
     "VERTEX_REGION_CLAUDE_HAIKU_4_5",
     "VERTEX_REGION_CLAUDE_HAIKU_5_5",       # added 2.1.293 (2026-10-07) — absent in .289/.290/.291/.292, measured
 )
