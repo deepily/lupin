@@ -116,3 +116,68 @@ def test_run_async_announces_the_second_stage_by_its_own_label():
             result = asyncio.run( agent.run_async() )
         assert f"Starting {label}..." in notified
         assert result.error == f"{label} was cancelled by user"
+
+
+# =============================================================================
+# The research leg reads its model ids from the INI, with no default in code
+# =============================================================================
+
+def _research_leg_patches( seen, cost, gister ):
+    from unittest.mock import AsyncMock, patch
+
+    async def _capture( **kw ):
+        seen.append( kw[ "config" ] )
+        return "# Report"
+
+    return ( patch( "cosa.agents.deep_research.cli.run_research", _capture ),
+             patch( "cosa.agents.deep_research.cli.generate_abstract_for_cli", AsyncMock( return_value="abs" ) ),
+             patch( "cosa.agents.deep_research.cli.save_report_with_frontmatter", return_value="/io/r.md" ),
+             patch( "cosa.agents.deep_research.cost_tracker.CostTracker", cost ),
+             patch( "cosa.memory.gister.Gister", gister ) )
+
+
+def _research_leg_doubles():
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    gister = MagicMock()
+    gister.return_value.get_gist.return_value = "a name"
+    cost = MagicMock()
+    cost.return_value.get_summary.return_value = SimpleNamespace( total_cost_usd=0.5, total_input_tokens=10, total_output_tokens=5, duration_seconds=2.0 )
+    return cost, gister
+
+
+@pytest.mark.asyncio
+async def test_the_research_leg_takes_both_model_ids_from_the_ini():
+    from contextlib import ExitStack
+    from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
+    seen = []
+    cost, gister = _research_leg_doubles()
+    with ExitStack() as stack:
+        for patched in _research_leg_patches( seen, cost, gister ): stack.enter_context( patched )
+        await DeepResearchToPodcastAgent( query="q", user_email="u@x.com", no_confirm=True )._run_deep_research()
+    assert ( seen[ 0 ].lead_model, seen[ 0 ].subagent_model ) == ( "claude-opus-5", "claude-sonnet-4-6" )
+
+
+@pytest.mark.asyncio
+async def test_the_research_leg_refuses_a_missing_subagent_model_key():
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
+    from cosa.config.configuration_manager import ConfigurationManager, MissingConfigKeyError
+    real = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+
+    class _NoSubagent:
+        """The real manager, except that one model key is absent."""
+        def __getattr__( self, name ): return getattr( real, name )
+        def get_required( self, key, **kw ):
+            if key == "deep research subagent model": raise MissingConfigKeyError( key, "block", "ini" )
+            return real.get_required( key, **kw )
+
+    seen = []
+    cost, gister = _research_leg_doubles()
+    with ExitStack() as stack:
+        for patched in _research_leg_patches( seen, cost, gister ): stack.enter_context( patched )
+        stack.enter_context( patch( "cosa.config.configuration_manager.ConfigurationManager", lambda **kw: _NoSubagent() ) )
+        with pytest.raises( MissingConfigKeyError, match="deep research subagent model" ):
+            await DeepResearchToPodcastAgent( query="q", user_email="u@x.com", no_confirm=True )._run_deep_research()
+    assert seen == []

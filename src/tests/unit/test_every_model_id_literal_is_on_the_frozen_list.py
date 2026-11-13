@@ -23,7 +23,6 @@ NOW_IN_INI    = ( "src/cosa/repo/duplicate_check/config.py", "src/lupin_mcp/reus
 FROZEN = {
     "src/cosa/agents/bug_fix_expediter/job.py"             : 1,
     "src/cosa/agents/bug_fix_expediter/orchestrator.py"    : 1,
-    "src/cosa/agents/chained_pipeline_state.py"            : 2,
     "src/cosa/agents/deep_research/api_client.py"          : 1,
     "src/cosa/agents/deep_research/cost_tracker.py"        : 15,
     "src/cosa/agents/llm_client.py"                        : 1,
