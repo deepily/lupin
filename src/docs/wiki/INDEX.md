@@ -10,6 +10,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[agent-llm-clients]] — the shared LLM client layer: model registry, client factory, completion and chat clients, token counting, prompt formatting, LLM exceptions. `cosa.agents` (llm_client, llm_client_factory, model_registry, base_llm_client, completion_client, token_counter, prompt_formatter, llm_exceptions)
 - [[util-jsonl-file]] — the reader of JSON Lines files: skips blank lines, raises on a bad line, and can treat a missing file as empty. `cosa.utils` (jsonl_file)
 - [[util-csv-text]] — the one reading of an operator-typed comma list: strip each entry, drop blanks, optionally lowercase. `cosa.utils` (csv_text)
+- [[util-agreement-stats]] — the exact two-sided McNemar p and the interpolated percentile, shared by the duplicate check proof and the reuse tools. `cosa.utils` (agreement_stats)
 - [[agents-xml-models-field-validators]] — the two shared checks of the xml_models files: None to empty string, and refuse an empty field. `cosa.agents.io_models` (field_validators)
 - [[bounded-claude-code-jobs]] — running a Claude Code task as a bounded or interactive CJ Flow job, and dispatching it. `cosa.agents.claude_code`, `cosa.orchestration.claude_code`
 - [[xml-io-models]] — the XML request and response models agents parse and emit. `cosa.agents.io_models`, `cosa.agents.dm_compression`, `cosa.agents.dm_tutor`, `cosa.crud_for_dataframes` (xml_models)

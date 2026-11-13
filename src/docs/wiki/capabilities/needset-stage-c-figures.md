@@ -7,7 +7,6 @@ pins:
   - lupin_mcp.reuse_needset.stage_c_score.split@1795a456f7
   - lupin_mcp.reuse_needset.stage_c_score.auc_counts@59642d33e0
   - lupin_mcp.reuse_needset.stage_c_score.aucs@926510cb0e
-  - lupin_mcp.reuse_needset.stage_c_score.percentile@beba0273a0
   - lupin_mcp.reuse_needset.stage_c_score.bootstrap@52054210dc
   - lupin_mcp.reuse_needset.stage_c_score.newcombe@e330d34c7f
   - lupin_mcp.reuse_needset.stage_c_score.spread@1711fce0f9
@@ -25,7 +24,7 @@ Scores the judge-only report against the mark written before any call. It reads 
 - `mean_ratings` collects each pair's ratings across its repeats. `population_pairs` picks one of four populations: all drafted, without unsure pairs, two agreeing raters, or without name-cue pairs.
 - `split` groups rated pairs by stratum and class. `auc_counts` counts the pairings in which the same-job rating is higher, ties one half.
 - `aucs` gives the within-stratum AUC, the stratum-weighted primary and the pooled AUC.
-- `percentile` and `bootstrap` give the 95 percent interval of each AUC. They resample within class and stratum with a fixed seed.
+- `bootstrap` gives the 95 percent interval of each AUC, taking its interval ends from `percentile` in `cosa.utils.agreement_stats`. They resample within class and stratum with a fixed seed.
 
 ## Acceptance
 - `acceptance` counts accepts at a line in each class. `reach_line` reads the not-same acceptance at the line where same-job acceptance reaches 0.80.

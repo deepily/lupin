@@ -15,6 +15,7 @@ import random
 import statistics
 
 from lupin_mcp.reuse_e2e import wilson
+from cosa.utils.agreement_stats import percentile
 
 SAME            = "same_job"
 NOT_SAME        = "not_same"
@@ -109,15 +110,6 @@ def aucs( groups ):
     every = { SAME: [ r for g in groups.values() for r in g[ SAME ] ], NOT_SAME: [ r for g in groups.values() for r in g[ NOT_SAME ] ] }
     w, n  = auc_counts( every[ SAME ], every[ NOT_SAME ] )
     return { "by_stratum": by, "primary": wins / total if total else None, "pooled": w / n if n else None }
-
-
-def percentile( values, q ):
-    """Ensures: returns the q-th percentile ( 0 to 1 ) of values by interpolation, None for none."""
-    if not values: return None
-    ordered = sorted( values )
-    place   = q * ( len( ordered ) - 1 )
-    low     = math.floor( place )
-    return ordered[ low ] + ( place - low ) * ( ordered[ min( low + 1, len( ordered ) - 1 ) ] - ordered[ low ] )
 
 
 def bootstrap( groups, resamples=RESAMPLES, seed=SEED ):
