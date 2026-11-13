@@ -1229,3 +1229,41 @@ def test_the_reinstall_text_is_pinned_to_a_literal():
         "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
         "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install\n"
         "The judge-call ceiling is not in the registry: it is the INI key `external repo lupin duplicate check ceiling` in src/conf/lupin-app.ini." )
+
+
+def manifest_of( tmp_path ):
+    path = tmp_path / "io" / "duplicate-check-daily" / dd.MANIFEST
+    return [ json.loads( l ) for l in path.read_text().splitlines() ] if path.exists() else []
+
+
+def test_each_judged_definition_gets_one_manifest_line_and_each_finding_names_the_model_that_ruled( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts )
+    lines = manifest_of( tmp_path )
+    cfg   = parts[ "verify" ]()
+    assert len( lines ) == doc[ "judged" ] == 3 and len( { l[ "id" ] for l in lines } ) == 3
+    assert all( l[ "run_file" ] == "2026-11-03-120000-hand.json" and l[ "model_id" ] == cfg[ "model_id" ] and l[ "config_sha" ] == cfg[ "config_sha" ] and l[ "time" ] == NOW.isoformat() for l in lines )
+    assert sorted( l[ "file" ] for l in lines ) == [ "client/a0.py", "client/a1.py", "client/a2.py" ]
+    assert doc[ "findings" ] and all( f[ "judge_model" ] == cfg[ "model_id" ] for f in doc[ "findings" ] )
+    dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts )
+    assert len( manifest_of( tmp_path ) ) == 3, "the empty second window adds no line"
+
+
+def test_a_definition_the_cap_left_is_not_in_the_manifest_until_a_later_run_judges_it( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    first = dd.run( repo, NOW, "hand", 1, "/bin/claude", parts )
+    assert len( manifest_of( tmp_path ) ) == first[ "judged" ] < 3
+
+
+def test_append_manifest_writes_nothing_and_makes_no_file_for_an_empty_list( tmp_path ):
+    dd.append_manifest( tmp_path / "none", [], { "model_id": "m", "config_sha": "s" }, "r.json", NOW )
+    assert not ( tmp_path / "none" ).exists()
+
+
+def test_a_judge_model_with_no_frozen_file_fails_the_frozen_prerequisite_by_name_and_judges_nothing( repo, tmp_path ):
+    history( repo )
+    def verify(): raise FileNotFoundError( 2, "No such file", "/conf/semdup-frozen-claude-opus-5-5.json" )
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, verify=verify ) )
+    assert doc[ "status" ] == "failed" and doc[ "prerequisite" ] == dd.PREREQ_FROZEN and "semdup-frozen-claude-opus-5-5.json" in doc[ "detail" ] and doc[ "judge_calls" ] == 0

@@ -41,6 +41,7 @@ from lupin_mcp.reuse_needset import source_at
 
 FOLDER            = ( "duplicate-check-daily", )
 LAST_SUCCESS      = "last-success.json"
+MANIFEST          = "interim-judge-manifest.jsonl"      # one line per judged definition: which model ruled on it, under which configuration, in which run
 RUN_LOCK          = "run.lock"        # held by the one run in flight; a boot near 10:00 starts the cron line and the reboot line together
 VECTORS_DIR       = "vectors"
 WORKTREE_PREFIX   = "duplicate-check-daily-"
@@ -410,6 +411,21 @@ def write_json( path, doc ):
     return path
 
 
+def append_manifest( folder, judged, cfg, run_file, now ):
+    """
+    Append one line per judged definition to the interim judge manifest.
+
+    Requires:
+        - folder is the daily check's data folder; judged are the definition records the run ruled on
+        - cfg is the verified frozen configuration; run_file names the run's result file; now is a timezone-aware datetime
+
+    Ensures:
+        - appends through history.append_line to <folder>/interim-judge-manifest.jsonl, making the folder, one line of { id, file, run_file, model_id, config_sha, time } for each judged definition, in order
+        - writes nothing, and does not create the file, when judged is empty
+    """
+    for d in judged: history.append_line( folder, { "id": d[ "id" ], "file": d[ "file" ], "run_file": run_file, "model_id": cfg[ "model_id" ], "config_sha": cfg[ "config_sha" ], "time": now.isoformat() }, name=MANIFEST )
+
+
 def record( folder, stem, doc, now ):
     """
     Write a run's result file and append its line to the run history.
@@ -458,7 +474,7 @@ def failed_prerequisite( client, cli_path, verify, version_fn ):
     Check the three prerequisites in order.
 
     Ensures:
-        - returns None when all hold, else { prerequisite, detail } for the first that does not: the embedding endpoint answers, the binary reports a version, the frozen configuration matches the live one
+        - returns None when all hold, else { prerequisite, detail } for the first that does not: the embedding endpoint answers, the binary reports a version, the frozen configuration matches the live one; a judge model with no frozen file fails the third
     """
     try: client.info()
     except Exception as e: return { "prerequisite": PREREQ_EMBEDDINGS, "detail": f"{type( e ).__name__}: {e}" }
@@ -466,6 +482,7 @@ def failed_prerequisite( client, cli_path, verify, version_fn ):
     if cli_path is None or version in ( None, UNREADABLE ): return { "prerequisite": PREREQ_BINARY, "detail": f"the binary {cli_path!r} reports no version" }
     try: verify()
     except err.DuplicateCheckError as e: return { "prerequisite": PREREQ_FROZEN, "detail": f"{e.code}: {e.detail}" }
+    except FileNotFoundError as e: return { "prerequisite": PREREQ_FROZEN, "detail": f"no frozen file for the selected judge model: {e.filename}" }
     return None
 
 
@@ -639,6 +656,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - an exception while reading the frozen configuration, choosing the window or making the worktree writes that file with status failed, stage setup and the error, removes a worktree it began, and moves nothing
         - the result holds test_code_dropped { owed, pool }: how many test-code definitions (is_test_code) were left out of the owed set and of the comparison pool
+        - every definition the run judged gets one line in interim-judge-manifest.jsonl, and each finding carries the model that ruled as judge_model
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
         - a baseline run leaves last-success alone and writes baseline.json: status complete when nothing is carried, else in_progress; once complete, a baseline run judges nothing
         - a daily run whose carried count, with the history's, rose on the last rise_limit measured daily runs records that as rising and alerts through the notifier
@@ -718,10 +736,12 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     doc.update( status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
+    unjudged_ids = { u[ "id" ] for u in out[ "unjudged" ] }
+    append_manifest( folder, [ d for d in fresh[ "defs" ] if d[ "id" ] not in unjudged_ids ], cfg, f"{stem}.json", now )
     try: settled = behaviour.settled_keys( folder )                    # a cluster the triage seat already ruled on, from either side, stays out of the record and the row until its code changes
     except ValueError as e: settled, doc[ "settled_error" ] = set(), str( e )       # a damaged verdicts file must not lose the judged run, so nothing is left out and the record says why
     found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ], settled )
-    found = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json" } for f in found ]       # the row names the run's day and the file that lists every finding
+    found = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json", "judge_model": cfg[ "model_id" ] } for f in found ]       # the row names the run's day and the file that lists every finding
     doc[ "findings" ] = [ filing.for_record( f ) for f in found ]       # kept on every run, filer or not: the weekly page counts them, and duplicate_check_refile files them again after a filing error
     for hook, key in ( ( "filer", "filing" ), ( "auditor", "audit" ) ):
         if hook not in parts: continue

@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.duplicate_check_filing.NoTriageOwner@022bda2814
   - lupin_mcp.duplicate_check_filing.triage_owner@3dd54aeadb
   - lupin_mcp.duplicate_check_filing.run_key@176353e748
-  - lupin_mcp.duplicate_check_filing.triage_payload@0e998a8fdb
+  - lupin_mcp.duplicate_check_filing.triage_payload@5942878c3c
   - lupin_mcp.duplicate_check_filing.triage_payloads@d5742c7adc
   - lupin_mcp.duplicate_check_filing.fit_body@88ea131cfc
   - lupin_mcp.duplicate_check_filing.read_pending@90d2acdec8
@@ -27,6 +27,7 @@ pins:
 - `triage_owner( declared, roster )` returns the lowercase persona key of the roster entry that matches the configured manager, whatever the case or accent. It never guesses. An empty roster raises `NoTriageOwner`, and so does a configured name that is blank, a role label or not on the roster. A row never lands on a role label or on a seat of another project.
 - `run_key( keys )` is `epic:dupcheck-run-` and 16 hex digits of the sha256 of the sorted finding keys. The same findings give the same row key.
 - `triage_payload( findings, owner, day )` builds one P5 task with no status, so the store's holding default applies. The title starts with `[LUPIN] Duplicate check <day>:` and asks whether the new functions should reuse existing ones.
+- The body holds one `judge: <model id>` line for each model that ruled, so an Opus row says `judge: claude-opus-5-5`.
 - The body says why the row exists and what to do: a `DUPCHECK-VERDICT` line per function, see [[duplicate-check-verdict-lines]]. It names the owner. It lists up to 200 findings, each with up to 5 of the definitions it repeats and a count of the rest. `created_by` is "<owner> (duplicate-check-daily)" with no session id.
 - The payload also carries `finding_keys`, every finding's key, so the filer can mark them triaged. The key is removed before the create.
 - `triage_payloads` splits a run into as many rows as it takes. Each row lists its findings in at most 200 findings and 30000 characters. With more than one row each title ends "(part n of m)".
