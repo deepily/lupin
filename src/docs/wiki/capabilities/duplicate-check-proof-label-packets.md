@@ -13,7 +13,7 @@ pins:
   - cosa.repo.duplicate_check.proof.label_prep.source_provenance@fc815af83c
   - cosa.repo.duplicate_check.proof.label_prep.run@3ff409c0cf
   - cosa.repo.duplicate_check.proof.label_prep.tree_definitions@34b0cb5b10
-  - cosa.repo.duplicate_check.proof.label_prep.live_wiring@1c3826a9a3
+  - cosa.repo.duplicate_check.proof.label_prep.live_wiring@cb57fb9ef6
   - cosa.repo.duplicate_check.proof.label_prep.main@63d7e5c866
 ---
 # Duplicate checker proof: blind packets and the answer key

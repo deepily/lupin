@@ -114,10 +114,11 @@ def frozen_needs( pairs, ledger, strip_fn ):
         - returns { rewrite id: need sentence } for each pair whose draft passed
         - a pair whose draft was not saved, or never passed, is absent
     """
-    out = { }
+    out      = { }
+    model_id = draft.drafter_model()      # read once, so every saved answer is looked up under one model
     for p in pairs:
         try:
-            rec = draft.draft_need( first_thousand.control_job( p, strip_fn ), yield_trace.saved_ask, ledger, max_tries=first_thousand.CONTROL_TRIES )
+            rec = draft.draft_need( first_thousand.control_job( p, strip_fn ), yield_trace.saved_ask, ledger, model_id=model_id, max_tries=first_thousand.CONTROL_TRIES )
         except SavedAnswerMissing:
             continue
         if rec[ "ok" ]: out[ p[ "rewrite" ][ "id" ] ] = rec[ "need" ]

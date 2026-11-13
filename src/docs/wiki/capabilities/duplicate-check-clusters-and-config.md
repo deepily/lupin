@@ -7,7 +7,8 @@ pins:
   - cosa.repo.duplicate_check.cluster.score@03fd52325c
   - cosa.repo.duplicate_check.cluster.sizes@2295c8d25f
   - cosa.repo.duplicate_check.cluster.surplus@cf21b33e57
-  - cosa.repo.duplicate_check.config.build_config@38d0b4be75
+  - cosa.repo.code_health_settings.model_id@25d79abd26
+  - cosa.repo.duplicate_check.config.build_config@f2add23202
   - cosa.repo.duplicate_check.config.config_sha@5878c5f4f2
   - cosa.repo.duplicate_check.config.freeze@8550134eb2
   - cosa.repo.duplicate_check.config.is_empty@b14a97293d
@@ -23,6 +24,9 @@ The score is surplus copies per 100 passing acceptance tests. The configuration 
 - `surplus` counts the new definitions beyond the one a cluster needs. `sizes` counts clusters of two or more by size.
 - `score` returns the surplus copies per 100 passing acceptance tests.
 - `build_config` builds the dict that holds every constant of a run, and `config_sha` takes its sha over every field except its own.
+- The judge's model is `model_id`, or else the INI key `duplicate check judge model`. A new model therefore reads as drift until it has its own frozen file.
+- `code_health_settings.model_id( key, config=None )` reads a model key, with no default in code. A blank, absent or spaced value raises, naming the key.
+- Its keys are `duplicate check judge model`, `duplicate check proof rewrite model` and `reuse need drafter model`. A manager it builds prints its banner to stderr.
 - `freeze` writes the configuration once and returns its sha. `is_empty` says whether a decision field is still unset.
 - `verify_frozen` checks the frozen file against its own sha and against what this run would use.
 - `frozen_path` is `src/conf/semdup-frozen-2.json` under the project root. `live_config` builds the configuration from the decided values in `frozen.py`, the judge's prompt parts and the scrub list of the tool tokens and arm labels.

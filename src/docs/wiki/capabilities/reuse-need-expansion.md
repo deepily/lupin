@@ -3,18 +3,18 @@ capability: reuse-need-expansion
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_expansion.ask_model@87c1f1f8b1
-  - lupin_mcp.reuse_expansion.make_expander@472fc6770a
+  - lupin_mcp.reuse_expansion.make_expander@9f215a4201
 ---
 # Reuse need expansion
 
 The optional first step of a candidate lookup. One text-only model call rewrites the need as paraphrases and identifier words. The candidate stage searches them too ([[candidate-stage]]).
 
 ## What it does
-- `make_expander( ask=None, model=EXPANSION_MODEL, out=print )` returns the function the stage calls for each lookup. It takes the ranking text and returns `{ paraphrases, identifiers }`: three paraphrases and one to five identifier words.
+- `make_expander( ask=None, model=None, out=print )` returns the function the stage calls for each lookup. It takes the ranking text and returns `{ paraphrases, identifiers }`: three paraphrases and one to five identifier words.
 - The model sees the need sentence and nothing else. Tools are off and no repository file is read. The prompt and the reader are `expansion_replay`'s, so a live lookup asks what the measured replay asked.
 - A failed call, a spent cap or a reply of the wrong shape returns None after one line to `out`. The lookup then runs as it would without expansion.
 - `ask_model( model, system, user )` sends the prompt on a worker thread of its own. It is safe inside the lookup's running event loop. It raises `ModelCallError` or `CallBudgetExceeded` when the call fails.
-- `EXPANSION_MODEL` is the model the measured replay's expansions came from.
+- With no `ask`, the model is the drafter's: `model`, else the INI key `reuse need drafter model` read when the expander is built (`draft.drafter_model`). The measured replay's expansions came from the drafter, so the two share one key. There is no model id in the code.
 
 ## Where it is switched on
 - The INI key `reuse candidate need expansion enabled` turns it on, and it ships `false`. With it off the stage is built with no expander and nothing changes.

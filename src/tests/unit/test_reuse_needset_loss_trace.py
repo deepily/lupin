@@ -18,7 +18,7 @@ from lupin_mcp.reuse_needset import agent_probe, draft, finalize, loss_trace, sc
 from lupin_mcp.reuse_needset import errors as er
 
 COMMIT  = "0123456789abcdef0123456789abcdef01234567"
-DRAFTER = { "model": draft.DRAFTER_MODEL, "prompt_version": "v1", "server": "max-plan" }
+DRAFTER = { "model": draft.drafter_model(), "prompt_version": "v1", "server": "max-plan" }
 AGREED  = { "choice": "AS_PROPOSED", "symbols": [], "final_source": "agreed" }
 ROOT    = "/tree"
 FROZEN  = { "index_manifest": "a" * 64, "symbols_sha": "b" * 40, "vector_build_info_sha": "c" * 64 }

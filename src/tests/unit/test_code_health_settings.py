@@ -204,3 +204,39 @@ def test_data_dir_builds_the_process_config_when_none_is_given( config, tmp_path
 def test_repo_of_names_the_repo_a_job_belongs_to_and_defaults_to_lupin():
     assert chs.repo_of( { "job": "x" } ) == "lupin"
     assert chs.repo_of( { "job": "x", "repo": "other" } ) == "other"
+
+
+# ---- model ids (row 5fa4750e: a model id lives in lupin-app.ini, never in code) ------------------------------------
+
+MODEL_KEYS = ( chs.JUDGE_MODEL_KEY, chs.REWRITE_MODEL_KEY, chs.DRAFTER_MODEL_KEY )
+
+
+def test_the_real_ini_names_fable_for_all_three_model_keys( config ):
+    assert [ chs.model_id( key, config ) for key in MODEL_KEYS ] == [ "claude-fable-5-1" ] * 3
+
+
+@pytest.mark.parametrize( "key", MODEL_KEYS )
+def test_a_model_key_follows_the_ini_and_is_read_stripped( config, key ):
+    config.set_config( key, "  claude-opus-5-5 " )
+    assert chs.model_id( key, config ) == "claude-opus-5-5"
+
+
+@pytest.mark.parametrize( "bad", [ "", "   ", "claude opus" ] )
+@pytest.mark.parametrize( "key", MODEL_KEYS )
+def test_a_blank_or_spaced_model_key_is_refused_naming_the_key_with_no_code_default( config, key, bad ):
+    config.set_config( key, bad )
+    with pytest.raises( chs.CodeHealthSettingError, match=f"^{key}: .*no default" ): chs.model_id( key, config )
+
+
+def test_model_id_builds_the_process_config_when_none_is_given( config ):
+    config.set_config( chs.JUDGE_MODEL_KEY, "claude-opus-5-5" )
+    assert chs.model_id( chs.JUDGE_MODEL_KEY ) == "claude-opus-5-5"
+
+
+def test_building_the_process_config_for_a_model_id_keeps_stdout_clean( config, capsys ):
+    """A first construction's banner goes to stderr, keeping the tools' JSON stdout clean."""
+    ConfigurationManager.reset_for_testing()
+    capsys.readouterr()
+    assert chs.model_id( chs.JUDGE_MODEL_KEY ) == "claude-fable-5-1"
+    seen = capsys.readouterr()
+    assert seen.out == "" and "Using environment variables" in seen.err

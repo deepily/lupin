@@ -61,7 +61,8 @@ def test_missed_ids_reads_the_control_stages_missed_list( tmp_path ):
 
 def test_frozen_needs_keeps_the_drafts_that_passed_and_drops_unsaved_and_failed_ones( monkeypatch ):
     outcome = { "d-r1": { "ok": True, "need": "need one" }, "d-r2": "missing", "d-r3": { "ok": False } }
-    def draft_need( job, ask, ledger, max_tries=None ):
+    def draft_need( job, ask, ledger, model_id, max_tries=None ):
+        assert model_id == "claude-fable-5-1"      # frozen_needs reads the drafter key once and passes it
         if outcome[ job[ "keys" ][ 0 ][ "id" ] ] == "missing": raise SavedAnswerMissing( "no answer" )
         return outcome[ job[ "keys" ][ 0 ][ "id" ] ]
     monkeypatch.setattr( fj.draft, "draft_need", draft_need )

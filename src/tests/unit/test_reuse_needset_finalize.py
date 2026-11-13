@@ -10,7 +10,7 @@ from lupin_mcp.reuse_needset import draft, finalize, schema
 from lupin_mcp.reuse_needset import errors as er
 
 COMMIT  = "0123456789abcdef0123456789abcdef01234567"
-DRAFTER = { "model": draft.DRAFTER_MODEL, "prompt_version": "v1", "server": "max-plan" }
+DRAFTER = { "model": draft.drafter_model(), "prompt_version": "v1", "server": "max-plan" }
 SENTENCE = "A function that adds up a list of numbers but stops once a ceiling has been reached."
 
 

@@ -13,7 +13,7 @@ from lupin_mcp.reuse_needset import errors as er
 CHECKER  = "claude-opus-5-5"
 SENTENCE = "A function that adds up a list of numbers but stops once a ceiling has been reached."
 COMMIT   = "0123456789abcdef0123456789abcdef01234567"
-DRAFTER  = { "model": draft.DRAFTER_MODEL, "prompt_version": "v1", "server": "max-plan" }
+DRAFTER  = { "model": draft.drafter_model(), "prompt_version": "v1", "server": "max-plan" }
 
 
 def reply( result="agree", note="the key adds numbers up to a limit" ):
@@ -103,7 +103,7 @@ def test_the_mechanical_findings_given_are_kept_on_the_check( tmp_path ):
     assert got[ "check" ][ "mechanical" ] == [ "twin_text_run" ]
 
 
-@pytest.mark.parametrize( "model, drafter_model", [ ( draft.DRAFTER_MODEL, draft.DRAFTER_MODEL ), ( "claude-haiku-5-5", "claude-haiku-5-5" ), ( draft.DRAFTER_MODEL, "claude-haiku-5-5" ) ] )
+@pytest.mark.parametrize( "model, drafter_model", [ ( draft.drafter_model(), draft.drafter_model() ), ( "claude-haiku-5-5", "claude-haiku-5-5" ), ( draft.drafter_model(), "claude-haiku-5-5" ) ] )
 def test_the_checker_may_not_be_the_drafter_and_nothing_is_asked_first( tmp_path, model, drafter_model ):
     ask = Asker( [ reply() ] )
     with pytest.raises( er.NeedsetError ) as e:
@@ -171,7 +171,7 @@ def test_needs_are_checked_in_parallel_and_returned_in_the_order_given( tmp_path
     got = asyncio.run( check.check_needs( needs, ask, book, CHECKER, lambda n: { "key_texts": [ f"def g{n['id']}(): pass" ] }, 2 ) )
     assert [ g[ "id" ] for g in got ] == [ n[ "id" ] for n in needs ] and all( g[ "status" ] == "checked" for g in got ) and len( seen ) == 4
     assert asyncio.run( check.check_needs( [], ask, book, CHECKER, lambda n: {}, 1 ) ) == []
-    with pytest.raises( er.NeedsetError ) as e: asyncio.run( check.check_needs( needs[ :1 ], ask, book, draft.DRAFTER_MODEL, lambda n: { "key_texts": [ "x" ] }, 1 ) )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( check.check_needs( needs[ :1 ], ask, book, draft.drafter_model(), lambda n: { "key_texts": [ "x" ] }, 1 ) )
     assert e.value.code == er.CHECKER_EQUALS_DRAFTER
 
 

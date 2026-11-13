@@ -275,9 +275,9 @@ def test_draft_all_keeps_passed_needs_and_names_the_pairs_without_one():
     rows  = [ make_row( 1 ), make_row( 2, label=sc.NOT_SAME, stratum="monolith:neighbour", unsure=True, raters=3 ) ]
     refusal = { "try": 0, "sentence": "A function that logs.", "failures": [ { "check": "identifier", "detail": "name pieces: log", "words": [ "log" ] } ] }
     reply = iter( [ { "ok": True, "need": "a sentence", "rejections": [ refusal ] }, { "ok": False, "reason": er.NEED_LEAKS_KEY, "rejections": [ refusal, { **refusal, "try": 1 } ] } ] )
-    with mock.patch.object( sc.draft, "draft_need", side_effect=lambda job, ask, ledger, max_tries: next( reply ) ) as dn:
+    with mock.patch.object( sc.draft, "draft_need", side_effect=lambda job, ask, ledger, model_id, max_tries: next( reply ) ) as dn:
         needs, undrafted, rejected = sc.draft_all( rows, lambda r: { "kind": "k", "text": "t", "forbidden": [ ] }, "ask", "ledger", 4 )
-    assert needs == { "pair-1": "a sentence" } and dn.call_args[ 0 ][ 1:] == ( "ask", "ledger" ) and dn.call_args[ 1 ] == { "max_tries": 4 }
+    assert needs == { "pair-1": "a sentence" } and dn.call_args[ 0 ][ 1:] == ( "ask", "ledger" ) and dn.call_args[ 1 ] == { "model_id": "claude-fable-5-1", "max_tries": 4 }
     assert undrafted == [ { "pair": "pair-2", "stratum": "monolith:neighbour", "label": sc.NOT_SAME, "unsure": True, "raters": 3, "reason": er.NEED_LEAKS_KEY } ]
     assert [ ( r[ "pair" ], r[ "try" ], r[ "outcome" ], r[ "sentence" ], r[ "failures" ][ 0 ][ "check" ] ) for r in rejected ] == [
         ( "pair-1", 0, "accepted_later", "A function that logs.", "identifier" ), ( "pair-2", 0, "undrafted", "A function that logs.", "identifier" ), ( "pair-2", 1, "undrafted", "A function that logs.", "identifier" ) ]
@@ -358,7 +358,8 @@ def live_argv( tmp_path, *more ):
 
 def stand_ins( tmp_path, rows, undrafted_pair=None, refused=(), by_records=False ):
     """Return the patches that replace the files, the drafter ledger and the strip step."""
-    def draft_need( job, ask, ledger, max_tries ):
+    def draft_need( job, ask, ledger, model_id, max_tries ):
+        assert model_id == "claude-fable-5-1"      # draft_all reads the drafter key once and passes it
         if job[ "meta" ][ "stage_c" ] == undrafted_pair: return { "ok": False, "reason": er.NEED_LEAKS_KEY, "rejections": [ { "try": 0, "sentence": "A function that fails.", "failures": [ { "check": "form", "detail": "d", "words": [ ] } ] } ] }
         if by_records: return { "ok": True, "need": f"Need for {job[ 'seed' ][ 'id' ]} against {job[ 'keys' ][ 0 ][ 'id' ]}.", "rejections": [ ] }   # as the saved drafts do: one sentence per record pair
         return { "ok": True, "need": f"Need for {job[ 'meta' ][ 'stage_c' ]}.", "rejections": [ ] }
@@ -437,7 +438,8 @@ def test_replaying_the_saved_ledger_writes_the_rejects_and_makes_no_model_call( 
     rows = [ make_row( 1 ), make_row( 2 ) ]
     seen = []
 
-    def draft_need( job, ask, ledger, max_tries ):
+    def draft_need( job, ask, ledger, model_id, max_tries ):
+        assert model_id == "claude-fable-5-1"      # draft_all reads the drafter key once and passes it
         seen.append( ( ask, ledger, max_tries ) )
         return { "ok": job[ "meta" ][ "stage_c" ] == "pair-1", "need": "n", "reason": er.NEED_LEAKS_KEY, "rejections": [ { "try": 0, "sentence": "A function that x.", "failures": [ ] } ] }
     with mock.patch.object( sc.draft, "draft_need", side_effect=draft_need ), mock.patch.object( sc.draft, "make_ledger", return_value="ledger" ) as made, mock.patch.object( sc.strip, "strip_member", return_value={ "kind": "k", "text": "t", "forbidden": [ ] } ) as stripped, \
@@ -489,7 +491,8 @@ class RedraftWorld:
         self.calls   = [ ]
         self.hook    = [ ]
 
-    def draft_need( self, job, ask, ledger, max_tries ):
+    def draft_need( self, job, ask, ledger, model_id, max_tries ):
+        assert model_id == "claude-fable-5-1"      # draft_all reads the drafter key once and passes it
         """Fail every pair but pair-1 on the replay; on a live ask accept only the pairs in accepts."""
         pair = job[ "meta" ][ "stage_c" ]
         self.calls.append( ( pair, ask is sc.cache_only, max_tries ) )

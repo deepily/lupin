@@ -2,14 +2,14 @@
 capability: needset-drafting-flows
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.draft.draft_need@4625c0eb9d
-  - lupin_mcp.reuse_needset.draft.draft_cell@fea09c6d5f
+  - lupin_mcp.reuse_needset.draft.draft_need@d92f4f1223
+  - lupin_mcp.reuse_needset.draft.draft_cell@acf54d512e
   - lupin_mcp.reuse_needset.draft.replacement_report@75e3a4fa43
   - lupin_mcp.reuse_needset.draft.draft_cells@cd40e8a89d
   - lupin_mcp.reuse_needset.draft.none_prompt@82c49d11e8
   - lupin_mcp.reuse_needset.draft.none_note@908dcd7239
-  - lupin_mcp.reuse_needset.draft.draft_none@ad0a288d6a
-  - lupin_mcp.reuse_needset.draft.make_none_drafter@cb2ca926b8
+  - lupin_mcp.reuse_needset.draft.draft_none@2e0ef76eff
+  - lupin_mcp.reuse_needset.draft.make_none_drafter@6495083f5b
   - lupin_mcp.reuse_needset.draft.copy_check@ab47ae2ec9
 ---
 # Need set: drafting flows

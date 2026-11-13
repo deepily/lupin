@@ -335,8 +335,9 @@ def draft_all( rows, strip_fn, ask, ledger, max_tries=draft.MAX_TRIES ):
         - outcome is accepted_later or undrafted
     """
     needs, undrafted, rejected = {}, [], []
+    model_id = draft.drafter_model()      # read once, so one run's ledger keys name one model
     for row in rows:
-        rec = draft.draft_need( draft_job( row, strip_fn ), ask, ledger, max_tries=max_tries )
+        rec = draft.draft_need( draft_job( row, strip_fn ), ask, ledger, model_id=model_id, max_tries=max_tries )
         who = { k: row[ k ] for k in ( "pair", "stratum", "label", "unsure", "raters" ) }
         if rec[ "ok" ]: needs[ row[ "pair" ] ] = rec[ "need" ]
         else: undrafted.append( { **who, "reason": rec[ "reason" ] } )

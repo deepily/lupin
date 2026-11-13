@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.reuse_needset.smoke.Timed@265424ee74
   - lupin_mcp.reuse_needset.smoke.index_parts@da503efe90
   - lupin_mcp.reuse_needset.smoke.candidate_parts@307e96b916
-  - lupin_mcp.reuse_needset.smoke.assemble_env@8ebb9baed4
+  - lupin_mcp.reuse_needset.smoke.assemble_env@c288f16a30
   - lupin_mcp.reuse_needset.smoke.live_build_env@6d415d4343
   - lupin_mcp.reuse_needset.smoke.smoke_report@970e75f740
   - lupin_mcp.reuse_needset.smoke.main@cd0a755f6a

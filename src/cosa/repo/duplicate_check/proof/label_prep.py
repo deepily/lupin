@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 
 import cosa.utils.util as cu
+from cosa.repo import code_health_settings as chs
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import items as lb_items
 from cosa.repo.labelling import errors as lb_errors
@@ -36,7 +37,6 @@ MONOLITH_TOTAL = 60
 TOP_UP_WAVES   = 6
 THREADS        = 6
 STRATA         = ( "fable-planted", "opus-work-alike" )
-REWRITE_MODEL  = "claude-fable-5-1"
 ALIKE_MODEL    = "claude-opus-5-5"
 SENTENCE_MODEL = need_writer.DEFAULT_MODEL
 LANG_NAMES     = { "py": "Python", "ts": "TypeScript" }
@@ -551,10 +551,14 @@ def live_wiring( root, cache_dir, complete=model_transport.complete, client=None
 
     Ensures:
         - returns the dict run takes: server-origin definitions of every Python file of the spec and of the tracked client script files except the monolith,
-          three asks (Fable for rewrites, the need-writer model for sentences, Opus for work-alikes) and the shape readers
+          three asks (the `duplicate check proof rewrite model` INI key for rewrites, read when called; the need-writer model for sentences;
+          Opus for work-alikes) and the shape readers
+
+    Raises:
+        - CodeHealthSettingError when the rewrite model key is blank or absent
     """
     return { **tree_definitions( root ),
-             "asks": { "rewrite": make_ask( complete, REWRITE_MODEL ), "sentence": make_ask( complete, SENTENCE_MODEL ), "alike": make_ask( complete, ALIKE_MODEL ) },
+             "asks": { "rewrite": make_ask( complete, chs.model_id( chs.REWRITE_MODEL_KEY ) ), "sentence": make_ask( complete, SENTENCE_MODEL ), "alike": make_ask( complete, ALIKE_MODEL ) },
              "shape_of": { "py": plant.python_shape, "ts": script_shape },
              "client": client if client is not None else vector_build.EndpointClient(), "cache_dir": cache_dir }
 
