@@ -7,7 +7,7 @@ pins:
   - cosa.repo.duplicate_check.cluster.score@03fd52325c
   - cosa.repo.duplicate_check.cluster.sizes@2295c8d25f
   - cosa.repo.duplicate_check.cluster.surplus@cf21b33e57
-  - cosa.repo.code_health_settings.model_id@643ad165ed
+  - cosa.repo.code_health_settings.model_id@25d79abd26
   - cosa.repo.duplicate_check.config.build_config@f2add23202
   - cosa.repo.duplicate_check.config.config_sha@5878c5f4f2
   - cosa.repo.duplicate_check.config.freeze@8550134eb2
