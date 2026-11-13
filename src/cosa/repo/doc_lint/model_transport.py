@@ -21,6 +21,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -148,6 +149,7 @@ AGY_USAGE         = {}
 CLAUDE_USAGE_FIELDS = ( "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens" )
 CLAUDE_USAGE        = dict( { field: 0 for field in CLAUDE_USAGE_FIELDS }, calls=0, cost_usd=0.0 )      # what finished Claude Code calls reported, since the process began
 _CLAUDE_USAGE_LOCK  = threading.Lock()
+RESET_SHAPE         = re.compile( r"\bresets?\b", re.IGNORECASE )     # a plan-limit reply names when it lifts ("resets Nov 16, 10am"), whatever else it says
 RATE_LIMIT_MARKERS  = ( "rate limit", "rate_limit", "usage limit", "429", "too many requests", "overloaded", "reached your" )     # "reached your" is the plan limit: "You've reached your Fable limit."
 _AGY_USAGE_LOCK   = threading.Lock()
 _AGY_SCRATCH_LOCK = threading.Lock()
@@ -458,6 +460,21 @@ def claude_usage_summary():
         - the result is a copy, so a caller cannot change the tally
     """
     with _CLAUDE_USAGE_LOCK: return dict( CLAUDE_USAGE )
+
+
+def limit_reply( message, detail ):
+    """
+    Say whether an error result is the service refusing the call for a limit.
+
+    Requires:
+        - message is a ResultMessage with is_error true; detail is its subtype and text
+
+    Ensures:
+        - true when the CLI reports an error under subtype "success": the run finished and the reply is the service's own message, which is how a plan limit arrives (live, 13 Nov 2026), whatever its wording
+        - true when the text names a reset time, or carries a marker of RATE_LIMIT_MARKERS
+        - false for a failure the CLI itself names, such as error_during_execution or error_max_turns, unless the text says otherwise
+    """
+    return message.subtype == "success" or bool( RESET_SHAPE.search( detail ) ) or any( marker in detail.lower() for marker in RATE_LIMIT_MARKERS )
 
 
 def _note_claude_usage( message ):
@@ -815,7 +832,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
                 _note_claude_usage( message )
                 if message.is_error:
                     detail = f"{message.subtype}: {str( message.result )[ :300 ]}"
-                    limited = any( marker in detail.lower() for marker in RATE_LIMIT_MARKERS )
+                    limited = limit_reply( message, detail )
                     raise ( ModelRateLimited if limited else ModelCallError )( f"model call to {model} ended in an error result: {detail}" )
 
     try:

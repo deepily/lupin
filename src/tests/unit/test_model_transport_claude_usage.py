@@ -18,9 +18,9 @@ def fresh_tally():
     mt.CLAUDE_USAGE.update( saved )
 
 
-def result( usage=None, cost=None, error=False, text="denied" ):
-    """Ensures: returns a ResultMessage carrying the given usage and cost."""
-    return ResultMessage( subtype="error_during_execution" if error else "success", duration_ms=1, duration_api_ms=1, is_error=error, num_turns=1, session_id="s", result=text, usage=usage, total_cost_usd=cost )
+def result( usage=None, cost=None, error=False, text="denied", subtype=None ):
+    """Ensures: returns a ResultMessage; an error defaults to subtype error_during_execution."""
+    return ResultMessage( subtype=subtype or ( "error_during_execution" if error else "success" ), duration_ms=1, duration_api_ms=1, is_error=error, num_turns=1, session_id="s", result=text, usage=usage, total_cost_usd=cost )
 
 
 def call( *messages ):
@@ -66,4 +66,22 @@ def test_the_plan_limit_text_a_live_call_returned_raises_the_rate_limited_error(
 
 def test_any_other_error_result_stays_a_plain_model_call_error():
     with pytest.raises( mt.ModelCallError ) as caught: call( result( None, None, error=True, text="boom" ) )
+    assert not isinstance( caught.value, mt.ModelRateLimited )
+
+
+LIVE_PLAN_LIMIT = "You've hit your Fable limit · resets Nov 16, 10am (America/New_York). Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue."   # captured from a live call, 13 Nov 2026: is_error true under subtype "success"
+
+
+def test_the_plan_limit_of_13_nov_is_a_rate_limit_though_no_marker_names_it():
+    assert not any( m in LIVE_PLAN_LIMIT.lower() for m in mt.RATE_LIMIT_MARKERS ), "the live wording must not rely on a marker"
+    with pytest.raises( mt.ModelRateLimited ): call( result( None, None, error=True, text=LIVE_PLAN_LIMIT, subtype="success" ) )
+
+
+@pytest.mark.parametrize( "text, subtype", [ ( "Quota exhausted for this model. Try again later.", "success" ), ( "Fable is out of credit.", "success" ), ( "Out of quota. Resets Monday.", "error_during_execution" ) ] )
+def test_a_reworded_limit_is_still_a_rate_limit_by_the_shape_of_the_error_result( text, subtype ):
+    with pytest.raises( mt.ModelRateLimited ): call( result( None, None, error=True, text=text, subtype=subtype ) )
+
+
+def test_a_failure_the_cli_names_with_no_reset_time_stays_a_plain_model_call_error():
+    with pytest.raises( mt.ModelCallError ) as caught: call( result( None, None, error=True, text="Reached the turn limit of 1", subtype="error_max_turns" ) )
     assert not isinstance( caught.value, mt.ModelRateLimited )
