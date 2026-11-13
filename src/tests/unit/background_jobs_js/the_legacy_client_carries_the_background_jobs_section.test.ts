@@ -286,7 +286,7 @@ test( "the legacy accordion ends with the switched-off line when the server send
   const api = await load();
   const mount = byId( "background-jobs-container" );
   api.renderAccordion( mount, clone( FIXTURE ), { canRun : false, runNow : async () => "" } );
-  assert.equal( mount.querySelector( "[data-testid=background-jobs-off-line]" ), null );
+  assert.ok( mount.querySelector( "[data-testid=background-jobs-off-line]" ) === null, "the off-line is absent" );
   api.renderAccordion( mount, { ...clone( FIXTURE ), reporting_off_line : "8 jobs have reporting switched off" }, { canRun : false, runNow : async () => "" } );
   const last = mount.lastElementChild as HTMLElement;
   assert.equal( last.getAttribute( "data-testid" ), "background-jobs-off-line" );
@@ -360,7 +360,7 @@ test( "the legacy accordion draws a header row naming every column, sorts on a h
   await api.refresh(); await flush();                                             // a poll redraws: the pick stays
   assert.deepEqual( titles(), [ ...asc ].reverse() );
   click( "jobs-sort-name" );
-  assert.equal( mount.querySelector( "[aria-sort=ascending]" ), null, "third click returns to the default order" );
+  assert.ok( mount.querySelector( "[aria-sort=ascending]" ) === null, "third click returns to the default order" );
   click( "jobs-sort-health" ); click( "jobs-sort-health" );
   const states = Array.from( mount.querySelectorAll( ":scope > [data-testid=jobs-item]" ) ).map( ( i ) => i.getAttribute( "data-state" ) );
   assert.equal( states[ 0 ], "failing" );
