@@ -7,7 +7,7 @@ with from_config() classmethod.
 
 from dataclasses import dataclass
 
-from cosa.agents.shared.config_loader import load_dataclass_from_ini
+from cosa.agents.shared.config_loader import load_dataclass_from_ini, model_field
 from typing import Optional
 
 
@@ -25,8 +25,8 @@ class BugFixExpediterConfig:
     """
 
     # === Model Selection ===
-    lead_model                : str   = "claude-opus-4-6"
-    worker_model              : str   = "claude-sonnet-4-6"
+    lead_model                : str   = model_field( "bug fix expediter lead model" )
+    worker_model              : str   = model_field( "bug fix expediter worker model" )
 
     # === Extended thinking ===
     # Per-invocation override (via job param or API request body). None = SDK default.
@@ -108,8 +108,8 @@ def quick_smoke_test():
     try:
         # 1: Default instantiation
         config = BugFixExpediterConfig()
-        assert config.lead_model == "claude-opus-4-6"
-        assert config.worker_model == "claude-sonnet-4-6"
+        assert config.lead_model.startswith( "claude-" )
+        assert config.worker_model.startswith( "claude-" )
         assert config.max_fix_attempts == 2
         assert config.enabled == False
         assert config.trust_mode == "shadow"

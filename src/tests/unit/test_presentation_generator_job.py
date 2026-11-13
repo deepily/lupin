@@ -260,7 +260,7 @@ class TestPresentationConfig:
 
     def test_defaults( self, default_config ):
         """Default config values are correct."""
-        assert default_config.content_model == "claude-opus-4-6"
+        assert default_config.content_model == "claude-opus-5"
         assert default_config.target_duration_minutes == 15
         assert default_config.slides_per_minute == 1.0
         assert default_config.title_style == "assertion"
@@ -319,6 +319,8 @@ class TestPresentationConfig:
                 if key == "presentation generator target slide count":
                     return "40"
                 return default
+            def get_required( self, key, return_type="string", **kwargs ):
+                return f"model-for[{key}]"
         config = PresentationConfig.from_config( _FakeMgr() )
         assert config.target_slide_count == 40
 

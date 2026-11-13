@@ -124,3 +124,95 @@ def test_load_dataclass_passes_debug_and_label_through( capsys ):
     assert len( lines ) == 4
     load_dataclass_from_ini( _Cfg, _Mgr( {} ), KEY_MAP )
     assert capsys.readouterr().out == ""
+
+
+# ----------------------------------------------------------------------------
+# model ids: read from the INI, no default in code
+# ----------------------------------------------------------------------------
+from dataclasses import MISSING, field, fields
+
+from cosa.agents.shared.config_loader import model_field, required_model_id
+from cosa.config.configuration_manager import MissingConfigKeyError
+
+
+class _RequiredMgr:
+    """get_required answers from a dict, as the real manager does, and records each call."""
+
+    def __init__( self, values ):
+        self.values = values
+        self.calls  = []
+
+    def get_required( self, key, silent=False, return_type="string" ):
+        self.calls.append( ( key, silent, return_type ) )
+        return self.values[ key ]
+
+
+@dataclass
+class _WithModel:
+    lead  : str = model_field( "x lead model" )
+    count : int = 3
+
+
+def test_required_model_id_reads_the_key_through_get_required_silently():
+    mgr = _RequiredMgr( { "x lead model": "m-1" } )
+    assert required_model_id( "x lead model", mgr ) == "m-1"
+    assert mgr.calls == [ ( "x lead model", True, "string" ) ]
+
+
+def test_required_model_id_builds_the_process_manager_and_keeps_its_banner_off_stdout( capsys ):
+    built = []
+    class _Builds( _RequiredMgr ):
+        def __init__( self, env_var_name=None ):
+            super().__init__( { "x lead model": "from-process" } )
+            built.append( env_var_name )
+            print( "BANNER" )
+    from unittest.mock import patch
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", _Builds ):
+        assert required_model_id( "x lead model" ) == "from-process"
+    captured = capsys.readouterr()
+    assert built == [ "LUPIN_CONFIG_MGR_CLI_ARGS" ]
+    assert ( captured.out, captured.err ) == ( "", "BANNER\n" )
+
+
+def test_required_model_id_refuses_a_key_the_real_ini_lacks():
+    with pytest.raises( MissingConfigKeyError, match="no such model key for the test" ):
+        required_model_id( "no such model key for the test" )
+
+
+def test_required_model_id_reads_a_key_the_real_ini_holds():
+    assert required_model_id( "deep research lead model" ).startswith( "claude-" )
+
+
+def test_a_model_field_has_no_default_in_code_and_reads_the_ini_when_omitted():
+    lead = [ f for f in fields( _WithModel ) if f.name == "lead" ][ 0 ]
+    assert ( lead.default, lead.default_factory is MISSING ) == ( MISSING, False )
+    from unittest.mock import patch
+    with patch( "cosa.agents.shared.config_loader.required_model_id", return_value="never-called" ):
+        assert _WithModel( lead="passed" ).lead == "passed"         # a passed value is used as given
+
+
+def test_a_model_field_left_out_of_the_constructor_refuses_a_missing_key():
+    with pytest.raises( MissingConfigKeyError, match="x lead model" ):
+        _WithModel()
+
+
+def test_the_loader_reads_a_model_field_with_get_required_and_the_rest_with_get():
+    mgr = _RequiredMgr( { "x lead model": "m-2" } )
+    mgr.get = lambda key, default=None, return_type=None, silent=False: default
+    kwargs = load_kwargs_from_ini( _WithModel, mgr, { "lead": "x lead model", "count": "x count" }, silent=True )
+    assert kwargs == { "lead": "m-2", "count": 3 }
+    assert mgr.calls == [ ( "x lead model", True, "string" ) ]
+
+
+def test_the_loader_refuses_a_model_field_whose_key_is_missing():
+    mgr = _RequiredMgr( {} )
+    with pytest.raises( KeyError, match="x lead model" ):
+        load_kwargs_from_ini( _WithModel, mgr, { "lead": "x lead model" } )
+
+
+def test_a_field_with_another_default_factory_is_read_with_get():
+    @dataclass
+    class _Listy:
+        items : list = field( default_factory=list )
+    mgr = _Mgr( { "x items": [ 1 ] } )
+    assert load_kwargs_from_ini( _Listy, mgr, { "items": "x items" } ) == { "items": [ 1 ] }

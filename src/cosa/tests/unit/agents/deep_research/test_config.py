@@ -41,7 +41,7 @@ class TestDefaults( unittest.TestCase ):
 
     def test_default_models_and_audience( self ):
         cfg = ResearchConfig()
-        self.assertEqual( cfg.lead_model, "claude-opus-4-6" )
+        self.assertEqual( cfg.lead_model, "claude-opus-5" )      # read from the INI, not from code
         self.assertEqual( cfg.subagent_model, "claude-sonnet-4-6" )
         self.assertEqual( cfg.audience, "academic" )
         self.assertIsNone( cfg.audience_context )
@@ -71,13 +71,15 @@ class TestFromConfig( unittest.TestCase ):
             return default                                # string → echo the dataclass default
         mgr = Mock()
         mgr.get.side_effect = fake_get
+        mgr.get_required.side_effect = lambda ini_key, **kwargs: f"model-for[{ini_key}]"
         return mgr
 
     def test_loads_all_fields_with_type_coercion( self ):
         cfg = ResearchConfig.from_config( self._config_mgr() )
         self.assertIsInstance( cfg, ResearchConfig )
-        # string field echoed from its default
-        self.assertEqual( cfg.lead_model, "claude-opus-4-6" )
+        # model fields are read with get_required, which has no default
+        self.assertEqual( cfg.lead_model, "model-for[deep research lead model]" )
+        self.assertEqual( cfg.subagent_model, "model-for[deep research subagent model]" )
         # int fields coerced via return_type="int"
         self.assertEqual( cfg.max_subagents_simple, 7 )
         self.assertEqual( cfg.feedback_timeout_seconds, 7 )
@@ -112,20 +114,23 @@ class TestFromConfigReadsThroughTheSharedLoader( unittest.TestCase ):
     def _recording_mgr( self ):
         mgr = Mock()
         mgr.get.side_effect = lambda ini_key, default=None, silent=False, return_type="string": default
+        mgr.get_required.side_effect = lambda ini_key, **kwargs: f"model-for[{ini_key}]"
         return mgr
 
     def test_every_key_is_read_once_with_silent_true( self ):
         mgr = self._recording_mgr()
         ResearchConfig.from_config( mgr )
-        self.assertEqual( mgr.get.call_count, 26 )
-        self.assertEqual( { call.kwargs[ "silent" ] for call in mgr.get.call_args_list }, { True } )
-        self.assertEqual( len( { call.args[ 0 ] for call in mgr.get.call_args_list } ), 26 )
+        calls = mgr.get.call_args_list + mgr.get_required.call_args_list     # 24 through get, the two model ids through get_required
+        self.assertEqual( ( mgr.get.call_count, mgr.get_required.call_count ), ( 24, 2 ) )
+        self.assertEqual( { call.kwargs[ "silent" ] for call in calls }, { True } )
+        self.assertEqual( len( { call.args[ 0 ] for call in calls } ), 26 )
 
     def test_each_key_carries_the_field_default_and_a_type_coerced_return_type( self ):
         mgr = self._recording_mgr()
         ResearchConfig.from_config( mgr )
         asked = { call.args[ 0 ]: ( call.kwargs[ "default" ], call.kwargs[ "return_type" ] ) for call in mgr.get.call_args_list }
-        self.assertEqual( asked[ "deep research lead model" ], ( "claude-opus-4-6", "string" ) )
+        self.assertNotIn( "deep research lead model", asked )        # the model ids have no default: they go through get_required
+        self.assertEqual( [ call.args[ 0 ] for call in mgr.get_required.call_args_list ], [ "deep research lead model", "deep research subagent model" ] )
         self.assertEqual( asked[ "deep research max subagents complex" ], ( 10, "int" ) )
         self.assertEqual( asked[ "deep research prefer primary sources" ][ 1 ], "boolean" )
         self.assertEqual( asked[ "deep research audience context" ], ( None, "string" ) )

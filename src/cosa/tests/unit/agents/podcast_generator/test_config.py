@@ -83,6 +83,10 @@ class FakeCfg:
         if return_type == "boolean": return str( raw ).lower() in ( "true", "1", "yes" )
         return raw
 
+    def get_required( self, key, silent=False, return_type="string" ):
+        """Answer the model-id read: the key the test sets, else a marker naming the key."""
+        return self.values.get( key, f"model-for[{key}]" )
+
     def exists( self, key ):
         return key in self.exists_keys
 
@@ -185,7 +189,7 @@ class TestPodcastConfigBasics:
 
     def test_defaults_and_host_names( self ):
         cfg = PodcastConfig()
-        assert cfg.script_model            == "claude-opus-4-6"
+        assert cfg.script_model            == "claude-opus-5"      # read from the INI, not from code
         assert cfg.target_duration_minutes == 10
         assert cfg.audience                == "academic"
         assert cfg.target_languages        == [ "en" ]
@@ -269,7 +273,7 @@ class TestPodcastConfigFromConfig:
     def test_defaults_flow_through( self, capsys ):
         cfg = FakeCfg()   # everything defaults
         config = PodcastConfig.from_config( cfg, debug=True )
-        assert config.script_model            == "claude-opus-4-6"
+        assert config.script_model            == "model-for[podcast script model]"   # read with get_required, no default
         assert config.target_duration_minutes == 10           # "10" -> int
         assert config.include_intro is True                   # "True" -> boolean
         assert config.target_languages        == [ "en" ]
@@ -292,6 +296,7 @@ class TestPodcastConfigFromConfig:
         config   = PodcastConfig.from_config( FakeCfg() )
         expected = PodcastConfig()
         for field_name in PODCAST_INI_KEYS:
+            if field_name == "script_model": continue         # no default in code; the line above reads it through get_required
             assert getattr( config, field_name ) == getattr( expected, field_name ), field_name
 
     def test_every_mapped_key_reaches_its_own_field( self ):
@@ -312,6 +317,9 @@ class TestPodcastConfigFromConfig:
             def get( self, key, default=None, silent=False, return_type="string" ):
                 if key in PODCAST_INI_KEYS.values(): seen.append( silent )
                 return super().get( key, default=default, silent=silent, return_type=return_type )
+            def get_required( self, key, silent=False, return_type="string" ):
+                if key in PODCAST_INI_KEYS.values(): seen.append( silent )
+                return super().get_required( key, silent=silent, return_type=return_type )
         PodcastConfig.from_config( SilentSpy() )
         assert len( seen ) == 31
         assert all( seen )
@@ -324,6 +332,9 @@ class RawCfg:
         self.values = values
 
     def get( self, key, default=None, silent=False, return_type="string" ):
+        return self.values[ key ]
+
+    def get_required( self, key, silent=False, return_type="string" ):
         return self.values[ key ]
 
 

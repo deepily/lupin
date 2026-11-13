@@ -99,11 +99,16 @@ def _echo_get( ini_key, default=None, return_type=None ):
     return default
 
 
+def _echo_required( ini_key, return_type=None, **kwargs ):
+    _echo_get.seen[ ini_key ] = return_type
+    return f"model-for[{ini_key}]"
+
+
 class TestConfig( unittest.TestCase ):
 
     def test_defaults_and_budget_mirror( self ):
         c = _Config()
-        self.assertEqual( c.lead_model, "claude-opus-4-6" )
+        self.assertEqual( c.lead_model, "claude-opus-5" )     # read from the INI, not from code
         self.assertTrue( c.auto_fix_enabled )
         self.assertEqual( c.max_clusters, 8 )
         self.assertEqual( c.min_diagnosis_confidence, 0.65 )
@@ -119,6 +124,7 @@ class TestConfig( unittest.TestCase ):
         _echo_get.seen = {}
         self.cfg_mgr = MagicMock()
         self.cfg_mgr.get.side_effect = _echo_get
+        self.cfg_mgr.get_required.side_effect = _echo_required
 
     def _clean_env( self ):
         # Ensure the override env var is absent for the default from_config path.
@@ -132,6 +138,7 @@ class TestConfig( unittest.TestCase ):
             os.environ.pop( "TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE", None )
             c = _Config.from_config( self.cfg_mgr, debug=False )
         self.assertEqual( c.budget_usd, 15.0 )             # mirror still runs
+        self.assertEqual( ( c.lead_model, c.worker_model ), ( "model-for[test fix expediter lead model]", "model-for[test fix expediter worker model]" ) )
         seen = _echo_get.seen
         self.assertEqual( seen[ "test fix expediter lead model" ],      "string" )
         self.assertEqual( seen[ "test fix expediter auto fix enabled" ], "boolean" )

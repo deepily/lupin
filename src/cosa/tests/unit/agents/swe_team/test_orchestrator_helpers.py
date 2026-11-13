@@ -239,9 +239,9 @@ class TestInit( unittest.TestCase ):
             "cosa.agents.decision_proxy.circuit_breaker": cb_mod,
             "cosa.config.configuration_manager"         : cm_mod,
         }
+        config = SweTeamConfig( trust_mode="shadow" )   # built before the patch: its model ids are read from the real INI
         with patch.dict( sys.modules, mods ):
-            o = SweTeamOrchestrator( task_description="t",
-                                     config=SweTeamConfig( trust_mode="shadow" ) )
+            o = SweTeamOrchestrator( task_description="t", config=config )
         self.assertEqual( o.proxy, "PROXY" )   # defaults used after inner failure
 
     def test_proxy_import_error_leaves_proxy_none( self ):
