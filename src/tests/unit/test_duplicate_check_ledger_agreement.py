@@ -128,34 +128,36 @@ def test_bootstrap_all_undefined_reports_none():
     assert out[ "kappa" ] is None and out[ "weighted_kappa" ] is None and out[ "exact" ] == [ 1.0, 1.0 ]
 
 
-def test_against_labels_strata_and_mcnemar():
-    first  = { ( "d1", "c1" ): "duplicate", ( "d2", "c2" ): "distinct", ( "d3", "c3" ): "duplicate", ( "d4", "c4" ): "related", ( "d5", "c5" ): "distinct", ( "d6", "c6" ): "duplicate" }
-    second = { ( "d1", "c1" ): "duplicate", ( "d2", "c2" ): "near_duplicate", ( "d3", "c3" ): "distinct", ( "d4", "c4" ): "related", ( "d5", "c5" ): "distinct", ( "d6", "c6" ): "duplicate" }
-    pmap   = { "d1|c1": "L1", "d2|c2": "L2", "d3|c3": "L3", "d4|c4": "L4", "d5|c5": "L5", "dX|cX": "L9", "d6|c6": "L6", "d6|c6x": "L7" }
-    labels = { "L1": True, "L2": True, "L3": False, "L4": True, "L5": False, "L6": False }
-    strata = { "L1": "alike", "L2": "other", "L4": "other" }
-    out    = la.against_labels( first, second, pmap, labels, strata )
+def test_against_labels_proof_rules():
+    first  = { ( "d1", "c1" ): "duplicate", ( "d2", "c2" ): "distinct", ( "d3", "c3" ): "duplicate", ( "d4", "c4" ): "related", ( "d5", "c5" ): "distinct",
+               ( "d6", "c6" ): "duplicate", ( "d7", "c7" ): "duplicate", ( "d8", "c8" ): "duplicate", ( "d9", "c9" ): "distinct" }
+    second = { ( "d1", "c1" ): "duplicate", ( "d2", "c2" ): "near_duplicate", ( "d3", "c3" ): "distinct", ( "d4", "c4" ): "related", ( "d5", "c5" ): "distinct",
+               ( "d6", "c6" ): "duplicate", ( "d7", "c7" ): "duplicate", ( "d8", "c8" ): "duplicate", ( "d9", "c9" ): "distinct" }
+    pmap   = { "d1|c1": "L1", "d2|c2": "L2", "d3|c3": "L3", "d4|c4": "L4", "d5|c5": "L5", "dX|cX": "L9", "d6|c6": "L6", "d7|c7": "LU", "d8|c8": "LF", "d9|c9": "L7" }
+    labels = { "L1": True, "L2": True, "L3": False, "L4": True, "L5": False, "L6": False, "LF": False, "L7": True }
+    strata = { "L1": "alike", "L2": "other", "L4": "other", "L7": "other", "L8": "other" }
+    out    = la.against_labels( first, second, pmap, labels, strata, exclude=[ "LF" ] )
     allb   = out[ "all" ]
-    assert allb[ "labelled_pairs" ] == 6 and allb[ "true_pairs" ] == 3
-    assert allb[ "first" ][ "found" ] == 1 and allb[ "first" ][ "recall" ] == pytest.approx( 1 / 3 )
+    # true pairs are the five in strata; L8 maps to no ruled pair, so it counts as not found
+    assert allb[ "true_pairs" ] == 5
+    assert allb[ "first" ][ "found" ] == 1 and allb[ "first" ][ "recall" ] == pytest.approx( 1 / 5 )
+    assert allb[ "second" ][ "found" ] == 2
+    # flags on labelled pairs, the excluded LF and the unlabelled LU left out
     assert allb[ "first" ][ "flags" ] == 3 and allb[ "first" ][ "correct" ] == 1 and allb[ "first" ][ "precision" ] == pytest.approx( 1 / 3 )
-    assert allb[ "second" ][ "found" ] == 2 and allb[ "second" ][ "flags" ] == 3 and allb[ "second" ][ "correct" ] == 2
-    assert allb[ "mcnemar" ] == { "only_first": 1, "only_second": 1, "p": 1.0 }
-    assert out[ "alike" ][ "true_pairs" ] == 1 and out[ "alike" ][ "first" ][ "precision" ] is None
-    assert out[ "other" ][ "mcnemar" ][ "only_second" ] == 1
+    assert allb[ "second" ][ "flags" ] == 3 and allb[ "second" ][ "correct" ] == 2
+    assert allb[ "first" ][ "unlabelled_flags" ] == 1 and allb[ "second" ][ "unlabelled_flags" ] == 1
+    assert allb[ "mcnemar" ] == { "pairs": 8, "only_first": 1, "only_second": 1, "p": 1.0 }
+    assert out[ "alike" ][ "true_pairs" ] == 1 and "precision" not in out[ "alike" ][ "first" ]
+    assert out[ "other" ][ "true_pairs" ] == 4 and out[ "other" ][ "mcnemar" ] == { "pairs": 4, "only_first": 0, "only_second": 1, "p": 1.0 }
 
 
-def test_against_labels_merges_pairs_of_one_label():
-    first  = { ( "d1", "c1" ): "distinct", ( "d2", "c1" ): "duplicate" }
-    pmap   = { "d1|c1": "L1", "d2|c1": "L1" }
-    out    = la.against_labels( first, first, pmap, { "L1": True } )
-    assert out[ "all" ][ "first" ][ "found" ] == 1 and out[ "all" ][ "labelled_pairs" ] == 1
-
-
-def test_against_labels_empty_true_and_flags():
-    first = { ( "d1", "c1" ): "distinct" }
-    out   = la.against_labels( first, first, { "d1|c1": "L1" }, { "L1": False } )
-    assert out[ "all" ][ "first" ][ "recall" ] is None and out[ "all" ][ "first" ][ "precision" ] is None
+def test_against_labels_merges_pairs_of_one_label_and_empty_flags():
+    first  = { ( "d1", "c1" ): "distinct", ( "d2", "c1" ): "duplicate", ( "d3", "c3" ): "distinct" }
+    pmap   = { "d1|c1": "L1", "d2|c1": "L1", "d3|c3": "L3" }
+    out    = la.against_labels( first, first, pmap, { "L1": True, "L3": False }, { "L1": "s" } )
+    assert out[ "all" ][ "first" ][ "found" ] == 1
+    none   = la.against_labels( { ( "d3", "c3" ): "distinct" }, { ( "d3", "c3" ): "distinct" }, pmap, { "L3": False }, { "L1": "s" } )
+    assert none[ "all" ][ "first" ][ "precision" ] is None and none[ "all" ][ "first" ][ "recall" ] == 0.0
 
 
 def test_compare_refuses_disjoint_and_adds_labels():
@@ -163,7 +165,7 @@ def test_compare_refuses_disjoint_and_adds_labels():
     first, second = _two_ledgers()
     r = la.compare( first, second, draws=20 )
     assert r[ "pairs" ] == 24 and r[ "definitions" ] == 6 and "labels" not in r and sum( r[ "flag_table" ].values() ) == 24
-    r = la.compare( first, second, { "L": True }, { "d0|c0": "L" }, None, draws=5 )
+    r = la.compare( first, second, { "L": True }, { "d0|c0": "L" }, { "L": "s" }, draws=5 )
     assert r[ "labels" ][ "all" ][ "true_pairs" ] == 1
 
 
@@ -174,6 +176,11 @@ def test_main_end_to_end( tmp_path, capsys ):
     lab.write_text( json.dumps( { "L": True } ) )
     pmap = tmp_path / "pmap.json"
     pmap.write_text( json.dumps( { "semdup|a|b|pv|c1": "L" } ) )
-    assert la.main( [ "--first", str( one ), "--first-model", "m1", "--second", str( two ), "--second-model", "m2", "--labels", str( lab ), "--pair-map", str( pmap ), "--draws", "10" ] ) == 0
+    strata = tmp_path / "strata.json"
+    strata.write_text( json.dumps( { "L": "s" } ) )
+    excl = tmp_path / "excl.json"
+    excl.write_text( json.dumps( [ "ZZ" ] ) )
+    assert la.main( [ "--first", str( one ), "--first-model", "m1", "--second", str( two ), "--second-model", "m2", "--labels", str( lab ), "--pair-map", str( pmap ), "--strata", str( strata ), "--exclude", str( excl ), "--draws", "10" ] ) == 0
     out = json.loads( capsys.readouterr().out )
     assert out[ "pairs" ] == 4 and out[ "labels" ][ "all" ][ "true_pairs" ] == 1 and out[ "exact_count" ] == 2
+    assert la.main( [ "--first", str( one ), "--first-model", "m1", "--second", str( two ), "--second-model", "m2", "--draws", "3" ] ) == 0 and "labels" not in json.loads( capsys.readouterr().out )

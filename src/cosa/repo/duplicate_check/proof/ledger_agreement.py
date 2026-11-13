@@ -197,49 +197,61 @@ def mcnemar_exact( only_first, only_second ):
     return min( 1.0, 2 * p )
 
 
-def against_labels( first, second, pair_map, labels, strata=None ):
+def against_labels( first, second, pair_map, labels, strata, exclude=() ):
     """
-    Score both ledgers against the human labels.
+    Score both ledgers against the human labels, as the proof scores them.
 
     Requires:
-        - pair_map is { "<definition key>|<candidate>": label pair key }, the label pair key written as proof_run.label_key writes it
-        - labels is { label pair key: bool }; strata is None or { label pair key: stratum name } for the true pairs
+        - pair_map is { "<definition key>|<candidate>": label pair key }, the label key written as proof_run.label_key writes it
+        - labels is { label pair key: bool }
+        - strata is { label pair key: stratum name } for the planted and monolith pairs labelled true; these are the recall denominator
+        - exclude is the label pair keys left out of every count, the plant failures
 
     Ensures:
-        - a labelled pair counts as flagged by a ledger when any of its ruled pairs is a flag in that ledger; only pairs ruled in both ledgers count
-        - returns { all: block, <stratum>: block } where block holds, for each ledger, recall, precision and their counts, and McNemar's test on the labelled pairs where the two flags differ
-        - recall is over the true pairs ( of that stratum ); precision is over the flagged labelled pairs and is given for all pairs only
+        - a labelled pair counts as flagged by a ledger when any of its ruled pairs is a flag there; only pairs ruled in both ledgers count
+        - a true pair that no ruled pair maps to counts as not found, as in the proof
+        - returns { all: block, <stratum>: block }; a block holds for each ledger the true pairs found and recall
+        - the all block also holds the flags on labelled pairs, how many are true, and precision
+        - every block holds McNemar's test on the pairs where the two flags differ, over that block's pairs
+        - the all block counts the flagged pairs that carry no label, for each ledger
     """
+    skip    = set( exclude )
     flagged = [ {}, {} ]
-    for ( defkey, cand ), label_key in ( ( tuple( k.rsplit( "|", 1 ) ), v ) for k, v in pair_map.items() ):
-        p = ( defkey, cand )
-        if p not in first or p not in second or label_key not in labels: continue
-        for i, ledger in enumerate( ( first, second ) ): flagged[ i ][ label_key ] = flagged[ i ].get( label_key, False ) or ledger[ p ] in FLAGS
-    keys   = sorted( flagged[ 0 ] )
-    out    = {}
-    for name in [ "all", *sorted( set( ( strata or {} ).values() ) ) ]:
-        use   = [ k for k in keys if name == "all" or ( strata or {} ).get( k ) == name ]
-        true  = [ k for k in use if labels[ k ] ]
-        block = { "labelled_pairs": len( use ), "true_pairs": len( true ) }
+    unlabelled = [ set(), set() ]
+    for text, label_key in pair_map.items():
+        defkey, cand = text.rsplit( "|", 1 )
+        p            = ( defkey, cand )
+        if p not in first or p not in second or label_key in skip: continue
+        for i, ledger in enumerate( ( first, second ) ):
+            if label_key not in labels:
+                if ledger[ p ] in FLAGS: unlabelled[ i ].add( label_key )
+                continue
+            flagged[ i ][ label_key ] = flagged[ i ].get( label_key, False ) or ledger[ p ] in FLAGS
+    out = {}
+    for name in [ "all", *sorted( set( strata.values() ) ) ]:
+        true  = sorted( k for k, v in strata.items() if name == "all" or v == name )
+        pool  = sorted( set( true ) | set( flagged[ 0 ] ) | set( flagged[ 1 ] ) ) if name == "all" else true
+        block = { "true_pairs": len( true ) }
         for i, label in enumerate( ( "first", "second" ) ):
-            hits  = sum( 1 for k in true if flagged[ i ][ k ] )
-            flags = [ k for k in use if flagged[ i ][ k ] ]
-            good  = sum( 1 for k in flags if labels[ k ] )
-            block[ label ] = { "found": hits, "recall": hits / len( true ) if true else None,
-                               "flags": len( flags ), "correct": good, "precision": good / len( flags ) if flags and name == "all" else None }
-        b = sum( 1 for k in use if flagged[ 0 ][ k ] and not flagged[ 1 ][ k ] )
-        c = sum( 1 for k in use if flagged[ 1 ][ k ] and not flagged[ 0 ][ k ] )
-        block[ "mcnemar" ] = { "only_first": b, "only_second": c, "p": mcnemar_exact( b, c ) }
+            hits = sum( 1 for k in true if flagged[ i ].get( k, False ) )
+            block[ label ] = { "found": hits, "recall": hits / len( true ) }
+            if name == "all":
+                flags = [ k for k in flagged[ i ] if flagged[ i ][ k ] ]
+                good  = sum( 1 for k in flags if labels[ k ] )
+                block[ label ].update( flags=len( flags ), correct=good, precision=good / len( flags ) if flags else None, unlabelled_flags=len( unlabelled[ i ] ) )
+        b = sum( 1 for k in pool if flagged[ 0 ].get( k, False ) and not flagged[ 1 ].get( k, False ) )
+        c = sum( 1 for k in pool if flagged[ 1 ].get( k, False ) and not flagged[ 0 ].get( k, False ) )
+        block[ "mcnemar" ] = { "pairs": len( pool ), "only_first": b, "only_second": c, "p": mcnemar_exact( b, c ) }
         out[ name ] = block
     return out
 
 
-def compare( first, second, labels=None, pair_map=None, strata=None, draws=2000, seed=0 ):
+def compare( first, second, labels=None, pair_map=None, strata=None, exclude=(), draws=2000, seed=0 ):
     """
     Return the agreement figures with intervals.
 
     Ensures:
-        - adds the label scores when both labels and a pair map are given
+        - adds the label scores when labels, a pair map and strata are all given
     """
     pairs, one_side = paired( first, second )
     if not pairs: raise ValueError( "the two ledgers share no ruled pair" )
@@ -247,7 +259,7 @@ def compare( first, second, labels=None, pair_map=None, strata=None, draws=2000,
             "figures": statistics( first, second, pairs ), "intervals": bootstrap( first, second, pairs, draws, seed ),
             "flag_table": dict( zip( ( "both", "first_only", "second_only", "neither" ), flag_table( first, second, pairs ) ) ),
             "exact_count": exact( first, second, pairs ) }
-    if labels is not None and pair_map is not None: out[ "labels" ] = against_labels( first, second, pair_map, labels, strata )
+    if labels is not None and pair_map is not None and strata is not None: out[ "labels" ] = against_labels( first, second, pair_map, labels, strata, exclude )
     return out
 
 
@@ -257,7 +269,7 @@ def main( argv=None ):
 
     Requires:
         - argv holds --first and --second ledger paths, each with an optional --*-model and --*-slot to pick one pass,
-          and optionally --labels ( { label pair key: bool } ), --pair-map and --strata ( JSON files ), --draws and --seed
+          and optionally --labels ( { label pair key: bool } ), --pair-map, --strata and --exclude ( a list of label pair keys ), all JSON files, --draws and --seed
 
     Ensures:
         - prints one JSON document and returns 0
@@ -267,14 +279,14 @@ def main( argv=None ):
         ap.add_argument( f"--{side}", required=True )
         ap.add_argument( f"--{side}-model", default=None )
         ap.add_argument( f"--{side}-slot", default=None )
-    for name in ( "labels", "pair-map", "strata" ): ap.add_argument( f"--{name}", default=None )
+    for name in ( "labels", "pair-map", "strata", "exclude" ): ap.add_argument( f"--{name}", default=None )
     ap.add_argument( "--draws", type=int, default=2000 )
     ap.add_argument( "--seed", type=int, default=0 )
     a        = ap.parse_args( argv )
     load     = lambda p: None if p is None else json.loads( pathlib.Path( p ).read_text( encoding="utf-8" ) )
     first    = read_ledger( a.first, a.first_model, a.first_slot )
     second   = read_ledger( a.second, a.second_model, a.second_slot )
-    print( json.dumps( compare( first, second, load( a.labels ), load( a.pair_map ), load( a.strata ), a.draws, a.seed ), indent=2, sort_keys=True ) )
+    print( json.dumps( compare( first, second, load( a.labels ), load( a.pair_map ), load( a.strata ), load( a.exclude ) or (), a.draws, a.seed ), indent=2, sort_keys=True ) )
     return 0
 
 
