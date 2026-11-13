@@ -6,12 +6,16 @@ Venue: :7999-eligible (pure logic + fakes; the one real-thread test uses a block
 fake job released deterministically by request_cancel — no real arbiter run, no
 docker, no commons IO). Coverage target: 100% line+branch+function on fleet_arbiter_loop.py.
 """
+import contextlib
 import datetime
+import io
 import json
 import os
 import subprocess
 import threading
 from pathlib import Path
+
+import pytest
 
 from lupin_arbiter_app.fleet_arbiter_loop import (
     FleetArbiterLoop,
@@ -34,6 +38,24 @@ from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
 UTC = datetime.timezone.utc
 T0  = datetime.datetime( 2026, 6, 7, 12, 0, 0, tzinfo=UTC )
+
+
+@pytest.fixture( scope="module", autouse=True )
+def _primed_default_log_fn():
+    """
+    Make the first call to the shared module logger before any test reads its output.
+
+    Requires:
+        - _default_log_fn is the per-process logger built by make_log_fn with no tz_name
+
+    Ensures:
+        - its timezone cell is resolved once, with the ConfigurationManager banner that resolution prints discarded,
+          so a test that parses the logger's stdout sees only the JSON line whichever test ran first on the worker
+          (the first call printed 37 lines and later calls 1, measured on 11 Nov 2026)
+    """
+    with contextlib.redirect_stdout( io.StringIO() ):
+        _default_log_fn( "test_prime" )
+    yield
 
 
 def _report( files_found=0, roots_swept=( "/projects/lupin", ), prunable=0, keep=0,
