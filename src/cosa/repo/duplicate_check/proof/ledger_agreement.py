@@ -5,12 +5,14 @@ It gives agreement figures with bootstrap intervals, and recall and precision ag
 """
 import argparse
 import json
-import math
 import pathlib
 import random
 
+from cosa.repo.duplicate_check.judge import FLAG_VERDICTS as FLAGS
+from lupin_mcp.reuse_e2e import mcnemar_exact
+from lupin_mcp.reuse_needset.stage_c_score import percentile
+
 LEVELS    = ( "distinct", "related", "near_duplicate", "duplicate" )
-FLAGS     = ( "near_duplicate", "duplicate" )
 KEY_PARTS = 6
 
 
@@ -147,14 +149,6 @@ def statistics( first, second, pairs ):
              "flag_rate_first": ( table[ 0 ] + table[ 1 ] ) / len( pairs ), "flag_rate_second": ( table[ 0 ] + table[ 2 ] ) / len( pairs ) }
 
 
-def percentile( values, q ):
-    """Return the q-th quantile ( 0..1 ) of a sorted list by linear interpolation."""
-    pos = q * ( len( values ) - 1 )
-    lo  = math.floor( pos )
-    hi  = math.ceil( pos )
-    return values[ lo ] + ( values[ hi ] - values[ lo ] ) * ( pos - lo )
-
-
 def bootstrap( first, second, pairs, draws=2000, seed=0 ):
     """
     Bootstrap every agreement figure, resampling whole definitions.
@@ -181,20 +175,6 @@ def bootstrap( first, second, pairs, draws=2000, seed=0 ):
         vals   = sorted( draws_by.get( k, [] ) )
         out[ k ] = [ percentile( vals, 0.025 ), percentile( vals, 0.975 ) ] if vals else None
     return out
-
-
-def mcnemar_exact( only_first, only_second ):
-    """
-    Return the two-sided exact McNemar p-value from the two discordant counts.
-
-    Ensures:
-        - returns 1.0 when there are no discordant pairs
-    """
-    n = only_first + only_second
-    if n == 0: return 1.0
-    k = min( only_first, only_second )
-    p = sum( math.comb( n, i ) for i in range( k + 1 ) ) / 2 ** n
-    return min( 1.0, 2 * p )
 
 
 def against_labels( first, second, pair_map, labels, strata, exclude=() ):

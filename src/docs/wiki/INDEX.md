@@ -204,6 +204,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[duplicate-check-proof-label-loader]] — turns two reviewers' pair labels and the answer key into the labels `proof_run` takes. `cosa.repo.duplicate_check.proof` (label_load)
 - [[duplicate-check-proof-command]] — builds `proof_run`'s spec and wiring from a labelling run folder, checks or runs the proof once. `cosa.repo.duplicate_check.proof` (proof_cli)
 - [[duplicate-check-proof-flag-items]] — adds the flag pairs a trial proof run owes labels for to the labelling run, with a recoverable swap. `cosa.repo.duplicate_check.proof` (flag_items)
+- [[duplicate-check-proof-ledger-agreement]] — compares two judge ledgers on the same pairs: kappa, agreement coefficient, weighted kappa, bootstrap intervals, recall and precision against the human labels. `cosa.repo.duplicate_check.proof` (ledger_agreement)
 - [[duplicate-check-proof-label-packets]] — the monolith pairs, blind items, packets, answer key and the command of the proof's label preparation. `cosa.repo` (duplicate_check.proof.label_prep)
 - [[duplicate-check-clusters-and-config]] — duplicate clusters, the surplus-per-100-tests score and the frozen run configuration. `cosa.repo.duplicate_check` (cluster, config)
 - [[duplicate-check-judge-and-pipeline]] — the blind ledgered judge, its two backends, the judging pipeline, run scoring and the live smoke record. `cosa.repo.duplicate_check` (judge, pipeline, score_run, smoke)
