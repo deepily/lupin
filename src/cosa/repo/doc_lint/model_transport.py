@@ -149,7 +149,8 @@ AGY_USAGE         = {}
 CLAUDE_USAGE_FIELDS = ( "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens" )
 CLAUDE_USAGE        = dict( { field: 0 for field in CLAUDE_USAGE_FIELDS }, calls=0, cost_usd=0.0 )      # what finished Claude Code calls reported, since the process began
 _CLAUDE_USAGE_LOCK  = threading.Lock()
-RESET_SHAPE         = re.compile( r"\bresets?\b", re.IGNORECASE )     # a plan-limit reply names when it lifts ("resets Nov 16, 10am"), whatever else it says
+RESET_SHAPE         = re.compile( r"\bresets?\s+(?:at\s+|on\s+|in\s+)?(?:\d|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|mon|tue|wed|thu|fri|sat|sun|tomorrow|today|midnight|noon)\w*\b)", re.IGNORECASE )     # a plan-limit reply names when it lifts ("resets Nov 16, 10am"); "Connection reset by peer" does not match
+API_ERROR_PREFIX    = "api error"     # the CLI's prefix on a failure the API returned (401, 500); a plan limit is the CLI's own message and has none
 RATE_LIMIT_MARKERS  = ( "rate limit", "rate_limit", "usage limit", "429", "too many requests", "overloaded", "reached your" )     # "reached your" is the plan limit: "You've reached your Fable limit."
 _AGY_USAGE_LOCK   = threading.Lock()
 _AGY_SCRATCH_LOCK = threading.Lock()
@@ -470,11 +471,13 @@ def limit_reply( message, detail ):
         - message is a ResultMessage with is_error true; detail is its subtype and text
 
     Ensures:
-        - true when the CLI reports an error under subtype "success": the run finished and the reply is the service's own message, which is how a plan limit arrives (live, 13 Nov 2026), whatever its wording
-        - true when the text names a reset time, or carries a marker of RATE_LIMIT_MARKERS
-        - false for a failure the CLI itself names, such as error_during_execution or error_max_turns, unless the text says otherwise
+        - true when the CLI reports an error under subtype "success" and the text is not an "API Error": the reply is the CLI's own message, which is how a plan limit arrives (live, 13 Nov 2026), whatever its wording
+        - true when the text names a reset time (resets, then a date, a day or a clock time), or carries a marker of RATE_LIMIT_MARKERS
+        - false for an API failure such as a 401, and for a connection reset, unless a marker says otherwise
     """
-    return message.subtype == "success" or bool( RESET_SHAPE.search( detail ) ) or any( marker in detail.lower() for marker in RATE_LIMIT_MARKERS )
+    lowered = detail.lower()
+    own     = message.subtype == "success" and API_ERROR_PREFIX not in lowered
+    return own or bool( RESET_SHAPE.search( detail ) ) or any( marker in lowered for marker in RATE_LIMIT_MARKERS )
 
 
 def _note_claude_usage( message ):

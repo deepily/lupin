@@ -85,3 +85,14 @@ def test_a_reworded_limit_is_still_a_rate_limit_by_the_shape_of_the_error_result
 def test_a_failure_the_cli_names_with_no_reset_time_stays_a_plain_model_call_error():
     with pytest.raises( mt.ModelCallError ) as caught: call( result( None, None, error=True, text="Reached the turn limit of 1", subtype="error_max_turns" ) )
     assert not isinstance( caught.value, mt.ModelRateLimited )
+
+
+@pytest.mark.parametrize( "text, subtype", [ ( "error_during_execution: read ECONNRESET: Connection reset by peer", "error_during_execution" ),
+                                             ( "API Error: 401 {\"error\":\"invalid x-api-key\"}", "success" ), ( "API Error: 500 internal error", "success" ) ] )
+def test_a_connection_reset_and_an_api_failure_are_not_read_as_a_limit( text, subtype ):
+    with pytest.raises( mt.ModelCallError ) as caught: call( result( None, None, error=True, text=text, subtype=subtype ) )
+    assert not isinstance( caught.value, mt.ModelRateLimited )
+
+
+def test_an_api_429_under_subtype_success_is_still_a_limit_by_its_marker():
+    with pytest.raises( mt.ModelRateLimited ): call( result( None, None, error=True, text="API Error: 429 too many requests", subtype="success" ) )
