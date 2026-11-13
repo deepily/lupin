@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.reuse_needset.stage_parts.counted@b290dae039
   - lupin_mcp.reuse_needset.stage_parts.Tally@a51b5f124a
   - lupin_mcp.reuse_needset.stage_parts.yield_row@282d0350c1
-  - lupin_mcp.reuse_needset.stage_parts.build_parts@0bdb752762
+  - lupin_mcp.reuse_needset.stage_parts.build_parts@5683ed8cea
   - lupin_mcp.reuse_needset.stage_parts.RejectionLedger@3b887d4c06
   - lupin_mcp.reuse_needset.stage_parts.RejectionLedger.add@e3c1d53314
   - lupin_mcp.reuse_needset.stage_parts.RejectionLedger.rows@76ea8e5b94

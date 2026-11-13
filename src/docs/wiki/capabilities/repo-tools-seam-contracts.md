@@ -23,7 +23,7 @@ Answers where one repo keeps its state. `fleet_data_root` returns `<DEEPILY_DATA
 Answers text to vector. `EmbeddingProvider` owns the route and the key file. A process that does not own the engines reaches the server named by `LUPIN_APP_SERVER_URL`, read on every call. The default is `http://localhost:7999`, and a blank value counts as unset.
 
 ## Judge
-Answers whether definition A is the same job as definition B, for the duplicate check only. `judge_run` takes a backend that carries `.name`, `.server_label` and `.complete( model, system, user )`. The model is a pin, `claude-fable-5-1`, not a per-repo value. The doc-lint judges are a separate seam with a different shape and are not covered here.
+Answers whether definition A is the same job as definition B, for the duplicate check only. `judge_run` takes a backend that carries `.name`, `.server_label` and `.complete( model, system, user )`. The model is the global INI key `duplicate check judge model`, not a per-repo value. It is part of the config sha, so a new model needs its own frozen config. The doc-lint judges are a separate seam with a different shape and are not covered here.
 
 ## TaskStoreAdapter
 Answers how to file a finding as a row, idempotently. `TaskStoreAdapter` is the shared base of the live adapters. The stamped defaults are `PROJECT = "lupin"` in the filing module and `sender_project` `lupin` in the librarian's direct message (`notify_owner`). Owner and managers are not part of this seam; each has one home in the settings.

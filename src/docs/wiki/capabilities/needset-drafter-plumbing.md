@@ -2,7 +2,8 @@
 capability: needset-drafter-plumbing
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.draft.drafter_call@3d7248385d
+  - lupin_mcp.reuse_needset.draft.drafter_model@0dce3b9d06
+  - lupin_mcp.reuse_needset.draft.drafter_call@21a2899b71
   - lupin_mcp.reuse_needset.draft.make_ledger@e56913d1c7
   - lupin_mcp.reuse_needset.draft.SharedLedger@1aadd4a4ed
   - lupin_mcp.reuse_needset.draft.SharedCallLog@9241f3f96a
@@ -19,6 +20,7 @@ pins:
 The parts of drafting that send one prompt, check the reply and keep a ledger. Every model call goes through a ledger, so a stopped run resumes without repeating a call. The drafting flows are on [[needset-drafting-flows]].
 
 ## Sending
+- `drafter_model( model_id=None )` names the drafter's model: the caller's id, else the INI key `reuse need drafter model`, read when called. There is no model id in the code, and a blank key raises `CodeHealthSettingError`. `draft_need`, `draft_cell`, `draft_none` and `drafter_call` take `None` for it.
 - `drafter_call` builds the function that sends one system and user prompt to the drafter and blocks until the reply arrives. It must not be called from a running event loop.
 - `make_ledger` opens the drafting ledger, bound to the Claude Code binary's reported version, or `bundled` for the SDK's own binary, and then the server label. A ledger written under another binary or label is refused.
 - `SharedLedger` is a ledger several threads may read and write, with one lock per call.

@@ -5,15 +5,18 @@ Rick, 13 Nov 2026: a model id lives in lupin-app.ini, read through Configuration
 The list is what the tree held when that rule was written, measured at 35e48e35c plus the change that moved the code-health ids.
 It is a ratchet: a new literal fails, and so does a file that drops one until its count here is lowered or removed.
 The count is of literal occurrences, so a model id quoted in a docstring counts too; the predicate is the text, not the use.
+A literal is a quote, any provider prefix, `claude-`, at most one word, then a version digit, so a memento name does not match.
 """
 import pathlib
 import re
 import subprocess
 
+import pytest
+
 import cosa.utils.util as cu
 
-MODEL_LITERAL = re.compile( r"[\"']claude-[a-z]+-[0-9]" )
-TEST_DIR      = re.compile( r"(^|/)tests?/" )
+MODEL_LITERAL = re.compile( r"[\"'][\w.:/@-]*claude-(?:[a-z]+-)?[0-9]" )      # claude-opus-5-5, claude-3-5-sonnet, us.anthropic.claude-…
+NON_SOURCE      = re.compile( r"(^|/)tests?/|^src/rnd/|^src/cosa/rnd/" )
 SKIPPED_PARTS = ( ".venv", "node_modules", "site-packages" )
 NOW_IN_INI    = ( "src/cosa/repo/duplicate_check/config.py", "src/lupin_mcp/reuse_needset/draft.py", "src/lupin_mcp/reuse_expansion.py" )
 
@@ -25,6 +28,8 @@ FROZEN = {
     "src/cosa/agents/deep_research/api_client.py"          : 1,
     "src/cosa/agents/deep_research/config.py"              : 5,
     "src/cosa/agents/deep_research/cost_tracker.py"        : 15,
+    "src/cosa/agents/llm_client.py"                        : 1,
+    "src/cosa/agents/model_registry.py"                    : 2,
     "src/cosa/agents/notification_proxy/config.py"         : 1,
     "src/cosa/agents/podcast_generator/api_client.py"      : 3,
     "src/cosa/agents/podcast_generator/config.py"          : 3,
@@ -53,7 +58,7 @@ def source_files( root ):
         - returns repo-relative paths from `git ls-files 'src/*.py'`, without test folders, virtualenvs or vendored packages
     """
     listed = subprocess.run( [ "git", "ls-files", "src/*.py" ], cwd=root, capture_output=True, text=True, check=True ).stdout.split()
-    return [ path for path in listed if TEST_DIR.search( path ) is None and not any( part in path for part in SKIPPED_PARTS ) ]
+    return [ path for path in listed if NON_SOURCE.search( path ) is None and not any( part in path for part in SKIPPED_PARTS ) ]
 
 
 def model_literals( root ):
@@ -65,6 +70,13 @@ def model_literals( root ):
     """
     counts = { path: len( MODEL_LITERAL.findall( ( pathlib.Path( root ) / path ).read_text( encoding="utf-8" ) ) ) for path in source_files( root ) }
     return { path: count for path, count in counts.items() if count > 0 }
+
+
+@pytest.mark.parametrize( "text, hit", [ ( '"claude-opus-5-5"', True ), ( "'claude-3-5-sonnet-latest'", True ), ( '"anthropic:claude-3-5-sonnet"', True ),
+                                         ( '"us.anthropic.claude-opus-4-8"', True ), ( '"claude-fable-5-1"', True ), ( '"/repo/.claude-memento-maya-9e0b977d.md"', False ),
+                                         ( '"claude-code"', False ), ( "claude-opus-5-5 unquoted", False ) ] )
+def test_the_literal_pattern_sees_model_ids_in_every_spelling_and_not_memento_names( text, hit ):
+    assert ( MODEL_LITERAL.search( text ) is not None ) == hit
 
 
 def test_the_census_walks_the_source_tree_and_finds_the_known_literals():

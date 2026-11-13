@@ -97,9 +97,10 @@ def control_rows( pairs, ask, ledger, strip_fn, id_of ):
         - NeedsetError BAD_NEED when an original has no index id
     """
     rows, undrafted = [ ], [ ]
+    model_id        = draft.drafter_model()      # read once, so one run's ledger keys name one model
     for p in pairs:
         try:
-            rec = draft.draft_need( first_thousand.control_job( p, strip_fn ), ask, ledger, max_tries=first_thousand.CONTROL_TRIES )
+            rec = draft.draft_need( first_thousand.control_job( p, strip_fn ), ask, ledger, model_id=model_id, max_tries=first_thousand.CONTROL_TRIES )
         except SavedAnswerMissing:
             undrafted.append( p[ "rewrite" ][ "id" ] )
             continue
@@ -302,11 +303,13 @@ def _run( args, root, ctx, deps, close ):
 
     Ensures:
         - returns { live False, plan } for a plan, and { live True, plan, report, closed_run, close_error } for a live run
+        - the drafter's model is read from the INI once, so the plan, the asks and the report name the same model
     """
     yield_trace.hold_transport( ctx )
     rows, undrafted, unsaved = deps[ "rows" ]( args, root, ctx ) if "rows" in deps else collect_rows( args, root, ctx, deps )
     ledger = draft.make_ledger( f"{args.run_dir}/{LEDGER_FILE}", args.cli_path, args.server )
-    plan   = { **plan_of( rows, undrafted, unsaved, ledger, draft.drafter_model(), args.budget ), "run_name": os.environ[ rt.RUN_NAME_VARIABLE ] }
+    model  = draft.drafter_model()
+    plan   = { **plan_of( rows, undrafted, unsaved, ledger, model, args.budget ), "run_name": os.environ[ rt.RUN_NAME_VARIABLE ] }
     if not args.live: return { "live": False, "plan": plan }
     if "stage" in deps: stage, search = deps[ "stage" ]( ctx )
     else:
@@ -315,8 +318,8 @@ def _run( args, root, ctx, deps, close ):
         prepared = rt.prepare( ctx )
         search   = lists_for( stage, prepared[ 1 ], prepared[ 2 ], ctx.pages )
     fusion = ( stage.fusion if stage.fusion else { "k": rf.FUSION_K, "depth": rf.FUSION_DEPTH, "head": rf.FUSION_HEAD } )
-    ask    = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
-    report = run_live( args.run_dir, rows, ask, ledger, search, fusion, args.limit, args.budget, draft.drafter_model() )
+    ask    = deps[ "ask" ] if "ask" in deps else draft.drafter_call( model )
+    report = run_live( args.run_dir, rows, ask, ledger, search, fusion, args.limit, args.budget, model )
     try:
         closed, close_error = close( ctx ), None
     except Exception as error:

@@ -69,7 +69,8 @@ def pair( n ):
 
 def fake_draft( monkeypatch, outcome ):
     """Replace the drafting of a control need with a table of outcomes by rewrite id."""
-    def draft_need( job, ask, ledger, max_tries=None ):
+    def draft_need( job, ask, ledger, model_id, max_tries=None ):
+        assert model_id == "claude-fable-5-1"      # control_rows reads the drafter key once and passes it
         what = outcome[ job[ "keys" ][ 0 ][ "id" ] ]
         if what == "missing": raise SavedAnswerMissing( "no answer" )
         return what
@@ -270,7 +271,7 @@ def test_without_deps_main_builds_the_real_stage_rows_ask_and_closer( tmp_path, 
     monkeypatch.setattr( xr.vs, "load_vectors", lambda folder: seen.setdefault( "vectors", folder ) )
     monkeypatch.setattr( xr, "FullStage", lambda *a, **k: seen.setdefault( "stage", FakeStage() ) )
     monkeypatch.setattr( xr, "lists_for", lambda stage, entries, sha, pages: seen.setdefault( "search_args", ( entries, sha, pages ) ) and search_fn )
-    monkeypatch.setattr( xr.draft, "drafter_call", lambda: counted_ask() )
+    monkeypatch.setattr( xr.draft, "drafter_call", lambda model: counted_ask() if model == "claude-fable-5-1" else None )
     out = xr.main( argv( tmp_path, "--cli-path", old_run, "--live" ), None )
     assert out[ "closed_run" ] == "run-z" and seen[ "unlocked" ] == str( tmp_path ) and seen[ "vectors" ] == "/v" and seen[ "search_args" ] == ( [ "E" ], "sha", "pages" )
     assert out[ "report" ][ "used" ] == 1
