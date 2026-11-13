@@ -2,7 +2,7 @@
 capability: swe-team-cli-and-config
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.swe_team.__main__.main@5fe9c10205
+  - cosa.agents.swe_team.__main__.main@5d2f7a5ae8
   - cosa.agents.swe_team.config.SweTeamConfig@8ef6639f4d
 ---
 # SWE team command line and config

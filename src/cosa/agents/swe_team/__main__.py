@@ -64,12 +64,12 @@ Examples:
     parser.add_argument(
         "--lead-model",
         default=None,
-        help="Override lead model (default: claude-opus-4-6)",
+        help="Override lead model (default: INI key `swe team lead model`)",
     )
     parser.add_argument(
         "--worker-model",
         default=None,
-        help="Override worker model (default: claude-sonnet-4-6)",
+        help="Override worker model (default: INI key `swe team worker model`)",
     )
     parser.add_argument(
         "--budget",
