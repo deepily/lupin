@@ -57,6 +57,13 @@ def test_an_error_result_that_names_a_limit_raises_the_rate_limited_error_which_
     assert isinstance( caught.value, mt.ModelCallError ) and mt.claude_usage_summary()[ "calls" ] == 1, "a refused call is still counted"
 
 
+REAL_PLAN_LIMIT = "You've reached your Fable limit. Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue."   # captured from a live call, 11 Nov 2026
+
+
+def test_the_plan_limit_text_a_live_call_returned_raises_the_rate_limited_error():
+    with pytest.raises( mt.ModelRateLimited, match="reached your Fable limit" ): call( result( None, None, error=True, text=REAL_PLAN_LIMIT ) )
+
+
 def test_any_other_error_result_stays_a_plain_model_call_error():
     with pytest.raises( mt.ModelCallError ) as caught: call( result( None, None, error=True, text="boom" ) )
     assert not isinstance( caught.value, mt.ModelRateLimited )

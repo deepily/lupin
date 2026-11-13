@@ -148,7 +148,7 @@ AGY_USAGE         = {}
 CLAUDE_USAGE_FIELDS = ( "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens" )
 CLAUDE_USAGE        = dict( { field: 0 for field in CLAUDE_USAGE_FIELDS }, calls=0, cost_usd=0.0 )      # what finished Claude Code calls reported, since the process began
 _CLAUDE_USAGE_LOCK  = threading.Lock()
-RATE_LIMIT_MARKERS  = ( "rate limit", "rate_limit", "usage limit", "429", "too many requests", "overloaded" )
+RATE_LIMIT_MARKERS  = ( "rate limit", "rate_limit", "usage limit", "429", "too many requests", "overloaded", "reached your" )     # "reached your" is the plan limit: "You've reached your Fable limit."
 _AGY_USAGE_LOCK   = threading.Lock()
 _AGY_SCRATCH_LOCK = threading.Lock()
 

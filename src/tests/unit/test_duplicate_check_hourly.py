@@ -49,6 +49,15 @@ def test_a_rate_limited_call_is_counted_and_every_later_call_is_refused_without_
     assert ( count.calls, count.limited, inner.calls ) == ( 1, 1, 1 )
 
 
+def test_the_plan_limit_error_from_the_real_transport_is_counted_as_limited_and_stops_the_run_after_one_call():
+    from tests.unit.test_model_transport_claude_usage import REAL_PLAN_LIMIT, result
+    async def fake( prompt, options ): yield result( None, None, error=True, text=REAL_PLAN_LIMIT )
+    count = dd.Counting( dd.proof_cli.judge.MaxPlanBackend( query_fn=fake ) )
+    with pytest.raises( mt.ModelRateLimited, match="reached your Fable limit" ): asyncio.run( count.complete( "m", "s", "u" ) )
+    with pytest.raises( mt.ModelRateLimited, match="no further call" ): asyncio.run( count.complete( "m", "s", "u" ) )
+    assert ( count.calls, count.limited ) == ( 1, 1 )
+
+
 def test_branch_auto_names_the_newest_wip_branch_by_tip_time_and_otherwise_main( repo ):
     commit( repo, { "a.py": "x = 1\n" }, "base", 48 )
     assert dd.resolve_branch( repo, "auto" ) == "main", "no wip branch exists"
