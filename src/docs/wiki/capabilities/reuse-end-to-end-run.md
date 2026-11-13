@@ -9,7 +9,6 @@ pins:
   - lupin_mcp.reuse_e2e.read_search@da84661cfb
   - lupin_mcp.reuse_e2e.incomplete_causes@079c989e5f
   - lupin_mcp.reuse_e2e.wilson@e1346267be
-  - lupin_mcp.reuse_e2e.mcnemar_exact@f383c680a6
   - lupin_mcp.reuse_e2e.figures@2db02df5bd
   - lupin_mcp.reuse_e2e.paired@caf7902b28
   - lupin_mcp.reuse_e2e_run.E2EEnv@e53f8b9208
@@ -31,7 +30,7 @@ The end-to-end run sweeps the whole catalogue for each of 100 sampled members, o
 - `load_sample`, `load_needs` and `load_twins` read the frozen sample, need sentences and twin manifest. Each hash is checked first. The sample has 58 exact-cluster and 42 near-only members, in that order. A mismatch raises `FrozenInputRefused`.
 - `read_search( result, twins )` reads one finished search: whether a twin is on the shortlist, ranked first, or in the nearest ten.
 - `incomplete_causes` names why a search is incomplete, apart: the ceiling, the ledger, `CALL_FAILED`, `MALFORMED_ANSWER`, then the sweep's own. A complete search gives an empty list.
-- `wilson( k, n )` is the 95% Wilson interval. `mcnemar_exact` is the exact two-sided McNemar p of two discordant counts.
+- `wilson( k, n )` is the 95% Wilson interval. The exact two-sided McNemar p of two discordant counts comes from `mcnemar_exact` in `cosa.utils.agreement_stats`.
 - `figures( searches, questions )` gives each question's counts and headline figures, with an incomplete search counted as a miss. `paired` compares two questions on the members both ran.
 - `ask_old`, `ask_new` and `ask_candidates` are the asks: a full sweep with the old or new question, and the old one through the candidate stage. Each leaves the member out.
 - `E2EEnv` holds what the runner takes from outside: the ledger, the asks and a transport factory. Results go to `<data>/e2e-results/`.

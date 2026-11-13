@@ -9,8 +9,7 @@ import pathlib
 import random
 
 from cosa.repo.duplicate_check.judge import FLAG_VERDICTS as FLAGS
-from lupin_mcp.reuse_e2e import mcnemar_exact
-from lupin_mcp.reuse_needset.stage_c_score import percentile
+from cosa.utils.agreement_stats import mcnemar_exact, percentile
 
 LEVELS    = ( "distinct", "related", "near_duplicate", "duplicate" )
 KEY_PARTS = 6
