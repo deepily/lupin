@@ -147,6 +147,7 @@ def test_against_labels_proof_rules():
     assert allb[ "second" ][ "flags" ] == 3 and allb[ "second" ][ "correct" ] == 2
     assert allb[ "first" ][ "unlabelled_flags" ] == 1 and allb[ "second" ][ "unlabelled_flags" ] == 1
     assert allb[ "mcnemar" ] == { "pairs": 8, "only_first": 1, "only_second": 1, "p": 1.0 }
+    assert allb[ "mcnemar_true_pairs" ] == { "pairs": 5, "only_first": 0, "only_second": 1, "p": 1.0 }
     assert out[ "alike" ][ "true_pairs" ] == 1 and "precision" not in out[ "alike" ][ "first" ]
     assert out[ "other" ][ "true_pairs" ] == 4 and out[ "other" ][ "mcnemar" ] == { "pairs": 4, "only_first": 0, "only_second": 1, "p": 1.0 }
 

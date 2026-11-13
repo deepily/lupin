@@ -212,7 +212,8 @@ def against_labels( first, second, pair_map, labels, strata, exclude=() ):
         - a true pair that no ruled pair maps to counts as not found, as in the proof
         - returns { all: block, <stratum>: block }; a block holds for each ledger the true pairs found and recall
         - the all block also holds the flags on labelled pairs, how many are true, and precision
-        - every block holds McNemar's test on the pairs where the two flags differ, over that block's pairs
+        - every block holds McNemar's test on the pairs where the two flags differ, over that block's pairs, and again over its true pairs alone
+        - the first test is biased toward the ledger whose flags chose the labelled pairs, so the true-pairs test is the fair one
         - the all block counts the flagged pairs that carry no label, for each ledger
     """
     skip    = set( exclude )
@@ -242,6 +243,9 @@ def against_labels( first, second, pair_map, labels, strata, exclude=() ):
         b = sum( 1 for k in pool if flagged[ 0 ].get( k, False ) and not flagged[ 1 ].get( k, False ) )
         c = sum( 1 for k in pool if flagged[ 1 ].get( k, False ) and not flagged[ 0 ].get( k, False ) )
         block[ "mcnemar" ] = { "pairs": len( pool ), "only_first": b, "only_second": c, "p": mcnemar_exact( b, c ) }
+        tb = sum( 1 for k in true if flagged[ 0 ].get( k, False ) and not flagged[ 1 ].get( k, False ) )
+        tc = sum( 1 for k in true if flagged[ 1 ].get( k, False ) and not flagged[ 0 ].get( k, False ) )
+        block[ "mcnemar_true_pairs" ] = { "pairs": len( true ), "only_first": tb, "only_second": tc, "p": mcnemar_exact( tb, tc ) }
         out[ name ] = block
     return out
 
