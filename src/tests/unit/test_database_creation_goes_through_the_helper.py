@@ -22,6 +22,8 @@ ALLOWED   = (
     "src/tests/smoke/test_scratch_database_terminate_real_postgres.py",
     "src/tests/smoke/test_template_database_vector_real_postgres.py",
     "src/tests/unit/deploy/test_db_roles_drop_template.py",
+    # 2026-11-13: reads the VM init SQL and asserts it names the test database; it creates nothing (row d2a18b64).
+    "src/tests/unit/deploy/test_vm_test_server_overlay.py",
     "src/tests/unit/test_template_database_helper.py",
 )
 
