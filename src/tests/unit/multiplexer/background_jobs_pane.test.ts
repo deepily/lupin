@@ -609,7 +609,7 @@ test( "the Background Jobs toolbar icon is 🔁, is used by no other toggle, and
 
 test( "the accordion ends with the switched-off line when the server sends one, and with nothing extra when it does not (row 4aa0ba1b)", () => {
   const plain = drawAll();
-  assert.equal( plain.querySelector( "[data-testid=background-jobs-off-line]" ), null );
+  assert.ok( plain.querySelector( "[data-testid=background-jobs-off-line]" ) === null, "the off-line is absent" );
   const off = drawAll( { ...clone( FIXTURE ), reporting_off : 8, reporting_off_line : "8 jobs have reporting switched off" } );
   const last = off.lastElementChild as HTMLElement;
   assert.equal( last.getAttribute( "data-testid" ), "background-jobs-off-line" );
