@@ -12,7 +12,7 @@ pins:
   - cosa.agents.podcast_generator.state.PodcastScript@2bd4d3d944
   - cosa.agents.podcast_generator.tts_client.PodcastTTSClient@120b5ef7f6
   - cosa.agents.podcast_generator.audio_stitcher.PodcastAudioStitcher@7a56300067
-  - cosa.agents.podcast_generator.config.PodcastConfig@0dea4d4ae8
+  - cosa.agents.podcast_generator.config.PodcastConfig@aed8c2aebd
   - cosa.agents.podcast_generator.config.read_owner_email@5549eda88a
 ---
 # Podcast generation
@@ -30,7 +30,7 @@ pins:
 - "Revise script" followed by silence raises `PodcastGenerationError` and the job fails; it is not turned into an approval. The feedback wait is 300 seconds.
 - If the first script reply cannot be parsed, the job sends a low-priority note and asks for the script once more. A second parse failure fails the job, and the error gives the path of the saved raw reply. Script revision is not retried. A script with zero segments raises `PodcastGenerationError` before the gate; it is never offered for approval.
 - If some segments fail, the job asks whether to continue with partial audio and takes "yes" when nobody can answer. A language with no successful segment is skipped; if no language has audio, the job fails with a `RuntimeError` that names `ELEVENLABS_API_KEY`.
-- The `PodcastConfig` code default is `claude-opus-4-6` with at most 5 turns. The shipped INI (`[Lupin: Baseline]`) sets `podcast script model` to `claude-opus-5` instead. `podcast script max turns` is 5 there too.
+- `PodcastConfig` has no model default in code: a missing `podcast script model` key raises `MissingConfigKeyError`. The shipped INI (`[Lupin: Baseline]`) sets it to `claude-opus-5`. Turns are at most 5 by code default, and `podcast script max turns` is 5 there too.
 - With `publish_to_google_drive` on (off by default), the job copies the files to the user's Google Drive, and a Drive failure never fails the job. The job passes its `user_email` to the hook, and `podcast drive upload users` decides whether that user is uploaded ([[podcast-drive-publishing]]). `PodcastConfig` carries `drive_upload_users` (default `owner`) and `drive_owner_email` (default empty, meaning nobody). `read_owner_email( config_mgr )` is the one reader of `podcast drive owner email`. It returns the stripped value, or an empty string.
 
 ## How to extend
