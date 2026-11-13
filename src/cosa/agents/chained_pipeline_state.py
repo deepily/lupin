@@ -313,14 +313,8 @@ class ChainedDeepResearchAgent:
 
         # Create research configuration
         config = ResearchConfig(
-            lead_model = self.lead_model if self.lead_model else config_mgr.get(
-                "deep research lead model",
-                default="claude-opus-4-6"
-            ),
-            subagent_model = config_mgr.get(
-                "deep research subagent model",
-                default="claude-sonnet-4-6"
-            ),
+            lead_model     = self.lead_model if self.lead_model else config_mgr.get_required( "deep research lead model" ),
+            subagent_model = config_mgr.get_required( "deep research subagent model" ),
             audience = self.audience or config_mgr.get(
                 "deep research audience",
                 default="academic"
