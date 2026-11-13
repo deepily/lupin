@@ -25,7 +25,26 @@ import subprocess
 
 import pytest
 
+from cosa.utils.main_checkout import main_checkout_of
+
 CONTAINER = os.environ.get( "PREFLIGHT_CONTAINER", "lupin-rest-test" )
+
+
+def _host_checkout( tree ):
+    """
+    Return the checkout whose files the container binds, given the tree the test runs from.
+
+    The container is created from the main checkout, so its bind sources are that checkout's paths.
+    A seat worktree has `./.git` as a file. It also has its own `.claude/worktrees`.
+    The container sees neither, so reading them there reports a mount as missing when it is not.
+
+    Requires:
+        - tree is a path inside a git checkout, or any path
+
+    Ensures:
+        - returns the main checkout that owns tree, or tree itself when git cannot say
+    """
+    return main_checkout_of( tree ) or str( tree )
 
 
 def _docker_available():
@@ -149,7 +168,7 @@ def test_worktree_bind_mount_end_to_end():
     """
     smoke_name     = f"worktree-preflight-pytest-{os.getpid()}"
     container_path = f"/var/lupin/.claude/worktrees/{smoke_name}"
-    host_root      = os.path.abspath( os.path.join( os.path.dirname( __file__ ), "..", "..", ".." ) )
+    host_root      = _host_checkout( os.path.abspath( os.path.join( os.path.dirname( __file__ ), "..", "..", ".." ) ) )
     host_path      = os.path.join( host_root, ".claude", "worktrees", smoke_name )
     try:
         add = _docker_exec(
@@ -328,7 +347,7 @@ def test_gh_auth_status_warn_only():
 def _file_binds( container ):
     """Every FILE bind (./, ~, absolute) compose declares for `container`, as (src, dest)."""
     import yaml
-    lupin_root = os.environ.get( "LUPIN_ROOT", "." )
+    lupin_root = _host_checkout( os.environ.get( "LUPIN_ROOT", "." ) )
     compose    = os.path.join( lupin_root, "docker-compose.yml" )
     if not os.path.exists( compose ): return None
 
