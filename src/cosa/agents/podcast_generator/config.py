@@ -438,9 +438,9 @@ class PodcastConfig:
 
         timestamp = datetime.now().strftime( "%Y.%m.%d-%H%M%S" )
 
-        # Sanitize topic for filename: remove special chars, keep alphanumerics/spaces/hyphens
+        # Sanitize topic for filename: remove special chars, keep alphanumerics/whitespace/hyphens; every whitespace char becomes a hyphen
         topic_clean = re.sub( r'[^a-zA-Z0-9\s-]', '', topic )
-        topic_slug = topic_clean.lower().replace( " ", "-" )[ :50 ]
+        topic_slug = re.sub( r"\s", "-", topic_clean.lower() )[ :50 ]
         # Collapse multiple hyphens and strip leading/trailing hyphens
         topic_slug = re.sub( r'-+', '-', topic_slug ).strip( '-' )
 
