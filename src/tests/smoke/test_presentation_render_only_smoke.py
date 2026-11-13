@@ -537,8 +537,11 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
         abs_path = recorded
         if not os.path.isabs( abs_path ):
             import cosa.utils.util as cu
-            # job.py records pptx_path relative to io/ (it strips the io_base prefix).
-            abs_path = os.path.join( cu.get_project_root(), "io", recorded.lstrip( "/" ) )
+            from cosa.utils.main_checkout import main_checkout_of
+            # job.py records pptx_path relative to io/ (it strips the io_base prefix). The server that
+            # rendered the deck writes into the MAIN checkout's io/, so a seat worktree must look there.
+            root     = cu.get_project_root()
+            abs_path = os.path.join( main_checkout_of( root ) or root, "io", recorded.lstrip( "/" ) )
 
         verdict = verify_presentation_deck( abs_path )
         if verdict:
