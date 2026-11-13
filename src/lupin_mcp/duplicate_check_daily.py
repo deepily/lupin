@@ -420,13 +420,10 @@ def append_manifest( folder, judged, cfg, run_file, now ):
         - cfg is the verified frozen configuration; run_file names the run's result file; now is a timezone-aware datetime
 
     Ensures:
-        - appends to <folder>/interim-judge-manifest.jsonl, making the folder, one line of { id, file, run_file, model_id, config_sha, time } for each judged definition, in order
+        - appends through history.append_line to <folder>/interim-judge-manifest.jsonl, making the folder, one line of { id, file, run_file, model_id, config_sha, time } for each judged definition, in order
         - writes nothing, and does not create the file, when judged is empty
     """
-    if not judged: return
-    folder.mkdir( parents=True, exist_ok=True )
-    with open( folder / MANIFEST, "a", encoding="utf-8" ) as f:
-        for d in judged: f.write( json.dumps( { "id": d[ "id" ], "file": d[ "file" ], "run_file": run_file, "model_id": cfg[ "model_id" ], "config_sha": cfg[ "config_sha" ], "time": now.isoformat() }, sort_keys=True ) + "\n" )
+    for d in judged: history.append_line( folder, { "id": d[ "id" ], "file": d[ "file" ], "run_file": run_file, "model_id": cfg[ "model_id" ], "config_sha": cfg[ "config_sha" ], "time": now.isoformat() }, name=MANIFEST )
 
 
 def record( folder, stem, doc, now ):

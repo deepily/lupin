@@ -4,8 +4,8 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_daily.Counting@b972f2d227
   - lupin_mcp.duplicate_check_daily.findings_of@cfdb1b0bd4
-  - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
-  - lupin_mcp.duplicate_check_daily.run@0e3d95bce3
+  - lupin_mcp.duplicate_check_daily.failed_prerequisite@63584b8a94
+  - lupin_mcp.duplicate_check_daily.run@04f47b2156
   - lupin_mcp.duplicate_check_daily.cron_lines@5d30783eec
   - lupin_mcp.duplicate_check_daily.install_mode@8a07fed64c
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
@@ -13,6 +13,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.live_auditor@4cc714910e
   - lupin_mcp.duplicate_check_daily.main@183e409cd2
   - lupin_mcp.duplicate_check_daily.resolve_ceiling@8514765a03
+  - lupin_mcp.duplicate_check_daily.append_manifest@25912ae6d8
   - lupin_mcp.duplicate_check_daily.record@0c6e420b03
   - lupin_mcp.duplicate_check_daily.rising_guard@9bf675aa57
   - lupin_mcp.duplicate_check_daily.limit_flag@4dc500630b
@@ -21,15 +22,14 @@ pins:
 The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplicate-check-daily-window]]; rows are in [[duplicate-check-filing]]; the hourly slots, back-off and lock are in [[duplicate-check-daily-slots]].
 
 ## What it does
-- `failed_prerequisite` checks, in order, that the embedding endpoint answers, the Claude binary reports a version and the frozen configuration matches the live one. It returns None or `{ prerequisite, detail }` for the first that fails.
+- `failed_prerequisite` checks, in order, that the embedding endpoint answers, the Claude binary reports a version and the frozen configuration matches the live one. A judge model with no frozen file fails the third. It returns None or `{ prerequisite, detail }` for the first that fails.
 - `Counting` wraps the judge backend and counts the calls. After a rate or usage limit refusal it counts that in `limited` and refuses every later call of the run at once.
 - `findings_of` makes one finding per cluster that holds a new definition: the new definition with the lowest id, with `others` the rest. A cluster is left out when any of its new definitions already has a verdict line, so a verdict on either side settles the pair. Without `session_of` the session is None.
 - `run( root, now, trigger, cap, cli_path, parts, ... )` first runs the guards of [[duplicate-check-branch-guard]]. It then writes `<date>-<time>-<trigger>.json` under `duplicate-check-daily`. A trigger other than `cron`, `reboot` or `hand` raises `ValueError`.
 - A complete baseline judges nothing. A run inside a rate-limit back-off is recorded `skipped` and judges nothing. A failed prerequisite writes status `failed` and changes nothing else.
 - A judge ledger written under another Claude Code version is renamed aside (see `rotate_ledger_for_new_cli` in [[duplicate-check-proof-command]]); the result then holds `ledger_rotated`.
-- An error while reading the configuration, choosing the window or making the worktree writes status `failed`, stage `setup`. An error while building the pool, embedding or judging writes stage `judging`. `last-success.json` does not move. Worktrees are removed either way.
-- The result holds `test_code_dropped` with `owed` and `pool`: the test-code definitions left out of the owed set and of the comparison pool.
-- Otherwise status is `ok`, or `carried` when the cap left definitions. `last-success.json` advances to the last commit fully judged and records the branch.
+- An error while reading the configuration, choosing the window or making the worktree writes status `failed`, stage `setup`. An error while building the pool, embedding or judging writes stage `judging`. `last-success.json` does not move. Worktrees are removed either way. The result holds `test_code_dropped` with `owed` and `pool`: the test-code definitions left out of the owed set and of the comparison pool.
+- Otherwise status is `ok`, or `carried` when the cap left definitions. `last-success.json` advances to the last commit fully judged and records the branch. `append_manifest` writes one line per judged definition to `interim-judge-manifest.jsonl` through `append_line` of [[duplicate-check-run-history]]. A line holds the id, file, run file, model id, config sha and time, and each finding carries `judge_model`.
 - A filer or auditor that raises is caught and recorded with an `error`; the run still advances. Findings stay in the result file, and [[duplicate-check-refile]] can file them again.
 - With `ceiling` (`--ceiling N`) the cap is the number of definitions to judge, up to N. `limit_flag` gives `--ceiling N` when a ceiling is set, else `--cap N`, for the cron lines. With `baseline` (`--baseline`) the definitions are every one in the tree, drained over runs; `baseline.json` says `in_progress` or `complete`.
 - `rising_guard` alerts through the notifier when the carried count rose on the last `--rise-limit` (3) measured daily runs. It alerts on the first crossing only; later runs hold `rising` with `repeat`.
