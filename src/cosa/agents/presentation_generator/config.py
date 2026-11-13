@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 
 import cosa.utils.util as cu
-from cosa.agents.shared.config_loader import load_kwargs_from_ini
+from cosa.agents.shared.config_loader import load_kwargs_from_ini, model_field
 
 # Field name -> INI key. max_source_chars reads the shared base key (not presentation-prefixed),
 # the identical key the podcast config reads: single source of truth for the char ceiling.
@@ -55,8 +55,8 @@ class PresentationConfig:
     """
 
     # Model selection
-    content_model            : str   = "claude-opus-4-6"
-    automated_content_model  : str   = "claude-sonnet-4-6"
+    content_model            : str   = model_field( "presentation generator content model" )
+    automated_content_model  : str   = model_field( "presentation generator automated content model" )
     # Bounded-CC (in-process sdk_query) turn cap for each content-phase LLM call
     # (analysis/outline/elaboration/mermaid/matplotlib/d2/json). Each call is
     # single-shot; the bounded path REQUIRES an explicit max_turns.
@@ -216,7 +216,7 @@ def quick_smoke_test():
         # Test 1: Default instantiation
         print( "Testing default instantiation..." )
         config = PresentationConfig()
-        assert config.content_model == "claude-opus-4-6"
+        assert config.content_model.startswith( "claude-" )
         assert config.target_duration_minutes == 15
         assert config.slides_per_minute == 1.0
         assert config.title_style == "assertion"
@@ -245,7 +245,7 @@ def quick_smoke_test():
         from cosa.config.configuration_manager import ConfigurationManager
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         loaded = PresentationConfig.from_config( config_mgr, debug=True )
-        assert loaded.content_model == "claude-opus-4-6"
+        assert loaded.content_model.startswith( "claude-" )
         assert loaded.target_duration_minutes == 15
         assert loaded.slides_per_minute == 1.0
         assert loaded.title_style == "assertion"

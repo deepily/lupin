@@ -40,7 +40,7 @@ EXPECTED_PRESENTATION_KEYS = {
 class TestDefaults:
     def test_default_fields( self ):
         cfg = PresentationConfig()
-        assert cfg.content_model           == "claude-opus-4-6"
+        assert cfg.content_model           == "claude-opus-5"      # read from the INI, not from code
         assert cfg.automated_content_model == "claude-sonnet-4-6"
         assert cfg.target_duration_minutes == 15
         assert cfg.slides_per_minute       == 1.0
@@ -56,6 +56,7 @@ class TestFromConfig:
     def _mgr( self, values ):
         mgr = MagicMock()
         mgr.get.side_effect = lambda key, default=None, return_type="str": values.get( key, default )
+        mgr.get_required.side_effect = lambda key, return_type="str", **kwargs: values.get( key, f"model-for[{key}]" )
         return mgr
 
     def test_from_config_uses_ini_values_debug( self, capsys ):
@@ -79,7 +80,7 @@ class TestFromConfig:
 
     def test_from_config_falls_back_to_defaults_no_debug( self ):
         cfg = PresentationConfig.from_config( self._mgr( {} ), debug=False )
-        assert cfg.content_model           == "claude-opus-4-6"
+        assert cfg.content_model           == "model-for[presentation generator content model]"   # get_required, no default
         assert cfg.target_duration_minutes == 15
 
     def test_every_mapped_key_reaches_its_own_field( self ):
@@ -101,7 +102,8 @@ class TestFromConfig:
 
     def test_every_default_matches_the_dataclass_default( self ):
         cfg = PresentationConfig.from_config( self._mgr( {} ) )
-        assert cfg == PresentationConfig()
+        model_ids = { "content_model": "model-for[presentation generator content model]", "automated_content_model": "model-for[presentation generator automated content model]" }
+        assert cfg == PresentationConfig( **model_ids )
 
     def test_each_field_is_read_with_the_type_of_its_annotation( self ):
         types = {}

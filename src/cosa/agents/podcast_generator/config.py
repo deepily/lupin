@@ -16,7 +16,7 @@ from typing import Literal, Optional, List
 # ONE label map that cannot drift (row 81040071). Consumers keep importing it as
 # `from cosa.agents.podcast_generator.config import LANGUAGE_NAMES`.
 from cosa.agents.language_names import LANGUAGE_NAMES
-from cosa.agents.shared.config_loader import load_kwargs_from_ini
+from cosa.agents.shared.config_loader import load_kwargs_from_ini, model_field
 from cosa.utils.csv_text import split_csv
 
 
@@ -315,7 +315,7 @@ class PodcastConfig:
     """
 
     # === Model Selection ===
-    script_model : str = "claude-opus-4-6"
+    script_model : str = model_field( "podcast script model" )
 
     # === Host Configuration ===
     host_a_personality : HostPersonality = field( default_factory=lambda: DEFAULT_CURIOUS_HOST )
@@ -534,7 +534,7 @@ def quick_smoke_test():
         # Test 1: Default instantiation
         print( "Testing default config..." )
         config = PodcastConfig()
-        assert config.script_model == "claude-opus-4-6"
+        assert config.script_model.startswith( "claude-" )
         assert config.target_duration_minutes == 10
         print( "✓ Default config created" )
 
@@ -669,7 +669,7 @@ def quick_smoke_test():
             from cosa.config.configuration_manager import ConfigurationManager
             cfg_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             config_from_ini = PodcastConfig.from_config( cfg_mgr, debug=True )
-            assert config_from_ini.script_model == "claude-opus-4-6"
+            assert config_from_ini.script_model.startswith( "claude-" )
             assert config_from_ini.host_a_personality.name == "Maria"
             assert config_from_ini.host_b_personality.name == "Mr. Radio"
             assert len( config_from_ini.host_a_personality.typical_phrases ) > 0

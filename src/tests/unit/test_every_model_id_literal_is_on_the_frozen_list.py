@@ -21,22 +21,16 @@ SKIPPED_PARTS = ( ".venv", "node_modules", "site-packages" )
 NOW_IN_INI    = ( "src/cosa/repo/duplicate_check/config.py", "src/lupin_mcp/reuse_needset/draft.py", "src/lupin_mcp/reuse_expansion.py" )
 
 FROZEN = {
-    "src/cosa/agents/bug_fix_expediter/config.py"          : 4,
     "src/cosa/agents/bug_fix_expediter/job.py"             : 1,
     "src/cosa/agents/bug_fix_expediter/orchestrator.py"    : 1,
     "src/cosa/agents/chained_pipeline_state.py"            : 2,
     "src/cosa/agents/deep_research/api_client.py"          : 1,
-    "src/cosa/agents/deep_research/config.py"              : 5,
     "src/cosa/agents/deep_research/cost_tracker.py"        : 15,
     "src/cosa/agents/llm_client.py"                        : 1,
     "src/cosa/agents/model_registry.py"                    : 2,
     "src/cosa/agents/notification_proxy/config.py"         : 1,
     "src/cosa/agents/podcast_generator/api_client.py"      : 3,
-    "src/cosa/agents/podcast_generator/config.py"          : 3,
     "src/cosa/agents/presentation_generator/api_client.py" : 3,
-    "src/cosa/agents/presentation_generator/config.py"     : 4,
-    "src/cosa/agents/swe_team/config.py"                   : 4,
-    "src/cosa/agents/test_fix_expediter/config.py"         : 4,
     "src/cosa/agents/test_fix_expediter/job.py"            : 1,
     "src/cosa/repo/duplicate_check/proof/label_prep.py"    : 1,
     "src/cosa/repo/symindex/need_writer.py"                : 1,
@@ -80,10 +74,10 @@ def test_the_literal_pattern_sees_model_ids_in_every_spelling_and_not_memento_na
 
 
 def test_the_census_walks_the_source_tree_and_finds_the_known_literals():
-    """Positive control: the walk sees over 1000 files and the BFE config's four literals."""
+    """Positive control: the walk sees over 1000 files and the price table's fifteen literals."""
     root = cu.get_project_root()
     assert len( source_files( root ) ) > 1000
-    assert model_literals( root )[ "src/cosa/agents/bug_fix_expediter/config.py" ] == 4
+    assert model_literals( root )[ "src/cosa/agents/deep_research/cost_tracker.py" ] == 15
 
 
 def test_every_model_id_literal_is_on_the_frozen_list():

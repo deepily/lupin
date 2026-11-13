@@ -39,6 +39,9 @@ class _Cfg:
         if return_type == "boolean": return str( raw ).lower() == "true"
         return raw
 
+    def get_required( self, key, silent=False, return_type="string" ):
+        return self.values.get( key, f"model-for[{key}]" )      # the script model has no default in code
+
 
 def _real_cfg():
     from cosa.config.configuration_manager import ConfigurationManager

@@ -116,6 +116,7 @@ def _make_client( config=None, cost_tracker=None, debug=False, verbose=False,
                 return_value=mock_cfg,
             )
 
+        if config is None: config = ResearchConfig()      # built outside the patch: its model ids come from the real INI
         with cm:
             client = ResearchAPIClient(
                 config=config, cost_tracker=cost_tracker, debug=debug, verbose=verbose,

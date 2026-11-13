@@ -5,7 +5,47 @@ BugFixExpediterConfig, SweTeamConfig, TestFixExpediterConfig and ResearchConfig 
 fields to INI keys and coerce by the field's type; this is the one loop they share.
 """
 
-from dataclasses import fields
+import contextlib
+import functools
+import sys
+from dataclasses import field, fields
+
+
+def required_model_id( key, config_mgr=None ):
+    """
+    Read the Claude model id one agent config sends its prompts to, from lupin-app.ini.
+
+    Requires:
+        - key is an INI key that holds a model id
+        - config_mgr has a ConfigurationManager `get_required` method, or is None to use the process's own
+
+    Ensures:
+        - returns the value of the key, read when called, so an INI edit needs no code change
+        - there is no default in code: the INI file is the only place a model id is set
+        - building the process's own manager writes its start-up banner to stderr, never stdout
+
+    Raises:
+        - MissingConfigKeyError naming the key, the block and the file when the key is absent or blank
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    if config_mgr is None:
+        with contextlib.redirect_stdout( sys.stderr ): config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return config_mgr.get_required( key, silent=True )
+
+
+def model_field( key ):
+    """
+    Declare a dataclass field whose model id is read from an INI key at construction.
+
+    Requires:
+        - key is an INI key that holds a model id
+
+    Ensures:
+        - returns a dataclass field with no default value in code
+        - a constructor call that omits the field reads `key` through required_model_id, and refuses a missing key
+        - a constructor call that passes the field uses the value it passes
+    """
+    return field( default_factory=functools.partial( required_model_id, key ) )
 
 
 def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None, silent=False ):
@@ -13,7 +53,7 @@ def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None, sil
     Read one INI value per mapped field of a config dataclass, as constructor kwargs.
 
     Requires:
-        - cls is a dataclass whose mapped fields have defaults
+        - cls is a dataclass whose mapped fields have defaults, or are model_field fields, which have none
         - config_mgr is a ConfigurationManager
         - key_map maps field names of cls to INI key names
         - label is the name shown in debug lines; it defaults to cls.__name__
@@ -25,6 +65,7 @@ def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None, sil
           where return_type is "boolean" for bool, "int" for int, "float" for float and
           "string" for anything else (a string annotation such as "bool" counts too)
         - a field absent from the INI takes its dataclass default
+        - a model_field field is read with config_mgr.get_required( ini_key ), so a missing or blank key raises MissingConfigKeyError
         - with debug, prints one line per field naming the INI key
 
     Raises:
@@ -49,7 +90,10 @@ def load_kwargs_from_ini( cls, config_mgr, key_map, debug=False, label=None, sil
         else:
             return_type = "string"
 
-        value = config_mgr.get( ini_key, default=default, return_type=return_type, **get_extra )
+        if isinstance( dc_field.default_factory, functools.partial ) and dc_field.default_factory.func is required_model_id:
+            value = config_mgr.get_required( ini_key, return_type=return_type, **get_extra )
+        else:
+            value = config_mgr.get( ini_key, default=default, return_type=return_type, **get_extra )
         kwargs[ field_name ] = value
 
         if debug: print( f"  [{label}] {field_name} = {value} (from INI: {ini_key})" )
