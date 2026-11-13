@@ -222,7 +222,7 @@ def model_id( key, config=None ):
         - config has a ConfigurationManager `get` method, or is None to build the process's own
 
     Ensures:
-        - returns the stripped value of the key, read when called, so an INI edit needs no code change
+        - returns the stripped value of the key, read when called through ConfigurationManager.get_required, so an INI edit needs no code change
         - there is no default in code: the INI file is the only place a model id is set
         - building the process's own manager writes its start-up banner to stderr, never stdout, because the callers'
           command-line tools print their result as JSON on stdout
@@ -230,12 +230,15 @@ def model_id( key, config=None ):
     Raises:
         - CodeHealthSettingError naming the key when the value is blank, absent or holds white space
     """
+    from cosa.config.configuration_manager import ConfigurationManager, MissingConfigKeyError
     if config is None:
-        from cosa.config.configuration_manager import ConfigurationManager
         with contextlib.redirect_stdout( sys.stderr ): config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    text = read_text( config, key )
+    try:
+        text = str( config.get_required( key, silent=True ) ).strip()
+    except MissingConfigKeyError as error:
+        raise CodeHealthSettingError( f"{key}: {error}; this key has no default and lives only in lupin-app.ini" ) from error
     if ONE_TOKEN.fullmatch( text ) is None:
-        raise CodeHealthSettingError( f"{key}: {text!r} is not a model id; this key has no default and lives only in lupin-app.ini" )
+        raise CodeHealthSettingError( f"{key}: {text!r} is not one model id; this key has no default and lives only in lupin-app.ini" )
     return text
 
 
