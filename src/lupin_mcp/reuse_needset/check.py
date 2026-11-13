@@ -95,7 +95,7 @@ def second_check( need, ask, ledger, model_id, key_texts=None, lines=None, mecha
         - NeedsetError BAD_NEED when the need is not drafted, or its key texts or lines are missing
         - NeedsetError UNREADABLE_REPLY when both replies are unreadable
     """
-    if model_id in ( draft.DRAFTER_MODEL, need[ "drafter" ][ "model" ] ): raise er.NeedsetError( er.CHECKER_EQUALS_DRAFTER, model_id )
+    if model_id in ( draft.drafter_model(), need[ "drafter" ][ "model" ] ): raise er.NeedsetError( er.CHECKER_EQUALS_DRAFTER, model_id )
     if need[ "status" ] != "drafted": raise er.NeedsetError( er.BAD_NEED, f"{need[ 'id' ]}: only a drafted need is checked, this one is {need[ 'status' ]}" )
     if need[ "kind" ] == "nothing":
         if lines is None: raise er.NeedsetError( er.BAD_NEED, f"{need[ 'id' ]}: a nothing need needs the search hits" )

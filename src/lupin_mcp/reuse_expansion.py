@@ -10,9 +10,8 @@ import asyncio
 import concurrent.futures
 
 from cosa.repo.doc_lint import model_transport
+from lupin_mcp.reuse_needset import draft
 from lupin_mcp.reuse_needset import expansion_replay as ex
-
-EXPANSION_MODEL = "claude-fable-5-1"      # the model the measured replay's expansions came from (draft.DRAFTER_MODEL)
 
 
 def ask_model( model, system, user ):
@@ -34,19 +33,26 @@ def ask_model( model, system, user ):
         return pool.submit( lambda: asyncio.run( model_transport.complete( model, system, user ) ) ).result()
 
 
-def make_expander( ask=None, model=EXPANSION_MODEL, out=print ):
+def make_expander( ask=None, model=None, out=print ):
     """
     Build the function the candidate stage calls for each lookup.
 
     Requires:
         - ask is None for the real model, or a function taking ( system, user ) and returning reply text, as the tests pass
+        - model is a model id, or None for the drafter's: the measured replay's expansions came from the drafter, so the two share one INI key
         - out takes one line of text
 
     Ensures:
         - the returned function takes the ranking text and returns { paraphrases, identifiers } with three paraphrases and one to five identifier words
         - it returns None, after one line to out, when the model call fails or its reply is not that shape, so the lookup runs as it would without expansion
         - the model is shown the ranking text only
+        - with ask None, the model is resolved here, when the expander is built, through draft.drafter_model
+
+    Raises:
+        - CodeHealthSettingError when ask and model are both None and the drafter's INI key is blank or absent
     """
+    if ask is None: model = draft.drafter_model( model )
+
     def expand( ranking_text ):
         """Ensures: returns the need's expansion, or None when the model gave none."""
         try:

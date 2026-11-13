@@ -190,12 +190,17 @@ def test_the_real_call_goes_through_model_transport_on_a_thread_of_its_own_even_
     monkeypatch.setattr( model_transport, "complete", complete )
     async def inside_a_loop(): return rex.make_expander()( "a need" )
     assert asyncio.run( inside_a_loop() ) == EXPANSION
-    assert calls == [ ( rex.EXPANSION_MODEL, ex.SYSTEM, ex.expansion_prompt( "a need" ) ) ]
+    assert calls == [ ( rex.draft.drafter_model(), ex.SYSTEM, ex.expansion_prompt( "a need" ) ) ]
 
 
-def test_the_expander_model_is_the_one_the_measured_replay_used():
-    from lupin_mcp.reuse_needset import draft
-    assert rex.EXPANSION_MODEL == draft.DRAFTER_MODEL
+def test_the_expander_model_is_read_from_the_drafters_ini_key_unless_the_caller_names_one( monkeypatch ):
+    asked, keys = [], []
+    monkeypatch.setattr( rex.draft.chs, "model_id", lambda key, config=None: keys.append( key ) or "ini-drafter" )
+    monkeypatch.setattr( rex, "ask_model", lambda model, system, user: asked.append( model ) or reply_of() )
+    assert not hasattr( rex, "EXPANSION_MODEL" )
+    rex.make_expander()( "need" )
+    rex.make_expander( model="named" )( "need" )
+    assert asked == [ "ini-drafter", "named" ] and keys == [ rex.draft.chs.DRAFTER_MODEL_KEY ]
 
 
 # --- the client: off is today, on adds the lists -------------------------------------------------------------------------------------------

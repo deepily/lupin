@@ -4,12 +4,12 @@ import json
 import os
 import uuid
 
+from cosa.repo import code_health_settings as chs
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.duplicate_check import errors as err
 from cosa.repo.symindex import dups
 from cosa.repo.symindex.candidates.vector_store import canonical
 
-MODEL_ID       = "claude-fable-5-1"
 PROMPT_NAME    = "semdup"   # kept: the frozen prompt version "semdup-f620c8a20a" is a hash of this name
 MAX_CANDIDATES = 10
 MIN_CANDIDATES = 5
@@ -62,7 +62,7 @@ def config_sha( cfg ):
     return _sha( canonical( payload ) )
 
 
-def build_config( backend, temperature, unscorable_policy, system_prompt, user_template, parser_source, scrub, body_chars, jscpd, clone_cover=CLONE_COVER, min_nodes=dups.DEFAULT_MIN_NODE ):
+def build_config( backend, temperature, unscorable_policy, system_prompt, user_template, parser_source, scrub, body_chars, jscpd, clone_cover=CLONE_COVER, min_nodes=dups.DEFAULT_MIN_NODE, model_id=None ):
     """
     Build the configuration dict that freeze writes, holding every constant of a run.
 
@@ -73,6 +73,7 @@ def build_config( backend, temperature, unscorable_policy, system_prompt, user_t
         - scrub is the list of blindness tokens
         - body_chars is the cut applied to a body before it is embedded
         - jscpd is a dict with the five keys version, min_tokens, min_lines, max_size and chosen_in
+        - model_id is the judge's model id, or None to read `duplicate check judge model` from lupin-app.ini
 
     Ensures:
         - returns a dict holding model_id, the three decisions, prompt_version, the prompt, parser and scrub shas, the
@@ -83,10 +84,11 @@ def build_config( backend, temperature, unscorable_policy, system_prompt, user_t
 
     Raises:
         - ValueError if jscpd lacks a key or carries an extra one
+        - CodeHealthSettingError when model_id is None and the INI key is blank or absent
     """
     if set( jscpd ) != set( JSCPD_KEYS ): raise ValueError( f"jscpd must hold exactly {list( JSCPD_KEYS )}, got {sorted( jscpd )}" )
     cfg = {
-        "model_id"          : MODEL_ID,
+        "model_id"          : model_id if model_id is not None else chs.model_id( chs.JUDGE_MODEL_KEY ),
         "backend"           : backend,
         "temperature"       : temperature,
         "unscorable_policy" : unscorable_policy,

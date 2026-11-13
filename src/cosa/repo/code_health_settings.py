@@ -9,8 +9,10 @@ Usage:
     from cosa.repo import code_health_settings as chs
     settings = chs.repo_settings( config_mgr, "lupin" )
 """
+import contextlib
 import pathlib
 import re
+import sys
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
 from cosa.utils.csv_text import split_csv
@@ -30,6 +32,10 @@ DATA_SUBDIR      = "code-health"
 LANGUAGES        = ( "py", "ts", "dart" )
 DEFAULT_REPO     = "lupin"
 WHOLE_NUMBER     = re.compile( r"[0-9]+" )
+ONE_TOKEN        = re.compile( r"\S+" )
+JUDGE_MODEL_KEY   = "duplicate check judge model"
+REWRITE_MODEL_KEY = "duplicate check proof rewrite model"
+DRAFTER_MODEL_KEY = "reuse need drafter model"
 
 
 class CodeHealthSettingError( ValueError ):
@@ -205,6 +211,32 @@ def jev_token_limit( config, name ):
         - CodeHealthSettingError naming the key when the value is blank, absent or not a positive whole number
     """
     return read_positive_int( config, repo_key( name, JEV_LIMIT_KIND ) )
+
+
+def model_id( key, config=None ):
+    """
+    Read the model id one code-health caller sends its prompts to.
+
+    Requires:
+        - key is one of the model keys: JUDGE_MODEL_KEY, REWRITE_MODEL_KEY or DRAFTER_MODEL_KEY
+        - config has a ConfigurationManager `get` method, or is None to build the process's own
+
+    Ensures:
+        - returns the stripped value of the key, read when called, so an INI edit needs no code change
+        - there is no default in code: the INI file is the only place a model id is set
+        - building the process's own manager writes its start-up banner to stderr, never stdout, because the callers'
+          command-line tools print their result as JSON on stdout
+
+    Raises:
+        - CodeHealthSettingError naming the key when the value is blank, absent or holds white space
+    """
+    if config is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        with contextlib.redirect_stdout( sys.stderr ): config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    text = read_text( config, key )
+    if ONE_TOKEN.fullmatch( text ) is None:
+        raise CodeHealthSettingError( f"{key}: {text!r} is not a model id; this key has no default and lives only in lupin-app.ini" )
+    return text
 
 
 def data_subdir( config ):

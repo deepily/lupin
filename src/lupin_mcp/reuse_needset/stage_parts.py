@@ -188,7 +188,7 @@ def build_parts( env, built, lists, models, drafter, second, ledgers, partners=F
     vectors  = load_vectors( env.ctx.candidate_stage.vectors_dir )
     rows     = set( vectors.ids )
     pooled   = [ r for r in kept if r[ "id" ] in rows ]
-    renv     = types.SimpleNamespace( ctx=keys.KeyContext( pooled, measures, bodies, env.seed, vectors ), ask=drafter, ledger=ledgers[ "draft" ], model_id=draft.DRAFTER_MODEL,
+    renv     = types.SimpleNamespace( ctx=keys.KeyContext( pooled, measures, bodies, env.seed, vectors ), ask=drafter, ledger=ledgers[ "draft" ], model_id=draft.drafter_model(),
                                       calls_log=None, by_id=by_id, strip_fn=env.strip_fn, server=env.server, source_commit=env.source_commit, smoke=False )
     tally    = Tally()
     final    = final_need_fn( renv, route_table( lists, env.seed ), lambda prompt: second( SECOND_SYSTEM, prompt ), ledgers[ "second" ], models[ "second" ], tally, ledgers[ "rejections" ], partners )

@@ -165,7 +165,7 @@ def test_the_env_is_assembled_from_the_real_index_with_two_ledgers_and_a_smoke_f
     args = smoke.parse_args( argv( tmp_path / "out", extra=[ "--cli-path", "" ] ) )
     args.root = str( root )
     env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00", smoke.Timed( time.monotonic ) )
-    assert env.smoke is True and env.model_id == draft.DRAFTER_MODEL and env.source_commit == COMMIT and env.seed == 7 and env.set_at == "2026-10-24T14:00:00+00:00"
+    assert env.smoke is True and env.model_id == draft.drafter_model() and env.source_commit == COMMIT and env.seed == 7 and env.set_at == "2026-10-24T14:00:00+00:00"
     assert env.kind_split == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and env.parallel == 3 and env.none_draft_fn is not None
     assert env.extras == { "vector_coverage": { "eligible": len( env.kept ), "with_a_vector_row": len( env.kept ), "vector_set_ids": len( ids ), "stage_ids": len( by_id ) } }
     assert ( tmp_path / "out" ).is_dir()

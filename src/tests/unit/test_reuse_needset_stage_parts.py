@@ -26,7 +26,7 @@ def renv_for( tmp_path, ask=lambda system, user: SENTENCE ):
     """Return the run namespace over the first pair, seed d-orig00 and key d-rew00."""
     job = job_for_pair()
     return types.SimpleNamespace( ctx=types.SimpleNamespace( by_id={ "d-orig00": job[ "seed" ] }, bodies={ "d-rew00": "def rewritten_body(): return 1" } ), ask=ask,
-                                  ledger=draft.make_ledger( str( tmp_path / "draft.jsonl" ), None, "max-plan" ), model_id=draft.DRAFTER_MODEL, calls_log=None,
+                                  ledger=draft.make_ledger( str( tmp_path / "draft.jsonl" ), None, "max-plan" ), model_id=draft.drafter_model(), calls_log=None,
                                   by_id={ "d-orig00": job[ "seed" ] }, strip_fn=strip_of, server="max-plan", source_commit="abc", smoke=False )
 
 
@@ -85,7 +85,7 @@ def test_the_job_is_asked_for_the_seeds_language_and_route( tmp_path ):
 
 def test_the_checker_may_not_be_the_drafter( tmp_path ):
     tally = sp.Tally()
-    fn    = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), draft.DRAFTER_MODEL, tally, sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) ), partners=True, job_for=lambda *a: job_for_pair() )
+    fn    = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), draft.drafter_model(), tally, sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) ), partners=True, job_for=lambda *a: job_for_pair() )
     with pytest.raises( er.NeedsetError ) as e: fn( "d-orig00" )
     assert e.value.code == er.CHECKER_EQUALS_DRAFTER
 
@@ -147,7 +147,7 @@ def build( tmp_path, final=None, trace_all=None, identity=None, ledgers=None, mo
 
 def test_the_parts_search_only_seeds_with_a_vector_row_and_route_every_listed_seed( tmp_path, monkeypatch ):
     parts, seen, _ = build( tmp_path, monkeypatch=monkeypatch )
-    assert sorted( seen[ "renv" ].ctx.by_id ) == [ "ts-0", "ts-1" ] and seen[ "renv" ].ask == "DRAFT" and seen[ "renv" ].ledger == "LD" and seen[ "renv" ].model_id == draft.DRAFTER_MODEL
+    assert sorted( seen[ "renv" ].ctx.by_id ) == [ "ts-0", "ts-1" ] and seen[ "renv" ].ask == "DRAFT" and seen[ "renv" ].ledger == "LD" and seen[ "renv" ].model_id == draft.drafter_model()
     assert seen[ "renv" ].ctx.bodies[ "ts-2" ] == "body" and seen[ "renv" ].ctx.seed == 7 and seen[ "renv" ].smoke is False and len( seen[ "routes" ] ) == 8
     assert seen[ "second" ] == f"{sp.SECOND_SYSTEM}|p" and seen[ "model" ] == "M2"
     assert parts[ "index" ].ids == ( "ts-0", "ts-1", "ts-2" ) and isinstance( parts[ "tally" ], sp.Tally )

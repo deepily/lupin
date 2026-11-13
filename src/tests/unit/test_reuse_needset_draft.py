@@ -250,7 +250,7 @@ def test_a_failed_nothing_draft_is_not_sent_to_the_second_model( tmp_path ):
 
 
 def test_the_second_model_must_not_be_the_drafter( tmp_path ):
-    with pytest.raises( er.NeedsetError ) as e: none_drafter( tmp_path, second_model=draft.DRAFTER_MODEL )
+    with pytest.raises( er.NeedsetError ) as e: none_drafter( tmp_path, second_model=draft.drafter_model() )
     assert e.value.code == er.CHECKER_EQUALS_DRAFTER
 
 

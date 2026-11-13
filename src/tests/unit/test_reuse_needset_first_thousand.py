@@ -355,7 +355,7 @@ def test_the_live_parts_use_their_own_ledgers_in_the_run_folder_and_the_argument
     seen = {}
     args = types.SimpleNamespace( run_dir=str( tmp_path ), cli_path=None, server="max-plan", second_model="M2", probe_model="MP", partners=False )
     env  = types.SimpleNamespace( ask="DRAFT-ASK" )
-    monkeypatch.setattr( draft, "drafter_call", lambda model=draft.DRAFTER_MODEL: f"ask-{model}" )
+    monkeypatch.setattr( draft, "drafter_call", lambda model=draft.drafter_model(): f"ask-{model}" )
 
     def build( env_, built, lists, models, drafter, second, ledgers, partners ):
         seen.update( env=env_, built=built, lists=lists, models=models, drafter=drafter, second=second, ledgers=ledgers, partners=partners )

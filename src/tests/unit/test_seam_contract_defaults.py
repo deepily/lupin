@@ -52,9 +52,11 @@ def test_embedding_provider_defaults_to_the_dev_server_when_the_variable_is_unse
     assert ep.EmbeddingProvider._resolve_server_url() == "http://localhost:8000"
 
 
-def test_the_duplicate_check_judge_model_is_the_pinned_one():
-    """Judge: the duplicate-check model pin."""
-    assert dc_config.MODEL_ID == "claude-fable-5-1"
+def test_the_duplicate_check_judge_model_is_read_from_its_ini_key_and_has_no_code_default():
+    """Judge: the duplicate-check model comes from its INI key, with no pinned id in code."""
+    assert not hasattr( dc_config, "MODEL_ID" )
+    cfg = dc_config.build_config( "max-plan", 0, "p", "s", "u", "parser", [], 100, { "version": "5", "min_tokens": 50, "min_lines": 5, "max_size": "100kb", "chosen_in": "x" } )
+    assert cfg[ "model_id" ] == dc_config.chs.model_id( dc_config.chs.JUDGE_MODEL_KEY )
 
 
 def test_task_store_adapter_callers_stamp_lupin_as_the_project():

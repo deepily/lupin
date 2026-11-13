@@ -306,7 +306,7 @@ def _run( args, root, ctx, deps, close ):
     yield_trace.hold_transport( ctx )
     rows, undrafted, unsaved = deps[ "rows" ]( args, root, ctx ) if "rows" in deps else collect_rows( args, root, ctx, deps )
     ledger = draft.make_ledger( f"{args.run_dir}/{LEDGER_FILE}", args.cli_path, args.server )
-    plan   = { **plan_of( rows, undrafted, unsaved, ledger, draft.DRAFTER_MODEL, args.budget ), "run_name": os.environ[ rt.RUN_NAME_VARIABLE ] }
+    plan   = { **plan_of( rows, undrafted, unsaved, ledger, draft.drafter_model(), args.budget ), "run_name": os.environ[ rt.RUN_NAME_VARIABLE ] }
     if not args.live: return { "live": False, "plan": plan }
     if "stage" in deps: stage, search = deps[ "stage" ]( ctx )
     else:
@@ -316,7 +316,7 @@ def _run( args, root, ctx, deps, close ):
         search   = lists_for( stage, prepared[ 1 ], prepared[ 2 ], ctx.pages )
     fusion = ( stage.fusion if stage.fusion else { "k": rf.FUSION_K, "depth": rf.FUSION_DEPTH, "head": rf.FUSION_HEAD } )
     ask    = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
-    report = run_live( args.run_dir, rows, ask, ledger, search, fusion, args.limit, args.budget, draft.DRAFTER_MODEL )
+    report = run_live( args.run_dir, rows, ask, ledger, search, fusion, args.limit, args.budget, draft.drafter_model() )
     try:
         closed, close_error = close( ctx ), None
     except Exception as error:

@@ -35,7 +35,7 @@ NEEDLES = (
     { "group": 4, "needle": "/api/embeddings",                  "kind": "pin",      "maps_to": "LUPIN_APP_SERVER_URL: the server is Lupin's own, no key" },
     { "group": 4, "needle": "LUPIN_APP_SERVER_URL",             "kind": "pin",      "maps_to": "LUPIN_APP_SERVER_URL: the server is Lupin's own, no key" },
     { "group": 5, "needle": "JEV_MODEL",                        "kind": "pin",      "maps_to": "code pin: a new model is a recalibration" },
-    { "group": 5, "needle": "MODEL_ID",                         "kind": "pin",      "maps_to": "code pin: a new model is a recalibration" },
+    { "group": 5, "needle": "JUDGE_MODEL_KEY",                  "kind": "ini",      "maps_to": "duplicate check judge model (a new model is a recalibration)" },
     { "group": 6, "needle": "LUPIN_REUSE_REVIEW_DATA_ROOT",     "kind": "pin",      "maps_to": "reuse review data subdir keys (not touched, Q2)" },
     { "group": 6, "needle": "projects-data/lupin",              "kind": "pin",      "maps_to": "reuse review data subdir keys (not touched, Q2)" },
     { "group": 7, "needle": "PROJECT = \"lupin\"",               "kind": "registry", "maps_to": "registry repo key (section 6.2 Scheduler)" },

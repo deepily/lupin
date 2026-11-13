@@ -640,12 +640,13 @@ def test_live_wiring_extracts_the_server_and_client_trees_without_the_monolith_a
     async def complete( model, system, user ):
         models.append( model )
         return "ok"
+    monkeypatch.setattr( lp.chs, "model_id", lambda key, config=None: f"ini:{key}" )
     client = FakeEmbed()
     got = lp.live_wiring( tmp_path, tmp_path / "vec", complete=complete, client=client )
     assert [ d[ "name" ] for d in got[ "server_defs" ] ] == [ "fit" ] and [ d[ "name" ] for d in got[ "client_defs" ] ] == [ "a" ]
     assert got[ "client" ] is client and got[ "cache_dir" ] == tmp_path / "vec" and got[ "shape_of" ] == { "py": plant.python_shape, "ts": lp.script_shape }
     for name in ( "rewrite", "sentence", "alike" ): got[ "asks" ][ name ]( "s", "u" )
-    assert models == [ "claude-fable-5-1", "claude-sonnet-5-5", "claude-opus-5-5" ]
+    assert models == [ "ini:duplicate check proof rewrite model", "claude-sonnet-5-5", "claude-opus-5-5" ]
     default = lp.live_wiring( tmp_path, tmp_path / "vec", complete=complete )
     assert type( default[ "client" ] ).__name__ == "EndpointClient"
 
