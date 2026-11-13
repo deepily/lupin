@@ -10,7 +10,7 @@ pins:
   - cosa.agents.deep_research_to_presentation.state.ChainedResult@5d8d002f2d
   - cosa.agents.deep_research_to_podcast.state.PipelineState@4b3355bdf0
   - cosa.agents.chained_pipeline_state.ChainedResultMixin@043deeda1d
-  - cosa.agents.chained_pipeline_state.ChainedDeepResearchAgent@fd26841e00
+  - cosa.agents.chained_pipeline_state.ChainedDeepResearchAgent@78d23d01c0
 ---
 # Research chained pipelines
 

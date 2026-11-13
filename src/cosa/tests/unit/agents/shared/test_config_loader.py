@@ -132,7 +132,6 @@ def test_load_dataclass_passes_debug_and_label_through( capsys ):
 from dataclasses import MISSING, field, fields
 
 from cosa.agents.shared.config_loader import model_field, required_model_id
-from cosa.config.configuration_manager import MissingConfigKeyError
 
 
 class _RequiredMgr:
@@ -175,6 +174,9 @@ def test_required_model_id_builds_the_process_manager_and_keeps_its_banner_off_s
 
 
 def test_required_model_id_refuses_a_key_the_real_ini_lacks():
+    # Imported here, not at module top: a peer test swaps the manager module in sys.modules, and
+    # required_model_id imports it at call time, so only a call-time import names the class it raises.
+    from cosa.config.configuration_manager import MissingConfigKeyError
     with pytest.raises( MissingConfigKeyError, match="no such model key for the test" ):
         required_model_id( "no such model key for the test" )
 
@@ -192,6 +194,7 @@ def test_a_model_field_has_no_default_in_code_and_reads_the_ini_when_omitted():
 
 
 def test_a_model_field_left_out_of_the_constructor_refuses_a_missing_key():
+    from cosa.config.configuration_manager import MissingConfigKeyError     # call-time import, as above
     with pytest.raises( MissingConfigKeyError, match="x lead model" ):
         _WithModel()
 

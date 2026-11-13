@@ -2,7 +2,7 @@
 capability: tfe-intake-and-resume
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.test_fix_expediter.config.TestFixExpediterConfig@f7f07fcd0d
+  - cosa.agents.test_fix_expediter.config.TestFixExpediterConfig@6af0421d25
   - cosa.agents.test_fix_expediter.snapshot_loader.SnapshotLoadError@b02487617a
   - cosa.agents.test_fix_expediter.snapshot_loader.load_from_path@ae60ef0413
   - cosa.agents.test_fix_expediter.snapshot_loader.load_from_artifacts@262a7c7f8d
@@ -28,4 +28,5 @@ How a run starts from a failed test suite job, how failures are first grouped, a
 
 ## Invariants
 - `list_resume_candidates` and `fuzzy_match_candidates` return an empty list on any error and never raise.
+- The lead and worker model ids of `TestFixExpediterConfig` have no default in code; a missing INI key raises `MissingConfigKeyError`.
 - Trust mode is one of `inherit`, `shadow`, `fixed_l1` or `fixed_l3`.
