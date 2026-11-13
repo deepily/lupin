@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.expansion_run.read_env_file@41fa00e29a
   - lupin_mcp.reuse_needset.expansion_run.need_rows@95fc296169
-  - lupin_mcp.reuse_needset.expansion_run.control_rows@5dcd37fe81
+  - lupin_mcp.reuse_needset.expansion_run.control_rows@09f54fdafb
   - lupin_mcp.reuse_needset.expansion_run.FullResident@cfc241e68c
   - lupin_mcp.reuse_needset.expansion_run.FullResident.search@08e31de8e9
   - lupin_mcp.reuse_needset.expansion_run.FullStage@e747c07d22

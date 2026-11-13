@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.reuse_needset.forced_judge.missed_ids@66ead3d242
   - lupin_mcp.reuse_needset.forced_judge.resolved_label@eea748b36e
   - lupin_mcp.reuse_needset.forced_judge.pair_labels@dff2fc68ef
-  - lupin_mcp.reuse_needset.forced_judge.frozen_needs@2effc7ef2a
+  - lupin_mcp.reuse_needset.forced_judge.frozen_needs@a5980aca45
   - lupin_mcp.reuse_needset.forced_judge.plant_lines@01b689f427
   - lupin_mcp.reuse_needset.forced_judge.load_pairs_needs_labels@40ea717627
   - lupin_mcp.reuse_needset.forced_judge.build_rows@da73db5463
