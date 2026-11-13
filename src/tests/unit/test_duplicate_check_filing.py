@@ -553,3 +553,12 @@ def test_the_configured_triage_owner_is_on_the_rosters_the_cron_jobs_and_the_ser
     roster   = [ n.strip() for n in registry.split( "," ) ]
     assert ff.triage_owner( owners[ 0 ].strip(), roster )[ "owner" ] == "cheech", f"the registry roster {roster!r} must hold the INI's triage owner or every cron run refuses"
     assert "Tiberius" not in roster, "Tiberius is a lupin-mobile seat, not a lupin manager"
+
+
+def test_a_row_carries_one_judge_line_for_each_model_that_ruled_on_its_findings_and_none_when_no_finding_names_one():
+    owner = { "owner": "cheech", "note": "n" }
+    one   = ff.triage_payload( [ { **finding(), "judge_model": "claude-opus-5-5" }, { **finding( "d-2", "b2", "def b2(): pass" ), "judge_model": "claude-opus-5-5" } ], owner, DAY )[ "body" ]
+    assert one.count( "judge: claude-opus-5-5\n" ) == 1 and one.index( "judge: claude-opus-5-5" ) < one.index( "- a1 (" ) and one.index( "judge:" ) > one.index( "Correlation:" )
+    mixed = ff.triage_payload( [ { **finding(), "judge_model": "claude-opus-5-5" }, { **finding( "d-2", "b2", "def b2(): pass" ), "judge_model": "claude-fable-5-1" } ], owner, DAY )[ "body" ]
+    assert mixed.index( "judge: claude-fable-5-1" ) < mixed.index( "judge: claude-opus-5-5" )
+    assert "judge:" not in ff.triage_payload( [ finding() ], owner, DAY )[ "body" ]

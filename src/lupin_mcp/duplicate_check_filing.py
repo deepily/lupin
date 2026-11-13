@@ -109,6 +109,7 @@ def triage_payload( findings, owner, day ):
         - returns a TaskCreateIn payload at P5 with no status, so the store's holding default applies and a manager raises it
         - the title starts with the project tag, names the check, the day and the question to answer
         - the body says why the row exists, what to do, the owner and the first LIST_LIMIT findings with the definitions they repeat
+        - for each distinct judge_model the findings carry, in sorted order, the body holds the line "judge: <model id>" before the findings; findings with no judge_model add no line
         - each finding names at most OTHERS_LIMIT of the definitions it repeats and counts the rest
         - the rest are counted in a last line naming the result file, the first finding's run_file; the title counts every finding
         - finding_keys always lists every finding, so none is lost from the triaged file
@@ -122,11 +123,12 @@ def triage_payload( findings, owner, day ):
               + ( f"; and {len( f[ 'others' ] ) - OTHERS_LIMIT} more" if len( f[ "others" ] ) > OTHERS_LIMIT else "" ) for f in findings[ :LIST_LIMIT ] ]
     if count > LIST_LIMIT: lines.append( f"- and {count - LIST_LIMIT} more in {findings[ 0 ].get( 'run_file', 'the result file' )}" )
     key   = run_key( keys )
+    judge = "".join( f"judge: {m}\n" for m in sorted( { f[ "judge_model" ] for f in findings if "judge_model" in f } ) )
     body  = ( f"Why this row exists: the daily duplicate check found {count} new function(s) that repeat code the tree already has.\n"
               f"What to do: for each function below, rule duplicate (reuse the existing one), extend (change the existing one) or distinct (keep both). "
               f"Write one DUPCHECK-VERDICT line per function with lupin_mcp.duplicate_check_verdicts; it amends this row.\n"
               f"Window: {findings[ 0 ][ 'window' ][ 'start' ]}..{findings[ 0 ][ 'window' ][ 'end' ]}. Owner: {owner[ 'owner' ]} ({owner[ 'note' ]}).\n"
-              f"Correlation: one row per batch of findings, key {key}; a function already on an earlier row is not listed again.\n\n" + "\n".join( lines ) )
+              f"Correlation: one row per batch of findings, key {key}; a function already on an earlier row is not listed again.\n{judge}\n" + "\n".join( lines ) )
     return { "item_class": ITEM_CLASS, "title": f"[LUPIN] Duplicate check {day.day} {day.strftime( '%b' )}: decide whether {count} new function(s) should reuse existing ones",
              "project": PROJECT, "created_by": filer_created_by( owner[ "owner" ], CREATED_BY ), "body": body, "owner_persona": owner[ "owner" ], "accountable_manager": owner[ "owner" ],
              "priority": PRIORITY, "correlation_key": key, "finding_keys": keys }
