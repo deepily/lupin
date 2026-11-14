@@ -173,6 +173,27 @@ def _safe_remove( fpath: str ) -> None:
         pass
 
 
+def flush_tick( switch, send_fn, outbox_dir, ttl_seconds, logger=None ):
+    """
+    Run one tick of the flush daemon: flush the spool unless the switch says off.
+
+    Requires:
+        - switch has allowed() -> bool, as lupin_mcp.cron_switch_read.TickSwitch does
+        - send_fn, outbox_dir and ttl_seconds are as in flush()
+
+    Ensures:
+        - flush() runs only when switch.allowed() is True; a skipped tick leaves the spool untouched
+        - a flush() exception is logged as a warning when a logger is given, and never raised
+        - returns the flush stats, or None when the tick was skipped or flush raised
+    """
+    try:
+        if switch.allowed(): return flush( send_fn, outbox_dir, ttl_seconds )
+    except Exception as e:
+        if logger is not None:
+            logger.warning( f"[notify-outbox] flush error: {e}" )
+    return None
+
+
 def start_flusher(
     send_fn          : Callable[ [ dict ], bool ],
     outbox_dir       : str,
@@ -192,6 +213,8 @@ def start_flusher(
           interval_seconds and returns True
         - on subsequent calls: no-op, returns False (already running)
         - the loop never dies on a flush() exception (logged if logger given)
+        - checks the `cron job notify-outbox enabled` switch fresh from disk before every flush; a false
+          or unreadable switch skips that flush and the loop keeps running
     """
     global _flusher_started
     with _flusher_lock:
@@ -199,14 +222,13 @@ def start_flusher(
             return False
         _flusher_started = True
 
+    from lupin_mcp import cron_switch_read
+    switch = cron_switch_read.for_job( "notify-outbox", logger.warning if logger is not None else print )
+
     def _loop():  # pragma: no cover - unbounded `while True` around a real time.sleep; any call enters a loop that never returns, so no test can execute this body and reach the next statement
         while True:
             time.sleep( interval_seconds )
-            try:
-                flush( send_fn, outbox_dir, ttl_seconds )
-            except Exception as e:
-                if logger is not None:
-                    logger.warning( f"[notify-outbox] flush error: {e}" )
+            flush_tick( switch, send_fn, outbox_dir, ttl_seconds, logger )
 
     t = threading.Thread( target=_loop, name="notify-outbox-flusher", daemon=True )
     t.start()

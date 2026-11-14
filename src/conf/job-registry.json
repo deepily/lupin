@@ -577,6 +577,8 @@
     },
     {
       "job": "notification-expiry",
+      "enabled_key": "cron job notification-expiry enabled",
+      "switch_reader": "lupin_app.main:notification_expiry_sweep_loop",
       "catalog": "L18",
       "title": "Notification expiry",
       "owner": "cheech",
@@ -593,6 +595,8 @@
     },
     {
       "job": "commons-archival",
+      "enabled_key": "cron job commons-archival enabled",
+      "switch_reader": "lupin_mcp.commons_archival:CommonsArchiver._run_loop",
       "catalog": "L19",
       "title": "Commons archival",
       "owner": "cheech",
@@ -609,6 +613,8 @@
     },
     {
       "job": "notify-outbox",
+      "enabled_key": "cron job notify-outbox enabled",
+      "switch_reader": "lupin_mcp.notify_outbox:start_flusher",
       "catalog": "L20",
       "title": "Notify outbox flush",
       "owner": "cheech",
@@ -626,6 +632,8 @@
     },
     {
       "job": "socket-housekeeping",
+      "enabled_key": "cron job socket-housekeeping enabled",
+      "switch_reader": "lupin_app.main:websocket_heartbeat_loop",
       "catalog": "L22",
       "title": "Socket heartbeat, cleanup and transcript tailer",
       "owner": "cheech",

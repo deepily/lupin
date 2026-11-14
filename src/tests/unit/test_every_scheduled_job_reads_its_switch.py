@@ -32,7 +32,7 @@ REGISTRY_SIZE = 24      # counted by hand from src/conf/job-registry.json on 14 
 # Jobs that do not read their switch yet. Remove a job in the commit that makes it read its switch.
 NOT_YET = frozenset( {
     "context-tick", "yearly-reminders",
-    "notification-expiry", "commons-archival", "notify-outbox", "socket-housekeeping", "side-services", "pokes",
+    "side-services", "pokes",
 } )
 
 JOBS     = [ entry[ "job" ] for entry in REGISTRY ]

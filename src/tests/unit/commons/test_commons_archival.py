@@ -20,6 +20,20 @@ from unittest.mock import patch
 
 import pytest
 
+
+class _AlwaysOn:
+    """A switch that always allows the tick."""
+
+    def allowed( self ):
+        return True
+
+
+@pytest.fixture( autouse=True )
+def _switch_is_on( monkeypatch ):
+    """Keep the loop switch on, so these tests cover the work and not the switch."""
+    from lupin_mcp import cron_switch_read
+    monkeypatch.setattr( cron_switch_read, "for_job", lambda job, log=print: _AlwaysOn() )
+
 from lupin_mcp.commons_archival import (
     CommonsArchiver,
     _cutoff_iso,
