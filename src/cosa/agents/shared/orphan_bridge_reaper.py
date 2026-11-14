@@ -19,10 +19,8 @@ _REAPED_SENTINEL = -1
 
 
 def _default_list_bridges( session_dir ):
-    """List cc-*.json bridge files (excluding buffer/listener sidecars)."""
+    """List cc-*.json bridge files, buffer and listener sidecars left out."""
     from lupin_cli.claude_code.hooks.lib.sessions_dir import iter_bridge_paths
-    if not session_dir.exists():
-        return []
     return list( iter_bridge_paths( session_dir ) )
 
 
