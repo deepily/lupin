@@ -3,11 +3,11 @@ import json
 import re
 
 import cosa.utils.util as cu
+from lupin_mcp.cron_switch_read import parse_switch
 
 REGISTRY = "/src/conf/job-registry.json"
 INI      = "/src/conf/lupin-app.ini"
 SPLAINER = "/src/conf/lupin-app-splainer.ini"
-HELD_OFF = { "duplicate-check", "test-promotion" }
 
 
 def read( path ):
@@ -46,10 +46,17 @@ def test_a_job_outside_cron_management_carries_a_key_only_when_it_names_the_loop
     assert sorted( switch_values( read( INI ) ) ) == sorted( j[ "enabled_key" ] for j in registry_jobs() if "enabled_key" in j )
 
 
-def test_only_the_duplicate_check_and_the_test_promotion_ship_switched_off():
+def test_every_switch_reads_as_on_or_off_and_no_test_pins_which():
+    """
+    Every switch reads on or off, and no value is pinned.
+
+    Ensures: Rick flips values through the endpoint, so only the key set and a readable value are asserted.
+    """
     have = switch_values( read( INI ) )
-    assert sorted( k for k, v in have.items() if v == "false" ) == sorted( f"cron job {j} enabled" for j in HELD_OFF )
-    assert len( [ v for v in have.values() if v == "true" ] ) == len( [ j for j in registry_jobs() if "enabled_key" in j ] ) - len( HELD_OFF )
+    keys = [ j[ "enabled_key" ] for j in registry_jobs() if "enabled_key" in j ]
+    assert len( keys ) > 0
+    assert sorted( have ) == sorted( keys )
+    assert [ k for k in keys if parse_switch( have[ k ] ) is None ] == []
 
 
 def test_every_switch_has_a_splainer_twin():
