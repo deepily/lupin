@@ -52,3 +52,8 @@ def test_a_file_picked_by_name_is_still_run_whole():
     lines = listing()
     assert BY_NAME in lines
     assert not any( line.startswith( BY_NAME + "::" ) for line in lines )
+
+
+def test_a_census_marked_class_is_selected_whatever_its_file_is_called():
+    # Bug 7e51f330: TestTheRatchet counts DOM-assert violations across the whole tree, in a file the name rule skips.
+    assert "src/tests/unit/test_dom_assert_lint.py::TestTheRatchet" in listing()
