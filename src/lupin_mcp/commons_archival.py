@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from lupin_mcp import cron_switch_read
 from lupin_mcp.commons_store import (
     ENTRY_SEPARATOR,
     RESERVED_TOPICS,
@@ -109,7 +110,9 @@ class CommonsArchiver:
         retention_hours  : int  = 24,
         debug            : bool = False,
         verbose          : bool = False,
+        switch           = None,
     ):
+        self.switch           = switch
         self.root             = Path( root )
         self.commons_dir      = self.root / "io" / "commons"
         self.archive_dir      = self.commons_dir / "archive"
@@ -139,10 +142,16 @@ class CommonsArchiver:
             self._thread.join( timeout=join_timeout )
 
     def _run_loop( self ) -> None:
-        """Daemon body: rotate every interval_seconds until stop event fires."""
+        """
+        Daemon body: rotate every interval_seconds until stop event fires.
+
+        Reads the `cron job commons-archival enabled` switch from disk before each rotation.
+        A false or unreadable switch skips that rotation. The loop keeps waiting.
+        """
+        switch = self.switch if self.switch is not None else cron_switch_read.for_job( "commons-archival", print )
         while not self._stop_event.wait( timeout=self.interval_seconds ):
             try:
-                self.rotate_once()
+                if switch.allowed(): self.rotate_once()
             except Exception as e:
                 if self.debug: print( f"[CommonsArchiver] rotate_once raised: {e}" )
 

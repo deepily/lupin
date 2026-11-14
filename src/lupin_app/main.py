@@ -53,6 +53,7 @@ if src_path not in sys.path:
 from lupin_app.bootstrap_helpers import ( assert_lupin_root_valid, reload_enabled as _reload_enabled,
                                           register_sigusr1_faulthandler, reload_kwargs as _reload_kwargs )
 from cosa.rest.error_envelope import make_unhandled_exception_handler
+from lupin_mcp import cron_switch_read
 from lupin_app.lifespan_steps import ( record_clean_shutdown, cancel_background_task, shutdown_fcm_wake, drain_agentic_pool,
                                        stop_consumer_thread, cancel_peer_watchers, stop_commons_watcher,
                                        print_migration_banner, build_snapshot_manager_config, recover_interrupted_jobs,
@@ -251,6 +252,7 @@ async def websocket_heartbeat_loop():
         
     Ensures:
         - Performs heartbeat checks at configured intervals (default 30s)
+        - Checks the `cron job socket-housekeeping enabled` switch fresh from disk each tick; false skips the work, still sleeps
         - Removes dead connections automatically
         - Continues until cancelled or exception occurs
         
@@ -270,11 +272,12 @@ async def websocket_heartbeat_loop():
     )
     
     print( f"[WS-HEARTBEAT] Starting heartbeat loop with {interval}s interval" )
+    switch = cron_switch_read.for_job( "socket-housekeeping", print )
     
     while True:
         try:
-            # Run heartbeat check
-            dead_count = await websocket_manager.heartbeat_check()
+            # Run heartbeat check, unless the socket-housekeeping switch is off
+            dead_count = await websocket_manager.heartbeat_check() if switch.allowed() else 0
             
             if app_debug and app_verbose and dead_count > 0:
                 print( f"[WS-HEARTBEAT] Heartbeat removed {dead_count} dead connection(s)" )
@@ -302,6 +305,7 @@ async def websocket_cleanup_loop():
         
     Ensures:
         - Performs cleanup at configured intervals (default 1 hour)
+        - Checks the `cron job socket-housekeeping enabled` switch fresh from disk each tick; false skips the work, still sleeps
         - Removes stale sessions exceeding maximum age
         - Continues until cancelled or exception occurs
         
@@ -322,11 +326,12 @@ async def websocket_cleanup_loop():
     interval_seconds = interval_hours * 3600
     
     print( f"[WS-CLEANUP] Starting cleanup loop with {interval_hours} hour interval" )
+    switch = cron_switch_read.for_job( "socket-housekeeping", print )
     
     while True:
         try:
-            # Run cleanup
-            cleaned = await websocket_manager.auto_cleanup()
+            # Run cleanup, unless the socket-housekeeping switch is off
+            cleaned = await websocket_manager.auto_cleanup() if switch.allowed() else 0
             
             if app_debug and app_verbose and cleaned > 0:
                 print( f"[WS-CLEANUP] Cleaned {cleaned} stale session(s)" )
@@ -356,6 +361,8 @@ async def notification_expiry_sweep_loop():
         - a reachable notifications database
 
     Ensures:
+        - checks the `cron job notification-expiry enabled` switch fresh from disk before every
+          pass; a false or unreadable switch skips the pass, still sleeps, and keeps the loop alive
         - waits `notification grace period seconds` past expires_at before
           marking anything, so it never shortens the window in which a late
           human keypress is still honoured by /respond
@@ -385,9 +392,13 @@ async def notification_expiry_sweep_loop():
 
     print( f"[NOTIFY-SWEEP] Starting orphan sweep loop — every {interval_seconds}s, "
            f"grace {grace_seconds}s, batch {batch_limit}" )
+    switch = cron_switch_read.for_job( "notification-expiry", print )
 
     while True:
         try:
+            if not switch.allowed():
+                await asyncio.sleep( interval_seconds )
+                continue
             result = await asyncio.to_thread(
                 sweep_once, get_db, grace_seconds, batch_limit
             )
