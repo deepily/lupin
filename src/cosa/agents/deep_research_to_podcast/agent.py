@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
-from cosa.agents.chained_pipeline_state import ChainedDeepResearchAgent
+from cosa.agents.chained_pipeline_state import ChainedDeepResearchAgent, skipped_topic_names
 from .state import ChainedResult, PipelineState
 
 
@@ -134,7 +134,7 @@ class DeepResearchToPodcastAgent( ChainedDeepResearchAgent ):
 
     def _skipped_topic_names( self, dr_artifacts: dict ) -> list:
         """Name the research topics Deep Research skipped, so the checkpoint can say so."""
-        return [ g[ "topic" ] for g in dr_artifacts.get( "skipped_topics", [] ) ]
+        return skipped_topic_names( dr_artifacts )
 
     async def _run_podcast_generator( self, research_path: str ) -> dict:
         """
