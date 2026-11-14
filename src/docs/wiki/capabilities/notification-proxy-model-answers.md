@@ -7,7 +7,7 @@ pins:
   - cosa.agents.notification_proxy.xml_models.VerificationResponse@8f8fc5a1d8
   - cosa.agents.notification_proxy.verification.LlmAnswerVerifier@829b30f0e2
   - cosa.agents.notification_proxy.verification.NoReplyVerification@0406d731f6
-  - cosa.agents.notification_proxy.strategies.llm_fallback.LLMFallbackStrategy@863d4c0152
+  - cosa.agents.notification_proxy.strategies.llm_fallback.LLMFallbackStrategy@c7e47f3910
   - cosa.agents.notification_proxy.strategies.llm_script_matcher.resolve_script_path@8d143f4375
   - cosa.agents.notification_proxy.strategies.llm_script_matcher.strip_surrounding_quotes@2f2b54575d
   - cosa.agents.io_models.utils.number_fields.float_or_zero@94843d2cd3

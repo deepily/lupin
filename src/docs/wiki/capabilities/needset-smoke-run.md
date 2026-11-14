@@ -2,7 +2,7 @@
 capability: needset-smoke-run
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.smoke.parse_args@b6e4bf20c1
+  - lupin_mcp.reuse_needset.smoke.parse_args@df69806c2d
   - lupin_mcp.reuse_needset.smoke.kind_split@9af7ff40ce
   - lupin_mcp.reuse_needset.smoke.Timed@265424ee74
   - lupin_mcp.reuse_needset.smoke.index_parts@da503efe90

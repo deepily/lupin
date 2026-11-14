@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.write_seed_lists@480a3dd8ba
   - lupin_mcp.reuse_needset.first_thousand.live_parts@6bdad27106
   - lupin_mcp.reuse_needset.first_thousand.stage_factories@6b083e58de
-  - lupin_mcp.reuse_needset.first_thousand.parse_args@9c0d157d84
+  - lupin_mcp.reuse_needset.first_thousand.parse_args@55c81f599d
   - lupin_mcp.reuse_needset.first_thousand.plan@6de27be30d
   - lupin_mcp.reuse_needset.first_thousand.load_inputs@68bde7e075
   - lupin_mcp.reuse_needset.first_thousand.exit_status@d42a152d3e
