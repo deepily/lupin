@@ -5,6 +5,8 @@ The files are written by harness_runner.Ledger itself, bound as the daily run bi
 """
 import json
 
+import pytest
+
 from cosa.repo.doc_lint import harness_runner
 from cosa.repo.duplicate_check import ledger_merge as lm
 
@@ -61,3 +63,21 @@ def test_merge_takes_a_live_key_as_it_is_and_the_newest_version_among_rotated_fi
 
 def test_version_of_reads_the_version_and_a_missing_binding_sorts_first():
     assert lm.version_of( BINDING.format( "2.1.317 (Claude Code)" ) ) == ( 2, 1, 317 ) and lm.version_of( None ) == () and lm.version_of( "no version" ) == ()
+
+
+@pytest.mark.parametrize( "bound", [ "claude_cli=/other/claude|version=2.1.317 (Claude Code)|max-plan|max-plan", "claude_cli=/bin/claude|version=2.1.317 (Claude Code)|work-server|work-server", None ] )
+def test_a_rotated_file_bound_to_another_binary_or_backend_or_to_nothing_is_refused_and_nothing_is_written( tmp_path, bound ):
+    make( tmp_path, "judge-ledger.jsonl", "2.1.325 (Claude Code)", {} )
+    good  = make( tmp_path, "judge-ledger.claude-2.1.316.jsonl", "2.1.316 (Claude Code)", { key_of( "a" ): value( "related" ) } )
+    other = tmp_path / "judge-ledger.claude-2.1.317.jsonl"
+    other.write_text( ( json.dumps( { "binding": bound } ) + "\n" if bound else "" ) + json.dumps( { "key": key_of( "b" ), "value": value( "related" ) } ) + "\n", encoding="utf-8" )
+    live   = tmp_path / "judge-ledger.jsonl"
+    before = live.read_bytes()
+    with pytest.raises( harness_runner.LedgerBindingError ): lm.merge_rotated( tmp_path, apply=True )
+    assert live.read_bytes() == before and good.exists(), "the refusal comes before the first copy"
+
+
+def test_a_live_ledger_with_no_binding_refuses_the_merge( tmp_path ):
+    ( tmp_path / "judge-ledger.jsonl" ).write_text( "", encoding="utf-8" )
+    make( tmp_path, "judge-ledger.claude-2.1.317.jsonl", "2.1.317 (Claude Code)", { key_of( "a" ): value( "related" ) } )
+    with pytest.raises( harness_runner.LedgerBindingError ): lm.merge_rotated( tmp_path )

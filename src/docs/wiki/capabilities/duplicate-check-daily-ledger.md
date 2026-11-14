@@ -7,7 +7,8 @@ pins:
   - cosa.repo.duplicate_check.proof.proof_cli.StampedLedger.settle@1937f8f032
   - cosa.repo.duplicate_check.ledger_merge.version_of@d501e12ccc
   - cosa.repo.duplicate_check.ledger_merge.rotated_files@71d072f032
-  - cosa.repo.duplicate_check.ledger_merge.merge_rotated@09304e4013
+  - cosa.repo.duplicate_check.ledger_merge.strip_version@470f6f3b4e
+  - cosa.repo.duplicate_check.ledger_merge.merge_rotated@e262738bf3
   - cosa.repo.duplicate_check.ledger_reuse.saved_rulings@eca173b739
   - cosa.repo.duplicate_check.ledger_reuse.lookup@0060f8dbd5
 ---
@@ -22,7 +23,7 @@ The judge ledger of the daily and baseline runs. It keeps every ruling when Clau
 - A ruling is read back when its key matches. The key holds the definition and candidate hashes, the prompt version, the model id and the slot, and never the version.
 
 ## Rescuing rulings of another model
-- `merge_rotated` copies the rulings of every rotated ledger into the live one. A dry run writes nothing. A key keeps its model id and gets a `cli` stamp from its file. The newest version wins a clash. A rotated file is never changed.
+- `merge_rotated` copies the rulings of every rotated ledger into the live one. A dry run writes nothing. A key keeps its model id and gets a `cli` stamp from its file. The newest version wins a clash. A rotated file is never changed. A file bound to another binary, backend or server is refused before any copy.
 - `saved_rulings` indexes a ledger by definition. `lookup` answers from it. It returns the whole ruling when the candidates' text is the same. Otherwise it builds one verdict per candidate, when each has exactly one.
 - A reused ruling is never written to the ledger. Each carries the `model` that ruled it, and the run's rows and manifest line name it as `reused_from_model`.
 

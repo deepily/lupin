@@ -22,7 +22,7 @@ import time
 
 from cosa.repo import code_health_settings as chs
 from cosa.repo.doc_lint import model_transport
-from cosa.repo.duplicate_check import cluster, extract, pipeline
+from cosa.repo.duplicate_check import cluster, extract, judge, pipeline
 from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check import errors as err
 from cosa.repo.duplicate_check.proof import label_prep, proof_cli
@@ -454,6 +454,24 @@ def record( folder, stem, doc, now ):
     return doc
 
 
+def finding_judges( finding, verdicts, run_model ):
+    """
+    Name the models whose rulings made a finding, from its verdict rows.
+
+    Requires:
+        - finding is findings_of's { id, others, ... }; verdicts are judge_run's rows; run_model is the model this run judges with
+
+    Ensures:
+        - returns { judge_model }: the sorted model ids of the rows that flag a pair inside the finding's cluster, joined by "+"; run_model when no such row names one
+        - adds reused_from_model, the sorted model ids of the flagging rows that were reused, joined by "+", when any was, so a ruling read from saved Fable rulings is never filed as the run's model
+    """
+    members = { finding[ "id" ], *( o[ "id" ] for o in finding[ "others" ] ) }
+    rows    = [ v for v in verdicts if v[ "id" ] in members and v[ "candidate" ] in members and v[ "verdict" ] in judge.FLAG_VERDICTS ]
+    judges  = sorted( { v[ "model" ] for v in rows } ) or [ run_model ]
+    reused  = sorted( { v[ "reused_from_model" ] for v in rows if "reused_from_model" in v } )
+    return { "judge_model": "+".join( judges ), **( { "reused_from_model": "+".join( reused ) } if reused else {} ) }
+
+
 def findings_of( groups, fresh, pool, window, parts, commit_of=None, settled=() ):
     """
     Turn the duplicate clusters into one finding per cluster that holds a new definition.
@@ -666,7 +684,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - an exception while reading the frozen configuration, choosing the window or making the worktree writes that file with status failed, stage setup and the error, removes a worktree it began, and moves nothing
         - the result holds test_code_dropped { owed, pool }: how many test-code definitions (is_test_code) were left out of the owed set and of the comparison pool
-        - every definition the run judged gets one line in interim-judge-manifest.jsonl, and each finding carries the model that ruled as judge_model
+        - every definition the run judged gets one line in interim-judge-manifest.jsonl, and each finding carries the model or models that ruled it as judge_model, and reused_from_model when a saved ruling made it
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
         - a baseline run leaves last-success alone and writes baseline.json: status complete when nothing is carried, else in_progress; once complete, a baseline run judges nothing
         - a daily run whose carried count, with the history's, rose on the last rise_limit measured daily runs records that as rising and alerts through the notifier
@@ -751,7 +769,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     try: settled = behaviour.settled_keys( folder )                    # a cluster the triage seat already ruled on, from either side, stays out of the record and the row until its code changes
     except ValueError as e: settled, doc[ "settled_error" ] = set(), str( e )       # a damaged verdicts file must not lose the judged run, so nothing is left out and the record says why
     found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ], settled )
-    found = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json", "judge_model": cfg[ "model_id" ] } for f in found ]       # the row names the run's day and the file that lists every finding
+    found = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json", **finding_judges( f, out[ "verdicts" ], cfg[ "model_id" ] ) } for f in found ]       # the row names the run's day and the file that lists every finding
     doc[ "findings" ] = [ filing.for_record( f ) for f in found ]       # kept on every run, filer or not: the weekly page counts them, and duplicate_check_refile files them again after a filing error
     for hook, key in ( ( "filer", "filing" ), ( "auditor", "audit" ) ):
         if hook not in parts: continue

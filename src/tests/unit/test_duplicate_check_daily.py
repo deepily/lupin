@@ -1289,6 +1289,39 @@ def test_the_manifest_names_the_model_that_ruled_a_definition_ruled_from_saved_r
     assert lines[ "d-2" ][ "model_id" ] == "claude-opus-5-5" and "reused_from_model" not in lines[ "d-2" ]
 
 
+def row( a, b, model, verdict="near_duplicate", reused=False ):
+    """Build a judge verdict row; a reused row carries reused_from_model, as judge_run writes it."""
+    return { "id": a, "candidate": b, "verdict": verdict, "model": model, **( { "reused_from_model": model } if reused else {} ) }
+
+
+def test_a_finding_names_the_models_of_the_rows_that_flag_its_cluster_not_the_run_model_and_marks_a_reused_ruling( ):
+    finding = { "id": "d-1", "others": [ { "id": "d-2", "name": "n", "file": "f" } ] }
+    saved   = [ row( "d-1", "d-2", "claude-fable-5-1", reused=True ), row( "d-1", "d-9", "claude-opus-5-5" ), row( "d-9", "d-1", "claude-opus-5-5" ) ]
+    assert dd.finding_judges( finding, saved, "claude-opus-5-5" ) == { "judge_model": "claude-fable-5-1", "reused_from_model": "claude-fable-5-1" }, "a Fable ruling is not filed as Opus"
+    mixed   = [ *saved, row( "d-2", "d-1", "claude-opus-5-5" ) ]
+    assert dd.finding_judges( finding, mixed, "claude-opus-5-5" ) == { "judge_model": "claude-fable-5-1+claude-opus-5-5", "reused_from_model": "claude-fable-5-1" }
+    fresh   = [ row( "d-2", "d-1", "claude-opus-5-5" ), row( "d-1", "d-2", "claude-opus-5-5", verdict="related" ) ]
+    assert dd.finding_judges( finding, fresh, "claude-opus-5-5" ) == { "judge_model": "claude-opus-5-5" }, "a related row flags nothing, and a new ruling has no reused_from_model"
+    assert dd.finding_judges( finding, [], "claude-opus-5-5" ) == { "judge_model": "claude-opus-5-5" }
+
+
+def test_a_run_under_another_model_files_findings_from_saved_rulings_as_judged_by_the_model_that_ruled_them( repo, tmp_path ):
+    history( repo )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    fable  = parts_of( tmp_path )
+    cfg    = fable[ "verify" ]()
+    fable[ "verify" ] = lambda: { **cfg, "model_id": "claude-fable-5-1" }
+    first  = dd.run( repo, NOW, "hand", 10, "/bin/claude", fable )
+    assert first[ "judge_calls" ] == 3 and { f[ "judge_model" ] for f in first[ "findings" ] } == { "claude-fable-5-1" }
+    ( folder / dd.LAST_SUCCESS ).unlink()
+    opus   = parts_of( tmp_path )
+    opus[ "verify" ] = lambda: { **cfg, "model_id": "claude-opus-5-5" }
+    second = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", opus )
+    assert second[ "judge_calls" ] == 0 and second[ "judged" ] == 3 and second[ "findings" ], "every ruling was read from the saved Fable ones"
+    assert all( f[ "judge_model" ] == f[ "reused_from_model" ] == "claude-fable-5-1" for f in second[ "findings" ] ), "a Fable ruling is not filed as Opus"
+    assert { l[ "model_id" ] for l in manifest_of( tmp_path )[ 3: ] } == { "claude-fable-5-1" }
+
+
 def test_a_judge_model_with_no_frozen_file_fails_the_frozen_prerequisite_by_name_and_judges_nothing( repo, tmp_path ):
     history( repo )
     def verify(): raise FileNotFoundError( 2, "No such file", "/conf/semdup-frozen-claude-opus-5-5.json" )
