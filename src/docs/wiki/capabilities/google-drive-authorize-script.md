@@ -1,6 +1,6 @@
 ---
 capability: google-drive-authorize-script
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.google-drive-authorize.run_flow@34c00b09ed
   - scripts.google-drive-authorize.write_token@ae1c9fc0e6

@@ -1,6 +1,6 @@
 ---
 capability: rest-job-service-assessment
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.rest.job_service.boot_time_from@b61bf5f184
   - cosa.rest.job_service.store_counts_from_rows@1c587a2e2f

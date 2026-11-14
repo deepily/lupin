@@ -1,6 +1,6 @@
 ---
 capability: stale-mcp-census
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.stale_mcp_check.mcp_launch@5006b9d8a2
   - scripts.stale_mcp_check.resolve_modules@4569bc7a4f

@@ -1,6 +1,6 @@
 ---
 capability: dm-experiment-arm-rows-and-pairs
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.dm-experiment.analyze_arms.load_rows@9df2b28d90
   - scripts.dm-experiment.analyze_arms.is_experiment_row@13925acee3

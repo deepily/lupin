@@ -1,6 +1,6 @@
 ---
 capability: needset-control-scoring
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.planted_purposes.stage_sources@187dea5976
   - lupin_mcp.reuse_needset.planted_purposes.write_lines@fa3a2a9983

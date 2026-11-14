@@ -1,6 +1,6 @@
 ---
 capability: labelling-call-sites
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.repo.labelling.call_sites.calls_in@c012daa39f
   - cosa.repo.labelling.call_sites.find_call_sites@8fef586b8f

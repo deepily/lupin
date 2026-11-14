@@ -83,6 +83,39 @@ test( "symbols: functions, classes, accessors and typed arrows are listed, priva
     assert.equal( by[ "a.ts#add" ].pin.length, 10 );
 } );
 
+const IIFES = [
+    "( function() {",
+    "    function inFn() {}",
+    "    class K { m() {} private p() {} constructor() {} }",
+    "    const arrow = ( n ) => n, notFn = 1;",
+    "    ( () => { function deep() {} } )();",
+    "    some.call( this );",
+    "    other();",
+    "    x = 1;",
+    "} )();",
+    "( function() { function viaCall() {} } ).call( this );",
+    "( function() { function viaApply() {} } ).apply( this, [] );",
+    "!function() { function viaBang() {} }();",
+    "void function() { function viaVoid() {} }();",
+    "( () => { function inArrow() {} } )();",
+    "( () => 1 )();",
+    "( function() {} ).bind( this )();",
+    "[ 1 ].map( function() { function inCallback() {} } );",
+    "plain();",
+    "",
+].join( "\n" );
+
+test( "symbols: functions inside an IIFE are listed, named as at the top of the file and hidden from the public listing", () => {
+    const out = run( { "i.js": IIFES + "export function top() {}\n" } );
+    const by  = Object.fromEntries( out.map( ( r: any ) => [ r.name, r ] ) );
+    for ( const name of [ "inFn", "K", "K.m", "K.constructor", "K.p", "arrow", "deep", "viaCall", "viaApply", "viaBang", "viaVoid", "inArrow" ] ) assert.ok( by[ name ], name );
+    for ( const name of [ "inFn", "K", "K.m", "arrow", "deep", "viaCall", "viaApply", "viaBang", "viaVoid", "inArrow" ] ) assert.equal( by[ name ].public, false, name );
+    assert.equal( by.top.public, true );
+    const names = out.map( ( r: any ) => r.name );
+    for ( const absent of [ "notFn", "inCallback", "some", "other" ] ) assert.ok( !names.includes( absent ), absent );      // not a definition, or not run where it stands
+    assert.equal( by.inFn.line, 2 );
+} );
+
 const LIMITS = { doc_limit: 30, doc_marker: "…" };
 
 test( "doc_full: the whole JSDoc with its tags is folded to one line", () => {

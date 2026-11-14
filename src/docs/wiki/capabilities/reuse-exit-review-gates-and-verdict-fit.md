@@ -1,6 +1,6 @@
 ---
 capability: reuse-exit-review-gates-and-verdict-fit
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_exit_gate.merge_call_logs@3a57993167
   - lupin_mcp.reuse_exit_gate.entry_of@fef1adda22

@@ -1,6 +1,6 @@
 ---
 capability: reuse-run-harness-frozen-spec
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_harness.freeze.feature_ids@e85d28121f
   - lupin_mcp.reuse_harness.freeze.collect_tests@80b38659f6

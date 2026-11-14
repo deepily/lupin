@@ -1,6 +1,6 @@
 ---
 capability: admin-users-delete-and-confirm
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.admin.js.admin-users.confirmDeleteUser@25b472d782
   - src.lupin_app.static.html.auth.admin.js.admin-users.closeDeleteConfirmModal@ebffe70a9c

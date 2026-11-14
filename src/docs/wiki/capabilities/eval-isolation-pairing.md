@@ -1,6 +1,6 @@
 ---
 capability: eval-isolation-pairing
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.eval_isolation_guard.parse_permitted_stores@8aea90a80e
   - scripts.eval_isolation_guard.require_isolated_snapshot_table@7d06dd14f0

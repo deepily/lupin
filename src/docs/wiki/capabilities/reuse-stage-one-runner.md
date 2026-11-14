@@ -1,6 +1,6 @@
 ---
 capability: reuse-stage-one-runner
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_stage1_run.RunnerRefused@c9be74222b
   - lupin_mcp.reuse_stage1_run.StandIn@7f14fd5a90

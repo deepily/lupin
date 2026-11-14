@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-event-tools
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.purge-offline-heartbeat-events.fetch_offline_and_live@3262e2d564
   - scripts.purge-offline-heartbeat-events.main@3410779e54

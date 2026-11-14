@@ -1,6 +1,6 @@
 ---
 capability: reuse-run-harness-measure
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_harness.measure.working_seconds@0920a5c2e4
   - lupin_mcp.reuse_harness.measure.working_days@1828f6d49d

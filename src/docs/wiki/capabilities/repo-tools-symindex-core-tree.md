@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-core-tree
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.repo.symindex.spec.IndexSpec@8cb186ff48
   - cosa.repo.symindex.spec.NotARepo@51835f1312

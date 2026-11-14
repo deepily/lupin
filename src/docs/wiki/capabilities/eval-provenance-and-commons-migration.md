@@ -1,6 +1,6 @@
 ---
 capability: eval-provenance-and-commons-migration
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.eval_provenance.compute_sample_signature@3a3151d3e2
   - scripts.eval_provenance.make_provenance@864e4bb74a

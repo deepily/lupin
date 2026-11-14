@@ -1,6 +1,6 @@
 ---
 capability: runtime-argument-expeditor
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.agents.runtime_argument_expeditor.expeditor.RuntimeArgumentExpeditor@7f833f1d97
   - cosa.agents.runtime_argument_expeditor.expeditor.RuntimeArgumentExpeditor.expedite@279a626853

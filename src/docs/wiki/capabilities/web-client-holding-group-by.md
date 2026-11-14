@@ -1,6 +1,6 @@
 ---
 capability: web-client-holding-group-by
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.personaDisplay@3ff85e2cec
   - src.lupin_app.static.js.multiplexer.render.templates.holdingAreaTable.holdingGroupWhose@d4441338b0

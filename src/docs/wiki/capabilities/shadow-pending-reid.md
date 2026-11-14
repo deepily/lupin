@@ -1,6 +1,6 @@
 ---
 capability: shadow-pending-reid
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.shadow_pending_reid.ReidRefused@04b31f320f
   - lupin_mcp.shadow_pending_reid.read_items@4c35406b12

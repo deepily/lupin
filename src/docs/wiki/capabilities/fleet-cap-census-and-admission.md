@@ -1,6 +1,6 @@
 ---
 capability: fleet-cap-census-and-admission
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.fleet_size_cap.census@5b4dc5d3dc
   - lupin_mcp.fleet_size_cap.config_file_path@1cb72e1ceb

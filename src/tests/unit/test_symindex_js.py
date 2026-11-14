@@ -7,6 +7,7 @@ import pathlib
 
 import pytest
 
+from cosa.repo.symindex import build as bd
 from cosa.repo.symindex import extractor_contract as ec
 from cosa.repo.symindex import js_index as ji
 from cosa.repo.symindex import spec as sp
@@ -192,3 +193,35 @@ def test_doc_full_is_cut_exactly_where_the_python_extractor_cuts_it( tmp_path, t
     got = ji.extract_js( root, [ root / "c.ts" ] )[ 0 ][ "doc_full" ]
     assert got == ec.fold_doc( text )
     assert len( got ) <= ec.DOC_FULL_LIMIT + len( ec.DOC_FULL_MARKER )
+
+
+IIFE_SOURCE = '''( function() {
+    "use strict";
+    /** Names the host. */
+    function insideText( row ) { return row; }
+    const readsText = ( row ) => row;
+    class Pane { show() {} }
+} )();
+export function top() {}
+'''
+
+
+def test_functions_inside_an_iife_are_indexed_as_private_under_their_top_level_names( tmp_path ):
+    root = make_repo( tmp_path )
+    ( root / "web" / "iife.js" ).write_text( IIFE_SOURCE, encoding="utf-8" )
+    recs = ji.extract_js( root, [ root / "web" / "iife.js" ] )
+    by   = { r[ "name" ]: r for r in recs }
+    assert sorted( by ) == [ "Pane", "Pane.show", "insideText", "readsText", "top" ]
+    assert by[ "insideText" ][ "doc" ] == "Names the host." and by[ "insideText" ][ "line" ] == 4
+    assert [ n for n, r in by.items() if r[ "public" ] ] == [ "top" ]
+
+
+def test_a_built_index_answers_for_an_iife_function_and_lists_only_top_in_the_public_set( tmp_path ):
+    root = make_repo( tmp_path )
+    ( root / "web" / "iife.js" ).write_text( IIFE_SOURCE, encoding="utf-8" )
+    gen  = bd.build( root, tmp_path / "out" )[ "gen_dir" ]
+    every  = [ r for r in bd.read_symbols( gen, all_symbols=True ) if r[ "file" ] == "web/iife.js" ]
+    public = [ r[ "name" ] for r in bd.read_symbols( gen ) if r[ "file" ] == "web/iife.js" ]
+    hit    = next( r for r in every if r[ "name" ] == "insideText" )
+    assert hit[ "scope" ] == "private" and hit[ "id" ].endswith( "web.iife.insideText" )      # the id shape the reuse gate prints for the same function
+    assert public == [ "top" ]

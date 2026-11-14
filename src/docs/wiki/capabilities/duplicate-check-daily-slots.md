@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-daily-slots
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_daily.adaptive_run@9ef5851f1f
   - lupin_mcp.duplicate_check_daily.chunk_for@77597b14ca

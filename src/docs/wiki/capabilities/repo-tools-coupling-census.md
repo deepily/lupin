@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-coupling-census
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.repo.coupling_census.ControlFailed@17d3b46686
   - cosa.repo.coupling_census.validate_needles@a5f9349a6c

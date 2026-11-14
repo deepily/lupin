@@ -1,6 +1,6 @@
 ---
 capability: needset-call-cap
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.repo.doc_lint.model_transport.set_charge_hook@986d84594a
   - lupin_mcp.reuse_needset.call_cap.stage@4765009b1e

@@ -1,6 +1,6 @@
 ---
 capability: proxy-ratify-detail-and-live
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.getActionBadge@0e8339c155
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.getDataOriginBadge@e5eecc1f3a

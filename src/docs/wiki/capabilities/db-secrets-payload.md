@@ -1,6 +1,6 @@
 ---
 capability: db-secrets-payload
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.lupin_install_db_secrets.Refusal@113e9cff1b
   - scripts.lupin_install_db_secrets.check_copy@11b830d54d

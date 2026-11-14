@@ -1,6 +1,6 @@
 ---
 capability: needset-stage-c-figures
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.stage_c_score.mean_ratings@714e06092c
   - lupin_mcp.reuse_needset.stage_c_score.population_pairs@79b10d7c09

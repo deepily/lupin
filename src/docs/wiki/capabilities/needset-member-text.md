@@ -1,6 +1,6 @@
 ---
 capability: needset-member-text
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.strip.module_of@14c8855104
   - lupin_mcp.reuse_needset.strip.src_root_of@cfeae4d6fb

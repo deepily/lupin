@@ -1,6 +1,6 @@
 ---
 capability: lifespan-steps
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_app.lifespan_steps.print_migration_banner@9858fdf3b2
   - lupin_app.lifespan_steps.build_snapshot_manager_config@b6ea3172c9

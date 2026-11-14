@@ -1,6 +1,6 @@
 ---
 capability: self-respin-memento-and-clear
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.self_respin_core.build_nonce_line@be111eec22
   - lupin_mcp.self_respin_core.stamp_nonce_into@7a1f52439e
