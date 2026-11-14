@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-sample-rejudge
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_sample_rejudge.population_pairs@e6236cbcc8
   - lupin_mcp.duplicate_check_sample_rejudge.frame_ids@b8ef9be3ba
