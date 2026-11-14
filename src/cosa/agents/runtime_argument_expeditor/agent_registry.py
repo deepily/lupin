@@ -117,18 +117,23 @@ JOB_ARG_CONTRACTS = {
             "audience"         : "audience",
             "audience_context" : "audience_context",
             "script_type"      : "script_type",
+            "review"           : "review",
         },
         "fallback_questions" : {
             "research"         : "Which research document should I use for the podcast? Describe it or say the filename.",
             "languages"        : "What languages for the podcast? Use ISO codes like 'en' for English, 'es-MX' for Mexican Spanish, or say the language name.",
             "audience"         : "Who is the target audience? Options: beginner, intermediate, expert, or academic.",
             "audience_context" : "Any additional context about the audience? Say 'none' to skip.",
+            "review"           : "Should I stop for your review of the podcast script? Say 'ask' to review it first, or 'one_shot' to go straight to audio.",
         },
+        # review "ask" is the research_critical profile's own default (script_types.py), so
+        # the pair ( script_type, review ) below matches what an unanswered podcast gets.
         "fallback_defaults" : {
             "languages"        : "en",
             "audience"         : "academic",
             "audience_context" : "none",
             "script_type"      : "research_critical",
+            "review"           : "ask",
         },
         "special_handlers"   : {
             "research" : "fuzzy_file_match",
@@ -320,6 +325,7 @@ JOB_ARG_CONTRACTS = {
         "fallback_defaults" : {
             "budget"                  : "default",
             "target_duration_minutes" : "default",
+            "target_slide_count"      : "default",
             "theme"                   : "default",
             "audience"                : "general",
             "audience_context"        : "none",
