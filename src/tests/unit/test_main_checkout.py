@@ -126,3 +126,11 @@ def test_session_spawner_resolves_a_symlinked_owner_to_its_real_path( tmp_path, 
     link.symlink_to( real )
     monkeypatch.setattr( sp, "main_checkout_of", lambda start: str( link ) )
     assert sp._main_checkout_of( Path( "/anywhere" ) ) == real
+
+
+def test_the_straggler_stamp_helpers_default_to_the_one_shared_git_runner():
+    """The stamp helpers hold no git runner of their own: their default is main_checkout.run_git."""
+    from cosa.agents.shared import worktree_straggler_tickets as st
+    assert st.run_git is mc.run_git
+    assert not hasattr( st, "_plain_run" )
+    assert mc.run_git.__defaults__ == ( None, 10 ), "the shared runner keeps its ten second default; the stamp helpers pass their own sixty"
