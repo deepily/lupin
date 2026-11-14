@@ -131,3 +131,17 @@ def test_a_user_who_is_not_an_admin_sees_the_switches_read_only( logged_in_page,
     assert row.get_by_test_id( "cron-flip" ).is_disabled()
     assert "Read-only" in logged_in_page.locator( f"{client[ 'list' ]} [data-testid=cron-note]" ).inner_text()
     assert _on_disk( scratch_ini ) == "true"
+
+
+def test_on_a_drift_row_the_toggle_stays_on_the_job_title_line( admin_page, scratch_ini, client ):
+    row = _open( admin_page, client )
+    row.get_by_test_id( "cron-flip" ).click()
+    admin_page.wait_for_function( "( el ) => el.textContent === 'OFF'", arg=row.get_by_test_id( "cron-state" ).element_handle(), timeout=PAINT_MS )
+    ini_io.write_bool_to_disk( scratch_ini, KEY, True )      # a hand edit the endpoint never recorded: the row now drifts
+    row = _open( admin_page, client )
+    drift = row.get_by_test_id( "cron-drift" )
+    assert drift.is_visible(), "the file disagrees with the last recorded flip, so the row must say so"
+    title, toggle = row.get_by_test_id( "cron-title" ).bounding_box(), row.get_by_test_id( "cron-flip" ).bounding_box()
+    assert toggle[ "y" ] < title[ "y" ] + title[ "height" ] and toggle[ "y" ] + toggle[ "height" ] > title[ "y" ], \
+        f"the toggle ({toggle}) must sit on the same line as the job title ({title}) on a drift row"
+    assert drift.bounding_box()[ "y" ] >= toggle[ "y" ] + toggle[ "height" ] - 1, "the drift note goes below the toggle line"
