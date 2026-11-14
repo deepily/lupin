@@ -35,20 +35,21 @@ def _ini( tmp_path, text=INI ):
     """Write a lupin-app.ini and return its path."""
     path = tmp_path / "lupin-app.ini"
     path.write_text( text )
+    ( tmp_path / "job-registry.json" ).write_text( json.dumps( { "jobs": [ { "job": j } for j in ( "alpha", "beta", "gamma" ) ] } ) )
     return str( path )
 
 
 def test_edit_that_flips_a_switch_is_denied( tmp_path ):
     path   = _ini( tmp_path )
     reason = cg.cron_switch_deny_reason( "Edit", {
-        "file_path": path, "old_string": "cron job alpha enabled = true", "new_string": "cron job alpha enabled = false" }, env={} )
+        "file_path": path, "old_string": "cron job alpha enabled = true", "new_string": "cron job alpha enabled = false" } )
     assert reason is not None and "alpha" in reason
 
 
 def test_edit_of_another_key_is_allowed( tmp_path ):
     path = _ini( tmp_path )
     assert cg.cron_switch_deny_reason( "Edit", {
-        "file_path": path, "old_string": "some other key = 1", "new_string": "some other key = 2" }, env={} ) is None
+        "file_path": path, "old_string": "some other key = 1", "new_string": "some other key = 2" } ) is None
 
 
 def test_edit_carrying_a_switch_line_as_context_is_allowed( tmp_path ):
@@ -56,53 +57,67 @@ def test_edit_carrying_a_switch_line_as_context_is_allowed( tmp_path ):
     assert cg.cron_switch_deny_reason( "Edit", {
         "file_path": path,
         "old_string": "some other key = 1\ncron job alpha enabled = true",
-        "new_string": "some other key = 2\ncron job alpha enabled = true" }, env={} ) is None
+        "new_string": "some other key = 2\ncron job alpha enabled = true" } ) is None
 
 
 def test_multiedit_and_write_that_change_a_switch_are_denied( tmp_path ):
     path = _ini( tmp_path )
     multi = cg.cron_switch_deny_reason( "MultiEdit", { "file_path": path, "edits": [
         { "old_string": "some other key = 1", "new_string": "some other key = 3" },
-        { "old_string": "cron job beta enabled = false", "new_string": "cron job beta enabled = true" } ] }, env={} )
-    write = cg.cron_switch_deny_reason( "Write", { "file_path": path, "content": INI.replace( "alpha enabled = true", "alpha enabled = false" ) }, env={} )
-    added = cg.cron_switch_deny_reason( "Write", { "file_path": path, "content": INI + "cron job gamma enabled = true\n" }, env={} )
-    assert "beta" in multi and "alpha" in write and "gamma" in added
+        { "old_string": "cron job beta enabled = false", "new_string": "cron job beta enabled = true" } ] } )
+    write = cg.cron_switch_deny_reason( "Write", { "file_path": path, "content": INI.replace( "alpha enabled = true", "alpha enabled = false" ) } )
+    added = cg.cron_switch_deny_reason( "Write", { "file_path": path, "content": INI + "cron job zeta enabled = true\n" } )
+    assert "beta" in multi and "alpha" in write and "zeta" in added
 
 
 def test_edit_that_cannot_apply_or_file_that_cannot_be_read_is_judged_safely( tmp_path ):
     path = _ini( tmp_path )
-    assert cg.cron_switch_deny_reason( "Edit", { "file_path": path, "old_string": "absent", "new_string": "x" }, env={} ) is None
-    assert cg.cron_switch_deny_reason( "MultiEdit", { "file_path": path, "edits": "no" }, env={} ) is None
-    assert cg.cron_switch_deny_reason( "MultiEdit", { "file_path": path, "edits": [ "no" ] }, env={} ) is None
-    assert cg.cron_switch_deny_reason( "Write", { "file_path": path, "content": 5 }, env={} ) is None
+    assert cg.cron_switch_deny_reason( "Edit", { "file_path": path, "old_string": "absent", "new_string": "x" } ) is None
+    assert cg.cron_switch_deny_reason( "MultiEdit", { "file_path": path, "edits": "no" } ) is None
+    assert cg.cron_switch_deny_reason( "MultiEdit", { "file_path": path, "edits": [ "no" ] } ) is None
+    assert cg.cron_switch_deny_reason( "Write", { "file_path": path, "content": 5 } ) is None
     unreadable = str( tmp_path / "sub" / "lupin-app.ini" )
     os.makedirs( unreadable )                                   # a directory: open() raises OSError
     assert cg.cron_switch_deny_reason( "Edit", {
-        "file_path": unreadable, "old_string": "cron job a enabled = true", "new_string": "cron job a enabled = false" }, env={} ) is not None
-    assert cg.cron_switch_deny_reason( "MultiEdit", { "file_path": unreadable, "edits": [ "no", { "old_string": "x", "new_string": "y" } ] }, env={} ) is None
-    assert cg.cron_switch_deny_reason( "Write", { "file_path": str( tmp_path / "new" / "lupin-app.ini" ), "content": "cron job a enabled = true\n" }, env={} ) is not None
+        "file_path": unreadable, "old_string": "cron job a enabled = true", "new_string": "cron job a enabled = false" } ) is not None
+    assert cg.cron_switch_deny_reason( "MultiEdit", { "file_path": unreadable, "edits": [ "no", { "old_string": "x", "new_string": "y" } ] } ) is None
+    assert cg.cron_switch_deny_reason( "Write", { "file_path": str( tmp_path / "new" / "lupin-app.ini" ), "content": "cron job a enabled = true\n" } ) is not None
 
 
 def test_other_files_and_other_tools_are_ignored( tmp_path ):
     other = tmp_path / "notes.ini"
     other.write_text( INI )
-    assert cg.cron_switch_deny_reason( "Edit", { "file_path": str( other ), "old_string": "true", "new_string": "false" }, env={} ) is None
-    assert cg.cron_switch_deny_reason( "Read", { "file_path": _ini( tmp_path ) }, env={} ) is None
-    assert cg.cron_switch_deny_reason( "Edit", "not a dict", env={} ) is None
-    assert cg.cron_switch_deny_reason( "Bash", { "command": "" }, env={} ) is None
-    assert cg.cron_switch_deny_reason( "Bash", { "command": 5 }, env={} ) is None
+    assert cg.cron_switch_deny_reason( "Edit", { "file_path": str( other ), "old_string": "true", "new_string": "false" } ) is None
+    assert cg.cron_switch_deny_reason( "Read", { "file_path": _ini( tmp_path ) } ) is None
+    assert cg.cron_switch_deny_reason( "Edit", "not a dict" ) is None
+    assert cg.cron_switch_deny_reason( "Bash", { "command": "" } ) is None
+    assert cg.cron_switch_deny_reason( "Bash", { "command": 5 } ) is None
 
 
-def test_the_operator_hatch_in_the_environment_allows_and_the_command_cannot_reach_it( tmp_path ):
+def test_an_environment_flag_no_longer_allows_anything( tmp_path ):
     edit = { "file_path": _ini( tmp_path ), "old_string": "cron job alpha enabled = true", "new_string": "cron job alpha enabled = false" }
-    assert cg.cron_switch_deny_reason( "Edit", edit, env={ "LUPIN_ALLOW_CRON_SWITCH_EDIT": "1" } ) is None
-    assert cg.cron_switch_deny_reason( "Edit", edit, env={ "LUPIN_ALLOW_CRON_SWITCH_EDIT": "0" } ) is not None
-    assert cg.cron_switch_deny_reason( "Edit", edit, enabled=False ) is None
-    for command in ( "LUPIN_ALLOW_CRON_SWITCH_EDIT=1 git commit -F m", "export LUPIN_ALLOW_CRON_SWITCH_EDIT=1",
-                     "python3 -c \"import os; os.environ.setdefault('LUPIN_ALLOW_CRON_SWITCH_EDIT','1')\"",
-                     "python3 -c \"import os; os.environ['LUPIN_ALLOW_CRON_SWITCH_EDIT']='1'\"",
-                     "python3 <<'PY'\nimport os\nos.environ.update( {'LUPIN_ALLOW_CRON_SWITCH_EDIT': '1'} )\nPY" ):
-        assert cg.DENY_HATCH in cg.cron_switch_deny_reason( "Bash", { "command": command }, env={} )
+    with patch.dict( os.environ, { "LUPIN_ALLOW_CRON_SWITCH_EDIT": "1" } ):
+        assert cg.cron_switch_deny_reason( "Edit", edit ) is not None
+    assert not hasattr( cg, "DENY_HATCH" ) and not hasattr( cc, "HATCH_ENV" )
+
+
+def test_a_call_that_touches_the_ini_fails_closed_and_any_other_call_fails_open( tmp_path ):
+    edit = { "file_path": _ini( tmp_path ), "old_string": "some other key = 1", "new_string": "some other key = 2" }
+    with patch.object( cg, "_file_tool_jobs", side_effect=RuntimeError( "boom" ) ):
+        assert cg.DENY_UNJUDGED in cg.cron_switch_deny_reason( "Edit", edit )
+        assert cg.cron_switch_deny_reason( "Edit", { **edit, "file_path": str( tmp_path / "notes.txt" ) } ) is None
+    with patch.object( cg, "_bash_reason", side_effect=RuntimeError( "boom" ) ):
+        assert cg.DENY_UNJUDGED in cg.cron_switch_deny_reason( "Bash", { "command": "cat src/conf/lupin-app.ini" } )
+        assert cg.cron_switch_deny_reason( "Bash", { "command": "ls" } ) is None
+
+
+def test_what_the_guard_touches_is_judged_without_raising():
+    assert cg._touches_ini( "Edit", { "file_path": "/x/lupin-app.ini" } ) is True
+    assert cg._touches_ini( "Bash", { "command": "cat lupin-app.ini" } ) is True
+    assert cg._touches_ini( "Bash", { "command": "ls" } ) is False
+    assert cg._touches_ini( "Read", { "file_path": "/x/lupin-app.ini" } ) is False
+    assert cg._touches_ini( "Bash", "not a dict" ) is False
+    assert cg._touches_ini( "Bash", { "command": 5 } ) is False
 
 
 # ---------------------------------------------------------------- the guard, Bash
@@ -120,7 +135,7 @@ def test_the_operator_hatch_in_the_environment_allows_and_the_command_cannot_rea
     "bash -c \"sed -i s/a/b/ src/conf/lupin-app.ini\"",
 ] )
 def test_a_shell_write_to_the_ini_is_denied( command ):
-    assert cg.cron_switch_deny_reason( "Bash", { "command": command }, env={} ) is not None
+    assert cg.cron_switch_deny_reason( "Bash", { "command": command } ) is not None
 
 
 @pytest.mark.parametrize( "command", [
@@ -128,7 +143,7 @@ def test_a_shell_write_to_the_ini_is_denied( command ):
     "python3 -c \"from lupin_mcp.fleet_cap_ini_io import write_bool_to_disk; write_bool_to_disk('cron job a enabled', True)\"",
 ] )
 def test_a_python_write_to_the_ini_or_a_switch_writer_is_denied( command ):
-    assert cg.cron_switch_deny_reason( "Bash", { "command": command }, env={} ) is not None
+    assert cg.cron_switch_deny_reason( "Bash", { "command": command } ) is not None
 
 
 @pytest.mark.parametrize( "command", [
@@ -140,7 +155,7 @@ def test_a_python_write_to_the_ini_or_a_switch_writer_is_denied( command ):
     "ls src/conf",
 ] )
 def test_reading_or_naming_the_ini_is_allowed( command ):
-    assert cg.cron_switch_deny_reason( "Bash", { "command": command }, env={} ) is None
+    assert cg.cron_switch_deny_reason( "Bash", { "command": command } ) is None
 
 
 def test_the_deny_envelope_has_the_hook_shape():
@@ -159,7 +174,6 @@ def _hook( payload ):
                           ( "drain_and_acknowledge", { "return_value": [] } ), ( "format_voice_context", { "return_value": None } ) ):
             stack.enter_context( patch( f"{MODULE}.{name}", **kw ) )
         stack.enter_context( patch( f"{MODULE}.emit_json", emit ) )
-        stack.enter_context( patch.dict( os.environ, { "LUPIN_ALLOW_CRON_SWITCH_EDIT": "" } ) )
         try:
             ptu.main()
         except SystemExit as exit_:
@@ -280,12 +294,12 @@ def test_a_new_line_that_contradicts_the_record_or_has_no_registry_is_refused( t
     assert code == cc.EXIT_REFUSE and "does not list" in message
 
 
-def test_the_operator_hatch_lets_a_refused_change_through_with_a_notice( tmp_path ):
+def test_no_flag_in_the_environment_lets_a_refused_change_through( tmp_path ):
     root = _repo( tmp_path )
     _stage( root, INI.replace( "alpha enabled = true", "alpha enabled = false" ) )
-    env = { **_record( tmp_path ), cc.HATCH_ENV: "1" }
+    env = { **_record( tmp_path ), "LUPIN_ALLOW_CRON_SWITCH_EDIT": "1" }
     code, message = cc.check( str( root ), env=env )
-    assert code == cc.EXIT_ALLOW and "ALLOWED by the operator" in message
+    assert code == cc.EXIT_REFUSE and "REFUSED" in message
 
 
 def test_a_missing_or_broken_record_counts_as_empty( tmp_path ):
@@ -333,8 +347,8 @@ def test_the_pre_commit_chain_runs_the_gate_and_stops_on_a_refusal( tmp_path ):
 def test_a_python_heredoc_that_writes_the_ini_is_denied_and_a_harmless_one_is_not():
     write = "python3 <<'PY'\nopen( 'src/conf/lupin-app.ini', 'w' ).write( 'x' )\nPY"
     quiet = "python3 <<'PY'\nprint( 1 )\nPY"
-    assert cg.DENY_PYTHON_WRITE in cg.cron_switch_deny_reason( "Bash", { "command": write }, env={} )
-    assert cg.cron_switch_deny_reason( "Bash", { "command": quiet }, env={} ) is None
+    assert cg.DENY_PYTHON_WRITE in cg.cron_switch_deny_reason( "Bash", { "command": write } )
+    assert cg.cron_switch_deny_reason( "Bash", { "command": quiet } ) is None
 
 
 def test_nested_shells_are_scanned_to_a_depth_and_a_clean_one_passes():
@@ -354,3 +368,55 @@ def test_a_repo_without_a_registry_gives_none( tmp_path ):
     root.mkdir()
     _git( root, "init", "-q" )
     assert cc.registry_job_ids( str( root ) ) is None
+
+
+# ---------------------------------------------------------------- adding a registry job's key
+
+def _add( path, line ):
+    return { "file_path": path, "old_string": "some other key = 1", "new_string": "some other key = 1\n" + line }
+
+
+def test_adding_a_line_for_a_registry_job_is_allowed_through_every_tool( tmp_path ):
+    path = _ini( tmp_path )
+    assert cg.cron_switch_deny_reason( "Edit", _add( path, "cron job gamma enabled = true" ) ) is None
+    assert cg.cron_switch_deny_reason( "MultiEdit", { "file_path": path, "edits": [ _add( path, "cron job gamma enabled = false" ) ] } ) is None
+    assert cg.cron_switch_deny_reason( "Write", { "file_path": path, "content": INI + "cron job gamma enabled = true\n" } ) is None
+    unreadable_dir = tmp_path / "x" / "lupin-app.ini"
+    os.makedirs( unreadable_dir )                      # unreadable as a file: the call's own old and new text are compared
+    ( tmp_path / "x" / "job-registry.json" ).write_text( json.dumps( { "jobs": [ { "job": "gamma" } ] } ) )
+    assert cg.cron_switch_deny_reason( "Edit", _add( str( unreadable_dir ), "cron job gamma enabled = true" ) ) is None
+
+
+def test_adding_an_unlisted_duplicate_or_junk_line_is_still_denied( tmp_path ):
+    path = _ini( tmp_path )
+    for line in ( "cron job zeta enabled = true", "cron job alpha enabled = true", "cron job gamma enabled = maybe",
+                  "cron job gamma enabled = true\ncron job gamma enabled = false" ):
+        assert cg.cron_switch_deny_reason( "Edit", _add( path, line ) ) is not None
+    os.remove( tmp_path / "job-registry.json" )          # no registry beside the file: nothing may be added
+    assert cg.cron_switch_deny_reason( "Edit", _add( path, "cron job gamma enabled = true" ) ) is not None
+    ( tmp_path / "job-registry.json" ).write_text( "{" )
+    assert cg.registry_jobs_beside( path ) is None
+
+
+def test_changing_a_value_stays_denied_when_a_line_is_added_in_the_same_edit( tmp_path ):
+    path = _ini( tmp_path )
+    both = { "file_path": path, "old_string": "cron job alpha enabled = true", "new_string": "cron job alpha enabled = false\ncron job gamma enabled = true" }
+    reason = cg.cron_switch_deny_reason( "Edit", both )
+    assert reason is not None and "alpha" in reason and "gamma" not in reason.split( "\n" )[ 0 ]
+
+
+def test_a_bash_append_of_one_registry_line_is_allowed_and_every_other_form_is_denied( tmp_path ):
+    path = _ini( tmp_path )
+    ok   = f"echo 'cron job gamma enabled = true' >> {path}"
+    assert cg.cron_switch_deny_reason( "Bash", { "command": ok } ) is None
+    assert cg.cron_switch_deny_reason( "Bash", { "command": f"printf \"cron job gamma enabled = false\" >> {path}" } ) is None
+    for command in ( f"echo 'cron job zeta enabled = true' >> {path}",                       # not in the registry
+                     f"echo 'cron job alpha enabled = false' >> {path}",                    # the job already has a line
+                     f"echo 'cron job gamma enabled = maybe' >> {path}",                    # junk value
+                     f"echo 'cron job gamma enabled = true' > {path}",                      # overwrite, not append
+                     f"echo 'x = 1' >> {path}",                                             # not a switch line
+                     f"echo 'cron job gamma enabled = true' >> {path} && sed -i s/a/b/ {path}",
+                     f"echo 'cron job gamma enabled = true' >> {tmp_path}/nope/lupin-app.ini" ):
+        assert cg.cron_switch_deny_reason( "Bash", { "command": command } ) is not None, command
+    os.remove( tmp_path / "job-registry.json" )
+    assert cg.cron_switch_deny_reason( "Bash", { "command": ok } ) is not None

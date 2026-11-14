@@ -93,8 +93,8 @@ fi
 # A staged lupin-app.ini whose `cron job <job> enabled` line differs from HEAD passes only when the record in
 # cron-job-switches-state.json holds the new value (Rick flipped it through the accordion), or when the line is
 # the one-time creation of a registry job's key. Exit 3 refuses; any other exit carries no verdict and the commit
-# is allowed with a loud line, as for the doc-lint gate. The escape hatch is the operator's, read from the git
-# process's environment. See cron_switch_commit_check.py.
+# is allowed with a loud line, as for the doc-lint gate. This gate has no escape hatch of its own.
+# See cron_switch_commit_check.py.
 cron_switch_rc=0
 LUPIN_ROOT="$repo_root" PYTHONPATH="$repo_root/src" python3 -m lupin_cli.claude_code.hooks.lib.cron_switch_commit_check --repo-root "$repo_root" || cron_switch_rc=$?
 if [ "$cron_switch_rc" -eq 3 ]; then

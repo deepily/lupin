@@ -26,9 +26,7 @@ counts as empty, so every changed switch is refused.
 `cron_switch_guard` is the control before this one, at the tool call. This one also covers a
 commit that no tool call made, such as a script or a terminal outside Claude Code.
 
-The escape hatch is the flag `cron_switch_guard` reads, in the environment of the git process.
-That guard denies any Bash command that sets it, so in practice only the environment Rick launches
-a session with carries it. `git commit --no-verify` skips every pre-commit gate and is out of scope.
+There is no escape hatch. `git commit --no-verify` skips every pre-commit gate and is out of scope.
 
 Run from `src/scripts/pre-commit-chain.sh`. Exit 0 allows the commit and exit 3 refuses it.
 Any internal error prints a loud line and exits 0.
@@ -45,8 +43,6 @@ from lupin_cli.claude_code.hooks.lib.cron_switch_guard import INI_BASENAME, swit
 
 STATE_ENV      = "LUPIN_CRON_SWITCH_STATE"
 STATE_FILENAME = "cron-job-switches-state.json"
-HATCH_ENV      = "LUPIN_ALLOW_CRON_SWITCH_EDIT"
-_TRUE_VALUES   = ( "1", "true", "on", "yes" )
 
 REGISTRY_PATH = "src/conf/job-registry.json"
 
@@ -204,7 +200,6 @@ def check( repo_root, env=None ) -> Tuple[ int, str ]:
     Ensures:
         - returns ( EXIT_ALLOW, "" ) when no staged lupin-app.ini changes a switch off the record
         - returns ( EXIT_REFUSE, <message> ) naming each refused switch and what to do instead
-        - returns ( EXIT_ALLOW, <notice> ) when the escape hatch is set and a switch changed
 
     Raises:
         - RuntimeError when git cannot list the staged paths
@@ -221,8 +216,6 @@ def check( repo_root, env=None ) -> Tuple[ int, str ]:
         found.extend( f"  {path}  {line}" for line in problems )
     if not found:
         return EXIT_ALLOW, ""
-    if str( env.get( HATCH_ENV, "" ) ).strip().lower() in _TRUE_VALUES:
-        return EXIT_ALLOW, f"{_PREFIX} ALLOWED by the operator's escape hatch:\n" + "\n".join( found )
     message = (
         f"{_PREFIX} REFUSED: this commit changes a cron job switch that the endpoint did not record.\n"
         + "\n".join( found )

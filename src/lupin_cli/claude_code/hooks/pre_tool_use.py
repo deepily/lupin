@@ -109,8 +109,9 @@ def main():
     # Cron-switch guard (row 063fc1a8, amendment 4): each `cron job <job> enabled` line in
     # lupin-app.ini is a switch Rick flips through the scheduled-jobs accordion, which records
     # who flipped it. Denies an Edit, MultiEdit or Write that changes such a line, a Bash write
-    # to the file, a Python call to a switch writer, and a command that sets the escape hatch.
-    # DEFAULT-ON; the hatch lives only in the hook process's environment. FAIL-OPEN by contract.
+    # to the file, and a Python call to a switch writer. A line added for a registry job that has
+    # none is allowed. DEFAULT-ON, with no escape hatch. FAIL-CLOSED for a call that touches
+    # lupin-app.ini, FAIL-OPEN for every other call.
     from lupin_cli.claude_code.hooks.lib.cron_switch_guard import (
         cron_switch_deny_reason, build_cron_switch_deny_response,
     )

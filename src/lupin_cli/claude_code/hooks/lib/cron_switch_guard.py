@@ -5,13 +5,13 @@ Each job in `src/conf/job-registry.json` has one key in the main configuration f
 `cron job <job> enabled = true|false`. Rick flips it through the admin endpoint, which writes the
 line from Python and records who flipped it in `cron-job-switches-state.json`. Every seat runs as
 the same Unix user, so no file permission stops a seat from flipping the line by hand instead.
-This guard is the preventive control at the tool call; `cron_switch_commit_check` is the second
-one, at the commit. The drift flag on the accordion row is the detective control.
+This guard is the preventive control at the tool call. `cron_switch_commit_check` is the second one.
+The drift flag on the accordion row is the detective control.
 
 What is denied:
 
-  - Edit, MultiEdit and Write on a file named `lupin-app.ini`, when the result would change,
-    add or remove a switch line. The edit is applied to the file's current text and the two sets
+  - Edit, MultiEdit and Write on a file named `lupin-app.ini`, when the result would change
+    or remove a switch line, or add one that the registry does not allow. The edit is applied to the file's current text and the two sets
     of switch lines are compared. So an edit to any other key is allowed. So is an edit that
     only carries a switch line along as unchanged context
   - a Bash command that writes a file named `lupin-app.ini`. That covers a redirect into it
@@ -21,21 +21,26 @@ What is denied:
     So every Bash write to the file is denied, and the deny text points to the Edit tool
   - a Python payload that calls a switch writer (`write_switch`, `write_bool_to_disk`) on a
     `cron job` key, which bypasses the endpoint without naming the file
-  - a Bash command that sets the escape-hatch flag, because the commit check reads the same
-    flag from the git process's environment, which an inline prefix would reach
+
+A line may be added when its job is in the `job-registry.json` beside the file and has no line yet.
+The value must be true or false. That is how a registry job's key is first created.
+The same rule covers a single `echo '<line>' >> lupin-app.ini`. It is the commit check's rule.
 
 What stays allowed is reading the file (`cat`, `grep`, `git diff`, `git show`). So is text that
 only mentions it: quoted strings, commit messages, heredoc bodies fed to a non-shell program.
 So is the endpoint itself, which writes from the server process and passes through no tool call.
 
-The escape hatch is for the operator only, as in branch_lock_guard: a flag in the hook process's
-own environment, set when Rick launches a session. No command typed inside a session reaches it,
-and the flag's name stays out of the deny text.
+There is no escape hatch. Every seat runs as one Unix user, so a variable cannot be Rick's alone.
+Rick needs none. He flips switches through the admin endpoint, and this guard binds only tool calls.
 
 The threat model is accident, not evasion, as in stash_guard. Text matching cannot resolve a
-variable that holds the path, an eval, or a base64 payload. The guard fails open: any unexpected
-error returns None, so it never breaks a tool call. It is on by default.
+variable that holds the path, an eval, or a base64 payload.
+
+The guard fails closed for a tool call that touches a file named `lupin-app.ini`.
+An unexpected error there denies the call. Every other call fails open and returns None.
+Before this change it failed open for both.
 """
+import json
 import os
 import re
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -52,11 +57,8 @@ from lupin_cli.claude_code.hooks.lib.branch_lock_guard import (
 FILE_TOOL_NAMES = ( "Edit", "MultiEdit", "Write" )
 BASH_TOOL_NAMES = ( "Bash", )
 
-INI_BASENAME = "lupin-app.ini"
-
-# Read only from the hook process's environment, never from the command.
-_ENV_FLAG    = "LUPIN_ALLOW_CRON_SWITCH_EDIT"
-_TRUE_VALUES = ( "1", "true", "on", "yes" )
+INI_BASENAME      = "lupin-app.ini"
+REGISTRY_FILENAME = "job-registry.json"
 
 # One switch line. The job id is one token; the value is everything after the equals sign.
 _SWITCH_LINE_RE = re.compile(
@@ -68,6 +70,11 @@ _SWITCH_LINE_RE = re.compile(
 _INI_TOKEN = r"['\"]?[^\s;&|<>'\"]*lupin-app\.ini['\"]?(?=[\s;&|<>)]|$)"
 
 _REDIRECT_INTO_RE = re.compile( rf"(?:^|[^<>&0-9])[0-9]?>{{1,2}}\|?[^\S\n]*{_INI_TOKEN}" )
+
+# `echo '<one switch line>' >> <path>lupin-app.ini`, the one shell write the guard can judge.
+_APPEND_RE = re.compile(
+    r"""^\s*(?:echo|printf)\s+(?:-\w+\s+)*(?P<q>['"])(?P<text>[^'"]*)(?P=q)\s*>>\s*(?P<path>[^\s;&|<>'"]*lupin-app\.ini)\s*$"""
+)
 
 _IN_PLACE_PROGRAMS  = frozenset( { "sed", "gsed", "perl", "ruby" } )
 _EDITOR_PROGRAMS    = frozenset( { "ed", "ex", "vi", "vim", "nvim", "nano", "emacs" } )
@@ -88,31 +95,7 @@ _PY_WRITE_RE = re.compile(
 )
 _PY_SWITCH_WRITER_RE = re.compile( r"\b(?:write_switch|write_bool_to_disk|write_value_to_disk)\s*\(" )
 
-# Setting the flag inside a command: an assignment, an export, or a Python environ write.
-_HATCH_SET_RE = re.compile(
-    rf"""(?<![\w-]){_ENV_FLAG}\s*=(?!=)"""
-    rf"""|\bexport\s+(?:-\w+\s+)*{_ENV_FLAG}\b"""
-)
-
-# The Python form lives inside quotes, which the blanked text hides, so it is searched in the
-# original text of a segment that runs Python, and in Python heredoc bodies.
-_HATCH_PY_RE = re.compile(
-    rf"""environ\s*\.\s*(?:setdefault|update)\s*\([^)]*{_ENV_FLAG}"""
-    rf"""|environ\s*\[\s*['"]?{_ENV_FLAG}['"]?\s*\]\s*="""
-)
-
 _MAX_DEPTH = 3
-
-
-def _truthy( value ) -> bool:
-    """True iff value reads as an enabling flag value."""
-    return str( value ).strip().lower() in _TRUE_VALUES
-
-
-def _guard_disabled( env=None ) -> bool:
-    """True iff the escape hatch is set truthy in the hook's own environment."""
-    env = env if env is not None else os.environ
-    return _truthy( env.get( _ENV_FLAG, "" ) )
 
 
 def switch_lines( text ) -> Dict[ str, Tuple[ str, ... ] ]:
@@ -148,6 +131,50 @@ def changed_jobs( before, after ) -> List[ str ]:
     old = switch_lines( before )
     new = switch_lines( after )
     return sorted( job for job in set( old ) | set( new ) if old.get( job ) != new.get( job ) )
+
+
+def registry_jobs_beside( ini_path ) -> Optional[ set ]:
+    """
+    The job ids of the registry that sits beside a configuration file.
+
+    Requires:
+        - ini_path is the path of a lupin-app.ini
+
+    Ensures:
+        - returns the ids listed in `job-registry.json` in the same folder
+        - returns None when that file is missing or unreadable, so no added line is allowed
+        - never raises
+    """
+    try:
+        with open( os.path.join( os.path.dirname( ini_path ), REGISTRY_FILENAME ), "r", encoding="utf-8" ) as handle:
+            return { entry[ "job" ] for entry in json.load( handle )[ "jobs" ] }
+    except ( OSError, ValueError, KeyError, TypeError ):
+        return None
+
+
+def refused_changes( before, after, registry ) -> List[ str ]:
+    """
+    The jobs whose switch lines changed in a way the guard refuses.
+
+    Requires:
+        - before and after are str
+        - registry is the set of registry job ids, or None when it is unknown
+
+    Ensures:
+        - a changed value, a removed line and a duplicated line are refused
+        - a line added for a job in the registry, once, with the value true or false, is allowed:
+          that is how a registry job's key is first created
+        - returns the sorted job ids refused, [] when every change is allowed
+    """
+    old = switch_lines( before )
+    new = switch_lines( after )
+    refused = []
+    for job in changed_jobs( before, after ):
+        added = job not in old and len( new.get( job, () ) ) == 1 and new[ job ][ 0 ] in ( "true", "false" )
+        if added and registry is not None and job in registry:
+            continue
+        refused.append( job )
+    return refused
 
 
 def _is_ini_path( path ) -> bool:
@@ -193,7 +220,7 @@ def _file_tool_jobs( tool_name, tool_input ) -> List[ str ]:
         content = tool_input.get( "content", "" )
         if not isinstance( content, str ):
             return []
-        return changed_jobs( current or "", content )
+        return refused_changes( current or "", content, registry_jobs_beside( path ) )
 
     edits = tool_input.get( "edits" ) if tool_name == "MultiEdit" else [ tool_input ]
     if not isinstance( edits, list ):
@@ -203,7 +230,7 @@ def _file_tool_jobs( tool_name, tool_input ) -> List[ str ]:
         jobs = set()
         for edit in edits:
             if isinstance( edit, dict ):
-                jobs.update( changed_jobs( str( edit.get( "old_string", "" ) ), str( edit.get( "new_string", "" ) ) ) )
+                jobs.update( refused_changes( str( edit.get( "old_string", "" ) ), str( edit.get( "new_string", "" ) ), registry_jobs_beside( path ) ) )
         return sorted( jobs )
 
     after = current
@@ -214,12 +241,38 @@ def _file_tool_jobs( tool_name, tool_input ) -> List[ str ]:
         if applied is None:
             return []
         after = applied
-    return changed_jobs( current, after )
+    return refused_changes( current, after, registry_jobs_beside( path ) )
 
 
 def _tokens( segment ) -> List[ str ]:
     """The whitespace-separated words of a segment, each with surrounding quotes removed."""
     return [ token.strip( "'\"" ) for token in segment.split() ]
+
+
+def _is_allowed_append( original ) -> bool:
+    """
+    True iff one command appends a single new switch line for a registry job.
+
+    Requires:
+        - original is one simple command
+
+    Ensures:
+        - True only for `echo` or `printf` of one `cron job <job> enabled = true|false` line,
+          appended with `>>` to a lupin-app.ini whose neighbouring registry lists the job
+          and whose current text holds no line for it
+        - False for anything else, including a changed value, a second line and an unreadable file
+    """
+    match = _APPEND_RE.match( original )
+    if match is None:
+        return False
+    text = match.group( "text" ).strip()
+    line = _SWITCH_LINE_RE.match( text )
+    if line is None or line.group( 0 ) != text or line.group( "value" ).strip().lower() not in ( "true", "false" ):
+        return False
+    path     = match.group( "path" )
+    registry = registry_jobs_beside( path )
+    current  = _read_text( path )
+    return registry is not None and current is not None and line.group( "job" ) in registry and line.group( "job" ) not in switch_lines( current )
 
 
 def _segment_writes_ini( original, blanked ) -> bool:
@@ -236,6 +289,8 @@ def _segment_writes_ini( original, blanked ) -> bool:
         - False when the file is only read or only named inside a quoted argument of a reader
     """
     if INI_BASENAME not in original:
+        return False
+    if _is_allowed_append( original ):
         return False
     if _REDIRECT_INTO_RE.search( original ):
         return True
@@ -274,29 +329,22 @@ def _bash_reason( command, depth ) -> Optional[ str ]:
     The deny reason for one shell text, scanning heredoc bodies and nested shells too.
 
     Ensures:
-        - returns DENY_HATCH, DENY_BASH_WRITE or DENY_PYTHON_WRITE for the first finding, or None
+        - returns DENY_BASH_WRITE or DENY_PYTHON_WRITE for the first finding, or None
         - recurses into shell heredocs and `sh -c` payloads up to _MAX_DEPTH
     """
     outer, shell_bodies, python_bodies = _split_heredocs( command )
     normal  = _normalise_spelling( outer )
     blanked = _blank_preserving( normal )
 
-    if _HATCH_SET_RE.search( blanked ):
-        return DENY_HATCH
-
     for original, blank in _segments( normal, blanked ):
         if _segment_writes_ini( original, blank ):
             return DENY_BASH_WRITE
         # Any word of the segment, so `uv run python -c` and `.venv/bin/python3 -c` count too.
         runs_python = any( _PYTHON_PROGRAM_RE.match( os.path.basename( word ) ) for word in blank.split() )
-        if runs_python and _HATCH_PY_RE.search( original ):
-            return DENY_HATCH
         if runs_python and _python_writes_switch( original ):
             return DENY_PYTHON_WRITE
 
     for body in python_bodies:
-        if _HATCH_PY_RE.search( body ):
-            return DENY_HATCH
         if _python_writes_switch( body ):
             return DENY_PYTHON_WRITE
 
@@ -321,13 +369,13 @@ _INSTEAD = (
     "allows every change that leaves them as they are."
 )
 
-DENY_HATCH = (
-    "Denied: this command sets the cron-switch escape hatch. That flag belongs to the operator "
-    "and is read only from the environment Rick launches a session with."
-)
 DENY_BASH_WRITE = (
     "Denied: this command writes lupin-app.ini from the shell. A shell write cannot be checked "
     "line by line, so every one is refused."
+)
+DENY_UNJUDGED = (
+    "Denied: this call touches lupin-app.ini and the guard could not judge it, so it is refused "
+    "rather than allowed."
 )
 DENY_PYTHON_WRITE = (
     "Denied: this Python code writes lupin-app.ini, or calls a switch writer on a `cron job` key, "
@@ -340,33 +388,43 @@ def _deny_file_tool( jobs ) -> str:
     return f"Denied: this edit changes the on/off switch of {', '.join( jobs )} in lupin-app.ini."
 
 
-def cron_switch_deny_reason(
-    tool_name,
-    tool_input,
-    *,
-    enabled : Optional[ bool ] = None,
-    env     = None,
-) -> Optional[ str ]:
+def _touches_ini( tool_name, tool_input ) -> bool:
+    """
+    True iff a tool call names a file called lupin-app.ini.
+
+    Ensures:
+        - True for a file tool whose path is one, and for a Bash command that contains the name
+        - False for anything else, and for input it cannot read
+        - never raises
+    """
+    try:
+        if tool_name in FILE_TOOL_NAMES:
+            return _is_ini_path( tool_input.get( "file_path" ) )
+        if tool_name in BASH_TOOL_NAMES:
+            return INI_BASENAME in tool_input.get( "command", "" )
+    except ( AttributeError, TypeError ):
+        return False
+    return False
+
+
+def cron_switch_deny_reason( tool_name, tool_input ) -> Optional[ str ]:
     """
     Return a deny reason iff a tool call would change a cron job switch by hand.
 
     Requires:
         - tool_name is the hook payload's tool_name (str)
         - tool_input is the hook payload's tool_input (dict)
-        - enabled and env are None in production and injected for testing
 
     Ensures:
-        - None unless the guard is enabled and the call is an Edit, MultiEdit or Write that
-          changes a switch line of a lupin-app.ini file, or a Bash command that writes such a
-          file, writes a switch from Python, or sets the escape hatch
-        - the escape hatch is read only from the hook process's environment
+        - None unless the call is an Edit, MultiEdit or Write that changes a switch line of a
+          lupin-app.ini file, or a Bash command that writes such a file or writes a switch from Python
+        - a line added for a registry job that has none is not refused
         - the reason says what was refused, why, and what to do instead
-        - fail-open: any unexpected error returns None
+        - fail-closed for a call that touches lupin-app.ini: an unexpected error returns DENY_UNJUDGED
+        - fail-open for every other call: an unexpected error returns None
     """
     try:
-        if enabled is None:
-            enabled = not _guard_disabled( env )
-        if not enabled or not isinstance( tool_input, dict ):
+        if not isinstance( tool_input, dict ):
             return None
         if tool_name in FILE_TOOL_NAMES:
             if not _is_ini_path( tool_input.get( "file_path" ) ):
@@ -384,8 +442,8 @@ def cron_switch_deny_reason(
                 return None
             return f"{reason}\n{_WHY}\n{_INSTEAD}"
         return None
-    except Exception:                    # pragma: no cover - fail-open backstop: a hot-path guard must never raise
-        return None
+    except Exception:
+        return f"{DENY_UNJUDGED}\n{_WHY}\n{_INSTEAD}" if _touches_ini( tool_name, tool_input ) else None
 
 
 def build_cron_switch_deny_response( reason: str ) -> dict:
