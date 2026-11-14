@@ -36,3 +36,10 @@ def test_only_protected_admins_are_allowed_beyond_the_companions( name ):
     source = _fixture_source( FIXTURES[ name ] )
     assert "NOT ( roles @> CAST( '[\\\"admin\\\"]' AS jsonb ) )" in source
     assert "unexpected protected non-admin users" in source
+
+
+@pytest.mark.parametrize( "name", sorted( FIXTURES ) )
+def test_the_shared_tester_login_is_allowed_beyond_the_companions( name ):
+    source = _fixture_source( FIXTURES[ name ] )
+    assert 'os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )' in source
+    assert source.index( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ) > source.index( "SELECT email FROM users WHERE is_protected" )
