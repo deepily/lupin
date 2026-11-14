@@ -8,6 +8,24 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.13 - Session 3c1ff1fb (Cheech 🌿, manager; crew Rio, Tiberius, Chloé, Sam, John) | Merge queue landed, Gate A closed (Opus after rescue), pushed and backed up
+
+**Resume here**: memento `.claude-memento-cheech-3c1ff1fb.md` (amended 22:45). Branch pushed to origin at 4004d2924.
+1. **Merged**: 8c8008771 is the backlog-rescue explainer for Rick's manager. 79febee44 is Rio's chain A, which puts doc-parity-tick under its INI switch. 974a931a0 is Rio's chain B, three reuse fixes. 377960e10 is Chloé's ledger fix, row 395e4bcd. c9265bfa4 is Tiberius's ten reuse fixes, row ff7ad87e. The reuse gate passed 866 of 866.
+2. **Rick's rulings**: Gate A bcc022ff is closed as "Opus after rescue". His condition is that every ruling names its judging model. The Opus budget is 2,400 calls a day, row 40049d7f. He approved rows 3b045c28 and 84742382 for Chloé. The io/tmp sweep lines are installed, closing rows 25118ed7 and 2bd8ce23.
+3. **Rescue 3b045c28**: the second and third rescue steps are at ea5c8c70e, approved by Sam. Saved rulings answer 5,931 of 12,270 definitions. The merge and filing wait for Sam's mutation check and Cheech's go.
+4. **Final pyramid d2a18b64 at 4004d2924**: rows 1 to 4 and 10 to 12 are green. Unit had 45,835 passed and 3 failed. Two failures are fixed; TestTheRatchet is bug 20756314 for Krishna. Coverage moves to tomorrow's quiet window. Smoke ts-dfebd71d is running on :8000.
+5. **Filed**: 93b1cfc4 (accordion shows no toggle for Rick, Krishna). :7999 bounced at 22:37 so the accordion is live. Rio and Tiberius reaped with mementos.
+
+## 2026.11.13 - Session 5f75f136 (Mr. Radio 🦉, manager; crew Maria, Krishna, Maya, Rachel, Pocholo) | Group B model ids and the legacy cron-switch accordion merged; Rick's six decisions recorded
+
+**Resume here**: memento `.claude-memento-mr-radio-5f75f136.md`. Nothing merges into main until John's suites finish (Cheech, 22:42).
+1. **Merged**: f813f2635 (Maya's group B model ids, row a3ecd4ea closed), 08f792289 (rnd README link), 4004d2924 (Krishna's legacy-client scheduled-jobs accordion, row 063fc1a8). Each had passing changed-area tests, census guards and the reuse gate.
+2. **Miss**: 4004d2924 turned test_dom_assert_lint TestTheRatchet red, and the census guards don't select that test. Fix a6634c9de (row 20756314) is with Maria; the gap is bug 7e51f330.
+3. **Rick's rulings**: c38a49bd widened to all 24 registry jobs, and 12 have a switch today. 586e23b0 is deploy-and-smoke to the cloud VM at 18:00. 4fc04cb5 is parked to 20 Nov. 92076977 makes workers quiet by default, with urgent still spoken. The Opus budget is 2,400 calls a day.
+4. **Ready to merge after John**: a43a4cf84 is the VM tester login, row 8d67e474. bc82f35d8 is Maya's spend guard, row 40049d7f, with 313 passed. Pocholo's 7c43c4e64 follows once its E2E halves run.
+5. **Blocked**: the auto-mode classifier refuses seats' pytest in their worktrees; Rick was given an allow-rule text. Toggle-missing bug 93b1cfc4 is next for Krishna.
+
 ## 2026.11.11 - Session 67412f28 (Cheech 🌿, manager; crew Rio, Rachel, Chloé, Sam, John, Pocholo, Tiberius, Clayton, Arnold, Extra 1) | Reuse backlog row 2448ae19 closed; code-health rows a24acda1, 6fd6fc0c and 5bb97718 merged; four reviewed bug fixes wait on Rick's admit
 
 **Resume here**: memento `.claude-memento-cheech-67412f28.md`. Claims list and merge tools live in `projects-data/lupin/cheech-tools/` (`followups-2448ae19-pending.md`, `merge_check.sh`).
