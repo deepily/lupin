@@ -19,4 +19,4 @@ The judge ledger of the daily and baseline runs. It keeps every ruling when Clau
 ## Don't
 - Don't use it for the proof. `proof_ledger` keeps the version in the binding so a measured run never mixes binaries.
 - Don't expect a Fable ruling to answer an Opus run: the model id is in the key.
-- `rotate_ledger_for_new_cli` is no longer called by the daily run.
+- Don't look for `ledger_rotated` in a run file: no ledger is renamed aside any more.

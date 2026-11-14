@@ -390,38 +390,8 @@ def _ledger_binding( cli_path, backend ):
     return judge.ledger_binding( f"claude_cli={cli_path}|version={model_transport.cli_version( cli_path )}", backend )
 
 
-def rotate_ledger_for_new_cli( data_dir, cli_path, backend, folder=proof_run.PROOF_FOLDER ):
-    """
-    Move a judge ledger written under another Claude Code version aside.
-
-    Requires:
-        - data_dir, cli_path, backend and folder are as proof_ledger takes them
-
-    Ensures:
-        - returns None and changes nothing when there is no ledger, it records no binding, or its binding is this run's
-        - a ledger that differs from this run's binding in the version alone is renamed to judge-ledger.claude-<old version>.jsonl, with -2, -3 added when that name is taken
-        - returns { from, to, old_version, new_version } for a rotation, and prints one line saying so
-        - a ledger that differs in the binary, backend or server is left alone, so proof_ledger refuses it as before
-    """
-    path = pathlib.Path( data_dir ).joinpath( *folder ) / LEDGER_NAME
-    if not path.exists(): return None
-    held = harness_runner.Ledger( path ).recorded
-    mine = _ledger_binding( cli_path, backend )
-    if held is None or held == mine: return None
-    version = re.compile( r"\|version=([^|]*)" )
-    old, new = version.search( held ), version.search( mine )
-    if old is None or version.sub( "|version=", held, 1 ) != version.sub( "|version=", mine, 1 ): return None
-    target, n = path.with_name( f"judge-ledger.claude-{old.group( 1 )}.jsonl" ), 1
-    while target.exists():
-        n     += 1
-        target = path.with_name( f"judge-ledger.claude-{old.group( 1 )}-{n}.jsonl" )
-    path.rename( target )
-    print( f"[ledger-rotated] Claude Code {old.group( 1 )} -> {new.group( 1 )}: {path.name} moved to {target.name}, starting a new ledger", file=sys.stderr )
-    return { "from": path.name, "to": target.name, "old_version": old.group( 1 ), "new_version": new.group( 1 ) }
-
-
 class StampedLedger( harness_runner.Ledger ):
-    """A judge ledger that keeps every ruling across a Claude Code update and stamps each new ruling with the version that wrote it."""
+    """A judge ledger that survives a Claude Code update and stamps each ruling with its version."""
 
     def __init__( self, path, stamp ):
         """
@@ -434,12 +404,12 @@ class StampedLedger( harness_runner.Ledger ):
         super().__init__( path )
 
     def _append( self, record ):
-        """Ensures: a ruling record carries the writing version as "cli"; a binding record is written as it is."""
+        """Ensures: a ruling record carries the writing version as "cli"; a binding record does not."""
         super()._append( { **record, "cli": self.stamp } if "key" in record else record )
 
     def settle( self, binding ):
         """
-        Bind the ledger to binding, accepting a recorded binding that differs from it in the version alone.
+        Bind the ledger, accepting a recorded binding that differs only in the version.
 
         Requires:
             - binding names the binary path, backend and server, with no version
