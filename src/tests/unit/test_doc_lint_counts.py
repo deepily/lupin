@@ -177,6 +177,7 @@ def test_rule_files_are_the_tracked_files_of_the_package_the_word_list_and_the_c
     assert counts.rule_files( str( repo ) ) == [ "src/conf/dm-tutor-lowercase-words.txt", "src/cosa/repo/doc_lint/b.py", "src/cosa/repo/doc_lint/sub/a.py", "src/scripts/pre-commit-chain.sh" ]
 
 
+@pytest.mark.census
 def test_the_rule_files_of_the_real_tree_match_what_git_lists_for_that_set_and_are_not_empty():
     root   = cu.get_project_root()
     found  = counts.rule_files( root )

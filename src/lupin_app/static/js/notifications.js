@@ -18891,6 +18891,11 @@ class NotificationsUI {
 
         // Apply saved visibility state
         this.applySectionVisibility();
+
+        // Row 61070c08: the handlers above are bound late (init() awaits audio and IndexedDB
+        // first), so a click before this line does nothing. This attribute is the signal a test
+        // or script waits on before it clicks a toolbar button.
+        toolbar.dataset.bound = 'true';
         this.log( 'Section visibility toolbar initialized' );
     }
 

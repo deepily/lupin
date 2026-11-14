@@ -97,6 +97,7 @@ class TestTheRule:
 # 2. The ratchet
 # ══════════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.census   # it counts violations across the whole tree (bug 7e51f330)
 class TestTheRatchet:
 
     def test_no_file_has_MORE_violations_than_its_baseline( self ):
