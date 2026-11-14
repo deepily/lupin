@@ -45,6 +45,7 @@ The plan is `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`. They mu
 | `cc_transcript_append` | CC transcript console | Server → Client | No — per **watching browser session**, via `emit_to_session` |
 | `cc_transcript_state` | CC transcript console | Server → Client | No — per **watching browser session**, via `emit_to_session` |
 | `task_store_changed` | Task store | Server → Client | No — broadcast to every connected session subscribed to it, via `emit` |
+| `cron_job_switch_changed` | Scheduled jobs | Server → Client | No — broadcast to every connected session subscribed to it, via `emit_to_all`. Payload: the job's row from `GET /api/cron-jobs`, plus `type` and `timestamp` |
 | `sys_time_update` | System | Server → Client | No (broadcast) |
 | `status` | System | Server → Client | Varies |
 | `error` | System | Server → Client | Varies |

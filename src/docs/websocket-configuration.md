@@ -66,6 +66,8 @@ names = ConfigurationManager().get( "websocket available events", return_type="l
 
 Added: `task_store_changed`, the task panes' invalidation push. No other key is needed for it; the web client's `QueueTransport` carries it in its subscribed-events list. The legacy page's `_buildQueueAuthMessage` in `notifications.js` carries it as well.
 
+Added: `cron_job_switch_changed`, sent after an administrator flips a scheduled job's switch. The legacy page's `_buildQueueAuthMessage` subscribes to it, on the queue socket only.
+
 Warning: **That reader is a bare `value.split( ", " )` with no per-token strip.**
 
 Every entry must be separated by a comma **and a space**. A comma alone produces one mangled token: the new name never validates *and neither does the one before it*. Nothing raises, because the list is still non-empty.

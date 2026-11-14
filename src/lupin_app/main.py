@@ -88,7 +88,7 @@ from cosa.rest import task_store_change_notifier
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_drive, podcast_generator, podcast_proxy, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask, cc_transcript, heartbeat, reuse_candidates, pair_labelling, duplicate_check_status, job_summary
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_drive, podcast_generator, podcast_proxy, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask, cc_transcript, heartbeat, reuse_candidates, pair_labelling, duplicate_check_status, job_summary, cron_jobs
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs, record_server_available
 
@@ -1085,6 +1085,7 @@ app.include_router(reuse_candidates.router)   # /api/reuse-candidates/* — the 
 app.include_router(duplicate_check_status.router)   # /api/duplicate-check/* and /app/duplicate-check — backlog, tokens and projected zero of the daily duplicate check (row 0d23e394)
 app.include_router(pair_labelling.router)   # /api/pair-labelling/* — a reviewer labels a blind duplicate-check pair packet in the browser (row ea45cf15)
 app.include_router(job_summary.router)   # /api/jobs/* — one endpoint for every background job: health summary and Run now (row efe188bf)
+app.include_router(cron_jobs.router)   # /api/cron-jobs — each scheduled job's INI on/off switch, flipped by an administrator (row 063fc1a8)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

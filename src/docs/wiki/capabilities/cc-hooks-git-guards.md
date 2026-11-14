@@ -2,7 +2,7 @@
 capability: cc-hooks-git-guards
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_cli.claude_code.hooks.pre_tool_use.main@122392a13a
+  - lupin_cli.claude_code.hooks.pre_tool_use.main@e502e7a5e3
   - lupin_cli.claude_code.hooks.lib.stash_guard.stash_deny_reason@13e37ff81e
   - lupin_cli.claude_code.hooks.lib.branch_lock_guard.branch_lock_deny_reason@10ab10ceda
   - lupin_cli.claude_code.hooks.lib.kill_guard.kill_deny_reason@65a3afb943

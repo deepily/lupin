@@ -3408,6 +3408,8 @@ class NotificationsUI {
                 // Row 8796333b: one invalidation push per committed task-store write. The
                 // queue socket only, for the same reason as the two names above.
                 "task_store_changed",
+                // Row 063fc1a8: an administrator flipped a scheduled job's switch. Queue socket only.
+                "cron_job_switch_changed",
                 "auth_success",
                 "auth_error",
                 "connect",
@@ -3738,6 +3740,11 @@ class NotificationsUI {
 
                 case "task_store_changed":
                     this._handleTaskStoreChanged();
+                    break;
+
+                case "cron_job_switch_changed":
+                    // Row 063fc1a8: cron-jobs.js owns the section; this only hands it the row.
+                    if ( window.cronJobs ) window.cronJobs.applyEvent( envelope );
                     break;
 
                 case "notification_responded":
