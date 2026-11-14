@@ -909,14 +909,6 @@ def spawn_sessions(
     if refusal:
         raise ValueError( refusal )
 
-    # How the children's voice starts (row 92076977). Read once, before any child is spawned, so a
-    # mistyped INI value refuses the whole spawn naming the key instead of failing half-way.
-    # A manager role forwards `inherit` without reading the INI.
-    if voice_config_fn is None:
-        from cosa.config.configuration_manager import ConfigurationManager
-        voice_config_fn = lambda: ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    voice_env = worker_voice_mode.worker_voice_env( role, voice_config_fn )
-
     # `project` NOW GENUINELY SETS THE CHILD'S WORKING DIRECTORY (row 697a85fe,
     # Rick's ruling 2026-08-19). It used to be a label read nowhere, while the
     # child inherited the CALLER's cwd — so a manager in one repo asking for a
@@ -957,6 +949,14 @@ def spawn_sessions(
             f"argument does not do that, it applies the default {DEFAULT_SPAWN_PROJECT!r}. "
             f"The caller's own repo here is {detect_project()!r}."
         )
+
+    # How the children's voice starts (row 92076977). Read once, before any child is spawned, so a
+    # mistyped INI value refuses the whole spawn naming the key instead of failing half-way.
+    # A manager role forwards `inherit` without reading the INI.
+    if voice_config_fn is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        voice_config_fn = lambda: ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    voice_env = worker_voice_mode.worker_voice_env( role, voice_config_fn )
 
     # ── Give the seat a .venv it can actually run the unit tier with (row 9b2abfb7) ──
     #

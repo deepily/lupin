@@ -29,6 +29,7 @@ fired on every spawn would pass just as happily.
 import logging
 import subprocess
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
@@ -63,7 +64,9 @@ def _spawn_against( monkeypatch, caplog, root ):
         with caplog.at_level( logging.WARNING, logger="cosa.utils.worktree_venv" ):
             result = session_spawner.spawn_sessions(
                 1, "task", "mgr-sid", script_path="/bin/true", project="lupin",
-                session_dir=Path( tmp ), dry_run=True
+                session_dir=Path( tmp ), dry_run=True,
+                # These tests are about where the seat lands, not its voice, so the key is injected.
+                voice_config_fn=lambda: types.SimpleNamespace( get=lambda key, default=None, **kw: "quiet" )
             )
     return result, [ r for r in caplog.records if r.levelno >= logging.WARNING ]
 

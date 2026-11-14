@@ -61,6 +61,7 @@ the same mutation.
 import os
 import subprocess
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
@@ -241,6 +242,8 @@ def test_the_dry_run_says_it_provisioned_nothing_rather_than_staying_silent( mon
                 result = session_spawner.spawn_sessions(
                     1, "task", "mgr-sid", script_path="/bin/true", project="lupin",
                     session_dir=Path( session_dir ), dry_run=True,
+                    # This test is about provisioning, so the worker voice mode key is injected.
+                    voice_config_fn=lambda: types.SimpleNamespace( get=lambda key, default=None, **kw: "quiet" ),
                 )
             # The field is `seat_worktrees` — a LIST, one entry per seat — not a single
             # `seat_provisioning` dict. Found by driving the real call and printing the
