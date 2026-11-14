@@ -410,6 +410,43 @@ def test_rotate_ledger_numbers_the_aside_name_when_the_version_name_is_taken( tm
     assert done[ "to" ] == "judge-ledger.claude-2.1.317-2.jsonl" and path.with_name( "judge-ledger.claude-2.1.317.jsonl" ).read_text( encoding="utf-8" ) == "earlier\n"
 
 
+# ---- daily_ledger (row 395e4bcd) -----------------------------------------------------------------------------------
+
+def daily_at( tmp_path, monkeypatch, version, cli="/bin/claude" ):
+    """Make the daily ledger as Claude Code `version` would; returns ( ledger, ledger path )."""
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: version )
+    ledger = pc.daily_ledger( str( tmp_path ), cli, jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    return ledger, tmp_path.joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME
+
+
+def test_daily_ledger_binds_to_the_binary_and_server_not_the_version_and_stamps_each_ruling( tmp_path, monkeypatch ):
+    ledger, path = daily_at( tmp_path, monkeypatch, "2.1.317" )
+    ledger.put( "k1", { "rulings": [] } )
+    lines = [ json.loads( line ) for line in path.read_text( encoding="utf-8" ).splitlines() ]
+    assert lines == [ { "binding": "claude_cli=/bin/claude|max-plan|max-plan" }, { "key": "k1", "value": { "rulings": [] }, "cli": "2.1.317" } ]
+
+
+def test_daily_ledger_after_an_update_keeps_every_ruling_and_appends_a_version_free_binding_to_an_old_one( tmp_path, monkeypatch ):
+    _, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
+    held = pc.harness_runner.Ledger( path, binding=pc._ledger_binding( "/bin/claude", jd.MaxPlanBackend() ) )
+    held.put( "k1", { "rulings": [ 1 ] } )
+    before = path.read_text( encoding="utf-8" )
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.318" )
+    again = pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    assert again.get( "k1" ) == { "rulings": [ 1 ] } and path.read_text( encoding="utf-8" ).startswith( before ), "nothing is rewritten or renamed"
+    assert json.loads( path.read_text( encoding="utf-8" ).splitlines()[ -1 ] ) == { "binding": "claude_cli=/bin/claude|max-plan|max-plan" }
+    assert [ p.name for p in path.parent.iterdir() ] == [ pc.LEDGER_NAME ]
+    again.put( "k2", { "rulings": [] } )
+    assert pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER ).entries.keys() == { "k1", "k2" }
+
+
+def test_daily_ledger_still_refuses_another_binary_and_a_file_of_rulings_with_no_binding( tmp_path, monkeypatch ):
+    _, path = daily_at( tmp_path, monkeypatch, "2.1.317" )
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.daily_ledger( str( tmp_path ), "/new/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    path.write_text( json.dumps( { "key": "k", "value": { "rulings": [] } } ) + "\n", encoding="utf-8" )
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+
+
 # ---- main ---------------------------------------------------------------------------------------------------------
 
 def test_main_check_prints_the_sizes_computes_the_pairs_once_and_never_runs_the_proof( venue, capsys ):

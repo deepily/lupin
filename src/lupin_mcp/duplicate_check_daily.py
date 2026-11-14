@@ -653,7 +653,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - parts holds client, backend, structural ( a function taking the tree and the frozen configuration and giving judge_all's structural_pairs ), verify, version_fn and data_dir
     Ensures:
         - writes <data_dir>/duplicate-check-daily/<date>-<time>-<trigger>.json: the verdicts' clusters, the window, the judge calls and elapsed_seconds
-        - a judge ledger written under another Claude Code version is renamed aside first and a new one started; the result holds ledger_rotated { from, to, old_version, new_version }
+        - the judge ledger is bound to the binary path, backend and server, not the Claude Code version, so an update keeps every earlier ruling; each new ruling records the version that wrote it
         - before anything else, continuity_guard refuses a branch other than the one last-success.json or baseline.json recorded, or a recorded commit that is not on the branch: that file gets status failed, stage branch_guard and the refusal, and the urgent hook is told
         - a continuity refusal that repeats the previous run's is recorded with repeat true and sends no second alert, until a run ends differently
         - then branch_guard runs: a pinned branch that is stale or gone writes that file with status failed, stage branch_guard, the refusal, the reinstall command and notified (the notifier hook's answer, False without one); nothing else changes and last-success does not move
@@ -724,9 +724,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         if ceiling is not None: cap = min( ceiling, len( fresh[ "defs" ] ) )
         out   = { "verdicts": [], "unjudged": [], "dropped": { "count": 0, "ids": [] } }
         if fresh[ "defs" ]:
-            rotated = proof_cli.rotate_ledger_for_new_cli( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
-            if rotated is not None: doc[ "ledger_rotated" ] = rotated
-            ledger = proof_cli.proof_ledger( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
+            ledger = proof_cli.daily_ledger( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
             wiring = { **proof_cli.base_wiring( folder / VECTORS_DIR, parts[ "structural" ]( tree, cfg ), parallel, parts[ "client" ] ), "backend": count, "ledger": ledger, "redact_tools": True }
             out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap, skip_breaching=True )
     except Exception as exc:               # the pool build, the embeddings or the judge failed: leave a record and change nothing else
