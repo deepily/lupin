@@ -218,21 +218,39 @@ def test_the_run_uses_the_one_shared_wiring_builder_and_its_own_ledger_folder( r
     assert ( tmp_path / "io" / "duplicate-check-daily" / "judge-ledger.jsonl" ).exists() and not ( tmp_path / "io" / "proof" ).exists()
 
 
-@pytest.mark.parametrize( "old, rotates", [ ( "2.1.317", True ), ( "2.1.318", False ) ] )
-def test_a_ledger_of_another_claude_version_is_rotated_aside_and_the_run_goes_on_row_589102de( repo, tmp_path, monkeypatch, old, rotates ):
+def ledger_lines( path ):
+    """Ensures: returns the parsed records of a ledger file, in order."""
+    return [ json.loads( line ) for line in path.read_text( encoding="utf-8" ).splitlines() ]
+
+
+def test_a_claude_version_change_keeps_every_prior_ruling_and_the_run_asks_the_model_for_none_of_them_row_395e4bcd( repo, tmp_path, monkeypatch ):
     history( repo )
-    parts = parts_of( tmp_path )
-    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: old )
-    proof_cli.proof_ledger( parts[ "data_dir" ], "/bin/claude", parts[ "backend" ], dd.FOLDER )
-    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.318" )
+    parts  = parts_of( tmp_path )
     folder = tmp_path / "io" / "duplicate-check-daily"
-    doc    = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts )
-    assert doc[ "status" ] == "ok", "a version bump must not fail the run"
-    if rotates:
-        assert doc[ "ledger_rotated" ][ "to" ] == "judge-ledger.claude-2.1.317.jsonl" and ( folder / "judge-ledger.claude-2.1.317.jsonl" ).exists()
-        assert "version=2.1.318" in ( folder / "judge-ledger.jsonl" ).read_text( encoding="utf-8" )
-    else:
-        assert "ledger_rotated" not in doc and not ( folder / "judge-ledger.claude-2.1.318.jsonl" ).exists()
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.317 (Claude Code)" )
+    first  = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts )
+    ruled  = [ r for r in ledger_lines( folder / "judge-ledger.jsonl" ) if "key" in r ]
+    assert first[ "status" ] == "ok" and len( ruled ) == 3
+    ( folder / "last-success.json" ).unlink()                       # the same window is owed again, so the ledger is the only thing that can answer it
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.318 (Claude Code)" )
+    second = dd.run( repo, NOW + datetime.timedelta( hours=1 ), "hand", 10, "/bin/claude", parts )
+    after  = ledger_lines( folder / "judge-ledger.jsonl" )
+    assert second[ "status" ] == "ok" and second[ "judge_calls" ] == 0 and second[ "judged" ] == 3, "every ruling is read back, none is asked again"
+    assert [ r for r in after if "key" in r ] == ruled and "ledger_rotated" not in second
+    assert sorted( p.name for p in folder.glob( "judge-ledger*" ) ) == [ "judge-ledger.jsonl" ], "nothing is renamed aside"
+    assert [ r for r in after if "binding" in r ][ -1 ][ "binding" ] == "claude_cli=/bin/claude|max-plan|max-plan"
+
+
+def test_each_ruling_records_the_claude_version_that_wrote_it_and_the_two_versions_stay_told_apart_row_395e4bcd( repo, tmp_path, monkeypatch ):
+    history( repo )
+    parts  = parts_of( tmp_path )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.317 (Claude Code)" )
+    dd.run( repo, NOW, "hand", 1, "/bin/claude", parts )
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.318 (Claude Code)" )
+    dd.run( repo, NOW + datetime.timedelta( hours=1 ), "hand", 10, "/bin/claude", parts )
+    stamps = [ r[ "cli" ] for r in ledger_lines( folder / "judge-ledger.jsonl" ) if "key" in r ]
+    assert stamps == [ "2.1.317 (Claude Code)" ] + [ "2.1.318 (Claude Code)" ] * 2, "the first ruling is the old version's, the other two the new one's"
 
 
 def test_the_window_starts_at_the_first_commit_when_no_commit_is_a_day_old( repo ):

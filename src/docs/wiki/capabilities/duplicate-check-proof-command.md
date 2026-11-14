@@ -20,7 +20,6 @@ pins:
   - cosa.repo.duplicate_check.proof.proof_cli.base_wiring@5622376323
   - cosa.repo.duplicate_check.proof.proof_cli.live_parts@c864c0e78c
   - cosa.repo.duplicate_check.proof.proof_cli.proof_ledger@a993799e54
-  - cosa.repo.duplicate_check.proof.proof_cli.rotate_ledger_for_new_cli@61f078cab2
   - cosa.repo.duplicate_check.proof.proof_cli.main@26a968d594
   - cosa.repo.duplicate_check.proof.proof_cli.json_stdout@8fc89b4c01
 ---
@@ -33,7 +32,7 @@ Builds `proof_run`'s spec and wiring from a labelling run folder, then checks th
 - `plant_failures` lists the planted pairs both reviewers labelled False; a pair either has not labelled is not one. `label_state` reads the two labels files, plus a third rater's file and a supplement when given, and says what is owed. `read_supplement` builds the supplement from `--supplement-key` and two `--supplement-labels`, plus `--supplement-third` for a third rater's file on its disputed pairs. It refuses the key or files without each other, and any use with `--trial`. `trial_state` does the same for the one file of a trial run.
 - `rewrite_sources` finds each rewrite's file under `key/rewrites/<NNN>/`. `stage_pool` copies the pool into one temporary tree: server and monolith files under `tree/`, each rewrite under `proof-new/<NNN>/`, so a rewrite never overwrites its original.
 - `staged_pairs` finds the structural clone pairs of the whole pool in that tree and maps them back to pool ids. It hands dups every staged definition, because dups numbers a repeated name `~2` before the node cut. It keys a staged definition by file and line span, not name, because a class-member rewrite is recorded as `destroy` but extracted as `PlantedWrapper.destroy`. `check_found` raises if a pool definition is missing from the staged tree. `structural_source` caches `staged_pairs` by the pool's ids, so the second slot stages nothing. `base_wiring` builds the wiring the proof and the daily check share, short of the ledger. It uses the Claude Code backend and writes nothing. `live_parts` wires the real tree with it and writes nothing; `main` is the command.
-- `proof_ledger` makes the record folder and the judge ledger, bound with `judge.ledger_binding`. The folder is the proof's own unless a trial run names one. Only a real run calls it, and a real run needs `--claude-cli-path`. `main` prints its JSON through `json_stdout`, and banners go to stderr, so `json.loads` of stdout works. The owed flag pairs are added by [[duplicate-check-proof-flag-items]]. `rotate_ledger_for_new_cli` first renames a ledger bound to another Claude Code version to `judge-ledger.claude-<old version>.jsonl`. Any other binding change is left for `proof_ledger` to refuse.
+- `proof_ledger` makes the record folder and the judge ledger, bound with `judge.ledger_binding`. The folder is the proof's own unless a trial run names one. Only a real run calls it, and a real run needs `--claude-cli-path`. `main` prints its JSON through `json_stdout`, and banners go to stderr, so `json.loads` of stdout works. The owed flag pairs are added by [[duplicate-check-proof-flag-items]]. A change of Claude Code version makes `proof_ledger` refuse the ledger; the daily check uses [[duplicate-check-daily-ledger]] instead.
 
 ## Don't
 - Don't run without `--check` first; it prints the pool, pair and label counts, makes no model call and writes nothing.

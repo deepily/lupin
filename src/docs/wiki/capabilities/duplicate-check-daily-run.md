@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.Counting@f2ca3e39f1
   - lupin_mcp.duplicate_check_daily.findings_of@cfdb1b0bd4
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@63584b8a94
-  - lupin_mcp.duplicate_check_daily.run@2fed4ef8bf
+  - lupin_mcp.duplicate_check_daily.run@df142a5380
   - lupin_mcp.duplicate_check_daily.cron_lines@5d30783eec
   - lupin_mcp.duplicate_check_daily.install_mode@8a07fed64c
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
@@ -27,7 +27,7 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - `findings_of` makes one finding per cluster that holds a new definition: the new definition with the lowest id, with `others` the rest. A cluster is left out when any of its new definitions already has a verdict line, so a verdict on either side settles the pair. Without `session_of` the session is None.
 - `run( root, now, trigger, cap, cli_path, parts, ... )` first runs the guards of [[duplicate-check-branch-guard]]. It then writes `<date>-<time>-<trigger>.json` under `duplicate-check-daily`. A trigger other than `cron`, `reboot` or `hand` raises `ValueError`.
 - A run whose every new call failed, with no limit to explain it, is recorded `failed`. Rulings replayed from the ledger do not hide it. A limited run stays `carried`. A complete baseline judges nothing. A run inside a rate-limit back-off is recorded `skipped` and judges nothing. A failed prerequisite writes status `failed` and changes nothing else.
-- A judge ledger written under another Claude Code version is renamed aside (see `rotate_ledger_for_new_cli` in [[duplicate-check-proof-command]]); the result then holds `ledger_rotated`.
+- The judge ledger survives a Claude Code update; see [[duplicate-check-daily-ledger]]. No ledger is renamed aside.
 - An error while reading the configuration, choosing the window or making the worktree writes status `failed`, stage `setup`. An error while building the pool, embedding or judging writes stage `judging`. `last-success.json` does not move. Worktrees are removed either way. The result holds `test_code_dropped` with `owed` and `pool`: the test-code definitions left out of the owed set and of the comparison pool.
 - Otherwise status is `ok`, or `carried` when the cap left definitions. `last-success.json` advances to the last commit fully judged and records the branch. `append_manifest` writes one line per judged definition to `interim-judge-manifest.jsonl` through `append_line` of [[duplicate-check-run-history]]. A line holds the id, file, run file, model id, config sha and time, and each finding carries `judge_model`.
 - A filer or auditor that raises is caught and recorded with an `error`; the run still advances. Findings stay in the result file, and [[duplicate-check-refile]] can file them again.

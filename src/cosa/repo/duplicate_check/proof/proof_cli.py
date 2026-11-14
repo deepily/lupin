@@ -382,39 +382,77 @@ def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring
     return { "run": run, "mono_defs": mono, "distractors": [ *prep[ "server_defs" ], *prep[ "client_defs" ] ], "wiring": wiring }
 
 
+_VERSION = re.compile( r"\|version=[^|]*" )     # the version part of a binding, so two bindings can be compared without it
+
+
 def _ledger_binding( cli_path, backend ):
     """Return the binding a ledger made now for cli_path and backend carries."""
     return judge.ledger_binding( f"claude_cli={cli_path}|version={model_transport.cli_version( cli_path )}", backend )
 
 
-def rotate_ledger_for_new_cli( data_dir, cli_path, backend, folder=proof_run.PROOF_FOLDER ):
+class StampedLedger( harness_runner.Ledger ):
+    """A judge ledger that survives a Claude Code update and stamps each ruling with its version."""
+
+    def __init__( self, path, stamp ):
+        """
+        Load the ledger at path without settling its binding.
+
+        Requires:
+            - stamp is the Claude Code version string written on each ruling
+        """
+        self.stamp = stamp
+        super().__init__( path )
+
+    def _append( self, record ):
+        """Ensures: a ruling record carries the writing version as "cli"; a binding record does not."""
+        super()._append( { **record, "cli": self.stamp } if "key" in record else record )
+
+    def settle( self, binding ):
+        """
+        Bind the ledger, accepting a recorded binding that differs only in the version.
+
+        Requires:
+            - binding names the binary path, backend and server, with no version
+
+        Ensures:
+            - a ledger with no binding gets binding written; a ledger bound to binding is left as it is
+            - a ledger bound with a version in it gets binding appended as its newest binding, and keeps every ruling
+
+        Raises:
+            - LedgerBindingError when the recorded binding differs in more than the version, or the file holds rulings and no binding
+        """
+        held = self.recorded
+        if held == binding: return
+        if held is None and not self.entries:
+            self._append( { "binding": binding } )
+        elif held is not None and _VERSION.sub( "", held ) == binding:
+            self._append( { "binding": binding } )
+        else:
+            raise harness_runner.LedgerBindingError( f"ledger {self.path} was written under {held!r} and this run is {binding!r}: use a new ledger" )
+        self.recorded = binding
+
+
+def daily_ledger( data_dir, cli_path, backend, folder ):
     """
-    Move a judge ledger written under another Claude Code version aside.
+    Make the daily check's judge ledger, which survives a Claude Code update.
 
     Requires:
         - data_dir, cli_path, backend and folder are as proof_ledger takes them
 
     Ensures:
-        - returns None and changes nothing when there is no ledger, it records no binding, or its binding is this run's
-        - a ledger that differs from this run's binding in the version alone is renamed to judge-ledger.claude-<old version>.jsonl, with -2, -3 added when that name is taken
-        - returns { from, to, old_version, new_version } for a rotation, and prints one line saying so
-        - a ledger that differs in the binary, backend or server is left alone, so proof_ledger refuses it as before
+        - creates the folder if it is missing; returns the ledger at <folder>/judge-ledger.jsonl
+        - the ledger is bound to the binary path, backend and server, not to the version, so an update keeps every earlier ruling
+        - each ruling written from now on records the Claude Code version that wrote it as "cli"
+        - a ledger bound with a version is rebound by appending a binding record, and nothing is renamed or rewritten
+
+    Raises:
+        - LedgerBindingError when the binary path, backend or server differs from the ledger's
     """
-    path = pathlib.Path( data_dir ).joinpath( *folder ) / LEDGER_NAME
-    if not path.exists(): return None
-    held = harness_runner.Ledger( path ).recorded
-    mine = _ledger_binding( cli_path, backend )
-    if held is None or held == mine: return None
-    version = re.compile( r"\|version=([^|]*)" )
-    old, new = version.search( held ), version.search( mine )
-    if old is None or version.sub( "|version=", held, 1 ) != version.sub( "|version=", mine, 1 ): return None
-    target, n = path.with_name( f"judge-ledger.claude-{old.group( 1 )}.jsonl" ), 1
-    while target.exists():
-        n     += 1
-        target = path.with_name( f"judge-ledger.claude-{old.group( 1 )}-{n}.jsonl" )
-    path.rename( target )
-    print( f"[ledger-rotated] Claude Code {old.group( 1 )} -> {new.group( 1 )}: {path.name} moved to {target.name}, starting a new ledger", file=sys.stderr )
-    return { "from": path.name, "to": target.name, "old_version": old.group( 1 ), "new_version": new.group( 1 ) }
+    folder = pathlib.Path( data_dir ).joinpath( *folder )
+    folder.mkdir( parents=True, exist_ok=True )
+    ledger = StampedLedger( folder / LEDGER_NAME, model_transport.cli_version( cli_path ) )
+    ledger.settle( judge.ledger_binding( f"claude_cli={cli_path}", backend ) )
+    return ledger
 
 
 def proof_ledger( data_dir, cli_path, backend, folder=proof_run.PROOF_FOLDER ):

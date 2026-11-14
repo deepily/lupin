@@ -355,7 +355,7 @@ def test_proof_ledger_makes_the_proof_folder_and_binds_the_ledger_to_the_binary(
     assert jd.ledger_binding( "claude_cli=/bin/claude|version=9.9", backend ) in first and first.count( "max-plan" ) >= 2
 
 
-# ---- rotate_ledger_for_new_cli (row 589102de) ----------------------------------------------------------------------
+# ---- the proof ledger helper ---------------------------------------------------------------------------------------
 
 def ledger_at( tmp_path, monkeypatch, version, cli="/bin/claude" ):
     """Make the proof ledger as Claude Code `version` would; returns ( backend, ledger path )."""
@@ -365,49 +365,50 @@ def ledger_at( tmp_path, monkeypatch, version, cli="/bin/claude" ):
     return backend, tmp_path.joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME
 
 
-def test_rotate_ledger_moves_a_ledger_of_another_cli_version_aside_and_proof_ledger_then_starts_a_new_one( tmp_path, monkeypatch, capsys ):
-    backend, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
-    old_text      = path.read_text( encoding="utf-8" )
+def test_proof_ledger_keeps_its_strict_binding_a_new_version_or_another_binary_is_refused( tmp_path, monkeypatch ):
+    backend, _ = ledger_at( tmp_path, monkeypatch, "2.1.317" )
     monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.318" )
-    done          = pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend )
-    kept          = path.with_name( "judge-ledger.claude-2.1.317.jsonl" )
-    assert done == { "from": "judge-ledger.jsonl", "to": kept.name, "old_version": "2.1.317", "new_version": "2.1.318" }
-    assert kept.read_text( encoding="utf-8" ) == old_text and not path.exists()
-    assert "[ledger-rotated] Claude Code 2.1.317 -> 2.1.318" in capsys.readouterr().err
-    pc.proof_ledger( str( tmp_path ), "/bin/claude", backend )
-    assert "version=2.1.318" in path.read_text( encoding="utf-8" ) and "version=2.1.317" not in path.read_text( encoding="utf-8" )
-
-
-def test_rotate_ledger_leaves_a_ledger_of_the_same_version_alone( tmp_path, monkeypatch, capsys ):
-    backend, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
-    before        = path.read_text( encoding="utf-8" )
-    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend ) is None
-    assert path.read_text( encoding="utf-8" ) == before and [ p.name for p in path.parent.iterdir() ] == [ pc.LEDGER_NAME ] and capsys.readouterr().err == ""
-
-
-def test_rotate_ledger_does_nothing_without_a_ledger_or_a_recorded_binding( tmp_path ):
-    backend = jd.MaxPlanBackend()
-    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend ) is None
-    folder  = tmp_path.joinpath( *pr.PROOF_FOLDER )
-    folder.mkdir( parents=True )
-    ( folder / pc.LEDGER_NAME ).write_text( "", encoding="utf-8" )
-    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend ) is None and ( folder / pc.LEDGER_NAME ).exists()
-
-
-def test_rotate_ledger_refuses_to_hide_a_change_of_binary_or_of_binding_shape( tmp_path, monkeypatch ):
-    backend, path = ledger_at( tmp_path, monkeypatch, "2.1.317", cli="/old/claude" )
-    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/new/claude", backend ) is None and path.exists()
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.proof_ledger( str( tmp_path ), "/bin/claude", backend )
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.317" )
     with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.proof_ledger( str( tmp_path ), "/new/claude", backend )
-    path.write_text( json.dumps( { "binding": "something else entirely" } ) + "\n", encoding="utf-8" )
-    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/new/claude", backend ) is None and path.exists()
+    assert pc.proof_ledger( str( tmp_path ), "/bin/claude", backend ).recorded.endswith( "|max-plan|max-plan" )
 
 
-def test_rotate_ledger_numbers_the_aside_name_when_the_version_name_is_taken( tmp_path, monkeypatch ):
-    backend, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
-    path.with_name( "judge-ledger.claude-2.1.317.jsonl" ).write_text( "earlier\n", encoding="utf-8" )
+# ---- daily_ledger (row 395e4bcd) -----------------------------------------------------------------------------------
+
+def daily_at( tmp_path, monkeypatch, version, cli="/bin/claude" ):
+    """Make the daily ledger as Claude Code `version` would; returns ( ledger, ledger path )."""
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: version )
+    ledger = pc.daily_ledger( str( tmp_path ), cli, jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    return ledger, tmp_path.joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME
+
+
+def test_daily_ledger_binds_to_the_binary_and_server_not_the_version_and_stamps_each_ruling( tmp_path, monkeypatch ):
+    ledger, path = daily_at( tmp_path, monkeypatch, "2.1.317" )
+    ledger.put( "k1", { "rulings": [] } )
+    lines = [ json.loads( line ) for line in path.read_text( encoding="utf-8" ).splitlines() ]
+    assert lines == [ { "binding": "claude_cli=/bin/claude|max-plan|max-plan" }, { "key": "k1", "value": { "rulings": [] }, "cli": "2.1.317" } ]
+
+
+def test_daily_ledger_after_an_update_keeps_every_ruling_and_appends_a_version_free_binding_to_an_old_one( tmp_path, monkeypatch ):
+    _, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
+    held = pc.harness_runner.Ledger( path, binding=pc._ledger_binding( "/bin/claude", jd.MaxPlanBackend() ) )
+    held.put( "k1", { "rulings": [ 1 ] } )
+    before = path.read_text( encoding="utf-8" )
     monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.318" )
-    done          = pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend )
-    assert done[ "to" ] == "judge-ledger.claude-2.1.317-2.jsonl" and path.with_name( "judge-ledger.claude-2.1.317.jsonl" ).read_text( encoding="utf-8" ) == "earlier\n"
+    again = pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    assert again.get( "k1" ) == { "rulings": [ 1 ] } and path.read_text( encoding="utf-8" ).startswith( before ), "nothing is rewritten or renamed"
+    assert json.loads( path.read_text( encoding="utf-8" ).splitlines()[ -1 ] ) == { "binding": "claude_cli=/bin/claude|max-plan|max-plan" }
+    assert [ p.name for p in path.parent.iterdir() ] == [ pc.LEDGER_NAME ]
+    again.put( "k2", { "rulings": [] } )
+    assert pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER ).entries.keys() == { "k1", "k2" }
+
+
+def test_daily_ledger_still_refuses_another_binary_and_a_file_of_rulings_with_no_binding( tmp_path, monkeypatch ):
+    _, path = daily_at( tmp_path, monkeypatch, "2.1.317" )
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.daily_ledger( str( tmp_path ), "/new/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    path.write_text( json.dumps( { "key": "k", "value": { "rulings": [] } } ) + "\n", encoding="utf-8" )
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
 
 
 # ---- main ---------------------------------------------------------------------------------------------------------
