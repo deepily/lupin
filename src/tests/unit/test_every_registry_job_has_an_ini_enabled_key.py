@@ -7,7 +7,7 @@ import cosa.utils.util as cu
 REGISTRY = "/src/conf/job-registry.json"
 INI      = "/src/conf/lupin-app.ini"
 SPLAINER = "/src/conf/lupin-app-splainer.ini"
-HELD_OFF = { "duplicate-check" }
+HELD_OFF = { "duplicate-check", "test-promotion" }
 
 
 def read( path ):
@@ -33,9 +33,9 @@ def missing_switches( jobs, ini_text ):
     return [ j[ "job" ] for j in jobs if ( j.get( "cron_managed" ) or j.get( "switch_reader" ) ) and ( j.get( "enabled_key" ) != f"cron job {j[ 'job' ]} enabled" or have.get( j.get( "enabled_key" ) ) not in ( "true", "false" ) ) ]
 
 
-def test_the_registry_holds_twelve_cron_managed_jobs_and_each_has_a_switch_in_the_ini():
+def test_the_registry_holds_thirteen_cron_managed_jobs_and_each_has_a_switch_in_the_ini():
     jobs = registry_jobs()
-    assert len( jobs ) == 24 and len( [ j for j in jobs if j.get( "cron_managed" ) ] ) == 12
+    assert len( jobs ) == 25 and len( [ j for j in jobs if j.get( "cron_managed" ) ] ) == 13
     assert missing_switches( jobs, read( INI ) ) == []
 
 
@@ -46,7 +46,7 @@ def test_a_job_outside_cron_management_carries_a_key_only_when_it_names_the_loop
     assert sorted( switch_values( read( INI ) ) ) == sorted( j[ "enabled_key" ] for j in registry_jobs() if "enabled_key" in j )
 
 
-def test_only_the_duplicate_check_ships_switched_off():
+def test_only_the_duplicate_check_and_the_test_promotion_ship_switched_off():
     have = switch_values( read( INI ) )
     assert sorted( k for k, v in have.items() if v == "false" ) == sorted( f"cron job {j} enabled" for j in HELD_OFF )
     assert len( [ v for v in have.values() if v == "true" ] ) == len( [ j for j in registry_jobs() if "enabled_key" in j ] ) - len( HELD_OFF )

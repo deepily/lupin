@@ -27,7 +27,7 @@ from lupin_mcp import cron_switch_read as csr
 ROOT          = pathlib.Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) )
 REGISTRY      = json.loads( ( ROOT / "src/conf/job-registry.json" ).read_text() )[ "jobs" ]
 INI           = str( ROOT / "src/conf/lupin-app.ini" )
-REGISTRY_SIZE = 24      # counted by hand from src/conf/job-registry.json on 14 Nov; change it only with the registry
+REGISTRY_SIZE = 25      # counted by hand from src/conf/job-registry.json on 14 Nov; change it only with the registry
 
 # Jobs that do not read their switch yet. Remove a job in the commit that makes it read its switch.
 NOT_YET = frozenset()      # empty since side-services, the last job, read its switch (row c38a49bd)
@@ -58,7 +58,7 @@ def _resolve( reader ):
     return target
 
 
-def test_the_registry_holds_the_24_jobs_this_census_was_written_for():
+def test_the_registry_holds_the_25_jobs_this_census_was_written_for():
     assert len( JOBS ) == REGISTRY_SIZE
     assert len( set( JOBS ) ) == REGISTRY_SIZE
 

@@ -92,6 +92,7 @@ Instance lifecycle:
   vm-status              show RUNNING / STOPPED / SUSPENDED
   vm-start               resume a SUSPENDED instance or start a TERMINATED one (needed before SSH); reports which
   vm-stop                stop the instance (cost control)
+  vm-suspend             suspend a RUNNING instance, the state vm-start resumes from
 
 SSH:
   shell                  interactive SSH session (over IAP)
@@ -529,6 +530,14 @@ case "$SUBCMD" in
     vm-stop)
         require_project
         runit gcloud compute instances stop "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+        ;;
+
+    vm-suspend)
+        # Put a RUNNING instance back to SUSPENDED, the state vm-start resumes from. The daily test
+        # promotion uses it to leave the VM as it found it.
+        require_project
+        runit gcloud compute instances suspend "$VM_NAME" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
         ;;
 

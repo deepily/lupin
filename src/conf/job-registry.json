@@ -448,6 +448,41 @@
       "cron_log": "{root}/io/jobs/host-snapshot/cron.log"
     },
     {
+      "job": "test-promotion",
+      "enabled_key": "cron job test-promotion enabled",
+      "catalog": "L31",
+      "title": "Daily test promotion",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 18 * * *"
+        },
+        {
+          "after_boot_seconds": 600
+        }
+      ],
+      "summary_path": "{root}/io/jobs/test-promotion/job-summary.json",
+      "fix_debt": true,
+      "fix_debt_key": "prefix:epic:daily-test-promotion-",
+      "own_summary": true,
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.daily_test_promotion",
+          "--branch",
+          "auto",
+          "--trigger",
+          "hand"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/test-promotion.log",
+      "cron_tag": "test-promotion"
+    },
+    {
       "job": "hook-link-tick",
       "enabled_key": "cron job hook-link-tick enabled",
       "catalog": "L9",

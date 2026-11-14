@@ -88,7 +88,7 @@ def test_the_list_has_one_row_per_registry_job( ini ):
     rows = _client().get( LIST_PATH ).json()[ "jobs" ]
     names = [ r[ "job" ] for r in rows ]
     assert len( rows ) == len( json.load( open( os.path.join( cu.get_project_root(), "src/conf/job-registry.json" ) ) )[ "jobs" ] )
-    assert len( rows ) == 24
+    assert len( rows ) == 25
     assert names == [ e[ "job" ] for e in _registry() ]
     first = rows[ 0 ]
     assert first[ "key" ] == f"cron job {first[ 'job' ]} enabled"
@@ -295,12 +295,12 @@ def test_a_failed_announcement_does_not_fail_the_flip( ini, monkeypatch, capsys 
 
 # ── honoured and drift (María's amendments 1 and 3) ──────────────────────────
 
-def test_honoured_is_computed_from_the_registry_and_names_twenty_four_jobs( ini ):
+def test_honoured_is_computed_from_the_registry_and_names_twenty_five_jobs( ini ):
     rows = _client().get( LIST_PATH ).json()[ "jobs" ]
     honoured = sorted( r[ "job" ] for r in rows if r[ "honoured" ] )
     entries  = json.load( open( os.path.join( cu.get_project_root(), "src/conf/job-registry.json" ) ) )[ "jobs" ]
     pinned   = sorted( e[ "job" ] for e in entries if e.get( "cron_managed" ) is True or "switch_reader" in e )
-    assert honoured == pinned and len( honoured ) == 24      # 12 cron-managed, context-tick and yearly-reminders run through job_run; 4 arbiter loops, 4 server loops and the poker job check a TickSwitch; side-services names the memory watcher's loop (row c38a49bd)
+    assert honoured == pinned and len( honoured ) == 25      # 13 cron-managed (test-promotion among them), context-tick and yearly-reminders run through job_run; 4 arbiter loops, 4 server loops and the poker job check a TickSwitch; side-services names the memory watcher's loop (row c38a49bd)
     assert "fleet-arbiter" in honoured and "side-services" in honoured
     assert all( r[ "honoured" ] is True for r in rows ), "every registry job reads its switch now"
 
