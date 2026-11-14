@@ -80,3 +80,23 @@ def test_batch_script_matcher_confidence_is_parsed_then_clamped():
     assert conf( "1.7" ) == 1.0
     assert conf( "-1" ) == 0.0
     assert conf( "n/a" ) == 0.0
+
+
+def test_every_confidence_model_takes_its_reader_from_the_mixin():
+    from cosa.agents.io_models.utils.number_fields import ConfidenceFloatMixin
+    from cosa.agents.notification_proxy.xml_models import BatchScriptMatcherResponse, VerificationResponse
+    from cosa.agents.prediction_engine.xml_models import OpenEndedSynthesisResponse
+    from cosa.crud_for_dataframes.xml_models import CRUDIntent
+    models = [ CalcIntent, ScriptMatcherResponse, BatchScriptMatcherResponse, VerificationResponse, OpenEndedSynthesisResponse, CRUDIntent ]
+    for model in models:
+        assert issubclass( model, ConfidenceFloatMixin ), model.__name__
+        assert "get_confidence_float" not in vars( model ), f"{model.__name__} still carries its own copy"
+
+
+def test_the_mixin_reader_clamps_and_never_raises():
+    from cosa.agents.io_models.utils.number_fields import ConfidenceFloatMixin
+    class Holder( ConfidenceFloatMixin ):
+        def __init__( self, confidence ): self.confidence = confidence
+    assert Holder( "0.4" ).get_confidence_float() == 0.4
+    assert Holder( "9" ).get_confidence_float() == 1.0
+    assert Holder( None ).get_confidence_float() == 0.0
