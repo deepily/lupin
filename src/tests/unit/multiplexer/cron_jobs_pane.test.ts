@@ -14,7 +14,8 @@ import { ApiError } from "../../../lupin_app/static/js/multiplexer/api/ApiClient
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createCronJobsRenderer, cronChangedText, cronFlipFailureText, cronFlipPath, cronStateText,
-  CRON_DRIFT_TEXT, CRON_JOBS_PATH, CRON_JOBS_POLL_MS, CRON_NOT_REPORTED,
+  cronInsideText, cronReadsText,
+  CRON_CONFIRM_TEXT, CRON_DRIFT_TEXT, CRON_JOBS_PATH, CRON_JOBS_POLL_MS, CRON_NOT_REPORTED, CRON_UNREADABLE_TEXT,
 } from "../../../lupin_app/static/js/multiplexer/render/CronJobsRenderer";
 import type { CronJobRow, CronJobsApi, CronJobsSummary } from "../../../lupin_app/static/js/multiplexer/render/CronJobsRenderer";
 import { SECTION_TOGGLES } from "../../../lupin_app/static/js/multiplexer/render/templates/sectionToolbar";
@@ -300,6 +301,113 @@ test( "a cron_job_switch_changed frame repaints that row in place; unknown jobs 
   emit( { job : 7 } );
   assert.equal( items().length, before );
   assert.equal( text( "duplicate-check", "cron-state" ), "ON" );
+  g.r.unmount();
+} );
+
+// ── step 7 of the legacy client, ported: alarm confirmation, unreadable row, inside note, reads wording ──
+
+const STEP7 = (): CronJobsSummary => ( {
+  caller_is_admin : true,
+  jobs : [
+    row( "fleet-arbiter",  { alarm : true, reads : "tick" } ),
+    row( "janitor",        { inside : "fleet-arbiter", reads : "tick" } ),
+    row( "nightly",        { reads : "run" } ),
+    row( "broken",         { enabled : null } ),
+    row( "plain" ),
+  ],
+} );
+
+test( "the reads field picks the wording; without it the honoured flag decides", () => {
+  assert.equal( cronReadsText( row( "a", { reads : "run" } ) ), "reads its switch at each run" );
+  assert.equal( cronReadsText( row( "a", { reads : "tick" } ) ), "reads its switch every tick" );
+  assert.equal( cronReadsText( row( "a", { reads : null } ) ), "reads its switch" );
+  assert.equal( cronReadsText( row( "a", { reads : "other" } ) ), "reads its switch" );
+  assert.equal( cronReadsText( row( "a", { honoured : false } ) ), "does not read its switch yet" );
+} );
+
+test( "the inside note shows only while the host job is off", () => {
+  const jobs = [ row( "host", { enabled : false } ), row( "guest", { inside : "host" } ) ];
+  assert.equal( cronInsideText( jobs[ 1 ], jobs ), "off while host is off" );
+  assert.equal( cronInsideText( jobs[ 1 ], [ row( "host" ), jobs[ 1 ] ] ), null, "host is on" );
+  assert.equal( cronInsideText( jobs[ 1 ], [ jobs[ 1 ] ] ), null, "host is not listed" );
+  assert.equal( cronInsideText( row( "x" ), jobs ), null, "no inside field" );
+  assert.equal( cronInsideText( row( "x", { inside : null } ), jobs ), null );
+} );
+
+test( "the pane shows the reads wording, the unreadable row in red, and the inside note", async () => {
+  const s = STEP7();
+  s.jobs[ 0 ].enabled = false;                       // the host is off, so the janitor row says so
+  const g = rig( () => s );
+  g.r.mount( byId( "cron-jobs-pane" ) );
+  await flush();
+  assert.equal( text( "fleet-arbiter", "cron-honoured" ), "reads its switch every tick" );
+  assert.equal( text( "nightly", "cron-honoured" ), "reads its switch at each run" );
+  assert.equal( text( "janitor", "cron-inside" ), "off while fleet-arbiter is off" );
+  assert.equal( item( "plain" ).querySelector( "[data-testid=cron-inside]" ), null );
+  assert.equal( text( "broken", "cron-unreadable" ), CRON_UNREADABLE_TEXT );
+  assert.ok( item( "broken" ).classList.contains( "cron-unreadable" ) );
+  assert.ok( !item( "plain" ).classList.contains( "cron-unreadable" ) );
+  assert.equal( item( "plain" ).querySelector( "[data-testid=cron-unreadable]" ), null );
+  assert.match( ( document.querySelector( "[data-testid=cron-note]" ) as HTMLElement ).textContent as string, /or next tick for a loop/ );
+  g.r.unmount();
+} );
+
+test( "turning off an alarm job takes two clicks: the first asks, sends nothing, and the second sends the PUT", async () => {
+  const g = rig( STEP7 );
+  g.r.mount( byId( "cron-jobs-pane" ) );
+  await flush();
+  flipOf( "fleet-arbiter" ).click();
+  await flush();
+  assert.deepEqual( g.puts, [], "the first click must not write" );
+  assert.equal( flipOf( "fleet-arbiter" ).textContent, "Confirm: turn off" );
+  const note = item( "fleet-arbiter" ).querySelector( "[data-testid=cron-error]" ) as HTMLElement;
+  assert.equal( note.hidden, false );
+  assert.equal( note.textContent, CRON_CONFIRM_TEXT );
+  flipOf( "fleet-arbiter" ).click();
+  await flush();
+  assert.deepEqual( g.puts, [ { path : "/api/cron-jobs/fleet-arbiter/enabled", body : { on : false } } ] );
+  g.r.unmount();
+} );
+
+test( "a redraw drops a half-finished confirmation, so the next click asks again", async () => {
+  const g = rig( STEP7 );
+  g.r.mount( byId( "cron-jobs-pane" ) );
+  await flush();
+  flipOf( "fleet-arbiter" ).click();
+  await flush();
+  await g.r.refresh();                                // redraw: the button is fresh and the pending job is forgotten
+  flipOf( "fleet-arbiter" ).click();
+  await flush();
+  assert.deepEqual( g.puts, [], "a stale first click must not count as the confirmation" );
+  g.r.unmount();
+} );
+
+test( "a confirmation for one alarm job does not confirm another job, and a plain job flips on one click", async () => {
+  const s = STEP7();
+  s.jobs.push( row( "health-watcher", { alarm : true } ) );
+  const g = rig( () => s );
+  g.r.mount( byId( "cron-jobs-pane" ) );
+  await flush();
+  flipOf( "fleet-arbiter" ).click();
+  await flush();
+  flipOf( "health-watcher" ).click();                 // asks for its own confirmation
+  await flush();
+  assert.deepEqual( g.puts, [] );
+  flipOf( "plain" ).click();                          // not an alarm job: one click
+  await flush();
+  assert.deepEqual( g.puts.map( ( p ) => p.path ), [ "/api/cron-jobs/plain/enabled" ] );
+  g.r.unmount();
+} );
+
+test( "an alarm job that is off turns on with one click", async () => {
+  const s = STEP7();
+  s.jobs[ 0 ].enabled = false;
+  const g = rig( () => s );
+  g.r.mount( byId( "cron-jobs-pane" ) );
+  await flush();
+  flipOf( "fleet-arbiter" ).click();
+  await flush();
+  assert.deepEqual( g.puts, [ { path : "/api/cron-jobs/fleet-arbiter/enabled", body : { on : true } } ] );
   g.r.unmount();
 } );
 

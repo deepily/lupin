@@ -44,7 +44,7 @@
 
 .cron-error {
     grid-column : 1 / -1;
-    grid-row    : 3;
+    grid-row    : 5;
     color       : #842029;
 }
 
@@ -62,11 +62,13 @@
 
 .cron-unreadable-note {
     grid-column : 1 / -1;
+    grid-row    : 3;
     color       : #842029;
     font-weight : 600;
 }
 
 .cron-inside {
     grid-column : 1 / -1;
+    grid-row    : 4;
     color       : #6c757d;
 }

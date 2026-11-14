@@ -35,6 +35,8 @@ REAL_INI    = os.path.join( os.environ.get( "LUPIN_ROOT", "/var/lupin" ), "src",
 SERVER_INI  = os.environ.get( switches.INI_OVERRIDE_ENV )     # captured at import: what the server was created with
 JOB         = "duplicate-check"
 KEY         = switches.switch_key( JOB )
+ALARM_JOB   = "fleet-arbiter"
+ALARM_KEY   = switches.switch_key( ALARM_JOB )
 PAINT_MS    = 20_000
 
 CLIENTS = {
@@ -74,9 +76,9 @@ def scratch_ini():
         with open( REAL_INI, "rb" ) as source, open( SERVER_INI, "wb" ) as target: target.write( source.read() )
     record = f"{SERVER_INI}.cron-state.json"
     if os.path.exists( record ): os.remove( record )
-    ini_io.write_bool_to_disk( SERVER_INI, KEY, True )
+    for key in ( KEY, ALARM_KEY ): ini_io.write_bool_to_disk( SERVER_INI, key, True )
     yield SERVER_INI
-    ini_io.write_bool_to_disk( SERVER_INI, KEY, True )
+    for key in ( KEY, ALARM_KEY ): ini_io.write_bool_to_disk( SERVER_INI, key, True )
 
 
 def _on_disk( path ):
@@ -145,3 +147,17 @@ def test_on_a_drift_row_the_toggle_stays_on_the_job_title_line( admin_page, scra
     assert toggle[ "y" ] < title[ "y" ] + title[ "height" ] and toggle[ "y" ] + toggle[ "height" ] > title[ "y" ], \
         f"the toggle ({toggle}) must sit on the same line as the job title ({title}) on a drift row"
     assert drift.bounding_box()[ "y" ] >= toggle[ "y" ] + toggle[ "height" ] - 1, "the drift note goes below the toggle line"
+
+
+def test_turning_off_an_alarm_job_takes_a_confirming_click( admin_page, scratch_ini, client ):
+    admin_page.goto( f"{BASE_URL}{client[ 'url' ]}" )
+    row = admin_page.locator( f"{client[ 'list' ]} [data-testid=cron-item][data-job={ALARM_JOB}]" )
+    row.wait_for( state="visible", timeout=PAINT_MS )
+    toggle = row.get_by_test_id( "cron-flip" )
+    toggle.click()
+    assert toggle.inner_text() == "Confirm: turn off"
+    assert "silences what would report it" in row.get_by_test_id( "cron-error" ).inner_text()
+    assert ini_io.read_value_from_disk( scratch_ini, ALARM_KEY ).strip().lower() == "true", "the first click must not write the file"
+    toggle.click()
+    admin_page.wait_for_function( "( el ) => el.textContent === 'OFF'", arg=row.get_by_test_id( "cron-state" ).element_handle(), timeout=PAINT_MS )
+    assert ini_io.read_value_from_disk( scratch_ini, ALARM_KEY ).strip().lower() == "false"

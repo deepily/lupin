@@ -26,6 +26,12 @@ export const CRON_JOBS_POLL_MS = 60_000;
 export const CRON_NOT_REPORTED = "not reported";
 /** What a row says when the file disagrees with the last recorded flip. */
 export const CRON_DRIFT_TEXT   = "changed outside the endpoint";
+/** What an unreadable switch says: the job skips its ticks until the key is fixed. */
+export const CRON_UNREADABLE_TEXT = "switch unreadable: the key is missing from the configuration file or holds neither true nor false";
+/** What an alarm job's first turn-off click says; a second click confirms. */
+export const CRON_CONFIRM_TEXT = "Turning this off also silences what would report it. Click again to confirm.";
+/** How a row says when its job reads the switch, by the server's `reads` field. */
+export const CRON_READS_TEXT: Readonly<Record<string, string>> = { run : "reads its switch at each run", tick : "reads its switch every tick" };
 
 /** One job's row, as GET /api/cron-jobs and the socket frame carry it. */
 export interface CronJobRow {
@@ -38,6 +44,12 @@ export interface CronJobRow {
   drift           : boolean;
   last_changed_by : string | null;
   last_changed_at : string | null;
+  /** "run" for a wrapper-started job, "tick" for a loop that checks every tick, else none. */
+  reads?          : string | null;
+  /** True for one of the alarm jobs: turning it off silences what would report it. */
+  alarm?          : boolean;
+  /** The job whose tick this one runs inside, or null. */
+  inside?         : string | null;
 }
 
 /** The list door's answer. */
@@ -80,6 +92,20 @@ export function cronFlipPath( job: string ): string {
 export function cronStateText( enabled: boolean | null ): string {
   if ( enabled === null ) return "UNKNOWN";
   return enabled ? "ON" : "OFF";
+}
+
+/** How a row says its job reads the switch, from `reads` when sent, else from honoured. */
+export function cronReadsText( row: CronJobRow ): string {
+  const said = typeof row.reads === "string" ? CRON_READS_TEXT[ row.reads ] : undefined;
+  if ( said !== undefined ) return said;
+  return row.honoured ? "reads its switch" : "does not read its switch yet";
+}
+
+/** A line for a job inside another job's tick, when that host job is off; else null. */
+export function cronInsideText( row: CronJobRow, jobs: CronJobRow[] ): string | null {
+  if ( typeof row.inside !== "string" ) return null;
+  const host = jobs.find( ( j ) => j.job === row.inside );
+  return host !== undefined && host.enabled === false ? `off while ${ row.inside } is off` : null;
 }
 
 /** "who, YYYY-MM-DD HH:MM" for a row with a recorded flip, else the not-reported text. */
@@ -129,6 +155,7 @@ class CronJobsRendererImpl implements CronJobsRenderer {
   private busOff      : ( () => void ) | null = null;
   private pollId      : number | null = null;
   private current     : CronJobsSummary = { jobs: [], caller_is_admin: false };
+  private pendingConfirm: string | null = null;     // the job whose turn-off waits for its confirming click
 
   constructor( opts: CronJobsRendererOptions ) {
     this.api             = opts.api;
@@ -214,12 +241,13 @@ class CronJobsRendererImpl implements CronJobsRenderer {
     const mountEl = this.mountEl as HTMLElement;
     const header  = this.header as SectionHeaderHandle;
     this.current  = summary;
+    this.pendingConfirm = null;        // a redraw drops a half-finished confirmation, so one stale click never turns a job off
     mountEl.replaceChildren();
     const note = this.el( "p", "cron-note", summary.caller_is_admin
-      ? "Flipping a switch takes effect at the job's next start. A run already going is not stopped."
+      ? "Flipping a switch takes effect at the job's next start, or next tick for a loop. A run already going is not stopped."
       : "Read-only: only an administrator can flip a switch.", "cron-note" );
     mountEl.appendChild( note );
-    for ( const row of summary.jobs ) mountEl.appendChild( this.renderRow( row, summary.caller_is_admin ) );
+    for ( const row of summary.jobs ) mountEl.appendChild( this.renderRow( row, summary.caller_is_admin, summary.jobs ) );
     const off = summary.jobs.filter( ( j ) => j.enabled === false ).length;
     header.countEl.textContent = `${ summary.jobs.length }${ off > 0 ? ` (${ off } off)` : "" }`;
   }
@@ -232,16 +260,20 @@ class CronJobsRendererImpl implements CronJobsRenderer {
     return node;
   }
 
-  private renderRow( row: CronJobRow, canFlip: boolean ): HTMLElement {
-    const item  = this.el( "div", "cron-item", null, "cron-item" );
+  private renderRow( row: CronJobRow, canFlip: boolean, jobs: CronJobRow[] ): HTMLElement {
+    const unreadable = row.honoured && row.enabled === null;
+    const item  = this.el( "div", unreadable ? "cron-item cron-unreadable" : "cron-item", null, "cron-item" );
     item.setAttribute( "data-job", row.job );
     item.append(
       this.el( "span", "cron-title", row.title, "cron-title" ),
       this.el( "span", "cron-schedule", row.schedule, "cron-schedule" ),
       this.el( "span", `cron-state cron-state-${ cronStateText( row.enabled ).toLowerCase() }`, cronStateText( row.enabled ), "cron-state" ),
       this.el( "span", "cron-changed", cronChangedText( row ), "cron-changed" ),
-      this.el( "span", "cron-honoured", row.honoured ? "reads its switch" : "does not read its switch yet", "cron-honoured" ),
+      this.el( "span", "cron-honoured", cronReadsText( row ), "cron-honoured" ),
     );
+    if ( unreadable ) item.appendChild( this.el( "span", "cron-unreadable-note", CRON_UNREADABLE_TEXT, "cron-unreadable" ) );
+    const inside = cronInsideText( row, jobs );
+    if ( inside !== null ) item.appendChild( this.el( "span", "cron-inside", inside, "cron-inside" ) );
     if ( row.drift ) item.appendChild( this.el( "span", "cron-drift", CRON_DRIFT_TEXT, "cron-drift" ) );
     const button = this.el( "button", "cron-flip", row.enabled === true ? "Turn off" : "Turn on", "cron-flip" ) as HTMLButtonElement;
     button.type = "button";
@@ -249,9 +281,22 @@ class CronJobsRendererImpl implements CronJobsRenderer {
     const note = this.el( "span", "cron-error", null, "cron-error" );
     note.setAttribute( "role", "alert" );
     note.hidden = true;
-    button.addEventListener( "click", () => { void this.flip( row, note ); } );
+    button.addEventListener( "click", () => { void this.requestFlip( row, note, button ); } );
     item.append( button, note );
     return item;
+  }
+
+  // An alarm job's turn-off waits for a second, confirming click.
+  private async requestFlip( row: CronJobRow, note: HTMLElement, button: HTMLElement ): Promise<void> {
+    if ( row.alarm === true && row.enabled === true && this.pendingConfirm !== row.job ) {
+      this.pendingConfirm = row.job;
+      button.textContent  = "Confirm: turn off";
+      note.textContent    = CRON_CONFIRM_TEXT;
+      note.hidden         = false;
+      return;
+    }
+    this.pendingConfirm = null;
+    await this.flip( row, note );
   }
 
   private async flip( row: CronJobRow, note: HTMLElement ): Promise<void> {

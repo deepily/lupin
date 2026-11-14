@@ -63,8 +63,10 @@ def test_the_empty_variable_counts_as_unset( monkeypatch ):
 
 
 def test_every_call_into_the_ini_module_passes_the_resolver():
-    calls = [ c for name in INI_CALLS for c in _calls( _tree( MODULE_PATH ), name ) ]
-    assert len( calls ) == 3, f"the module has exactly the read, the locate and the write; found {len( calls )}"
+    tree  = _tree( MODULE_PATH )
+    calls = [ c for name in INI_CALLS for c in _calls( tree, name ) ]
+    calls += [ n for n in ast.walk( tree ) if isinstance( n, ast.Call ) and isinstance( n.func, ast.Name ) and n.func.id == "read_switch" ]
+    assert len( calls ) == 3, f"the module has exactly the shared read, the locate and the write; found {len( calls )}"
     for call in calls:
         first = call.args[ 0 ]
         assert isinstance( first, ast.Call ) and isinstance( first.func, ast.Name ) and first.func.id == "ini_path", \
