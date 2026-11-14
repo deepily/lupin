@@ -1,0 +1,48 @@
+/* Row 063fc1a8 — the scheduled-jobs accordion inside the legacy client's #section-cron-jobs.
+   State is colour AND text (ON / OFF / UNKNOWN), so colour alone never carries it. */
+
+.cron-error-banner {
+    padding    : 0.5rem 0.75rem;
+    border     : 1px solid #842029;
+    background : #f8d7da;
+    color      : #842029;
+}
+
+.cron-note {
+    margin : 0.25rem 0.25rem 0.5rem;
+    color  : #495057;
+}
+
+.cron-item {
+    display               : grid;
+    grid-template-columns : minmax(0, 1.4fr) minmax(0, 1.4fr) 5rem minmax(0, 1.4fr) minmax(0, 1fr) 7rem;
+    align-items           : baseline;
+    gap                   : 0.5rem;
+    padding               : 0.5rem 0.25rem;
+    border-bottom         : 1px solid #dee2e6;
+    overflow-wrap         : anywhere;
+}
+
+.cron-state {
+    font-weight : 600;
+}
+
+.cron-state-on      { color : #146c43; }
+.cron-state-off     { color : #842029; }
+.cron-state-unknown { color : #6c757d; }
+
+.cron-flip:disabled {
+    cursor  : not-allowed;
+    opacity : 0.5;
+}
+
+.cron-error {
+    grid-column : 1 / -1;
+    color       : #842029;
+}
+
+.cron-drift {
+    grid-column : 1 / -1;
+    color       : #664d03;
+    font-weight : 600;
+}

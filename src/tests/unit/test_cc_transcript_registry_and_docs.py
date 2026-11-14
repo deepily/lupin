@@ -77,7 +77,10 @@ COMMITTED_EVENTS_BEFORE = frozenset( [
 # a name arriving in the INI must still be reviewed here, as the assertion below insists.
 TASK_STORE_EVENTS = frozenset( [ "task_store_changed" ] )
 
-EXPECTED_EVENTS = COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS
+# Row 063fc1a8 (2026-11-13): the scheduled-job switch flip.
+CRON_SWITCH_EVENTS = frozenset( [ "cron_job_switch_changed" ] )
+
+EXPECTED_EVENTS = COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS | CRON_SWITCH_EVENTS
 
 
 # ── A2.6 ──────────────────────────────────────────────────────────────────────
@@ -166,7 +169,8 @@ def test_the_four_names_are_not_already_among_the_committed_twenty_five():
         f"was read as. Re-read lupin-app.ini and date the change."
     )
     assert not ( TASK_STORE_EVENTS & ( COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS ) )
-    assert len( EXPECTED_EVENTS ) == 30
+    assert not ( CRON_SWITCH_EVENTS & ( COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS ) )
+    assert len( EXPECTED_EVENTS ) == 31
 
 
 # ── A2.7 ──────────────────────────────────────────────────────────────────────

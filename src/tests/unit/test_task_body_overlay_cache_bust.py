@@ -65,6 +65,8 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/js/shared/approve-link.js",
     "/static/js/background-jobs.js",
     "/static/css/background-jobs-legacy.css",
+    "/static/js/cron-jobs.js",
+    "/static/css/cron-jobs-legacy.css",
     "/static/js/notifications.js",
     "/static/js/broadcast-panel.js",
 } )

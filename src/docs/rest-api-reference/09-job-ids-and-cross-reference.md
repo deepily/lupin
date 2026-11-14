@@ -39,6 +39,15 @@ Each job's promise is in `src/conf/job-registry.json`. Each run's report is a `j
 | GET | `/api/jobs/summary` | API key or JWT | `jobs-summary/1` plus `caller_is_operator` (true only for the operator login): one entry per registered job (23 today), worst state first, each with state, reasons, debts, schedule, strip, `runnable` and targets |
 | POST | `/api/jobs/{job}/run` | Operator login only | Starts one run with trigger `hand`: 200 started, 403 not the operator, 404 unknown job, 409 run lock held, 422 not runnable |
 
+## 31. Scheduled Jobs (`/api/cron-jobs`)
+
+Each registry job has an on/off switch, the key `cron job <job> enabled` in `lupin-app.ini`. The job reads it at its next start; a run already going is not stopped. Every read comes fresh from the file, never from the configuration manager. Who flipped a switch is kept in `cron-job-switches-state.json` beside the write lock (attribution only; the switch is the key). Code: `cosa/rest/cron_job_switches.py`, `cosa/rest/routers/cron_jobs.py`.
+
+| Method | Path | Auth | Summary |
+|---|---|---|---|
+| GET | `/api/cron-jobs` | API key or JWT | `{ jobs, caller_is_admin }`. A row per registry job: `job`, `title`, `schedule`, `key`, `enabled` (true, false, or null when the key is absent, duplicated or not a boolean), `honoured` (true only for a `cron_managed` job, the ones `lupin_mcp.job_run` runs), `drift` (the file disagrees with the record: edited outside the endpoint), `last_changed_by`, `last_changed_at` |
+| PUT | `/api/cron-jobs/{job}/enabled` | Admin login only | Body `{ "on": bool }`. 200 the row re-read from the file; 403 an API key alone or a non-admin login (nothing written); 404 unknown job; 409 the job is not `honoured`, or the file lacks the key or defines it twice (nothing written); 422 a body that is not a bare boolean; 500 the file cannot be written. Emits the `cron_job_switch_changed` WebSocket event. It is the only writer of these keys; `test_every_cron_job_switch_has_one_writer.py` fails on another |
+
 ## 29. Pair Labelling (`/api/pair-labelling/*`)
 
 A reviewer labels the pairs of a blind `semdup_pair` packet from the page `/app/pair-labelling?reviewer=<name>`. The default reviewer is `rick`.
