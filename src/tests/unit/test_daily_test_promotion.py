@@ -20,6 +20,7 @@ _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
+from cosa.utils.atomic_json import load_json_dict
 from lupin_mcp import daily_test_promotion as dtp
 from lupin_mcp import duplicate_check_filing as filing
 from lupin_mcp import job_run
@@ -150,15 +151,18 @@ def test_smoke_names_the_first_check_that_failed():
 
 # ── time ─────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize( "now,expected", [
-    ( datetime.datetime( 2026, 11, 14, 22, 59, tzinfo=UTC ), "2026-11-13T18:00:00-05:00" ),     # 17:59 in New York: yesterday's slot
-    ( datetime.datetime( 2026, 11, 14, 23, 0, tzinfo=UTC ),  "2026-11-14T18:00:00-05:00" ),     # exactly 18:00
-    ( datetime.datetime( 2026, 11, 15, 14, 0, tzinfo=UTC ),  "2026-11-14T18:00:00-05:00" ),     # morning after
-    ( datetime.datetime( 2026, 3, 9, 14, 0, tzinfo=UTC ),    "2026-03-08T18:00:00-04:00" ),     # the day after spring forward: the slot is on summer time
-    ( datetime.datetime( 2026, 11, 1, 13, 0, tzinfo=UTC ),   "2026-10-31T18:00:00-04:00" ),     # the morning of fall back: the slot is the evening before, summer time
-], ids=[ "before", "exact", "morning", "spring-forward", "fall-back" ] )
-def test_the_latest_slot_is_the_last_18_00_new_york_time_across_daylight_saving( now, expected ):
-    assert dtp.latest_slot( now, ZONE ).isoformat() == expected
+@pytest.mark.parametrize( "now,last,expected", [
+    ( datetime.datetime( 2026, 11, 14, 22, 59, tzinfo=UTC ), "2026-11-13T18:00:05-05:00", False ),     # 17:59 in New York: yesterday's slot was served
+    ( datetime.datetime( 2026, 11, 14, 22, 59, tzinfo=UTC ), "2026-11-12T18:00:05-05:00", True ),      # yesterday's slot was missed
+    ( datetime.datetime( 2026, 11, 14, 23, 0, tzinfo=UTC ),  "2026-11-13T18:00:05-05:00", True ),      # exactly 18:00: today's slot has opened
+    ( datetime.datetime( 2026, 11, 14, 23, 0, tzinfo=UTC ),  "2026-11-14T18:00:00-05:00", False ),     # an attempt at the slot itself counts
+    ( datetime.datetime( 2026, 3, 9, 14, 0, tzinfo=UTC ),    "2026-03-08T21:59:00+00:00", True ),      # day after spring forward: the slot was 22:00 UTC, so 21:59 UTC missed it
+    ( datetime.datetime( 2026, 3, 9, 14, 0, tzinfo=UTC ),    "2026-03-08T22:00:00+00:00", False ),     # the same slot on summer time, served at 22:00 UTC
+    ( datetime.datetime( 2026, 11, 1, 13, 0, tzinfo=UTC ),   "2026-10-31T21:59:00+00:00", True ),      # morning of fall back: the slot was 22:00 UTC on summer time
+    ( datetime.datetime( 2026, 11, 1, 13, 0, tzinfo=UTC ),   "2026-10-31T22:00:00+00:00", False ),
+], ids=[ "before-served", "before-missed", "exact-open", "exact-served", "spring-missed", "spring-served", "fall-missed", "fall-served" ] )
+def test_a_boot_is_due_exactly_when_no_attempt_follows_the_latest_18_00_slot_in_the_configured_zone( now, last, expected ):
+    assert dtp.due( "boot", { "last_attempt_at": last }, now, ZONE ) is expected
 
 
 def test_a_cron_or_hand_entry_is_always_due_and_a_boot_only_when_no_attempt_follows_the_slot():
@@ -173,17 +177,6 @@ def test_a_cron_or_hand_entry_is_always_due_and_a_boot_only_when_no_attempt_foll
 
 
 # ── state and the stretch behind ─────────────────────────────────────────
-
-def test_read_state_answers_a_dict_for_every_kind_of_file( tmp_path ):
-    path = tmp_path / "state.json"
-    assert dtp.read_state( path ) == { }
-    path.write_text( "{" )
-    assert dtp.read_state( path ) == { }
-    path.write_text( "[1]" )
-    assert dtp.read_state( path ) == { }
-    path.write_text( '{"a": 1}' )
-    assert dtp.read_state( path ) == { "a": 1 }
-
 
 def test_the_stretch_behind_starts_once_and_clears_on_success():
     state = { }
@@ -356,7 +349,7 @@ def _folder( repo ):
 def test_a_promotion_writes_a_clean_record_and_state_and_files_nothing( repo ):
     store = Store()
     code  = _run( repo, Runner( **{ "vm-status": ( 0, "RUNNING" ), "run": ( 0, repo.old ) } ), store )
-    record, state = js.read_summary( _folder( repo ) / "job-summary.json" ), dtp.read_state( _folder( repo ) / "state.json" )
+    record, state = js.read_summary( _folder( repo ) / "job-summary.json" ), load_json_dict( _folder( repo ) / "state.json" )
     assert code == 0 and store.rows == { }
     assert record[ "last_attempt" ][ "outcome" ] == "clean" and record[ "last_attempt" ][ "mode" ] == dtp.PROMOTED
     assert state[ "last_promoted_sha" ] == repo.new and state[ "last_result" ] == dtp.PROMOTED and "behind_since" not in state
@@ -402,7 +395,7 @@ def test_deferrals_for_three_days_file_one_stale_row_and_never_a_second_in_the_s
     assert codes == [ 0 ] * 5, "a deferral is not a failure"
     stale  = [ key for key in store.rows if "-stale-" in key ]
     assert stale == [ "epic:daily-test-promotion-stale-2026-11-14" ], "one row, named for the day the stretch began"
-    state = dtp.read_state( _folder( repo ) / "state.json" )
+    state = load_json_dict( _folder( repo ) / "state.json" )
     assert state[ "stale_filed_for" ] == state[ "behind_since" ]
     assert js.read_summary( _folder( repo ) / "job-summary.json" )[ "last_attempt" ][ "outcome" ] == "carried"
 
@@ -410,9 +403,9 @@ def test_deferrals_for_three_days_file_one_stale_row_and_never_a_second_in_the_s
 def test_a_promotion_after_a_stretch_behind_clears_the_stretch( repo ):
     store = Store()
     _run( repo, Runner( **{ "vm-status": ( 0, "RUNNING" ), "run": ( 0, repo.old ), "test-server idle": ( 1, "" ) } ), store )
-    assert "behind_since" in dtp.read_state( _folder( repo ) / "state.json" )
+    assert "behind_since" in load_json_dict( _folder( repo ) / "state.json" )
     _run( repo, Runner( **{ "vm-status": ( 0, "RUNNING" ), "run": ( 0, repo.old ) } ), store, now=NOW + datetime.timedelta( days=1 ) )
-    assert "behind_since" not in dtp.read_state( _folder( repo ) / "state.json" )
+    assert "behind_since" not in load_json_dict( _folder( repo ) / "state.json" )
 
 
 def test_a_boot_after_the_slot_was_served_writes_nothing_and_a_boot_after_a_missed_slot_runs( repo ):

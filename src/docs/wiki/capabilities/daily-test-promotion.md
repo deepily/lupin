@@ -5,9 +5,7 @@ pins:
   - lupin_mcp.daily_test_promotion.run_command@96aa6d4e93
   - lupin_mcp.daily_test_promotion.Vm@bd2312abdf
   - lupin_mcp.daily_test_promotion.app_zone@17d8c445ad
-  - lupin_mcp.daily_test_promotion.latest_slot@12fb743333
-  - lupin_mcp.daily_test_promotion.due@10864c6adb
-  - lupin_mcp.daily_test_promotion.read_state@9fa3d1d41b
+  - lupin_mcp.daily_test_promotion.due@3f37e475b2
   - lupin_mcp.daily_test_promotion.row_payload@6233950d78
   - lupin_mcp.daily_test_promotion.pick_sha@133bd46536
   - lupin_mcp.daily_test_promotion.with_ref@2b0a221483
@@ -19,7 +17,7 @@ pins:
   - lupin_mcp.daily_test_promotion.settle@6dba8aa66b
   - lupin_mcp.daily_test_promotion.decide@cba445859e
   - lupin_mcp.daily_test_promotion.conclude@08bf058178
-  - lupin_mcp.daily_test_promotion.run@fee5eefe58
+  - lupin_mcp.daily_test_promotion.run@7963fc3ba4
   - lupin_mcp.daily_test_promotion.main@8466f88d47
 ---
 # Daily test promotion
@@ -27,7 +25,7 @@ pins:
 `lupin_mcp.daily_test_promotion` moves the newest merged build to the cloud test VM once a day and smokes it. It is the registry job `test-promotion`, run through `cron-job.sh` and `job_run`, and its switch `cron job test-promotion enabled` ships false.
 
 ## One run
-- `run` takes a lock, then asks `due`. A cron or hand entry is always due. A boot entry runs only when no attempt follows the latest 18:00 slot. `latest_slot` computes it in the zone `app_zone` reads from the `app timezone` key, across daylight saving.
+- `run` takes a lock, then asks `due`. A cron or hand entry is always due. A boot entry runs only when no attempt follows the latest 18:00 slot. `job_cron.cron_last` finds it in the zone `app_zone` reads from the `app timezone` key.
 - `pick_sha` takes the tip of the working branch. A stored `last_promoted_sha` equal to it ends the run with no VM call.
 - Otherwise `decide` starts the VM if it is not running and reads the sha it runs. An equal sha ends the run. A busy or unknown test server defers it. The VM goes back to its earlier power state.
 

@@ -29,7 +29,8 @@ import zoneinfo
 
 import cosa.utils.util as cu
 from cosa.config import app_timezone
-from cosa.utils.atomic_json import write_json_atomic
+from cosa.rest import job_cron
+from cosa.utils.atomic_json import load_json_dict, write_json_atomic
 from lupin_mcp import duplicate_check_daily as dcd
 from lupin_mcp import duplicate_check_filing as filing
 from lupin_mcp import job_summary as js
@@ -37,6 +38,7 @@ from cosa.rest.task_store_rules import filer_created_by
 
 JOB            = "test-promotion"
 SLOT_HOUR      = 18
+SLOT_CRON      = f"0 {SLOT_HOUR} * * *"      # the registry's cron line; job_cron finds the last firing of it
 STALE_DAYS     = 3
 VM_SCRIPT      = "src/scripts/lupin-vm.sh"
 VM_DEPLOYED    = "/mnt/lupin-data/lupin/.deployed-ref"      # first field: the sha the last completed deploy left on the VM
@@ -172,21 +174,6 @@ def app_zone( config=None ):
     return zoneinfo.ZoneInfo( app_timezone.get_app_timezone( config ) )
 
 
-def latest_slot( now, zone ):
-    """
-    The most recent 18:00 in the user's zone at or before now.
-
-    Requires:
-        - now is a timezone-aware datetime; zone is a ZoneInfo
-
-    Ensures:
-        - returns an aware datetime at 18:00 in zone, correct across a daylight saving change
-    """
-    local = now.astimezone( zone )
-    day   = local.date() if local.hour >= SLOT_HOUR else local.date() - datetime.timedelta( days=1 )
-    return datetime.datetime.combine( day, datetime.time( SLOT_HOUR ), tzinfo=zone )
-
-
 def due( trigger, state, now, zone ):
     """
     Whether this entry should run.
@@ -196,21 +183,12 @@ def due( trigger, state, now, zone ):
 
     Ensures:
         - returns True for cron and hand
-        - returns True for boot only when no attempt is recorded since the latest 18:00 slot, so a
+        - returns True for boot only when no attempt is recorded since the latest 18:00 slot in zone, so a
           reboot never repeats a day that already ran and never skips a day the host slept through
     """
     if trigger != "boot": return True
     last = state.get( "last_attempt_at" )
-    return last is None or datetime.datetime.fromisoformat( last ) < latest_slot( now, zone )
-
-
-def read_state( path ):
-    """Ensures: returns the stored dict, or an empty dict for a missing or unreadable file."""
-    try:
-        doc = json.loads( pathlib.Path( path ).read_text( encoding="utf-8" ) )
-    except ( OSError, ValueError ):
-        return {}
-    return doc if isinstance( doc, dict ) else {}
+    return last is None or datetime.datetime.fromisoformat( last ) < job_cron.cron_last( SLOT_CRON, now.astimezone( zone ) )
 
 
 def row_payload( kind, sha, detail, owner, extra_key=None ):
@@ -419,7 +397,7 @@ def run( root, now, trigger, branch, vm, store, owner, zone, check=False ):
     folder     = pathlib.Path( root ) / "io" / "jobs" / JOB
     folder.mkdir( parents=True, exist_ok=True )
     state_path = folder / "state.json"
-    state      = read_state( state_path )
+    state      = load_json_dict( state_path )
     started    = js.iso_now( now )
     name, sha  = pick_sha( root, branch )
     if check:
