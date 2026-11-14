@@ -1207,6 +1207,31 @@ def _get_default_speakerphone():
         return False  # solo default if anything blows up
 
 
+def is_quiet_worker( session_id ):
+    """
+    Return whether a session is a quiet worker.
+
+    `notify_user` stamps `worker_quiet` on a quiet worker's events. A quiet worker is a spawned,
+    non-manager session whose speakerphone is off. `worker_voice_mode.is_quiet_worker_bridge` decides,
+    and a standing manager spawned with any role is never quieted.
+
+    Requires:
+        - session_id is a full session id or its 8-character prefix
+
+    Ensures:
+        - returns True only for a bridge `is_quiet_worker_bridge` accepts
+        - returns False for a missing or unreadable bridge
+        - never raises
+    """
+    try:
+        path = find_session_path_by_id( session_id )
+        if not path: return False
+        from lupin_mcp.worker_voice_mode import is_quiet_worker_bridge
+        return is_quiet_worker_bridge( _load_bridge_object( path ), MANAGER_FIGURE_BRIDGE_FIELD )
+    except ( json.JSONDecodeError, OSError, ImportError ):
+        return False
+
+
 def find_active_speakerphone_sessions( exclude_session_id=None ):
     """
     Scan all bridge files for sessions whose speakerphone_on is true.

@@ -89,6 +89,8 @@ interface ServerNotificationFields {
   sender_id      ?: string;
   timestamp      ?: string;
   voice_persona  ?: ServerVoicePersona | null;
+  // Row 92076977: the server sets this on a quiet worker's notifications (see SenderRecord.worker_quiet).
+  worker_quiet   ?: boolean;
   // Generic payload bag — different notification types carry different
   // shapes (Phase 6c conversation-mode events use `payload.active` /
   // `payload.on` for the mode flag; legacy speakerphone_changed adds
@@ -403,6 +405,7 @@ class SenderStoreImpl implements SenderStore {
         conversation_mode_active : false,           // Phase 6c Node D — default off; flipped by handleConversationModeUpdate
       };
       if (isWorker) record.is_worker = true;
+      if (n.worker_quiet === true) record.worker_quiet = true;
       this.applyBufferedSessionName(record);
       this.senders.set(senderId, record);
       this.emit("added", senderId);
@@ -412,6 +415,10 @@ class SenderStoreImpl implements SenderStore {
     existing.last_active_ts = ts;
     existing.unread_count++;
     if (isWorker) existing.is_worker = true;
+    // The server's stamp is authoritative on every event: present sets the chip, absent clears it
+    // (Rick flipped the worker to speakerphone, or it was never a quiet worker).
+    if (n.worker_quiet === true) existing.worker_quiet = true;
+    else delete existing.worker_quiet;
     this.emit("updated", senderId);
   }
 
@@ -502,6 +509,12 @@ class SenderStoreImpl implements SenderStore {
       };
       this.applyBufferedSessionName(record);
       this.senders.set(senderId, record);
+    }
+
+    // Rick turning a quiet worker's speakerphone on wins over the stamp until the next event says so.
+    if (active && record.worker_quiet === true) {
+      delete record.worker_quiet;
+      this.emit("updated", senderId);
     }
 
     if (active) {

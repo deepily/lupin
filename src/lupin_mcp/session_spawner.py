@@ -35,6 +35,7 @@ from lupin_mcp import respin_credit
 from lupin_mcp import skeleton_crew
 from lupin_mcp import reap_memento
 from lupin_mcp import reap_branch
+from lupin_mcp import worker_voice_mode
 from cosa.agents.shared import seat_teardown
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
@@ -778,6 +779,7 @@ def spawn_sessions(
     fleet_gate_fn      : Callable = default_fleet_gate,
     fleet_config_fn    : Optional[ Callable ] = None,
     fleet_census_fn    : Optional[ Callable ] = None,
+    voice_config_fn    : Optional[ Callable ] = None,
     dry_run            : bool = False,
     model              : Optional[ str ] = None,
     runner             : Callable = default_runner,
@@ -856,6 +858,7 @@ def spawn_sessions(
         spawn_cap: max children
         dry_run: pass --dry-run; do not persist the manifest
         model: resolved model id to pin via `--model` (None → inherit user default)
+        voice_config_fn: injected () -> ConfigurationManager for the worker voice mode key
         name_prefix: tmux session name prefix
         runner: injected subprocess runner
         session_dir: injected session/manifest directory
@@ -905,6 +908,14 @@ def spawn_sessions(
         refusal = fleet_gate_fn( count, **gate_extra )
     if refusal:
         raise ValueError( refusal )
+
+    # How the children's voice starts (row 92076977). Read once, before any child is spawned, so a
+    # mistyped INI value refuses the whole spawn naming the key instead of failing half-way.
+    # A manager role forwards `inherit` without reading the INI.
+    if voice_config_fn is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        voice_config_fn = lambda: ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    voice_env = worker_voice_mode.worker_voice_env( role, voice_config_fn )
 
     # `project` NOW GENUINELY SETS THE CHILD'S WORKING DIRECTORY (row 697a85fe,
     # Rick's ruling 2026-08-19). It used to be a label read nowhere, while the
@@ -1137,7 +1148,8 @@ def spawn_sessions(
         env  = {
             "COSA_VOICE_SPAWNED_BY" : manager_session_id,
             "COSA_VOICE_HEADLESS"   : "1",
-            "COSA_VOICE_ROLE"       : role
+            "COSA_VOICE_ROLE"       : role,
+            **voice_env
         }
         # Owner-lineage drift fix (2026-06-22): freeze the manager's persona AS IT
         # IS NOW (spawn time) so the child can stamp it onto its bridge. The
