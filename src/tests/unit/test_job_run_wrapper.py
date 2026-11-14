@@ -103,3 +103,18 @@ def test_a_switched_on_job_runs_and_a_missing_key_or_missing_enabled_key_stops_t
     reg  = tmp_path / jr.REGISTRY_FILE
     doc  = json.loads( reg.read_text() ); doc[ "jobs" ][ 0 ].pop( "enabled_key" ); reg.write_text( json.dumps( doc ) )
     with pytest.raises( ValueError, match="no enabled_key" ): jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=reader( True, [] ) )
+
+
+def test_the_switch_is_read_through_a_silent_configuration_manager( tmp_path, monkeypatch, capsys ):
+    """The manager prints a 37-line banner, so it is built silent and its prints are swallowed."""
+    import cosa.config.configuration_manager as cm
+    built = []
+    class Quiet:
+        def __init__( self, **kw ): built.append( kw ); print( "banner noise" )
+        def get_required( self, key, return_type="string" ): return False
+    monkeypatch.setattr( cm, "ConfigurationManager", Quiet )
+    env = switch_tree( tmp_path, monkeypatch )
+    env[ "LUPIN_CONFIG_MGR_CLI_ARGS" ] = "x"
+    assert jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ) ) == 0
+    assert built == [ { "env_var_name": "LUPIN_CONFIG_MGR_CLI_ARGS", "silent": True, "mute_splainer": True } ]
+    assert "banner noise" not in capsys.readouterr().out

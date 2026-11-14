@@ -7,7 +7,9 @@ Two optional patterns read counts from the output. The first group of --count-re
 The first group of --drained-re is what the run drained. A job that already writes its own record does not need it.
 """
 import argparse
+import contextlib
 import datetime
+import io
 import os
 import pathlib
 import re
@@ -181,7 +183,8 @@ def main( argv=None, environ=None, runner=stream_run, config=None ):
     if config is None:
         from cosa.config.configuration_manager import ConfigurationManager
         if "LUPIN_CONFIG_MGR_CLI_ARGS" not in environ: environ.update( bootstrap_env( registry, root ) )
-        config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        with contextlib.redirect_stdout( io.StringIO() ):      # the manager prints a startup banner that silent=True does not cover, and it would fill every cron log
+            config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", silent=True, mute_splainer=True )
     if not switched_on( entry, config ):
         print( f"job_run: job {args.job} is switched off: INI key '{entry[ 'enabled_key' ]}' is false, so nothing ran" )
         return 0
