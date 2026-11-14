@@ -87,6 +87,7 @@ def line_of( doc, run_file, backfilled=False ):
         - returns the same keys for every run, a failed one included
         - a number the run could not measure is None
         - findings_by_commit counts findings per commit, under "unknown" for a finding with none
+        - judge_model, the model the run's calls went to, is copied when the run reached the point of naming it (None before that, and on every line written before this key existed)
         - branch, owed, rate_limited, backoff_until and the usage of the run's judge calls (input, output, cache write and cache read tokens, notional cost, calls the SDK reported) are copied when the run measured them, else None
         - calls_per_hour is the judge calls over the elapsed time scaled to an hour, None for a run that made no call
     """
@@ -110,10 +111,25 @@ def line_of( doc, run_file, backfilled=False ):
              "judge_calls": doc.get( "judge_calls" ), "findings": len( found ) if found is not None else None, "groups": len( clusters ) if clusters is not None else None,
              "group_sizes": sorted( len( g ) for g in clusters ) if clusters is not None else None, "findings_by_commit": by_commit,
              **counts_of( doc.get( "filing" ) ), "unreadable": len( doc[ "unreadable" ] ) if doc.get( "unreadable" ) is not None else None, "backfilled": backfilled,
-             "branch": doc.get( "branch" ), "owed": doc.get( "owed" ), "rate_limited": doc.get( "rate_limited" ), "backoff_until": doc.get( "backoff_until" ),
+             "branch": doc.get( "branch" ), "judge_model": doc.get( "judge_model" ), "owed": doc.get( "owed" ), "rate_limited": doc.get( "rate_limited" ), "backoff_until": doc.get( "backoff_until" ),
              "input_tokens": usage.get( "input_tokens" ), "output_tokens": usage.get( "output_tokens" ), "cache_creation_tokens": usage.get( "cache_creation_input_tokens" ),
              "cache_read_tokens": usage.get( "cache_read_input_tokens" ), "cost_usd": usage.get( "cost_usd" ), "usage_calls": usage.get( "calls" ),
              "calls_per_hour": round( calls / secs * 3600 ) if calls and secs else None }
+
+
+def calls_on( lines, day, model ):
+    """
+    Count the judge calls started on one calendar day that may have gone to one model.
+
+    Requires:
+        - lines are history lines; day is an ISO date, the first ten characters of a line's started_at
+
+    Ensures:
+        - returns the sum of judge_calls over the lines that started on day and name model
+        - a line that names no model (written before judge_model existed, or before the run reached it) is charged to every model, because its calls cannot be shown to have gone elsewhere
+        - a line with no measured calls (None) adds 0
+    """
+    return sum( line[ "judge_calls" ] or 0 for line in lines if line[ "started_at" ][ :10 ] == day and line.get( "judge_model" ) in ( model, None ) )
 
 
 def append_line( folder, line, name=RUNS_FILE ):

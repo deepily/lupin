@@ -92,6 +92,10 @@ UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", 
 CARRIED           = behaviour.CARRIED     # names copied into the cron lines from the installer's environment
 
 
+class SpendRefused( Exception ):
+    """Raised when a model's daily call budget is spent; run turns it into a skipped slot."""
+
+
 class Counting:
     """A judge backend that counts the calls made through it."""
 
@@ -642,6 +646,31 @@ def live_noter( message, abstract, **kwargs ):
     return live_notifier( message, abstract, priority="low", kind="progress", **kwargs )
 
 
+def calls_left( folder, parts, model, now ):
+    """
+    Say how many judge calls the day's budget leaves for one model.
+
+    Requires:
+        - folder is the job's data folder; model is the judge model id; now is the run's start time
+        - parts may hold config, an object with the ConfigurationManager get method; without it the process's own manager is built
+    Ensures:
+        - returns the model's `duplicate check daily call budget` minus the calls the history shows started today on it, at least 1
+        - the history counts every call started, failed or not, and a line that names no model counts against every model
+
+    Raises:
+        - SpendRefused naming the model, the calls used and the budget when the day's budget is spent
+        - CodeHealthSettingError naming the key when the key is blank or malformed, or lists no budget for the model
+    """
+    config = parts.get( "config" )
+    if config is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        with contextlib.redirect_stdout( sys.stderr ): config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    budget = chs.daily_call_budget( config, model )
+    used   = history.calls_on( history.read_lines( folder ), now.date().isoformat(), model )
+    if used >= budget: raise SpendRefused( f"the daily call budget for {model} is spent: {used} calls started today of {budget}; the key `{chs.DAILY_BUDGET_KEY}` sets it, and the count restarts at midnight" )
+    return budget - used
+
+
 def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof_cli.DEFAULT_PARALLEL, clock=time.monotonic, ceiling=None, baseline=False, rise_limit=RISE_LIMIT ):
     """
     Run the daily check once.
@@ -658,6 +687,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - a continuity refusal that repeats the previous run's is recorded with repeat true and sends no second alert, until a run ends differently
         - then branch_guard runs: a pinned branch that is stale or gone writes that file with status failed, stage branch_guard, the refusal, the reinstall command and notified (the notifier hook's answer, False without one); nothing else changes and last-success does not move
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
+        - after the frozen configuration is verified and before any pool, embedding or worktree work, calls_left checks the judge model's daily call budget: a spent budget writes that file with status skipped, a note, judge_calls 0 and judge_model, and nothing else changes; a missing or malformed budget fails the run at stage setup naming the key; otherwise the run's cap is lowered to the calls left
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - an exception while reading the frozen configuration, choosing the window or making the worktree writes that file with status failed, stage setup and the error, removes a worktree it began, and moves nothing
         - the result holds test_code_dropped { owed, pool }: how many test-code definitions (is_test_code) were left out of the owed set and of the comparison pool
@@ -704,10 +734,14 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     doc, target = base, None
     try:
         cfg    = parts[ "verify" ]()
+        budget_left = calls_left( folder, parts, cfg[ "model_id" ], now )
         window = baseline_window( root, branch ) if baseline else window_of( root, last, now, branch )
-        doc    = { **base, "window": { "start": window[ "start" ], "end": window[ "end" ], "commits": len( window[ "commits" ] ) } }
+        doc    = { **base, "judge_model": cfg[ "model_id" ], "window": { "start": window[ "start" ], "end": window[ "end" ], "commits": len( window[ "commits" ] ) } }
         target = pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}"
         tree   = source_at.ensure_worktree( root, window[ "end" ], target )
+    except SpendRefused as spent:          # the model's day is spent: skip the slot the way a rate limit does, with nothing made and nothing moved
+        doc = { **base, "judge_model": cfg[ "model_id" ], "status": SKIPPED, "note": str( spent ), "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
+        return record( folder, stem, doc, now )
     except Exception as exc:               # the frozen configuration, the window or the worktree failed: leave a record and change nothing else
         if target is not None: release( root, target )
         doc = { **doc, "status": "failed", "stage": STAGE_SETUP, "error": f"{type( exc ).__name__}: {exc}", "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
@@ -722,6 +756,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         pool  = pool_without_earlier_versions( tree, fresh[ "defs" ], left )
         doc[ "test_code_dropped" ] = { "owed": fresh[ "test_dropped" ], "pool": left[ 0 ] }
         if ceiling is not None: cap = min( ceiling, len( fresh[ "defs" ] ) )
+        cap = min( cap, budget_left )        # the day's budget bounds the run, not only the start of it
         out   = { "verdicts": [], "unjudged": [], "dropped": { "count": 0, "ids": [] } }
         if fresh[ "defs" ]:
             ledger = proof_cli.daily_ledger( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
