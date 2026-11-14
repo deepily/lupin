@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-io_models number_fields: the float-or-zero parser and the 0-to-1 clamp.
+io_models number_fields: the float-or-zero parser, its int twin and the 0-to-1 clamp.
 
 Every model that reads a confidence or an amount out of a string field goes through them.
 
@@ -15,7 +15,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.agents.calculator.xml_models import CalcIntent
-from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
+from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero, int_or_zero
 from cosa.agents.notification_proxy.xml_models import ScriptMatcherResponse
 
 
@@ -32,6 +32,25 @@ def test_float_or_zero_gives_zero_for_blank_junk_and_none():
     assert float_or_zero( "high" ) == 0.0
     assert float_or_zero( None ) == 0.0
     assert float_or_zero( [ 1 ] ) == 0.0
+
+
+def test_int_or_zero_reads_whole_numbers_out_of_text():
+    assert int_or_zero( "30" ) == 30
+    assert int_or_zero( " 30.9 " ) == 30
+    assert int_or_zero( "-4" ) == -4
+    assert int_or_zero( 7.8 ) == 7
+
+
+def test_int_or_zero_gives_zero_for_blank_junk_none_nan_and_infinity():
+    for bad in ( "", "   ", "high", None, [ 1 ], "nan", "inf", "-inf" ):
+        assert int_or_zero( bad ) == 0, bad
+
+
+def test_term_years_is_a_positive_int_or_zero_through_int_or_zero():
+    assert CalcIntent( operation="mortgage", term_years="30" ).get_term_years_int() == 30
+    assert CalcIntent( operation="mortgage", term_years="-5" ).get_term_years_int() == 0
+    assert CalcIntent( operation="mortgage", term_years="nan" ).get_term_years_int() == 0
+    assert CalcIntent( operation="mortgage", term_years="inf" ).get_term_years_int() == 0
 
 
 def test_clamp_unit_keeps_the_range_and_pins_outside_values():
