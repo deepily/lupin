@@ -13,6 +13,7 @@ src/scripts/bounce-dev-server.sh is a STUB that records its invocation — so no
 container is touched. bash + date only; no DB, no network.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -64,7 +65,8 @@ class TestBounceWatcher( unittest.TestCase ):
 
         # The watcher reads the side-services switch through lupin_mcp.cron_switch_read, so the
         # throwaway root carries the real package (a link) and a config file that holds the key.
-        os.symlink( os.path.join( REPO_ROOT, "src", "lupin_mcp" ), os.path.join( self.root, "src", "lupin_mcp" ) )
+        for package in ( "lupin_mcp", "cosa" ): os.symlink( os.path.join( REPO_ROOT, "src", package ), os.path.join( self.root, "src", package ) )
+        self.summary  = os.path.join( self.root, "io", "jobs", "side-services", "job-summary.json" )
         self.config   = os.path.join( self.root, "src", "conf", CONFIG_NAME )
         self.log_file = os.path.join( self.root, "watcher.log" )
         os.makedirs( os.path.dirname( self.config ), exist_ok=True )
@@ -150,6 +152,11 @@ class TestBounceWatcher( unittest.TestCase ):
         self.assertFalse( os.path.exists( self.heartbeat ), "an idle watcher stamped a heartbeat" )
         self.assertEqual( self._run_count(), 0, "an idle watcher ran the bounce" )
         self.assertIn( "discarded a trigger", self._log() )
+        if value in ( "false", ):
+            self.assertFalse( os.path.exists( self.summary ), "an off switch is not a failure and wrote a failed summary" )
+        else:
+            with open( self.summary ) as f: record = json.load( f )[ "last_attempt" ]
+            self.assertEqual( ( record[ "outcome" ], record[ "stage" ] ), ( "failed", "switch" ), "an unreadable key did not turn the job's summary red" )
 
     def test_switch_false_stamps_no_heartbeat_and_discards_a_trigger_then_true_resumes( self ):
         self._assert_idle_while( "false" )
@@ -174,12 +181,13 @@ class TestBounceWatcherWithNoConfigFile( unittest.TestCase ):
         root = tempfile.mkdtemp( prefix="watcher-test-noconfig-" )
         try:
             os.makedirs( os.path.join( root, "src", "scripts" ) )
-            os.symlink( os.path.join( REPO_ROOT, "src", "lupin_mcp" ), os.path.join( root, "src", "lupin_mcp" ) )
+            for package in ( "lupin_mcp", "cosa" ): os.symlink( os.path.join( REPO_ROOT, "src", package ), os.path.join( root, "src", package ) )
             env  = dict( os.environ, LUPIN_ROOT=root, BOUNCE_WATCHER_POLL_SECS="1", BOUNCE_WATCHER_SWITCH_SECS="1" )
             proc = subprocess.Popen( [ "bash", WATCHER ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
             try:
                 time.sleep( 3 )
                 self.assertFalse( os.path.exists( os.path.join( root, "io", "bounce", "watcher-heartbeat" ) ) )
+                self.assertTrue( os.path.exists( os.path.join( root, "io", "jobs", "side-services", "job-summary.json" ) ), "a missing file did not write the failed summary" )
             finally:
                 proc.terminate()
                 proc.wait( timeout=5 )

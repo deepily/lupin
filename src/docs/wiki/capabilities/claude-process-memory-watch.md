@@ -9,7 +9,7 @@ pins:
   - cosa.utils.cc_memory_watch.is_claude_process@c401f7e660
   - cosa.utils.cc_memory_watch.is_listener_process@0b2fb615ef
   - cosa.utils.cc_memory_watch.iter_pids@7fd843988f
-  - cosa.utils.cc_memory_watch.main@c9251af78b
+  - cosa.utils.cc_memory_watch.main@351cfb1a3c
   - cosa.utils.cc_memory_watch.parse_cgroup_path@f71f109951
   - cosa.utils.cc_memory_watch.parse_listener_owner_map@20573c3048
   - cosa.utils.cc_memory_watch.parse_scope_unit@ba45b57588

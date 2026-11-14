@@ -10,7 +10,9 @@ Words such as `yes` or `1` are unknown here, never on and never off.
 The module imports only the standard library and `fleet_cap_ini_io`, so the standalone arbiter,
 which runs in a light virtual environment, can import it.
 """
+import argparse
 import os
+import sys
 from typing import Optional
 
 from lupin_mcp import fleet_cap_ini_io
@@ -181,3 +183,31 @@ def for_job( job, log=print ):
     from lupin_mcp import fleet_size_cap
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _main_repo_path
     return TickSwitch( job, fleet_size_cap.main_checkout_ini_path, lambda: summary_path_in( _main_repo_path( cu.get_project_root() ), job ), log )
+
+
+def main( argv=None ):
+    """
+    Check one job's switch from the command line, for a service outside this tree's Python.
+
+    Requires:
+        - argv holds --job, --ini (the configuration file) and --root (the checkout whose io/jobs holds the summary)
+
+    Ensures:
+        - prints one word on stdout: on, off or unknown, where unknown means the key is missing or holds neither true nor false
+        - the log lines go to stderr, so stdout stays one word
+        - an unknown answer writes the job's failed summary, as every in-process loop does
+        - returns 0 for every answer
+    """
+    parser = argparse.ArgumentParser( description="Print on, off or unknown for one job's switch." )
+    parser.add_argument( "--job", required=True )
+    parser.add_argument( "--ini", required=True )
+    parser.add_argument( "--root", required=True )
+    args   = parser.parse_args( argv )
+    switch = TickSwitch( args.job, lambda: args.ini, lambda: summary_path_in( args.root, args.job ), log=lambda line: print( line, file=sys.stderr ) )
+    switch.allowed()
+    print( { "on": "on", "off": "off", "unreadable": "unknown" }[ switch.last ] )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - process entry point
+    sys.exit( main() )

@@ -148,3 +148,18 @@ def test_context_tick_reads_its_switch_through_job_run_and_its_row_says_at_each_
     assert ( job_run.switched_on( entry, off ), job_run.switched_on( entry, on ) ) == ( False, True )
     monkeypatch.setattr( sw, "read_enabled", lambda job: True )
     assert sw.build_row( entry, {} )[ "reads" ] == "run"
+
+
+def test_the_command_line_check_prints_one_word_and_writes_a_failed_summary_only_for_an_unreadable_key( tmp_path, capsys ):
+    root    = tmp_path / "root"
+    summary = root / "io" / "jobs" / JOB / "job-summary.json"
+    for line, word in ( ( f"cron job {JOB} enabled = true", "on" ), ( f"cron job {JOB} enabled = false", "off" ) ):
+        assert csr.main( [ "--job", JOB, "--ini", _ini( tmp_path, line ), "--root", str( root ) ] ) == 0
+        out, err = capsys.readouterr()
+        assert out == word + "\n" and not summary.exists()
+    for line in ( "", f"cron job {JOB} enabled = yes" ):
+        assert csr.main( [ "--job", JOB, "--ini", _ini( tmp_path, line ), "--root", str( root ) ] ) == 0
+        out, err = capsys.readouterr()
+        record   = json.loads( summary.read_text() )[ "last_attempt" ]
+        assert out == "unknown\n" and "ERROR" in err and record[ "outcome" ] == "failed" and record[ "stage" ] == "switch"
+        summary.unlink()

@@ -8,6 +8,7 @@ the original drift apart, in their source and in what they answer.
 import inspect
 import os
 import pathlib
+import subprocess
 import sys
 
 import pytest
@@ -18,6 +19,7 @@ if _src_path not in sys.path:
 
 from cosa.utils import cc_memory_watch as watch
 from lupin_mcp import cron_switch_read as csr
+from lupin_mcp import job_summary as js
 
 KEY = "cron job side-services " + "enabled"
 
@@ -98,7 +100,7 @@ def test_a_gate_with_no_config_file_never_reads_anything( tmp_path ):
 def test_the_gate_logs_one_line_per_change_and_reads_fresh_each_time( tmp_path ):
     lines = []
     path  = tmp_path / "settings.conf"
-    gate  = watch.SwitchGate( str( path ), log=lines.append )
+    gate  = watch.SwitchGate( str( path ), log=lines.append, report=lambda ini: None )
     path.write_text( f"{KEY} = true\n" )
     assert gate.allowed() is True
     assert gate.allowed() is True
@@ -118,8 +120,8 @@ def test_the_gate_logs_one_line_per_change_and_reads_fresh_each_time( tmp_path )
 
 def test_a_gate_that_starts_off_or_unreadable_says_so_once( tmp_path ):
     lines = []
-    assert watch.SwitchGate( _config( tmp_path, f"{KEY} = false\n" ), log=lines.append ).allowed() is False
-    assert watch.SwitchGate( str( tmp_path / "absent.conf" ), log=lines.append ).allowed() is False
+    assert watch.SwitchGate( _config( tmp_path, f"{KEY} = false\n" ), log=lines.append, report=lambda ini: None ).allowed() is False
+    assert watch.SwitchGate( str( tmp_path / "absent.conf" ), log=lines.append, report=lambda ini: None ).allowed() is False
     assert [ "is false" in lines[ 0 ], "ERROR" in lines[ 1 ] ] == [ True, True ]
 
 
@@ -127,8 +129,9 @@ def test_a_gate_that_starts_off_or_unreadable_says_so_once( tmp_path ):
 
 @pytest.fixture
 def counted( monkeypatch ):
-    """Replace run_once with a counter so a test sees whether a pass sampled."""
+    """Count the passes that sampled, and never start the failed-summary child."""
     calls = []
+    monkeypatch.setattr( watch, "write_failed_summary", lambda ini: True )
     monkeypatch.setattr( watch, "run_once", lambda tracker, emit, now=None: calls.append( now ) or [] )
     return calls
 
@@ -185,3 +188,94 @@ def test_the_registry_names_the_loop_that_calls_the_gate():
 def test_the_unit_template_passes_the_main_config_file_to_the_watcher():
     template = ( pathlib.Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) ) / "src" / "scripts" / "lupin-cc-memory-watch.service" ).read_text()
     assert "--ini __LUPIN_ROOT__/src/conf/" + "lupin-app" + ".ini" in template
+
+
+# ── the failed summary: an unreadable key must turn the jobs page red ────
+
+class FakeRun:
+    """A runner that records its call and answers with a chosen exit code or error."""
+
+    def __init__( self, code=0, error=None ):
+        self.code, self.error, self.calls = code, error, []
+
+    def __call__( self, argv, **kwargs ):
+        self.calls.append( ( argv, kwargs ) )
+        if self.error is not None: raise self.error
+        return type( "Done", (), { "returncode": self.code } )()
+
+
+def test_the_gate_asks_for_a_failed_summary_on_every_unreadable_pass_and_never_when_on_or_off( tmp_path ):
+    asked = []
+    gate  = watch.SwitchGate( str( tmp_path / "s.conf" ), log=lambda line: None, report=asked.append )
+    ( tmp_path / "s.conf" ).write_text( f"{KEY} = true\n" )
+    gate.allowed()
+    ( tmp_path / "s.conf" ).write_text( f"{KEY} = false\n" )
+    gate.allowed()
+    assert asked == []
+    ( tmp_path / "s.conf" ).write_text( "" )
+    gate.allowed(); gate.allowed()
+    assert asked == [ str( tmp_path / "s.conf" ) ] * 2
+
+
+def test_the_failed_summary_call_runs_the_repository_check_with_the_job_the_file_and_the_root( tmp_path ):
+    ini = tmp_path / "src" / "conf" / "settings.conf"
+    ini.parent.mkdir( parents=True )
+    ini.write_text( "" )
+    runner = FakeRun()
+    assert watch.write_failed_summary( str( ini ), runner=runner ) is True
+    argv, kwargs = runner.calls[ 0 ]
+    assert argv[ 0 ] == "python3" and argv[ 1:4 ] == [ "-m", "lupin_mcp.cron_switch_read", "--job" ] and argv[ 4 ] == "side-services"
+    assert argv[ 5: ] == [ "--ini", str( ini ), "--root", str( tmp_path.resolve() ) ]
+    assert kwargs[ "env" ][ "LUPIN_ROOT" ] == str( tmp_path.resolve() ) and kwargs[ "env" ][ "PYTHONPATH" ] == str( tmp_path.resolve() / "src" ) and kwargs[ "timeout" ] == 60
+
+
+def test_the_failed_summary_call_prefers_the_checkouts_own_interpreter_when_it_has_one( tmp_path ):
+    ini = tmp_path / "src" / "conf" / "settings.conf"
+    ini.parent.mkdir( parents=True )
+    ( tmp_path / ".venv" / "bin" ).mkdir( parents=True )
+    ( tmp_path / ".venv" / "bin" / "python" ).write_text( "" )
+    runner = FakeRun()
+    watch.write_failed_summary( str( ini ), runner=runner )
+    assert runner.calls[ 0 ][ 0 ][ 0 ] == str( tmp_path.resolve() / ".venv" / "bin" / "python" )
+    runner = FakeRun()
+    watch.write_failed_summary( str( ini ), runner=runner, python="/chosen/python" )
+    assert runner.calls[ 0 ][ 0 ][ 0 ] == "/chosen/python"
+
+
+@pytest.mark.parametrize( "runner,path,fragment", [
+    ( FakeRun( code=3 ),                                    "src/conf/s.conf", "exited 3" ),
+    ( FakeRun( error=OSError( "no interpreter" ) ),         "src/conf/s.conf", "OSError" ),
+    ( FakeRun( error=subprocess.TimeoutExpired( "x", 60 ) ), "src/conf/s.conf", "TimeoutExpired" ),
+    ( FakeRun(),                                            "/s.conf",         "IndexError" ),
+], ids=[ "nonzero", "no-interpreter", "timeout", "path-too-short" ] )
+def test_a_failed_summary_that_cannot_be_written_is_logged_and_never_raises( tmp_path, runner, path, fragment ):
+    lines = []
+    target = path if path.startswith( "/" ) else str( tmp_path / path )
+    assert watch.write_failed_summary( target, runner=runner, log=lines.append ) is False
+    assert len( lines ) == 1 and fragment in lines[ 0 ]
+
+
+def test_the_real_check_writes_a_failed_summary_for_a_missing_key_and_none_for_true_or_false( tmp_path ):
+    root = tmp_path / "root"
+    ( root / "src" / "conf" ).mkdir( parents=True )
+    for name in ( "cosa", "lupin_mcp" ): ( root / "src" / name ).symlink_to( pathlib.Path( _src_path ) / name )
+    ini     = root / "src" / "conf" / "settings.conf"
+    summary = root / "io" / "jobs" / "side-services" / "job-summary.json"
+    for text in ( f"{KEY} = true\n", f"{KEY} = false\n" ):
+        ini.write_text( text )
+        assert watch.write_failed_summary( str( ini ), python=sys.executable ) is True
+        assert not summary.exists()
+    for text in ( "", f"{KEY} = yes\n" ):
+        ini.write_text( text )
+        assert watch.write_failed_summary( str( ini ), python=sys.executable ) is True
+        record = js.read_summary( summary )[ "last_attempt" ]
+        assert record[ "outcome" ] == "failed" and record[ "stage" ] == "switch" and KEY in record[ "evidence" ]
+        summary.unlink()
+
+
+def test_the_loop_asks_for_the_failed_summary_when_the_key_is_unreadable( tmp_path, monkeypatch ):
+    asked = []
+    monkeypatch.setattr( watch, "write_failed_summary", asked.append )
+    monkeypatch.setattr( watch, "run_once", lambda tracker, emit, now=None: [] )
+    assert watch.main( [ "--once", "--ini", str( tmp_path / "absent.conf" ) ] ) == 0
+    assert asked == [ str( tmp_path / "absent.conf" ) ]

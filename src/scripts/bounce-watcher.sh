@@ -66,10 +66,13 @@ log() { echo "[bounce-watcher] $*"; }
 
 log "watching ${TRIGGER} (heartbeat every ${POLL_INTERVAL}s → ${HEARTBEAT})"
 
-# Print on, off or unknown for the side-services switch. A missing interpreter, a failed import
-# or an unreadable file all print unknown, never on.
+# Print on, off or unknown for the side-services switch, through the repository's own check
+# (lupin_mcp.cron_switch_read). An unreadable key also makes that check write the job's failed
+# summary, so the jobs page turns red. A missing interpreter or a failed import prints unknown, never on.
 read_switch() {
-    PYTHONPATH="${LUPIN_ROOT}/src" "${SWITCH_PYTHON}" -c 'import sys; from lupin_mcp import cron_switch_read as c; print({True: "on", False: "off"}.get(c.read_switch(sys.argv[1], "side-services"), "unknown"))' "${SWITCH_INI}" 2>/dev/null || echo unknown
+    local answer
+    answer="$( PYTHONPATH="${LUPIN_ROOT}/src" "${SWITCH_PYTHON}" -m lupin_mcp.cron_switch_read --job side-services --ini "${SWITCH_INI}" --root "${LUPIN_ROOT}" 2>/dev/null | tail -n 1 )"
+    echo "${answer:-unknown}"
 }
 
 # Refresh switch_state when the last read is old enough, logging one line when the answer changes.
