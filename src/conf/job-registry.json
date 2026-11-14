@@ -281,6 +281,7 @@
     },
     {
       "job": "doc-parity-tick",
+      "enabled_key": "cron job doc-parity-tick enabled",
       "catalog": "P3",
       "title": "Doc-parity tick",
       "owner": "cheech",
@@ -298,7 +299,11 @@
       },
       "owner_confirmed": false,
       "cron_tag": "doc-parity-tick",
-      "cron_exclusion_reason": "planning-is-prompting owns this script and installs its own line; Lupin does not write it"
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/doc-parity-tick.log",
+      "cron_replaces": [
+        "workflow/scripts/doc-parity-tick.sh"
+      ]
     },
     {
       "job": "worktree-census",

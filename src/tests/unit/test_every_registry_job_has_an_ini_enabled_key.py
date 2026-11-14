@@ -29,15 +29,15 @@ def missing_switches( jobs, ini_text ):
     return [ j[ "job" ] for j in jobs if j.get( "cron_managed" ) and ( j.get( "enabled_key" ) != f"cron job {j[ 'job' ]} enabled" or have.get( j.get( "enabled_key" ) ) not in ( "true", "false" ) ) ]
 
 
-def test_the_registry_holds_eleven_cron_managed_jobs_and_each_has_a_switch_in_the_ini():
+def test_the_registry_holds_twelve_cron_managed_jobs_and_each_has_a_switch_in_the_ini():
     jobs = registry_jobs()
-    assert len( jobs ) == 24 and len( [ j for j in jobs if j.get( "cron_managed" ) ] ) == 11
+    assert len( jobs ) == 24 and len( [ j for j in jobs if j.get( "cron_managed" ) ] ) == 12
     assert missing_switches( jobs, read( INI ) ) == []
 
 
 def test_no_job_outside_cron_management_carries_a_key_that_controls_nothing():
     unmanaged = [ j for j in registry_jobs() if not j.get( "cron_managed" ) ]
-    assert len( unmanaged ) == 13
+    assert len( unmanaged ) == 12
     assert [ j[ "job" ] for j in unmanaged if "enabled_key" in j ] == []
     assert sorted( switch_values( read( INI ) ) ) == sorted( j[ "enabled_key" ] for j in registry_jobs() if j.get( "cron_managed" ) )
 
@@ -45,7 +45,7 @@ def test_no_job_outside_cron_management_carries_a_key_that_controls_nothing():
 def test_only_the_duplicate_check_ships_switched_off():
     have = switch_values( read( INI ) )
     assert sorted( k for k, v in have.items() if v == "false" ) == sorted( f"cron job {j} enabled" for j in HELD_OFF )
-    assert len( [ v for v in have.values() if v == "true" ] ) == 10
+    assert len( [ v for v in have.values() if v == "true" ] ) == 11
 
 
 def test_every_switch_has_a_splainer_twin():

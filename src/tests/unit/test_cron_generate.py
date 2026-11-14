@@ -392,8 +392,8 @@ def test_every_registry_job_that_runs_or_has_a_cron_tag_is_managed_or_says_why_n
     runnable = [ j for j in jobs if j.get( "run" ) or j.get( "cron_tag" ) or any( "cron" in e or "after_boot_seconds" in e for e in j.get( "schedule", [] ) ) ]
     managed  = [ j for j in runnable if j.get( "cron_managed" ) ]
     excluded = [ j for j in runnable if not j.get( "cron_managed" ) ]
-    assert len( managed ) >= 9 and len( excluded ) >= 3, "the loop below sees both populations"
-    assert "yearly-reminders" in { j[ "job" ] for j in excluded }
+    assert len( managed ) >= 9 and len( excluded ) >= 2, "the loop below sees both populations"
+    assert { j[ "job" ] for j in excluded } == { "yearly-reminders", "context-tick" }, "doc-parity-tick is managed since row 94033d80; context-tick stays with its own installer"
     assert "worktree-census" in { j[ "job" ] for j in managed }
     census = next( j for j in managed if j[ "job" ] == "worktree-census" )
     assert census[ "clean_exit_codes" ] == [ 0, 1 ], "it exits 1 whenever it has findings, which is its report, not a failure"
