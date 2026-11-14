@@ -144,7 +144,7 @@ def lock( held ):
 def test_live_run_bounds_each_run_by_the_calls_left_and_writes_a_history_line(tmp_path, monkeypatch):
     for name in ( "a.json", "b.json" ): ( tmp_path / name ).write_text( json.dumps( DOC ), encoding="utf-8" )
     caps = []
-    def fake( root, doc, ids, parts, cli, cap, parallel ):
+    def fake( root, doc, ids, parts, cli, cap, parallel, *rest ):
         caps.append( ( ids, cap ) )
         return [ { "id": ids[ 0 ] } ], [ { "id": ids[ 0 ] } ], [ "gone" ], cap
     monkeypatch.setattr( sc, "rejudge_run", fake )
@@ -235,7 +235,7 @@ def test_rejudge_run_takes_every_definition_of_the_tree_for_a_baseline_run(tmp_p
 
 def test_second_pass_writes_its_history_line_even_when_a_later_run_file_raises(tmp_path, monkeypatch):
     for name in ( "a.json", "b.json" ): ( tmp_path / name ).write_text( json.dumps( DOC ), encoding="utf-8" )
-    def fake( root, doc, ids, parts, cli, cap, parallel ):
+    def fake( root, doc, ids, parts, cli, cap, parallel, *rest ):
         if ids == [ "d-2" ]: raise RuntimeError( "the second run file broke" )
         return [], [], [], 3
     monkeypatch.setattr( sc, "rejudge_run", fake )
@@ -244,3 +244,24 @@ def test_second_pass_writes_its_history_line_even_when_a_later_run_file_raises(t
     last = history.read_lines( tmp_path )[ -1 ]
     assert last[ "mode" ] == sc.MODE and last[ "status" ] == "failed" and last[ "judge_calls" ] == 3
     assert history.calls_on( history.read_lines( tmp_path ), NOW.date().isoformat(), OPUS ) == 3
+
+
+def test_rejudge_run_judges_the_second_pass_under_its_own_model_and_slot(tmp_path, monkeypatch):
+    seen, released = [], []
+    def judge_all( wanted, everyone, cfg, wiring, slot, max_calls=None, skip_breaching=False ):
+        seen.append( ( cfg[ "model_id" ], slot, max_calls ) )
+        return { "verdicts": [], "unjudged": [] }
+    patch_live( monkeypatch, judge_all, released )
+    sc.rejudge_run( str( tmp_path ), DOC, [ "d-1" ], PARTS, "cli", 3, 1, first_model="model-x", second_model="model-y", second_slot=4 )
+    sc.rejudge_run( str( tmp_path ), DOC, [ "d-1" ], PARTS, "cli", 3, 1 )
+    assert seen == [ ( "model-x", 0, 0 ), ( "model-y", 4, 3 ), ( OPUS, 0, 0 ), ( OPUS, 1, 3 ) ]
+
+
+def test_second_pass_names_the_model_that_makes_the_calls_for_the_budget_and_the_history(tmp_path, monkeypatch):
+    ( tmp_path / "a.json" ).write_text( json.dumps( DOC ), encoding="utf-8" )
+    budgets, calls = [], []
+    monkeypatch.setattr( daily, "calls_left", lambda folder, parts, model, now: budgets.append( model ) or 10 )
+    monkeypatch.setattr( sc, "rejudge_run", lambda root, doc, ids, parts, cli, cap, parallel, first, second, slot: calls.append( ( first, second, slot ) ) or ( [], [], [], 2 ) )
+    sc.second_pass( "root", tmp_path, OPUS, { "a.json": [ "d-1" ] }, {}, "cli", 1, NOW, second_model=FABLE, second_slot=3 )
+    assert budgets == [ FABLE ] and calls == [ ( OPUS, FABLE, 3 ) ]
+    assert history.read_lines( tmp_path )[ -1 ][ "judge_model" ] == FABLE

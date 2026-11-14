@@ -149,17 +149,18 @@ def render( model, size, seed, groups, result=None ):
     return "\n".join( lines )
 
 
-def rejudge_run( root, doc, ids, parts, cli_path, cap, parallel ):
+def rejudge_run( root, doc, ids, parts, cli_path, cap, parallel, first_model=None, second_model=None, second_slot=SECOND_SLOT ):
     """
     Judge a run's sampled definitions on both slots.
 
     Requires:
         - doc is the run's result document, with the window it judged; ids are definition ids that run judged
         - parts are duplicate_check_daily.live_parts' answer; cap is the most model calls the second pass may make
+        - first_model and second_model are model ids, or None for the frozen configuration's own; second_slot is the slot of the second pass
 
     Ensures:
         - rebuilds the run's window from its start and end commits, and for a baseline run takes every definition of the tree as the baseline did, then checks out its end commit in a worktree of its own, and removes the worktree afterwards, even on an error
-        - replays slot 0 from the ledger with no call allowed, and judges slot 1 with up to cap calls
+        - replays slot 0 from the ledger under first_model with no call allowed, and judges second_slot under second_model with up to cap calls
         - returns ( first rows, second rows, missing ids, calls made ): missing are the sampled ids the window no longer yields as new definitions, or that a pass left unjudged
     """
     window   = { "start": doc[ "window" ][ "start" ], "end": doc[ "window" ][ "end" ] }
@@ -177,8 +178,8 @@ def rejudge_run( root, doc, ids, parts, cli_path, cap, parallel ):
         folder = pathlib.Path( parts[ "data_dir" ] ).joinpath( *daily.FOLDER )
         ledger = proof_cli.daily_ledger( parts[ "data_dir" ], cli_path, parts[ "backend" ], daily.FOLDER )
         wiring = { **proof_cli.base_wiring( folder / daily.VECTORS_DIR, parts[ "structural" ]( tree, cfg ), parallel, parts[ "client" ] ), "backend": count, "ledger": ledger, "redact_tools": True }
-        first  = pipeline.judge_all( wanted, [ *fresh[ "defs" ], *pool ], cfg, wiring, FIRST_SLOT, max_calls=0, skip_breaching=True )
-        second = pipeline.judge_all( wanted, [ *fresh[ "defs" ], *pool ], cfg, wiring, SECOND_SLOT, max_calls=cap, skip_breaching=True )
+        first  = pipeline.judge_all( wanted, [ *fresh[ "defs" ], *pool ], { **cfg, **( { "model_id": first_model } if first_model else {} ) }, wiring, FIRST_SLOT, max_calls=0, skip_breaching=True )
+        second = pipeline.judge_all( wanted, [ *fresh[ "defs" ], *pool ], { **cfg, **( { "model_id": second_model } if second_model else {} ) }, wiring, second_slot, max_calls=cap, skip_breaching=True )
     finally:
         daily.release( root, tree )
     unjudged = { u[ "id" ] for u in first[ "unjudged" ] } | { u[ "id" ] for u in second[ "unjudged" ] }
@@ -186,12 +187,13 @@ def rejudge_run( root, doc, ids, parts, cli_path, cap, parallel ):
     return first[ "verdicts" ], second[ "verdicts" ], sorted( missing ), count.calls
 
 
-def second_pass( root, folder, model, groups, parts, cli_path, parallel, now ):
+def second_pass( root, folder, model, groups, parts, cli_path, parallel, now, second_model=None, second_slot=SECOND_SLOT ):
     """
     Judge every sampled run's definitions on both slots and record the calls.
 
     Requires:
         - the caller holds the daily check's run lock
+        - second_model is None to judge again with model, or the id of another model; the day's budget and the history line then name second_model, because it makes the calls
 
     Ensures:
         - judges each run file's sample with rejudge_run, the calls of all of them bounded by the day's calls left
@@ -201,23 +203,24 @@ def second_pass( root, folder, model, groups, parts, cli_path, parallel, now ):
     Raises:
         - duplicate_check_daily.SpendRefused when the model's day budget is spent, before any call
     """
-    left   = daily.calls_left( folder, parts, model, now )
+    caller = second_model or model
+    left   = daily.calls_left( folder, parts, caller, now )
     total  = [ [], [], [], 0 ]
     status = "failed"
     try:
         for run_file, ids in groups.items():
             doc = json.loads( ( pathlib.Path( folder ) / run_file ).read_text( encoding="utf-8" ) )
-            got = rejudge_run( root, doc, ids, parts, cli_path, min( len( ids ), left - total[ 3 ] ), parallel )
+            got = rejudge_run( root, doc, ids, parts, cli_path, min( len( ids ), left - total[ 3 ] ), parallel, model, second_model, second_slot )
             for k in range( 3 ): total[ k ] += got[ k ]
             total[ 3 ] += got[ 3 ]
         status = "ok"
     finally:
-        history.append_line( folder, history.line_of( { "started_at": now.isoformat(), "trigger": "hand", "status": status, "mode": MODE, "judge_calls": total[ 3 ], "judge_model": model,
+        history.append_line( folder, history.line_of( { "started_at": now.isoformat(), "trigger": "hand", "status": status, "mode": MODE, "judge_calls": total[ 3 ], "judge_model": caller,
                                                        "elapsed_seconds": ( datetime.datetime.now().astimezone() - now ).total_seconds() }, MODE ) )
     return tuple( total )
 
 
-def live_run( root, folder, model, groups, parts, cli_path, parallel, now ):
+def live_run( root, folder, model, groups, parts, cli_path, parallel, now, second_model=None, second_slot=SECOND_SLOT ):
     """
     Run the second pass for every sampled run, inside the daily check's run lock.
 
@@ -229,7 +232,7 @@ def live_run( root, folder, model, groups, parts, cli_path, parallel, now ):
         - RuntimeError when the lock is held; duplicate_check_daily.SpendRefused when the budget is spent
     """
     with daily.run_lock( parts[ "data_dir" ] ) as held:
-        got = second_pass( root, folder, model, groups, parts, cli_path, parallel, now ) if held else None
+        got = second_pass( root, folder, model, groups, parts, cli_path, parallel, now, second_model, second_slot ) if held else None
     if got is None: raise RuntimeError( "another run holds the run lock; try again when it ends" )
     return got
 
