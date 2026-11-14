@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-daily-ledger
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.proof.proof_cli.daily_ledger@d6cba5c36e
   - cosa.repo.duplicate_check.proof.proof_cli.StampedLedger@21e8828a11

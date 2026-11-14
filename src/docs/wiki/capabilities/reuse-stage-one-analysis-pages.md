@@ -1,6 +1,6 @@
 ---
 capability: reuse-stage-one-analysis-pages
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_stage1_analysis.analyze_pages@66e471b628
   - lupin_mcp.reuse_stage1_analysis.page_arm@624f70c6a9

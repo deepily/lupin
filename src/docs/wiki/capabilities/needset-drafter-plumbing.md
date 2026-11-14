@@ -1,6 +1,6 @@
 ---
 capability: needset-drafter-plumbing
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.draft.drafter_model@0dce3b9d06
   - lupin_mcp.reuse_needset.draft.drafter_call@21a2899b71

@@ -1,6 +1,6 @@
 ---
 capability: api-keys-table-creator
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.create_api_keys_table.create_api_keys_table@1f71d7d883
   - scripts.create_api_keys_table.validate_schema@088a6c5c12

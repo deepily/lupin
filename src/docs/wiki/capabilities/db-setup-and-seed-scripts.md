@@ -1,6 +1,6 @@
 ---
 capability: db-setup-and-seed-scripts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.auth_migration.migrate_mock_users.generate_secure_password@c2839aff40
   - scripts.auth_migration.migrate_mock_users.migrate_users@02f45540fc

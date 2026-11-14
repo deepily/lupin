@@ -1,6 +1,6 @@
 ---
 capability: job-backfill-readers
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.job_backfill.librarian_steps@9ea493e487
   - lupin_mcp.job_backfill.refresh_steps@86e3a94968

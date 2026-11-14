@@ -1,6 +1,6 @@
 ---
 capability: task-approve-link
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.rest.task_approve_link.approve_link_line@5d3c5732e8
   - src.lupin_app.static.js.shared.approve-link.approveRowId@411733b4a9

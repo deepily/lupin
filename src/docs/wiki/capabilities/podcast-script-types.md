@@ -1,6 +1,6 @@
 ---
 capability: podcast-script-types
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.script_types.ScriptTypeProfile@0a95e8fc95
   - cosa.agents.podcast_generator.script_types.get_profile@dba44bd84b

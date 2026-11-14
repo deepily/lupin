@@ -1,6 +1,6 @@
 ---
 capability: admin-users-api-and-table
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.admin.js.admin-users.loadUsers@c509aca888
   - src.lupin_app.static.html.auth.admin.js.admin-users.getUserDetails@bb833719cb

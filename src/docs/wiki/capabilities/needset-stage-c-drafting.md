@@ -1,6 +1,6 @@
 ---
 capability: needset-stage-c-drafting
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.stage_c.draft_job@5b9025eb24
   - lupin_mcp.reuse_needset.stage_c.request_for@0227b7492b

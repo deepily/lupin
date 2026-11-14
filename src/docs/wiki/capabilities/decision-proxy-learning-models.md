@@ -1,6 +1,6 @@
 ---
 capability: decision-proxy-learning-models
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.agents.decision_proxy.bayesian_trust.BayesianLogisticRegression@bb0b7b0250
   - cosa.agents.decision_proxy.conformal_wrapper.ConformalDecisionWrapper@fb9a2a2800

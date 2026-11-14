@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-blind-and-extract
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.blind.assert_blind@44209a6a27
   - cosa.repo.duplicate_check.blind.redact_tool_names@03c8a313df

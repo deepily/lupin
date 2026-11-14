@@ -1,6 +1,6 @@
 ---
 capability: respin-credit-and-reap-branch-check
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.respin_credit.credit_dir@3a81d5e79d
   - lupin_mcp.respin_credit.mint@f8d572608c

@@ -1,6 +1,6 @@
 ---
 capability: reuse-fresh-needs-sample
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_phase5_run.pick_sample@33cacf08ad
   - lupin_mcp.reuse_phase5_run.write_sample@d722fdcf1f

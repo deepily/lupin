@@ -1,6 +1,6 @@
 ---
 capability: reuse-run-harness
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_harness.arms.build_session_config@5288cd90e4
   - lupin_mcp.reuse_harness.arms.verify_arm@25226f86a8

@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-proof-label-loader
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.proof.label_load.key_rows@18eed9d6c1
   - cosa.repo.duplicate_check.proof.label_load.pair_key_labels@83ea19795a

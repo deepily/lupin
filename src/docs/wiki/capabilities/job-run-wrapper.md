@@ -1,6 +1,6 @@
 ---
 capability: job-run-wrapper
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.job_run.last_int@eaae30df87
   - lupin_mcp.job_run.stream_run@bdc5517dbe

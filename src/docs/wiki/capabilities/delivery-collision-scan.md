@@ -1,6 +1,6 @@
 ---
 capability: delivery-collision-scan
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.delivery-collision-scan.discover_branches@a5a7e084b0
   - scripts.delivery-collision-scan.commit_file_map@075108e93d

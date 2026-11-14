@@ -1,6 +1,6 @@
 ---
 capability: reuse-fresh-needs-figures
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_phase5_stage.agreement@384399e870
   - lupin_mcp.reuse_phase5_stage.false_reuse@e8fbd288b8

@@ -1,6 +1,6 @@
 ---
 capability: utils-review-verdict-gate
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.utils.review_verdict.last_summary_counts@1e56847ddf
   - cosa.utils.review_verdict.parse_census@a9b41687f3

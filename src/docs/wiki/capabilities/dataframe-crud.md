@@ -1,6 +1,6 @@
 ---
 capability: dataframe-crud
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.crud_for_dataframes.agent.CrudForDataFramesAgent@d31214bbfa
   - cosa.crud_for_dataframes.agent.CrudForDataFramesAgent.run_code@c773563ecc

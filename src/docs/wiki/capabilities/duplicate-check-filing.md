@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-filing
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_filing.correlation_key@0c74ec30fe
   - lupin_mcp.duplicate_check_filing.for_record@630a473baf
