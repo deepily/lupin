@@ -188,6 +188,31 @@ class CategoryTrust:
 
         return min( computed_level, self.cap_level )
 
+    def _level_from_rate( self, rate, n ):
+        """
+        Pick the trust level a success rate and an observation count earn.
+
+        A level needs both its rate threshold and its minimum sample count, and the climb stops at the first level that misses either.
+
+        Requires:
+            - rate is the number the caller judges: the Beta lower bound or the BLR posterior mean
+            - n is the number of observations behind it
+
+        Ensures:
+            - returns the highest level from 2 to 5 whose rate_thresholds and min_samples both hold, else 1
+            - never returns more than cap_level
+        """
+        computed_level = 1
+        for lvl in ( 2, 3, 4, 5 ):
+            rate_ok    = rate >= self.rate_thresholds[ lvl ]
+            samples_ok = n >= self.min_samples[ lvl ]
+            if rate_ok and samples_ok:
+                computed_level = lvl
+            else:
+                break
+
+        return min( computed_level, self.cap_level )
+
     def _level_beta( self ):
         """
         Beta-Bernoulli trust level computation.
@@ -210,16 +235,7 @@ class CategoryTrust:
         # 95% credible interval lower bound
         lower_bound = beta_dist.ppf( 0.05, alpha, beta )
 
-        computed_level = 1
-        for lvl in ( 2, 3, 4, 5 ):
-            rate_ok    = lower_bound >= self.rate_thresholds[ lvl ]
-            samples_ok = n >= self.min_samples[ lvl ]
-            if rate_ok and samples_ok:
-                computed_level = lvl
-            else:
-                break
-
-        return min( computed_level, self.cap_level )
+        return self._level_from_rate( lower_bound, n )
 
     def _level_blr( self ):
         """
@@ -239,16 +255,7 @@ class CategoryTrust:
 
         rate = self._blr_model.posterior_mean_rate()
 
-        computed_level = 1
-        for lvl in ( 2, 3, 4, 5 ):
-            rate_ok    = rate >= self.rate_thresholds[ lvl ]
-            samples_ok = n >= self.min_samples[ lvl ]
-            if rate_ok and samples_ok:
-                computed_level = lvl
-            else:
-                break
-
-        return min( computed_level, self.cap_level )
+        return self._level_from_rate( rate, n )
 
     @staticmethod
     def build_feature_vector( question, category_index, hour_of_day=None, recent_error_rate=0.0 ):
