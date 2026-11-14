@@ -270,14 +270,8 @@
       "audience": [
         "managers"
       ],
-      "run": {
-        "argv": [
-          "{pip}/workflow/scripts/context-pressure-tick.sh"
-        ],
-        "env": {}
-      },
       "owner_confirmed": false,
-      "cron_exclusion_reason": "planning-is-prompting owns this script and its fleet timer install (slot-fleet tag), so it is not a Lupin line to generate"
+      "cron_exclusion_reason": "planning-is-prompting owns this script and its fleet timer install (slot-fleet tag), so it is not a Lupin line to generate. Its installer writes the line as cron-job.sh context-tick cron -- <tick>, so job_run records each run; there is no run block, so the page offers no Run now (Rick, decision 317d5101, 2026-11-14)"
     },
     {
       "job": "doc-parity-tick",
@@ -288,6 +282,9 @@
       "schedule": [
         {
           "cron": "30 7 * * *"
+        },
+        {
+          "after_boot_seconds": 180
         }
       ],
       "summary_path": "{root}/io/jobs/doc-parity-tick/job-summary.json",
