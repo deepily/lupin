@@ -769,6 +769,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-render-voice-and-tts]] — Direct TTS, TTS chrome, preview slider, conversation-mode pin and time-saved tiles. `src.lupin_app.static.js.multiplexer.render` (DirectTtsRenderer, TtsChromeRenderer, TtsPreviewSliderRenderer, ConversationModePinRenderer, TimeSavedRenderer)
 - [[web-client-render-transcript-and-reading]] — the console transcript, reading pane, Q&A pane and Submit Agentic Jobs pane. `src.lupin_app.static.js.multiplexer.render` (SessionTranscriptRenderer, ReadingPaneRenderer, QaPaneRenderer, SubmitJobsPaneRenderer)
 - [[web-client-render-task-board-panes]] — the Epic Board, Finished Tasks, Fleet Status, Holding Area, Task List and Jobs pane renderers. `src.lupin_app.static.js.multiplexer.render` (EpicBoardRenderer, FinishedTasksRenderer, FleetStatusRenderer, HoldingAreaRenderer, TaskListRenderer, JobsPaneRenderer)
+- [[rest-cron-job-switches]] — the on/off key of each scheduled job, its read and write module, the GET and PUT endpoint and the legacy accordion. `cosa.rest` (cron_job_switches, routers.cron_jobs)
+- [[cc-hook-cron-switch-guard]] — the PreToolUse guard and the pre-commit check that stop a hand edit of a scheduled-job switch. `lupin_cli.claude_code.hooks.lib` (cron_switch_guard, cron_switch_commit_check)
 - [[web-client-render-chrome-and-settings]] — the nav bar, section toolbar, debug, filter settings and system status panes. `src.lupin_app.static.js.multiplexer.render` (NavBarRenderer, SectionToolbarRenderer, DebugPanelRenderer, FilterSettingsRenderer, SystemStatusRenderer)
 
 ## Draft slugs folded into written pages
