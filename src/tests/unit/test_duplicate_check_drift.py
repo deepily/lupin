@@ -115,19 +115,20 @@ def test_finding_judges_read_each_finding_and_tolerate_runs_with_none(tmp_path):
     write_run( tmp_path, "2026-11-14-100000-cron.json", "2026-11-14T10:00:00-05:00", findings=[ { "id": "d-1", "judge_model": OPUS }, { "id": "d-2", "judge_model": f"{OPUS}+{FABLE}", "reused_from_model": FABLE }, { "id": "d-3" } ] )
     write_run( tmp_path, "2026-11-14-110000-cron.json", "2026-11-14T11:00:00-05:00", findings=None )
     bad = []
-    assert dd.finding_judges( tmp_path, bad ) == { ( "2026-11-14-100000-cron", "d-1" ): ( OPUS, False ), ( "2026-11-14-100000-cron", "d-2" ): ( f"{OPUS}+{FABLE}", True ) }
+    assert dd.finding_judges( tmp_path, bad ) == { ( "2026-11-14-100000-cron", "d-1" ): ( OPUS, False ), ( "2026-11-14-100000-cron", "d-2" ): ( f"{OPUS}+{FABLE}", True ), ( "2026-11-14-100000-cron", "d-3" ): ( dd.NO_MODEL, False ) }
     assert bad == []
 
 
 def test_triage_table_counts_each_finding_once_under_its_judge(tmp_path):
     write_run( tmp_path, "2026-11-14-100000-cron.json", "2026-11-14T10:00:00-05:00", findings=[
-        { "id": "d-1", "judge_model": OPUS }, { "id": "d-2", "judge_model": OPUS }, { "id": "d-3", "judge_model": OPUS }, { "id": "d-4", "judge_model": FABLE, "reused_from_model": FABLE }, { "id": "d-5", "judge_model": FABLE } ] )
-    verdicts = [ ( "d-1", "DUPLICATE" ), ( "d-2", "DISTINCT" ), ( "d-4", "EXTEND" ), ( "d-4", "DISTINCT" ), ( "d-9", "DUPLICATE" ) ]
+        { "id": "d-1", "judge_model": OPUS }, { "id": "d-2", "judge_model": OPUS }, { "id": "d-3", "judge_model": OPUS }, { "id": "d-4", "judge_model": FABLE, "reused_from_model": FABLE }, { "id": "d-5", "judge_model": FABLE }, { "id": "d-6" }, { "id": "d-7" } ] )
+    verdicts = [ ( "d-1", "DUPLICATE" ), ( "d-2", "DISTINCT" ), ( "d-4", "EXTEND" ), ( "d-4", "DISTINCT" ), ( "d-6", "EXTEND" ), ( "d-9", "DUPLICATE" ) ]
     ( tmp_path / "verdicts.jsonl" ).write_text( "\n".join( json.dumps( { "run": "2026-11-14-100000-cron", "finding": f, "verdict": v } ) for f, v in verdicts ) + "\n", encoding="utf-8" )
     rows = dd.triage_table( tmp_path, [] ).splitlines()[ 2: ]
     assert rows[ 0 ].startswith( f"| {OPUS} | 3 | 1 | 0 | 1 | 1 | 1/2 (50.0%," ) and rows[ 0 ].endswith( "| 0 |" )
     assert rows[ 1 ].startswith( f"| {FABLE} | 2 | 0 | 0 | 1 | 1 | 0/1 (0.0%," ) and rows[ 1 ].endswith( "| 1 |" )
-    assert len( rows ) == 2
+    assert rows[ 2 ].startswith( f"| {dd.NO_MODEL} | 2 | 0 | 1 | 0 | 1 | 1/1 (100.0%," )
+    assert len( rows ) == 3
 
 
 def test_triage_table_refuses_a_damaged_verdicts_file(tmp_path):
@@ -149,6 +150,7 @@ def test_report_holds_both_tables_the_references_and_the_unreadable_files(tmp_pa
     assert "## Triage outcomes by judge model" in text
     assert f"{dd.NO_RUN_FILE}: 2026-11-14-110000-cron.json" in text
     assert text.count( "2026-11-14-110000-cron.json" ) == 1
+    assert dd.NO_MODEL not in text
     with pytest.raises( ValueError ): dd.report( tmp_path, OPUS, FABLE, "11 Nov" )
 
 
@@ -202,3 +204,9 @@ def test_pair_counts_count_a_models_own_rows_and_leave_reused_ones_out():
     assert daily.pair_counts( [ rows[ 4 ] ] ) == {}
     assert daily.pair_counts( [] ) == {}
     assert "pairs" in daily.UNREACHED
+
+
+def test_report_says_so_when_findings_name_no_model(tmp_path):
+    write_run( tmp_path, "2026-11-14-100000-cron.json", "2026-11-14T10:00:00-05:00", findings=[ { "id": "d-1" } ] )
+    text = dd.report( tmp_path, OPUS, FABLE, "2026-11-11" )
+    assert f"| {dd.NO_MODEL} | 1 |" in text and f"The row '{dd.NO_MODEL}' holds the findings written before result files named their judge" in text

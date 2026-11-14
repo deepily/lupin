@@ -35,6 +35,7 @@ EXIT_NOT_MADE   = 3
 SHIFT_HEADERS   = ( "week of", "pair verdicts", "flagged", "rate", "against the proof's rate", "against the backlog rate" )
 TRIAGE_HEADERS  = ( "judge model", "findings", "duplicate", "extend", "distinct", "not ruled yet", "real of ruled", "of which reused" )
 NO_RUN_FILE     = "result files that cannot be read"
+NO_MODEL        = "no model recorded"   # the label of findings written before result files carried judge_model
 KEY_MODEL_AT    = 4                     # the model id inside a judge ledger key: stage|old|new|prompt|model|slot
 VERSION_LEDGERS = "judge-ledger.claude-*.jsonl"
 
@@ -174,12 +175,12 @@ def finding_judges( folder, unreadable ):
     Ensures:
         - returns { ( run file stem, finding id ): ( judge_model, reused ) } for every finding of every result file in folder; reused is True when the finding carries reused_from_model
         - a file that cannot be read adds its name to unreadable, and a run that failed before judging has no findings
-        - a finding with no judge_model is left out
+        - a finding with no judge_model is kept, under NO_MODEL, because every finding written before the field existed has none
     """
     got = {}
     for name, doc in run_documents( folder, unreadable ):
         for f in doc.get( "findings" ) or []:
-            if "judge_model" in f: got[ ( pathlib.Path( name ).stem, f[ "id" ] ) ] = ( f[ "judge_model" ], "reused_from_model" in f )
+            got[ ( pathlib.Path( name ).stem, f[ "id" ] ) ] = ( f.get( "judge_model", NO_MODEL ), "reused_from_model" in f )
     return got
 
 
@@ -237,6 +238,7 @@ def report( folder, model, baseline_model, before ):
     lines = [ f"# Interim judge drift report: {model}", "", f"Weekly flag rate of {model}: its own pair verdicts only, never a reused ruling.", "", flags, "",
               f"Fable's rate on the proof: {share( round( PROOF_FLAG_RATE * 100 ), 100 )}.",
               f"{baseline_model} before {before}, from {len( backlog[ 2 ] )} version ledger(s) ({', '.join( backlog[ 2 ] ) or 'none'}): {share( backlog[ 1 ], backlog[ 0 ] )}.", "", "## Triage outcomes by judge model", "", triage ]
+    if NO_MODEL in triage: lines += [ "", f"The row '{NO_MODEL}' holds the findings written before result files named their judge; the model that ruled them is not recorded." ]
     if unreadable: lines += [ "", f"{NO_RUN_FILE}: {', '.join( sorted( set( unreadable ) ) )}" ]
     return "\n".join( lines )
 
