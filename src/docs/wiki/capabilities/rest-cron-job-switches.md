@@ -11,7 +11,7 @@ pins:
   - cosa.rest.cron_job_switches.switch_key@fb6e422e6c
   - cosa.rest.cron_job_switches.ini_path@0692c2e155
   - cosa.rest.cron_job_switches.state_path@c716314db9
-  - cosa.rest.routers.cron_jobs.get_cron_jobs@1b55ea8ac4
+  - cosa.rest.routers.cron_jobs.get_cron_jobs@f9d839ca5b
   - cosa.rest.routers.cron_jobs.put_cron_job_enabled@43257eacb6
   - cosa.rest.routers.cron_jobs.CronJobSwitchIn@684b9444e6
 ---
