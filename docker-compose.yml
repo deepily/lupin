@@ -711,6 +711,14 @@ services:
       # ⚠️ Applies at container CREATE: `up -d --force-recreate lupin-rest-test`. The copy is seeded
       # by test_skeleton_crew_switch_integration.py on its first run.
       LUPIN_SKELETON_CREW_INI: /var/lupin/flow-ratio/skeleton-crew.test.ini
+      # The scheduled-job switches THIS server reads and writes (row 063fc1a8): a test-only copy of the
+      # configuration file in the shared flow-ratio folder, never the real src/conf/lupin-app.ini. The cron
+      # jobs on the host read the real file at every run, so an E2E flip here would switch a real job off.
+      # cron_job_switches.ini_path() is the one resolver for the PUT writer and every reader of
+      # GET /api/cron-jobs, and the attribution record sits beside the copy. The write lock is NOT moved.
+      # ⚠️ Applies at container CREATE: `up -d --force-recreate lupin-rest-test`. The copy is seeded by
+      # test_cron_jobs_section_in_both_clients.py on its first run.
+      LUPIN_CRON_SWITCH_INI: /var/lupin/flow-ratio/cron-switches.test.ini
       LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
       # Row 80513825 (Rick, 2026-10-03): the app connects as its OWN role, `lupin_app`, not

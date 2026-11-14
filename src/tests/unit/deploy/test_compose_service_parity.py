@@ -321,6 +321,12 @@ KNOWN_DIVERGENT_ENV = {
                       "launcher and every Stop hook read.",
         "cloud-gpu" : "2026-10-10 — no test server on the VM.",
     },
+    "LUPIN_CRON_SWITCH_INI": {
+        "dev-dev"   : "2026-11-14 — only :8000 gets a test-only copy of the configuration file for the "
+                      "scheduled-job switches; :7999 keeps the real src/conf/lupin-app.ini, which every "
+                      "cron job reads at its next start (row 063fc1a8).",
+        "cloud-gpu" : "2026-11-14 — no test server on the VM.",
+    },
     "LUPIN_HEARTBEAT_POKE_MUTE_FILE": {
         "dev-dev"   : "2026-10-02 — only :8000 gets a test-only poke switch file; :7999 keeps the "
                       "fleet's real heartbeat-poke-mute.json, which the Stop hook on the host reads.",

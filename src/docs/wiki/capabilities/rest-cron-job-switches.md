@@ -34,3 +34,5 @@ Each job in `src/conf/job-registry.json` has one on/off key in `src/conf/lupin-a
 - The legacy client shows the rows in the Scheduled Jobs section of the notifications page. Its code is `cron-jobs.js`. A row shows the switch, who flipped it last, and a note when `drift` is true.
 - Everyone sees the switches. Only an administrator login gets a control that sends the PUT. The control is disabled for a job that does not read its switch and for a key with no value yet.
 - The page updates a row when it receives `cron_job_switch_changed`.
+- The multiplexer has its own copy: the Scheduled Jobs pane, `CronJobsRenderer.ts`. It polls every 60 seconds, flips with `ApiClient.put`, and repaints a row from the bus event.
+- The `:8000` E2E flips a scratch copy named by `LUPIN_CRON_SWITCH_INI`, never the real file. It refuses to run when the variable is unset. A compose change needs a force-recreate.

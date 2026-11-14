@@ -78,6 +78,7 @@ import {
   createHoldingAreaRenderer,
   createEpicBoardRenderer,
   createBackgroundJobsRenderer,
+  createCronJobsRenderer,
   createSectionToolbarRenderer,
   createNavBarRenderer,
   type TtsPreviewSliderRenderer,
@@ -1099,6 +1100,13 @@ function bootMultiplexer(): void {
   if (backgroundJobsMountEl === null) throw new Error("multiplexer: #background-jobs-pane not found");
   backgroundJobsRenderer.mount(backgroundJobsMountEl);
 
+  // Scheduled jobs (row 063fc1a8, phase 2): each cron job's INI switch, flippable by an administrator.
+  // It takes its own fetch of GET /api/cron-jobs and repaints on the `cron_job_switch_changed` socket frame.
+  const cronJobsRenderer = createCronJobsRenderer({ api: apiClient, eventBus });
+  const cronJobsMountEl = document.getElementById("cron-jobs-pane");
+  if (cronJobsMountEl === null) throw new Error("multiplexer: #cron-jobs-pane not found");
+  cronJobsRenderer.mount(cronJobsMountEl);
+
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
   // carbon-copy of the legacy floating #section-toolbar: per-section visibility
   // toggles + collapse-all/expand-all. Drives the ViewStateStore (persisted);
@@ -1315,6 +1323,7 @@ function bootMultiplexer(): void {
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
       backgroundJobsRenderer      : "mounted",
+      cronJobsRenderer            : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
       sectionToolbarRenderer      : "mounted",
       // Lane L4 (v0.1.9) — top nav / logout bar.
@@ -1361,6 +1370,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] holdingAreaRenderer:mounted");
   console.log("[multiplexer] epicBoardRenderer:mounted");
   console.log("[multiplexer] backgroundJobsRenderer:mounted");
+  console.log("[multiplexer] cronJobsRenderer:mounted");
   console.log("[multiplexer] sectionToolbarRenderer:mounted");
   // Parity B-4 — Time Saved mounts LAST of all the panes, in the pre-allocated
   // slot block below the toolbar, so its handshake sits after the toolbar's.
