@@ -1,6 +1,6 @@
 ---
 capability: commons-persona-disambiguation
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.commons_xml_models.PersonaInfo@046381c0cd
   - lupin_mcp.commons_xml_models.PersonaDisambiguationRequest@481d1de3ef

@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-package-sweep
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.doc_lint.scope_gate.check@af101dc1f0
   - cosa.repo.doc_lint.scope_gate.report@b84598b273

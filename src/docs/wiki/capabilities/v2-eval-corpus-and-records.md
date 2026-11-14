@@ -1,6 +1,6 @@
 ---
 capability: v2-eval-corpus-and-records
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.v2_eval.is_utterance_line@64850c3a82
   - scripts.v2_eval.load_corpus@a967cde576

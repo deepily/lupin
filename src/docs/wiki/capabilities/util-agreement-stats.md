@@ -1,6 +1,6 @@
 ---
 capability: util-agreement-stats
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.agreement_stats.mcnemar_exact@f383c680a6
   - cosa.utils.agreement_stats.percentile@beba0273a0

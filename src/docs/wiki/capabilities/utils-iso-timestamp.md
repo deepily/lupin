@@ -1,6 +1,6 @@
 ---
 capability: utils-iso-timestamp
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.iso_timestamp.parse_iso@1f810d5498
 ---

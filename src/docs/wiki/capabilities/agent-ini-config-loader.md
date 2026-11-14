@@ -1,6 +1,6 @@
 ---
 capability: agent-ini-config-loader
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.shared.config_loader.load_kwargs_from_ini@e7b509ef5d
   - cosa.agents.shared.config_loader.load_dataclass_from_ini@d57cdf477c

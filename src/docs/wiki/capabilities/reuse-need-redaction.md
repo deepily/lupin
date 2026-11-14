@@ -1,6 +1,6 @@
 ---
 capability: reuse-need-redaction
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_redact.routes_from_text@939fa88900
   - lupin_mcp.reuse_redact.redact_need@fc6d8b971f

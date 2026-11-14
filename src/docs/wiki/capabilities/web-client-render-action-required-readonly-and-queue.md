@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-action-required-readonly-and-queue
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredReadOnly.renderActionRequiredReadOnly@ee6da9c1c5
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredReadOnly.renderActionRequiredEmpty@466033654e

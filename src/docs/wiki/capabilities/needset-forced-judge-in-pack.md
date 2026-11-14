@@ -1,6 +1,6 @@
 ---
 capability: needset-forced-judge-in-pack
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.forced_judge.places_for@edc21c777b
   - lupin_mcp.reuse_needset.forced_judge.judge_row_in_pack@9baa20c696

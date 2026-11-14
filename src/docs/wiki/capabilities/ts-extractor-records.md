@@ -1,6 +1,6 @@
 ---
 capability: ts-extractor-records
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.cosa.repo.symindex.ts_extract.scriptKind@f2d9a2be27
   - src.cosa.repo.symindex.ts_extract.emit@78a1a8a072
@@ -9,7 +9,7 @@ pins:
   - src.cosa.repo.symindex.ts_extract.leafTokens@e1a87cba1a
   - src.cosa.repo.symindex.ts_extract.pinOf@f58136cf90
   - src.cosa.repo.symindex.ts_extract.params@80781d7315
-  - src.cosa.repo.symindex.ts_extract.iifeStatements@b94f22aee0
+  - src.cosa.repo.symindex.ts_extract.iifeStatements@9d8fd16bef
   - src.cosa.repo.symindex.ts_extract.emitStatements@0cd255abf9
 ---
 # TypeScript extractor: records, docs and pins

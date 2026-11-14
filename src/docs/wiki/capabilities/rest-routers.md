@@ -1,6 +1,6 @@
 ---
 capability: rest-routers
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers.v2_ask.build_ask_flow@b262e00dda
   - cosa.rest.routers.v2_ask.install_ask_flow@b35d082dfd

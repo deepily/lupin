@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-daily-budget
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_daily.calls_left@0ae75e1843
   - lupin_mcp.duplicate_check_daily.SpendRefused@71a0de09ed

@@ -1,6 +1,6 @@
 ---
 capability: reuse-run-harness-start
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_harness.driver.image_of@292ecb1da0
   - lupin_mcp.reuse_harness.driver.run_dir_of@9fa8dc9b7c

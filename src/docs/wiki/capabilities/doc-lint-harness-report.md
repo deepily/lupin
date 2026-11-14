@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-harness-report
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.doc_lint.harness_report.upper_bound@4a36fef7ca
   - cosa.repo.doc_lint.harness_report.interval@b2d80868e6

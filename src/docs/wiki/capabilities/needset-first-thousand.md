@@ -1,6 +1,6 @@
 ---
 capability: needset-first-thousand
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.planted_pool.planted_entry@79f54086e3
   - lupin_mcp.reuse_needset.planted_pool.PlantedVectors@067b309b7a

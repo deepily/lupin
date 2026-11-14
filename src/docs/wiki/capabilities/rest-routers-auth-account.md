@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-auth-account
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers.auth.register@40778b116c
   - cosa.rest.routers.auth.refresh@35fa448227

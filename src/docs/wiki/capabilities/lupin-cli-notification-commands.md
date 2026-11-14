@@ -1,6 +1,6 @@
 ---
 capability: lupin-cli-notification-commands
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_cli.notifications.notify_user.main@997116db53
   - lupin_cli.notifications.notify_user.validate_environment@f16063d649

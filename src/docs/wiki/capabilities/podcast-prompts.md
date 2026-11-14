@@ -1,6 +1,6 @@
 ---
 capability: podcast-prompts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.prompts.personality.create_personality_from_description@2440f72cf7
   - cosa.agents.podcast_generator.prompts.personality.get_dynamic_duo_description@4593091a9d

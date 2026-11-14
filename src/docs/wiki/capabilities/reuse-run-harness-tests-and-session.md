@@ -1,6 +1,6 @@
 ---
 capability: reuse-run-harness-tests-and-session
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_harness.acceptance.Acceptance@80a0430e63
   - lupin_mcp.reuse_harness.acceptance.Acceptance.run@ffb05c068a

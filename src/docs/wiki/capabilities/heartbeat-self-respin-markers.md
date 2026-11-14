@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-self-respin-markers
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinVerdict@1780b0a196
   - cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinAssessment@24a3b7429a

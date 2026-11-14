@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-arbiter-switches
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers.arbiter.FleetSnapshotIn@d268d47ccb
   - cosa.rest.routers.arbiter.get_fleet_snapshot@f6c8cfc229

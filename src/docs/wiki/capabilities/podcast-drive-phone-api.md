@@ -1,6 +1,6 @@
 ---
 capability: podcast-drive-phone-api
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers.podcast_drive.list_podcasts@5a1c443337
   - cosa.rest.routers.podcast_drive.stream_podcast_file@71d684576c

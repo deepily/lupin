@@ -1,6 +1,6 @@
 ---
 capability: needset-judge-probe-figures
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.judge_probe_read.accepted@ba187fc5a7
   - lupin_mcp.reuse_needset.judge_probe_read.newcombe@dade3c0c82

@@ -1,6 +1,6 @@
 ---
 capability: reuse-need-check-and-stage-client
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_need_check.entry_text_of@e084f98b33
   - lupin_mcp.reuse_need_check.twin_groups@ae524d039f

@@ -1,6 +1,6 @@
 ---
 capability: reuse-stage-two-run
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_stage2_run.spec_for@3f1a54612d
   - lupin_mcp.reuse_stage2_run.load_plan@84a0149f29

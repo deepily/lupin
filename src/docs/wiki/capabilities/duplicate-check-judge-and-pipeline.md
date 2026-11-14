@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-judge-and-pipeline
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.judge.MaxPlanBackend@5cd98e2615
   - cosa.repo.duplicate_check.judge.WorkServerBackend@b57813f170

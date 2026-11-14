@@ -1,6 +1,6 @@
 ---
 capability: proxy-ratify-actions
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.toggleSelect@55706eea2e
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.toggleSelectAll@5d27846489

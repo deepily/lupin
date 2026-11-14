@@ -1,6 +1,6 @@
 ---
 capability: ts-doc-extract-script
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.scripts.ts_doc_extract.lineBody@58db6afb46
   - src.scripts.ts_doc_extract.blockBody@a48da3658c

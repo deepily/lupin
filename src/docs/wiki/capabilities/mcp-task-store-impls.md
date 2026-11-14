@@ -1,6 +1,6 @@
 ---
 capability: mcp-task-store-impls
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.task_store_tools.task_create_impl@0182da3c63
   - lupin_mcp.task_store_tools.task_correlate_impl@06e589af27

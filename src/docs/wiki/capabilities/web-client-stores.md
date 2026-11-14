@@ -1,6 +1,6 @@
 ---
 capability: web-client-stores
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.stores.index.createStores@dd40f53d52
   - src.lupin_app.static.js.multiplexer.stores.NotificationStore.NotificationStoreImpl.setFilterMode@dd07fd1290

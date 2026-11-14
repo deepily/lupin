@@ -1,6 +1,6 @@
 ---
 capability: needset-final-set
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.finalize.sample_size@7058a18b07
   - lupin_mcp.reuse_needset.finalize.select_for_labelling@e3b0670206

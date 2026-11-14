@@ -1,6 +1,6 @@
 ---
 capability: mcp-spawner-helpers
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.session_spawner.artifact_alarm@328d1ddec3
   - lupin_mcp.session_spawner.build_spawn_argv@f76212cac7

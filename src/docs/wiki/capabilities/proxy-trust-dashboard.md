@@ -1,6 +1,6 @@
 ---
 capability: proxy-trust-dashboard
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.admin.js.proxy-dashboard.loadTrustStates@bd20f13bc2
   - src.lupin_app.static.html.auth.admin.js.proxy-dashboard.loadRecentDecisions@a9ae90fe48

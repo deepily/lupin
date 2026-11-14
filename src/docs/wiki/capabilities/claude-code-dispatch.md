@@ -1,6 +1,6 @@
 ---
 capability: claude-code-dispatch
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@cf95a5e1a7
   - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher.dispatch@06780c00bc

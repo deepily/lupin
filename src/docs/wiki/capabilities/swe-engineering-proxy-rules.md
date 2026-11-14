@@ -1,6 +1,6 @@
 ---
 capability: swe-engineering-proxy-rules
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.swe_team.proxy.config.swe_proxy_config_from_config_mgr@b998418ea1
   - cosa.agents.swe_team.proxy.engineering_categories.get_category_cap_level@d39407b242

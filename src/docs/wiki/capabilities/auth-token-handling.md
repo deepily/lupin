@@ -1,6 +1,6 @@
 ---
 capability: auth-token-handling
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.js.auth.getAccessToken@5f9fd8ec2a
   - src.lupin_app.static.html.auth.js.auth.getRefreshToken@10fd7e178a

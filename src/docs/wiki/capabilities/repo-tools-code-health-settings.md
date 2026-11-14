@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-code-health-settings
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.code_health_settings.CodeHealthSettingError@3886071770
   - cosa.repo.code_health_settings.repo_key@30bc8ac55c

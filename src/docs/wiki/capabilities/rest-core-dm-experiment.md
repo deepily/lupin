@@ -1,6 +1,6 @@
 ---
 capability: rest-core-dm-experiment
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.dm_experiment.ExperimentPolicy@5eb9747bee
   - cosa.rest.dm_experiment.make_policy@7fafab9d7c

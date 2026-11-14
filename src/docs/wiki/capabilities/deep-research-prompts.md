@@ -1,6 +1,6 @@
 ---
 capability: deep-research-prompts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.deep_research.prompts.clarification.get_clarification_prompt@fb9304adce
   - cosa.agents.deep_research.prompts.clarification.parse_clarification_response@b7961e3f09

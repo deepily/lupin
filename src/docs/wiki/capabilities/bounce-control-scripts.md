@@ -1,6 +1,6 @@
 ---
 capability: bounce-control-scripts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.bounce_dev_warn.main@813d05dcac
   - scripts.capture-bounce-resubmit.parse_test_types@ba7a844a6a

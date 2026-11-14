@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-commons-broadcast
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers.commons.init_commons_state@5ce4446f77
   - cosa.rest.routers.commons.BroadcastRequestBody@136f15c48d

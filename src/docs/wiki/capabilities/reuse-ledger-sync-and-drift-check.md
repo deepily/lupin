@@ -1,6 +1,6 @@
 ---
 capability: reuse-ledger-sync-and-drift-check
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_ledger_sync.LedgerDrift@f10299888b
   - lupin_mcp.reuse_ledger_sync.check_drift@6e320e49ac

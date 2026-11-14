@@ -1,6 +1,6 @@
 ---
 capability: presentation-gate-silence-proof
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.presentation-gate-silence-proof.prove_gate_silence.register_and_login@b686afac4a
   - scripts.presentation-gate-silence-proof.prove_gate_silence.SilentConnectedUser@61224f42b8

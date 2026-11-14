@@ -1,6 +1,6 @@
 ---
 capability: reuse-stage-one-arm-driver
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_stage1.retry_index@bb75e81b71
   - lupin_mcp.reuse_stage1.StageRefused@114fa611ec

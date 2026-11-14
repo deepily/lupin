@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-test-code
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_daily.is_test_code@98d7410a63
   - lupin_mcp.duplicate_check_daily.without_test_code@d90d051822

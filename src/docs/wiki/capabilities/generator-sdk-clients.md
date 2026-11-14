@@ -1,6 +1,6 @@
 ---
 capability: generator-sdk-clients
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.api_client.PodcastAPIClient@3b9486000c
   - cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_script@92acc1bb1e

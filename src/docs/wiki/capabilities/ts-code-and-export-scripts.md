@@ -1,6 +1,6 @@
 ---
 capability: ts-code-and-export-scripts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.scripts.ts_code_tokens.isJavaScript@f4240df7da
   - src.scripts.ts_code_tokens.signature@5df62e47de

@@ -1,6 +1,6 @@
 ---
 capability: retired-queue-doors
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers._retired_doors.refusal_detail@28e39ec43b
   - cosa.rest.routers._retired_doors.gone@f7af6a87f6

@@ -1,6 +1,6 @@
 ---
 capability: api-key-and-account-scripts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.create_admin_test_account.main@15a3b48b34
   - scripts.create_service_account_postgres.generate_api_key@6698d96841

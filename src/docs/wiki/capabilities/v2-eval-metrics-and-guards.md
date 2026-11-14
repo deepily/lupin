@@ -1,6 +1,6 @@
 ---
 capability: v2-eval-metrics-and-guards
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.v2_eval.percentile@4330c1ce7f
   - scripts.v2_eval.route_matches@5bab207ef8

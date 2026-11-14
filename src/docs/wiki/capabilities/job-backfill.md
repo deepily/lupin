@@ -1,6 +1,6 @@
 ---
 capability: job-backfill
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.job_backfill.is_file@512d237ed5
   - lupin_mcp.job_backfill.mtime_of@a0a07f82d6

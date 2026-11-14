@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-refile
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_refile.RefileError@db8c97d407
   - lupin_mcp.duplicate_check_refile.FilingFailed@96b99fba14

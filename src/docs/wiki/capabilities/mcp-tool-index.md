@@ -1,6 +1,6 @@
 ---
 capability: mcp-tool-index
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.cosa_voice_mcp.SessionIdUnavailable@dffa40682f
   - lupin_mcp.cosa_voice_mcp.ask_open_ended_batch@872579d2a8

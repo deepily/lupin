@@ -1,6 +1,6 @@
 ---
 capability: credential-drift-and-scrubbing
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.credential_file_scrubber.count_value_occurrences@83f950bac1
   - cosa.utils.credential_file_scrubber.format_report@34636f2dfc

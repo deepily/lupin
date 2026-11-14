@@ -1,6 +1,6 @@
 ---
 capability: arbiter-context-pressure-writer
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_arbiter_app.context_pressure_writer.build_context_pressure_section@2f6023abac
   - lupin_arbiter_app.context_pressure_writer.ContextPressureWriterLoop@1fc1857cdd

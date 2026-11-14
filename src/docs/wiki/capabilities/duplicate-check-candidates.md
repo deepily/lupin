@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-candidates
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.body_vectors.body_text@c765892c19
   - cosa.repo.duplicate_check.body_vectors.engine_tag@73eaf52263

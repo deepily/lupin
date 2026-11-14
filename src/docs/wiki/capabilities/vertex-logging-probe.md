@@ -1,6 +1,6 @@
 ---
 capability: vertex-logging-probe
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.vertex_logging.LoggingReadout@f490615241
   - cosa.utils.vertex_logging.LoggingReadout.count_rows@e5b705ddff

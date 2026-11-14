@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-cards-session-strip
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.sessionStripIcon.personaInitial@7560a28a59
   - src.lupin_app.static.js.multiplexer.render.templates.sessionStripIcon.applyManagerBadge@6a13733074

@@ -1,6 +1,6 @@
 ---
 capability: util-csv-text
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.csv_text.split_csv@a4083fadf8
 ---

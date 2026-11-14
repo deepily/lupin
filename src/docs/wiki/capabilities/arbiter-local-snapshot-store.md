@@ -1,6 +1,6 @@
 ---
 capability: arbiter-local-snapshot-store
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_arbiter_app.local_snapshot_store.LocalSnapshotStore@2188d3215a
 ---

@@ -1,6 +1,6 @@
 ---
 capability: eval-isolation-write-target
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.eval_isolation_guard.IsolationNotConfigured@035d8f427e
   - scripts.eval_isolation_guard.PairedTargetsNotIsolated@5b5f3b1271

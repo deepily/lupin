@@ -1,6 +1,6 @@
 ---
 capability: agent-small-agents-and-helpers
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.agent_base.CodeGenerationFailedException@7b3dea2f9c
   - cosa.agents.runnable_code.RunnableCode@a166b37df7

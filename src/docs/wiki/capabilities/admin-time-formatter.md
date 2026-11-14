@@ -1,6 +1,6 @@
 ---
 capability: admin-time-formatter
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.admin.js.admin-time.formatRelativeTime@ad272f3b0b
 ---

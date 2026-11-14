@@ -1,6 +1,6 @@
 ---
 capability: reuse-refusals-record
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_refusals.scanned_lines@677691b7bc
   - lupin_mcp.reuse_refusals.judge@847c61de03

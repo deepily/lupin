@@ -1,6 +1,6 @@
 ---
 capability: cc-memory-watch-switch
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.cc_memory_watch.parse_switch@8c49eee605
   - cosa.utils.cc_memory_watch.read_switch@eba044d209

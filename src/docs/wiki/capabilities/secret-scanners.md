@@ -1,6 +1,6 @@
 ---
 capability: secret-scanners
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.pre-commit-secret-scan.added_lines_by_file@72605cab11
   - scripts.pre-commit-secret-scan.main@6998b63ba6

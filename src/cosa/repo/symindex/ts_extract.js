@@ -218,11 +218,13 @@ function emit( file, name, kind, sig, node, sf, docNode, isPublic = true ) {
                 line: pos.line + 1, end_line: end.line + 1, public: isPublic } );
 }
 
+// An expression with any wrapping parentheses removed.
+function bare( e ) { return ts.isParenthesizedExpression( e ) ? bare( e.expression ) : e; }
+
 // The statements of a function expression that is called where it stands (an IIFE), or null for any other statement.
 // Covers `( function() { ... } )()`, `( () => { ... } )()`, `( function() { ... } ).call( this )` and `.apply`, and `!function() { ... }()`.
 function iifeStatements( st ) {
     if ( !ts.isExpressionStatement( st ) ) return null;
-    const bare = e => ts.isParenthesizedExpression( e ) ? bare( e.expression ) : e;
     let call = bare( st.expression );
     if ( ts.isPrefixUnaryExpression( call ) ) call = bare( call.operand );
     else if ( ts.isVoidExpression( call ) ) call = bare( call.expression );

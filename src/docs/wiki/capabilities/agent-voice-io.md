@@ -1,6 +1,6 @@
 ---
 capability: agent-voice-io
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.utils.voice_io.configure@d2624f0109
   - cosa.agents.utils.voice_io.notify@137826045d

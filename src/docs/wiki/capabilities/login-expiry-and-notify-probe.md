@@ -1,6 +1,6 @@
 ---
 capability: login-expiry-and-notify-probe
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.lib.claude_login_expiry.classify@7b615fecde
   - scripts.lib.claude_login_expiry.main@041b48268c

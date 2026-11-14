@@ -1,6 +1,6 @@
 ---
 capability: mcp-server-plumbing
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.jsonrpc_stdout.reserve_stdout_for_jsonrpc@1aa1d7aa5b
   - lupin_mcp.outbound_api_key.load_outbound_api_key@7d660725f7

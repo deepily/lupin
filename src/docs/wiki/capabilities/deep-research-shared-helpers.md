@@ -1,6 +1,6 @@
 ---
 capability: deep-research-shared-helpers
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.deep_research.job.abstract_and_save_report@958c9a1715
   - cosa.agents.deep_research.job.derive_session_name@d6679a5ecd

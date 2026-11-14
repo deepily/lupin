@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-reader-run-text
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.doc_lint.reader_rig_run.RunRefused@1a99858d78
   - cosa.repo.doc_lint.reader_rig_run.parse_args@e2c2e4a8d0

@@ -1,6 +1,6 @@
 ---
 capability: symindex-tests-scope
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.symindex.spec.tests_spec@7859cb1016
   - cosa.repo.symindex.spec.skip_rule@03f8eb9a6e

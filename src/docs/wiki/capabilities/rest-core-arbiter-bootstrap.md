@@ -1,6 +1,6 @@
 ---
 capability: rest-core-arbiter-bootstrap
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.arbiter_bootstrap.arbiter_already_present@0ff460895d
   - cosa.rest.arbiter_bootstrap.build_arbiter_job@168681ae60

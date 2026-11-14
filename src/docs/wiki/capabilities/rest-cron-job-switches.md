@@ -1,6 +1,6 @@
 ---
 capability: rest-cron-job-switches
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.cron_job_switches.write_switch@a3609e949b
   - cosa.rest.cron_job_switches.read_enabled@f527d44865

@@ -1,6 +1,6 @@
 ---
 capability: coverage-contention-guard
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.coverage_contention.comm_could_be_pytest@845e75b15c
   - cosa.utils.coverage_contention.escape_hatch_engaged@a5ec54bff0

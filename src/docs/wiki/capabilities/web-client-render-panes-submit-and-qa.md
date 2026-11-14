@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-panes-submit-and-qa
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.qaChrome.metricSpan@9c85660b43
   - src.lupin_app.static.js.multiplexer.render.templates.qaChrome.renderQaChrome@fb508d0699

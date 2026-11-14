@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-task-verbs
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.taskVerbs.verbNeeds@8c27e60969
   - src.lupin_app.static.js.multiplexer.render.taskVerbs.verbLabel@c0aa61aec9

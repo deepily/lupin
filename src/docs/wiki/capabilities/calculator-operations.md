@@ -1,6 +1,6 @@
 ---
 capability: calculator-operations
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.calculator.calc_operations.arithmetic@967a828eef
   - cosa.agents.calculator.calc_operations.compare_prices@1d0b3c3710

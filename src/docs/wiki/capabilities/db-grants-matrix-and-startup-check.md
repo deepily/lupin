@@ -1,6 +1,6 @@
 ---
 capability: db-grants-matrix-and-startup-check
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.db_grants.build_check_sql@495eaa9be8
   - cosa.utils.db_grants.build_template_sql@56ec26e101

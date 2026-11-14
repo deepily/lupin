@@ -1,6 +1,6 @@
 ---
 capability: rest-services-login-tokens-and-lockout
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.rate_limiter.record_failed_login@0545ececb4
   - cosa.rest.rate_limiter.clear_failed_attempts@f6ae7693b2

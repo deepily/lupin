@@ -1,6 +1,6 @@
 ---
 capability: live-probe-and-one-shot-scripts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.backfill_bridge_sender_id.classify@dfe6f18565
   - scripts.backfill_bridge_sender_id.main@beb4673fb5

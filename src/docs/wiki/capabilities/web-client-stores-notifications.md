@@ -1,6 +1,6 @@
 ---
 capability: web-client-stores-notifications
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.stores.AckStore.foldKey@d11fbb792a
   - src.lupin_app.static.js.multiplexer.stores.AckStore.normalizeText@af2bb36d54

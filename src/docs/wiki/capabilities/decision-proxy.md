@@ -1,6 +1,6 @@
 ---
 capability: decision-proxy
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.decision_proxy.responder.DecisionResponder@f11a853e54
   - cosa.agents.decision_proxy.trust_tracker.TrustTracker@e6ea84b97f

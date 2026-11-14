@@ -1,6 +1,6 @@
 ---
 capability: reuse-merge-gate
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_merge_gate.read_names@7b792933ba
   - lupin_mcp.reuse_merge_gate.read_since@504f35523c

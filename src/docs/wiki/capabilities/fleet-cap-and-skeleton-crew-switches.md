@@ -1,6 +1,6 @@
 ---
 capability: fleet-cap-and-skeleton-crew-switches
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.fleet_cap_ini_io.KeyNotFound@478ea2b537
   - lupin_mcp.fleet_cap_ini_io.KeyDefinedTwice@60defb02e4

@@ -1,6 +1,6 @@
 ---
 capability: rest-data-embedding-regen-run-control
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.db.embedding_regeneration.should_proceed@04a0afd54b
   - cosa.rest.db.embedding_regeneration.is_off_peak@5f0ceef609

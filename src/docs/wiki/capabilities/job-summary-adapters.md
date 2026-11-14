@@ -1,6 +1,6 @@
 ---
 capability: job-summary-adapters
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.job_summary_adapters.aware@63bad172e5
   - lupin_mcp.job_summary_adapters.outcome_of@2e31777aef

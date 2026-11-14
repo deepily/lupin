@@ -1,6 +1,6 @@
 ---
 capability: rest-job-registry
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.job_registry.load_registry@2331e4912c
   - cosa.rest.job_registry.reporting_on@b552249ccd
