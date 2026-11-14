@@ -1,6 +1,6 @@
 ---
 capability: web-client-experimental-tts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - src.lupin_app.static.js.test.experimental-tts.ExperimentalProgressiveTTS@36c88e9bf7
   - src.lupin_app.static.js.test.experimental-tts.setTestText@1a3d5905f5

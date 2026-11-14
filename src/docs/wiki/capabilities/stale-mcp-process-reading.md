@@ -1,6 +1,6 @@
 ---
 capability: stale-mcp-process-reading
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.stale_mcp_check.read_boot_time@b2187c846e
   - scripts.stale_mcp_check.read_stat@9394498ffc

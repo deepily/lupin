@@ -1,6 +1,6 @@
 ---
 capability: reuse-ledger-capacity-and-run-names
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_ledger.make_run_name@010c4514b5
   - lupin_mcp.reuse_ledger.ceiling_for@71b8f985fb

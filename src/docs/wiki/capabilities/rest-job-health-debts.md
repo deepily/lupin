@@ -1,6 +1,6 @@
 ---
 capability: rest-job-health-debts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.rest.job_health.window_points@82a2986f40
   - cosa.rest.job_health.scan_grew@318047b2c5

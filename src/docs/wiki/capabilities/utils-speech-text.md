@@ -1,6 +1,6 @@
 ---
 capability: utils-speech-text
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.utils.speech_text.strip_markdown_links_for_speech@d07055d033
 ---

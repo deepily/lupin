@@ -1,6 +1,6 @@
 ---
 capability: job-liveness-check
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.lib.job_liveness.read_cmdline@d8990c38e9
   - scripts.lib.job_liveness.read_ppid@fb06cc5ed5

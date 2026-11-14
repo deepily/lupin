@@ -1,6 +1,6 @@
 ---
 capability: job-summary-record
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.job_summary.iso_now@79805f657a
   - lupin_mcp.job_summary.read_summary@197f9caef9

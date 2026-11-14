@@ -1,6 +1,6 @@
 ---
 capability: needset-judge-probe-arms
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.judge_probe.shaped_id@51a1fe79d6
   - lupin_mcp.reuse_needset.judge_probe.variant_template@411167f840

@@ -1,6 +1,6 @@
 ---
 capability: reuse-tools-index-and-receipts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_tools.module_of@c144285c7e
   - lupin_mcp.reuse_tools.scope_of_line@f957248139

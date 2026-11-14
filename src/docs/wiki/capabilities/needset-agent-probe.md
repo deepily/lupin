@@ -1,6 +1,6 @@
 ---
 capability: needset-agent-probe
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.agent_probe.build_prompt@632c4b41f1
   - lupin_mcp.reuse_needset.agent_probe.rulings@3dadd2ed80

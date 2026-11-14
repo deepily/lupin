@@ -1,6 +1,6 @@
 ---
 capability: needset-yield-trace
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.yield_trace.saved_ask@04aac966fd
   - lupin_mcp.reuse_needset.yield_trace.copy_saved@5055147353

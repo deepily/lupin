@@ -1,6 +1,6 @@
 ---
 capability: db-secrets-installer-steps
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.install_db_secrets.preflight@88e10161e2
   - scripts.install_db_secrets.write_file@35789bdc1d

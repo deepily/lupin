@@ -1,6 +1,6 @@
 ---
 capability: reuse-behaviour-duplicate-check-table
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_behaviour.read_check_run@bd18dcdd6c
   - lupin_mcp.reuse_behaviour.read_check_runs@49ea76e6ce

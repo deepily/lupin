@@ -1,6 +1,6 @@
 ---
 capability: reuse-seeded-miss-scenario
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_seeded_miss_e2e.RunRefused@6e0ab10c9c
   - lupin_mcp.reuse_seeded_miss_e2e.shortlist_of@ac3497615f

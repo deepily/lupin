@@ -1,6 +1,6 @@
 ---
 capability: task-approve-batch-link
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.rest.task_approve_link.approve_batch_line@70b06baceb
   - cosa.rest.task_approve_link.parse_batch_row_ids@7d083d848c

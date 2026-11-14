@@ -1,6 +1,6 @@
 ---
 capability: reuse-run-harness-live-check
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_harness.live_check.plan_text@5c31e6206d
   - lupin_mcp.reuse_harness.live_check.boot_check@5320687518

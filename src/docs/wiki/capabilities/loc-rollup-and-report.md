@@ -1,6 +1,6 @@
 ---
 capability: loc-rollup-and-report
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.loc-analysis.loc_rollup.git@f431efae07
   - scripts.loc-analysis.loc_rollup.counted@4755916639

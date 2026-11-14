@@ -1,6 +1,6 @@
 ---
 capability: podcast-card-links
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.play_links.clean_title@d9fce3f41d
   - cosa.agents.podcast_generator.play_links.read_script_title@79229cef0c

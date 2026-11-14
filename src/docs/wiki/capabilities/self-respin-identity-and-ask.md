@@ -1,6 +1,6 @@
 ---
 capability: self-respin-identity-and-ask
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.self_respin_core.SelfRespinResult@6c8c181db2
   - lupin_mcp.self_respin_core.self_respin_from_bridge@0945f200f5

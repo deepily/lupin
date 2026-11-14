@@ -1,6 +1,6 @@
 ---
 capability: falsify-mutation-harness
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.falsify.MutationRefused@8e82bf2e77
   - scripts.falsify.span_of@bb93ee793d

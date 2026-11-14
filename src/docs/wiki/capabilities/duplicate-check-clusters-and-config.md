@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-clusters-and-config
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.cluster.clusters@62c12e6059
   - cosa.repo.duplicate_check.cluster.join_pairs@322934e6a6

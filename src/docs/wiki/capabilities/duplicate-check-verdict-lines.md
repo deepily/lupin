@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-verdict-lines
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_verdicts.parse_line@aaba3c7c88
   - lupin_mcp.duplicate_check_verdicts.finding_ids@2bce6f3244

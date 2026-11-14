@@ -1,6 +1,6 @@
 ---
 capability: reuse-need-expansion
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - lupin_mcp.reuse_expansion.ask_model@87c1f1f8b1
   - lupin_mcp.reuse_expansion.make_expander@9f215a4201

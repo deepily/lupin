@@ -1,6 +1,6 @@
 ---
 capability: service-account-creator
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - scripts.create_service_account.generate_api_key@6698d96841
   - scripts.create_service_account.get_or_create_service_account@06355e93ab
