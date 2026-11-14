@@ -416,19 +416,24 @@ def write_json( path, doc ):
     return path
 
 
-def append_manifest( folder, judged, cfg, run_file, now ):
+def append_manifest( folder, judged, cfg, run_file, now, reused=None ):
     """
     Append one line per judged definition to the interim judge manifest.
 
     Requires:
         - folder is the daily check's data folder; judged are the definition records the run ruled on
         - cfg is the verified frozen configuration; run_file names the run's result file; now is a timezone-aware datetime
+        - reused is None, or judge_run's { definition id: model ids } of the definitions ruled from saved rulings
 
     Ensures:
-        - appends through history.append_line to <folder>/interim-judge-manifest.jsonl, making the folder, one line of { id, file, run_file, model_id, config_sha, time } for each judged definition, in order
+        - appends through history.append_line to <folder>/interim-judge-manifest.jsonl, making the folder, one line of { id, file, run_file, model_id, config_sha, time } for each judged definition, in order; a definition ruled from saved rulings has model_id of the model that ruled and reused_from_model, the same ids joined by "+"
         - writes nothing, and does not create the file, when judged is empty
     """
-    for d in judged: history.append_line( folder, { "id": d[ "id" ], "file": d[ "file" ], "run_file": run_file, "model_id": cfg[ "model_id" ], "config_sha": cfg[ "config_sha" ], "time": now.isoformat() }, name=MANIFEST )
+    reused = reused or {}
+    for d in judged:
+        line = { "id": d[ "id" ], "file": d[ "file" ], "run_file": run_file, "model_id": cfg[ "model_id" ], "config_sha": cfg[ "config_sha" ], "time": now.isoformat() }
+        if d[ "id" ] in reused: line.update( model_id="+".join( reused[ d[ "id" ] ] ), reused_from_model="+".join( reused[ d[ "id" ] ] ) )
+        history.append_line( folder, line, name=MANIFEST )
 
 
 def record( folder, stem, doc, now ):
@@ -742,7 +747,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     if count.calls and count.failed == count.calls and not count.limited:       # every new call failed without a limit to explain it (a limit already backs off and alerts): a ruling replayed from the ledger is not a judgment of this run, so judged cannot hide it
         doc.update( status="failed", stage=STAGE_JUDGING, error=f"all {count.calls} new judge calls failed; the {doc[ 'judged' ]} judged were replayed from the ledger or earlier" )
     unjudged_ids = { u[ "id" ] for u in out[ "unjudged" ] }
-    append_manifest( folder, [ d for d in fresh[ "defs" ] if d[ "id" ] not in unjudged_ids ], cfg, f"{stem}.json", now )
+    append_manifest( folder, [ d for d in fresh[ "defs" ] if d[ "id" ] not in unjudged_ids ], cfg, f"{stem}.json", now, out.get( "reused" ) )
     try: settled = behaviour.settled_keys( folder )                    # a cluster the triage seat already ruled on, from either side, stays out of the record and the row until its code changes
     except ValueError as e: settled, doc[ "settled_error" ] = set(), str( e )       # a damaged verdicts file must not lose the judged run, so nothing is left out and the record says why
     found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ], settled )

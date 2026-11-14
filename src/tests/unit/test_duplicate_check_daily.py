@@ -1280,6 +1280,15 @@ def test_append_manifest_writes_nothing_and_makes_no_file_for_an_empty_list( tmp
     assert not ( tmp_path / "none" ).exists()
 
 
+def test_the_manifest_names_the_model_that_ruled_a_definition_ruled_from_saved_rulings_and_the_run_model_for_the_others( tmp_path ):
+    cfg  = { "model_id": "claude-opus-5-5", "config_sha": "s" }
+    defs = [ { "id": "d-1", "file": "a.py" }, { "id": "d-2", "file": "b.py" } ]
+    dd.append_manifest( tmp_path / "io" / "duplicate-check-daily", defs, cfg, "r.json", NOW, reused={ "d-1": [ "claude-fable-5-1" ] } )
+    lines = { l[ "id" ]: l for l in manifest_of( tmp_path ) }
+    assert lines[ "d-1" ][ "model_id" ] == lines[ "d-1" ][ "reused_from_model" ] == "claude-fable-5-1", "a Fable ruling is not filed under Opus"
+    assert lines[ "d-2" ][ "model_id" ] == "claude-opus-5-5" and "reused_from_model" not in lines[ "d-2" ]
+
+
 def test_a_judge_model_with_no_frozen_file_fails_the_frozen_prerequisite_by_name_and_judges_nothing( repo, tmp_path ):
     history( repo )
     def verify(): raise FileNotFoundError( 2, "No such file", "/conf/semdup-frozen-claude-opus-5-5.json" )

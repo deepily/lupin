@@ -6,7 +6,7 @@ pins:
   - cosa.repo.symindex.spec.detected_spec@7a0be26984
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold.fleet_data_root@f42b2cc795
   - cosa.memory.embedding_provider.EmbeddingProvider@37be6ca656
-  - cosa.repo.duplicate_check.judge.judge_run@3ad6419146
+  - cosa.repo.duplicate_check.judge.judge_run@99623cea22
   - cosa.repo.symindex.task_store_adapter.TaskStoreAdapter@a788853e36
   - cosa.utils.hook_link_tick.notify_route@42195f40bf
   - lupin_mcp.cron_generate.lines_for_job@ae3a14af36

@@ -5,7 +5,7 @@ pins:
   - cosa.repo.duplicate_check.judge.MaxPlanBackend@5cd98e2615
   - cosa.repo.duplicate_check.judge.WorkServerBackend@b57813f170
   - cosa.repo.duplicate_check.judge.build_prompt@929dcbf40c
-  - cosa.repo.duplicate_check.judge.judge_run@3ad6419146
+  - cosa.repo.duplicate_check.judge.judge_run@99623cea22
   - cosa.repo.duplicate_check.judge.ledger_binding@176c22d9f9
   - cosa.repo.duplicate_check.judge.parse_reply@a4690fda14
   - cosa.repo.duplicate_check.judge.rehomed@0bd68846c1
@@ -23,7 +23,7 @@ pins:
 # Duplicate checker: judge and scoring
 The judge makes one blind, ledgered model call per new definition and rules on each of its candidates.
 - `build_prompt` builds the system and user prompts, with random-suffix tags around every block. `prompt_parts` returns the three texts behind the prompt version.
-- `parse_reply` parses a reply strictly into one verdict per label. `judge_run` judges each definition once and resumes from the ledger. A finished ruling read back from the ledger goes through `rehomed` first. A model call that raises `ModelCallError` leaves its definition unjudged as `JUDGE_CALL_FAILED`, is not ledgered, and the other definitions go on.
+- `parse_reply` parses a reply strictly into one verdict per label. `judge_run` judges each definition once and resumes from the ledger. A finished ruling read back from the ledger goes through `rehomed` first. With no call under the run's model, `ledger_reuse.lookup` answers from a saved ruling of any model. Each row names its judge in `model`, and a reused row adds `reused_from_model`. A model call that raises `ModelCallError` leaves its definition unjudged as `JUDGE_CALL_FAILED`, is not ledgered, and the other definitions go on.
 - `rehomed( value, records )` points a ledgered ruling's candidates at the definitions the run holds now. The ledger key holds the candidates' text, not their ids, and an id carries its origin. So a function a daily run ruled on as `server` has a different id in the baseline run, where it is new. A candidate id the run holds stays. One that is that record's id under the other origin becomes the record's id. A ruling whose candidate is neither is dropped, because it names a definition the run does not hold. A value with no `rulings` comes back unchanged.
 - `ledger_binding` names what a ledger is bound to, so another binary or server is refused.
 - `MaxPlanBackend` uses bounded Claude Code, which has no temperature setting. `WorkServerBackend` uses Rick's work server and passes temperature 0.
