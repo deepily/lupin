@@ -478,6 +478,8 @@
     },
     {
       "job": "yearly-reminders",
+      "enabled_key": "cron job yearly-reminders enabled",
+      "switch_reader": "lupin_mcp.job_run:switched_on",
       "catalog": "L10",
       "title": "Yearly reminders (password rotation, LoRA review)",
       "owner": "rick",
