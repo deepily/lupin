@@ -500,6 +500,8 @@
     },
     {
       "job": "fleet-arbiter",
+      "enabled_key": "cron job fleet-arbiter enabled",
+      "switch_reader": "lupin_arbiter_app.fleet_arbiter_loop:build_fleet_arbiter_job_factory",
       "catalog": "L11",
       "title": "Fleet arbiter (:8001)",
       "owner": "cheech",
@@ -514,6 +516,8 @@
     },
     {
       "job": "context-pressure-writer",
+      "enabled_key": "cron job context-pressure-writer enabled",
+      "switch_reader": "lupin_arbiter_app.app:_build_context_pressure_loop",
       "catalog": "L13",
       "title": "Context-pressure writer",
       "owner": "cheech",
@@ -528,6 +532,8 @@
     },
     {
       "job": "health-watcher",
+      "enabled_key": "cron job health-watcher enabled",
+      "switch_reader": "lupin_arbiter_app.app:assemble_app",
       "catalog": "L14",
       "title": "Health watcher",
       "owner": "cheech",
@@ -542,6 +548,8 @@
     },
     {
       "job": "worktree-janitor",
+      "enabled_key": "cron job worktree-janitor enabled",
+      "switch_reader": "lupin_arbiter_app.fleet_arbiter_loop:build_fleet_arbiter_job_factory",
       "catalog": "L12",
       "title": "Worktree janitor",
       "owner": "cheech",

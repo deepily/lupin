@@ -52,6 +52,8 @@ ALWAYS_REQUIRED = [
     "cosa.rest.job_service",                       # the job alert watcher reads the job summary in-process; stdlib and the Lupin tree only
     "cosa.repo.symindex.paths",
     "lupin_arbiter_app.context_pressure_writer",
+    "lupin_mcp.cron_switch_read",                  # each arbiter loop checks its scheduled-job switch every tick (row c38a49bd)
+    "lupin_mcp.job_summary",                       # the switch writes a failed summary when its key is unreadable
     "cosa.config.configuration_manager",
     "cosa.agents.heartbeat_arbiter.arbiter_job",
     "cosa.agents.heartbeat_arbiter.turn_age_watchdog",

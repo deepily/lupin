@@ -254,6 +254,7 @@ class ContextPressureWriterLoop:
         clock            : Optional[ Any ]              = None,
         log_fn           : Optional[ Callable ]         = None,
         interval_seconds : int                          = 60,
+        switch           : Optional[ Any ]              = None,
     ) -> None:
         """
         Store the injected seams and validate the loop's configuration.
@@ -264,6 +265,7 @@ class ContextPressureWriterLoop:
             - store exposes set_section( name, value )
             - budget_fractions carries a "default" key
             - interval_seconds is positive
+            - switch is None, or a TickSwitch the loop checks before every poll
 
         Ensures:
             - injected seams resolved (clock → SystemClock, log_fn → structured JSON)
@@ -281,6 +283,7 @@ class ContextPressureWriterLoop:
         self._clock            = clock if clock is not None else SystemClock()
         self._log_fn           = log_fn if log_fn is not None else _default_log_fn
         self._interval_seconds = interval_seconds
+        self._switch           = switch
         self._stop             = threading.Event()
         self._thread           = None
 
@@ -317,7 +320,7 @@ class ContextPressureWriterLoop:
 
         One bad tick never exits the loop (the observer invariant).
         """
-        run_poll_loop( self._stop, self.poll_once, self._log_fn, self._clock, self._interval_seconds )
+        run_poll_loop( self._stop, self.poll_once, self._log_fn, self._clock, self._interval_seconds, self._switch )
 
     def start( self ) -> None:
         """Spawn the daemon tick thread."""

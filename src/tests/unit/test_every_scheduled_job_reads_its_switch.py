@@ -3,7 +3,7 @@ Every scheduled job in the registry reads its on/off switch, checked job by job.
 
 Rick, 13 Nov: every job the accordion lists must actually read its switch, "listed out explicitly and
 then checked 1 by 1". A job is honoured when it runs through job_run, which is cron_managed. It is
-also honoured when it names, in `switch_reader`, a symbol that checks a TickSwitch every tick.
+also honoured when it names, in `switch_reader`, the symbol that checks or builds its TickSwitch.
 
 NOT_YET lists the jobs that do not read their switch yet. It only shrinks. A job leaves the list in
 the commit that makes it honoured, and a listed job that is already honoured fails the test.
@@ -31,7 +31,7 @@ REGISTRY_SIZE = 24      # counted by hand from src/conf/job-registry.json on 14 
 
 # Jobs that do not read their switch yet. Remove a job in the commit that makes it read its switch.
 NOT_YET = frozenset( {
-    "context-tick", "yearly-reminders", "fleet-arbiter", "context-pressure-writer", "health-watcher", "worktree-janitor",
+    "context-tick", "yearly-reminders",
     "notification-expiry", "commons-archival", "notify-outbox", "socket-housekeeping", "side-services", "pokes",
 } )
 
@@ -91,7 +91,14 @@ def test_every_switch_reader_names_a_real_symbol_that_checks_the_switch():
     assert sorted( entry[ "job" ] for entry in READERS ) == sorted( loops ), "every honoured job that cron does not start must name its reader"
     for entry in READERS:
         source = inspect.getsource( _resolve( entry[ "switch_reader" ] ) )
-        assert ".allowed(" in source, f"{entry[ 'job' ]}: {entry[ 'switch_reader' ]} never calls TickSwitch.allowed"
+        builds = f'cron_switch_read.for_job( "{entry[ "job" ]}"' in source
+        assert builds or ".allowed(" in source, f"{entry[ 'job' ]}: {entry[ 'switch_reader' ]} neither builds its own switch nor calls TickSwitch.allowed"
+
+
+@pytest.mark.parametrize( "entry", READERS, ids=lambda entry: entry[ "job" ] )
+def test_a_switch_reader_job_keeps_its_summary_where_the_switch_writes_failures( entry ):
+    assert entry[ "summary_path" ] == f"{{root}}/io/jobs/{entry[ 'job' ]}/job-summary.json"
+    assert csr.summary_path_in( "/r", entry[ "job" ] ) == f"/r/io/jobs/{entry[ 'job' ]}/job-summary.json"
 
 
 def _a_tick_that_checks( switch ):

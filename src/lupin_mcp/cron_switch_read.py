@@ -10,6 +10,7 @@ Words such as `yes` or `1` are unknown here, never on and never off.
 The module imports only the standard library and `fleet_cap_ini_io`, so the standalone arbiter,
 which runs in a light virtual environment, can import it.
 """
+import os
 from typing import Optional
 
 from lupin_mcp import fleet_cap_ini_io
@@ -145,3 +146,38 @@ class TickSwitch:
             js.write_summary( self.summary_path_fn(), self.job, attempt, now=now )
         except ( ImportError, OSError, ValueError ) as error:
             self.log( f"{self.job}: could not write the failed summary: {error}" )
+
+
+def summary_path_in( root, job ) -> str:
+    """
+    Where a job's summary lives under a checkout, as the registry writes it.
+
+    Requires:
+        - root is a checkout's root folder
+        - job is a registry job id whose `summary_path` is `{root}/io/jobs/<job>/job-summary.json`
+
+    Ensures:
+        - returns `<root>/io/jobs/<job>/job-summary.json`; the census test pins every switch
+          reader's registry entry to this shape
+    """
+    return os.path.join( str( root ), "io", "jobs", job, "job-summary.json" )
+
+
+def for_job( job, log=print ):
+    """
+    The TickSwitch a production loop uses: the main checkout's configuration file and summary.
+
+    Requires:
+        - job is a registry job id
+        - log takes one string
+
+    Ensures:
+        - returns a TickSwitch that reads the main checkout's `src/conf/lupin-app.ini` at every
+          tick, so a seat's worktree copy is never read, and writes failures to the job's summary
+          in that checkout's `io/jobs/<job>/`
+        - imports the path helpers only when called, so this module stays light to import
+    """
+    import cosa.utils.util as cu
+    from lupin_mcp import fleet_size_cap
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _main_repo_path
+    return TickSwitch( job, fleet_size_cap.main_checkout_ini_path, lambda: summary_path_in( _main_repo_path( cu.get_project_root() ), job ), log )

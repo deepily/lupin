@@ -8,7 +8,7 @@ the :8001 service needs nothing new.
 """
 
 
-def run_poll_loop( stop, poll_once, log_fn, clock, interval_seconds ):
+def run_poll_loop( stop, poll_once, log_fn, clock, interval_seconds, switch=None ):
     """
     Poll until stop is set, logging any error a poll raises and sleeping between polls.
 
@@ -18,9 +18,12 @@ def run_poll_loop( stop, poll_once, log_fn, clock, interval_seconds ):
         - log_fn( event, **fields ) records a structured event
         - clock has sleep( seconds )
         - interval_seconds is the pause after each poll
+        - switch is None, or has allowed() -> bool, as lupin_mcp.cron_switch_read.TickSwitch does
 
     Ensures:
-        - poll_once runs at least once unless stop is already set
+        - poll_once runs at least once unless stop is already set or the switch says off
+        - with a switch, poll_once runs only on a tick where switch.allowed() is True; a skipped tick
+          still sleeps, so turning the switch back on resumes polling with no restart
         - a poll that raises is logged as "poll_error" with the error text, and the loop goes on
         - clock.sleep( interval_seconds ) runs after every poll, including one that raised
         - returns only when stop is set
@@ -30,7 +33,7 @@ def run_poll_loop( stop, poll_once, log_fn, clock, interval_seconds ):
     """
     while not stop.is_set():
         try:
-            poll_once()
+            if switch is None or switch.allowed(): poll_once()
         except Exception as e:
             log_fn( "poll_error", error=str( e ) )
         clock.sleep( interval_seconds )

@@ -32,7 +32,7 @@ import datetime
 import json
 import os
 import uuid
-from typing import Callable, List, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, List, Optional, Protocol, runtime_checkable
 
 from cosa.agents.agentic_job_base import AgenticJobBase
 # Reuse the Hook-Poker's clock seam (DRY — same SystemClock / FakeClock pattern).
@@ -702,6 +702,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         monopolize   : bool = False,
         debug        : bool = False,
         verbose      : bool = False,
+        switch       : Optional[ Any ] = None,                        # row c38a49bd: a TickSwitch checked before every poll; None means always on
     ) -> None:
         """
         Construct the arbiter consumer job.
@@ -920,6 +921,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # sandbox worktrees; preserves WIP + keeps branches; never pushes). A
         # None seam is visibly inert, never a hidden behavior change.
         self._worktree_janitor_fn     = worktree_janitor_fn
+        self._switch                  = switch
         # ee59d5ed orphan-bridge janitor: per-poll lineage-independent reap of
         # CONFIRMED-dead orphan bridges (dual-confirm + debounce inside the seam).
         # None → visibly inert (today's behavior); the :8001 factory wires it.
@@ -4582,6 +4584,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - exits on self._cancel_requested or elapsed >= max_duration_seconds
+            - with a switch, a tick where switch.allowed() is False skips the poll (and so the
+              janitor and pokes inside it) and still sleeps; the error streak is left as it was
             - a per-poll exception is swallowed (the observer invariant: one bad
               poll never kills the arbiter) and demoted to a render-sink log; it
               escalates to Rick (notify_fn) only when persistent
@@ -4597,9 +4601,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 return self._exit_summary( "hard-cap" )
 
             try:
-                self._poll_once()
-                self._poll_error_streak    = 0          # clean poll → reset the streak
-                self._poll_error_escalated = False
+                if self._switch is None or self._switch.allowed():   # row c38a49bd: a switched-off tick skips the poll and still sleeps
+                    self._poll_once()
+                    self._poll_error_streak    = 0      # clean poll → reset the streak
+                    self._poll_error_escalated = False
             except Exception as e:                      # observer invariant — never die on one poll
                 self._on_poll_error( e )
 
