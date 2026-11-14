@@ -7145,8 +7145,21 @@ class NotificationsUI {
         if ( notification.sender_id ) {
             const parsed    = this.parseSenderId( notification.sender_id );
             const sessionId = parsed && parsed.sessionId;
+            // Quiet workers (row 92076977): the server stamps `worker_quiet: true` on the event of a
+            // spawned, non-manager session whose speakerphone is off. The stamp wins over a stored
+            // "loud" entry, so a fresh worker shows and behaves quiet from its first notification.
+            const workerQuiet = notification.worker_quiet === true;
+            if ( sessionId && workerQuiet && this.conversationModes[ sessionId ] !== false ) {
+                this._setConversationModeLocal( sessionId, false );
+                this._setStripIconConvMode( sessionId, false );
+            }
             if ( sessionId && this.conversationModes[ sessionId ] === false ) {
-                if ( notification.priority === "high" || notification.priority === "urgent" ) {
+                // A quiet worker's urgent notify still speaks, by Rick's design. Every other quiet
+                // session, such as a manager Rick quieted by hand, keeps the rewrite of both priorities.
+                const rewritten = workerQuiet
+                    ? notification.priority === "high"
+                    : ( notification.priority === "high" || notification.priority === "urgent" );
+                if ( rewritten ) {
                     this.log( `[QUIET-MODE] Rewriting priority for muted session ${sessionId}: ${notification.priority} → medium` );
                     notification.priority      = "medium";
                     notification.suppress_ding = false;

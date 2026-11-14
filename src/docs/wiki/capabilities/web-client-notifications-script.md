@@ -24,7 +24,7 @@ pins:
   - src.lupin_app.static.js.notifications.ccConsoleEndWatch@efe6f62fe9
   - src.lupin_app.static.js.notifications.ccConsoleApplyChunk@092a363890
   - src.lupin_app.static.js.notifications.ccConsoleApplyState@e88891a26b
-  - src.lupin_app.static.js.notifications.NotificationsUI@1aa7015c9d
+  - src.lupin_app.static.js.notifications.NotificationsUI@04e0e6431e
 ---
 # Web client notifications script
 

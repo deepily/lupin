@@ -768,6 +768,10 @@ export interface SenderRecord {
   // header's `.sender-session-name` span. Client-persisted (localStorage
   // mirror in SenderStore) since the cold-load hydration does NOT carry it.
   session_name?            : string;
+  // True while the server stamps `worker_quiet` on this sender's notifications: a spawned, non-manager
+  // session whose speakerphone is off. It drives the quiet chip on the sender card. A speakerphone_changed
+  // that turns the speakerphone on clears it. It is not `conversation_mode_active`, the pinned-conversation flag.
+  worker_quiet?            : boolean;
 }
 
 // R5 (2026-07-01) — payload of the `session_topic` bus event (NotificationStore

@@ -24,11 +24,15 @@ import os
 import shutil
 import subprocess
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
 
 from lupin_mcp import session_spawner
+
+# These tests are about the seat's tree, not its voice, so the worker voice mode key is injected.
+_QUIET_CONFIG = lambda: types.SimpleNamespace( get=lambda key, default=None, **kw: "quiet" )
 
 
 # The real scripts, from the tree this file lives in — never from LUPIN_ROOT, which
@@ -120,7 +124,8 @@ def _spawn_into( monkeypatch, tree ):
         return session_spawner.spawn_sessions(
             1, "task", "mgr-sid", script_path="/bin/true", project="lupin",
             session_dir=Path( session_dir ), dry_run=False,
-            runner=lambda argv, env=None: _FakeCompleted()
+            runner=lambda argv, env=None: _FakeCompleted(),
+            voice_config_fn=_QUIET_CONFIG
         )
 
 
@@ -222,7 +227,8 @@ class TestADryRunBorrowsNothing:
                 with tempfile.TemporaryDirectory() as session_dir:
                     result = session_spawner.spawn_sessions(
                         1, "task", "mgr-sid", script_path="/bin/true", project="lupin",
-                        session_dir=Path( session_dir ), dry_run=True
+                        session_dir=Path( session_dir ), dry_run=True,
+                        voice_config_fn=_QUIET_CONFIG
                     )
 
                 assert not os.path.exists( os.path.join( worktree, "node_modules" ) ), \

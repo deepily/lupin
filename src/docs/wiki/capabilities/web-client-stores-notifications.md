@@ -13,9 +13,9 @@ pins:
   - src.lupin_app.static.js.multiplexer.stores.MissedStore.createMissedStore@3e0d329540
   - src.lupin_app.static.js.multiplexer.stores.NotificationStore.describeRejection@576d8b5cda
   - src.lupin_app.static.js.multiplexer.stores.NotificationStore.formatTtsMessage@2d60c259fc
-  - src.lupin_app.static.js.multiplexer.stores.NotificationStore.NotificationStoreImpl@170db85c11
+  - src.lupin_app.static.js.multiplexer.stores.NotificationStore.NotificationStoreImpl@a98b4fcf27
   - src.lupin_app.static.js.multiplexer.stores.NotificationStore.createNotificationStore@60d7963881
-  - src.lupin_app.static.js.multiplexer.stores.SenderStore.SenderStoreImpl@ddaa3aa9ec
+  - src.lupin_app.static.js.multiplexer.stores.SenderStore.SenderStoreImpl@3d51f58ad9
   - src.lupin_app.static.js.multiplexer.stores.SenderStore.createSenderStore@5fc0f9f5a9
   - src.lupin_app.static.js.multiplexer.stores.SessionStripStore.SessionStripStoreImpl@6ca587fff6
   - src.lupin_app.static.js.multiplexer.stores.SessionStripStore.createSessionStripStore@8445ff1047

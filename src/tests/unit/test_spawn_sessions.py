@@ -1923,6 +1923,8 @@ class TestResolveProjectRootFromAWorktree:
             script_path="x", dry_run=True,
             runner=lambda *a, **k: SimpleNamespace( returncode=0, stdout="", stderr="" ),
             session_dir=tmp_path / "sessions",
+            # This fake tree has no INI, so the worker voice mode key is injected, not read.
+            voice_config_fn=lambda: _FakeConfigMgr( { "cc session worker default voice mode": "quiet" } ),
         )
         assert result[ "requested" ] == 1
 
@@ -1986,5 +1988,6 @@ class TestUnresolvableProjectMessageNamesARealEscape:
             project=None, dry_run=True,
             runner=lambda *a, **k: SimpleNamespace( returncode=0, stdout="", stderr="" ),
             session_dir=tmp_path / "sessions",
+            voice_config_fn=lambda: _FakeConfigMgr( { "cc session worker default voice mode": "quiet" } ),
         )
         assert result[ "requested" ] == 1

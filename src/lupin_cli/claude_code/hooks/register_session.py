@@ -2121,7 +2121,13 @@ def main():
             session_data[ "spawned_by" ]      = _spawned_by
             session_data[ "headless" ]        = os.environ.get( "COSA_VOICE_HEADLESS", "" ) == "1"
             session_data[ "role" ]            = os.environ.get( "COSA_VOICE_ROLE", "reviewer" )
-            session_data[ "speakerphone_on" ] = False
+            # Worker default voice mode (row 92076977): spawn_sessions forwards the INI key's word,
+            # and a manager spawn forwards `inherit`. An absent or unknown word keeps today's False,
+            # so a child spawned by an older server behaves as before.
+            from lupin_mcp import worker_voice_mode as _wvm
+            from lupin_cli.claude_code.hooks.lib.session_bridge import _get_default_speakerphone
+            session_data[ "speakerphone_on" ] = _wvm.speakerphone_for_mode(
+                os.environ.get( _wvm.ENV_VAR ), _get_default_speakerphone )
             # Owner-lineage drift fix (2026-06-22): freeze the manager's persona-at-
             # spawn onto this worker's bridge so the arbiter resolves the TRUE
             # spawning manager for a finished/dead worker WITHOUT re-deriving the
@@ -2391,6 +2397,15 @@ def main():
             # out-of-band drive never saw it because the test monkeypatches
             # _spawn_listener, so the clobbering write never runs.
             session_data[ MANAGER_FIGURE_BRIDGE_FIELD ] = _mf_implicit
+            # Amendment 2 (Tiberius, row 92076977): a spawned session whose allocated persona is a
+            # standing manager is a manager whatever role it was spawned with (Cheech was measured
+            # as role "author"), so it gets the mode-aware default, not the worker's quiet start.
+            if _mf_implicit and session_data.get( "spawned_by" ):
+                from lupin_cli.claude_code.hooks.lib.session_bridge import (
+                    _get_default_speakerphone as _inherit_fn, set_speakerphone )
+                _mf_on = bool( _inherit_fn() )
+                session_data[ "speakerphone_on" ] = _mf_on
+                set_speakerphone( stable_session_id, _mf_on )
             if not set_manager_figure_implicit( stable_session_id, _mf_implicit ):
                 print( "[register_session] WARNING: manager-figure stamp not written "
                        "(bridge unresolved); is_manager_figure will fall back to the "

@@ -12,6 +12,29 @@ import uuid
 NOTIFICATION_PRIORITIES = ( "urgent", "high", "medium", "low" )
 
 
+def _worker_quiet_for_sender( sender_id: Optional[ str ] ) -> bool:
+    """
+    Whether the sender is a quiet worker, read from its bridge.
+
+    Requires:
+        - sender_id is a sender id such as 'claude.code@lupin.deepily.ai#<8-hex>', or None
+
+    Ensures:
+        - returns True only when the bridge behind the '#' suffix is a spawned, non-manager session
+          with speakerphone off, by `session_bridge.is_quiet_worker`
+        - a sender id with no '#' suffix, a missing bridge or any read failure gives False
+        - never raises
+    """
+    if not sender_id or "#" not in sender_id: return False
+    suffix = sender_id.split( "#", 1 )[ 1 ].strip()
+    if not suffix: return False
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import is_quiet_worker
+        return is_quiet_worker( suffix )
+    except ImportError:  # pragma: no cover -- the hook library ships in the same tree; only a broken install reaches this
+        return False
+
+
 def _creation_key( item ) -> float:
     """
     A notification's creation time as seconds since the epoch, for ordering.
@@ -62,7 +85,8 @@ class NotificationItem:
                  sender_icon: Optional[str] = None,
                  reply_to: Optional[str] = None,
                  thread_id: Optional[str] = None,
-                 human_only: bool = False ) -> None:
+                 human_only: bool = False,
+                 worker_quiet: bool = False ) -> None:
         """
         Initialize a notification item.
 
@@ -143,6 +167,11 @@ class NotificationItem:
         # to the TTS endpoint so each session speaks with its own voice.
         # See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
         self.voice_persona = voice_persona
+
+        # True when the sender is a quiet worker (spawned, non-manager, speakerphone off). The clients
+        # show the quiet chip and rewrite medium and high priority to a ding; urgent still speaks.
+        # Row 92076977.
+        self.worker_quiet = worker_quiet
 
         # Generic structured payload for custom-typed state-update notifications
         # whose data shape doesn't fit existing typed fields. Carries event-specific
@@ -234,6 +263,8 @@ class NotificationItem:
             "session_name"               : self.session_name,
             # Per-session voice persona (None when no persona allocated → server uses Sam default)
             "voice_persona"              : self.voice_persona,
+            # Quiet-worker flag, present only when true so other events stay byte-identical
+            **( { "worker_quiet": True } if self.worker_quiet else {} ),
             # Generic structured payload for custom-typed notifications (None on standard types)
             "payload"                    : self.payload,
             # Communication-direction axis + DM provenance/threading (first-class columns).
@@ -390,7 +421,8 @@ class NotificationFifoQueue( FifoQueue ):
             sender_persona           = sender_persona,
             sender_icon              = sender_icon,
             reply_to                 = reply_to,
-            thread_id                = thread_id
+            thread_id                = thread_id,
+            worker_quiet             = _worker_quiet_for_sender( sender_id )
         )
         
         # Priority handling - urgent/high go to front, but after other urgent/high
