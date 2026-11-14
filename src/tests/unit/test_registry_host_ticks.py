@@ -8,10 +8,11 @@ Rick ruled "Host via job runner" for both.
 - doc-parity-tick is scheduled for 07:30, when the host is usually off, so it also runs after boot.
 """
 import json
-import os
 from pathlib import Path
 
-ROOT     = Path( os.environ[ "LUPIN_ROOT" ] )
+import cosa.utils.util as cu
+
+ROOT     = Path( cu.get_project_root() )
 REGISTRY = ROOT / "src" / "conf" / "job-registry.json"
 
 
