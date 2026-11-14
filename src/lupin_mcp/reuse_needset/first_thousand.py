@@ -530,12 +530,12 @@ def parse_args( argv ):
     ap.add_argument( "--limit", type=int, default=call_cap.CALL_LIMIT )
     ap.add_argument( "--cli-path", default=None )
     ap.add_argument( "--server", default="max-plan" )
-    ap.add_argument( "--second-model", default=smoke.SECOND_MODEL )
-    ap.add_argument( "--probe-model", default=smoke.SECOND_MODEL )
+    ap.add_argument( "--second-model", default=None, help="a model id; the `reuse need second model` INI key when left out" )
+    ap.add_argument( "--probe-model", default=None, help="a model id; the `reuse need second model` INI key when left out" )
     ap.add_argument( "--plant-purposes", default=None, help="the plants' purpose.jsonl; the run folder's purpose-plants/purpose.jsonl when left out" )
     ap.add_argument( "--partners", action="store_true", help="search for a partner of each seed; off by default, a seed is then its own known answer" )
     ap.add_argument( "--live", action="store_true" )
-    return ap.parse_args( argv )
+    return smoke.resolve_second_models( ap.parse_args( argv ), ( "second_model", "probe_model" ) )
 
 
 def plan( args, loaded ):

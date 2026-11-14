@@ -206,9 +206,9 @@ def parse_args( argv ):
     ap.add_argument( "--budget", type=int, default=TRACE_BUDGET )
     ap.add_argument( "--cli-path", default=None )
     ap.add_argument( "--server", default="max-plan" )
-    ap.add_argument( "--probe-model", default=smoke.SECOND_MODEL )
+    ap.add_argument( "--probe-model", default=None, help="a model id; the `reuse need second model` INI key when left out" )
     ap.add_argument( "--live", action="store_true" )
-    return ap.parse_args( argv )
+    return smoke.resolve_second_models( ap.parse_args( argv ), ( "probe_model", ) )
 
 
 def live_parts( args, root, ctx, deps ):

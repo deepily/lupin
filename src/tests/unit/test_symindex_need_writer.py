@@ -485,6 +485,28 @@ def test_sdk_reply_options_are_the_hermetic_profile_of_the_model_transport( monk
     assert options.permission_mode == mt.PERMISSION_MODE
 
 
+def test_sdk_reply_runs_on_the_ini_model_unless_one_is_named( monkeypatch ):
+    asked, seen = [], []
+    messages    = [ ResultMessage( subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="s" ) ]
+    monkeypatch.setattr( nw, "sdk_query", _fake_sdk( messages, seen ) )
+    monkeypatch.setattr( nw.chs, "model_id", lambda key, config=None: asked.append( key ) or "from-ini" )
+    asyncio.run( nw.sdk_reply( "p", "s" ) )
+    asyncio.run( nw.sdk_reply( "p", "s", "named" ) )
+    assert [ o.model for o in seen ] == [ "from-ini", "named" ] and asked == [ "symindex need writer model" ]
+
+
+def test_the_command_line_sends_no_model_when_left_out_so_the_ini_decides_and_the_named_one_when_given( src_root, tmp_path, monkeypatch ):
+    models = []
+    async def fake_reply( prompt, system_prompt, model=None ):
+        models.append( model )
+        return _reply( GOOD )
+    monkeypatch.setattr( nw, "sdk_reply", fake_reply )
+    base = [ "--sample", _sample_file( tmp_path ), "--src-root", src_root, "--out", str( tmp_path / "out" ), "--limit", "1" ]
+    assert nw.main( base ) == 0
+    assert nw.main( [ *base[ :-2 ], "--out", str( tmp_path / "out2" ), "--limit", "1", "--model", "named" ] ) == 0
+    assert models == [ None, "named" ]
+
+
 def test_sdk_reply_raises_when_the_stream_has_no_result( monkeypatch ):
     monkeypatch.setattr( nw, "sdk_query", _fake_sdk( [ AssistantMessage( content=[ TextBlock( text="x" ) ], model="m" ) ], [] ) )
     with pytest.raises( RuntimeError, match="no result message" ):

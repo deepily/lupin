@@ -18,7 +18,9 @@ import cosa.utils.util as cu
 MODEL_LITERAL = re.compile( r"[\"'][\w.:/@-]*claude-(?:[a-z]+-)?[0-9]" )      # claude-opus-5-5, claude-3-5-sonnet, us.anthropic.claude-…
 NON_SOURCE      = re.compile( r"(^|/)tests?/|^src/rnd/|^src/cosa/rnd/" )
 SKIPPED_PARTS = ( ".venv", "node_modules", "site-packages" )
-NOW_IN_INI    = ( "src/cosa/repo/duplicate_check/config.py", "src/lupin_mcp/reuse_needset/draft.py", "src/lupin_mcp/reuse_expansion.py" )
+NOW_IN_INI    = ( "src/cosa/repo/duplicate_check/config.py", "src/lupin_mcp/reuse_needset/draft.py", "src/lupin_mcp/reuse_expansion.py",
+                  "src/cosa/repo/duplicate_check/proof/label_prep.py", "src/cosa/repo/symindex/need_writer.py", "src/lupin_mcp/reuse_needset/smoke.py",
+                  "src/cosa/agents/notification_proxy/config.py" )
 
 FROZEN = {
     "src/cosa/agents/bug_fix_expediter/job.py"             : 1,
@@ -27,16 +29,12 @@ FROZEN = {
     "src/cosa/agents/deep_research/cost_tracker.py"        : 15,
     "src/cosa/agents/llm_client.py"                        : 1,
     "src/cosa/agents/model_registry.py"                    : 2,
-    "src/cosa/agents/notification_proxy/config.py"         : 1,
     "src/cosa/agents/podcast_generator/api_client.py"      : 3,
     "src/cosa/agents/presentation_generator/api_client.py" : 3,
     "src/cosa/agents/test_fix_expediter/job.py"            : 1,
-    "src/cosa/repo/duplicate_check/proof/label_prep.py"    : 1,
-    "src/cosa/repo/symindex/need_writer.py"                : 1,
     "src/cosa/utils/vertex_env.py"                         : 5,
     "src/cosa/utils/vertex_spend_ceiling.py"               : 1,
     "src/lupin_mcp/cosa_voice_mcp.py"                      : 1,
-    "src/lupin_mcp/reuse_needset/smoke.py"                 : 1,
     "src/scripts/tfe_to_cc_phase1_smoke.py"                : 1,
     "src/scripts/tfe_to_cc_phase3_live.py"                 : 1,
     "src/scripts/verify_vertex_logging.py"                 : 1,

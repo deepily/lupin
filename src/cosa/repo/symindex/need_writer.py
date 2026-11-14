@@ -21,10 +21,10 @@ from claude_agent_sdk import query as sdk_query
 
 import cosa.utils.util as cu
 from cosa.agents.shared.sdk_error_result import error_result_text
+from cosa.repo import code_health_settings as chs
 from cosa.repo.doc_lint import model_transport as mt
 from cosa.repo.symindex import need_input as ni
 
-DEFAULT_MODEL    = "claude-sonnet-5-5"
 MIN_WORDS        = 8
 MAX_WORDS        = 40
 MAX_ATTEMPTS     = 3
@@ -75,25 +75,28 @@ class Reply:
     output_tokens : int
 
 
-async def sdk_reply( prompt, system_prompt, model=DEFAULT_MODEL ):
+async def sdk_reply( prompt, system_prompt, model=None ):
     """
     Make one tools-off, short call and return its text and telemetry.
 
     Requires:
         - the Claude Code login is present on this host
+        - model is a model id, or None to read `symindex need writer model` from lupin-app.ini
 
     Ensures:
+        - runs on the model given, else on the INI value read now, never a value written in code
         - runs with the hermetic profile of the model transport: no hooks, no CLAUDE.md, no memory,
           no setting sources, no MCP servers, no skills
         - returns a Reply whose text joins every assistant text block
         - missing cost or usage in the result reads as zero
 
     Raises:
+        - CodeHealthSettingError when model is None and the INI key is blank or absent
         - RuntimeError carrying the CLI's own text when the result is an error
         - RuntimeError when the stream ends with no result message
     """
     options = ClaudeAgentOptions(
-        model           = model,
+        model           = chs.model_id( chs.NEED_WRITER_MODEL_KEY ) if model is None else model,
         system_prompt   = system_prompt,
         tools           = list( mt.NO_TOOLS ),
         permission_mode = mt.PERMISSION_MODE,
@@ -382,7 +385,7 @@ def main( argv=None, reply_fn=None ):
     parser.add_argument( "--src-root", default=None )
     parser.add_argument( "--out", required=True )
     parser.add_argument( "--limit", type=int, default=None )
-    parser.add_argument( "--model", default=DEFAULT_MODEL )
+    parser.add_argument( "--model", default=None, help="a model id; the `symindex need writer model` INI key when left out" )
     parser.add_argument( "--max-attempts", type=int, default=MAX_ATTEMPTS )
     parser.add_argument( "--assemble", default=None, help="write the needs document here and make no model call" )
     parser.add_argument( "--resend-list", default=None, help="the checker's resend-list.json; those members are rewritten" )
