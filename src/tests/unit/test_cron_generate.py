@@ -4,6 +4,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -16,9 +17,12 @@ from lupin_mcp import job_run as jrun
 from tests.unit.test_librarian_tick import cron   # noqa: F401  (fixture: the fake crontab and the fake lock)
 
 
+ON = types.SimpleNamespace( get_required=lambda key, return_type="string": True )     # a configuration stand-in whose every switch is on
+
+
 def job( name, schedule, **extra ):
     """Ensures: returns a managed registry job with the keys load_registry demands."""
-    return { "job": name, "title": name, "owner": "cheech", "schedule": schedule, "summary_path": "{root}/io/jobs/" + name + "/job-summary.json",
+    return { "job": name, "enabled_key": f"cron job {name} enabled", "title": name, "owner": "cheech", "schedule": schedule, "summary_path": "{root}/io/jobs/" + name + "/job-summary.json",
              "run": { "argv": [ "{python}", "-m", "x", "--trigger", "hand" ], "env": { "JOB_VAR": "{root}/j" } }, "cron_managed": True, "cron_tag": name + "-tag", **extra }
 
 
@@ -220,7 +224,7 @@ def test_from_registry_runs_the_registry_command_with_the_registry_environment_a
         return type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )()
 
     monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
-    code = jrun.main( [ "--job", "alpha", "--from-registry", "--trigger", "boot" ], { "LUPIN_ROOT": str( tree ) }, fake )
+    code = jrun.main( [ "--job", "alpha", "--from-registry", "--trigger", "boot" ], { "LUPIN_ROOT": str( tree ) }, fake, config=ON )
     assert code == 0 and seen[ "command" ] == [ str( tree / ".venv" / "bin" / "python" ), "-m", "x", "--trigger", "reboot" ]
     assert seen[ "env" ][ "JOB_VAR" ] == f"{tree}/j" and seen[ "env" ][ "LUPIN_JOB_TRIGGER" ] == "boot"
     record = json.loads( ( tree / "io" / "jobs" / "alpha" / "job-summary.json" ).read_text() )
@@ -231,7 +235,7 @@ def test_from_registry_with_a_job_that_has_no_run_block_is_refused( tree, capsys
     doc = json.loads( ( tree / "src/conf/job-registry.json" ).read_text() )
     doc[ "jobs" ][ 0 ].pop( "run" )
     ( tree / "src/conf/job-registry.json" ).write_text( json.dumps( doc ) )
-    assert jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda *a, **k: None ) == jrun.EXIT_NO_JOB
+    assert jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda *a, **k: None, config=ON ) == jrun.EXIT_NO_JOB
     assert "no command given" in capsys.readouterr().err
 
 
@@ -290,7 +294,7 @@ def test_the_registry_settings_that_data_dir_needs_come_before_it_runs( tree, mo
     registry[ "defaults" ][ "run_env" ][ "LUPIN_ROOT" ] = "{root}/boot"
     ( tree / "src/conf/job-registry.json" ).write_text( json.dumps( { "schema": "job-registry/1", "defaults": registry[ "defaults" ], "jobs": registry[ "jobs" ] } ) )
     monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
-    jrun.main( [ "--job", "alpha", "--from-registry" ], None, lambda command, **kw: type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )() )
+    jrun.main( [ "--job", "alpha", "--from-registry" ], None, lambda command, **kw: type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )(), config=ON )
     assert seen[ "at_data_dir" ] == f"{tree}/boot", "data_dir saw the registry's setting, not the bare environment's"
 
 
@@ -304,7 +308,7 @@ def test_cron_job_sh_under_env_i_gets_past_environment_loading_and_runs_the_job(
     for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ): ( tree / "src" / "conf" / name ).symlink_to( real / "src" / "conf" / name )
     ( tree / ".venv" ).symlink_to( sys.prefix )
     shipped = jr.load_registry( REAL_ROOT )
-    probe   = { "job": "probe", "title": "probe", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
+    probe   = { "job": "probe", "enabled_key": "cron job wiki-librarian enabled", "title": "probe", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
                 "run": { "argv": [ "{python}", "-c", "import os; print( 'ran', os.environ[ 'COSA_VOICE_MANAGERS__LUPIN' ] )" ], "env": {} } }
     ( tree / "src" / "conf" / "job-registry.json" ).write_text( json.dumps( { "schema": "job-registry/1", "defaults": shipped[ "defaults" ], "jobs": [ probe ] } ) )
     done = subprocess.run( [ "env", "-i", f"HOME={tmp_path}", f"DEEPILY_DATA_DIR={tmp_path / 'data'}", f"LUPIN_ROOT={tree}", str( real / "src/scripts/cron-job.sh" ), "probe", "cron" ],
@@ -353,7 +357,7 @@ def test_main_passes_own_summary_through_as_no_record_written( tree, monkeypatch
     doc[ "jobs" ][ 0 ][ "own_summary" ] = True
     ( tree / "src/conf/job-registry.json" ).write_text( json.dumps( doc ) )
     monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
-    code = jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda command, **kw: type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )() )
+    code = jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda command, **kw: type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )(), config=ON )
     assert code == 0 and not ( tree / "io" / "jobs" / "alpha" / "job-summary.json" ).exists()
 
 
@@ -379,7 +383,7 @@ def test_main_reads_clean_exit_codes_from_the_registry_entry( tree, monkeypatch 
     doc[ "jobs" ][ 0 ][ "clean_exit_codes" ] = [ 0, 2 ]
     ( tree / "src/conf/job-registry.json" ).write_text( json.dumps( doc ) )
     monkeypatch.setattr( jrun.hs, "refresh_best_effort", lambda environ=None: None )
-    code = jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda command, **kw: type( "R", (), { "returncode": 2, "stdout": "", "stderr": "" } )() )
+    code = jrun.main( [ "--job", "alpha", "--from-registry" ], { "LUPIN_ROOT": str( tree ) }, lambda command, **kw: type( "R", (), { "returncode": 2, "stdout": "", "stderr": "" } )(), config=ON )
     assert code == 2 and json.loads( ( tree / "io" / "jobs" / "alpha" / "job-summary.json" ).read_text() )[ "last_attempt" ][ "outcome" ] == "clean"
 
 

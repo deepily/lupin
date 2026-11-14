@@ -127,7 +127,24 @@ def with_trigger( argv, trigger ):
     return out
 
 
-def main( argv=None, environ=None, runner=stream_run ):
+def switched_on( entry, config ):
+    """
+    Read a registry job's run-time switch from the configuration.
+
+    Requires:
+        - entry is a registry job; config has get_required( key, return_type="boolean" )
+    Ensures:
+        - returns True or False as the job's INI key says, with no default in code
+        - the key is the entry's enabled_key, so the registry names every switch
+    Raises:
+        - ValueError when the entry has no enabled_key
+        - MissingConfigKeyError when the INI has no value for the key, or a blank one
+    """
+    if not entry.get( "enabled_key" ): raise ValueError( f"job_run: job {entry[ 'job' ]} has no enabled_key in the registry" )
+    return config.get_required( entry[ "enabled_key" ], return_type="boolean" )
+
+
+def main( argv=None, environ=None, runner=stream_run, config=None ):
     """
     Run the wrapper from the command line.
 
@@ -137,6 +154,8 @@ def main( argv=None, environ=None, runner=stream_run ):
 
     Ensures:
         - returns the command's exit code, or EXIT_NO_JOB when the job is not registered or no command was given
+        - returns 0 after one line naming the INI key when the job's switch is false, before it reads the data folder, starts the command or writes a record; cron, boot and manual runs all pass here
+        - config is the ConfigurationManager the switch is read from; None builds one from LUPIN_CONFIG_MGR_CLI_ARGS
         - with --from-registry and --root, the registry command gets --root <value> appended, so a job of another repo runs against that repo's checkout
     """
     environ = os.environ if environ is None else environ
@@ -159,6 +178,13 @@ def main( argv=None, environ=None, runner=stream_run ):
         return EXIT_NO_JOB
     from cosa.rest.job_service import bootstrap_env, run_command
     from cosa.repo.symindex.paths import data_dir
+    if config is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        if "LUPIN_CONFIG_MGR_CLI_ARGS" not in environ: environ.update( bootstrap_env( registry, root ) )
+        config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    if not switched_on( entry, config ):
+        print( f"job_run: job {args.job} is switched off: INI key '{entry[ 'enabled_key' ]}' is false, so nothing ran" )
+        return 0
     if args.from_registry and not command: environ.update( bootstrap_env( registry, root ) )    # data_dir reads the configuration manager's settings, so they come first
     data = data_dir( root )
     if args.from_registry and not command:
