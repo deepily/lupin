@@ -46,3 +46,19 @@
     color       : #664d03;
     font-weight : 600;
 }
+
+/* A switch the server could not read: the job skips its ticks, so the row says so in red (row c38a49bd). */
+.cron-unreadable {
+    background-color : #f8d7da;
+}
+
+.cron-unreadable-note {
+    grid-column : 1 / -1;
+    color       : #842029;
+    font-weight : 600;
+}
+
+.cron-inside {
+    grid-column : 1 / -1;
+    color       : #6c757d;
+}

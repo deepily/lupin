@@ -238,3 +238,70 @@ test( "a 409 that names the unread switch shows the server's words", async () =>
   flipButton( "duplicate-check" ).click(); await flush();
   assert.match( item( "duplicate-check" ).querySelector( "[data-testid=cron-error]" )!.textContent as string, /^'x' does not read its switch yet/ );
 } );
+
+// ── Row c38a49bd step 7: how a row says it reads its switch, an unreadable switch, alarm jobs, and a job inside another ──
+
+const ARBITER = { ...ROW_A, job : "fleet-arbiter",    title : "Fleet arbiter (:8001)", key : "cron job fleet-arbiter enabled",    reads : "tick", alarm : true,  inside : null };
+const JANITOR = { ...ROW_A, job : "worktree-janitor", title : "Worktree janitor",      key : "cron job worktree-janitor enabled", reads : "tick", alarm : false, inside : "fleet-arbiter" };
+const putCount = () => calls.filter( ( c ) => c.opts?.method === "PUT" ).length;
+
+test( "a row says whether its job reads the switch at each run or every tick", async () => {
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ROW_A, reads : "run" }, { ...ARBITER } ], caller_is_admin : true } ) } );
+  await load();
+  assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-honoured]" )!.textContent, "reads its switch at each run" );
+  assert.equal( item( "fleet-arbiter" ).querySelector( "[data-testid=cron-honoured]" )!.textContent, "reads its switch every tick" );
+} );
+
+test( "a switch the server could not read is a red row that says so, with no button to flip", async () => {
+  await load();
+  assert.equal( item( "disk-report" ).classList.contains( "cron-unreadable" ), true );
+  assert.match( item( "disk-report" ).querySelector( "[data-testid=cron-unreadable]" )!.textContent as string, /^switch unreadable: / );
+  assert.equal( flipButton( "disk-report" ).disabled, true );
+  assert.equal( item( "duplicate-check" ).classList.contains( "cron-unreadable" ), false );
+  assert.equal( item( "duplicate-check" ).querySelectorAll( "[data-testid=cron-unreadable]" ).length, 0 );
+} );
+
+test( "turning off an alarm job takes a confirming second click; the first sends nothing", async () => {
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ARBITER } ], caller_is_admin : true } ) } );
+  putReply  = () => ( { ok : true, status : 200, json : async () => ( { ...ARBITER, enabled : false } ) } );
+  await load();
+  flipButton( "fleet-arbiter" ).click(); await flush();
+  assert.equal( putCount(), 0 );
+  assert.equal( flipButton( "fleet-arbiter" ).textContent, "Confirm: turn off" );
+  assert.match( item( "fleet-arbiter" ).querySelector( "[data-testid=cron-error]" )!.textContent as string, /silences what would report it/ );
+  flipButton( "fleet-arbiter" ).click(); await flush();
+  assert.equal( putCount(), 1 );
+  assert.deepEqual( JSON.parse( calls.find( ( c ) => c.opts?.method === "PUT" )!.opts!.body as string ), { on : false } );
+  assert.equal( stateOf( "fleet-arbiter" ), "OFF" );
+} );
+
+test( "a redraw between the two clicks cancels the confirmation, so one later click only asks again", async () => {
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ARBITER } ], caller_is_admin : true } ) } );
+  const ui = await load();
+  flipButton( "fleet-arbiter" ).click(); await flush();
+  await ui.refresh();
+  flipButton( "fleet-arbiter" ).click(); await flush();
+  assert.equal( putCount(), 0 );
+  assert.equal( flipButton( "fleet-arbiter" ).textContent, "Confirm: turn off" );
+} );
+
+test( "turning an alarm job on, or any other job off, takes one click", async () => {
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ARBITER, enabled : false }, { ...JANITOR } ], caller_is_admin : true } ) } );
+  await load();
+  flipButton( "fleet-arbiter" ).click(); await flush();
+  assert.equal( putCount(), 1 );
+  flipButton( "worktree-janitor" ).click(); await flush();
+  assert.equal( putCount(), 2 );
+} );
+
+test( "a job that runs inside another says it is off while that job is off", async () => {
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ARBITER, enabled : false }, { ...JANITOR } ], caller_is_admin : true } ) } );
+  await load();
+  assert.equal( item( "worktree-janitor" ).querySelector( "[data-testid=cron-inside]" )!.textContent, "off while fleet-arbiter is off" );
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ARBITER }, { ...JANITOR } ], caller_is_admin : true } ) } );
+  await load();
+  assert.equal( item( "worktree-janitor" ).querySelectorAll( "[data-testid=cron-inside]" ).length, 0 );
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...JANITOR, inside : "no-such-job" } ], caller_is_admin : true } ) } );
+  await load();
+  assert.equal( item( "worktree-janitor" ).querySelectorAll( "[data-testid=cron-inside]" ).length, 0 );
+} );

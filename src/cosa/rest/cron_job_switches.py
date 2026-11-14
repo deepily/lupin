@@ -164,7 +164,14 @@ def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[
         - attribution is what `read_attribution` returned
 
     Ensures:
-        - returns { job, title, schedule, key, enabled, honoured, drift, last_changed_by, last_changed_at }
+        - returns { job, title, schedule, key, enabled, honoured, drift, last_changed_by, last_changed_at,
+          reads, alarm, inside }
+        - reads is "run" for a job job_run starts, "tick" for a loop that checks a TickSwitch, and None
+          for a job that does not read its switch
+        - alarm is True only for a registry entry with `"alarm": true`: a job whose being off silences
+          what would report it, so the client asks for confirmation before turning it off
+        - inside names the job whose tick this one runs in (the janitor runs inside fleet-arbiter's),
+          or None
         - enabled is True, False, or None when the file does not say
         - honoured is computed from the registry by `is_honoured`, never typed by hand
         - drift is true only when enabled is known, a record exists and the record disagrees with
@@ -187,6 +194,9 @@ def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[
         "drift"           : known and not agrees,
         "last_changed_by" : noted.get( "by" ) if agrees else None,
         "last_changed_at" : noted.get( "at" ) if agrees else None,
+        "reads"           : ( "run" if entry.get( "cron_managed" ) is True else "tick" ) if is_honoured( entry ) else None,
+        "alarm"           : entry.get( "alarm" ) is True,
+        "inside"          : entry.get( "inside" ) if isinstance( entry.get( "inside" ), str ) else None,
     }
 
 

@@ -118,3 +118,22 @@ def test_a_job_is_honoured_by_job_run_or_by_a_named_reader_and_its_key():
     assert sw.is_honoured( { "job": "a", "enabled_key": "cron job a enabled", "switch_reader": "  " } ) is False
     assert sw.is_honoured( { "job": "a", "enabled_key": "cron job a enabled", "switch_reader": 7 } ) is False
     assert sw.is_honoured( { "job": "a", "cron_managed": False } ) is False
+
+
+def test_a_row_says_how_its_job_reads_the_switch_and_whether_it_is_an_alarm_job( monkeypatch ):
+    monkeypatch.setattr( sw, "read_enabled", lambda job: True )
+    cron = sw.build_row( { "job": "a", "title": "A", "cron_managed": True }, {} )
+    loop = sw.build_row( { "job": "b", "title": "B", "enabled_key": "cron job b enabled", "switch_reader": "m:f", "alarm": True }, {} )
+    none = sw.build_row( { "job": "c", "title": "C", "alarm": "yes", "inside": 7 }, {} )
+    kid  = sw.build_row( { "job": "d", "title": "D", "enabled_key": "cron job d enabled", "switch_reader": "m:f", "inside": "b" }, {} )
+    assert ( cron[ "reads" ], cron[ "alarm" ], cron[ "inside" ] ) == ( "run", False, None )
+    assert ( loop[ "reads" ], loop[ "alarm" ], loop[ "inside" ] ) == ( "tick", True, None )
+    assert ( none[ "reads" ], none[ "alarm" ], none[ "inside" ] ) == ( None, False, None )
+    assert kid[ "inside" ] == "b"
+
+
+def test_the_registry_marks_exactly_rick_s_four_alarm_jobs_and_the_janitor_inside_the_arbiter():
+    root    = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    entries = json.load( open( os.path.join( root, "src/conf/job-registry.json" ) ) )[ "jobs" ]
+    assert sorted( e[ "job" ] for e in entries if e.get( "alarm" ) is True ) == [ "fleet-arbiter", "health-watcher", "notify-outbox", "socket-housekeeping" ]
+    assert { e[ "job" ]: e[ "inside" ] for e in entries if "inside" in e } == { "worktree-janitor": "fleet-arbiter" }
