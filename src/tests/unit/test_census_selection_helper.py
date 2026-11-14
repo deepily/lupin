@@ -63,6 +63,23 @@ def test_outer():
     def test_every_nested_in_a_function(): pass
 
 
+@pytest.mark.census
+def test_marked_function(): pass
+
+
+@pytest.mark.census
+class TestMarkedClass:
+    def test_every_inside_a_marked_class(): pass
+    def test_counts_the_tree( self ): pass
+
+
+class TestUnmarkedHolder:
+    @pytest.mark.census
+    def test_marked_method( self ): pass
+    @pytest.mark.slow
+    def test_other_mark( self ): pass
+
+
 def test_every_module_level_guard(): pass
 '''
 
@@ -84,11 +101,12 @@ def test_a_file_is_picked_by_name_for_the_names_the_old_rule_picked( path, picke
     assert cs.picked_by_name( path ) is picked
 
 
-def test_guard_ids_lists_each_test_every_function_through_classes_and_compound_statements_once():
+def test_guard_ids_lists_each_guard_through_classes_and_compound_statements_once_and_a_marked_class_whole():
     ids = cs.guard_ids( "t.py", SOURCE )
     assert ids == [ "t.py::test_every_module_level_guard", "t.py::test_every_async_guard", "t.py::TestHolder::test_every_method_guard",
                     "t.py::TestHolder::TestInner::test_every_inner_guard", "t.py::test_every_guard_under_an_if", "t.py::test_every_guard_under_an_else", "t.py::test_every_guard_in_a_handler",
-                    "t.py::test_every_guard_in_a_finally", "t.py::test_every_guard_in_a_with", "t.py::test_every_guard_in_a_for", "t.py::test_every_guard_in_a_while" ]
+                    "t.py::test_every_guard_in_a_finally", "t.py::test_every_guard_in_a_with", "t.py::test_every_guard_in_a_for", "t.py::test_every_guard_in_a_while",
+                    "t.py::test_marked_function", "t.py::TestMarkedClass", "t.py::TestUnmarkedHolder::test_marked_method" ]
 
 
 def test_guard_ids_of_a_file_with_none_is_empty_and_a_syntax_warning_is_not_printed():

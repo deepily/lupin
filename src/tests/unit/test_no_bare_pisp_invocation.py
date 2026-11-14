@@ -248,6 +248,7 @@ def test_the_corpus_rule_admits_instructions_and_excludes_records():
     assert not _in_scope( "src/tests/unit/test_reap_memento.py" )
 
 
+@pytest.mark.census
 def test_no_instructing_file_hands_a_seat_an_unrunnable_pisp_command( pat ):
     """
     The sweep.

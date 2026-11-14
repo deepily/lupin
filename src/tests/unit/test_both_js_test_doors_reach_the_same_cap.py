@@ -88,6 +88,7 @@ def _project_root_computed_by( door_path ):
     return done.stdout.strip()
 
 
+@pytest.mark.census
 def test_the_corpus_is_exactly_the_two_known_doors():
     """
     The denominator control.

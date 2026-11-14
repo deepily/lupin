@@ -77,6 +77,7 @@ def scan( root, paths ):
     return hits, scanned, skipped
 
 
+@pytest.mark.census
 def test_no_tracked_file_under_src_carries_a_conflict_marker():
     paths = tracked_files( ROOT )
     hits, scanned, skipped = scan( ROOT, paths )

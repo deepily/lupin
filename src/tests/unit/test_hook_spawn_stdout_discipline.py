@@ -157,6 +157,7 @@ def _popen_violations( tree, path ):
             yield f"{path}:{node.lineno} missing {sorted( missing )}"
 
 
+@pytest.mark.census
 def test_hook_tree_has_no_unredirected_popen():
     """
     THE INVARIANT (73d2b589): every subprocess.Popen in the hook tree names

@@ -15,10 +15,10 @@ from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 from cosa.agents.io_models.utils.json_fields import json_or_empty
-from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero, int_or_zero
+from cosa.agents.io_models.utils.number_fields import ConfidenceFloatMixin, float_or_zero, int_or_zero
 
 
-class CalcIntent( BaseXMLModel ):
+class CalcIntent( ConfidenceFloatMixin, BaseXMLModel ):
     """
     Calculator intent extracted from natural language by LLM.
 
@@ -92,19 +92,6 @@ class CalcIntent( BaseXMLModel ):
     VALID_OPERATORS: ClassVar[ List[ str ] ] = [
         "add", "subtract", "multiply", "divide", "modulo", "power"
     ]
-
-    def get_confidence_float( self ):
-        """
-        Parse confidence string to float.
-
-        Requires:
-            - self.confidence is a numeric string
-
-        Ensures:
-            - Returns float between 0.0 and 1.0
-            - Returns 0.0 if parsing fails
-        """
-        return clamp_unit( float_or_zero( self.confidence ) )
 
     def get_value_float( self ):
         """
