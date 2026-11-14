@@ -24,12 +24,12 @@ The shared writer of the `job-summary/1` file each background job leaves after a
 - `read_summary` returns None for a file that is missing, unreadable or of another schema.
 
 ## Attempts
-- `check_attempt` fills every key; outcome must be clean, carried, failed or skipped, trigger must be cron, boot or hand, and a start time is required. Otherwise ValueError.
+- `check_attempt` fills every key; outcome must be clean, carried, failed, skipped or disabled. Trigger must be cron, boot or hand, and a start time is required. Otherwise ValueError.
 - `trigger_from_env` returns the value of `LUPIN_JOB_TRIGGER` when it names a trigger (Run now sets hand), else the default.
 - `iso_now` gives local time with an offset, to the second.
 
 ## Building the next record
-- `build_summary` moves `last_finished` only on clean or carried. Failures grow on failed, reset on clean or carried and hold on skipped.
+- `build_summary` moves `last_finished` only on clean or carried. Failures grow on failed, reset on clean or carried and hold on skipped and disabled.
 - `scan_block` and `fix_block` keep the previous block when the run gave none or did not finish. A finished run adds one point; `trimmed` keeps the newest 14.
 - A failed or skipped run keeps the old scan block and time: stale, not zero. Fix debt points add the opened rows to the previous total.
 - When a job's count fell, drained is the larger of its reported figure and the fall. 168 to 3 drains 165. 24 to 2 with a reported 10 drains 22. So arrived is never negative. The wiki librarian reports its own small figure. A reported figure above the fall is kept, and nothing stays nothing when the count did not fall. Arrivals are derived only when the job left them null and a previous count exists: count now minus count before plus drained.

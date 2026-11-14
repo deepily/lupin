@@ -7,7 +7,8 @@ pins:
   - lupin_mcp.job_run.recorded_since@780f57c2a5
   - lupin_mcp.job_run.run_and_report@f90c309b7d
   - lupin_mcp.job_run.with_trigger@3bf3b60abf
-  - lupin_mcp.job_run.main@9b49da7fa3
+  - lupin_mcp.job_run.switched_on@0f42d5cc75
+  - lupin_mcp.job_run.main@bcdd067dbe
 ---
 # Job run wrapper
 
@@ -27,6 +28,12 @@ Runs a shell job and leaves it a job-summary record; the record format is in [[j
 - With `own_summary` set in the registry, the wrapper writes nothing when the command was clean or the job wrote its record during this run.
 - `recorded_since` tells that: true when the file holds a record whose last attempt finished at or after the start, to the second.
 - A failing exit before the job wrote its record still gets a failed record, so a crash never leaves the old one standing.
+
+## The run-time switch
+- Each cron-managed registry job names an INI key in `enabled_key`, `cron job <job> enabled`. `switched_on` reads it through the configuration manager with no default in code. A missing or blank key stops the run.
+- When the key is false the wrapper starts nothing. It writes one record with the outcome `disabled`, prints one line naming the key and returns 0. Cron, boot and manual runs all take this path.
+- A `disabled` record counts as a run that happened, so the job reads as off and never overdue. It is not a finished run, so the last finish and the debt figures stay as they were.
+- A job whose registry entry has no `enabled_key` has no switch and runs as before. Only the cron-managed jobs have one, because a key that controls nothing misleads.
 
 ## `main`
 - `--from-registry` takes the command and environment from the job's registry entry, as Run now does; `--trigger` says how the run began.

@@ -85,24 +85,34 @@ def reader( value, asked ):
     return types.SimpleNamespace( get_required=get_required )
 
 
-@pytest.mark.parametrize( "argv", [ [ "--job", "j", "--", "echo", "hi" ], [ "--job", "j", "--trigger", "cron", "--from-registry" ], [ "--job", "j", "--trigger", "boot", "--from-registry" ], [ "--job", "j", "--from-registry" ] ] )
-def test_a_switched_off_job_logs_its_key_and_exits_zero_before_any_work( tmp_path, monkeypatch, capsys, argv ):
+@pytest.mark.parametrize( "argv, trigger", [ ( [ "--job", "j", "--", "echo", "hi" ], "cron" ), ( [ "--job", "j", "--trigger", "cron", "--from-registry" ], "cron" ),
+                                              ( [ "--job", "j", "--trigger", "boot", "--from-registry" ], "boot" ), ( [ "--job", "j", "--from-registry" ], "cron" ) ] )
+def test_a_switched_off_job_writes_a_disabled_record_logs_its_key_and_exits_zero_without_running( tmp_path, monkeypatch, capsys, argv, trigger ):
     env, asked, ran = switch_tree( tmp_path, monkeypatch ), [], []
     code = jr_mod.main( argv, env, lambda command, **kw: ran.append( command ), config=reader( False, asked ) )
     out  = capsys.readouterr().out
     assert code == 0 and ran == [] and asked == [ ( "cron job j enabled", "boolean" ) ]
     assert out.count( "\n" ) == 1 and "cron job j enabled" in out and "switched off" in out
-    assert not ( tmp_path / "out" ).exists() and not ( tmp_path / "data" ).exists()
+    last = json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ]
+    assert last[ "outcome" ] == "disabled" and last[ "trigger" ] == trigger and last[ "failure" ] is None and "cron job j enabled" in last[ "evidence" ]
 
 
-def test_a_switched_on_job_runs_and_a_missing_key_or_missing_enabled_key_stops_the_run( tmp_path, monkeypatch ):
+def test_a_manual_run_of_a_switched_off_job_is_a_hand_trigger( tmp_path, monkeypatch ):
+    env = { **switch_tree( tmp_path, monkeypatch ), "LUPIN_JOB_TRIGGER": "hand" }
+    assert jr_mod.main( [ "--job", "j", "--from-registry" ], env, fake( 0 ), config=reader( False, [] ) ) == 0
+    assert json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ][ "trigger" ] == "hand"
+
+
+def test_a_switched_on_job_runs_a_missing_ini_key_stops_it_and_a_job_with_no_switch_runs_ungated( tmp_path, monkeypatch ):
     env, asked, ran = switch_tree( tmp_path, monkeypatch ), [], []
     assert jr_mod.main( [ "--job", "j", "--", "echo", "hi" ], env, fake( 0 ), config=reader( True, asked ) ) == 0 and ( tmp_path / "out" / "j.json" ).exists()
+    assert json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ][ "outcome" ] == "clean"
     def absent( key, return_type="string" ): raise KeyError( key )
     with pytest.raises( KeyError ): jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=types.SimpleNamespace( get_required=absent ) )
     reg  = tmp_path / jr.REGISTRY_FILE
     doc  = json.loads( reg.read_text() ); doc[ "jobs" ][ 0 ].pop( "enabled_key" ); reg.write_text( json.dumps( doc ) )
-    with pytest.raises( ValueError, match="no enabled_key" ): jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=reader( True, [] ) )
+    second = []
+    assert jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=reader( False, second ) ) == 0 and second == [], "no enabled_key: the INI is never asked"
 
 
 def test_the_switch_is_read_through_a_silent_configuration_manager( tmp_path, monkeypatch, capsys ):

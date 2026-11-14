@@ -258,7 +258,6 @@
     },
     {
       "job": "context-tick",
-      "enabled_key": "cron job context-tick enabled",
       "catalog": "P1",
       "title": "Context-pressure tick (fleet)",
       "owner": "cheech",
@@ -282,7 +281,6 @@
     },
     {
       "job": "doc-parity-tick",
-      "enabled_key": "cron job doc-parity-tick enabled",
       "catalog": "P3",
       "title": "Doc-parity tick",
       "owner": "cheech",
@@ -476,7 +474,6 @@
     },
     {
       "job": "yearly-reminders",
-      "enabled_key": "cron job yearly-reminders enabled",
       "catalog": "L10",
       "title": "Yearly reminders (password rotation, LoRA review)",
       "owner": "rick",
@@ -498,7 +495,6 @@
     },
     {
       "job": "fleet-arbiter",
-      "enabled_key": "cron job fleet-arbiter enabled",
       "catalog": "L11",
       "title": "Fleet arbiter (:8001)",
       "owner": "cheech",
@@ -513,7 +509,6 @@
     },
     {
       "job": "context-pressure-writer",
-      "enabled_key": "cron job context-pressure-writer enabled",
       "catalog": "L13",
       "title": "Context-pressure writer",
       "owner": "cheech",
@@ -528,7 +523,6 @@
     },
     {
       "job": "health-watcher",
-      "enabled_key": "cron job health-watcher enabled",
       "catalog": "L14",
       "title": "Health watcher",
       "owner": "cheech",
@@ -543,7 +537,6 @@
     },
     {
       "job": "worktree-janitor",
-      "enabled_key": "cron job worktree-janitor enabled",
       "catalog": "L12",
       "title": "Worktree janitor",
       "owner": "cheech",
@@ -571,7 +564,6 @@
     },
     {
       "job": "notification-expiry",
-      "enabled_key": "cron job notification-expiry enabled",
       "catalog": "L18",
       "title": "Notification expiry",
       "owner": "cheech",
@@ -588,7 +580,6 @@
     },
     {
       "job": "commons-archival",
-      "enabled_key": "cron job commons-archival enabled",
       "catalog": "L19",
       "title": "Commons archival",
       "owner": "cheech",
@@ -605,7 +596,6 @@
     },
     {
       "job": "notify-outbox",
-      "enabled_key": "cron job notify-outbox enabled",
       "catalog": "L20",
       "title": "Notify outbox flush",
       "owner": "cheech",
@@ -623,7 +613,6 @@
     },
     {
       "job": "socket-housekeeping",
-      "enabled_key": "cron job socket-housekeeping enabled",
       "catalog": "L22",
       "title": "Socket heartbeat, cleanup and transcript tailer",
       "owner": "cheech",
@@ -645,7 +634,6 @@
     },
     {
       "job": "side-services",
-      "enabled_key": "cron job side-services enabled",
       "catalog": "L28",
       "title": "Side services",
       "owner": "cheech",
@@ -680,7 +668,6 @@
     },
     {
       "job": "pokes",
-      "enabled_key": "cron job pokes enabled",
       "catalog": "L30",
       "title": "Pokes (when started)",
       "owner": "cheech",

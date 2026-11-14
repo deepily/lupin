@@ -1,4 +1,4 @@
-"""Census guard: every registry job has a run-time switch in the INI."""
+"""Census guard: every cron-managed registry job has a run-time switch in the INI."""
 import json
 import re
 
@@ -24,35 +24,42 @@ def switch_values( text ):
 
 
 def missing_switches( jobs, ini_text ):
-    """Ensures: returns the jobs whose key is not canonical or has no true or false INI line."""
+    """Ensures: returns the managed jobs whose key is not canonical or has no true/false line."""
     have = switch_values( ini_text )
-    return [ j[ "job" ] for j in jobs if j.get( "enabled_key" ) != f"cron job {j[ 'job' ]} enabled" or have.get( j.get( "enabled_key" ) ) not in ( "true", "false" ) ]
+    return [ j[ "job" ] for j in jobs if j.get( "cron_managed" ) and ( j.get( "enabled_key" ) != f"cron job {j[ 'job' ]} enabled" or have.get( j.get( "enabled_key" ) ) not in ( "true", "false" ) ) ]
 
 
-def test_the_registry_holds_twenty_four_jobs_and_each_has_a_switch_in_the_ini():
+def test_the_registry_holds_eleven_cron_managed_jobs_and_each_has_a_switch_in_the_ini():
     jobs = registry_jobs()
-    assert len( jobs ) == 24
+    assert len( jobs ) == 24 and len( [ j for j in jobs if j.get( "cron_managed" ) ] ) == 11
     assert missing_switches( jobs, read( INI ) ) == []
+
+
+def test_no_job_outside_cron_management_carries_a_key_that_controls_nothing():
+    unmanaged = [ j for j in registry_jobs() if not j.get( "cron_managed" ) ]
+    assert len( unmanaged ) == 13
+    assert [ j[ "job" ] for j in unmanaged if "enabled_key" in j ] == []
+    assert sorted( switch_values( read( INI ) ) ) == sorted( j[ "enabled_key" ] for j in registry_jobs() if j.get( "cron_managed" ) )
 
 
 def test_only_the_duplicate_check_ships_switched_off():
     have = switch_values( read( INI ) )
     assert sorted( k for k, v in have.items() if v == "false" ) == sorted( f"cron job {j} enabled" for j in HELD_OFF )
-    assert len( [ v for v in have.values() if v == "true" ] ) == 23
+    assert len( [ v for v in have.values() if v == "true" ] ) == 10
 
 
-def test_every_switch_has_a_splainer_twin_and_no_switch_is_unregistered():
+def test_every_switch_has_a_splainer_twin():
     assert sorted( switch_values( read( INI ) ) ) == sorted( re.findall( r"^(cron job \S+ enabled)\s*=", read( SPLAINER ), re.MULTILINE ) )
-    assert sorted( switch_values( read( INI ) ) ) == sorted( j[ "enabled_key" ] for j in registry_jobs() )
 
 
 def test_the_guard_goes_red_when_one_switch_is_deleted_from_the_ini():
-    cut = "\n".join( l for l in read( INI ).split( "\n" ) if not l.startswith( "cron job pokes enabled" ) )
+    cut = "\n".join( l for l in read( INI ).split( "\n" ) if not l.startswith( "cron job disk-report enabled" ) )
     assert cut != read( INI )
-    assert missing_switches( registry_jobs(), cut ) == [ "pokes" ]
+    assert missing_switches( registry_jobs(), cut ) == [ "disk-report" ]
 
 
-def test_the_guard_goes_red_when_a_registry_job_has_no_enabled_key():
+def test_the_guard_goes_red_when_a_managed_job_has_no_enabled_key():
     jobs = [ dict( j ) for j in registry_jobs() ]
-    jobs[ 5 ].pop( "enabled_key" )
-    assert missing_switches( jobs, read( INI ) ) == [ jobs[ 5 ][ "job" ] ]
+    first = next( j for j in jobs if j.get( "cron_managed" ) )
+    first.pop( "enabled_key" )
+    assert missing_switches( jobs, read( INI ) ) == [ first[ "job" ] ]

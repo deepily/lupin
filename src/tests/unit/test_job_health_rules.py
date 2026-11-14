@@ -57,6 +57,16 @@ def test_a_skipped_run_is_not_silent():
     assert run( entry(), s, at( 7, 12 ) )[ "state" ] == "healthy"
 
 
+def test_a_disabled_run_covers_the_due_time_so_a_switched_off_job_is_off_not_overdue():
+    old = record( when=at( 6, 10 ) )
+    assert run( entry(), old, at( 7, 12 ) )[ "state" ] == "silent", "control: with no run since, the same job is overdue"
+    off = record( "disabled", at( 7, 10, 1 ), previous=old, evidence="INI key 'cron job j enabled' is false" )
+    got = run( entry(), off, at( 7, 12 ) )
+    assert got[ "state" ] == "healthy" and got[ "reasons" ] == [] and got[ "last_attempt" ][ "outcome" ] == "disabled"
+    assert got[ "last_finished" ][ "started_at" ] == at( 6, 10 ).isoformat(), "a disabled run is not a finished run: the last finish stays the earlier one"
+    assert got[ "consecutive_failures" ] == 0
+
+
 def test_a_hand_run_after_the_due_time_covers_it_and_another_mode_does_not():
     s = record( "clean", at( 7, 10, 40 ), trigger="hand" ) if False else record( "clean", at( 7, 10, 40 ) )
     assert run( entry(), s, at( 7, 12 ) )[ "state" ] == "healthy"
