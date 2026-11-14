@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.job_run.recorded_since@780f57c2a5
   - lupin_mcp.job_run.run_and_report@f90c309b7d
   - lupin_mcp.job_run.with_trigger@3bf3b60abf
-  - lupin_mcp.job_run.switched_on@0f42d5cc75
+  - lupin_mcp.job_run.switched_on@289b08f82b
   - lupin_mcp.job_run.main@bcdd067dbe
 ---
 # Job run wrapper
@@ -30,7 +30,7 @@ Runs a shell job and leaves it a job-summary record; the record format is in [[j
 - A failing exit before the job wrote its record still gets a failed record, so a crash never leaves the old one standing.
 
 ## The run-time switch
-- Each cron-managed registry job names an INI key in `enabled_key`, `cron job <job> enabled`. `switched_on` reads it through the configuration manager with no default in code. A missing or blank key stops the run.
+- Each cron-managed registry job names an INI key in `enabled_key`, `cron job <job> enabled`. `switched_on` reads the key's text and gives it to `parse_switch`, the one rule every switch reader shares, with no default in code. A missing or blank key stops the run, and so does a word that is neither true nor false, such as yes or 1.
 - When the key is false the wrapper starts nothing. It writes one record with the outcome `disabled`, prints one line naming the key and returns 0. Cron, boot and manual runs all take this path.
 - A `disabled` record counts as a run that happened, so the job reads as off and never overdue. It is not a finished run, so the last finish and the debt figures stay as they were.
 - A job whose registry entry has no `enabled_key` has no switch and runs as before. Only the cron-managed jobs have one, because a key that controls nothing misleads.
