@@ -101,6 +101,9 @@ def test_the_toolbar_button_hides_and_shows_the_section( logged_in_page, client 
     _open( page, client )
     section, button = page.locator( client[ "section" ] ), page.get_by_test_id( client[ "toolbar" ] )
     assert section.is_visible() and "active" in ( button.get_attribute( "class" ) or "" )
+    if client is CLIENTS[ "legacy" ]:
+        # Row 61070c08: the legacy toolbar binds its handlers after init()'s awaits, later than the jobs rows appear.
+        page.locator( "#section-toolbar[data-bound=true]" ).wait_for( state="attached", timeout=20_000 )
     button.click()
     section.wait_for( state="hidden", timeout=5_000 )
     button.click()
