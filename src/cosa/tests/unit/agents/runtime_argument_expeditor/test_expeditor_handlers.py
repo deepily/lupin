@@ -586,10 +586,6 @@ class TestTfeCheckpointMatch( unittest.TestCase ):
         self.assertEqual( out, "tfe-fallback" )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestFakedSubmoduleRestore:
     """The cleanup restores what was there; it never evicts a real loaded module."""
 
@@ -622,3 +618,7 @@ class TestFakedSubmoduleRestore:
             snap = _snapshot_faked_submodules()
             assert snap[ dotted ][ 1 ] is _ABSENT
             _restore_faked_submodules( snap )
+
+
+if __name__ == "__main__":
+    unittest.main()
