@@ -91,7 +91,7 @@ TEST_PROFILES = {
         "audience"         : "general",
         "audience_context" : "none",
         "languages"        : "en",
-        "review"        : "one_shot",
+        "review"           : "one_shot",
     },
     "research_to_podcast" : {
         "description" : "Auto-answer for research-to-podcast chained workflow",
@@ -117,7 +117,7 @@ TEST_PROFILES = {
         "audience_context"         : "none",
         "research"                 : "/tmp/mock-research-document.md",
         "languages"                : "en",
-        "review"                : "one_shot",
+        "review"                   : "one_shot",
         "prompt"                   : "fix the authentication bug in the login endpoint",
         "project"                  : "lupin",
         "task"                     : "add a health check endpoint to the API",
