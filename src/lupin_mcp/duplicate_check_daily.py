@@ -88,7 +88,7 @@ STAGE_GUARD       = "branch_guard"
 STAGE_BASELINE    = "baseline"        # the stage named in a result file when the baseline part of an hourly slot raised after the daily part had finished
 STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
-UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable", "owed", "usage", "rate_limited", "backoff_until" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
+UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable", "owed", "usage", "rate_limited", "backoff_until", "pairs" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
 CARRIED           = behaviour.CARRIED     # names copied into the cron lines from the installer's environment
 
 
@@ -476,6 +476,27 @@ def finding_judges( finding, verdicts, run_model ):
     return { "judge_model": "+".join( judges ), **( { "reused_from_model": "+".join( reused ) } if reused else {} ) }
 
 
+def pair_counts( verdicts ):
+    """
+    Count a run's own pair verdicts for each model, for the drift report.
+
+    Requires:
+        - verdicts are judge_run's rows, each with model and verdict
+
+    Ensures:
+        - returns { model id: { rows, flagged } }, where rows is the pair verdicts that model ruled and flagged those with a verdict in judge.FLAG_VERDICTS
+        - a row with reused_from_model is left out, so a saved ruling of another model is never counted as this run's
+        - returns {} when no row remains
+    """
+    counts = {}
+    for v in verdicts:
+        if "reused_from_model" in v: continue
+        row = counts.setdefault( v[ "model" ], { "rows": 0, "flagged": 0 } )
+        row[ "rows" ]   += 1
+        row[ "flagged" ] += 1 if v[ "verdict" ] in judge.FLAG_VERDICTS else 0
+    return counts
+
+
 def findings_of( groups, fresh, pool, window, parts, commit_of=None, settled=() ):
     """
     Turn the duplicate clusters into one finding per cluster that holds a new definition.
@@ -795,7 +816,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     moved  = progress( fresh[ "defs" ], fresh[ "commit_of" ], out[ "unjudged" ], window )
     doc.update( usage=usage_since( used0, spend(), count.calls ), rate_limited=count.limited, backoff_until=( now + datetime.timedelta( seconds=BACKOFF_SECONDS ) ).isoformat() if count.limited else None )
     doc.update( judge_failed=count.failed, status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
-                carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
+                carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, pairs=pair_counts( out[ "verdicts" ] ), unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
     if count.calls and count.failed == count.calls and not count.limited:       # every new call failed without a limit to explain it (a limit already backs off and alerts): a ruling replayed from the ledger is not a judgment of this run, so judged cannot hide it
         doc.update( status="failed", stage=STAGE_JUDGING, error=f"all {count.calls} new judge calls failed; the {doc[ 'judged' ]} judged were replayed from the ledger or earlier" )
