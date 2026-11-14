@@ -221,3 +221,26 @@ def test_main_refuses_when_the_budget_is_spent_or_the_lock_is_held(tmp_path):
     def spent( *a ): raise daily.SpendRefused( "the daily call budget is spent" )
     code, text = run_main( [ "--model", OPUS, "--check-dir", str( tmp_path ), "--go", "--claude-cli-path", "c" ], run=spent, parts={} )
     assert code == sc.EXIT_NOT_MADE and "SpendRefused" in text
+
+
+def test_rejudge_run_takes_every_definition_of_the_tree_for_a_baseline_run(tmp_path, monkeypatch):
+    released, seen = [], []
+    patch_live( monkeypatch, lambda wanted, everyone, cfg, wiring, slot, max_calls=None, skip_breaching=False: seen.append( [ d[ "id" ] for d in wanted ] ) or { "verdicts": [], "unjudged": [] }, released )
+    monkeypatch.setattr( daily, "git", lambda *a: pytest.fail( "a baseline run has no commit list to read" ) )
+    monkeypatch.setattr( daily, "new_definitions", lambda *a: pytest.fail( "a baseline run does not ask for the window's new definitions" ) )
+    monkeypatch.setattr( daily, "baseline_definitions", lambda tree, window: { "defs": [ { "id": "d-1" }, { "id": "d-9" } ] } )
+    _first, _second, missing, _calls = sc.rejudge_run( str( tmp_path ), { **DOC, "mode": "baseline" }, [ "d-1", "d-2" ], PARTS, "cli", 2, 1 )
+    assert seen == [ [ "d-1" ], [ "d-1" ] ] and missing == [ "d-2" ] and len( released ) == 1
+
+
+def test_second_pass_writes_its_history_line_even_when_a_later_run_file_raises(tmp_path, monkeypatch):
+    for name in ( "a.json", "b.json" ): ( tmp_path / name ).write_text( json.dumps( DOC ), encoding="utf-8" )
+    def fake( root, doc, ids, parts, cli, cap, parallel ):
+        if ids == [ "d-2" ]: raise RuntimeError( "the second run file broke" )
+        return [], [], [], 3
+    monkeypatch.setattr( sc, "rejudge_run", fake )
+    monkeypatch.setattr( daily, "calls_left", lambda folder, parts, model, now: 10 )
+    with pytest.raises( RuntimeError, match="second run file broke" ): sc.second_pass( "root", tmp_path, OPUS, { "a.json": [ "d-1" ], "b.json": [ "d-2" ] }, {}, "cli", 1, NOW )
+    last = history.read_lines( tmp_path )[ -1 ]
+    assert last[ "mode" ] == sc.MODE and last[ "status" ] == "failed" and last[ "judge_calls" ] == 3
+    assert history.calls_on( history.read_lines( tmp_path ), NOW.date().isoformat(), OPUS ) == 3

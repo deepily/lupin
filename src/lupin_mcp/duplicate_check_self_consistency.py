@@ -158,19 +158,20 @@ def rejudge_run( root, doc, ids, parts, cli_path, cap, parallel ):
         - parts are duplicate_check_daily.live_parts' answer; cap is the most model calls the second pass may make
 
     Ensures:
-        - rebuilds the run's window from its start and end commits, checks out its end commit in a worktree of its own, and removes the worktree afterwards, even on an error
+        - rebuilds the run's window from its start and end commits, and for a baseline run takes every definition of the tree as the baseline did, then checks out its end commit in a worktree of its own, and removes the worktree afterwards, even on an error
         - replays slot 0 from the ledger with no call allowed, and judges slot 1 with up to cap calls
         - returns ( first rows, second rows, missing ids, calls made ): missing are the sampled ids the window no longer yields as new definitions, or that a pass left unjudged
     """
-    window = { "start": doc[ "window" ][ "start" ], "end": doc[ "window" ][ "end" ] }
-    listed = daily.git( root, "rev-list", "--reverse", "--first-parent", f"{window[ 'start' ]}..{window[ 'end' ]}" )
+    window   = { "start": doc[ "window" ][ "start" ], "end": doc[ "window" ][ "end" ] }
+    baseline = doc.get( "mode" ) == history.MODE_BASELINE
+    listed   = "" if baseline else daily.git( root, "rev-list", "--reverse", "--first-parent", f"{window[ 'start' ]}..{window[ 'end' ]}" )
     window[ "commits" ] = listed.split() if listed else []
     cfg    = parts[ "verify" ]()
     target = pathlib.Path( root ) / daily.source_at.WORKTREES / f"{WORKTREE_NAME}{window[ 'end' ][ :9 ]}"
     tree   = daily.source_at.ensure_worktree( root, window[ "end" ], target )
     count  = daily.Counting( parts[ "backend" ] )
     try:
-        fresh  = daily.new_definitions( tree, root, window )
+        fresh  = daily.baseline_definitions( tree, window ) if baseline else daily.new_definitions( tree, root, window )
         wanted = [ d for d in fresh[ "defs" ] if d[ "id" ] in set( ids ) ]
         pool   = daily.pool_without_earlier_versions( tree, fresh[ "defs" ] )
         folder = pathlib.Path( parts[ "data_dir" ] ).joinpath( *daily.FOLDER )
@@ -194,21 +195,25 @@ def second_pass( root, folder, model, groups, parts, cli_path, parallel, now ):
 
     Ensures:
         - judges each run file's sample with rejudge_run, the calls of all of them bounded by the day's calls left
-        - appends one history line, mode self-consistency, with the calls made and the model, so the day's budget counts them
+        - appends one history line, mode self-consistency, with the calls made and the model, so the day's budget counts them; the line is written even when a later run file raises, with status failed and the calls made so far
         - returns ( first rows, second rows, missing ids, calls made ), the rows of every run joined
 
     Raises:
         - duplicate_check_daily.SpendRefused when the model's day budget is spent, before any call
     """
-    left  = daily.calls_left( folder, parts, model, now )
-    total = [ [], [], [], 0 ]
-    for run_file, ids in groups.items():
-        doc = json.loads( ( pathlib.Path( folder ) / run_file ).read_text( encoding="utf-8" ) )
-        got = rejudge_run( root, doc, ids, parts, cli_path, min( len( ids ), left - total[ 3 ] ), parallel )
-        for k in range( 3 ): total[ k ] += got[ k ]
-        total[ 3 ] += got[ 3 ]
-    history.append_line( folder, history.line_of( { "started_at": now.isoformat(), "trigger": "hand", "status": "ok", "mode": MODE, "judge_calls": total[ 3 ], "judge_model": model,
-                                                   "elapsed_seconds": ( datetime.datetime.now().astimezone() - now ).total_seconds() }, MODE ) )
+    left   = daily.calls_left( folder, parts, model, now )
+    total  = [ [], [], [], 0 ]
+    status = "failed"
+    try:
+        for run_file, ids in groups.items():
+            doc = json.loads( ( pathlib.Path( folder ) / run_file ).read_text( encoding="utf-8" ) )
+            got = rejudge_run( root, doc, ids, parts, cli_path, min( len( ids ), left - total[ 3 ] ), parallel )
+            for k in range( 3 ): total[ k ] += got[ k ]
+            total[ 3 ] += got[ 3 ]
+        status = "ok"
+    finally:
+        history.append_line( folder, history.line_of( { "started_at": now.isoformat(), "trigger": "hand", "status": status, "mode": MODE, "judge_calls": total[ 3 ], "judge_model": model,
+                                                       "elapsed_seconds": ( datetime.datetime.now().astimezone() - now ).total_seconds() }, MODE ) )
     return tuple( total )
 
 
