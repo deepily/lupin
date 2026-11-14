@@ -226,7 +226,7 @@ test( "a job that does not read its switch says so and has its button disabled; 
   await load();
   assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-honoured]" )!.textContent, "does not read its switch yet" );
   assert.equal( flipButton( "duplicate-check" ).disabled, true );
-  assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-drift]" ), null );
+  assert.equal( item( "duplicate-check" ).querySelectorAll( "[data-testid=cron-drift]" ).length, 0 );
   assert.equal( item( "wiki-librarian" ).querySelector( "[data-testid=cron-honoured]" )!.textContent, "reads its switch" );
   assert.equal( item( "wiki-librarian" ).querySelector( "[data-testid=cron-drift]" )!.textContent, "changed outside the endpoint" );
   assert.equal( flipButton( "wiki-librarian" ).disabled, false );
