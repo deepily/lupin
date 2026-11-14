@@ -686,6 +686,8 @@
     },
     {
       "job": "pokes",
+      "enabled_key": "cron job pokes enabled",
+      "switch_reader": "cosa.agents.heartbeat_poker_job:HeartbeatPokerJob.__init__",
       "catalog": "L30",
       "title": "Pokes (when started)",
       "owner": "cheech",
