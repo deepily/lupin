@@ -7,6 +7,7 @@ import subprocess
 
 import pytest
 
+from cosa.repo import code_health_settings as chs
 from cosa.repo.duplicate_check import config as cf
 from cosa.repo.duplicate_check import errors as err
 from cosa.repo.duplicate_check import judge as jd
@@ -51,7 +52,7 @@ def parts_of( tmp_path, **over ):
     backend = FakeBackend()
     cfg     = cf.build_config( "max-plan", "unsettable:bounded-cc", "stub", *jd.prompt_parts(), SCRUB, 4000, JSCPD, min_nodes=10 )
     base    = { "client": FakeClient(), "backend": backend, "data_dir": str( tmp_path / "io" ), "version_fn": lambda p: "9.9", "verify": lambda: cfg,
-                "structural": lambda tree, c: ( lambda defs: [] ) }
+                "config": KeyConfig( { chs.DAILY_BUDGET_KEY: f"{cfg[ 'model_id' ]}=100000" } ), "structural": lambda tree, c: ( lambda defs: [] ) }
     return { **base, **over }
 
 
@@ -1285,3 +1286,71 @@ def test_a_judge_model_with_no_frozen_file_fails_the_frozen_prerequisite_by_name
     def verify(): raise FileNotFoundError( 2, "No such file", "/conf/semdup-frozen-claude-opus-5-5.json" )
     doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, verify=verify ) )
     assert doc[ "status" ] == "failed" and doc[ "prerequisite" ] == dd.PREREQ_FROZEN and "semdup-frozen-claude-opus-5-5.json" in doc[ "detail" ] and doc[ "judge_calls" ] == 0
+
+
+# ---- the daily call budget per model (row 40049d7f) ----
+
+def model_of( parts ): return parts[ "verify" ]()[ "model_id" ]
+
+
+def seed_calls( tmp_path, day, calls, model ):
+    """Ensures: appends one history line of calls started on the day, naming the model or None."""
+    stamp = datetime.datetime.fromisoformat( f"{day}T08:00:00+00:00" )
+    hist.append_line( tmp_path / "io" / "duplicate-check-daily", { **hist.line_of( { "status": "ok", "trigger": "cron", "started_at": stamp.isoformat(), "judge_calls": calls, "judge_model": model }, "seed.json" ) } )
+
+
+def test_a_spent_budget_skips_the_slot_with_no_call_and_moves_nothing( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    model = model_of( parts )
+    parts[ "config" ] = KeyConfig( { chs.DAILY_BUDGET_KEY: f"{model}=50" } )
+    seed_calls( tmp_path, "2026-11-03", 50, model )
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )
+    assert doc[ "status" ] == dd.SKIPPED and doc[ "judge_calls" ] == 0 and doc[ "judge_model" ] == model
+    assert "50 calls started today of 50" in doc[ "note" ] and chs.DAILY_BUDGET_KEY in doc[ "note" ]
+    assert parts[ "backend" ].calls == 0, "the fake backend was never reached"
+    assert not ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).exists(), "a skipped slot advances nothing"
+    assert len( worktrees( repo ) ) == 1, "the refusal comes before any worktree is made"
+    assert hist.read_lines( tmp_path / "io" / "duplicate-check-daily" )[ -1 ][ "status" ] == dd.SKIPPED
+
+
+def test_the_run_cap_is_lowered_to_the_calls_the_budget_leaves( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    model = model_of( parts )
+    parts[ "config" ] = KeyConfig( { chs.DAILY_BUDGET_KEY: f"{model}=50" } )
+    seed_calls( tmp_path, "2026-11-03", 48, model )
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )
+    assert doc[ "cap" ] == 2 and doc[ "judge_calls" ] <= 2 and doc[ "judge_model" ] == model, "ten were asked for, two were left"
+    assert doc[ "status" ] == "carried", "the cap left definitions unjudged, so they carry"
+
+
+def test_only_todays_calls_on_this_model_are_charged_except_lines_that_name_no_model( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    model = model_of( parts )
+    parts[ "config" ] = KeyConfig( { chs.DAILY_BUDGET_KEY: f"{model}=50" } )
+    seed_calls( tmp_path, "2026-11-02", 500, model )
+    seed_calls( tmp_path, "2026-11-03", 500, "some-other-model" )
+    assert dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )[ "status" ] == "ok", "yesterday's calls and another model's calls leave the budget whole"
+    seed_calls( tmp_path, "2026-11-03", 50, None )
+    assert dd.run( repo, NOW + datetime.timedelta( hours=1 ), "cron", 10, "/bin/claude", parts )[ "status" ] == dd.SKIPPED, "a line with no model is charged to this one"
+
+
+def test_a_model_the_budget_key_does_not_list_fails_the_run_at_setup_naming_the_key( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path, config=KeyConfig( { chs.DAILY_BUDGET_KEY: "claude-sonnet-5-5=10" } ) )
+    doc   = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )
+    assert doc[ "status" ] == "failed" and doc[ "stage" ] == dd.STAGE_SETUP and doc[ "judge_calls" ] == 0 and chs.DAILY_BUDGET_KEY in doc[ "error" ]
+    assert not ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).exists()
+
+
+def test_with_no_config_part_the_budget_comes_from_the_live_ini( repo, tmp_path, monkeypatch ):
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development" )
+    history( repo )
+    parts = parts_of( tmp_path )
+    del parts[ "config" ]
+    real = parts[ "verify" ]()
+    parts[ "verify" ] = lambda: { **real, "model_id": "claude-opus-5-5" }
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )
+    assert doc[ "judge_model" ] == "claude-opus-5-5" and doc[ "status" ] == "ok", "the real INI lists claude-opus-5-5"

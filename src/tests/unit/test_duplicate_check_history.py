@@ -28,7 +28,7 @@ def test_a_successful_run_flattens_to_one_line_with_counts_group_sizes_and_findi
                     "mode": "daily", "status": "carried", "failure": None, "window_start": "aaa", "window_end": "bbb", "commits": 65, "judged": 304, "carried": 2, "cap": 300,
                     "ceiling": None, "judge_calls": 300, "findings": 3, "groups": 2, "group_sizes": [ 2, 3 ], "findings_by_commit": { "c1": 2, "unknown": 1 },
                     "filed": 2, "already_filed": 0, "queued_for_retry": 1, "refused": 0, "unreadable": 1, "backfilled": False,
-                    "branch": None, "owed": None, "rate_limited": None, "backoff_until": None, "input_tokens": None, "output_tokens": None, "cache_creation_tokens": None,
+                    "branch": None, "judge_model": None, "owed": None, "rate_limited": None, "backoff_until": None, "input_tokens": None, "output_tokens": None, "cache_creation_tokens": None,
                     "cache_read_tokens": None, "cost_usd": None, "usage_calls": None, "calls_per_hour": 1038 }
 
 
@@ -166,3 +166,19 @@ def test_the_table_reader_prints_the_series_and_then_the_numbers_of_the_lines_it
 def test_append_line_writes_to_the_named_file_when_given_one(tmp_path):
     assert hist.append_line( tmp_path, { "a": 1 }, "own.jsonl" ) == tmp_path / "own.jsonl" and not ( tmp_path / hist.RUNS_FILE ).exists()
     assert ( tmp_path / "own.jsonl" ).read_text() == '{"a": 1}\n'
+
+
+def stamped( day, calls, model ): return hist.line_of( { "status": "ok", "trigger": "cron", "started_at": f"{day}T08:00:00-05:00", "judge_calls": calls, "judge_model": model }, "x.json" )
+
+
+def test_a_line_copies_the_model_its_calls_went_to_and_none_when_the_run_never_named_one():
+    assert hist.line_of( { **ok_doc(), "judge_model": "claude-opus-5-5" }, "f.json" )[ "judge_model" ] == "claude-opus-5-5"
+    assert hist.line_of( ok_doc(), "f.json" )[ "judge_model" ] is None
+
+
+def test_calls_on_sums_one_days_calls_for_one_model_and_charges_unnamed_lines_to_every_model():
+    lines = [ stamped( "2026-11-13", 100, "opus" ), stamped( "2026-11-13", 30, "opus" ), stamped( "2026-11-13", 7, "sonnet" ), stamped( "2026-11-12", 900, "opus" ),
+              stamped( "2026-11-13", 5, None ), stamped( "2026-11-13", None, "opus" ) ]
+    assert hist.calls_on( lines, "2026-11-13", "opus" ) == 135, "100 + 30 + the 5 of the unnamed line; None calls add 0; yesterday and sonnet do not count"
+    assert hist.calls_on( lines, "2026-11-13", "sonnet" ) == 12
+    assert hist.calls_on( lines, "2026-11-14", "opus" ) == 0 and hist.calls_on( [], "2026-11-13", "opus" ) == 0

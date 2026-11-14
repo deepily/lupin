@@ -39,6 +39,7 @@ DRAFTER_MODEL_KEY = "reuse need drafter model"
 ALIKE_MODEL_KEY   = "duplicate check proof alike model"
 NEED_WRITER_MODEL_KEY = "symindex need writer model"
 SECOND_MODEL_KEY  = "reuse need second model"
+DAILY_BUDGET_KEY  = "duplicate check daily call budget"
 
 
 class CodeHealthSettingError( ValueError ):
@@ -214,6 +215,33 @@ def jev_token_limit( config, name ):
         - CodeHealthSettingError naming the key when the value is blank, absent or not a positive whole number
     """
     return read_positive_int( config, repo_key( name, JEV_LIMIT_KIND ) )
+
+
+def daily_call_budget( config, model ):
+    """
+    Read the most judge calls the duplicate check may start in one calendar day on one model.
+
+    Requires:
+        - the key holds comma-separated <model id>=<calls> pairs, such as `claude-opus-5-5=2400, claude-sonnet-5-5=2400`
+        - config has a ConfigurationManager `get` method; model is the model id the run will send its calls to
+
+    Ensures:
+        - returns the calls listed for model, a positive int
+        - a model the key does not list has no budget, and that is a refusal, never unlimited
+
+    Raises:
+        - CodeHealthSettingError naming the key when it is blank, a pair is malformed or repeats a model, a count is not a positive whole number, or model is not listed
+    """
+    text = read_text( config, DAILY_BUDGET_KEY )
+    pairs = {}
+    for entry in split_csv( text ):
+        name, _, count = ( part.strip() for part in entry.partition( "=" ) )
+        if ONE_TOKEN.fullmatch( name ) is None or WHOLE_NUMBER.fullmatch( count ) is None or int( count ) < 1:
+            raise CodeHealthSettingError( f"{DAILY_BUDGET_KEY}: {entry!r} is not <model id>=<positive whole number of calls>; this key has no default" )
+        if name in pairs: raise CodeHealthSettingError( f"{DAILY_BUDGET_KEY}: {name!r} is listed twice; this key has no default" )
+        pairs[ name ] = int( count )
+    if model not in pairs: raise CodeHealthSettingError( f"{DAILY_BUDGET_KEY}: no daily budget is listed for {model!r} (it lists {sorted( pairs )}); a model with no budget does not run" )
+    return pairs[ model ]
 
 
 def model_id( key, config=None ):

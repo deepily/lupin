@@ -246,3 +246,26 @@ def test_building_the_process_config_for_a_model_id_keeps_stdout_clean( config, 
     assert chs.model_id( chs.JUDGE_MODEL_KEY ) == "claude-opus-5-5"
     seen = capsys.readouterr()
     assert seen.out == "" and "Using environment variables" in seen.err
+
+
+BUDGET = "duplicate check daily call budget"
+
+
+def test_a_listed_model_has_its_daily_call_budget( config ):
+    config.set_config( BUDGET, " claude-opus-5-5 = 2400 , claude-sonnet-5-5=100" )
+    assert chs.DAILY_BUDGET_KEY == BUDGET
+    assert ( chs.daily_call_budget( config, "claude-opus-5-5" ), chs.daily_call_budget( config, "claude-sonnet-5-5" ) ) == ( 2400, 100 )
+
+
+def test_the_real_ini_budgets_opus_and_lists_no_fable( config ):
+    assert chs.daily_call_budget( config, "claude-opus-5-5" ) == 2400
+    with pytest.raises( chs.CodeHealthSettingError, match = "no daily budget is listed for 'claude-fable-5-1'" ): chs.daily_call_budget( config, "claude-fable-5-1" )
+
+
+@pytest.mark.parametrize( "value, why", [ ( "", "no daily budget is listed" ), ( "claude-opus-5-5", "is not <model id>=" ), ( "claude-opus-5-5=0", "is not <model id>=" ),
+                                           ( "claude-opus-5-5=-3", "is not <model id>=" ), ( "claude-opus-5-5=many", "is not <model id>=" ), ( "=5", "is not <model id>=" ),
+                                           ( "claude-opus-5-5=5, claude-opus-5-5=6", "is listed twice" ), ( "claude-sonnet-5-5=5", "no daily budget is listed" ) ] )
+def test_a_blank_malformed_repeated_or_unlisted_budget_is_refused_naming_the_key( config, value, why ):
+    config.set_config( BUDGET, value )
+    with pytest.raises( chs.CodeHealthSettingError, match = BUDGET ) as caught: chs.daily_call_budget( config, "claude-opus-5-5" )
+    assert why in str( caught.value )
