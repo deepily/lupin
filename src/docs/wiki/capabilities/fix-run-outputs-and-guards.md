@@ -11,6 +11,7 @@ pins:
   - cosa.agents.shared.fix_executor.BFETimeoutError@0414fa1b5b
   - cosa.agents.shared.diagnosis_json.parse_diagnosis_json@42f2080b38
   - cosa.agents.shared.diagnosis_json.fallback_diagnosis_fields@b6b6ad3701
+  - cosa.agents.shared.coder_stream.read_coder_stream@3d8fdfb90c
 ---
 # Fix run outputs and guards
 
@@ -28,6 +29,10 @@ Small helpers shared by both fix expediters. They write the plan and the final r
 - `raise_error_result` logs the failure and raises `RuntimeError` with the hint included.
 - `BFETimeoutError` is raised when one agent call outlives the wall-clock budget.
 - `fallback_diagnosis_fields( reason )` builds the fields both expediters give a fallback diagnosis: confidence 0.1, category `unknown`, one evidence line.
+- `read_coder_stream` reads a Coder's message stream to its end. It returns the joined text and each distinct edited path, first seen first. Both expediters call it from `_delegate_to_coder`.
+- It checks the timeout on every message and the iteration limit once at the end. It stops at the first message after a cancel.
+- Each `Edit` or `Write` calls the post-tool hook. Each tool use and result message sends one progress line. An error result goes through `raise_error_result`.
+- The caller passes its own message classes, logger and hook, so its tests can replace them. `SweTeamOrchestrator._redelegate_with_feedback` is a third near-copy, not folded in.
 
 ## Invariants
 - `BFETimeoutError` is not a `SafetyLimitError`. The fix executor re-raises it, so the job ends dead and the pool slot is released.
