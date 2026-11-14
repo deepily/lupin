@@ -12,7 +12,7 @@ pins:
   - lupin_mcp.reuse_needset.expansion_run.lists_for@640a073a0b
   - lupin_mcp.reuse_needset.expansion_run.plan_of@f3155766c9
   - lupin_mcp.reuse_needset.expansion_run.run_live@7785bf4f62
-  - lupin_mcp.reuse_needset.expansion_run.parse_args@6bdf166fcf
+  - lupin_mcp.reuse_needset.expansion_run.parse_args@89fa4cd26a
   - lupin_mcp.reuse_needset.expansion_run.collect_rows@9a2d99a23f
   - lupin_mcp.reuse_needset.expansion_run.main@cdb903d39d
   - lupin_mcp.reuse_needset.expansion_run.exit_status@e0995b5ff4

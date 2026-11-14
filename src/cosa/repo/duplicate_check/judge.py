@@ -4,7 +4,7 @@ import json
 import re
 
 from cosa.repo.doc_lint import harness_runner, model_transport
-from cosa.repo.duplicate_check import blind, errors as err, extract
+from cosa.repo.duplicate_check import blind, errors as err, extract, ledger_reuse
 
 VERDICTS      = ( "duplicate", "near_duplicate", "related", "distinct" )
 FLAG_VERDICTS = ( "duplicate", "near_duplicate" )
@@ -266,12 +266,14 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         - redact_tools is True to show a definition's reuse-tool names as a placeholder, so they are not a scrub token to refuse; arm labels still are
 
     Ensures:
-        - returns { verdicts, unjudged }: a row { id, candidate, verdict, reason, model, prompt_version, server, slot } for each candidate of each
-          judged definition, and { id, code, detail } for each definition whose reply could not be read
+        - returns { verdicts, unjudged, reused }: a row { id, candidate, verdict, reason, model, prompt_version, server, slot } for each candidate of each
+          judged definition, and reused, { definition id: the sorted model ids whose saved rulings it was given instead of a call }, and { id, code, detail } for each definition whose reply could not be read
         - one call per definition; a reply that cannot be read is asked for once more, and a second failure is ledgered as unreadable so a
           resume does not ask again
         - a call that raises model_transport.ModelCallError leaves its definition unjudged with code JUDGE_CALL_FAILED and the error text, the other
           definitions go on, and nothing is ledgered for it, so a resume asks it again; any other error still stops the run
+        - when the ledger holds no call under this model for a definition, a saved ruling of any model is used instead, as ledger_reuse.lookup finds it, with no call and no cap spent: the whole ruling when the candidates' text is the same, else one verdict per candidate when every candidate has one
+        - every row names the model that ruled it in "model"; a reused row also carries "reused_from_model", the same id, so a Fable ruling never reads as an Opus one
         - a finished definition is never asked again: the ledger key holds the candidates' text, the definition's text, the prompt version, the
           model id and the slot
         - the calls run through harness_runner.run_parallel, keyed on the definition's text, so byte-equal definitions run one after another
@@ -286,7 +288,8 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         - DuplicateCheckError BLINDNESS_BREACH if a definition or candidate or the finished prompt carries a scrub token, unless skip_breaching leaves the definition unjudged or the candidate out; the finished prompt always raises
         - the errors that are not a ModelCallError, as run_parallel raises them
     """
-    made = [ 0 ]
+    made  = [ 0 ]
+    saved = ledger_reuse.saved_rulings( ledger.entries, STAGE )
 
     async def judge_one( d ):
         """Judge one definition, or read its finished ruling from the ledger."""
@@ -294,6 +297,8 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         key     = harness_runner.ledger_key( STAGE, _pair( d, records ), cfg[ "prompt_version" ], cfg[ "model_id" ], slot )
         done    = ledger.get( key )
         if done is not None: return rehomed( done, records )
+        reused  = ledger_reuse.lookup( saved, STAGE, _pair( d, records ), cfg[ "prompt_version" ], slot, records )
+        if reused is not None: return rehomed( reused, records )
         capped  = { "unreadable": { "code": err.JUDGE_CAP_REACHED, "detail": f"the cap of {max_calls} calls was reached" } }
         if max_calls is not None and made[ 0 ] >= max_calls: return capped
         try: mine = blind.blind_definition( d, scrub, redact_tools )
@@ -329,12 +334,15 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         return value
 
     outcomes = await harness_runner.run_parallel( defs, judge_one, parallel, lambda d: d[ "text" ] )
-    verdicts, unjudged = [], []
+    verdicts, unjudged, reused = [], [], {}
     for d, value in zip( defs, outcomes ):
         if "unreadable" in value:
             unjudged.append( { "id": d[ "id" ], **value[ "unreadable" ] } )
             continue
         for r in value[ "rulings" ]:
-            verdicts.append( { "id": d[ "id" ], "candidate": r[ "candidate" ], "verdict": r[ "verdict" ], "reason": r[ "reason" ], "model": cfg[ "model_id" ],
-                               "prompt_version": cfg[ "prompt_version" ], "server": backend.server_label, "slot": slot } )
-    return { "verdicts": verdicts, "unjudged": unjudged }
+            row = { "id": d[ "id" ], "candidate": r[ "candidate" ], "verdict": r[ "verdict" ], "reason": r[ "reason" ], "model": r.get( "model", cfg[ "model_id" ] ),
+                    "prompt_version": cfg[ "prompt_version" ], "server": backend.server_label, "slot": slot }
+            if "model" in r: row[ "reused_from_model" ] = r[ "model" ]
+            verdicts.append( row )
+        if value[ "rulings" ] and "model" in value[ "rulings" ][ 0 ]: reused[ d[ "id" ] ] = sorted( { r[ "model" ] for r in value[ "rulings" ] } )
+    return { "verdicts": verdicts, "unjudged": unjudged, "reused": reused }
