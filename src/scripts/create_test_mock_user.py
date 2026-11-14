@@ -17,6 +17,10 @@ They are never hardcoded and never printed back:
 The script is idempotent: an existing account has its password reset, its roles set to
 ["user"], and is activated and email-verified, rather than duplicated.
 
+The account is also marked is_protected. The e2e and integration cleanups run
+"DELETE FROM users WHERE NOT is_protected" before every test. Without the mark, the first
+cleanup deletes this login, and every later login answers 401 and then 429.
+
 Warning: the database lives inside the Docker network, so run this inside the container:
 
     docker exec -e LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL=... -e LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD=... \
@@ -43,13 +47,15 @@ USER_ROLES = [ "user" ]
 
 
 def _finish_new( repo, user ):
-    """Ensures: the new account is marked email-verified."""
+    """Ensures: the new account is email-verified and protected from test cleanups."""
     repo.mark_email_verified( user.id )
+    repo.update( user.id, is_protected=True )
 
 
 def _finish_existing( repo, existing, updated ):
-    """Ensures: the account is activated and verified; returns the verified user."""
+    """Ensures: the account is activated, protected and verified; returns the verified user."""
     repo.activate( existing.id )
+    repo.update( existing.id, is_protected=True )
     return repo.mark_email_verified( existing.id )
 
 
@@ -65,6 +71,7 @@ def main():
     Ensures:
         - the named account exists, is active, is email-verified, and holds roles ["user"] only
         - the account's password is the one supplied
+        - the account is marked is_protected, so the test-database cleanups leave it in place
         - reports the email and roles; never echoes the password
 
     Raises:

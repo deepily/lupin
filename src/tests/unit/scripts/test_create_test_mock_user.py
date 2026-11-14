@@ -88,6 +88,9 @@ class _Repo:
     def activate( self, uid ):
         self.calls.append( ( "activate", uid ) )
 
+    def update( self, uid, **fields ):
+        self.calls.append( ( "update", uid, tuple( sorted( fields.items() ) ) ) )
+
 
 class _Session:
     """Minimal session — the script's only use of it is `commit`."""
@@ -218,6 +221,7 @@ def test_absent_account_is_created_with_the_user_role_only_and_verified( wired, 
         ( "get_by_email",       _EMAIL ),
         ( "create_user",        _EMAIL, _HASH, ( "user", ) ),
         ( "mark_email_verified", 21 ),
+        ( "update",             21, ( ( "is_protected", True ), ) ),
     ]
     assert session.commits == 1
     assert "created" in capsys.readouterr().out
@@ -248,6 +252,7 @@ def test_existing_account_is_reset_in_place( wired, creds, capsys ):
         ( "update_password",     11, _HASH ),
         ( "update_roles",        11, ( "user", ) ),
         ( "activate",            11 ),
+        ( "update",              11, ( ( "is_protected", True ), ) ),
         ( "mark_email_verified", 11 ),
     ]
     assert session.commits == 1

@@ -255,7 +255,9 @@ def clean_test_db():
         # Every companion must be present and protected. A protected ADMIN beyond the
         # companions is allowed: it is the smoke admin made by create_admin_test_account.py,
         # which marks itself protected so this cleanup stops deleting it (row 77718bf0).
-        # Any other protected row is a leftover from a prior test or a seed regression.
+        # The shared tester login is allowed too: create_test_mock_user.py protects it, because
+        # on the VM no seeded companion carries it. Any other protected row is a leftover from a
+        # prior test or a seed regression.
         count    = conn.execute(
             text( "SELECT count(*) FROM users WHERE is_protected AND email = ANY( :emails )" ),
             { "emails": list( COMPANION_EMAILS ) }
@@ -267,7 +269,7 @@ def clean_test_db():
         strays = conn.execute(
             text( "SELECT email FROM users WHERE is_protected AND NOT ( email = ANY( :emails ) ) "
                   "AND NOT ( roles @> CAST( '[\"admin\"]' AS jsonb ) )" ),
-            { "emails": list( COMPANION_EMAILS ) }
+            { "emails": list( COMPANION_EMAILS ) + [ e for e in [ os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ) ] if e ] }
         ).fetchall()
         assert not strays, f"SAFETY: unexpected protected non-admin users after teardown: {strays}"
 
