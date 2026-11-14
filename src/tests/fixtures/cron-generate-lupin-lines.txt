@@ -9,6 +9,7 @@
 @reboot sleep 240 && <ROOT>/src/scripts/cron-job.sh vector-refresh boot >> /DATA/projects-data/lupin/reuse-review/refresh/refresh.log 2>&1 # reuse-vector-refresh
 37 11 * * * <ROOT>/src/scripts/cron-job.sh shadow-audit cron >> /DATA/projects-data/lupin/reuse-review/shadow-audit/shadow-audit.log 2>&1 # reuse-shadow-audit
 @reboot sleep 300 && <ROOT>/src/scripts/cron-job.sh shadow-audit boot >> /DATA/projects-data/lupin/reuse-review/shadow-audit/shadow-audit.log 2>&1 # reuse-shadow-audit
+30 7 * * * <ROOT>/src/scripts/cron-job.sh doc-parity-tick cron >> /HOME/.lupin/logs/doc-parity-tick.log 2>&1 # doc-parity-tick
 0 13 * * 1 <ROOT>/src/scripts/cron-job.sh worktree-census cron >> /HOME/.lupin/logs/worktree-hygiene-report.log 2>&1 # worktree-hygiene-report
 0 19 * * 0 <ROOT>/src/scripts/cron-job.sh disk-report cron >> <ROOT>/io/claude_code_hooks/logs/disk-hygiene-report.log 2>&1 # disk-report
 30 19 * * 0 <ROOT>/src/scripts/cron-job.sh hook-log-sweep cron >> <ROOT>/io/claude_code_hooks/logs/disk-hygiene-sweep.log 2>&1 # hook-log-sweep
