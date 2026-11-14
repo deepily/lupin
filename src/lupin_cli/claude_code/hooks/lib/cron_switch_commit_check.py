@@ -39,6 +39,7 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+from cosa.utils import atomic_json
 from lupin_cli.claude_code.hooks.lib.cron_switch_guard import INI_BASENAME, switch_lines
 
 STATE_ENV      = "LUPIN_CRON_SWITCH_STATE"
@@ -76,12 +77,7 @@ def read_state( path ) -> Dict[ str, Any ]:
         - returns {} when the file is missing, is not valid JSON, or is not an object
         - never raises
     """
-    try:
-        with open( path, "r", encoding="utf-8" ) as handle:
-            record = json.load( handle )
-    except ( OSError, ValueError ):
-        return {}
-    return record if isinstance( record, dict ) else {}
+    return atomic_json.load_json_dict( path )
 
 
 def _git( repo_root, *args ) -> Tuple[ int, str ]:

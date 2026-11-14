@@ -20,6 +20,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from cosa.rest.job_cron import entry_label
+from cosa.utils import atomic_json
 from lupin_mcp import config_write_lock, fleet_cap_ini_io, fleet_size_cap
 
 KEY_TEMPLATE      = "cron job {job} enabled"
@@ -103,12 +104,7 @@ def read_attribution() -> Dict[ str, Any ]:
         - returns {} when the file is missing, is not valid JSON, or is not an object
         - never raises
     """
-    try:
-        with open( state_path(), "r", encoding="utf-8" ) as handle:
-            record = json.load( handle )
-    except ( OSError, ValueError ):
-        return {}
-    return record if isinstance( record, dict ) else {}
+    return atomic_json.load_json_dict( state_path() )
 
 
 def _write_attribution( job: str, on: bool, who: str, moment: datetime.datetime ) -> None:
