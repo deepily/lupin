@@ -17,7 +17,7 @@ from lupin_mcp import job_run as jrun
 from tests.unit.test_librarian_tick import cron   # noqa: F401  (fixture: the fake crontab and the fake lock)
 
 
-ON = types.SimpleNamespace( get_required=lambda key, return_type="string": True )     # a configuration stand-in whose every switch is on
+ON = types.SimpleNamespace( get_required=lambda key, return_type="string": "true" )     # a configuration stand-in whose every switch is on: the text the real get_required returns
 
 
 def job( name, schedule, **extra ):

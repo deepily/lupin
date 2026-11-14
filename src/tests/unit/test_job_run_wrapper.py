@@ -9,7 +9,7 @@ from lupin_mcp import job_run as jr_mod
 import cosa.rest.job_registry as jr
 
 
-ON = types.SimpleNamespace( get_required=lambda key, return_type="string": True )     # a configuration stand-in whose every switch is on
+ON = types.SimpleNamespace( get_required=lambda key, return_type="string": "true" )     # a configuration stand-in whose every switch is on
 
 
 def fake( code=0, out="", err="" ):
@@ -89,9 +89,9 @@ def reader( value, asked ):
                                               ( [ "--job", "j", "--trigger", "boot", "--from-registry" ], "boot" ), ( [ "--job", "j", "--from-registry" ], "cron" ) ] )
 def test_a_switched_off_job_writes_a_disabled_record_logs_its_key_and_exits_zero_without_running( tmp_path, monkeypatch, capsys, argv, trigger ):
     env, asked, ran = switch_tree( tmp_path, monkeypatch ), [], []
-    code = jr_mod.main( argv, env, lambda command, **kw: ran.append( command ), config=reader( False, asked ) )
+    code = jr_mod.main( argv, env, lambda command, **kw: ran.append( command ), config=reader( "false", asked ) )
     out  = capsys.readouterr().out
-    assert code == 0 and ran == [] and asked == [ ( "cron job j enabled", "boolean" ) ]
+    assert code == 0 and ran == [] and asked == [ ( "cron job j enabled", "string" ) ]
     assert out.count( "\n" ) == 1 and "cron job j enabled" in out and "switched off" in out
     last = json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ]
     assert last[ "outcome" ] == "disabled" and last[ "trigger" ] == trigger and last[ "failure" ] is None and "cron job j enabled" in last[ "evidence" ]
@@ -99,20 +99,20 @@ def test_a_switched_off_job_writes_a_disabled_record_logs_its_key_and_exits_zero
 
 def test_a_manual_run_of_a_switched_off_job_is_a_hand_trigger( tmp_path, monkeypatch ):
     env = { **switch_tree( tmp_path, monkeypatch ), "LUPIN_JOB_TRIGGER": "hand" }
-    assert jr_mod.main( [ "--job", "j", "--from-registry" ], env, fake( 0 ), config=reader( False, [] ) ) == 0
+    assert jr_mod.main( [ "--job", "j", "--from-registry" ], env, fake( 0 ), config=reader( "false", [] ) ) == 0
     assert json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ][ "trigger" ] == "hand"
 
 
 def test_a_switched_on_job_runs_a_missing_ini_key_stops_it_and_a_job_with_no_switch_runs_ungated( tmp_path, monkeypatch ):
     env, asked, ran = switch_tree( tmp_path, monkeypatch ), [], []
-    assert jr_mod.main( [ "--job", "j", "--", "echo", "hi" ], env, fake( 0 ), config=reader( True, asked ) ) == 0 and ( tmp_path / "out" / "j.json" ).exists()
+    assert jr_mod.main( [ "--job", "j", "--", "echo", "hi" ], env, fake( 0 ), config=reader( "true", asked ) ) == 0 and ( tmp_path / "out" / "j.json" ).exists()
     assert json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ][ "outcome" ] == "clean"
     def absent( key, return_type="string" ): raise KeyError( key )
     with pytest.raises( KeyError ): jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=types.SimpleNamespace( get_required=absent ) )
     reg  = tmp_path / jr.REGISTRY_FILE
     doc  = json.loads( reg.read_text() ); doc[ "jobs" ][ 0 ].pop( "enabled_key" ); reg.write_text( json.dumps( doc ) )
     second = []
-    assert jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=reader( False, second ) ) == 0 and second == [], "no enabled_key: the INI is never asked"
+    assert jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=reader( "false", second ) ) == 0 and second == [], "no enabled_key: the INI is never asked"
 
 
 def test_the_switch_is_read_through_a_silent_configuration_manager( tmp_path, monkeypatch, capsys ):
@@ -121,7 +121,7 @@ def test_the_switch_is_read_through_a_silent_configuration_manager( tmp_path, mo
     built = []
     class Quiet:
         def __init__( self, **kw ): built.append( kw ); print( "banner noise" )
-        def get_required( self, key, return_type="string" ): return False
+        def get_required( self, key, return_type="string" ): return "false"
     monkeypatch.setattr( cm, "ConfigurationManager", Quiet )
     env = switch_tree( tmp_path, monkeypatch )
     env[ "LUPIN_CONFIG_MGR_CLI_ARGS" ] = "x"

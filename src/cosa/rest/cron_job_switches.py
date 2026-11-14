@@ -22,24 +22,11 @@ from typing import Any, Dict, List, Optional
 from cosa.rest.job_cron import entry_label
 from cosa.utils import atomic_json
 from lupin_mcp import config_write_lock, fleet_cap_ini_io, fleet_size_cap
+from lupin_mcp.cron_switch_read import read_switch, switch_key
 
-KEY_TEMPLATE      = "cron job {job} enabled"
 INI_OVERRIDE_ENV  = "LUPIN_CRON_SWITCH_INI"
 STATE_FILENAME    = "cron-job-switches-state.json"
 EVENT_NAME        = "cron_job_switch_changed"
-
-
-def switch_key( job: str ) -> str:
-    """
-    The configuration key that holds one job's switch.
-
-    Requires:
-        - job is a registry job id
-
-    Ensures:
-        - returns `cron job <job> enabled`
-    """
-    return KEY_TEMPLATE.format( job=job )
 
 
 def ini_path() -> str:
@@ -79,20 +66,12 @@ def read_enabled( job: str ) -> Optional[ bool ]:
         - job is a registry job id
 
     Ensures:
-        - returns True or False for a value that is true or false, in any case
-        - returns None when the key is absent, defined twice, unreadable, or holds anything else.
-          The row then shows the switch as unknown, never as on
+        - returns what `lupin_mcp.cron_switch_read.read_switch` returns for the configuration file:
+          True or False, or None when the key is absent, defined twice, unreadable or holds anything
+          else. The row then shows the switch as unknown, never as on
         - never raises
     """
-    raw = fleet_cap_ini_io.read_value_from_disk( ini_path(), switch_key( job ) )
-    if raw is None:
-        return None
-    lowered = raw.strip().lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    return None
+    return read_switch( ini_path(), job )
 
 
 def read_attribution() -> Dict[ str, Any ]:

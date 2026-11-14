@@ -21,6 +21,7 @@ import types
 import cosa.rest.job_registry as jr
 from lupin_mcp import host_snapshot as hs
 from lupin_mcp import job_summary as js
+from lupin_mcp.cron_switch_read import parse_switch
 
 EXIT_NO_JOB = 64
 TRIGGER_WORDS = { "cron": "cron", "boot": "reboot" }                  # the cron entry script says cron or boot; duplicate-check's own flag calls a boot "reboot"
@@ -134,15 +135,19 @@ def switched_on( entry, config ):
     Read a registry job's run-time switch from the configuration.
 
     Requires:
-        - entry is a registry job; config has get_required( key, return_type="boolean" )
+        - entry is a registry job; config has get_required( key ), which answers the key's text
     Ensures:
         - returns True when the entry names no enabled_key: only the cron-managed jobs have a switch
-        - otherwise returns True or False as the INI key says, with no default in code
+        - otherwise returns True or False as `parse_switch` reads the key's text, the one rule every switch reader shares, with no default in code
     Raises:
         - MissingConfigKeyError when the entry names a key the INI has no value for, or a blank one
+        - ValueError when the key holds a word that is neither true nor false, such as yes or 1
     """
     if not entry.get( "enabled_key" ): return True
-    return config.get_required( entry[ "enabled_key" ], return_type="boolean" )
+    raw   = config.get_required( entry[ "enabled_key" ] )
+    value = parse_switch( raw )
+    if value is None: raise ValueError( f"INI key '{entry[ 'enabled_key' ]}' holds {raw!r}, which is neither true nor false" )
+    return value
 
 
 def main( argv=None, environ=None, runner=stream_run, config=None ):
