@@ -137,3 +137,14 @@ def test_the_registry_marks_exactly_rick_s_four_alarm_jobs_and_the_janitor_insid
     entries = json.load( open( os.path.join( root, "src/conf/job-registry.json" ) ) )[ "jobs" ]
     assert sorted( e[ "job" ] for e in entries if e.get( "alarm" ) is True ) == [ "fleet-arbiter", "health-watcher", "notify-outbox", "socket-housekeeping" ]
     assert { e[ "job" ]: e[ "inside" ] for e in entries if "inside" in e } == { "worktree-janitor": "fleet-arbiter" }
+
+
+def test_context_tick_reads_its_switch_through_job_run_and_its_row_says_at_each_run( monkeypatch ):
+    from lupin_mcp import job_run
+    root  = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    entry = next( e for e in json.load( open( os.path.join( root, "src/conf/job-registry.json" ) ) )[ "jobs" ] if e[ "job" ] == "context-tick" )
+    off   = type( "Config", (), { "get_required": lambda self, key: "false" } )()
+    on    = type( "Config", (), { "get_required": lambda self, key: "true" } )()
+    assert ( job_run.switched_on( entry, off ), job_run.switched_on( entry, on ) ) == ( False, True )
+    monkeypatch.setattr( sw, "read_enabled", lambda job: True )
+    assert sw.build_row( entry, {} )[ "reads" ] == "run"

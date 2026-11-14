@@ -31,13 +31,14 @@ REGISTRY_SIZE = 24      # counted by hand from src/conf/job-registry.json on 14 
 
 # Jobs that do not read their switch yet. Remove a job in the commit that makes it read its switch.
 NOT_YET = frozenset( {
-    "context-tick", "yearly-reminders",
+    "yearly-reminders",
     "notification-expiry", "commons-archival", "notify-outbox", "socket-housekeeping", "side-services",
 } )
 
 JOBS     = [ entry[ "job" ] for entry in REGISTRY ]
 HONOURED = [ entry for entry in REGISTRY if entry[ "job" ] not in NOT_YET ]
 READERS  = [ entry for entry in REGISTRY if "switch_reader" in entry ]
+JOB_RUN_READER = "lupin_mcp.job_run:switched_on"     # the reader named by a job whose cron line runs through cron-job.sh, though cron_generate does not write it
 
 
 def _resolve( reader ):
@@ -92,7 +93,8 @@ def test_every_switch_reader_names_a_real_symbol_that_checks_the_switch():
     for entry in READERS:
         source = inspect.getsource( _resolve( entry[ "switch_reader" ] ) )
         builds = f'cron_switch_read.for_job( "{entry[ "job" ]}"' in source
-        assert builds or ".allowed(" in source, f"{entry[ 'job' ]}: {entry[ 'switch_reader' ]} neither builds its own switch nor calls TickSwitch.allowed"
+        by_run = entry[ "switch_reader" ] == JOB_RUN_READER and "enabled_key" in source     # a cron line through cron-job.sh: job_run reads the key before each run
+        assert builds or by_run or ".allowed(" in source, f"{entry[ 'job' ]}: {entry[ 'switch_reader' ]} neither builds its own switch nor calls TickSwitch.allowed"
 
 
 @pytest.mark.parametrize( "entry", READERS, ids=lambda entry: entry[ "job" ] )

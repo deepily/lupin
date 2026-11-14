@@ -258,6 +258,8 @@
     },
     {
       "job": "context-tick",
+      "enabled_key": "cron job context-tick enabled",
+      "switch_reader": "lupin_mcp.job_run:switched_on",
       "catalog": "P1",
       "title": "Context-pressure tick (fleet)",
       "owner": "cheech",

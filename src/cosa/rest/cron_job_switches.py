@@ -134,6 +134,9 @@ def write_switch( job: str, on: bool, who: str, now: Optional[ datetime.datetime
     fleet_cap_ini_io.write_bool_to_disk( ini_path(), switch_key( job ), on )
 
 
+JOB_RUN_READER = "lupin_mcp.job_run:switched_on"     # the switch_reader of a job whose cron line runs through cron-job.sh but is not generated here
+
+
 def is_honoured( entry: Dict[ str, Any ] ) -> bool:
     """
     Whether the job reads its switch at run time.
@@ -166,7 +169,8 @@ def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[
     Ensures:
         - returns { job, title, schedule, key, enabled, honoured, drift, last_changed_by, last_changed_at,
           reads, alarm, inside }
-        - reads is "run" for a job job_run starts, "tick" for a loop that checks a TickSwitch, and None
+        - reads is "run" for a job job_run starts (cron_managed, or naming JOB_RUN_READER), "tick" for a
+          loop that checks a TickSwitch, and None
           for a job that does not read its switch
         - alarm is True only for a registry entry with `"alarm": true`: a job whose being off silences
           what would report it, so the client asks for confirmation before turning it off
@@ -194,7 +198,7 @@ def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[
         "drift"           : known and not agrees,
         "last_changed_by" : noted.get( "by" ) if agrees else None,
         "last_changed_at" : noted.get( "at" ) if agrees else None,
-        "reads"           : ( "run" if entry.get( "cron_managed" ) is True else "tick" ) if is_honoured( entry ) else None,
+        "reads"           : ( "run" if entry.get( "cron_managed" ) is True or entry.get( "switch_reader" ) == JOB_RUN_READER else "tick" ) if is_honoured( entry ) else None,
         "alarm"           : entry.get( "alarm" ) is True,
         "inside"          : entry.get( "inside" ) if isinstance( entry.get( "inside" ), str ) else None,
     }

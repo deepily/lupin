@@ -295,14 +295,14 @@ def test_a_failed_announcement_does_not_fail_the_flip( ini, monkeypatch, capsys 
 
 # ── honoured and drift (María's amendments 1 and 3) ──────────────────────────
 
-def test_honoured_is_computed_from_the_registry_and_names_seventeen_jobs( ini ):
+def test_honoured_is_computed_from_the_registry_and_names_eighteen_jobs( ini ):
     rows = _client().get( LIST_PATH ).json()[ "jobs" ]
     honoured = sorted( r[ "job" ] for r in rows if r[ "honoured" ] )
     entries  = json.load( open( os.path.join( cu.get_project_root(), "src/conf/job-registry.json" ) ) )[ "jobs" ]
     pinned   = sorted( e[ "job" ] for e in entries if e.get( "cron_managed" ) is True or "switch_reader" in e )
-    assert honoured == pinned and len( honoured ) == 17      # 12 run through job_run; 4 arbiter loops and the poker job check a TickSwitch (row c38a49bd)
+    assert honoured == pinned and len( honoured ) == 18      # 12 cron-managed and context-tick run through job_run; 4 arbiter loops and the poker job check a TickSwitch (row c38a49bd)
     assert "fleet-arbiter" in honoured
-    assert all( r[ "honoured" ] is False for r in rows if r[ "job" ] in ( "context-tick", "yearly-reminders" ) )
+    assert all( r[ "honoured" ] is False for r in rows if r[ "job" ] in ( "yearly-reminders", ) )
 
 
 def test_a_job_that_does_not_read_its_switch_answers_409_and_writes_nothing( ini, announced ):
