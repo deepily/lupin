@@ -31,7 +31,7 @@ from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
 from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
-from cosa.agents.io_models.utils.json_object_recovery import extract_json_object
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, extract_last_balanced
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
     TFEPhase,
@@ -860,37 +860,14 @@ class TFEOrchestrator:
         except json.JSONDecodeError:
             pass
 
-        # Attempt 2: top-level JSON array (walk backward from last `]`)
-        close_idx = text.rfind( "]" )
-        if close_idx != -1:
-            depth = 0
-            for i in range( close_idx, -1, -1 ):
-                if text[ i ] == "]":
-                    depth += 1
-                elif text[ i ] == "[":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[ i : close_idx + 1 ]
-                        try:
-                            return json.loads( candidate )
-                        except json.JSONDecodeError:
-                            break
-
-        # Attempt 3: top-level JSON object (walk backward from last `}`)
-        close_idx = text.rfind( "}" )
-        if close_idx != -1:
-            depth = 0
-            for i in range( close_idx, -1, -1 ):
-                if text[ i ] == "}":
-                    depth += 1
-                elif text[ i ] == "{":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[ i : close_idx + 1 ]
-                        try:
-                            return json.loads( candidate )
-                        except json.JSONDecodeError:
-                            break
+        # Attempts 2 and 3: the last balanced top-level array, then the last balanced object
+        for open_char, close_char in ( ( "[", "]" ), ( "{", "}" ) ):
+            candidate = extract_last_balanced( text, open_char, close_char )
+            if candidate is not None:
+                try:
+                    return json.loads( candidate )
+                except json.JSONDecodeError:
+                    pass
 
         return None
 
