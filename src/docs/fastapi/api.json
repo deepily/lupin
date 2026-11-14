@@ -14252,6 +14252,153 @@
                     }
                 }
             }
+        },
+        "/api/cron-jobs": {
+            "get": {
+                "tags": [
+                    "cron-jobs"
+                ],
+                "summary": "Every scheduled job with its on/off switch",
+                "description": "One row per registry job. The fields are job, title, schedule, key, enabled, honoured, drift, last_changed_by and last_changed_at. The enabled field is read fresh from the configuration file, and is null when the file does not say. The honoured field is false when the job does not read its switch, so flipping it would change nothing. The drift field is true when the file disagrees with the endpoint's record of the last flip, meaning it was edited by hand. The caller_is_admin field is true only for an administrator login, so a client can show the switches read-only to everyone else.",
+                "operationId": "get_cron_jobs_api_cron_jobs_get",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cron-jobs/{job}/enabled": {
+            "put": {
+                "tags": [
+                    "cron-jobs"
+                ],
+                "summary": "Admin: turn one scheduled job on or off",
+                "description": "Body { on: bool }. Writes `cron job <job> enabled` to the configuration file and returns the row re-read from the file. Administrator login only: an API-key caller or a non-admin login is refused with 403 and nothing is written. An unknown job is a 404. A job that does not read its switch, or a key the file lacks or defines twice, is a 409 and nothing is written.",
+                "operationId": "put_cron_job_enabled_api_cron_jobs__job__enabled_put",
+                "parameters": [
+                    {
+                        "name": "job",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Job"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CronJobSwitchIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "components": {
@@ -15131,6 +15278,22 @@
                 ],
                 "title": "CreateUserResponse",
                 "description": "Response model for user creation."
+            },
+            "CronJobSwitchIn": {
+                "properties": {
+                    "on": {
+                        "type": "boolean",
+                        "title": "On",
+                        "description": "True lets the job run, false makes its next start exit without work."
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "on"
+                ],
+                "title": "CronJobSwitchIn",
+                "description": "Body for PUT /api/cron-jobs/{job}/enabled.\n\n`on` is a bare JSON boolean. Any other field, and any other type, is a 422."
             },
             "DeleteUserRequest": {
                 "properties": {

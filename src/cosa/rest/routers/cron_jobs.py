@@ -72,13 +72,14 @@ async def _announce( row: Dict[ str, Any ] ) -> None:
 @router.get(
     "/cron-jobs",
     summary     = "Every scheduled job with its on/off switch",
-    description = "One row per registry job: job, title, schedule, key, enabled (read fresh from "
-                  "the configuration file; null when the file does not say), honoured (false when "
-                  "the job does not read its switch, so flipping it would change nothing), drift "
-                  "(true when the file disagrees with the endpoint's record of the last flip, "
-                  "meaning it was edited by hand), last_changed_by and last_changed_at. "
-                  "caller_is_admin is true only for an administrator login, so a client can show "
-                  "the switches read-only to everyone else."
+    description = "One row per registry job. The fields are job, title, schedule, key, enabled, honoured, "
+                  "drift, last_changed_by and last_changed_at. "
+                  "The enabled field is read fresh from the configuration file, and is null when the file does not say. "
+                  "The honoured field is false when the job does not read its switch, so flipping it would change nothing. "
+                  "The drift field is true when the file disagrees with the endpoint's record of the last flip, "
+                  "meaning it was edited by hand. "
+                  "The caller_is_admin field is true only for an administrator login, "
+                  "so a client can show the switches read-only to everyone else."
 )
 async def get_cron_jobs(
     _user : Annotated[ str, Depends( require_api_key_or_jwt ) ],

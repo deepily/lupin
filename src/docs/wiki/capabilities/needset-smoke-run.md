@@ -3,6 +3,7 @@ capability: needset-smoke-run
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.smoke.parse_args@df69806c2d
+  - lupin_mcp.reuse_needset.smoke.resolve_second_models@541859772e
   - lupin_mcp.reuse_needset.smoke.kind_split@9af7ff40ce
   - lupin_mcp.reuse_needset.smoke.Timed@265424ee74
   - lupin_mcp.reuse_needset.smoke.index_parts@da503efe90
@@ -21,6 +22,7 @@ A small live run of ten needs that measures and sets no pass bar. It takes a tes
 
 ## Arguments
 - `parse_args` reads the command line. The root, output folder, source commit, seed, vector folders and the three matched-kind counts are required.
+- `resolve_second_models` fills each named model argument the caller left out with the `reuse need second model` INI value, read at call time. An argument that holds a model id is left alone, and a blank or absent key raises `CodeHealthSettingError`. The drafting runs that share these arguments call it too.
 - `kind_split` returns the split the arguments name. No default stands in for the real split. `--partner-floor` is optional and off by default, so draws made without it are unchanged.
 
 ## Building the run
