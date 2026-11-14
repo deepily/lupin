@@ -12,6 +12,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import zoneinfo
 
 import pytest
 
@@ -25,6 +26,7 @@ from lupin_mcp import job_run
 from lupin_mcp import job_summary as js
 
 UTC      = datetime.timezone.utc
+ZONE     = zoneinfo.ZoneInfo( "America/New_York" )                   # the zone the app timezone key holds on this host
 NOW      = datetime.datetime( 2026, 11, 14, 23, 0, tzinfo=UTC )          # 18:00 in New York
 GIT_ENV  = { "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com" }
 
@@ -85,6 +87,19 @@ class Store:
         return True, 201, { }
 
 
+class Config:
+    """The configuration manager's two members this job reads, holding a zone name."""
+
+    config_block_id = "test"
+
+    def __init__( self, zone="America/New_York" ):
+        self.zone = zone
+
+    def get_required( self, key ):
+        assert key == "app timezone"
+        return self.zone
+
+
 def vm_of( runner, root="/r" ):
     return dtp.Vm( root, runner )
 
@@ -143,17 +158,18 @@ def test_smoke_names_the_first_check_that_failed():
     ( datetime.datetime( 2026, 11, 1, 13, 0, tzinfo=UTC ),   "2026-10-31T18:00:00-04:00" ),     # the morning of fall back: the slot is the evening before, summer time
 ], ids=[ "before", "exact", "morning", "spring-forward", "fall-back" ] )
 def test_the_latest_slot_is_the_last_18_00_new_york_time_across_daylight_saving( now, expected ):
-    assert dtp.latest_slot( now ).isoformat() == expected
+    assert dtp.latest_slot( now, ZONE ).isoformat() == expected
 
 
 def test_a_cron_or_hand_entry_is_always_due_and_a_boot_only_when_no_attempt_follows_the_slot():
     state = { "last_attempt_at": "2026-11-14T18:00:05-05:00" }
-    assert dtp.due( "cron", state, NOW ) and dtp.due( "hand", state, NOW )
-    assert dtp.due( "boot", { }, NOW ) is True
-    assert dtp.due( "boot", state, NOW ) is False                                        # 18:00:05 is after the 18:00 slot
-    assert dtp.due( "boot", { "last_attempt_at": "2026-11-13T18:00:05-05:00" }, NOW ) is True
+    assert dtp.due( "cron", state, NOW, ZONE ) and dtp.due( "hand", state, NOW, ZONE )
+    assert dtp.due( "boot", { }, NOW, ZONE ) is True
+    assert dtp.due( "boot", state, NOW, ZONE ) is False                                        # 18:00:05 is after the 18:00 slot
+    assert dtp.due( "boot", { "last_attempt_at": "2026-11-13T18:00:05-05:00" }, NOW, ZONE ) is True
     morning = datetime.datetime( 2026, 11, 15, 14, 0, tzinfo=UTC )                       # the host was off at 18:00 and boots next morning
-    assert dtp.due( "boot", { "last_attempt_at": "2026-11-13T18:00:05-05:00" }, morning ) is True
+    assert dtp.due( "boot", { "last_attempt_at": "2026-11-13T18:00:05-05:00" }, morning, ZONE ) is True
+    assert dtp.due( "boot", { "last_attempt_at": "2026-11-14T18:00:05-05:00" }, morning, zoneinfo.ZoneInfo( "Pacific/Auckland" ) ) is True, "the slot follows the configured zone, not New York"
 
 
 # ── state and the stretch behind ─────────────────────────────────────────
@@ -330,7 +346,7 @@ def test_no_call_carries_a_credential_word( repo ):
 # ── run: records, rows, lock, check ──────────────────────────────────────
 
 def _run( repo, runner, store, now=NOW, trigger="cron", check=False ):
-    return dtp.run( str( repo ), now, trigger, "auto", vm_of( runner, repo ), store, "mr radio", check )
+    return dtp.run( str( repo ), now, trigger, "auto", vm_of( runner, repo ), store, "mr radio", ZONE, check )
 
 
 def _folder( repo ):
@@ -448,14 +464,14 @@ def test_main_builds_the_vm_and_the_live_store_and_maps_reboot_to_boot( repo, mo
 
     monkeypatch.setattr( filing, "LiveStore", FakeLive )
     runner = Runner( **{ "vm-status": ( 0, "RUNNING" ), "run": ( 0, repo.new ) } )
-    assert dtp.main( [ "--trigger", "reboot", "--owner", "someone" ], environ={ "LUPIN_ROOT": str( repo ) }, runner=runner, now=NOW ) == 0
+    assert dtp.main( [ "--trigger", "reboot", "--owner", "someone" ], environ={ "LUPIN_ROOT": str( repo ) }, runner=runner, now=NOW, config=Config() ) == 0
     assert len( built ) == 1 and runner.calls == [ "vm-status", "run" ]
     assert js.read_summary( _folder( repo ) / "job-summary.json" )[ "last_attempt" ][ "trigger" ] == "boot"
 
 
 def test_main_with_check_builds_no_store_and_takes_the_root_from_the_project_when_the_environment_has_none( repo, monkeypatch, capsys ):
     monkeypatch.setattr( dtp.cu, "get_project_root", lambda: str( repo ) )
-    assert dtp.main( [ "--check" ], environ={ }, runner=Runner() ) == 0
+    assert dtp.main( [ "--check" ], environ={ }, runner=Runner(), config=Config() ) == 0
     assert "test-promotion --check" in capsys.readouterr().out
 
 
@@ -469,3 +485,23 @@ def test_the_registry_entry_runs_this_module_through_job_run_with_its_switch_off
     assert job_run.with_trigger( entry[ "run" ][ "argv" ], "boot" )[ -1 ] == "reboot"
     ini = ( root / "src/conf" / ( "lupin-app" + ".ini" ) ).read_text()
     assert ini.count( "cron job test-promotion enabled           = false\n" ) == 1, "the switch ships off"
+
+
+def test_the_zone_comes_from_the_app_timezone_key_and_a_bad_name_stops_the_run():
+    assert dtp.app_zone( Config( "Pacific/Auckland" ) ).key == "Pacific/Auckland"
+    with pytest.raises( dtp.app_timezone.InvalidAppTimezoneError ):
+        dtp.app_zone( Config( "Not/AZone" ) )
+
+
+def test_with_no_config_the_zone_is_read_through_the_configuration_manager( monkeypatch ):
+    import cosa.config.configuration_manager as manager
+    seen = {}
+
+    class FakeManager( Config ):
+        def __init__( self, env_var_name, silent, mute_splainer ):
+            super().__init__( "Europe/Berlin" )
+            seen.update( env_var_name=env_var_name, silent=silent, mute_splainer=mute_splainer )
+
+    monkeypatch.setattr( manager, "ConfigurationManager", FakeManager )
+    assert dtp.app_zone().key == "Europe/Berlin"
+    assert seen == { "env_var_name": "LUPIN_CONFIG_MGR_CLI_ARGS", "silent": True, "mute_splainer": True }

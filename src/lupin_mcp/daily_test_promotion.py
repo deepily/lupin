@@ -28,6 +28,7 @@ import sys
 import zoneinfo
 
 import cosa.utils.util as cu
+from cosa.config import app_timezone
 from cosa.utils.atomic_json import write_json_atomic
 from lupin_mcp import duplicate_check_daily as dcd
 from lupin_mcp import duplicate_check_filing as filing
@@ -35,7 +36,6 @@ from lupin_mcp import job_summary as js
 from cosa.rest.task_store_rules import filer_created_by
 
 JOB            = "test-promotion"
-ZONE           = zoneinfo.ZoneInfo( "America/New_York" )    # Rick said 18:00 Eastern; the zone follows daylight saving, like the host clock
 SLOT_HOUR      = 18
 STALE_DAYS     = 3
 VM_SCRIPT      = "src/scripts/lupin-vm.sh"
@@ -152,27 +152,47 @@ class Vm:
         return None
 
 
-def latest_slot( now ):
+def app_zone( config=None ):
     """
-    The most recent 18:00 New York time at or before now.
+    The user's time zone, read from the `app timezone` key.
 
     Requires:
-        - now is a timezone-aware datetime
+        - config has get_required and config_block_id as the configuration manager does, or is None to build one from LUPIN_CONFIG_MGR_CLI_ARGS
 
     Ensures:
-        - returns an aware datetime at 18:00 New York time, correct across a daylight saving change
+        - returns the ZoneInfo the key names; no zone is written in code
+
+    Raises:
+        - MissingConfigKeyError when the key is absent or blank
+        - InvalidAppTimezoneError when it names no zone
     """
-    local = now.astimezone( ZONE )
+    if config is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", silent=True, mute_splainer=True )
+    return zoneinfo.ZoneInfo( app_timezone.get_app_timezone( config ) )
+
+
+def latest_slot( now, zone ):
+    """
+    The most recent 18:00 in the user's zone at or before now.
+
+    Requires:
+        - now is a timezone-aware datetime; zone is a ZoneInfo
+
+    Ensures:
+        - returns an aware datetime at 18:00 in zone, correct across a daylight saving change
+    """
+    local = now.astimezone( zone )
     day   = local.date() if local.hour >= SLOT_HOUR else local.date() - datetime.timedelta( days=1 )
-    return datetime.datetime.combine( day, datetime.time( SLOT_HOUR ), tzinfo=ZONE )
+    return datetime.datetime.combine( day, datetime.time( SLOT_HOUR ), tzinfo=zone )
 
 
-def due( trigger, state, now ):
+def due( trigger, state, now, zone ):
     """
     Whether this entry should run.
 
     Requires:
-        - trigger is cron, boot or hand; state is the stored dict; now is aware
+        - trigger is cron, boot or hand; state is the stored dict; now is aware; zone is a ZoneInfo
 
     Ensures:
         - returns True for cron and hand
@@ -181,7 +201,7 @@ def due( trigger, state, now ):
     """
     if trigger != "boot": return True
     last = state.get( "last_attempt_at" )
-    return last is None or datetime.datetime.fromisoformat( last ) < latest_slot( now )
+    return last is None or datetime.datetime.fromisoformat( last ) < latest_slot( now, zone )
 
 
 def read_state( path ):
@@ -384,12 +404,12 @@ def conclude( parts, now, trigger, result, stage, detail, started, state ):
     return 1 if outcome == "failed" else 0
 
 
-def run( root, now, trigger, branch, vm, store, owner, check=False ):
+def run( root, now, trigger, branch, vm, store, owner, zone, check=False ):
     """
     One entry of the job.
 
     Requires:
-        - trigger is cron, boot or hand; vm is a Vm; store has query and create as the filer's store does
+        - trigger is cron, boot or hand; vm is a Vm; zone is a ZoneInfo; store has query and create as the filer's store does
 
     Ensures:
         - returns the exit code
@@ -404,7 +424,7 @@ def run( root, now, trigger, branch, vm, store, owner, check=False ):
     name, sha  = pick_sha( root, branch )
     if check:
         print( f"test-promotion --check: branch {name} at {sha[ :12 ]}; stored last promoted {state.get( 'last_promoted_sha' )}; "
-               f"{'due' if due( trigger, state, now ) else 'not due'} for {trigger}; the VM is not contacted" )
+               f"{'due' if due( trigger, state, now, zone ) else 'not due'} for {trigger}; the VM is not contacted" )
         return 0
     with open( folder / "run.lock", "w" ) as lock:
         try:
@@ -413,14 +433,14 @@ def run( root, now, trigger, branch, vm, store, owner, check=False ):
             print( "test-promotion: another run holds the lock, so this one exits" )
             return 0
         parts = { "root": root, "store": store, "owner": owner, "sha": sha, "summary": str( folder / "job-summary.json" ), "state_path": state_path }
-        if not due( trigger, state, now ):
+        if not due( trigger, state, now, zone ):
             print( f"test-promotion: {CAUGHT_UP}: an attempt is already recorded since the {SLOT_HOUR}:00 slot" )
             return 0
         result, stage, detail = decide( root, vm, sha, state )
         return conclude( parts, now, trigger, result, stage, detail, started, state )
 
 
-def main( argv=None, environ=None, runner=run_command, store=None, now=None ):
+def main( argv=None, environ=None, runner=run_command, store=None, now=None, config=None ):
     """
     Run the job from the command line.
 
@@ -429,7 +449,7 @@ def main( argv=None, environ=None, runner=run_command, store=None, now=None ):
 
     Ensures:
         - returns the exit code of run
-        - store None builds the live store; runner and now are test seams
+        - store None builds the live store and config None builds the configuration manager; runner and now are test seams
     """
     environ = os.environ if environ is None else environ
     parser  = argparse.ArgumentParser( description="Promote the newest merged build to the cloud test VM, then smoke it." )
@@ -441,7 +461,7 @@ def main( argv=None, environ=None, runner=run_command, store=None, now=None ):
     root    = environ.get( "LUPIN_ROOT" ) or cu.get_project_root()
     now     = now or datetime.datetime.now().astimezone()
     trigger = TRIGGER_NAMES[ args.trigger ]
-    return run( root, now, trigger, args.branch, Vm( root, runner ), store or ( None if args.check else filing.LiveStore() ), args.owner, args.check )
+    return run( root, now, trigger, args.branch, Vm( root, runner ), store or ( None if args.check else filing.LiveStore() ), args.owner, app_zone( config ), args.check )
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point
