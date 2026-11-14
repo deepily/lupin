@@ -7,8 +7,8 @@ refusal plus a 90-word resend — and co-primary A (all attempts) moves while
 co-primary B (first attempts only) does not. That split is the whole point:
 A alone moving means we measured retries, not restraint.
 
-Loads the dashed-directory script via importlib; its analysis logic imports no
-cosa, so these run in isolation.
+Loads the dashed-directory script via importlib; its analysis logic imports one
+standard-library-only cosa module (iso_timestamp), so these run in isolation.
 
 Venue: :7999-eligible (pure unit — no server, no DB, no state mutation).
 """
@@ -350,17 +350,18 @@ def _timed_row( slot_id, arm, words, assigned=None, delivered=None, **kw ):
     return row
 
 
-def test_parse_ts_returns_none_for_missing_or_unparseable():
-    assert AN._parse_ts( None )        is None
-    assert AN._parse_ts( "" )          is None
-    assert AN._parse_ts( "not-a-ts" )  is None
+def test_parse_iso_returns_none_for_missing_or_unparseable():
+    assert AN.parse_iso( None )        is None
+    assert AN.parse_iso( "" )          is None
+    assert AN.parse_iso( "not-a-ts" )  is None
 
 
-def test_parse_ts_treats_naive_as_utc_and_preserves_aware():
-    naive = AN._parse_ts( "2026-08-04T13:53:17" )
-    aware = AN._parse_ts( "2026-08-04T13:53:17+00:00" )
+def test_parse_iso_treats_naive_as_utc_and_preserves_aware():
+    naive = AN.parse_iso( "2026-08-04T13:53:17" )
+    aware = AN.parse_iso( "2026-08-04T13:53:17+00:00" )
     assert naive.utcoffset().total_seconds() == 0
     assert naive == aware                      # the whole point: the two forms compare
+    assert AN.parse_iso( "2026-08-04T13:53:17Z" ) == aware   # a trailing Z reads as UTC
 
 
 def test_delivery_delay_seconds_computes_the_gap():
