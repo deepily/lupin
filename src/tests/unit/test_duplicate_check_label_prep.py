@@ -646,7 +646,7 @@ def test_live_wiring_extracts_the_server_and_client_trees_without_the_monolith_a
     assert [ d[ "name" ] for d in got[ "server_defs" ] ] == [ "fit" ] and [ d[ "name" ] for d in got[ "client_defs" ] ] == [ "a" ]
     assert got[ "client" ] is client and got[ "cache_dir" ] == tmp_path / "vec" and got[ "shape_of" ] == { "py": plant.python_shape, "ts": lp.script_shape }
     for name in ( "rewrite", "sentence", "alike" ): got[ "asks" ][ name ]( "s", "u" )
-    assert models == [ "ini:duplicate check proof rewrite model", "claude-sonnet-5-5", "claude-opus-5-5" ]
+    assert models == [ "ini:duplicate check proof rewrite model", "ini:symindex need writer model", "ini:duplicate check proof alike model" ]
     default = lp.live_wiring( tmp_path, tmp_path / "vec", complete=complete )
     assert type( default[ "client" ] ).__name__ == "EndpointClient"
 

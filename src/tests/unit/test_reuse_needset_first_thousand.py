@@ -393,10 +393,13 @@ def run_dir_files( tmp_path, cli=True ):
     return argv, hashlib.sha256( planted.read_bytes() ).hexdigest()
 
 
-def test_the_command_line_needs_its_inputs_and_is_a_plan_unless_live_is_given():
+def test_the_command_line_needs_its_inputs_and_is_a_plan_unless_live_is_given( monkeypatch ):
+    monkeypatch.setattr( smoke.chs, "model_id", lambda key, config=None: f"ini:{key}" )
     base = [ "--root", "/r", "--run-dir", "/d", "--planted", "p", "--answer-key", "k", "--labels-dir", "l", "--seed", "7", "--source-commit", "abc" ]
     a    = ft.parse_args( base )
-    assert a.seed == 7 and a.limit == 1314 and a.live is False and a.cli_path is None and a.server == "max-plan" and a.second_model == a.probe_model == smoke.SECOND_MODEL and ft.parse_args( [ *base, "--live", "--limit", "5" ] ).live is True
+    assert a.seed == 7 and a.limit == 1314 and a.live is False and a.cli_path is None and a.server == "max-plan" and a.second_model == a.probe_model == "ini:reuse need second model" and ft.parse_args( [ *base, "--live", "--limit", "5" ] ).live is True
+    named = ft.parse_args( [ *base, "--second-model", "m-2", "--probe-model", "m-p" ] )
+    assert ( named.second_model, named.probe_model ) == ( "m-2", "m-p" )
     with pytest.raises( SystemExit ): ft.parse_args( base[ :-2 ] )
 
 

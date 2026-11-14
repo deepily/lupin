@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 
+from cosa.repo import code_health_settings as chs
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.symindex import build, dups, spec as sp
 from cosa.repo.symindex.candidates import candidate_stage, vector_build, vector_store
@@ -23,7 +24,6 @@ from lupin_mcp.reuse_needset import errors as er
 TOTAL        = 10
 MATCHED      = 8
 NONE         = 2
-SECOND_MODEL = "claude-opus-5-5"
 SECOND_SYSTEM = "You answer with one JSON object and nothing else."
 CALLS_FILE   = "ledger-calls.jsonl"
 SMOKE_FILE   = "needset-smoke.json"
@@ -55,8 +55,28 @@ def parse_args( argv ):
     ap.add_argument( "--server",           default="max-plan" )
     ap.add_argument( "--set-by",           default="smoke" )
     ap.add_argument( "--cli-path",         default=None )
-    ap.add_argument( "--second-model",     default=SECOND_MODEL )
-    return ap.parse_args( argv )
+    ap.add_argument( "--second-model",     default=None, help="a model id; the `reuse need second model` INI key when left out" )
+    return resolve_second_models( ap.parse_args( argv ), ( "second_model", ) )
+
+
+def resolve_second_models( args, names ):
+    """
+    Fill each named model argument the caller left out with the INI value.
+
+    Requires:
+        - names are attributes of args, each a model id or None
+
+    Ensures:
+        - each named attribute that is None now holds `reuse need second model` from lupin-app.ini, read now, never a value written in code
+        - an attribute that holds a model id is left alone
+        - returns args
+
+    Raises:
+        - CodeHealthSettingError when an attribute is None and the INI key is blank or absent
+    """
+    for name in names:
+        if vars( args )[ name ] is None: setattr( args, name, chs.model_id( chs.SECOND_MODEL_KEY ) )
+    return args
 
 
 def kind_split( args ):

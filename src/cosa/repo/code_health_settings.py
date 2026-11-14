@@ -36,6 +36,9 @@ ONE_TOKEN        = re.compile( r"\S+" )
 JUDGE_MODEL_KEY   = "duplicate check judge model"
 REWRITE_MODEL_KEY = "duplicate check proof rewrite model"
 DRAFTER_MODEL_KEY = "reuse need drafter model"
+ALIKE_MODEL_KEY   = "duplicate check proof alike model"
+NEED_WRITER_MODEL_KEY = "symindex need writer model"
+SECOND_MODEL_KEY  = "reuse need second model"
 
 
 class CodeHealthSettingError( ValueError ):
@@ -218,7 +221,7 @@ def model_id( key, config=None ):
     Read the model id one code-health caller sends its prompts to.
 
     Requires:
-        - key is one of the model keys: JUDGE_MODEL_KEY, REWRITE_MODEL_KEY or DRAFTER_MODEL_KEY
+        - key is the INI key of a model id: one of this module's *_MODEL_KEY names, or another service's key, such as the notification proxy's fallback model
         - config has a ConfigurationManager `get` method, or is None to build the process's own
 
     Ensures:

@@ -11,6 +11,8 @@ asyncio.run (no pytest-asyncio dependency).
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 import cosa.agents.notification_proxy.strategies.llm_fallback as fb
 from cosa.agents.notification_proxy.strategies.llm_fallback import LLMFallbackStrategy
 
@@ -117,6 +119,21 @@ class TestRespond:
         client.messages.create = AsyncMock( return_value=_make_fake_response( "academic" ) )
         out = asyncio.run( s.respond( { "message": "audience?", "response_type": "open_ended" } ) )
         assert out == "academic"
+
+    def test_respond_calls_the_model_the_ini_key_names( self ):
+        s, client = _strategy_with_key()
+        client.messages.create = AsyncMock( return_value=_make_fake_response( "academic" ) )
+        asked = []
+        with patch.object( fb.chs, "model_id", side_effect=lambda key, config=None: asked.append( key ) or "ini-model" ):
+            asyncio.run( s.respond( { "message": "audience?" } ) )
+        assert client.messages.create.call_args.kwargs[ "model" ] == "ini-model" and asked == [ "notification proxy llm fallback model" ]
+
+    def test_respond_with_no_model_key_raises_instead_of_reading_it_as_an_api_failure( self ):
+        s, client = _strategy_with_key()
+        client.messages.create = AsyncMock( return_value=_make_fake_response( "x" ) )
+        with patch.object( fb.chs, "model_id", side_effect=fb.chs.CodeHealthSettingError( "no key" ) ):
+            with pytest.raises( fb.chs.CodeHealthSettingError ): asyncio.run( s.respond( { "message": "q" } ) )
+        client.messages.create.assert_not_called()
 
     def test_respond_empty_answer_returns_none( self ):
         s, client = _strategy_with_key()

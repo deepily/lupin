@@ -215,6 +215,12 @@ def test_the_real_ini_names_opus_for_the_judge_and_the_rewrite_and_sonnet_for_th
     assert [ chs.model_id( key, config ) for key in MODEL_KEYS ] == [ "claude-opus-5-5", "claude-opus-5-5", "claude-sonnet-5-5" ], "no key names Fable; the drafter differs from the need checker"
 
 
+def test_the_real_ini_holds_the_four_ids_that_moved_out_of_code_in_row_a3ecd4ea_with_the_values_the_code_held( config ):
+    moved = { chs.ALIKE_MODEL_KEY: "claude-opus-5-5", chs.NEED_WRITER_MODEL_KEY: "claude-sonnet-5-5", chs.SECOND_MODEL_KEY: "claude-opus-5-5",
+              "notification proxy llm fallback model": "claude-sonnet-4-5-20250929" }
+    assert { key: chs.model_id( key, config ) for key in moved } == moved
+
+
 @pytest.mark.parametrize( "key", MODEL_KEYS )
 def test_a_model_key_follows_the_ini_and_is_read_stripped( config, key ):
     config.set_config( key, "  claude-opus-5-5 " )

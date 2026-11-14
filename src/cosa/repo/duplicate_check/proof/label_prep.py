@@ -37,8 +37,6 @@ MONOLITH_TOTAL = 60
 TOP_UP_WAVES   = 6
 THREADS        = 6
 STRATA         = ( "fable-planted", "opus-work-alike" )
-ALIKE_MODEL    = "claude-opus-5-5"
-SENTENCE_MODEL = need_writer.DEFAULT_MODEL
 LANG_NAMES     = { "py": "Python", "ts": "TypeScript" }
 FENCE          = re.compile( r"^```[A-Za-z]*\s*\n(.*?)\n?```\s*$", re.DOTALL )
 ALIKE_SYSTEM   = "You write one function from a short description. Reply with the function source only, in the language named, with no comments about the description."
@@ -551,14 +549,14 @@ def live_wiring( root, cache_dir, complete=model_transport.complete, client=None
 
     Ensures:
         - returns the dict run takes: server-origin definitions of every Python file of the spec and of the tracked client script files except the monolith,
-          three asks (the `duplicate check proof rewrite model` INI key for rewrites, read when called; the need-writer model for sentences;
-          Opus for work-alikes) and the shape readers
+          three asks (the `duplicate check proof rewrite model` INI key for rewrites, read when called; the `symindex need writer model` key for sentences;
+          the `duplicate check proof alike model` key for work-alikes, each read when called) and the shape readers
 
     Raises:
-        - CodeHealthSettingError when the rewrite model key is blank or absent
+        - CodeHealthSettingError when the rewrite, need-writer or alike model key is blank or absent
     """
     return { **tree_definitions( root ),
-             "asks": { "rewrite": make_ask( complete, chs.model_id( chs.REWRITE_MODEL_KEY ) ), "sentence": make_ask( complete, SENTENCE_MODEL ), "alike": make_ask( complete, ALIKE_MODEL ) },
+             "asks": { "rewrite": make_ask( complete, chs.model_id( chs.REWRITE_MODEL_KEY ) ), "sentence": make_ask( complete, chs.model_id( chs.NEED_WRITER_MODEL_KEY ) ), "alike": make_ask( complete, chs.model_id( chs.ALIKE_MODEL_KEY ) ) },
              "shape_of": { "py": plant.python_shape, "ts": script_shape },
              "client": client if client is not None else vector_build.EndpointClient(), "cache_dir": cache_dir }
 

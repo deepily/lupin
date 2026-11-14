@@ -48,7 +48,8 @@ SUBSCRIBED_EVENTS = [
 # LLM Fallback Configuration
 # ============================================================================
 
-LLM_FALLBACK_MODEL      = "claude-sonnet-4-5-20250929"
+# The model id lives in lupin-app.ini under this key; there is no default in code (Rick, 13 Nov 2026).
+LLM_FALLBACK_MODEL_KEY  = "notification proxy llm fallback model"
 LLM_FALLBACK_MAX_TOKENS = 500
 
 
