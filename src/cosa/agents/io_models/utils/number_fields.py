@@ -77,4 +77,3 @@ class ConfidenceFloatMixin:
             - never raises
         """
         return clamp_unit( float_or_zero( self.confidence ) )
-
