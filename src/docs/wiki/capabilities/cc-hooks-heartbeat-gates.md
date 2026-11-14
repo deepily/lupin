@@ -15,25 +15,25 @@ pins:
   - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.open_gates@b8dc6419b6
   - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.due_gates@b9009c7e19
   - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.aged_open_gates@2213db339c
-  - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.derive_user_chase_until@790515ac9f
+  - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.derive_user_chase_until@b4842251c6
   - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.upsert_gate@844e634c00
   - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.mark_answered@97e82e2468
   - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.stamp_asked@e3645a5198
   - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.bump_reask_count@e581cd9835
   - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.defer_to_chase@fecb01fb6b
+  - lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.blocked_by_has_user@0bb3e94ce1
 ---
 # Heartbeat poke cap, mute and user gates
 The Stop-hook heartbeat keeps a per-session poke counter, a fleet-wide mute file and pending-user-gate rows.
 ## What it does
 - `get_poke_count` reads the session's poke count, `reset_poke_count` deletes it, and `is_cap_reached` compares it with a cap.
-- `poke_mute_path` names the mute file, `write_poke_mute` sets the switch and records who set it.
-- `mute_message` is the one line a seat sees in place of the poke while the switch is on.
+- `poke_mute_path` names the mute file, `write_poke_mute` sets the switch and records who set it. `mute_message` is the one line a seat sees in place of the poke while the switch is on.
 - `make_gate` builds one pending-user-gate row with every field in a fixed order.
-- `open_gates` returns the unanswered rows. `due_gates` returns the pokeable ones whose re-ask interval has elapsed.
-- `aged_open_gates` returns open gates whose last ask is older than a fixed age.
+- `open_gates` returns the unanswered rows. `due_gates` returns the pokeable ones whose re-ask interval has elapsed. `aged_open_gates` returns open gates whose last ask is older than a fixed age.
 - `is_chase_deferred`, `is_user_deferred` and `derive_user_chase_until` tell whether a scheduled chase postpones the re-ask.
 - `is_reask_capped` is true when a gate spent its re-ask budget and no chase is scheduled.
 - `upsert_gate`, `mark_answered`, `stamp_asked`, `bump_reask_count` and `defer_to_chase` edit the row list.
+- `blocked_by_has_user( blocked_by )` says whether a row's `blocked_by` holds a `{kind: user}` ref. The hook library and the arbiter's user-gate test both call it, and it gives False for anything that is not a list.
 ## Don't
 - Do not hand-edit gate rows. Use the row functions, which keep the field order.
 ## Invariants

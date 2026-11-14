@@ -5,7 +5,7 @@ pins:
   - cosa.agents.podcast_generator.api_client.APIResponse@983d368321
   - cosa.agents.podcast_generator.audio_stitcher.StitchingResult@fe54d737f5
   - cosa.agents.podcast_generator.config.HostPersonality@005c32a8a0
-  - cosa.agents.podcast_generator.config.VoiceProfile@6d8d798ed9
+  - cosa.agents.podcast_generator.config.VoiceProfile@40ff48f6fa
   - cosa.agents.podcast_generator.tts_client.TTSSegmentResult@2924886016
   - cosa.agents.podcast_generator.tts_client.VoiceConfig@708d9863de
 ---
