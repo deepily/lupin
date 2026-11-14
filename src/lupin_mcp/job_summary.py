@@ -17,7 +17,7 @@ from cosa.utils.atomic_json import write_json_atomic
 
 SCHEMA          = "job-summary/1"
 MAX_POINTS      = 14
-OUTCOMES        = ( "clean", "carried", "failed", "skipped" )
+OUTCOMES        = ( "clean", "carried", "failed", "skipped", "disabled" )     # disabled: the job's INI switch was off, so the run did nothing
 FINISHED        = ( "clean", "carried" )                              # outcomes that count as "ran to the end"
 TRIGGERS        = ( "cron", "boot", "hand" )
 ATTEMPT_KEYS    = ( "started_at", "finished_at", "trigger", "outcome", "stage", "failure", "evidence", "mode" )
@@ -100,7 +100,7 @@ def scan_block( given, previous, attempt, as_of ):
         - previous is the block of the last record, or None
     Ensures:
         - a run that gave no block, or did not finish, returns the previous block (None when there is none)
-        - a failed or skipped run carries the previous block forward with its old as_of: the count is stale, not zero
+        - a failed, skipped or disabled run carries the previous block forward with its old as_of: the count is stale, not zero
         - a finished run gets a new as_of and appends one point when it reported a count
         - a job whose count fell gets drained = max( reported, the fall ): 168 to 3 drained 165, and 24 to 2 with a reported 10 drained 22, so arrived can never be negative (a job whose debt others clear reports 0 or too little)
         - a reported figure above the fall is kept, and none stays none when the count did not fall, because a missing figure is not a zero
@@ -128,7 +128,7 @@ def fix_block( given, previous, attempt, as_of ):
         - previous is the block of the last record, or None
     Ensures:
         - a run that gave no block, or did not finish, returns the previous block (None when there is none)
-        - a failed or skipped run carries the previous block forward unchanged
+        - a failed, skipped or disabled run carries the previous block forward unchanged
         - a finished run appends one point whose opened_total is the previous total plus opened_in_run
     """
     if given is None or attempt[ "outcome" ] not in FINISHED: return previous
@@ -154,8 +154,8 @@ def build_summary( job, attempt, scan_debt=None, fix_debt=None, previous=None, w
         - returns a dict with schema job-summary/1 and no health field
         - recent holds the last MAX_RECENT attempts as { at, outcome, mode }, oldest first
         - last_finished moves only on a clean or carried attempt
-        - consecutive_failures grows on failed, resets on clean or carried, and holds on skipped
-        - work_found_last_run holds its previous value on a failed or skipped run
+        - consecutive_failures grows on failed, resets on clean or carried, and holds on skipped and disabled
+        - work_found_last_run holds its previous value on a failed, skipped or disabled run
     Raises:
         - ValueError from check_attempt
     """

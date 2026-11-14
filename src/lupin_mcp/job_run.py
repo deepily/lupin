@@ -7,7 +7,9 @@ Two optional patterns read counts from the output. The first group of --count-re
 The first group of --drained-re is what the run drained. A job that already writes its own record does not need it.
 """
 import argparse
+import contextlib
 import datetime
+import io
 import os
 import pathlib
 import re
@@ -127,7 +129,23 @@ def with_trigger( argv, trigger ):
     return out
 
 
-def main( argv=None, environ=None, runner=stream_run ):
+def switched_on( entry, config ):
+    """
+    Read a registry job's run-time switch from the configuration.
+
+    Requires:
+        - entry is a registry job; config has get_required( key, return_type="boolean" )
+    Ensures:
+        - returns True when the entry names no enabled_key: only the cron-managed jobs have a switch
+        - otherwise returns True or False as the INI key says, with no default in code
+    Raises:
+        - MissingConfigKeyError when the entry names a key the INI has no value for, or a blank one
+    """
+    if not entry.get( "enabled_key" ): return True
+    return config.get_required( entry[ "enabled_key" ], return_type="boolean" )
+
+
+def main( argv=None, environ=None, runner=stream_run, config=None ):
     """
     Run the wrapper from the command line.
 
@@ -137,6 +155,9 @@ def main( argv=None, environ=None, runner=stream_run ):
 
     Ensures:
         - returns the command's exit code, or EXIT_NO_JOB when the job is not registered or no command was given
+        - returns 0 after one line naming the INI key when the job's switch is false: it writes one record with outcome disabled, never starts the command; cron, boot and manual runs all pass here
+        - a job whose registry entry has no enabled_key has no switch and runs as before
+        - config is the ConfigurationManager the switch is read from; None builds one from LUPIN_CONFIG_MGR_CLI_ARGS
         - with --from-registry and --root, the registry command gets --root <value> appended, so a job of another repo runs against that repo's checkout
     """
     environ = os.environ if environ is None else environ
@@ -159,6 +180,18 @@ def main( argv=None, environ=None, runner=stream_run ):
         return EXIT_NO_JOB
     from cosa.rest.job_service import bootstrap_env, run_command
     from cosa.repo.symindex.paths import data_dir
+    if config is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        if "LUPIN_CONFIG_MGR_CLI_ARGS" not in environ: environ.update( bootstrap_env( registry, root ) )
+        with contextlib.redirect_stdout( io.StringIO() ):      # the manager prints a startup banner that silent=True does not cover, and it would fill every cron log
+            config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", silent=True, mute_splainer=True )
+    if not switched_on( entry, config ):
+        now     = js.iso_now()
+        attempt = { "started_at": now, "finished_at": now, "trigger": js.trigger_from_env( args.trigger, environ ), "outcome": "disabled", "stage": None, "failure": None,
+                    "evidence": f"INI key '{entry[ 'enabled_key' ]}' is false", "mode": args.mode }
+        js.write_summary( jr.resolve_path( entry[ "summary_path" ], root, data_dir( root ) ), args.job, attempt )      # a disabled run is a run: the job reads as off, never overdue
+        print( f"job_run: job {args.job} is switched off: INI key '{entry[ 'enabled_key' ]}' is false, so nothing ran" )
+        return 0
     if args.from_registry and not command: environ.update( bootstrap_env( registry, root ) )    # data_dir reads the configuration manager's settings, so they come first
     data = data_dir( root )
     if args.from_registry and not command:

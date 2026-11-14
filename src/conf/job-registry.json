@@ -20,6 +20,7 @@
   "jobs": [
     {
       "job": "duplicate-check",
+      "enabled_key": "cron job duplicate-check enabled",
       "catalog": "L5",
       "title": "Duplicate check",
       "owner": "cheech",
@@ -83,6 +84,7 @@
     },
     {
       "job": "wiki-librarian",
+      "enabled_key": "cron job wiki-librarian enabled",
       "catalog": "L1",
       "title": "Wiki librarian",
       "owner": "cheech",
@@ -131,6 +133,7 @@
     },
     {
       "job": "reuse-behaviour",
+      "enabled_key": "cron job reuse-behaviour enabled",
       "catalog": "L4",
       "title": "Reuse-behaviour page",
       "owner": "cheech",
@@ -174,6 +177,7 @@
     },
     {
       "job": "vector-refresh",
+      "enabled_key": "cron job vector-refresh enabled",
       "catalog": "L2",
       "title": "Vector refresh (also rebuilds the symbol index)",
       "owner": "cheech",
@@ -217,6 +221,7 @@
     },
     {
       "job": "shadow-audit",
+      "enabled_key": "cron job shadow-audit enabled",
       "catalog": "L3",
       "title": "Shadow audit",
       "owner": "cheech",
@@ -297,6 +302,7 @@
     },
     {
       "job": "worktree-census",
+      "enabled_key": "cron job worktree-census enabled",
       "catalog": "P4",
       "title": "Worktree census",
       "owner": "cheech",
@@ -328,6 +334,7 @@
     },
     {
       "job": "disk-report",
+      "enabled_key": "cron job disk-report enabled",
       "catalog": "L6",
       "title": "Disk report",
       "owner": "cheech",
@@ -354,6 +361,7 @@
     },
     {
       "job": "hook-log-sweep",
+      "enabled_key": "cron job hook-log-sweep enabled",
       "catalog": "L7",
       "title": "Hook-log sweep",
       "owner": "cheech",
@@ -381,6 +389,7 @@
     },
     {
       "job": "io-tmp-sweep",
+      "enabled_key": "cron job io-tmp-sweep enabled",
       "catalog": "L8",
       "title": "io/tmp sweep",
       "owner": "cheech",
@@ -411,6 +420,7 @@
     },
     {
       "job": "host-snapshot",
+      "enabled_key": "cron job host-snapshot enabled",
       "catalog": "L15",
       "title": "Host snapshot (crontab and units, for the container)",
       "owner": "cheech",
@@ -435,6 +445,7 @@
     },
     {
       "job": "hook-link-tick",
+      "enabled_key": "cron job hook-link-tick enabled",
       "catalog": "L9",
       "title": "Hook-link tick",
       "owner": "cheech",

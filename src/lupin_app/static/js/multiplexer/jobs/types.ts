@@ -11,8 +11,8 @@
 /** The five health states, worst first. */
 export type JobState = "unknown" | "silent" | "failing" | "behind" | "healthy";
 
-/** The four outcomes of one attempt. */
-export type JobOutcome = "clean" | "carried" | "failed" | "skipped";
+/** The five outcomes of one attempt. */
+export type JobOutcome = "clean" | "carried" | "failed" | "skipped" | "disabled";
 
 /** A reference to a task-store row, shown as a titled link and never as a bare id. */
 export interface JobRowRef {

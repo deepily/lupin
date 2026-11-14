@@ -11,7 +11,7 @@ import cosa.repo.symindex.paths as paths
 import cosa.rest.job_registry as jr
 from lupin_mcp import cron_generate as cg
 from lupin_mcp import job_run as jrun
-from tests.unit.test_cron_generate import tree   # noqa: F401  (fixture: a root with a registry of managed jobs)
+from tests.unit.test_cron_generate import ON, tree   # noqa: F401  (fixture: a root with a registry of managed jobs)
 
 REAL_ROOT = str( pathlib.Path( __file__ ).resolve().parents[ 3 ] )
 GOLDEN    = pathlib.Path( __file__ ).resolve().parents[ 1 ] / "fixtures" / "cron-generate-lupin-lines.txt"
@@ -102,7 +102,7 @@ def run_job_run( tree, extra, monkeypatch ):
         seen.update( command=command )
         return type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )()
 
-    assert jrun.main( [ "--job", "alpha", "--from-registry", "--trigger", "boot", *extra ], { "LUPIN_ROOT": str( tree ) }, fake ) == 0
+    assert jrun.main( [ "--job", "alpha", "--from-registry", "--trigger", "boot", *extra ], { "LUPIN_ROOT": str( tree ) }, fake, config=ON ) == 0
     return seen[ "command" ]
 
 
@@ -134,7 +134,7 @@ def entry_script_run( tmp_path, *extra ):
     for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ): ( root / "src" / "conf" / name ).symlink_to( real / "src" / "conf" / name )
     ( root / ".venv" ).symlink_to( sys.prefix )
     shipped = jr.load_registry( REAL_ROOT )
-    probe   = { "job": "probe", "title": "probe", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
+    probe   = { "job": "probe", "enabled_key": "cron job wiki-librarian enabled", "title": "probe", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
                 "run": { "argv": [ "{python}", "-c", "import os, sys; print( 'argv', sys.argv[ 1: ], 'root', os.environ[ 'LUPIN_ROOT' ] )", "--trigger", "hand" ], "env": {} } }
     ( root / "src" / "conf" / "job-registry.json" ).write_text( json.dumps( { "schema": "job-registry/1", "defaults": shipped[ "defaults" ], "jobs": [ probe ] } ) )
     done = subprocess.run( [ "env", "-i", f"HOME={tmp_path}", f"DEEPILY_DATA_DIR={tmp_path / 'data'}", f"LUPIN_ROOT={root}", str( real / "src/scripts/cron-job.sh" ), "probe", "cron", *extra ],

@@ -9,6 +9,9 @@ from lupin_mcp import job_run as jr_mod
 import cosa.rest.job_registry as jr
 
 
+ON = types.SimpleNamespace( get_required=lambda key, return_type="string": True )     # a configuration stand-in whose every switch is on
+
+
 def fake( code=0, out="", err="" ):
     """Ensures: returns a runner stand-in that answers with the given result."""
     return lambda command, **kw: types.SimpleNamespace( returncode=code, stdout=out, stderr=err )
@@ -43,16 +46,16 @@ def test_a_failing_or_unstartable_command_is_failed_and_keeps_its_exit_code(tmp_
 def test_main_finds_the_job_in_the_registry_and_refuses_an_unknown_job_or_an_empty_command(tmp_path, monkeypatch, capsys):
     reg = tmp_path / jr.REGISTRY_FILE
     reg.parent.mkdir( parents=True )
-    reg.write_text( json.dumps( { "schema": "job-registry/1", "defaults": {}, "jobs": [ { "job": "j", "title": "J", "owner": "cheech", "summary_path": "{root}/out/j.json" } ] } ) )
+    reg.write_text( json.dumps( { "schema": "job-registry/1", "defaults": {}, "jobs": [ { "job": "j", "enabled_key": "cron job j enabled", "title": "J", "owner": "cheech", "summary_path": "{root}/out/j.json" } ] } ) )
     import cosa.repo.symindex.paths as paths
     monkeypatch.setattr( paths, "data_dir", lambda root: tmp_path / "data" )
     env = { "LUPIN_ROOT": str( tmp_path ) }
-    assert jr_mod.main( [ "--job", "j", "--", "echo", "hi" ], env, fake( 0, "hi\n" ) ) == 0 and ( tmp_path / "out" / "j.json" ).exists()
-    assert jr_mod.main( [ "--job", "j", "echo" ], env, fake( 0 ) ) == 0
-    assert jr_mod.main( [ "--job", "zzz", "--", "echo" ], env, fake( 0 ) ) == jr_mod.EXIT_NO_JOB and "no job zzz" in capsys.readouterr().err
-    assert jr_mod.main( [ "--job", "j" ], env, fake( 0 ) ) == jr_mod.EXIT_NO_JOB and "no command" in capsys.readouterr().err
+    assert jr_mod.main( [ "--job", "j", "--", "echo", "hi" ], env, fake( 0, "hi\n" ), config=ON ) == 0 and ( tmp_path / "out" / "j.json" ).exists()
+    assert jr_mod.main( [ "--job", "j", "echo" ], env, fake( 0 ), config=ON ) == 0
+    assert jr_mod.main( [ "--job", "zzz", "--", "echo" ], env, fake( 0 ), config=ON ) == jr_mod.EXIT_NO_JOB and "no job zzz" in capsys.readouterr().err
+    assert jr_mod.main( [ "--job", "j" ], env, fake( 0 ), config=ON ) == jr_mod.EXIT_NO_JOB and "no command" in capsys.readouterr().err
     monkeypatch.chdir( tmp_path )
-    assert jr_mod.main( [ "--job", "j", "--", "x" ], {}, fake( 0 ) ) == 0
+    assert jr_mod.main( [ "--job", "j", "--", "x" ], {}, fake( 0 ), config=ON ) == 0
 
 
 def test_a_wrapped_run_leaves_the_container_a_fresh_crontab_copy(tmp_path, monkeypatch):
@@ -61,3 +64,67 @@ def test_a_wrapped_run_leaves_the_container_a_fresh_crontab_copy(tmp_path, monke
     monkeypatch.setattr( hs, "refresh_best_effort", lambda environ=None, now=None, run=None: seen.append( environ ) or True )
     jr_mod.run_and_report( tmp_path / "s.json", "j", [ "x" ], environ={ "K": "v" }, runner=fake( 0 ) )
     assert seen == [ { "K": "v" } ]
+
+
+def switch_tree( tmp_path, monkeypatch, own_summary=False ):
+    """Ensures: returns the env of a root whose registry holds the job j with a switch."""
+    reg = tmp_path / jr.REGISTRY_FILE
+    reg.parent.mkdir( parents=True )
+    entry = { "job": "j", "enabled_key": "cron job j enabled", "title": "J", "owner": "cheech", "summary_path": "{root}/out/j.json", "run": { "argv": [ "echo", "hi" ], "env": {} } }
+    reg.write_text( json.dumps( { "schema": "job-registry/1", "defaults": { "run_env": {} }, "jobs": [ entry ] } ) )
+    import cosa.repo.symindex.paths as paths
+    monkeypatch.setattr( paths, "data_dir", lambda root: tmp_path / "data" )
+    return { "LUPIN_ROOT": str( tmp_path ) }
+
+
+def reader( value, asked ):
+    """Ensures: returns a configuration stand-in that records each ask and answers value."""
+    def get_required( key, return_type="string" ):
+        asked.append( ( key, return_type ) )
+        return value
+    return types.SimpleNamespace( get_required=get_required )
+
+
+@pytest.mark.parametrize( "argv, trigger", [ ( [ "--job", "j", "--", "echo", "hi" ], "cron" ), ( [ "--job", "j", "--trigger", "cron", "--from-registry" ], "cron" ),
+                                              ( [ "--job", "j", "--trigger", "boot", "--from-registry" ], "boot" ), ( [ "--job", "j", "--from-registry" ], "cron" ) ] )
+def test_a_switched_off_job_writes_a_disabled_record_logs_its_key_and_exits_zero_without_running( tmp_path, monkeypatch, capsys, argv, trigger ):
+    env, asked, ran = switch_tree( tmp_path, monkeypatch ), [], []
+    code = jr_mod.main( argv, env, lambda command, **kw: ran.append( command ), config=reader( False, asked ) )
+    out  = capsys.readouterr().out
+    assert code == 0 and ran == [] and asked == [ ( "cron job j enabled", "boolean" ) ]
+    assert out.count( "\n" ) == 1 and "cron job j enabled" in out and "switched off" in out
+    last = json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ]
+    assert last[ "outcome" ] == "disabled" and last[ "trigger" ] == trigger and last[ "failure" ] is None and "cron job j enabled" in last[ "evidence" ]
+
+
+def test_a_manual_run_of_a_switched_off_job_is_a_hand_trigger( tmp_path, monkeypatch ):
+    env = { **switch_tree( tmp_path, monkeypatch ), "LUPIN_JOB_TRIGGER": "hand" }
+    assert jr_mod.main( [ "--job", "j", "--from-registry" ], env, fake( 0 ), config=reader( False, [] ) ) == 0
+    assert json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ][ "trigger" ] == "hand"
+
+
+def test_a_switched_on_job_runs_a_missing_ini_key_stops_it_and_a_job_with_no_switch_runs_ungated( tmp_path, monkeypatch ):
+    env, asked, ran = switch_tree( tmp_path, monkeypatch ), [], []
+    assert jr_mod.main( [ "--job", "j", "--", "echo", "hi" ], env, fake( 0 ), config=reader( True, asked ) ) == 0 and ( tmp_path / "out" / "j.json" ).exists()
+    assert json.loads( ( tmp_path / "out" / "j.json" ).read_text() )[ "last_attempt" ][ "outcome" ] == "clean"
+    def absent( key, return_type="string" ): raise KeyError( key )
+    with pytest.raises( KeyError ): jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=types.SimpleNamespace( get_required=absent ) )
+    reg  = tmp_path / jr.REGISTRY_FILE
+    doc  = json.loads( reg.read_text() ); doc[ "jobs" ][ 0 ].pop( "enabled_key" ); reg.write_text( json.dumps( doc ) )
+    second = []
+    assert jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ), config=reader( False, second ) ) == 0 and second == [], "no enabled_key: the INI is never asked"
+
+
+def test_the_switch_is_read_through_a_silent_configuration_manager( tmp_path, monkeypatch, capsys ):
+    """The manager prints a 37-line banner, so it is built silent and its prints are swallowed."""
+    import cosa.config.configuration_manager as cm
+    built = []
+    class Quiet:
+        def __init__( self, **kw ): built.append( kw ); print( "banner noise" )
+        def get_required( self, key, return_type="string" ): return False
+    monkeypatch.setattr( cm, "ConfigurationManager", Quiet )
+    env = switch_tree( tmp_path, monkeypatch )
+    env[ "LUPIN_CONFIG_MGR_CLI_ARGS" ] = "x"
+    assert jr_mod.main( [ "--job", "j", "--", "echo" ], env, fake( 0 ) ) == 0
+    assert built == [ { "env_var_name": "LUPIN_CONFIG_MGR_CLI_ARGS", "silent": True, "mute_splainer": True } ]
+    assert "banner noise" not in capsys.readouterr().out
