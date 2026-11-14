@@ -20,3 +20,8 @@ A daily limit on the judge calls the check may start, one figure per model. It s
 - A missing or bad budget fails the run at stage `setup`, naming the key.
 - Otherwise the run's cap is lowered to the calls left, so one run cannot overspend the day.
 - Every result file and history line carries `judge_model`; see [[duplicate-check-run-history]].
+
+## Limits
+- A run killed mid-judge leaves no history line, so its calls are not counted. The host powers off nightly.
+- Two overlapping runs can both read the history before either writes. The run lock of [[duplicate-check-daily-slots]] stops a second run only while the first holds it.
+- History lines written before `judge_model` existed name no model. They count against every model, so a day that holds them can read as spent.
