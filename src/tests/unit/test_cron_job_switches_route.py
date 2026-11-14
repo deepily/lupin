@@ -29,6 +29,7 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.routers import cron_jobs
 from lupin_mcp import config_write_lock
 from lupin_mcp import fleet_cap_ini_io as io
+from tests.helpers.main_ini_fence import main_ini_fence   # noqa: F401 - autouse: the main checkout's INI is fenced in every test here
 
 LIST_PATH = "/api/cron-jobs"
 
@@ -51,6 +52,7 @@ def ini( tmp_path, monkeypatch ):
     path = tmp_path / "lupin-app.ini"
     path.write_text( _ini_text(), encoding="utf-8" )
     monkeypatch.setenv( sw.INI_OVERRIDE_ENV, str( path ) )
+    assert sw.ini_path() == str( path ), "the resolver must name the temp file, or the writes below would reach the real one"
     return path
 
 

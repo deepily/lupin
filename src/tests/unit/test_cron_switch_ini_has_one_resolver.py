@@ -31,6 +31,7 @@ from cosa.rest import cron_job_switches as sw
 from cosa.rest import job_registry as jr
 from lupin_mcp import fleet_cap_ini_io as io
 from lupin_mcp import fleet_size_cap
+from tests.helpers.main_ini_fence import main_ini_fence   # noqa: F401 - autouse: the main checkout's INI is fenced in every test here
 
 MODULE_PATH = os.path.join( cu.get_project_root(), "src", "cosa", "rest", "cron_job_switches.py" )
 ROUTER_PATH = os.path.join( cu.get_project_root(), "src", "cosa", "rest", "routers", "cron_jobs.py" )
@@ -94,6 +95,7 @@ def spied( monkeypatch, tmp_path ):
     jobs    = jr.load_registry( cu.get_project_root() )[ "jobs" ]
     scratch.write_text( "[Lupin: Baseline]\n" + "".join( f"{sw.switch_key( j[ 'job' ] )} = true\n" for j in jobs ), encoding="utf-8" )
     monkeypatch.setenv( sw.INI_OVERRIDE_ENV, str( scratch ) )
+    assert sw.ini_path() == str( scratch ), "the resolver must name the scratch file, or the writes below would reach the real one"
     seen = []
     for name in INI_CALLS:
         real = getattr( io, name )
