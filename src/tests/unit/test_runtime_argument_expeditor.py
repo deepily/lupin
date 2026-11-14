@@ -1080,13 +1080,15 @@ class TestConfirmAndIterate:
 
         assert result is None  # Cancels because user said "no"
 
-    def test_extract_comment( self ):
-        """_extract_comment() extracts comment text from annotated responses."""
-        assert RuntimeArgumentExpeditor._extract_comment( "yes [comment: change budget to 10]" ) == "change budget to 10"
-        assert RuntimeArgumentExpeditor._extract_comment( "no [comment: make it cheaper]" ) == "make it cheaper"
-        assert RuntimeArgumentExpeditor._extract_comment( "yes" ) is None
-        assert RuntimeArgumentExpeditor._extract_comment( "no" ) is None
-        assert RuntimeArgumentExpeditor._extract_comment( "" ) is None
+    def test_comment_extraction_uses_shared_qualifier_helper( self ):
+        """The confirm loop reads the comment through the shared qualifier helper."""
+        from cosa.utils.notification_utils import extract_qualifier_comment
+        assert extract_qualifier_comment( "yes [comment: change budget to 10]" )[ 1 ] == "change budget to 10"
+        assert extract_qualifier_comment( "no [comment: make it cheaper]" )[ 1 ] == "make it cheaper"
+        assert extract_qualifier_comment( "yes" )[ 1 ] is None
+        assert extract_qualifier_comment( "no" )[ 1 ] is None
+        assert extract_qualifier_comment( "" )[ 1 ] is None
+        assert not hasattr( RuntimeArgumentExpeditor, "_extract_comment" )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
