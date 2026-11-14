@@ -80,3 +80,21 @@ def test_a_standing_manager_gets_inherit_whatever_role_and_whatever_word( monkey
                    role=role, voice_word="quiet", chorus=chorus )
     assert data[ "manager_figure_implicit" ] is True
     assert data[ "speakerphone_on" ] is expected, "a manager must get the mode-aware default, solo off and chorus on"
+
+
+@pytest.mark.parametrize( "role,persona,expected", [
+    ( "author",  "Tiffany", False ),   # a worker starts quiet under the INI key
+    ( "manager", "maria",   True  ),   # a spawned manager inherits, and chorus is on
+] )
+def test_the_real_spawn_env_feeds_the_real_hook( monkeypatch, tmp_path, role, persona, expected ):
+    """spawn_sessions builds the child's env, and the hook turns that env into the bridge flag."""
+    from test_spawn_sessions import FakeRunner, _stated_fleet
+    from lupin_mcp.session_spawner import spawn_sessions
+    runner = FakeRunner()
+    spawn_sessions( 1, "t", "mgr-sid", script_path="/s.sh", role=role, runner=runner, session_dir=tmp_path / "sessions",
+                    voice_config_fn=lambda: type( "C", ( ), { "get": lambda self, key, default=None, **kw: "quiet" } )(),
+                    **_stated_fleet() )
+    env  = runner.calls[ 0 ][ 1 ]
+    data = _drive( monkeypatch, tmp_path, persona=persona, chain="Cheech,maria,*", role=env[ "COSA_VOICE_ROLE" ],
+                   voice_word=env[ "COSA_VOICE_WORKER_VOICE_MODE" ], chorus=True )
+    assert data[ "speakerphone_on" ] is expected
