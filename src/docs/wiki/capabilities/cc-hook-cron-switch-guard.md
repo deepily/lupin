@@ -1,5 +1,20 @@
 ---
 capability: cc-hook-cron-switch-guard
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pins:
+  - lupin_cli.claude_code.hooks.lib.cron_switch_guard.cron_switch_deny_reason@9e59b458ba
+  - lupin_cli.claude_code.hooks.lib.cron_switch_guard.build_cron_switch_deny_response@d273703a47
+  - lupin_cli.claude_code.hooks.lib.cron_switch_guard.switch_lines@644739db30
+  - lupin_cli.claude_code.hooks.lib.cron_switch_guard.changed_jobs@3a0672557b
+  - lupin_cli.claude_code.hooks.lib.cron_switch_guard.refused_changes@6497644fdf
+  - lupin_cli.claude_code.hooks.lib.cron_switch_guard.registry_jobs_beside@09a8e00c95
+  - lupin_cli.claude_code.hooks.lib.cron_switch_commit_check.check@5d79f63bf5
+  - lupin_cli.claude_code.hooks.lib.cron_switch_commit_check.violations_for@86426f394c
+  - lupin_cli.claude_code.hooks.lib.cron_switch_commit_check.registry_job_ids@6784c17e3f
+  - lupin_cli.claude_code.hooks.lib.cron_switch_commit_check.staged_ini_paths@703defb018
+  - lupin_cli.claude_code.hooks.lib.cron_switch_commit_check.read_state@e7de00ef31
+  - lupin_cli.claude_code.hooks.lib.cron_switch_commit_check.state_path@8e07e2a1d8
+  - lupin_cli.claude_code.hooks.lib.cron_switch_commit_check.main@b47b02ae25
 ---
 # Cron-switch guard and commit check
 

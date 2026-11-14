@@ -1,5 +1,19 @@
 ---
 capability: rest-cron-job-switches
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pins:
+  - cosa.rest.cron_job_switches.write_switch@a3609e949b
+  - cosa.rest.cron_job_switches.read_enabled@f527d44865
+  - cosa.rest.cron_job_switches.read_attribution@4a8668291c
+  - cosa.rest.cron_job_switches.is_honoured@5f18453267
+  - cosa.rest.cron_job_switches.build_row@108c246b60
+  - cosa.rest.cron_job_switches.build_rows@15e2e9c925
+  - cosa.rest.cron_job_switches.switch_key@fb6e422e6c
+  - cosa.rest.cron_job_switches.ini_path@0692c2e155
+  - cosa.rest.cron_job_switches.state_path@c716314db9
+  - cosa.rest.routers.cron_jobs.get_cron_jobs@1b55ea8ac4
+  - cosa.rest.routers.cron_jobs.put_cron_job_enabled@43257eacb6
+  - cosa.rest.routers.cron_jobs.CronJobSwitchIn@684b9444e6
 ---
 # Scheduled-job switches: the API and the accordion
 

@@ -295,11 +295,11 @@ def test_a_failed_announcement_does_not_fail_the_flip( ini, monkeypatch, capsys 
 
 # ── honoured and drift (María's amendments 1 and 3) ──────────────────────────
 
-def test_honoured_is_computed_from_the_registry_and_names_eleven_jobs( ini ):
+def test_honoured_is_computed_from_the_registry_and_names_twelve_jobs( ini ):
     rows = _client().get( LIST_PATH ).json()[ "jobs" ]
     honoured = sorted( r[ "job" ] for r in rows if r[ "honoured" ] )
     pinned   = sorted( e[ "job" ] for e in json.load( open( os.path.join( cu.get_project_root(), "src/conf/job-registry.json" ) ) )[ "jobs" ] if e.get( "cron_managed" ) is True )
-    assert honoured == pinned and len( honoured ) == 11
+    assert honoured == pinned and len( honoured ) == 12
     assert all( r[ "honoured" ] is False for r in rows if r[ "job" ] in ( "fleet-arbiter", "context-tick", "yearly-reminders" ) )
 
 
