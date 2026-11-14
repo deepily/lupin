@@ -47,7 +47,7 @@ def test_build_config_holds_exactly_the_documented_fields_with_the_fixed_constan
     assert sorted( cfg ) == sorted( [ "model_id", "backend", "temperature", "unscorable_policy", "prompt_version", "system_prompt_sha", "parser_sha",
                                       "min_nodes", "max_candidates", "min_candidates", "list_depth", "fusion_head", "body_chars", "clone_cover",
                                       "jscpd", "scrub_sha", "config_sha" ] )
-    assert ( cfg[ "model_id" ], cfg[ "max_candidates" ], cfg[ "min_candidates" ], cfg[ "list_depth" ], cfg[ "fusion_head" ], cfg[ "clone_cover" ] ) == ( "claude-fable-5-1", 10, 5, 10, 2, 0.5 )
+    assert ( cfg[ "model_id" ], cfg[ "max_candidates" ], cfg[ "min_candidates" ], cfg[ "list_depth" ], cfg[ "fusion_head" ], cfg[ "clone_cover" ] ) == ( "claude-opus-5-5", 10, 5, 10, 2, 0.5 )
     assert cfg[ "min_nodes" ] == 25 and cfg[ "body_chars" ] == 4000 and cfg[ "jscpd" ] == JSCPD
     assert cfg[ "config_sha" ] == cf.config_sha( cfg ) and len( cfg[ "config_sha" ] ) == 64
 
@@ -213,7 +213,7 @@ def test_code_that_moved_since_the_freeze_is_refused( tmp_path, over ):
 def test_a_frozen_file_edited_by_hand_fails_its_own_sha(tmp_path):
     path = str( tmp_path / "f.json" )
     cf.freeze( make(), path )
-    text = open( path ).read().replace( '"model_id": "claude-fable-5-1"', '"model_id": "claude-opus-5-5"' )
+    text = open( path ).read().replace( '"model_id": "claude-opus-5-5"', '"model_id": "claude-fable-5-1"' )
     open( path, "w" ).write( text )
     with pytest.raises( err.DuplicateCheckError, match="recomputes to" ) as caught:
         cf.verify_frozen( path, make() )

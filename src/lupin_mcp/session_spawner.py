@@ -813,8 +813,9 @@ def spawn_sessions(
           serialize via the server's atomic allocate-or-409.
         - When `model` is a non-empty string, forwards `--model <model>` to every
           child via the build_spawn_argv claude_args seam, so the child boots on
-          that model instead of the user default (Fable-5-managers / Opus-5-
-          workers, 2026-08-17). When `model` is None/empty, NO --model
+          that model instead of the user default (managers inherit the user
+          default, measured as Opus 5.5 on 13 Nov 2026; workers Sonnet 5.5).
+          When `model` is None/empty, no --model
           flag is passed and the child inherits the user default (today's fail-open
           behavior). The resolved model is echoed on EVERY roster entry and at the
           top level (spawn-ack verification → verify-allocated-MODEL).

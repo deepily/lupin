@@ -136,7 +136,7 @@ def test_another_key_text_or_checker_model_is_another_question( tmp_path ):
     book = ledger( tmp_path )
     need = matched()
     check.second_check( need, Asker( [ reply() ] ), book, CHECKER, key_texts=[ "x" ] )
-    for kwargs, model in ( ( { "key_texts": [ "y" ] }, CHECKER ), ( { "key_texts": [ "x" ] }, "claude-sonnet-5-5" ) ):
+    for kwargs, model in ( ( { "key_texts": [ "y" ] }, CHECKER ), ( { "key_texts": [ "x" ] }, "claude-haiku-5-5" ) ):
         ask = Asker( [ reply() ] )
         check.second_check( need, ask, book, model, **kwargs )
         assert len( ask.prompts ) == 1

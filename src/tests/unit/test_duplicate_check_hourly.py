@@ -485,3 +485,29 @@ def test_a_baseline_part_that_raises_leaves_the_daily_record_standing_records_it
     assert [ ( l[ "mode" ], l[ "status" ] ) for l in lines ] == [ ( "daily", "ok" ), ( "baseline", "failed" ) ] and lines[ 0 ][ "run_file" ] != lines[ 1 ][ "run_file" ]
     urgent = [ s for s in hooks.sent if s[ 0 ] == "urgent" ]
     assert len( urgent ) == 1 and "baseline" in urgent[ 0 ][ 1 ] + urgent[ 0 ][ 2 ] and "d-92909e2698" in urgent[ 0 ][ 1 ] + urgent[ 0 ][ 2 ]
+
+
+def test_a_run_whose_new_calls_all_failed_without_a_limit_is_failed_not_carried_and_a_run_with_one_success_is_not( repo, tmp_path ):
+    history( repo )
+    broken = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path, backend=FakeBackend( call_error=True ) ) )
+    assert broken[ "status" ] == "failed" and broken[ "stage" ] == dd.STAGE_JUDGING and broken[ "judge_failed" ] == broken[ "judge_calls" ] > 0 and broken[ "rate_limited" ] == 0
+    assert "all " in broken[ "error" ] and len( broken[ "carried" ] ) == 3, "the work is still carried for the next run"
+    mixed = dd.run( repo, NOW + datetime.timedelta( hours=1 ), "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert mixed[ "status" ] == "ok" and mixed[ "judge_failed" ] == 0
+
+
+def test_a_limited_run_keeps_its_carried_status_because_the_backoff_and_the_alert_already_name_the_limit( repo, tmp_path ):
+    history( repo )
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path, backend=LimitedBackend() ) )
+    assert doc[ "status" ] == "carried" and doc[ "judge_failed" ] == doc[ "judge_calls" ] and doc[ "rate_limited" ] >= 1
+
+
+def test_the_live_limit_of_13_nov_through_the_real_transport_backs_the_run_off_with_no_marker_in_its_words( repo, tmp_path ):
+    from tests.unit.test_model_transport_claude_usage import LIVE_PLAN_LIMIT, result
+    async def fake( prompt, options ): yield result( None, None, error=True, text=LIVE_PLAN_LIMIT, subtype="success" )
+    backend = dd.proof_cli.judge.MaxPlanBackend( query_fn=fake )
+    history( repo )
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path, backend=backend ) )
+    assert doc[ "rate_limited" ] == 1 and doc[ "judge_calls" ] == 1 and doc[ "backoff_until" ] is not None
+    skipped = dd.run( repo, NOW + datetime.timedelta( hours=1 ), "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert skipped[ "status" ] == "skipped"

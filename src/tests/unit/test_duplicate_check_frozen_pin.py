@@ -25,7 +25,7 @@ def test_the_approved_prompt_text_has_the_version_that_was_approved():
 def test_the_decided_values_are_the_rulings_of_2026_10_25():
     cfg = fz.live_config()
     assert ( cfg[ "backend" ], cfg[ "temperature" ], cfg[ "unscorable_policy" ] ) == ( "max-plan", "unsettable:bounded-cc", "worst-rank" )
-    assert cfg[ "model_id" ] == "claude-fable-5-1" and cfg[ "body_chars" ] == 10000
+    assert cfg[ "model_id" ] == "claude-opus-5-5" and cfg[ "body_chars" ] == 10000
     assert cfg[ "jscpd" ] == { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "label-prep-max-size" }
     assert cfg[ "backend" ] == judge.MaxPlanBackend().name and cfg[ "temperature" ] == judge.MaxPlanBackend().temperature_record
 
@@ -67,15 +67,15 @@ def select( monkeypatch, model ):
 
 
 def test_the_selected_model_is_read_from_the_ini_key_each_time_it_is_asked( monkeypatch ):
-    assert fz.selected_model() == "claude-fable-5-1", "lupin-app.ini names the Fable model until the switch"
-    select( monkeypatch, "claude-opus-5-5" )
-    assert fz.selected_model() == "claude-opus-5-5"
+    assert fz.selected_model() == "claude-opus-5-5", "lupin-app.ini names the Opus model since the switch of 13 Nov"
+    select( monkeypatch, "claude-fable-5-1" )
+    assert fz.selected_model() == "claude-fable-5-1"
 
 
 def test_frozen_path_finds_the_one_file_whose_model_id_is_the_selected_model( monkeypatch ):
-    assert fz.frozen_path().endswith( "/src/conf/semdup-frozen-2.json" )
-    select( monkeypatch, "claude-opus-5-5" )
     assert fz.frozen_path().endswith( "/src/conf/semdup-frozen-3-opus.json" )
+    select( monkeypatch, "claude-fable-5-1" )
+    assert fz.frozen_path().endswith( "/src/conf/semdup-frozen-2.json" )
 
 
 def conf_with( tmp_path, monkeypatch, models ):
@@ -101,22 +101,22 @@ def test_a_model_with_no_frozen_file_gets_a_path_that_names_it_and_verify_frozen
 
 
 def test_live_config_carries_the_selected_model_and_its_own_sha( monkeypatch ):
-    fable = fz.live_config()
-    select( monkeypatch, "claude-opus-5-5" )
+    opus = fz.live_config()
+    select( monkeypatch, "claude-fable-5-1" )
     live = fz.live_config()
-    assert live[ "model_id" ] == "claude-opus-5-5" and live[ "config_sha" ] == cf.config_sha( live ) != fable[ "config_sha" ]
+    assert live[ "model_id" ] == "claude-fable-5-1" and live[ "config_sha" ] == cf.config_sha( live ) != opus[ "config_sha" ]
 
 
 def test_the_committed_opus_file_is_the_live_configuration_under_opus_and_differs_from_the_fable_file_in_model_and_sha_only( monkeypatch ):
-    fable = cf.verify_frozen( fz.frozen_path(), fz.live_config() )
-    select( monkeypatch, "claude-opus-5-5" )
     opus  = cf.verify_frozen( fz.frozen_path(), fz.live_config() )
+    select( monkeypatch, "claude-fable-5-1" )
+    fable = cf.verify_frozen( fz.frozen_path(), fz.live_config() )
     assert opus[ "model_id" ] == "claude-opus-5-5"
     assert sorted( k for k in fable if fable[ k ] != opus[ k ] ) == [ "config_sha", "model_id" ]
 
 
-def test_the_fable_file_refuses_an_opus_run_as_drift( monkeypatch ):
+def test_the_opus_file_refuses_a_fable_run_as_drift( monkeypatch ):
     path = fz.frozen_path()
-    select( monkeypatch, "claude-opus-5-5" )
+    select( monkeypatch, "claude-fable-5-1" )
     with pytest.raises( err.DuplicateCheckError ) as caught: cf.verify_frozen( path, fz.live_config() )
     assert caught.value.code == err.CONFIG_DRIFT and "model_id" in caught.value.detail

@@ -96,7 +96,7 @@ class Counting:
     """A judge backend that counts the calls made through it."""
 
     def __init__( self, backend ):
-        self.backend, self.calls, self.limited = backend, 0, 0
+        self.backend, self.calls, self.limited, self.failed = backend, 0, 0, 0
         self.server_label                      = backend.server_label
 
     async def complete( self, model, system_prompt, user_prompt ):
@@ -104,7 +104,8 @@ class Counting:
         Count the call and return the backend's answer.
 
         Ensures:
-            - a call the service refuses for a rate or usage limit is counted in limited and raised again
+            - a call the service refuses for a rate or usage limit is counted in limited and in failed, and raised again
+            - any other call that raises a ModelCallError is counted in failed and raised again
             - every later call of the run raises at once without reaching the service
         """
         if self.limited: raise model_transport.ModelRateLimited( "the service rate-limited an earlier call of this run; no further call is made" )
@@ -112,6 +113,10 @@ class Counting:
         try: return await self.backend.complete( model, system_prompt, user_prompt )
         except model_transport.ModelRateLimited:
             self.limited += 1
+            self.failed  += 1
+            raise
+        except model_transport.ModelCallError:
+            self.failed += 1
             raise
 
 
@@ -733,9 +738,11 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     groups = [ g for g in cluster.clusters( ids, cluster.join_pairs( out[ "verdicts" ] ) ) if len( g ) > 1 ]
     moved  = progress( fresh[ "defs" ], fresh[ "commit_of" ], out[ "unjudged" ], window )
     doc.update( usage=usage_since( used0, spend(), count.calls ), rate_limited=count.limited, backoff_until=( now + datetime.timedelta( seconds=BACKOFF_SECONDS ) ).isoformat() if count.limited else None )
-    doc.update( status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
+    doc.update( judge_failed=count.failed, status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
+    if count.calls and count.failed == count.calls and not count.limited:       # every new call failed without a limit to explain it (a limit already backs off and alerts): a ruling replayed from the ledger is not a judgment of this run, so judged cannot hide it
+        doc.update( status="failed", stage=STAGE_JUDGING, error=f"all {count.calls} new judge calls failed; the {doc[ 'judged' ]} judged were replayed from the ledger or earlier" )
     unjudged_ids = { u[ "id" ] for u in out[ "unjudged" ] }
     append_manifest( folder, [ d for d in fresh[ "defs" ] if d[ "id" ] not in unjudged_ids ], cfg, f"{stem}.json", now )
     try: settled = behaviour.settled_keys( folder )                    # a cluster the triage seat already ruled on, from either side, stays out of the record and the row until its code changes

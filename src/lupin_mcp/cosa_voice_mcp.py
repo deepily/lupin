@@ -3037,7 +3037,7 @@ def spawn_sessions(
     # Resolve the child's model: explicit param wins; else the per-role INI key;
     # else the INI `default` key (covers unknown/new roles); else None (no flag →
     # inherit the user default, fail-open). See ruling #2 (2026-07-02): managers
-    # get Fable-5 via Rick's user default, zero code — no `manager` INI key ships;
+    # inherit Rick's user default (Opus 5.5 on 13 Nov 2026), zero code — no `manager` INI key ships;
     # the cost goal is met entirely by the worker-side flag.
     spawn_models   = cfg[ "spawn_models" ]
     resolved_model = model or spawn_models.get( role ) or spawn_models.get( "default" )

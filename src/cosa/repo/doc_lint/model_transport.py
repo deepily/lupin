@@ -21,6 +21,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -148,6 +149,8 @@ AGY_USAGE         = {}
 CLAUDE_USAGE_FIELDS = ( "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens" )
 CLAUDE_USAGE        = dict( { field: 0 for field in CLAUDE_USAGE_FIELDS }, calls=0, cost_usd=0.0 )      # what finished Claude Code calls reported, since the process began
 _CLAUDE_USAGE_LOCK  = threading.Lock()
+RESET_SHAPE         = re.compile( r"\bresets?\s+(?:at\s+|on\s+|in\s+)?(?:\d|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|tomorrow|today|midnight|noon)\b)", re.IGNORECASE )     # a plan-limit reply names when it lifts ("resets Nov 16, 10am"); "Connection reset by peer" and "resets monitoring state" do not match
+FAILURE_MARKERS     = ( "api error", "invalid api key", "/login", "unauthorized", "authentication" )     # a reply the CLI sends when the call failed (a 401, a broken login); a plan limit carries none of them, so a failure is never backed off as a limit
 RATE_LIMIT_MARKERS  = ( "rate limit", "rate_limit", "usage limit", "429", "too many requests", "overloaded", "reached your" )     # "reached your" is the plan limit: "You've reached your Fable limit."
 _AGY_USAGE_LOCK   = threading.Lock()
 _AGY_SCRATCH_LOCK = threading.Lock()
@@ -458,6 +461,23 @@ def claude_usage_summary():
         - the result is a copy, so a caller cannot change the tally
     """
     with _CLAUDE_USAGE_LOCK: return dict( CLAUDE_USAGE )
+
+
+def limit_reply( message, detail ):
+    """
+    Say whether an error result is the service refusing the call for a limit.
+
+    Requires:
+        - message is a ResultMessage with is_error true; detail is its subtype and text
+
+    Ensures:
+        - true when the CLI reports an error under subtype "success" and the text carries no FAILURE_MARKERS entry: the reply is the CLI's own message, which is how a plan limit arrives (live, 13 Nov 2026), whatever its wording
+        - true when the text names a reset time (resets, then a date, a day or a clock time), or carries a marker of RATE_LIMIT_MARKERS
+        - false for an API failure or a broken login, and for a connection reset, unless a marker says otherwise
+    """
+    lowered = detail.lower()
+    own     = message.subtype == "success" and not any( marker in lowered for marker in FAILURE_MARKERS )
+    return own or bool( RESET_SHAPE.search( detail ) ) or any( marker in lowered for marker in RATE_LIMIT_MARKERS )
 
 
 def _note_claude_usage( message ):
@@ -815,7 +835,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
                 _note_claude_usage( message )
                 if message.is_error:
                     detail = f"{message.subtype}: {str( message.result )[ :300 ]}"
-                    limited = any( marker in detail.lower() for marker in RATE_LIMIT_MARKERS )
+                    limited = limit_reply( message, detail )
                     raise ( ModelRateLimited if limited else ModelCallError )( f"model call to {model} ended in an error result: {detail}" )
 
     try:

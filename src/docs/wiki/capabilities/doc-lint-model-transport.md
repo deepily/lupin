@@ -20,7 +20,8 @@ pins:
   - cosa.repo.doc_lint.model_transport.wrap@57a3b9746a
   - cosa.repo.doc_lint.model_transport.ModelRateLimited@eee129bf08
   - cosa.repo.doc_lint.model_transport.claude_usage_summary@7f54a7e8f3
-  - cosa.repo.doc_lint.model_transport.complete@18f6ef1584
+  - cosa.repo.doc_lint.model_transport.complete@df072bb75c
+  - cosa.repo.doc_lint.model_transport.limit_reply@9876942988
 ---
 # Doc-lint model transport
 
@@ -35,6 +36,5 @@ The one door the judge harness uses to reach a Claude model, through bounded Cla
 - `configure_agy` sends later calls through agy, pinned to the binary on disk, and returns the ledger binding. `configure_claude` returns to Claude Code and forgets the pin. `agy_usage_summary` returns a copy of the tokens agy reported, per model. `claude_usage_summary` does the same for Claude Code: calls, token counts and `cost_usd`, a notional list-price figure, not a charge.
 
 ## Budget
-- `set_budget` caps calls per model id, counted from a ledger file that outlives the process. `calls_used` counts the ledger lines for a model, and `budget_summary` returns used and cap per capped model.
-- A call over the cap raises `CallBudgetExceeded` before any model is contacted. It is not a `ModelCallError`, so a caller that retries must not retry past it.
-- `ModelCallError` is a call that returned nothing usable. `ModelUnavailableError` is a service that stayed unavailable. `ModelWaitCutShort` is a wait ended by a stop. `ModelRateLimited` is a refusal for a rate or usage limit; a caller that sees it stops calling for a while.
+- `set_budget` caps calls per model id, counted from a ledger file that outlives the process. `calls_used` counts the ledger lines for a model, and `budget_summary` returns used and cap per capped model. A call over the cap raises `CallBudgetExceeded` before any model is contacted. It is not a `ModelCallError`, so a caller that retries must not retry past it.
+- `ModelCallError` is a call that returned nothing usable. `ModelUnavailableError` is a service that stayed unavailable. `ModelWaitCutShort` is a wait ended by a stop. `ModelRateLimited` is a refusal for a rate or usage limit; a caller that sees it stops calling for a while. `limit_reply` reads an error result: subtype `success` without a failure marker, a named reset time or a wording marker is a limit.

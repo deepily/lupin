@@ -56,7 +56,7 @@ def test_the_duplicate_check_judge_model_is_read_from_its_ini_key_and_has_no_cod
     """Judge: the duplicate-check model comes from its INI key, with no pinned id in code."""
     assert not hasattr( dc_config, "MODEL_ID" )
     cfg = dc_config.build_config( "max-plan", 0, "p", "s", "u", "parser", [], 100, { "version": "5", "min_tokens": 50, "min_lines": 5, "max_size": "100kb", "chosen_in": "x" } )
-    assert cfg[ "model_id" ] == "claude-fable-5-1"      # the committed INI value; the frozen config pins the same id
+    assert cfg[ "model_id" ] == "claude-opus-5-5"       # the committed INI value; the frozen config pins the same id
 
 
 def test_task_store_adapter_callers_stamp_lupin_as_the_project():

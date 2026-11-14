@@ -138,7 +138,7 @@ def test_the_drafter_call_sends_the_prompt_to_the_named_model_and_returns_the_te
         return "reply"
 
     monkeypatch.setattr( draft.model_transport, "complete", fake_complete )
-    assert draft.drafter_call()( "sys", "usr" ) == "reply" and seen == { "model": "claude-fable-5-1", "system": "sys", "user": "usr", "query_fn": None }
+    assert draft.drafter_call()( "sys", "usr" ) == "reply" and seen == { "model": "claude-sonnet-5-5", "system": "sys", "user": "usr", "query_fn": None }
     assert draft.drafter_call( "other-model", query_fn="q" )( "s", "u" ) == "reply" and seen[ "model" ] == "other-model" and seen[ "query_fn" ] == "q"
 
 
