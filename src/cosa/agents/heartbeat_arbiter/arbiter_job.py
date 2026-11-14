@@ -96,7 +96,7 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
 # arbiter resurfaces a dark session's aged user-gate to Rick.
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path, declared_work_owed, is_honored
-from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates, derive_user_chase_until
+from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates, derive_user_chase_until, blocked_by_has_user
 # b33c8e96: cross-package SINGLE source of truth for the arbiter-poke sentinel. Both
 # poke bodies below DERIVE their prefix from this constant so the emitter (here) and
 # the Stop-hook matcher (is_heartbeat_poke_prompt) cannot drift — a wrapped arbiter
@@ -2757,11 +2757,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return False
         if item.get( "gate_class" ) == "operator":
             return True
-        if item.get( "status" ) == "blocked":
-            for ref in ( item.get( "blocked_by" ) or [ ] ):
-                if isinstance( ref, dict ) and ref.get( "kind" ) == "user":
-                    return True
-        return False
+        return item.get( "status" ) == "blocked" and blocked_by_has_user( item.get( "blocked_by" ) )
 
     @staticmethod
     def _item_is_review_gate_hold( item ):
