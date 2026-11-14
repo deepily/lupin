@@ -88,7 +88,8 @@ def test_a_failure_the_cli_names_with_no_reset_time_stays_a_plain_model_call_err
 
 
 @pytest.mark.parametrize( "text, subtype", [ ( "error_during_execution: read ECONNRESET: Connection reset by peer", "error_during_execution" ),
-                                             ( "API Error: 401 {\"error\":\"invalid x-api-key\"}", "success" ), ( "API Error: 500 internal error", "success" ) ] )
+                                             ( "API Error: 401 {\"error\":\"invalid x-api-key\"}", "success" ), ( "API Error: 500 internal error", "success" ),
+                                             ( "Invalid API key · Please run /login", "success" ), ( "Out of quota. Resets monitoring state later.", "error_during_execution" ) ] )
 def test_a_connection_reset_and_an_api_failure_are_not_read_as_a_limit( text, subtype ):
     with pytest.raises( mt.ModelCallError ) as caught: call( result( None, None, error=True, text=text, subtype=subtype ) )
     assert not isinstance( caught.value, mt.ModelRateLimited )

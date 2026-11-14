@@ -149,8 +149,8 @@ AGY_USAGE         = {}
 CLAUDE_USAGE_FIELDS = ( "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens" )
 CLAUDE_USAGE        = dict( { field: 0 for field in CLAUDE_USAGE_FIELDS }, calls=0, cost_usd=0.0 )      # what finished Claude Code calls reported, since the process began
 _CLAUDE_USAGE_LOCK  = threading.Lock()
-RESET_SHAPE         = re.compile( r"\bresets?\s+(?:at\s+|on\s+|in\s+)?(?:\d|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|mon|tue|wed|thu|fri|sat|sun|tomorrow|today|midnight|noon)\w*\b)", re.IGNORECASE )     # a plan-limit reply names when it lifts ("resets Nov 16, 10am"); "Connection reset by peer" does not match
-API_ERROR_PREFIX    = "api error"     # the CLI's prefix on a failure the API returned (401, 500); a plan limit is the CLI's own message and has none
+RESET_SHAPE         = re.compile( r"\bresets?\s+(?:at\s+|on\s+|in\s+)?(?:\d|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|tomorrow|today|midnight|noon)\b)", re.IGNORECASE )     # a plan-limit reply names when it lifts ("resets Nov 16, 10am"); "Connection reset by peer" and "resets monitoring state" do not match
+FAILURE_MARKERS     = ( "api error", "invalid api key", "/login", "unauthorized", "authentication" )     # a reply the CLI sends when the call failed (a 401, a broken login); a plan limit carries none of them, so a failure is never backed off as a limit
 RATE_LIMIT_MARKERS  = ( "rate limit", "rate_limit", "usage limit", "429", "too many requests", "overloaded", "reached your" )     # "reached your" is the plan limit: "You've reached your Fable limit."
 _AGY_USAGE_LOCK   = threading.Lock()
 _AGY_SCRATCH_LOCK = threading.Lock()
@@ -471,12 +471,12 @@ def limit_reply( message, detail ):
         - message is a ResultMessage with is_error true; detail is its subtype and text
 
     Ensures:
-        - true when the CLI reports an error under subtype "success" and the text is not an "API Error": the reply is the CLI's own message, which is how a plan limit arrives (live, 13 Nov 2026), whatever its wording
+        - true when the CLI reports an error under subtype "success" and the text carries no FAILURE_MARKERS entry: the reply is the CLI's own message, which is how a plan limit arrives (live, 13 Nov 2026), whatever its wording
         - true when the text names a reset time (resets, then a date, a day or a clock time), or carries a marker of RATE_LIMIT_MARKERS
-        - false for an API failure such as a 401, and for a connection reset, unless a marker says otherwise
+        - false for an API failure or a broken login, and for a connection reset, unless a marker says otherwise
     """
     lowered = detail.lower()
-    own     = message.subtype == "success" and API_ERROR_PREFIX not in lowered
+    own     = message.subtype == "success" and not any( marker in lowered for marker in FAILURE_MARKERS )
     return own or bool( RESET_SHAPE.search( detail ) ) or any( marker in lowered for marker in RATE_LIMIT_MARKERS )
 
 
