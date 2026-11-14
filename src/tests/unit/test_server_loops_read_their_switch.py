@@ -169,3 +169,74 @@ def test_start_flusher_builds_the_notify_outbox_switch( tmp_path, monkeypatch, l
     assert built[ 0 ][ 0 ] == "notify-outbox"
     assert built[ 0 ][ 1 ] is ( print if logger is None else logger.warning )
     monkeypatch.setattr( notify_outbox, "_flusher_started", False )
+
+
+class _Done( Exception ):
+    """Raised by a test's sleep to end an otherwise endless loop."""
+
+
+class _FakeThread:
+    """Records the thread start_flusher builds, so a test can run its target by hand."""
+
+    made = []
+
+    def __init__( self, target, args, name, daemon ):
+        self.target, self.args = target, args
+        _FakeThread.made.append( self )
+
+    def start( self ):
+        pass
+
+
+def test_run_flusher_sleeps_first_and_stops_when_told_to( tmp_path ):
+    naps, ticks = [], []
+    allowed     = mock.MagicMock( allowed=lambda: ticks.append( 1 ) or False )
+    notify_outbox.run_flusher( allowed, None, str( tmp_path ), 1, 30, None, sleep=naps.append, stop=lambda: len( naps ) >= 3 )
+    assert naps == [ 30, 30, 30 ] and len( ticks ) == 3
+
+
+def test_run_flusher_uses_the_real_sleep_when_none_is_injected( tmp_path, monkeypatch ):
+    naps = []
+    monkeypatch.setattr( notify_outbox.time, "sleep", lambda seconds: naps.append( seconds ) or ( _ for _ in () ).throw( _Done() ) )
+    with pytest.raises( _Done ):
+        notify_outbox.run_flusher( mock.MagicMock( allowed=lambda: False ), None, str( tmp_path ), 1, 7 )
+    assert naps == [ 7 ]
+
+
+def test_a_false_switch_leaves_the_spool_untouched_through_start_flusher( tmp_path, monkeypatch ):
+    ini, sent = _Ini( tmp_path, "notify-outbox" ), []
+    outbox    = str( tmp_path / "outbox" )
+    notify_outbox.spool( types.SimpleNamespace( model_dump=lambda mode: { "idempotency_key": "k1", "text": "hello" } ), outbox )
+    ini.set( "false" )
+    ini.wire( monkeypatch )
+    _FakeThread.made.clear()
+    monkeypatch.setattr( notify_outbox, "_flusher_started", False )
+    monkeypatch.setattr( notify_outbox.threading, "Thread", _FakeThread )
+    assert notify_outbox.start_flusher( lambda request: sent.append( request ) or True, outbox, 600, 30 ) is True
+    thread = _FakeThread.made[ 0 ]
+    naps, seen = [], []
+
+    def sleep( seconds ):
+        naps.append( seconds )
+        if len( naps ) == 3: raise _Done()
+        if len( naps ) == 2:
+            seen.append( ( len( sent ), len( notify_outbox.list_spooled( outbox ) ) ) )      # after the first pass, with the key false
+            ini.set( "true" )
+
+    monkeypatch.setattr( notify_outbox.time, "sleep", sleep )
+    with pytest.raises( _Done ):
+        thread.target( *thread.args )
+    assert naps == [ 30, 30, 30 ]
+    assert seen == [ ( 0, 1 ) ]                              # the first pass, key false: nothing sent, the spool untouched
+    assert len( sent ) == 1                                  # the second pass, key true, delivered it
+    assert notify_outbox.list_spooled( outbox ) == []
+    monkeypatch.setattr( notify_outbox, "_flusher_started", False )
+
+
+def test_a_switch_that_cannot_be_built_leaves_the_flusher_startable( tmp_path, monkeypatch ):
+    def broken( job, log=print ): raise ImportError( "no path helpers" )
+    monkeypatch.setattr( csr, "for_job", broken )
+    monkeypatch.setattr( notify_outbox, "_flusher_started", False )
+    with pytest.raises( ImportError ):
+        notify_outbox.start_flusher( lambda r: True, str( tmp_path ), 10, 30 )
+    assert notify_outbox._flusher_started is False
