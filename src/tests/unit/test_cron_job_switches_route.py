@@ -214,6 +214,7 @@ def test_a_key_the_file_lacks_is_409_and_is_not_invented( ini, announced ):
     before = ini.read_text()
     assert _put( _client(), "duplicate-check", { "on": True } ).status_code == 409
     assert ini.read_text() == before and announced == []
+    assert not os.path.exists( sw.state_path() )               # a refused flip leaves no attribution record
 
 
 def test_a_key_defined_twice_is_409( ini, announced ):
@@ -221,6 +222,7 @@ def test_a_key_defined_twice_is_409( ini, announced ):
     before = ini.read_text()
     assert _put( _client(), "duplicate-check", { "on": False } ).status_code == 409
     assert ini.read_text() == before and announced == []
+    assert not os.path.exists( sw.state_path() )               # a refused flip leaves no attribution record
 
 
 def test_a_file_that_cannot_be_written_is_500_and_announces_nothing( ini, announced, monkeypatch ):

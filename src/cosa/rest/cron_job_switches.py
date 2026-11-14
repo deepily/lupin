@@ -142,8 +142,10 @@ def write_switch( job: str, on: bool, who: str, now: Optional[ datetime.datetime
         - who is the administrator's email or user id
 
     Ensures:
-        - the attribution record is written first and the configuration file second, so a failed
-          second write leaves a record that disagrees with the file
+        - the key is located before anything is written, so a key the file lacks or defines twice
+          is refused with nothing written: the record file is left as it was
+        - then the attribution record is written and the configuration file second, so a failed
+          second write (an OS error) leaves a record that disagrees with the file
         - the key is never inserted: a key the file lacks is refused, not invented
 
     Raises:
@@ -152,6 +154,7 @@ def write_switch( job: str, on: bool, who: str, now: Optional[ datetime.datetime
         - OSError when either file cannot be written
     """
     moment = now if now is not None else datetime.datetime.now( datetime.timezone.utc )
+    fleet_cap_ini_io.locate_key( ini_path(), switch_key( job ) )
     _write_attribution( job, on, who, moment )
     fleet_cap_ini_io.write_bool_to_disk( ini_path(), switch_key( job ), on )
 
