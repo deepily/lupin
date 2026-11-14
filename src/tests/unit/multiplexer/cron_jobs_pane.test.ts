@@ -151,7 +151,7 @@ test( "mount paints one row per job with state, schedule, changed line and honou
   assert.equal( text( "no-key", "cron-state" ), "UNKNOWN" );
   assert.equal( text( "not-read", "cron-honoured" ), "does not read its switch yet" );
   assert.equal( text( "drifted", "cron-drift" ), CRON_DRIFT_TEXT );
-  assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-drift]" ), null );
+  assert.equal( item( "duplicate-check" ).querySelectorAll( "[data-testid=cron-drift]" ).length, 0 );
   assert.match( ( document.querySelector( "[data-testid=cron-note]" ) as HTMLElement ).textContent as string, /^Flipping a switch takes effect/ );
   assert.equal( ( document.querySelector( "[data-testid=cron-jobs-error]" ) as HTMLElement ).hidden, true );
   g.r.unmount();
@@ -343,11 +343,11 @@ test( "the pane shows the reads wording, the unreadable row in red, and the insi
   assert.equal( text( "fleet-arbiter", "cron-honoured" ), "reads its switch every tick" );
   assert.equal( text( "nightly", "cron-honoured" ), "reads its switch at each run" );
   assert.equal( text( "janitor", "cron-inside" ), "off while fleet-arbiter is off" );
-  assert.equal( item( "plain" ).querySelector( "[data-testid=cron-inside]" ), null );
+  assert.equal( item( "plain" ).querySelectorAll( "[data-testid=cron-inside]" ).length, 0 );
   assert.equal( text( "broken", "cron-unreadable" ), CRON_UNREADABLE_TEXT );
   assert.ok( item( "broken" ).classList.contains( "cron-unreadable" ) );
   assert.ok( !item( "plain" ).classList.contains( "cron-unreadable" ) );
-  assert.equal( item( "plain" ).querySelector( "[data-testid=cron-unreadable]" ), null );
+  assert.equal( item( "plain" ).querySelectorAll( "[data-testid=cron-unreadable]" ).length, 0 );
   assert.match( ( document.querySelector( "[data-testid=cron-note]" ) as HTMLElement ).textContent as string, /or next tick for a loop/ );
   g.r.unmount();
 } );
