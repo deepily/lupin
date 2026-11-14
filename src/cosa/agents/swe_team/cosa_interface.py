@@ -34,7 +34,7 @@ from cosa.utils.notification_utils import format_questions_for_tts, convert_ques
 # Shared utilities
 from cosa.agents.utils.sender_id import detect_project, build_sender_id
 from cosa.agents.utils.feedback_analysis import is_approval, is_rejection
-from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher
+from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher, make_role_interface_functions
 
 logger = logging.getLogger( __name__ )
 
@@ -94,114 +94,7 @@ TARGET_USER: Optional[ str ] = None
 # Primary Interface Functions
 # =============================================================================
 
-async def notify_progress(
-    message: str,
-    role: str = "lead",
-    priority: str = "medium",
-    abstract: Optional[ str ] = None,
-    session_name: Optional[ str ] = None,
-    job_id: Optional[ str ] = None,
-    queue_name: Optional[ str ] = None,
-    progress_group_id: Optional[ str ] = None,
-) -> None:
-    """
-    Send fire-and-forget progress notification from a specific agent role.
-
-    Args:
-        message: Progress message to announce
-        role: Agent role sending the notification
-        priority: "low", "medium", "high", or "urgent"
-        abstract: Optional supplementary context
-        session_name: Optional human-readable session name
-        job_id: Optional agentic job ID for routing
-        queue_name: Optional queue where job is running
-        progress_group_id: Optional progress group ID for in-place DOM updates
-    """
-    _dispatcher.session_id   = SESSION_ID
-    _dispatcher.session_name = SESSION_NAME
-    _dispatcher.target_user  = TARGET_USER
-    await _dispatcher.notify_progress(
-        message, priority=priority, abstract=abstract,
-        session_name=session_name, job_id=job_id,
-        queue_name=queue_name, progress_group_id=progress_group_id,
-        role=role
-    )
-
-
-async def ask_confirmation(
-    question: str,
-    role: str = "lead",
-    default: str = "no",
-    timeout: int = 120,
-    abstract: Optional[ str ] = None,
-) -> bool:
-    """
-    Ask a yes/no question and return boolean result.
-
-    Args:
-        question: The yes/no question to ask
-        role: Agent role asking the question
-        default: Default answer if timeout
-        timeout: Seconds to wait for response
-        abstract: Optional supplementary context
-
-    Returns:
-        bool: True if approved, False otherwise
-    """
-    _dispatcher.session_id   = SESSION_ID
-    _dispatcher.target_user  = TARGET_USER
-    return await _dispatcher.ask_confirmation(
-        question, default=default, timeout=timeout,
-        abstract=abstract, role=role
-    )
-
-
-async def request_decision(
-    question: str,
-    options: list,
-    role: str = "lead",
-    timeout: int = 300,
-    abstract: Optional[ str ] = None,
-) -> dict:
-    """
-    Present multiple-choice decision to user/proxy.
-
-    Args:
-        question: The decision question
-        options: List of question objects with header, options, multiSelect
-        role: Agent role requesting the decision
-        timeout: Seconds to wait
-        abstract: Optional supplementary context
-
-    Returns:
-        dict: {"answers": {...}} with selections
-    """
-    _dispatcher.session_id   = SESSION_ID
-    _dispatcher.target_user  = TARGET_USER
-    return await _dispatcher.present_choices(
-        options, timeout=timeout, abstract=abstract, role=role
-    )
-
-
-async def get_feedback(
-    prompt: str,
-    role: str = "lead",
-    timeout: int = 300,
-) -> Optional[ str ]:
-    """
-    Get open-ended feedback from user via voice.
-
-    Args:
-        prompt: Text to speak to the user
-        role: Agent role requesting feedback
-        timeout: Maximum seconds to wait
-
-    Returns:
-        str or None: User's transcribed response
-    """
-    _dispatcher.session_id   = SESSION_ID
-    _dispatcher.target_user  = TARGET_USER
-    return await _dispatcher.get_feedback( prompt, timeout=timeout, role=role )
+notify_progress, ask_confirmation, request_decision, get_feedback = make_role_interface_functions( globals() )
 
 
 # =============================================================================

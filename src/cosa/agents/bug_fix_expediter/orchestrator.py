@@ -45,9 +45,10 @@ from cosa.agents.bug_fix_expediter.plan_writer import PlanWriter
 from cosa.agents.shared.git_strategist import GitStrategist
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.fix_executor import FixExecutor
+from cosa.agents.shared.edit_agent_options import build_edit_agent_options
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
 from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
-from cosa.agents.io_models.utils.json_object_recovery import extract_json_object
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, extract_last_balanced
 
 # SWE Team reuse — safety, hooks, test runner (kept for back-compat;
 # FixExecutor imports these directly, but existing BFE test fixtures may
@@ -815,20 +816,7 @@ class BFEOrchestrator:
         Returns:
             str or None: Extracted JSON array string, or None if not found
         """
-        close_idx = text.rfind( "]" )
-        if close_idx == -1:
-            return None
-
-        depth = 0
-        for i in range( close_idx, -1, -1 ):
-            if text[ i ] == "]":
-                depth += 1
-            elif text[ i ] == "[":
-                depth -= 1
-                if depth == 0:
-                    return text[ i : close_idx + 1 ]
-
-        return None
+        return extract_last_balanced( text, "[", "]" )
 
     @staticmethod
     def _auto_select_fix( fixes: list ) -> Optional:
@@ -1572,16 +1560,10 @@ class BFEOrchestrator:
         Returns:
             ClaudeAgentOptions configured for code editing
         """
-        return ClaudeAgentOptions(
-            model           = self.config.worker_model,
-            system_prompt   = CODER_SYSTEM_PROMPT,
-            tools           = [ "Read", "Edit", "Bash" ],
-            cwd             = self._worktree_cwd or cu.get_project_root(),
-            permission_mode = "acceptEdits",
-            can_use_tool    = build_can_use_tool( cosa_interface, guard, "code-fixer" ),
-            max_turns       = self.config.max_fix_attempts * 10,
-            max_budget_usd  = self.config.budget_usd,
-            effort          = self.config.thinking_effort,
+        return build_edit_agent_options(
+            self.config, self._worktree_cwd, CODER_SYSTEM_PROMPT,
+            build_can_use_tool( cosa_interface, guard, "code-fixer" ),
+            self.config.max_fix_attempts * 10
         )
 
     @staticmethod
@@ -1627,16 +1609,9 @@ class BFEOrchestrator:
         Returns:
             ClaudeAgentOptions configured for test writing and execution
         """
-        return ClaudeAgentOptions(
-            model           = self.config.worker_model,
-            system_prompt   = TESTER_SYSTEM_PROMPT,
-            tools           = [ "Read", "Edit", "Bash" ],
-            cwd             = self._worktree_cwd or cu.get_project_root(),
-            permission_mode = "acceptEdits",
-            can_use_tool    = build_can_use_tool( cosa_interface, guard, "tester" ),
-            max_turns       = 10,
-            max_budget_usd  = self.config.budget_usd,
-            effort          = self.config.thinking_effort,
+        return build_edit_agent_options(
+            self.config, self._worktree_cwd, TESTER_SYSTEM_PROMPT,
+            build_can_use_tool( cosa_interface, guard, "tester" ), 10
         )
 
     # =========================================================================

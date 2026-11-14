@@ -2,13 +2,10 @@
 capability: swe-team-notifications
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.swe_team.cosa_interface.ask_confirmation@24a6c17bf4
-  - cosa.agents.swe_team.cosa_interface.get_feedback@08e962bb98
   - cosa.agents.swe_team.cosa_interface.get_sender_id@63b6e070e0
-  - cosa.agents.swe_team.cosa_interface.notify_progress@261bc51e7a
-  - cosa.agents.swe_team.cosa_interface.request_decision@cdb054d0a8
   - cosa.agents.swe_team.voice_io.reconfigure@8265f4719a
   - cosa.agents.swe_team.notification_client.OrchestratorNotificationClient@38473751dd
+  - cosa.agents.utils.agent_notification_dispatcher.make_role_interface_functions@13bd859c83
 ---
 # SWE team notifications
 
@@ -25,6 +22,7 @@ The orchestrator talks to the user and the proxy through `cosa_interface`, and l
 - It keeps only `user_initiated_message` notifications for its own job id. Each goes on a shared queue with message, priority, timestamp and sender.
 - An `urgent` message also sets a shared event, so the orchestrator checks in at once.
 - `start` runs it in a daemon thread with its own event loop. `stop_sync` closes the socket and waits up to 5 seconds for the thread.
+- `notify_progress`, `ask_confirmation`, `request_decision` and `get_feedback` are built by `make_role_interface_functions( globals() )`, the role-aware sibling of `make_interface_functions`. Role is the second parameter of each, so a positional call such as `ask_confirmation( question, role, default, timeout, abstract )` works. It reads `SESSION_ID`, `SESSION_NAME` and `TARGET_USER` from the module on every call and needs no `SENDER_ID`.
 
 ## Invariants
 - The client makes its login token in-process from the user's email. If the user is not found, login returns `None`.

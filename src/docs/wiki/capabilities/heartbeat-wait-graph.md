@@ -6,7 +6,7 @@ pins:
   - cosa.agents.heartbeat_arbiter.dependency_graph.build_store_blocked_item_index@954977fe98
   - cosa.agents.heartbeat_arbiter.dependency_graph.build_store_wait_edges@6ecf3ca864
   - cosa.agents.heartbeat_arbiter.dependency_graph.build_wait_edges@487e447659
-  - cosa.agents.heartbeat_arbiter.dependency_graph.cycle_is_store_backed@f0a50dd9c1
+  - cosa.agents.heartbeat_arbiter.dependency_graph.cycle_is_store_backed@7cbd3aaf8c
   - cosa.agents.heartbeat_arbiter.dependency_graph.edge_is_store_backed@39e228eb30
   - cosa.agents.heartbeat_arbiter.dependency_graph.find_deadlock_cycles@258946b60f
   - cosa.agents.heartbeat_arbiter.dependency_graph.hold_contradicts_peer_edge@77f366fc84

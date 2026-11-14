@@ -15,7 +15,7 @@ from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 from cosa.agents.io_models.utils.json_fields import json_or_empty
-from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
+from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero, int_or_zero
 
 
 class CalcIntent( BaseXMLModel ):
@@ -186,11 +186,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns positive integer
             - Returns 0 if parsing fails
         """
-        try:
-            val = int( float( self.term_years ) )
-            return val if val > 0 else 0
-        except ( ValueError, TypeError ):
-            return 0
+        return max( 0, int_or_zero( self.term_years ) )
 
     def get_down_payment_float( self ):
         """

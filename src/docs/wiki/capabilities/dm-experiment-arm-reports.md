@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - scripts.dm-experiment.analyze_arms.co_primary@b73dbe238d
   - scripts.dm-experiment.analyze_arms.order_effect@f1eab4365f
-  - scripts.dm-experiment.analyze_arms.delivery_delay_seconds@8377560c8c
+  - scripts.dm-experiment.analyze_arms.delivery_delay_seconds@d68e7ed6a6
   - scripts.dm-experiment.analyze_arms.secondaries@38c60b3c45
   - scripts.dm-experiment.analyze_arms.counts_only@2933dc499a
   - scripts.dm-experiment.analyze_arms.format_report@66ef6ce181

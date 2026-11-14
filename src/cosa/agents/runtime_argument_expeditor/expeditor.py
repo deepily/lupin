@@ -38,7 +38,8 @@ from lupin_cli.notifications.notification_models import (
 )
 from cosa.utils.notification_utils import (
     format_open_ended_batch_for_tts,
-    convert_open_ended_batch_for_api
+    convert_open_ended_batch_for_api,
+    extract_qualifier_comment
 )
 from cosa.utils.csv_text import split_csv
 
@@ -813,7 +814,7 @@ class RuntimeArgumentExpeditor:
                 return None
 
             # "yes [comment: ...]" or "no [comment: ...]"
-            comment = self._extract_comment( response )
+            comment = extract_qualifier_comment( response )[ 1 ]
 
             if lower.startswith( "yes" ):
                 if comment:
@@ -1406,27 +1407,6 @@ class RuntimeArgumentExpeditor:
         # (bug 68198c9f). The measured stage-killer: an undeliverable confirm.
         context.reason = self._classify_ask_failure( response )
         return None
-
-    @staticmethod
-    def _extract_comment( response_text ):
-        """
-        Extract comment text from a YES_NO response with annotation.
-
-        Requires:
-            - response_text is a string like "yes [comment: change budget to 10]"
-
-        Ensures:
-            - Returns the comment string if pattern matches
-            - Returns None if no comment found
-
-        Args:
-            response_text: Raw YES_NO response string
-
-        Returns:
-            str or None: Extracted comment text or None
-        """
-        match = re.search( r'\[comment:\s*(.+?)\]', response_text )
-        return match.group( 1 ).strip() if match else None
 
     def _batch_collect_args( self, batchable_args, fallback_questions, user_email, fallback_defaults=None, command_key=None, abstract=None, *, context=None ):
         """

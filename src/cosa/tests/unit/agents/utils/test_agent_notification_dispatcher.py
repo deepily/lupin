@@ -414,3 +414,68 @@ def test_present_choices_generic_error_returns_empty_answers():
     d = AgentNotificationDispatcher( agent_type="test.agent" )
     with patch.object( mod, "_notify_user_sync", side_effect=RuntimeError( "weird" ) ):
         assert _run( d.present_choices( _QUESTIONS ) ) == { "answers": {} }
+
+
+# ---------------------------------------------------------------------------
+# make_role_interface_functions: the role-aware wrappers the SWE team module is built from
+# ---------------------------------------------------------------------------
+
+def _role_namespace():
+    from unittest.mock import AsyncMock
+    d = MagicMock()
+    d.notify_progress = AsyncMock( return_value=None )
+    d.ask_confirmation = AsyncMock( return_value=True )
+    d.present_choices = AsyncMock( return_value={ "answers": { "h": "v" } } )
+    d.get_feedback = AsyncMock( return_value="fb" )
+    return { "__name__": "fake.role_module", "_dispatcher": d, "SESSION_ID": "sess-1", "SESSION_NAME": "name-1", "TARGET_USER": "u@x" }, d
+
+
+def test_role_wrappers_have_the_four_names_the_module_exposes():
+    ns, _ = _role_namespace()
+    notify_progress, ask_confirmation, request_decision, get_feedback = mod.make_role_interface_functions( ns )
+    assert [ f.__name__ for f in ( notify_progress, ask_confirmation, request_decision, get_feedback ) ] == [ "notify_progress", "ask_confirmation", "request_decision", "get_feedback" ]
+    assert all( f.__module__ == "fake.role_module" for f in ( notify_progress, ask_confirmation, request_decision, get_feedback ) )
+
+
+def test_role_notify_progress_pushes_session_identity_and_forwards_the_role():
+    ns, d = _role_namespace()
+    notify_progress = mod.make_role_interface_functions( ns )[ 0 ]
+    _run( notify_progress( "hi", "coder", "low", job_id="j1", progress_group_id="pg-1" ) )
+    assert ( d.session_id, d.session_name, d.target_user ) == ( "sess-1", "name-1", "u@x" )
+    args, kwargs = d.notify_progress.await_args
+    assert args == ( "hi", )
+    assert kwargs[ "role" ] == "coder" and kwargs[ "priority" ] == "low" and kwargs[ "job_id" ] == "j1" and kwargs[ "progress_group_id" ] == "pg-1"
+
+
+def test_role_ask_confirmation_keeps_the_positional_order_the_orchestrator_uses():
+    ns, d = _role_namespace()
+    ask_confirmation = mod.make_role_interface_functions( ns )[ 1 ]
+    assert _run( ask_confirmation( "ok?", "tester", "yes", 30, "abs" ) ) is True
+    args, kwargs = d.ask_confirmation.await_args
+    assert args == ( "ok?", ) and kwargs == { "default": "yes", "timeout": 30, "abstract": "abs", "role": "tester" }
+    assert ( d.session_id, d.target_user ) == ( "sess-1", "u@x" )
+    assert not isinstance( d.session_name, str )          # only notify_progress copies the session name
+
+
+def test_role_request_decision_awaits_present_choices_with_the_options():
+    ns, d = _role_namespace()
+    request_decision = mod.make_role_interface_functions( ns )[ 2 ]
+    assert _run( request_decision( "q", [ { "x": 1 } ], "lead", 60, "abs" ) ) == { "answers": { "h": "v" } }
+    args, kwargs = d.present_choices.await_args
+    assert args == ( [ { "x": 1 } ], ) and kwargs == { "timeout": 60, "abstract": "abs", "role": "lead" }
+
+
+def test_role_get_feedback_forwards_prompt_timeout_and_role():
+    ns, d = _role_namespace()
+    get_feedback = mod.make_role_interface_functions( ns )[ 3 ]
+    assert _run( get_feedback( "prompt", "tester", 9 ) ) == "fb"
+    args, kwargs = d.get_feedback.await_args
+    assert args == ( "prompt", ) and kwargs == { "timeout": 9, "role": "tester" }
+
+
+def test_role_wrappers_read_the_namespace_on_every_call():
+    ns, d = _role_namespace()
+    ask_confirmation = mod.make_role_interface_functions( ns )[ 1 ]
+    ns[ "SESSION_ID" ] = "sess-2"
+    _run( ask_confirmation( "again?" ) )
+    assert d.session_id == "sess-2"

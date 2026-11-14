@@ -22,7 +22,8 @@ effective_arm. The 776 legacy rows carry arm == "signal_only" and are never
 pooled into an arm. They are an observational baseline under a third condition.
 
 Standalone bootstrap: sets sys.path from LUPIN_ROOT first. The analysis logic
-imports no cosa, so the unit tests exercise it in isolation.
+imports one cosa module, cosa.utils.iso_timestamp, which needs only the standard
+library, so the unit tests still exercise it in isolation.
 
 Run:  python src/scripts/dm-experiment/analyze_arms.py [--corpus <path>] [--counts-only]
 """
@@ -39,7 +40,8 @@ if src_path not in sys.path: sys.path.insert( 0, src_path )                # pra
 import json
 import random
 import argparse
-import datetime
+
+from cosa.utils.iso_timestamp import parse_iso
 
 # ---------------------------------------------------------------------------
 EXPERIMENT_TAG                 = "two-arm-v1"
@@ -324,29 +326,6 @@ def _repeated_rejection_loops( arm_rows ):
                 if r.get( "length_gate" ) == "rejected" and r.get( "follows_rejection", False ) )
 
 
-def _parse_ts( value ):
-    """
-    Parse an ISO-8601 stamp into a timezone-aware datetime, or None.
-
-    Requires:
-        - value is an ISO-8601 string, or None
-
-    Ensures:
-        - returns a timezone-aware datetime, treating a naive stamp as UTC
-          (the corpus writes `ts` naive and `delivered_at`/`assigned_at_utc`
-          aware; comparing the two forms raises, so both are normalised here)
-        - returns None for None or an unparseable string, so one malformed
-          stamp drops one row instead of failing the whole analysis
-    """
-    if not value: return None
-    try:
-        parsed = datetime.datetime.fromisoformat( value )
-    except ValueError:
-        return None
-    if parsed.tzinfo is None: parsed = parsed.replace( tzinfo=datetime.timezone.utc )
-    return parsed
-
-
 def delivery_delay_seconds( row ):
     """
     Seconds from arm assignment to delivery for one row, or None.
@@ -359,8 +338,8 @@ def delivery_delay_seconds( row ):
         - `assigned_at_utc` is the arm-assignment instant, so this measures the
           delay the sender waited, not the corpus write latency
     """
-    assigned  = _parse_ts( row.get( "assigned_at_utc" ) )
-    delivered = _parse_ts( row.get( "delivered_at" ) )
+    assigned  = parse_iso( row.get( "assigned_at_utc" ) )
+    delivered = parse_iso( row.get( "delivered_at" ) )
     if assigned is None or delivered is None: return None
     return ( delivered - assigned ).total_seconds()
 

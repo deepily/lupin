@@ -512,17 +512,13 @@ def cycle_is_store_backed( cycle, store_edges ):
         - a self-cycle [X] needs X→X, which build_store_wait_edges never emits
           (self-edges dropped) → a self-deadlock is never store-backed (correct:
           no real cross-owner dependency)
-        - empty / malformed cycle → False; never raises
+        - empty / malformed cycle → False; a falsy persona in the ring or a non-dict store_edges → False; never raises
+        - each ring edge is judged by edge_is_store_backed, the one edge test
     """
     if not cycle or not isinstance( cycle, list ):
         return False
     n = len( cycle )
-    for i in range( n ):
-        holder  = canonical_persona_key( cycle[ i ] )             or cycle[ i ]
-        awaited = canonical_persona_key( cycle[ ( i + 1 ) % n ] ) or cycle[ ( i + 1 ) % n ]
-        if awaited not in store_edges.get( holder, set() ):
-            return False
-    return True
+    return all( edge_is_store_backed( cycle[ i ], cycle[ ( i + 1 ) % n ], store_edges ) for i in range( n ) )
 
 
 def edge_is_store_backed( holder, awaited, store_edges ):

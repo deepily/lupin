@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 from cosa.agents.io_models.utils.json_object_recovery import (
     extract_json_object,
+    extract_last_balanced,
     recover_json_object,
     save_raw_response,
 )
@@ -58,6 +59,26 @@ class TestExtractJsonObject( unittest.TestCase ):
     def test_dangling_close_without_open_returns_none( self ):
         # `}` present but no balancing `{` → loop exhausts → None.
         self.assertIsNone( extract_json_object( "dangling } brace" ) )
+
+
+class TestExtractLastBalanced( unittest.TestCase ):
+
+    def test_arrays_embedded_in_prose_return_the_last_balanced_span( self ):
+        self.assertEqual( extract_last_balanced( 'pre [[1], [2]] post', "[", "]" ), "[[1], [2]]" )
+        self.assertEqual( extract_last_balanced( "a [1] b [2, 3] c", "[", "]" ), "[2, 3]" )
+
+    def test_the_same_walk_serves_braces_as_extract_json_object_does( self ):
+        text = 'Here: {"a": {"b": 1}} done'
+        self.assertEqual( extract_last_balanced( text, "{", "}" ), '{"a": {"b": 1}}' )
+        self.assertEqual( extract_last_balanced( text, "{", "}" ), extract_json_object( text ) )
+
+    def test_no_close_or_no_matching_open_returns_none( self ):
+        self.assertIsNone( extract_last_balanced( "no bracket", "[", "]" ) )
+        self.assertIsNone( extract_last_balanced( "abc ] def", "[", "]" ) )
+        self.assertIsNone( extract_last_balanced( "", "[", "]" ) )
+
+    def test_a_bracket_of_the_other_pair_is_not_counted( self ):
+        self.assertEqual( extract_last_balanced( '{"k": [1, 2]}', "[", "]" ), "[1, 2]" )
 
 
 class TestRecoverJsonObject( unittest.TestCase ):

@@ -4,7 +4,7 @@ self-contained helper methods (the expedite() top-level flow + the two fuzzy/tfe
 special handlers live in test_expeditor_flow.py):
 
   __init__, _resolve_display_name, _parse_lora_args, _resolve_default,
-  _inject_system_args, _extract_comment, _build_request_context, _ask_for_arg,
+  _inject_system_args, _build_request_context, _ask_for_arg,
   _ask_for_confirmation, _parse_modification, _batch_collect_args, _confirm_and_iterate.
 
 ALL boundaries mocked: config_mgr, LlmClientFactory, notify_user_sync,
@@ -18,6 +18,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
+from cosa.utils.notification_utils import extract_qualifier_comment
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
     ArgSpec,
@@ -176,10 +177,11 @@ class TestInitAndPureHelpers( unittest.TestCase ):
         self.assertEqual( out[ "user_id" ], "uid1" )
         self.assertTrue( out[ "no_confirm" ] )
 
-    def test_extract_comment_match_and_none( self ):
-        self.assertEqual( RuntimeArgumentExpeditor._extract_comment( "yes [comment: change budget to 10]" ),
-                          "change budget to 10" )
-        self.assertIsNone( RuntimeArgumentExpeditor._extract_comment( "yes" ) )
+    def test_comment_extraction_uses_shared_qualifier_helper( self ):
+        # The confirm loop reads the comment through notification_utils.extract_qualifier_comment.
+        self.assertEqual( extract_qualifier_comment( "yes [comment: change budget to 10]" )[ 1 ], "change budget to 10" )
+        self.assertIsNone( extract_qualifier_comment( "yes" )[ 1 ] )
+        self.assertFalse( hasattr( RuntimeArgumentExpeditor, "_extract_comment" ) )
 
 
 # ============================================================================

@@ -298,7 +298,7 @@ def aged_open_gates( gates, now_epoch, age_seconds, user_chase_until_epoch=None 
     return out
 
 
-def _blocked_by_has_user( blocked_by ):
+def blocked_by_has_user( blocked_by ):
     """
     Return whether a store row's blocked_by has any {kind: "user"} ref (pure; never raises).
 
@@ -338,7 +338,7 @@ def derive_user_chase_until( rows, now_epoch ):
     for row in ( rows or [ ] ):
         if not isinstance( row, dict ):
             continue
-        if not _blocked_by_has_user( row.get( "blocked_by" ) ):
+        if not blocked_by_has_user( row.get( "blocked_by" ) ):
             continue
         # age = now - next_chase_ts; age < 0 ⇒ the chase is in the FUTURE.
         age = _iso_age_seconds( row.get( "next_chase_ts" ), now_epoch )
