@@ -36,7 +36,6 @@ from functools import partial
 from .config import PresentationConfig
 from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate, temperature_to_steer
 from .prompts.json_recovery import recover_json_object
-from cosa.agents.shared.sdk_error_result import raise_error_result
 
 # Claude Agent SDK — graceful fallback (mirrors the BFE/TFE/Podcast import guard)
 try:
@@ -298,38 +297,10 @@ class PresentationAPIClient( BoundedCCClientBase ):
         if self.debug:
             print( f"[PresentationAPIClient] sdk_query {model} for {call_type} (max_turns={self.config.content_max_turns})" )
 
-        collected     = []
-        input_tokens  = 0
-        output_tokens = 0
-        sdk_cost_usd  = 0.0
-        # UNKNOWN until a ResultMessage reports it. Do NOT seed "end_turn": that
-        # coerces "no completion signal arrived" into "completed cleanly", and
-        # orchestrator._elaborate_async (it sets is_truncated when stop_reason is not "end_turn")
-        # would then skip the chunked fallback exactly when it is needed (bug
-        # 98d937c2, fail-open). None reads as truncated downstream — the safe way.
-        stop_reason   = None
-
-        async for message in sdk_query( prompt=user_message, options=options ):
-            if isinstance( message, AssistantMessage ):
-                for block in message.content:
-                    if isinstance( block, TextBlock ):
-                        collected.append( block.text )
-            elif isinstance( message, TextBlock ):
-                collected.append( message.text )
-            elif isinstance( message, ResultMessage ):
-                if message.is_error: raise_error_result( message, f"PresentationAPIClient {call_type}", logger )
-                usage         = message.usage or {}
-                input_tokens  = usage.get( "input_tokens", 0 )
-                output_tokens = usage.get( "output_tokens", 0 )
-                sdk_cost_usd  = message.total_cost_usd or 0.0
-                stop_reason   = message.stop_reason   # keep None as UNKNOWN — never coerce to "end_turn"
-
-        content = "".join( collected ).strip()
-
-        self.cost_estimate.add_usage(
-            model=model, input_tokens=input_tokens, output_tokens=output_tokens,
+        content, input_tokens, output_tokens, sdk_cost_usd, stop_reason = await self._collect_reply(
+            sdk_query( prompt=user_message, options=options ), model, call_type,
+            AssistantMessage, TextBlock, ResultMessage,
         )
-        self.cost_estimate.add_sdk_cost( sdk_cost_usd )
 
         if self.debug:
             print( f"[PresentationAPIClient] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f}" )

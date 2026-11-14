@@ -55,3 +55,25 @@ def clamp_unit( value ):
         - never raises for a number
     """
     return max( 0.0, min( 1.0, value ) )
+
+
+class ConfidenceFloatMixin:
+    """
+    Gives an XML model whose `confidence` field is a string the one reader for it.
+
+    List this class before BaseXMLModel in the bases, so the method sits on the model without a pydantic field.
+    """
+
+    def get_confidence_float( self ):
+        """
+        Parse the confidence string to a float, clamped to [0.0, 1.0].
+
+        Requires:
+            - self.confidence is a string, or any value float_or_zero accepts
+
+        Ensures:
+            - returns a float in [0.0, 1.0]
+            - returns 0.0 when the text does not parse
+            - never raises
+        """
+        return clamp_unit( float_or_zero( self.confidence ) )

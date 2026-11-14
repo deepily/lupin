@@ -31,7 +31,6 @@ from functools import partial
 
 from .config import PodcastConfig
 from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate, temperature_to_steer
-from cosa.agents.shared.sdk_error_result import raise_error_result
 # D6-LENIENT JSON recovery — single source of truth lives in the parsing module
 from .prompts.script_generation import lenient_json_loads
 
@@ -278,36 +277,10 @@ class PodcastAPIClient( BoundedCCClientBase ):
         if self.debug:
             print( f"[PodcastAPIClient] sdk_query {model} for {call_type} (max_turns={self.config.script_max_turns})" )
 
-        collected      = []
-        input_tokens   = 0
-        output_tokens  = 0
-        sdk_cost_usd   = 0.0
-        stop_reason    = None   # unknown until a ResultMessage reports it; never seeded as "end_turn"
-
-        async for message in sdk_query( prompt=user_message, options=options ):
-            if isinstance( message, AssistantMessage ):
-                for block in message.content:
-                    if isinstance( block, TextBlock ):
-                        collected.append( block.text )
-            elif isinstance( message, TextBlock ):
-                collected.append( message.text )
-            elif isinstance( message, ResultMessage ):
-                if message.is_error: raise_error_result( message, f"PodcastAPIClient {call_type}", logger )
-                usage         = message.usage or {}
-                input_tokens  = usage.get( "input_tokens", 0 )
-                output_tokens = usage.get( "output_tokens", 0 )
-                sdk_cost_usd  = message.total_cost_usd or 0.0
-                stop_reason   = message.stop_reason   # keep None as unknown, never coerce to "end_turn"
-
-        content = "".join( collected ).strip()
-
-        # Record usage (token estimate) + SDK cost telemetry (Max-plan covered)
-        self.cost_estimate.add_usage(
-            model         = model,
-            input_tokens  = input_tokens,
-            output_tokens = output_tokens,
+        content, input_tokens, output_tokens, sdk_cost_usd, stop_reason = await self._collect_reply(
+            sdk_query( prompt=user_message, options=options ), model, call_type,
+            AssistantMessage, TextBlock, ResultMessage,
         )
-        self.cost_estimate.add_sdk_cost( sdk_cost_usd )
 
         if self.debug:
             print( f"[PodcastAPIClient] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f}" )

@@ -57,6 +57,7 @@ if _SRC_PATH not in sys.path:              # pragma: no cover - bootstrap: src-p
     sys.path.insert( 0, _SRC_PATH )
 
 import cosa.utils.util as du   # noqa: E402
+from cosa.utils.agreement_stats import percentile as shared_percentile   # noqa: E402  — the one linear-interpolation percentile
 from cosa.rest.v2.registry import resolve   # noqa: E402  — the table the CRUD exclusion reads
 
 # The provenance-stamp contract lives in paired_eval (the paired orchestrator, which imports
@@ -617,14 +618,7 @@ def percentile( values: Sequence[ float ], pct: float ) -> Optional[ float ]:
     """
     if not values:
         return None
-    ordered = sorted( values )
-    if len( ordered ) == 1:
-        return round( float( ordered[ 0 ] ), 3 )
-    rank = ( pct / 100.0 ) * ( len( ordered ) - 1 )
-    low  = int( rank )
-    high = min( low + 1, len( ordered ) - 1 )
-    frac = rank - low
-    return round( ordered[ low ] + ( ordered[ high ] - ordered[ low ] ) * frac, 3 )
+    return round( float( shared_percentile( values, pct / 100.0 ) ), 3 )
 
 
 def _rate( numerator: int, denominator: int ) -> Optional[ float ]:

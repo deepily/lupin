@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x095bff/ts5.9.3
 pins:
   - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob@8c689d0441
   - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob.do_all@42afdb8dc9
-  - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator@5b792d985e
+  - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator@f617b96917
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_diagnosis@47e97bb180
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_proposal@c395c18198
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_fix@01cb024310

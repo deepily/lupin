@@ -805,7 +805,7 @@ def find_session_by_id( session_id, exact=False, check_pid=True ):
         - Returns None if no match or session_id is empty
         - exact=True: matches only on full-id equality (no prefix fallback)
         - exact=False (default): full-id or 8-char-prefix equality (legacy)
-        - Skips bridge files whose PID is dead, unless check_pid is False
+        - Skips bridge files whose PID is dead, unless check_pid is False or host pids cannot be trusted (inside a container); the live scan is `iter_live_bridges`, shared with `find_session_path_by_id`
         - Never raises exceptions
 
     Args:
@@ -819,17 +819,12 @@ def find_session_by_id( session_id, exact=False, check_pid=True ):
     if not session_id or not SESSION_DIR.exists():
         return None
 
-    paths = iter_bridge_paths( SESSION_DIR )
-    if not check_pid:
-        # Newest first, so the first match is the most recently written bridge.
-        paths = sorted( paths, key=_mtime_or_zero, reverse=True )
+    if check_pid:
+        hit = find_in_bridge_index( iter_live_bridges(), session_id, exact=exact )
+        return hit[ 1 ] if hit else None
 
-    for path in paths:
-        # PID liveness check
-        file_pid = _extract_pid_from_filename( path.name )
-        if check_pid and file_pid is not None and not _is_pid_alive( file_pid ):
-            continue
-
+    # No liveness check: newest first, so the first match is the most recently written bridge.
+    for path in sorted( iter_bridge_paths( SESSION_DIR ), key=_mtime_or_zero, reverse=True ):
         try:
             data = _load_bridge_object( path )
 

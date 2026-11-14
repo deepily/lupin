@@ -12,10 +12,10 @@ from pydantic import Field, field_validator
 from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
-from cosa.agents.io_models.utils.number_fields import clamp_unit, float_or_zero
+from cosa.agents.io_models.utils.number_fields import ConfidenceFloatMixin
 
 
-class OpenEndedSynthesisResponse( BaseXMLModel ):
+class OpenEndedSynthesisResponse( ConfidenceFloatMixin, BaseXMLModel ):
     """
     LLM-synthesized prediction for open-ended notification responses.
 
@@ -48,19 +48,6 @@ class OpenEndedSynthesisResponse( BaseXMLModel ):
         Pydantic str fields reject None, so we convert at the boundary.
         """
         return none_to_empty( v, info.field_name, keep_none=( "predicted_answer", ) )
-
-    def get_confidence_float( self ):
-        """
-        Parse confidence string to float.
-
-        Requires:
-            - self.confidence is a numeric string
-
-        Ensures:
-            - Returns float between 0.0 and 1.0
-            - Returns 0.0 if parsing fails
-        """
-        return clamp_unit( float_or_zero( self.confidence ) )
 
     def to_xml( self, root_tag="open_ended_synthesis_response", pretty=True ):
         """
