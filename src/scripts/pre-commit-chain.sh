@@ -89,4 +89,18 @@ elif [ "$doc_lint_rc" -ne 0 ]; then
     echo "[pre-commit-chain] doc-lint gate exited $doc_lint_rc without a refusal verdict, commit ALLOWED: findings above, if any, were NOT enforced. If this tree's gate.py predates blocking, rebase." >&2
 fi
 
+# ---- gate 4: no cron job switch changes off the endpoint's record ------------------------------------
+# A staged lupin-app.ini whose `cron job <job> enabled` line differs from HEAD passes only when the record in
+# cron-job-switches-state.json holds the new value (Rick flipped it through the accordion), or when the line is
+# the one-time creation of a registry job's key. Exit 3 refuses; any other exit carries no verdict and the commit
+# is allowed with a loud line, as for the doc-lint gate. The escape hatch is the operator's, read from the git
+# process's environment. See cron_switch_commit_check.py.
+cron_switch_rc=0
+LUPIN_ROOT="$repo_root" PYTHONPATH="$repo_root/src" python3 -m lupin_cli.claude_code.hooks.lib.cron_switch_commit_check --repo-root "$repo_root" || cron_switch_rc=$?
+if [ "$cron_switch_rc" -eq 3 ]; then
+    exit 1
+elif [ "$cron_switch_rc" -ne 0 ]; then
+    echo "[pre-commit-chain] cron-switch gate exited $cron_switch_rc without a refusal verdict, commit ALLOWED: the switch check was NOT enforced." >&2
+fi
+
 exit 0

@@ -106,6 +106,19 @@ def main():
         emit_json( build_branch_lock_deny_response( branch_lock_reason ) )
         sys.exit( 0 )
 
+    # Cron-switch guard (row 063fc1a8, amendment 4): each `cron job <job> enabled` line in
+    # lupin-app.ini is a switch Rick flips through the scheduled-jobs accordion, which records
+    # who flipped it. Denies an Edit, MultiEdit or Write that changes such a line, a Bash write
+    # to the file, a Python call to a switch writer, and a command that sets the escape hatch.
+    # DEFAULT-ON; the hatch lives only in the hook process's environment. FAIL-OPEN by contract.
+    from lupin_cli.claude_code.hooks.lib.cron_switch_guard import (
+        cron_switch_deny_reason, build_cron_switch_deny_response,
+    )
+    cron_switch_reason = cron_switch_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    if cron_switch_reason:
+        emit_json( build_cron_switch_deny_response( cron_switch_reason ) )
+        sys.exit( 0 )
+
     # Worktree creator record (row 8ca4be22): a worker makes its own review tree by hand, and the
     # janitor retires it after the worker is gone. Write the spawning manager to the ledger now,
     # while the seat's environment still names it, so the archive row can route to that manager.
