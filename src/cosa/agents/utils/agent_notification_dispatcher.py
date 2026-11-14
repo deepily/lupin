@@ -773,6 +773,94 @@ def make_interface_functions( namespace, notify_extras=(), ask_extras=(), feedba
     return wrappers
 
 
+def make_role_interface_functions( namespace ):
+    """
+    Build the four async wrappers of a role-aware agent's cosa_interface module.
+
+    The SWE team sends each notification under a role of its own, so its module has no SENDER_ID and takes role as its second parameter.
+    Each wrapper copies the module's session id and target user onto the module's dispatcher, then awaits one dispatcher method with the role.
+    Everything is read from `namespace` on every call, never captured, because callers assign SESSION_ID, SESSION_NAME and TARGET_USER at run time and tests patch `_dispatcher`.
+
+    Requires:
+        - namespace is the calling module's globals(), holding _dispatcher, SESSION_ID, SESSION_NAME and TARGET_USER
+
+    Ensures:
+        - Returns ( notify_progress, ask_confirmation, request_decision, get_feedback ), all coroutine functions
+        - Each takes its text first and role second, so a positional call such as ask_confirmation( question, role, default, timeout, abstract ) keeps working
+        - Only notify_progress copies SESSION_NAME onto the dispatcher
+        - request_decision awaits the dispatcher's present_choices
+    """
+
+    def push_identity( dispatcher ):
+        dispatcher.session_id  = namespace[ "SESSION_ID" ]
+        dispatcher.target_user = namespace[ "TARGET_USER" ]
+
+    async def notify_progress(
+        message: str,
+        role: str = "lead",
+        priority: str = "medium",
+        abstract: Optional[ str ] = None,
+        session_name: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        queue_name: Optional[ str ] = None,
+        progress_group_id: Optional[ str ] = None,
+    ) -> None:
+        """Send a fire-and-forget progress notification from one agent role."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        dispatcher.session_name = namespace[ "SESSION_NAME" ]
+        await dispatcher.notify_progress(
+            message, priority=priority, abstract=abstract,
+            session_name=session_name, job_id=job_id,
+            queue_name=queue_name, progress_group_id=progress_group_id,
+            role=role
+        )
+
+    async def ask_confirmation(
+        question: str,
+        role: str = "lead",
+        default: str = "no",
+        timeout: int = 120,
+        abstract: Optional[ str ] = None,
+    ) -> bool:
+        """Ask a yes/no question from one agent role and return the boolean result."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.ask_confirmation(
+            question, default=default, timeout=timeout,
+            abstract=abstract, role=role
+        )
+
+    async def request_decision(
+        question: str,
+        options: list,
+        role: str = "lead",
+        timeout: int = 300,
+        abstract: Optional[ str ] = None,
+    ) -> dict:
+        """Present multiple-choice questions from one agent role and return the answers."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.present_choices(
+            options, timeout=timeout, abstract=abstract, role=role
+        )
+
+    async def get_feedback(
+        prompt: str,
+        role: str = "lead",
+        timeout: int = 300,
+    ) -> Optional[ str ]:
+        """Get open-ended feedback from the user for one agent role."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.get_feedback( prompt, timeout=timeout, role=role )
+
+    wrappers = ( notify_progress, ask_confirmation, request_decision, get_feedback )
+    for wrapper in wrappers:
+        wrapper.__module__ = namespace[ "__name__" ]
+    return wrappers
+
+
 def quick_smoke_test():
     """Quick smoke test for AgentNotificationDispatcher."""
     import inspect
