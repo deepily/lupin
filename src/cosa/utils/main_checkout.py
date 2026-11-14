@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 
-def _run_git( argv, cwd=None, timeout=10 ):
+def run_git( argv, cwd=None, timeout=10 ):
     """
     Run one git command and capture its text output.
 
@@ -37,7 +37,7 @@ def main_checkout_of( path, run=None, timeout=10 ) -> str | None:
         - never raises
     """
     try:
-        proc = ( run or _run_git )( [ "git", "rev-parse", "--path-format=absolute", "--git-common-dir" ], cwd=str( path ), timeout=timeout )
+        proc = ( run or run_git )( [ "git", "rev-parse", "--path-format=absolute", "--git-common-dir" ], cwd=str( path ), timeout=timeout )
     except Exception:
         # any failure of the (possibly injected) runner means git cannot say; the callers hold their own fallbacks
         return None

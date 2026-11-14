@@ -27,12 +27,12 @@ idle threshold, the earliest a sweep could have refused it. The row body says th
 import json
 import os
 import re
-import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from cosa.utils.atomic_json import load_json_section
 from cosa.utils.csv_text import split_csv
+from cosa.utils.main_checkout import run_git
 
 STRAGGLER_KEY_PREFIX  = "worktree:"
 STRAGGLER_AGE_HOURS   = 24.0
@@ -57,11 +57,6 @@ def straggler_key( path: str ) -> str:
 MANAGER_STAMP_KEY = "branch.{branch}.lupin-manager"
 
 
-def _plain_run( argv, cwd=None, timeout=60 ):
-    """Run argv with subprocess; the default git runner of the stamp helpers."""
-    return subprocess.run( argv, cwd=cwd, capture_output=True, text=True, timeout=timeout )
-
-
 def _manager_words( name: str ) -> str:
     """Return a persona in the store's key shape: "Mr. Radio" gives "mr radio"."""
     from lupin_mcp.persona_normalization import canonical_persona_key
@@ -79,7 +74,7 @@ def read_stamp( project_root: str, branch: str, run: Optional[ Callable ] = None
         - returns the value of git config `branch.<branch>.lupin-manager` in that repo, or None when it is
           unset, blank, or git could not be run; never raises
     """
-    run = run if run is not None else _plain_run
+    run = run if run is not None else run_git
     try:
         done = run( [ "git", "config", "--get", MANAGER_STAMP_KEY.format( branch=branch ) ], cwd=project_root, timeout=60 )
     except Exception:
@@ -97,7 +92,7 @@ def write_stamp( project_root: str, branch: str, manager: str, run: Optional[ Ca
         - returns False, changing nothing, when git fails; never raises
         - the stamp is repo config, so it outlives the worktree and the branch's move to refs/archive
     """
-    run = run if run is not None else _plain_run
+    run = run if run is not None else run_git
     try:
         done = run( [ "git", "config", MANAGER_STAMP_KEY.format( branch=branch ), manager ], cwd=project_root, timeout=60 )
     except Exception:

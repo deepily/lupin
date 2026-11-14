@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 import cosa.utils.util as cu
+from cosa.agents.chained_pipeline_state import skipped_topic_names
 from cosa.rest.job_state import JobState
 
 
@@ -381,7 +382,7 @@ class AgenticJobBase( ABC ):
         Raises:
             - nothing
         """
-        return [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
+        return skipped_topic_names( result.dr_artifacts )
 
     @staticmethod
     def _skipped_topics_line( skipped_names ) -> str:

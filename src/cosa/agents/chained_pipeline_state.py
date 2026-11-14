@@ -13,6 +13,19 @@ import time
 from datetime import datetime
 
 
+def skipped_topic_names( dr_artifacts: dict ) -> list:
+    """
+    Name the research topics Deep Research skipped.
+
+    Requires:
+        - dr_artifacts is the artifacts dict Deep Research returned
+
+    Ensures:
+        - returns the topic of each entry under "skipped_topics", empty when there are none
+    """
+    return [ g[ "topic" ] for g in dr_artifacts.get( "skipped_topics", [] ) ]
+
+
 class ChainedResultMixin:
     """
     Predicate shared by the chained pipelines' result dataclasses.

@@ -10,8 +10,8 @@ pins:
   - cosa.agents.shared.worktree_straggler_tickets.owner_for_branch@b5d8b2a504
   - cosa.agents.shared.worktree_straggler_tickets.owner_for_tree@ebaed22309
   - cosa.agents.shared.worktree_straggler_tickets.project_for_tree@e87311afa3
-  - cosa.agents.shared.worktree_straggler_tickets.read_stamp@3530aacf61
-  - cosa.agents.shared.worktree_straggler_tickets.write_stamp@42b6604559
+  - cosa.agents.shared.worktree_straggler_tickets.read_stamp@3921811f12
+  - cosa.agents.shared.worktree_straggler_tickets.write_stamp@c88ff9a959
   - cosa.agents.shared.worktree_straggler_tickets.read_creator_record@6c119cdd7b
   - cosa.agents.shared.worktree_straggler_tickets.spawn_registry_manager@a201694448
   - cosa.agents.shared.worktree_straggler_tickets.resolve_creator@b713a471aa

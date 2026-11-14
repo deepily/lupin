@@ -11,7 +11,10 @@ from typing import Optional
 
 import pytest
 
-from cosa.agents.chained_pipeline_state import ChainedResultMixin
+from types import SimpleNamespace
+
+from cosa.agents.chained_pipeline_state import ChainedResultMixin, skipped_topic_names
+from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
 from cosa.agents.deep_research_to_podcast.state import ChainedResult as PodcastResult, PipelineState as PodcastState
 from cosa.agents.deep_research_to_presentation.state import ChainedResult as PresentationResult, PipelineState as PresentationState
 
@@ -181,3 +184,17 @@ async def test_the_research_leg_refuses_a_missing_subagent_model_key():
         with pytest.raises( MissingConfigKeyError, match="deep research subagent model" ):
             await DeepResearchToPodcastAgent( query="q", user_email="u@x.com", no_confirm=True )._run_deep_research()
     assert seen == []
+
+
+def test_skipped_topic_names_reads_each_topic_and_is_empty_without_the_key():
+    assert skipped_topic_names( { "skipped_topics": [ { "topic": "a" }, { "topic": "b" } ] } ) == [ "a", "b" ]
+    assert skipped_topic_names( { } ) == [ ]
+
+
+def test_the_podcast_agent_and_the_job_both_name_skipped_topics_through_the_shared_function():
+    from cosa.agents.agentic_job_base import AgenticJobBase
+    artifacts = { "skipped_topics": [ { "topic": "x" }, { "topic": "y" } ] }
+    agent     = DeepResearchToPodcastAgent.__new__( DeepResearchToPodcastAgent )
+    assert agent._skipped_topic_names( artifacts ) == skipped_topic_names( artifacts ) == [ "x", "y" ]
+    assert AgenticJobBase._skipped_topic_names( SimpleNamespace( dr_artifacts=artifacts ) ) == [ "x", "y" ]
+
