@@ -295,20 +295,21 @@ def test_a_failed_announcement_does_not_fail_the_flip( ini, monkeypatch, capsys 
 
 # ── honoured and drift (María's amendments 1 and 3) ──────────────────────────
 
-def test_honoured_is_computed_from_the_registry_and_names_twenty_three_jobs( ini ):
+def test_honoured_is_computed_from_the_registry_and_names_twenty_four_jobs( ini ):
     rows = _client().get( LIST_PATH ).json()[ "jobs" ]
     honoured = sorted( r[ "job" ] for r in rows if r[ "honoured" ] )
     entries  = json.load( open( os.path.join( cu.get_project_root(), "src/conf/job-registry.json" ) ) )[ "jobs" ]
     pinned   = sorted( e[ "job" ] for e in entries if e.get( "cron_managed" ) is True or "switch_reader" in e )
-    assert honoured == pinned and len( honoured ) == 23      # 12 cron-managed, context-tick and yearly-reminders run through job_run; 4 arbiter loops, 4 server loops and the poker job check a TickSwitch (row c38a49bd)
-    assert "fleet-arbiter" in honoured
-    assert all( r[ "honoured" ] is False for r in rows if r[ "job" ] in ( "side-services", ) )
+    assert honoured == pinned and len( honoured ) == 24      # 12 cron-managed, context-tick and yearly-reminders run through job_run; 4 arbiter loops, 4 server loops and the poker job check a TickSwitch; side-services names the memory watcher's loop (row c38a49bd)
+    assert "fleet-arbiter" in honoured and "side-services" in honoured
+    assert all( r[ "honoured" ] is True for r in rows ), "every registry job reads its switch now"
 
 
-def test_a_job_that_does_not_read_its_switch_answers_409_and_writes_nothing( ini, announced ):
+def test_a_job_that_does_not_read_its_switch_answers_409_and_writes_nothing( ini, announced, monkeypatch ):
+    monkeypatch.setattr( sw, "is_honoured", lambda entry: entry[ "job" ] != "notify-outbox" )     # every shipped job is honoured now, so one is made not to be
     before = ini.read_text()
-    response = _put( _client(), "side-services", { "on": False } )
-    assert response.status_code == 409 and "side-services" in response.json()[ "detail" ]
+    response = _put( _client(), "notify-outbox", { "on": False } )
+    assert response.status_code == 409 and "notify-outbox" in response.json()[ "detail" ]
     assert ini.read_text() == before and announced == []
     assert not os.path.exists( sw.state_path() )
 

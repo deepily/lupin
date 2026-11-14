@@ -661,6 +661,8 @@
     },
     {
       "job": "side-services",
+      "enabled_key": "cron job side-services enabled",
+      "switch_reader": "cosa.utils.cc_memory_watch:main",
       "catalog": "L28",
       "title": "Side services",
       "owner": "cheech",

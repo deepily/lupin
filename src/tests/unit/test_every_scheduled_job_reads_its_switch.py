@@ -30,9 +30,7 @@ INI           = str( ROOT / "src/conf/lupin-app.ini" )
 REGISTRY_SIZE = 24      # counted by hand from src/conf/job-registry.json on 14 Nov; change it only with the registry
 
 # Jobs that do not read their switch yet. Remove a job in the commit that makes it read its switch.
-NOT_YET = frozenset( {
-    "side-services",
-} )
+NOT_YET = frozenset()      # empty since side-services, the last job, read its switch (row c38a49bd)
 
 JOBS     = [ entry[ "job" ] for entry in REGISTRY ]
 HONOURED = [ entry for entry in REGISTRY if entry[ "job" ] not in NOT_YET ]

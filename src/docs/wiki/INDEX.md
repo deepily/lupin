@@ -426,6 +426,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[spend-ceiling-prices-and-report-redaction]] — ModelPrice, UnpricedModelError, max_daily_usd_at_tpm and pytest longrepr redaction. `cosa.utils` (vertex_spend_ceiling, secret_redaction)
 - [[gcs-and-api-rate-limit-helpers]] — GCS text read/write helpers, the API resource manager singleton, and GCP project/location lookup. `cosa.utils` (util_gcs, api_resource_manager, gcp_project)
 - [[claude-process-memory-watch]] — samples live Claude Code process memory and writes one alert line per runaway, naming the session. `cosa.utils` (cc_memory_watch)
+- [[cc-memory-watch-switch]] — the side-services on/off key that gates each memory-watch pass, read fresh with a vendored parse rule. `cosa.utils` (cc_memory_watch)
 - [[model-server-liveness-and-transcript-tail]] — refusing a run when a vLLM endpoint is dead, and byte-offset JSONL transcript reads for the console. `cosa.utils` (model_server_liveness, transcript_tail)
 - [[tree-state-and-import-origin]] — the tree-state line, start sha and bundle hash, and the imports= origin token. `cosa.utils` (tree_state, import_origin)
 - [[checked-hash-bytecode]] — checked-hash pyc write control, pyc census and mode ledger. `cosa.utils` (checked_hash_pyc)
