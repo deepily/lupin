@@ -1,14 +1,16 @@
 """
 What the podcast and presentation bounded-CC clients share.
 
-Both run text synthesis through the in-process Claude Agent SDK. Each client keeps its own
-_call_api, because the two differ. The presentation client leaves stop_reason as None until a
-result reports one, so a missing signal is not read as a clean finish. The podcast client starts
-it at "end_turn".
+Both run text synthesis through the in-process Claude Agent SDK.
+Each client keeps its own _call_api, which builds its options and its APIResponse.
+The loop that reads the reply stream and records cost is `_collect_reply` here.
+Both clients leave stop_reason as None until a result reports one, so a missing signal is not read as a clean finish.
 """
 
 import logging
 from dataclasses import dataclass
+
+from cosa.agents.shared.sdk_error_result import raise_error_result
 
 
 @dataclass
@@ -179,6 +181,52 @@ class BoundedCCClientBase:
             temperature   = temperature,
             call_type     = call_type,
         )
+
+    async def _collect_reply( self, stream, model, call_type, assistant_message, text_block, result_message ):
+        """
+        Read one `sdk_query` stream to its end and record the usage and cost.
+
+        The message classes are arguments because each client module imports them under its own
+        name, and its tests replace them there.
+
+        Requires:
+            - stream is the async iterator sdk_query returned
+            - assistant_message, text_block and result_message are the SDK's classes, or stand-ins
+
+        Ensures:
+            - returns ( content, input_tokens, output_tokens, sdk_cost_usd, stop_reason )
+            - content is every assistant text block joined and stripped
+            - stop_reason is None until a result message reports one; it is never seeded as "end_turn", so a missing signal reads as truncated downstream
+            - self.cost_estimate holds the usage and the SDK cost telemetry
+
+        Raises:
+            - RuntimeError when a result message is an error, with the failure text and any login hint
+        """
+        collected     = []
+        input_tokens  = 0
+        output_tokens = 0
+        sdk_cost_usd  = 0.0
+        stop_reason   = None
+
+        async for message in stream:
+            if isinstance( message, assistant_message ):
+                for block in message.content:
+                    if isinstance( block, text_block ):
+                        collected.append( block.text )
+            elif isinstance( message, text_block ):
+                collected.append( message.text )
+            elif isinstance( message, result_message ):
+                if message.is_error: raise_error_result( message, f"{self.LABEL} {call_type}", self._logger )
+                usage         = message.usage or {}
+                input_tokens  = usage.get( "input_tokens", 0 )
+                output_tokens = usage.get( "output_tokens", 0 )
+                sdk_cost_usd  = message.total_cost_usd or 0.0
+                stop_reason   = message.stop_reason
+
+        self.cost_estimate.add_usage( model=model, input_tokens=input_tokens, output_tokens=output_tokens )
+        self.cost_estimate.add_sdk_cost( sdk_cost_usd )
+
+        return "".join( collected ).strip(), input_tokens, output_tokens, sdk_cost_usd, stop_reason
 
     async def call_with_json_output( self, system_prompt: str, user_message: str, max_tokens: int = 4096 ) -> dict:
         """
