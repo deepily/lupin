@@ -136,7 +136,7 @@ describe("sender card quiet chip", () => {
   });
   test("any other card has neither", () => {
     const root = renderSenderCard(record(), []);
-    assert.equal(root.querySelector(".sender-quiet-chip"), null);
+    assert.equal(root.querySelectorAll(".sender-quiet-chip").length, 0);
     assert.equal(root.hasAttribute("data-worker-quiet"), false);
   });
 });
