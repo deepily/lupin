@@ -178,6 +178,20 @@ class TestVoiceProfile:
         vp = VoiceProfile.from_config( cfg, prefix="podcast voice male" )
         assert vp.use_speaker_boost is True                     # exists False -> default True
 
+    def test_from_config_takes_every_default_from_the_dataclass_fields( self ):
+        vp = VoiceProfile.from_config( FakeCfg(), prefix="podcast voice female" )
+        defaults = VoiceProfile( voice_id="" )
+        assert vp.voice_id          == ""
+        assert vp.name              == defaults.name              == "Default"
+        assert vp.stability         == defaults.stability         == 0.65
+        assert vp.similarity_boost  == defaults.similarity_boost  == 0.75
+        assert vp.style             == defaults.style             == 0.35
+
+    def test_from_config_reads_each_key_under_its_own_name( self ):
+        cfg = FakeCfg( values={ "podcast voice male name": "Marcus", "podcast voice male similarity boost": "0.9", "podcast voice male style": "0.1" } )
+        vp  = VoiceProfile.from_config( cfg, prefix="podcast voice male" )
+        assert ( vp.name, vp.similarity_boost, vp.style ) == ( "Marcus", 0.9, 0.1 )
+
 
 # ----------------------------------------------------------------------------
 # PodcastConfig basics

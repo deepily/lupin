@@ -161,23 +161,20 @@ class VoiceProfile:
         Returns:
             VoiceProfile: Configured instance
         """
-        voice_id         = config_mgr.get( f"{prefix} id",              default="",    silent=True )
-        name             = config_mgr.get( f"{prefix} name",            default="Default", silent=True )
-        stability        = config_mgr.get( f"{prefix} stability",       default="0.65", silent=True, return_type="float" )
-        similarity_boost = config_mgr.get( f"{prefix} similarity boost", default="0.75", silent=True, return_type="float" )
-        style            = config_mgr.get( f"{prefix} style",           default="0.35", silent=True, return_type="float" )
+        # The id has no dataclass default, and the speaker-boost key is optional with a True default, so both are read by hand.
+        voice_id          = config_mgr.get( f"{prefix} id", default="", silent=True )
         use_speaker_boost = config_mgr.get( f"{prefix} use speaker boost", default="True", silent=True, return_type="boolean" ) if config_mgr.exists( f"{prefix} use speaker boost" ) else True
+        key_map           = {
+            "name"             : f"{prefix} name",
+            "stability"        : f"{prefix} stability",
+            "similarity_boost" : f"{prefix} similarity boost",
+            "style"            : f"{prefix} style",
+        }
+        kwargs            = load_kwargs_from_ini( cls, config_mgr, key_map, silent=True )
 
-        if debug: print( f"[VoiceProfile.from_config] Loaded {prefix}: {name} (id={voice_id[ :8 ]}...)" )
+        if debug: print( f"[VoiceProfile.from_config] Loaded {prefix}: {kwargs[ 'name' ]} (id={voice_id[ :8 ]}...)" )
 
-        return cls(
-            voice_id         = voice_id,
-            name             = name,
-            stability        = stability,
-            similarity_boost = similarity_boost,
-            style            = style,
-            use_speaker_boost = use_speaker_boost,
-        )
+        return cls( voice_id=voice_id, use_speaker_boost=use_speaker_boost, **kwargs )
 
 
 # =============================================================================
