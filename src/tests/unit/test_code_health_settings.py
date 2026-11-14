@@ -211,8 +211,8 @@ def test_repo_of_names_the_repo_a_job_belongs_to_and_defaults_to_lupin():
 MODEL_KEYS = ( chs.JUDGE_MODEL_KEY, chs.REWRITE_MODEL_KEY, chs.DRAFTER_MODEL_KEY )
 
 
-def test_the_real_ini_names_fable_for_all_three_model_keys( config ):
-    assert [ chs.model_id( key, config ) for key in MODEL_KEYS ] == [ "claude-fable-5-1" ] * 3
+def test_the_real_ini_names_opus_for_the_judge_and_the_rewrite_and_sonnet_for_the_drafter( config ):
+    assert [ chs.model_id( key, config ) for key in MODEL_KEYS ] == [ "claude-opus-5-5", "claude-opus-5-5", "claude-sonnet-5-5" ], "no key names Fable; the drafter differs from the need checker"
 
 
 @pytest.mark.parametrize( "key", MODEL_KEYS )
@@ -237,6 +237,6 @@ def test_building_the_process_config_for_a_model_id_keeps_stdout_clean( config, 
     """A first construction's banner goes to stderr, keeping the tools' JSON stdout clean."""
     ConfigurationManager.reset_for_testing()
     capsys.readouterr()
-    assert chs.model_id( chs.JUDGE_MODEL_KEY ) == "claude-fable-5-1"
+    assert chs.model_id( chs.JUDGE_MODEL_KEY ) == "claude-opus-5-5"
     seen = capsys.readouterr()
     assert seen.out == "" and "Using environment variables" in seen.err
