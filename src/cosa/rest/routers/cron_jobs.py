@@ -73,9 +73,12 @@ async def _announce( row: Dict[ str, Any ] ) -> None:
     "/cron-jobs",
     summary     = "Every scheduled job with its on/off switch",
     description = "One row per registry job: job, title, schedule, key, enabled (read fresh from "
-                  "the configuration file; null when the file does not say), last_changed_by and "
-                  "last_changed_at. caller_is_admin is true only for an administrator login, so a "
-                  "client can show the switches read-only to everyone else."
+                  "the configuration file; null when the file does not say), honoured (false when "
+                  "the job does not read its switch, so flipping it would change nothing), drift "
+                  "(true when the file disagrees with the endpoint's record of the last flip, "
+                  "meaning it was edited by hand), last_changed_by and last_changed_at. "
+                  "caller_is_admin is true only for an administrator login, so a client can show "
+                  "the switches read-only to everyone else."
 )
 async def get_cron_jobs(
     _user : Annotated[ str, Depends( require_api_key_or_jwt ) ],
@@ -102,7 +105,8 @@ async def get_cron_jobs(
     description = "Body { on: bool }. Writes `cron job <job> enabled` to the configuration file "
                   "and returns the row re-read from the file. Administrator login only: an "
                   "API-key caller or a non-admin login is refused with 403 and nothing is written. "
-                  "An unknown job is a 404."
+                  "An unknown job is a 404. A job that does not read its switch, or a key the file lacks "
+                  "or defines twice, is a 409 and nothing is written."
 )
 async def put_cron_job_enabled(
     job      : str,
