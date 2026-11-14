@@ -142,11 +142,17 @@ def is_honoured( entry: Dict[ str, Any ] ) -> bool:
         - entry is a registry job
 
     Ensures:
-        - returns True only for a job with `cron_managed` true, the jobs that run through
-          lupin_mcp.job_run, which is the one reader of the switch
+        - returns True for a job with `cron_managed` true: it runs through lupin_mcp.job_run,
+          which reads the switch before every run
+        - returns True for a job whose entry has an `enabled_key` and names its reader in
+          `switch_reader`: a loop that checks a `TickSwitch` at the start of every tick. The
+          census test `test_every_scheduled_job_reads_its_switch` checks that the named
+          symbol exists and calls `.allowed(`, so the field is a checked claim
         - returns False for every other job: its switch would change a line nothing reads
     """
-    return entry.get( "cron_managed" ) is True
+    if entry.get( "cron_managed" ) is True: return True
+    reader = entry.get( "switch_reader" )
+    return bool( entry.get( "enabled_key" ) ) and isinstance( reader, str ) and bool( reader.strip() )
 
 
 def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[ str, Any ]:
@@ -160,8 +166,7 @@ def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[
     Ensures:
         - returns { job, title, schedule, key, enabled, honoured, drift, last_changed_by, last_changed_at }
         - enabled is True, False, or None when the file does not say
-        - honoured is computed from the registry (`cron_managed` true: the job runs through
-          lupin_mcp.job_run, the one reader of the switch), never typed by hand
+        - honoured is computed from the registry by `is_honoured`, never typed by hand
         - drift is true only when enabled is known, a record exists and the record disagrees with
           the file: the file was edited outside the endpoint. A job never flipped has drift false
         - the attribution is shown only when it agrees with the file; a record that disagrees

@@ -66,3 +66,82 @@ def read_switch( ini_path: str, job: str ) -> Optional[ bool ]:
         - never raises
     """
     return parse_switch( fleet_cap_ini_io.read_value_from_disk( ini_path, switch_key( job ) ) )
+
+
+class TickSwitch:
+    """
+    The check a long-running loop makes at the start of every tick.
+
+    A loop builds one TickSwitch for its job and calls `allowed()` before each tick's work.
+    The key is read fresh from disk every time, so flipping it takes effect on the next tick
+    with no restart. The loop itself never stops: a skipped tick still sleeps.
+    """
+
+    def __init__( self, job, ini_path_fn, summary_path_fn=None, log=print ):
+        """
+        Remember which job this is and where its switch and summary live.
+
+        Requires:
+            - job is a registry job id
+            - ini_path_fn is a zero-argument callable that returns the configuration file's path
+            - summary_path_fn is a zero-argument callable that returns the job's summary path, or None
+              for a job with no summary
+            - log takes one string
+
+        Ensures:
+            - nothing is read until the first `allowed()` call
+        """
+        self.job             = job
+        self.ini_path_fn     = ini_path_fn
+        self.summary_path_fn = summary_path_fn
+        self.log             = log
+        self.last            = "unread"
+
+    def allowed( self, now=None ) -> bool:
+        """
+        Read the switch and say whether this tick may do its work.
+
+        Requires:
+            - now is a datetime for the summary's time stamp, or None for the current time
+
+        Ensures:
+            - returns True when the key reads `true`, and False when it reads `false`
+            - returns False when the key is absent, defined twice, unreadable or holds another word;
+              there is no default in code. Each such tick also writes the job's summary with
+              outcome failed and the key name as evidence, when the job has a summary
+            - logs one line each time the answer changes (on, off or unreadable), so a loop that
+              stays off for a day writes one line, not one per tick
+            - never raises: a failure to write the summary is reported on the log
+        """
+        key   = switch_key( self.job )
+        value = read_switch( self.ini_path_fn(), self.job )
+        state = { True: "on", False: "off", None: "unreadable" }[ value ]
+        if state != self.last:
+            if state == "on" and self.last != "unread": self.log( f"{self.job}: INI key '{key}' is true, so ticks run again" )
+            if state == "off": self.log( f"{self.job}: INI key '{key}' is false, so ticks skip their work until it is true" )
+            if state == "unreadable": self.log( f"{self.job}: ERROR: INI key '{key}' is missing or holds neither true nor false, so ticks skip their work" )
+            self.last = state
+        if state == "unreadable": self._write_failed_summary( key, now )
+        return value is True
+
+    def _write_failed_summary( self, key, now ):
+        """
+        Record an unreadable switch where the jobs page and the job's own summary show it.
+
+        Requires:
+            - key is this job's switch key
+
+        Ensures:
+            - writes the summary with outcome failed, stage switch and the key name as evidence,
+              when summary_path_fn is set
+            - logs the error and returns when the write fails or the summary module cannot load
+        """
+        if self.summary_path_fn is None: return
+        try:
+            from lupin_mcp import job_summary as js
+            stamp   = js.iso_now( now )
+            attempt = { "started_at": stamp, "finished_at": stamp, "trigger": "cron", "outcome": "failed", "stage": "switch",
+                        "failure": "switch unreadable", "evidence": f"INI key '{key}' is missing or holds neither true nor false", "mode": "in-process tick" }
+            js.write_summary( self.summary_path_fn(), self.job, attempt, now=now )
+        except ( ImportError, OSError, ValueError ) as error:
+            self.log( f"{self.job}: could not write the failed summary: {error}" )
