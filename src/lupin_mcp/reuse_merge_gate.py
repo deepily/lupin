@@ -10,6 +10,7 @@ A branch that adds no definitions and no outcome lines passes. It sends nothing 
 
 The base is the merge base with the nearest of the branches in the key `reuse merge gate base`, else main and origin/main.
 The key `reuse merge gate since`, a commit, moves the base up to it, so earlier lines and definitions are exempt.
+The key `reuse searched since` does the same for the check that each ruling has a `SEARCHED` line: a ruling added before it needs none.
 A rename is followed: a function in a renamed file is new only when it is absent under the old path.
 
 The flag `reuse review gating` is read fresh on every run:
@@ -19,6 +20,7 @@ The flag `reuse review gating` is read fresh on every run:
 
 Exit 3 means the gate could not check. Either the flag is absent, doubled or garbled, or git named no base.
 It also means the flag is true and `since` is empty, because the gate would then check every definition back to the base.
+It also means the flag is true and `reuse searched since` is empty, or either key is not a known commit.
 It also means `since` is not a known commit, the list of new definitions could not be built,
 or a given diff reports `algorithm_changed`.
 That is not a pass, in either phase.
@@ -49,6 +51,7 @@ UNREADABLE       = ( OSError, ValueError, RuntimeError, SyntaxError, needset_err
 BASE_CANDIDATES  = ( "main", "origin/main" )                    # the branches a branch is merged into, when --base and the key `reuse merge gate base` are both absent
 LOCALS_MARK      = "<locals>"                                # the index's mark of a function nested in a function; the gate does not count such a definition
 SINCE_KEY        = "reuse merge gate since"                  # a commit; only definitions and lines added after it are checked
+SEARCHED_SINCE_KEY = "reuse searched since"                     # a commit; only rulings added after it need a `SEARCHED` line
 BASE_KEY         = "reuse merge gate base"                   # the branches to measure from, separated by spaces; the nearest merge base wins
 SHA_RE           = re.compile( r"[0-9a-f]{7,40}" )
 HUNK_RE          = re.compile( r"^@@ -\S+ \+(\d+)(?:,\d+)? @@" )          # the first line a hunk adds, in the new file
@@ -84,20 +87,21 @@ def read_names( ini ):
     return raw.split() if raw and raw.strip() else list( BASE_CANDIDATES )
 
 
-def read_since( ini ):
+def read_since( ini, key=SINCE_KEY ):
     """
     Read the commit after which definitions and lines are checked.
 
     Requires:
         - ini is a configuration file path, or None for the default file
+        - key is SINCE_KEY or SEARCHED_SINCE_KEY
     Ensures:
-        - returns the commit text the key `reuse merge gate since` holds, or None when the key is absent, doubled, unreadable or empty
+        - returns the commit text the key holds, or None when the key is absent, doubled, unreadable or empty
     Raises:
         - ValueError when the key holds something that is not a hexadecimal commit
     """
-    raw = fleet_cap_ini_io.read_value_from_disk( ini if ini is not None else gate.ini_path(), SINCE_KEY )
+    raw = fleet_cap_ini_io.read_value_from_disk( ini if ini is not None else gate.ini_path(), key )
     if raw is None or not raw.strip(): return None
-    if not SHA_RE.fullmatch( raw.strip() ): raise ValueError( f"`{SINCE_KEY}` holds {raw!r}, which is not a commit" )
+    if not SHA_RE.fullmatch( raw.strip() ): raise ValueError( f"`{key}` holds {raw!r}, which is not a commit" )
     return raw.strip()
 
 
@@ -123,12 +127,12 @@ def resolve_base( root, names=None ):
     return best[ 1 ] if best else None
 
 
-def effective_base( root, sha, since ):
+def effective_base( root, sha, since, key=SINCE_KEY ):
     """
     Move the base up to the `since` commit when that commit lies between the base and HEAD.
 
     Requires:
-        - sha is a commit; since is a commit text or None
+        - sha is a commit; since is a commit text or None; key names the INI key `since` came from
     Ensures:
         - returns the full sha of `since` when it is a descendant of sha and an ancestor of HEAD, so earlier definitions and lines are exempt
         - returns sha when since is None, or lies outside that stretch (a branch cut before `since` is checked from its merge base)
@@ -137,7 +141,7 @@ def effective_base( root, sha, since ):
     """
     if since is None: return sha
     code, full = _git( root, [ "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}" ] )
-    if code != 0 or not full.strip(): raise ValueError( f"`{SINCE_KEY}` names {since}, which git does not know" )
+    if code != 0 or not full.strip(): raise ValueError( f"`{key}` names {since}, which git does not know" )
     full = full.strip()
     inside = _git( root, [ "merge-base", "--is-ancestor", sha, full ] )[ 0 ] == 0 and _git( root, [ "merge-base", "--is-ancestor", full, "HEAD" ] )[ 0 ] == 0
     return full if inside else sha
@@ -208,16 +212,17 @@ def added_definition_ids( root, base_sha ):
     return sorted( r[ "id" ] for r in records )
 
 
-def run( root, base, diff_path, data_dir, log_dir, gating, since=None ):
+def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_since=None ):
     """
     Judge the outcome lines the branch adds, and the new definitions of a given diff.
 
     Requires:
-        - gating is True or False; since is a commit text or None
+        - gating is True or False; since and searched_since are each a commit text or None
         - base is a branch name, a list of names, or None
         - diff_path is a symbol index diff file, or None for the definitions added_definition_ids finds
     Ensures:
         - a ruling on a definition with no `SEARCHED` line for it, in any added document, is one more entry of "missing"
+        - only rulings and `SEARCHED` lines added after `searched_since` are read for that check, when it lies inside the stretch `since` leaves
         - returns { "refusals": [ { path, n, line, reasons } ], "missing": [ { symbol, reason } ], "lines": int, "definitions": int, "appended": int }
         - returns { "error": text } when the gate could not check: an unreadable or ill-shaped diff file, an unreadable call log, a diff with `algorithm_changed`, no base, or a record that could not be written
         - refusals.jsonl in data_dir gains one record per judged line, once per document text
@@ -227,7 +232,8 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None ):
     sha = resolve_base( root, base )
     if sha is None: return { "error": "git names no merge base for HEAD; pass --base" }
     try:
-        sha = effective_base( root, sha, since )
+        sha     = effective_base( root, sha, since )
+        s_sha   = effective_base( root, sha, searched_since, SEARCHED_SINCE_KEY )
         diff = json.loads( pathlib.Path( diff_path ).read_text( encoding="utf-8" ) ) if diff_path else { "added": added_definition_ids( root, sha ) }
         if not isinstance( diff, dict ) or not isinstance( diff.get( "added", [] ), list ): raise ValueError( f"{diff_path} is not a symbol index diff" )
         if "algorithm_changed" in diff: raise ValueError( f"{diff_path}: the pin algorithm changed, so the diff lists no definitions to check" )
@@ -236,7 +242,7 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None ):
     files = added_text_by_file( root, sha )
     if files is None: return { "error": f"git could not diff {sha} against HEAD" }
     receipts, searches, exclusions = eg.receipts_by_id( records ), eg.searches_by_receipt( records, data_dir ), eg.exclusions_by_symbol( records )
-    refusals, outcomes, rulings, searched, lines, appended = [], [], {}, {}, 0, 0
+    refusals, outcomes, rulings, lines, appended = [], [], {}, 0, 0
     for path, text in files.items():
         file_rulings = eg.parse_rulings( text )
         verdicts     = rr.judge( text, receipts, searches, exclusions, file_rulings, root )
@@ -246,9 +252,14 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None ):
         except OSError as e: return { "error": f"{type( e ).__name__}: {e}" }
         outcomes    += ro.parse_outcomes( text )
         for sym, rows in file_rulings.items(): rulings.setdefault( sym, [] ).extend( rows )
-        for sym, by_search in eg.parse_searched( text ).items(): searched.setdefault( sym, {} ).update( by_search )
         refusals    += [ { "path": path, "n": v[ "n" ], "line": v[ "line" ], "reasons": v[ "reasons" ] } for v in verdicts if v[ "status" ] == "refused" ]
-    missing = ro.missing_outcome_refusals( diff.get( "added", [] ), outcomes, rulings ) + ro.missing_searched_refusals( rulings, searched )
+    s_files = files if s_sha == sha else added_text_by_file( root, s_sha )
+    if s_files is None: return { "error": f"git could not diff {s_sha} against HEAD" }
+    s_rulings, searched = {}, {}
+    for text in s_files.values():
+        for sym, rows in eg.parse_rulings( text ).items(): s_rulings.setdefault( sym, [] ).extend( rows )
+        for sym, by_search in eg.parse_searched( text ).items(): searched.setdefault( sym, {} ).update( by_search )
+    missing = ro.missing_outcome_refusals( diff.get( "added", [] ), outcomes, rulings ) + ro.missing_searched_refusals( s_rulings, searched )
     return { "refusals": refusals, "missing": missing, "lines": lines, "definitions": len( diff.get( "added", [] ) ), "appended": appended }
 
 
@@ -300,7 +311,7 @@ def main( argv=None, out=None ):
     if flag is None:
         print( f"REFUSING: `{gate.GATING_KEY}` could not be read. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
-    try: since = read_since( a.ini )
+    try: since, searched_since = read_since( a.ini ), read_since( a.ini, SEARCHED_SINCE_KEY )
     except ValueError as e:
         print( f"REFUSING: {e}. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
@@ -308,12 +319,16 @@ def main( argv=None, out=None ):
         print( f"REFUSING: `{gate.GATING_KEY}` is true and `{SINCE_KEY}` is empty, so the gate would check every definition back to the merge base."
                f" Set both in one commit. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
+    if flag and searched_since is None:
+        print( f"REFUSING: `{gate.GATING_KEY}` is true and `{SEARCHED_SINCE_KEY}` is empty, so the gate would demand a SEARCHED line of every ruling back to the merge base."
+               f" Set it to the commit where the SEARCHED check starts. Nothing was checked.", file=out )
+        return EXIT_NOT_CHECKED
     data = pathlib.Path( a.data_dir or rr.default_data_dir( root ) )
     try: data.mkdir( parents=True, exist_ok=True )
     except OSError as e:
         print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
-    result = run( root, a.base or read_names( a.ini ), a.diff, data, a.log_dir or data / "call-log", flag, since )
+    result = run( root, a.base or read_names( a.ini ), a.diff, data, a.log_dir or data / "call-log", flag, since, searched_since )
     if "error" in result:
         print( f"REFUSING: {result[ 'error' ]}. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED

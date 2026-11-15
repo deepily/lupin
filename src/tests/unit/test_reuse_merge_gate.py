@@ -75,6 +75,7 @@ def default_since( repo ):
 def run( repo, data, tmp_path, *extra, value="true", lines="" ):
     """Ensures: returns ( exit code, text ) of the command on repo, with a since unless given."""
     if "reuse merge gate since" not in lines: lines = f"reuse merge gate since = {default_since( repo )}\n{lines}"
+    if "reuse searched since" not in lines: lines = f"reuse searched since = {default_since( repo )}\n{lines}"
     out  = io.StringIO()
     code = mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, value, lines ), *extra ], out=out )
     return code, out.getvalue()
@@ -219,14 +220,14 @@ def test_a_git_that_cannot_start_answers_127(  repo, monkeypatch ):
 def test_the_data_folder_and_the_flag_default_to_the_shared_choices( repo, data, tmp_path, monkeypatch ):
     commit_doc( repo, "review.md", GOOD )
     monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", str( data ) )
-    monkeypatch.setenv( gate.INI_OVERRIDE, ini( tmp_path, extra=f"reuse merge gate since = {default_since( repo )}\n" ) )
+    monkeypatch.setenv( gate.INI_OVERRIDE, ini( tmp_path, extra=f"reuse merge gate since = {default_since( repo )}\nreuse searched since = {default_since( repo )}\n" ) )
     out = io.StringIO()
     assert mg.main( [ "--root", str( repo ) ], out=out ) == 0 and ( data / rr.REFUSALS_NAME ).exists()
 
 
 def test_the_command_prints_to_standard_output_by_default( repo, data, tmp_path, capsys ):
     commit_doc( repo, "review.md", GOOD )
-    assert mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, extra=f"reuse merge gate since = {default_since( repo )}\n" ) ] ) == 0
+    assert mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, extra=f"reuse merge gate since = {default_since( repo )}\nreuse searched since = {default_since( repo )}\n" ) ] ) == 0
     assert "REUSE GATE PASSED" in capsys.readouterr().out
 
 
@@ -454,10 +455,11 @@ def test_a_renamed_file_makes_only_its_new_functions_new( repo, data, tmp_path )
 
 FLIP_SINCE  = "2e91a63f2d26ee2645030da6304aaef39d418eeb"                                     # Rick, 10 Nov 2026 (row 5f8fc615): moved from d0180365c, the v0.2.2 squash merge, to the branch tip that night; the older definitions are back-filled by row
 FLIP_BASE   = "main"                                                                       # the branch v0.2.3 merges into
-FLIP_VALUES = { mg.SINCE_KEY: FLIP_SINCE, mg.BASE_KEY: FLIP_BASE }
+SEARCHED_FLIP = "f20d11273013611a585dacd41be92a58d56245a8"                                 # Cheech, 14 Nov 2026 (row 7571c610): the tip the SEARCHED check starts after
+FLIP_VALUES = { mg.SINCE_KEY: FLIP_SINCE, mg.BASE_KEY: FLIP_BASE, mg.SEARCHED_SINCE_KEY: SEARCHED_FLIP }
 
 
-@pytest.mark.parametrize( "key", [ mg.SINCE_KEY, mg.BASE_KEY ] )
+@pytest.mark.parametrize( "key", [ mg.SINCE_KEY, mg.BASE_KEY, mg.SEARCHED_SINCE_KEY ] )
 def test_the_shipped_ini_defines_each_new_key_once_with_its_flip_value_and_the_explainer_describes_it( key ):
     root = pathlib.Path( mg.__file__ ).resolve().parents[ 2 ]
     for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ):
@@ -468,6 +470,7 @@ def test_the_shipped_ini_defines_each_new_key_once_with_its_flip_value_and_the_e
         else: assert "Keep it defined exactly once." in rows[ 0 ] and len( rows[ 0 ] ) > 200
     ini_path = str( root / "src" / "conf" / "lupin-app.ini" )
     assert mg.read_since( ini_path ) == FLIP_SINCE and mg.read_names( ini_path ) == [ FLIP_BASE ]
+    assert mg.read_since( ini_path, mg.SEARCHED_SINCE_KEY ) == SEARCHED_FLIP
     assert gate.read_gating( ini_path, quiet=True ) is True, "gating is on, and the longer key names do not make the gating key read as doubled"
 
 
@@ -520,3 +523,48 @@ def test_a_ruling_with_no_searched_line_from_before_since_is_exempt( repo, data,
     assert code == 1 and "no SEARCHED line" in text
     code, text = run( repo, data, tmp_path, lines=f"reuse merge gate since = {since}\n" )
     assert code == 0 and "no SEARCHED line" not in text, "a ruling on main before since stays exempt"
+
+
+def test_a_ruling_before_the_searched_since_commit_is_exempt_while_since_still_reads_it( repo, data, tmp_path ):
+    ( repo / "old.md" ).write_text( f"RULING repo:pkg.mod.bare :: DUPLICATE :: reuse-receipt: {RID}\n", encoding="utf-8" )
+    git( repo, "add", "old.md" )
+    git( repo, "commit", "-q", "-m", "old ruling" )
+    later = sha_of( repo )
+    commit_doc( repo, "new.md", GOOD )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "repo:pkg.mod.bare has a RULING line and no SEARCHED line" in text, "searched since at the merge base reads the old ruling"
+    code, text = run( repo, data, tmp_path, lines=f"reuse searched since = {later}\n" )
+    assert code == 0 and "no SEARCHED line" not in text, "searched since after it exempts it, and a later document still passes"
+    ( repo / "late.md" ).write_text( f"RULING repo:pkg.mod.late :: DUPLICATE :: reuse-receipt: {RID}\n", encoding="utf-8" )
+    git( repo, "add", "late.md" )
+    git( repo, "commit", "-q", "-m", "late ruling" )
+    code, text = run( repo, data, tmp_path, lines=f"reuse searched since = {later}\n" )
+    assert code == 1 and "repo:pkg.mod.late has a RULING line and no SEARCHED line" in text and "repo:pkg.mod.bare" not in text, "a ruling after it is still judged"
+
+
+def test_a_searched_diff_git_cannot_produce_could_not_be_checked( repo, data, tmp_path, monkeypatch ):
+    commit_doc( repo, "review.md", GOOD )
+    later = sha_of( repo )
+    commit_doc( repo, "second.md", GOOD )
+    real  = mg.added_text_by_file
+    monkeypatch.setattr( mg, "added_text_by_file", lambda root, sha: real( root, sha ) if sha != later else None )
+    code, text = run( repo, data, tmp_path, lines=f"reuse searched since = {later}\n" )
+    assert code == 3 and f"git could not diff {later}" in text
+
+
+@pytest.mark.parametrize( "lines", [ "", "reuse searched since =\n", "reuse searched since = aaaaaaa\nreuse searched since = bbbbbbb\n" ] )
+def test_gating_on_with_an_empty_searched_since_could_not_be_checked_and_says_why( repo, data, tmp_path, lines ):
+    commit_doc( repo, "review.md", GOOD )
+    out  = io.StringIO()
+    code = mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, "true", f"reuse merge gate since = {default_since( repo )}\n{lines}" ) ], out=out )
+    text = out.getvalue()
+    assert code == 3 and "`reuse review gating` is true and `reuse searched since` is empty" in text and "Nothing was checked." in text
+    assert "Total Tests" not in text, "nothing was scanned"
+
+
+def test_a_searched_since_that_is_not_a_known_commit_could_not_be_checked( repo, data, tmp_path ):
+    commit_doc( repo, "review.md", GOOD )
+    code, text = run( repo, data, tmp_path, lines="reuse searched since = latest\n" )
+    assert code == 3 and "`reuse searched since` holds 'latest', which is not a commit" in text
+    code, text = run( repo, data, tmp_path, lines="reuse searched since = abcdef1\n" )
+    assert code == 3 and "`reuse searched since` names abcdef1, which git does not know" in text
