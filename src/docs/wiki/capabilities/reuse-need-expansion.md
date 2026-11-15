@@ -14,7 +14,7 @@ The optional first step of a candidate lookup. One text-only model call rewrites
 - The model sees the need sentence and nothing else. Tools are off and no repository file is read. The prompt and the reader are `expansion_replay`'s, so a live lookup asks what the measured replay asked.
 - A failed call, a spent cap or a reply of the wrong shape returns None after one line to `out`. The lookup then runs as it would without expansion.
 - `ask_model( model, system, user )` sends the prompt on a worker thread of its own. It is safe inside the lookup's running event loop. It raises `ModelCallError` or `CallBudgetExceeded` when the call fails.
-- With no `ask`, the model is the drafter's: `model`, else the INI key `reuse need drafter model` read when the expander is built (`draft.drafter_model`). The measured replay's expansions came from the drafter, so the two share one key. There is no model id in the code.
+- With no `ask`, the model is `model`, else the INI key `reuse candidate need expansion model` read when the expander is built (`claude-opus-5-5`). It is the expander's own key and the drafter's key (`reuse need drafter model`) is left alone, so the checker-differs-from-drafter rule does not touch it. There is no model id in the code. The 5 Nov replay's expansions came from Fable;.
 
 ## Where it is switched on
 - The INI key `reuse candidate need expansion enabled` turns it on, and it ships `false`. With it off the stage is built with no expander and nothing changes.

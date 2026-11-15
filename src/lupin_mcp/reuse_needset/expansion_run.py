@@ -14,6 +14,7 @@ import os
 import pathlib
 import re
 
+from cosa.repo import code_health_settings as chs
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.symindex.candidates import rank_fusion as rf
 from cosa.repo.symindex.candidates import resident
@@ -303,12 +304,12 @@ def _run( args, root, ctx, deps, close ):
 
     Ensures:
         - returns { live False, plan } for a plan, and { live True, plan, report, closed_run, close_error } for a live run
-        - the drafter's model is read from the INI once, so the plan, the asks and the report name the same model
+        - the expander's model is read from the INI once, so the plan, the asks and the report name the same model
     """
     yield_trace.hold_transport( ctx )
     rows, undrafted, unsaved = deps[ "rows" ]( args, root, ctx ) if "rows" in deps else collect_rows( args, root, ctx, deps )
     ledger = draft.make_ledger( f"{args.run_dir}/{LEDGER_FILE}", args.cli_path, args.server )
-    model  = draft.drafter_model()
+    model  = chs.model_id( chs.EXPANSION_MODEL_KEY )
     plan   = { **plan_of( rows, undrafted, unsaved, ledger, model, args.budget ), "run_name": os.environ[ rt.RUN_NAME_VARIABLE ] }
     if not args.live: return { "live": False, "plan": plan }
     if "stage" in deps: stage, search = deps[ "stage" ]( ctx )

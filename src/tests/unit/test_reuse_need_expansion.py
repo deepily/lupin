@@ -190,17 +190,17 @@ def test_the_real_call_goes_through_model_transport_on_a_thread_of_its_own_even_
     monkeypatch.setattr( model_transport, "complete", complete )
     async def inside_a_loop(): return rex.make_expander()( "a need" )
     assert asyncio.run( inside_a_loop() ) == EXPANSION
-    assert calls == [ ( rex.draft.drafter_model(), ex.SYSTEM, ex.expansion_prompt( "a need" ) ) ]
+    assert calls == [ ( rex.chs.model_id( rex.chs.EXPANSION_MODEL_KEY ), ex.SYSTEM, ex.expansion_prompt( "a need" ) ) ]
 
 
-def test_the_expander_model_is_read_from_the_drafters_ini_key_unless_the_caller_names_one( monkeypatch ):
+def test_the_expander_model_is_its_own_ini_key_never_the_drafters_unless_the_caller_names_one( monkeypatch ):
     asked, keys = [], []
-    monkeypatch.setattr( rex.draft.chs, "model_id", lambda key, config=None: keys.append( key ) or "ini-drafter" )
+    monkeypatch.setattr( rex.chs, "model_id", lambda key, config=None: keys.append( key ) or "ini-" + key )
     monkeypatch.setattr( rex, "ask_model", lambda model, system, user: asked.append( model ) or reply_of() )
-    assert not hasattr( rex, "EXPANSION_MODEL" )
     rex.make_expander()( "need" )
     rex.make_expander( model="named" )( "need" )
-    assert asked == [ "ini-drafter", "named" ] and keys == [ rex.draft.chs.DRAFTER_MODEL_KEY ]
+    assert rex.chs.EXPANSION_MODEL_KEY == "reuse candidate need expansion model" and rex.chs.EXPANSION_MODEL_KEY != rex.chs.DRAFTER_MODEL_KEY
+    assert asked == [ "ini-reuse candidate need expansion model", "named" ] and keys == [ rex.chs.EXPANSION_MODEL_KEY ]
 
 
 # --- the client: off is today, on adds the lists -------------------------------------------------------------------------------------------

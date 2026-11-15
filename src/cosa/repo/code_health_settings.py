@@ -36,6 +36,7 @@ ONE_TOKEN        = re.compile( r"\S+" )
 JUDGE_MODEL_KEY   = "duplicate check judge model"
 REWRITE_MODEL_KEY = "duplicate check proof rewrite model"
 DRAFTER_MODEL_KEY = "reuse need drafter model"
+EXPANSION_MODEL_KEY = "reuse candidate need expansion model"
 ALIKE_MODEL_KEY   = "duplicate check proof alike model"
 NEED_WRITER_MODEL_KEY = "symindex need writer model"
 SECOND_MODEL_KEY  = "reuse need second model"

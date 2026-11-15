@@ -210,11 +210,16 @@ def test_repo_of_names_the_repo_a_job_belongs_to_and_defaults_to_lupin():
 
 # ---- model ids (row 5fa4750e: a model id lives in lupin-app.ini, never in code) ------------------------------------
 
-MODEL_KEYS = ( chs.JUDGE_MODEL_KEY, chs.REWRITE_MODEL_KEY, chs.DRAFTER_MODEL_KEY )
+MODEL_KEYS = ( chs.JUDGE_MODEL_KEY, chs.REWRITE_MODEL_KEY, chs.DRAFTER_MODEL_KEY, chs.EXPANSION_MODEL_KEY )
 
 
 def test_the_real_ini_names_opus_for_the_judge_and_the_rewrite_and_sonnet_for_the_drafter( config ):
-    assert [ chs.model_id( key, config ) for key in MODEL_KEYS ] == [ "claude-opus-5-5", "claude-opus-5-5", "claude-sonnet-5-5" ], "no key names Fable; the drafter differs from the need checker"
+    assert [ chs.model_id( key, config ) for key in MODEL_KEYS[ :3 ] ] == [ "claude-opus-5-5", "claude-opus-5-5", "claude-sonnet-5-5" ], "no key names Fable; the drafter differs from the need checker"
+
+
+def test_the_real_ini_names_opus_for_the_need_expander_while_the_drafter_stays_sonnet( config ):
+    assert chs.model_id( chs.EXPANSION_MODEL_KEY, config ) == "claude-opus-5-5"
+    assert chs.model_id( chs.DRAFTER_MODEL_KEY, config ) == "claude-sonnet-5-5"
 
 
 def test_the_real_ini_holds_the_four_ids_that_moved_out_of_code_in_row_a3ecd4ea_with_the_values_the_code_held( config ):

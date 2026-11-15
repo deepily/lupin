@@ -271,7 +271,7 @@ def test_without_deps_main_builds_the_real_stage_rows_ask_and_closer( tmp_path, 
     monkeypatch.setattr( xr.vs, "load_vectors", lambda folder: seen.setdefault( "vectors", folder ) )
     monkeypatch.setattr( xr, "FullStage", lambda *a, **k: seen.setdefault( "stage", FakeStage() ) )
     monkeypatch.setattr( xr, "lists_for", lambda stage, entries, sha, pages: seen.setdefault( "search_args", ( entries, sha, pages ) ) and search_fn )
-    monkeypatch.setattr( xr.draft, "drafter_call", lambda model: counted_ask() if model == "claude-sonnet-5-5" else None )
+    monkeypatch.setattr( xr.draft, "drafter_call", lambda model: counted_ask() if model == "claude-opus-5-5" else None )
     out = xr.main( argv( tmp_path, "--cli-path", old_run, "--live" ), None )
     assert out[ "closed_run" ] == "run-z" and seen[ "unlocked" ] == str( tmp_path ) and seen[ "vectors" ] == "/v" and seen[ "search_args" ] == ( [ "E" ], "sha", "pages" )
     assert out[ "report" ][ "used" ] == 1

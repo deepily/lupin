@@ -26,7 +26,7 @@ Instantiate the **spin-up crew** (Implementer · Reviewer · Tester) against a t
 
 5. **Notify + hand to Steward.** `notify()` the user who came online and the collection topic; `commons_send_to` the Steward your spin-up plan so they observe live.
 
-6. **Run the gate.** implement → adversarial review → integration/e2e green → **verify BOTH green AND reviewed** → commit only on the user's word (re-loop on fail). Steward runs the scaled post-game every cycle. Teardown on *"stand down the SWE team"* reaps the crew with mementos; the standing pair persists.
+6. **Run the gate.** Implement, then adversarial review, then unit and census green for the files changed. Verify both green and reviewed. The Manager then commits and merges to the working branch. Re-loop on fail. Integration/e2e belongs to the PR to main (CLAUDE.md "Two kinds of merge"). The Steward runs the scaled post-game every cycle. Teardown on *"stand down the SWE team"* reaps the crew with mementos. The standing pair persists.
 
 ## If the task is "build an agent that runs by voice"
 
@@ -65,7 +65,7 @@ Whole picture, written for someone who was in none of these sessions:
 
 - **Standing pair is never spawned** — only the crew is. Teardown reaps only the crew.
 - **Charters are sliced verbatim**, not paraphrased — the durable wording is the point.
-- **Hard commit gate**: green AND adversarially-reviewed, non-negotiable; commit/push is the user's call.
+- **Hard commit gate**: green (unit and census for the files changed) and adversarially reviewed. The Manager commits and merges to the working branch. Push to origin is the user's call.
 - **No-confabulation**: every "done" the Manager accepts is backed by a primary artifact (receipts-before-claims).
 
 ## Project configuration
