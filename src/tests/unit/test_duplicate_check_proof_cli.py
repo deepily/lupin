@@ -16,6 +16,7 @@ from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import errors as lb_errors
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
+from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check import extract as ex
 from cosa.repo.duplicate_check import judge as jd
 from cosa.repo.duplicate_check.proof import label_load as ll
@@ -540,14 +541,41 @@ def test_check_with_nothing_changing_prints_its_json_and_returns_0( venue, tmp_p
     assert json.loads( capsys.readouterr().out )[ "status" ] == "checked"
 
 
-def test_main_refuses_a_run_folder_planted_under_another_config_sha( tmp_path, monkeypatch ):
+def test_main_refuses_a_run_folder_planted_under_another_config_sha( tmp_path, monkeypatch, capsys ):
     other = World( tmp_path, config_sha="not-the-frozen-sha" )
     monkeypatch.setattr( pc.frozen, "frozen_path", lambda: other.toy.wiring[ "frozen_path" ] )
     monkeypatch.setattr( pc.frozen, "live_config", lambda: other.toy.cfg )
     monkeypatch.setattr( model_transport, "configure", lambda cli_path=None, cwd=None: None )
     def no_parts( *a ): raise AssertionError( "make_parts must not be called" )
-    with pytest.raises( ValueError, match=f"planted under config not-the-frozen-sha, the frozen one is {other.toy.cfg[ 'config_sha' ]}" ):
-        pc.main( [ "--run-dir", str( other.run_dir ), "--check" ], make_parts=no_parts, run_proof=refuse_run )
+    assert pc.main( [ "--run-dir", str( other.run_dir ), "--check" ], make_parts=no_parts, run_proof=refuse_run ) == 2
+    seen = capsys.readouterr()
+    lines = seen.err.strip().splitlines()
+    assert seen.out == "" and len( lines ) == 1, lines
+    live = other.toy.cfg
+    assert f"planted under config not-the-froz" in lines[ 0 ] and f"the current config is {live[ 'config_sha' ][ :12 ]} ({live[ 'model_id' ]})" in lines[ 0 ]
+    assert "no frozen file for it" in lines[ 0 ] and "plant a proof under the current config" in lines[ 0 ]
+
+
+def test_a_run_planted_under_the_same_config_but_another_model_is_refused_and_names_both_models( tmp_path, monkeypatch, capsys ):
+    """Guard: a difference in model_id alone is never accepted, though both frozen files verify."""
+    world  = World( tmp_path )
+    live   = world.toy.cfg
+    folder = pathlib.Path( world.toy.wiring[ "frozen_path" ] ).parent
+    older  = { **live, "model_id": "claude-older-model" }
+    older[ "config_sha" ] = cfg_mod.config_sha( older )
+    assert older[ "config_sha" ] != live[ "config_sha" ] and { k for k in live if live[ k ] != older[ k ] } == { "model_id", "config_sha" }
+    ( folder / "semdup-frozen-older.json" ).write_text( json.dumps( older ), encoding="utf-8" )
+    run = world.key.parent.parent
+    key = json.loads( world.key.read_text( encoding="utf-8" ) )
+    key[ "config_sha" ] = older[ "config_sha" ]
+    world.key.write_text( json.dumps( key ), encoding="utf-8" )
+    monkeypatch.setattr( pc.frozen, "frozen_path", lambda: world.toy.wiring[ "frozen_path" ] )
+    monkeypatch.setattr( pc.frozen, "live_config", lambda: live )
+    monkeypatch.setattr( model_transport, "configure", lambda cli_path=None, cwd=None: None )
+    def no_parts( *a ): raise AssertionError( "make_parts must not be called: a model-only difference was accepted" )
+    assert pc.main( [ "--run-dir", str( run ), "--check" ], make_parts=no_parts, run_proof=refuse_run ) == 2
+    line = capsys.readouterr().err.strip()
+    assert f"planted under config {older[ 'config_sha' ][ :12 ]} (claude-older-model)" in line and f"current config is {live[ 'config_sha' ][ :12 ]} ({live[ 'model_id' ]})" in line
 
 
 # ---- the third rater ---------------------------------------------------------------------------------------------

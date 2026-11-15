@@ -260,12 +260,14 @@ def test_an_empty_packet_takes_the_new_items_alone( flagged ):
     assert len( flagged.packets[ "rick" ].read_text().splitlines() ) == 4
 
 
-def test_refuses_a_run_planted_under_another_config( tmp_path, monkeypatch ):
+def test_refuses_a_run_planted_under_another_config( tmp_path, monkeypatch, capsys ):
     other = World( tmp_path, config_sha="not-the-frozen-sha" )
     monkeypatch.setattr( fi.frozen, "frozen_path", lambda: other.toy.wiring[ "frozen_path" ] )
     monkeypatch.setattr( fi.frozen, "live_config", lambda: other.toy.cfg )
-    with pytest.raises( ValueError, match="planted under config not-the-frozen-sha" ):
-        fi.main( [ "--run-dir", str( other.run_dir ), "--record", "none" ], make_parts=lambda *a: pytest.fail( "parts must not be built" ) )
+    for flag in ( [], [ "--check" ] ):
+        assert fi.main( [ "--run-dir", str( other.run_dir ), "--record", "none", *flag ], make_parts=lambda *a: pytest.fail( "parts must not be built" ) ) == 2
+        lines = capsys.readouterr().err.strip().splitlines()
+        assert len( lines ) == 1 and "planted under config not-the-froz" in lines[ 0 ] and f"({other.toy.cfg[ 'model_id' ]})" in lines[ 0 ] and "plant a proof under the current config" in lines[ 0 ]
 
 
 def test_a_failed_check_removes_the_staged_files_and_swaps_nothing( flagged, monkeypatch ):
