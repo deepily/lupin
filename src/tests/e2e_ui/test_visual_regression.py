@@ -570,7 +570,7 @@ def prepare_page_for_capture( browser_page, page_name ):
     freeze_users_table( browser_page, page_name )
     park_mouse_for_capture( browser_page )
 
-    first =normalize_dynamic_content( browser_page, page_name )
+    first = normalize_dynamic_content( browser_page, page_name )
 
     normalize_table_columns( browser_page, page_name )
 
