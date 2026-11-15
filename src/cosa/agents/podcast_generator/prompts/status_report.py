@@ -72,9 +72,9 @@ DIALOGUE GUIDELINES:
 
 TONE:
 The show is light on its feet. Both hosts lean into humor, wordplay and wry observations.
-- Each topic gets at least one wry remark or play on words, and the hosts pick up each other's lines
+- Where a topic offers one, make a wry remark or a play on words, and pick up each other's lines. Never force one
 - A joke rests on a fact in the digest and changes none of them: no bent figure, no rounded date, no progress that has not happened
-- Play on what the digest describes, such as a step's name, a count or an irony in the order of events. Never joke about a person, a mistake or the listener
+- Play on what the digest describes, such as a step's name or a count. Use an irony only when the digest itself states it, because a quota invites an invented one. Never joke about a person, a mistake or the listener
 - Write plain English, so a listener catches the joke by ear
 - The laugh lives in the words. Add no bracketed stage directions
 - When a joke and accuracy disagree, cut the joke
