@@ -16,6 +16,14 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-14 (Cheech 🌿 `8b134124`, crew John, Sam, Maya, Pocholo, working overnight; times Eastern)
+
+- **Full pyramid is for the PR only** (Rick by voice, about 22:40): e2e and integration run only before a PR to main. A merge to the working branch needs green unit and census checks plus review. Why: Cheech froze merges from about 21:00 to 22:40 behind all 15 rows (row d2a18b64). It could not finish before 23:00, and Rick called it "an absolute productivity killer". Row e986fbbc (Maya) audits the workflow wording and goes to Rick before it lands.
+- **Working-branch merges are a manager's own call** (Rick, about 23:05, relayed by Mr. Radio and María): managers land reviewed, tested merges without asking. Push stays his word. Open gap: the auto-mode classifier refused `git merge` from both manager seats tonight. So Rick ran two merges in Cheech's pane. A narrower allow rule was proposed to him: `LUPIN_ALLOW_MERGE_COMMIT=1 git merge --no-ff:*`. Not yet added.
+- **Overnight run** (about 23:15): the host stays on and the crew works through the night. The Opus backlog drain (row d30a1081) waits for the morning cron.
+- **Need expansion goes on Opus** (row 88469dd4, raised to P0 by Rick): the expander shared `reuse need drafter model`. That key must differ from the Opus need checker, so expansion ran on Sonnet by accident. It gets its own key and a re-measure on Opus. The switch flip is Rick's.
+- **Judge AUC does not hold the abstraction build** (about 22:30, relayed by María). It is recorded as dated paragraphs in the 9 Nov plan (3d6bef661, row 85044d24).
+
 ## 📚 Decisions log 2026-11-11 (Mr. Radio 🦉 `f55fd006`, post-game for the 10 Nov crew of session `24d257d2`; times Eastern)
 
 Source: `src/docs/post-games/v0.2.3/2026.11.10-mr-radio-crew-vm-and-backfill-post-game.md` (row a47dbb5d). Rick approved the self-report about 10:02.

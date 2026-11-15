@@ -19,6 +19,16 @@
 
 ### Checkpoint | 2026.11.14 23:31 | Rick's 📷: night-shift state recorded; code already committed as merges
 
+## 2026.11.14 - Session 8b134124 (Cheech 🌿, manager; crew John, Sam, Maya, Pocholo) | Merge queue landed, the Opus drain runs on cron, 274 functions triaged, and Rick ruled the full pyramid is for the PR only
+
+**Resume here**: memento `.claude-memento-cheech-8b134124.md` (amended 22:59). Working-branch head is 3d6bef661 or later; the night shift is still running.
+1. **Merged**: 532666d16 (Krishna, symindex sees IIFE-nested JS) and 66acb4be7 (Chloé's chain with Sam's wiki pins). Also 9a7ebd838 and 444122d4a (Maya, reuse gate) and 41976532b (Pocholo, the `--check` refusal). Then a00b29219 (Rio's two commits) and 3d6bef661 (Sam's plan update, row 85044d24). Rick ran the last two in Cheech's pane. The auto-mode classifier refuses seat merges.
+2. **Rick's rulings**: e2e and integration run only before a PR to main (22:40). A working-branch merge needs green unit and census checks plus review. Row e986fbbc audits the workflow wording. Managers land reviewed, tested merges without asking (23:05). The host stays on overnight (23:15).
+3. **Opus drain, row d30a1081**: the hourly `--adaptive` cron runs a daily pass, then a baseline pass. The 21:00 slot was skipped on the run lock. 5,858 were left to judge at 21:04. It resumes in the morning.
+4. **Triage**: Sam ruled 274 functions across five duplicate-check rows. Remediation of the duplicate and extend rulings is held as row 9cc37a94.
+5. **Pyramid at 1809f7a2b, row d2a18b64**: unit 46,313 passed, cosa 10,415, typescript 6,793, smoke 496. The first e2e_a run was void. The parity_oracle conftest rebuilt the bundle mid-run (row 112e1a5e). The re-run had 10 real reds (row b92d123b). Two were a test bug, fixed by John in d3f0f11c4. Eight went to Mr. Radio's lane. Rio fixed e2e_b's one hover-dependent visual red in 374f21815.
+6. **Filed**: 88469dd4 (P0, Maya). Need expansion gets its own Opus model key, then a re-measure of the 60 to 69 of 70 result. The switch flip is Rick's. It ran on Sonnet only through a shared key.
+
 ## 2026.11.13 - Session 3c1ff1fb (Cheech 🌿, manager; crew Rio, Tiberius, Chloé, Sam, John) | Merge queue landed, Gate A closed (Opus after rescue), pushed and backed up
 
 **Resume here**: memento `.claude-memento-cheech-3c1ff1fb.md` (amended 22:45). Branch pushed to origin at 4004d2924.
