@@ -275,6 +275,14 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     # Brief settle window for any post-inject layout repaint.
     time.sleep( 0.2 )
 
+    # Park the pointer at the page corner. This test never moves the mouse, so wherever
+    # Playwright left it decided whether a bucket header showed its :hover shade: the 9 Nov
+    # baseline holds the Job History header shaded and the e2e_b run at 1809f7a2b did not
+    # (31,473 pixels, all in that header). The same park is used in
+    # test_legacy_keep_place_toggle_style.py.
+    page.mouse.move( 0, 0 )
+    time.sleep( 0.2 )
+
     # Capture the entire #jobs-pane (avoids body-level layout drift).
     # Height-tolerant compare (bug 660d02b4): --update-snapshots and a plain
     # COMPARE can differ by ±1px on a benign sub-pixel row-height rounding
