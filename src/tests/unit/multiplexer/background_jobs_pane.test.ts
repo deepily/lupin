@@ -272,7 +272,7 @@ test( "the accordion draws all 23 jobs (plus nested targets) by service name A t
   assert.deepEqual( titles, [ ...titles ].sort( ( a, b ) => a.localeCompare( b ) ) );
   for ( const line of mount.querySelectorAll( "[data-testid=jobs-line]" ) ) assert.equal( line.getAttribute( "aria-expanded" ), "false" );
   for ( const panel of mount.querySelectorAll( "[data-testid=jobs-panel]" ) ) assert.equal( ( panel as HTMLElement ).hidden, true );
-  assert.equal( mount.querySelectorAll( "[data-job=side-services]" ).length, 4, "the side-services job and its three targets" );
+  assert.equal( mount.querySelectorAll( "[data-job=side-services]" ).length, 3, "the side-services job and its two targets" );
 } );
 
 test( "the duplicate check's collapsed line reads as design 6 shows it", () => {
@@ -501,7 +501,7 @@ test( "mounted: loads the summary once, draws 23 jobs, counts them, titles the h
   assert.deepEqual( h.gets, [ "/api/jobs/summary" ] );
   assert.equal( root.querySelectorAll( "[data-testid=jobs-accordion] > [data-testid=jobs-item]" ).length, 23 );
   assert.equal( root.querySelector( "[data-testid=multiplexer-background-jobs-count]" )!.textContent, "23" );
-  assert.match( root.querySelector( "[data-testid=multiplexer-background-jobs-header]" )!.getAttribute( "title" ) as string, /^23 jobs: 9 healthy, 3 failing, 2 silent, 9 unknown$/ );
+  assert.match( root.querySelector( "[data-testid=multiplexer-background-jobs-header]" )!.getAttribute( "title" ) as string, /^23 jobs: 10 healthy, 3 failing, 1 silent, 9 unknown$/ );
   assert.equal( ( root.querySelector( "[data-testid=jobs-error]" ) as HTMLElement ).hidden, true );
   assert.equal( h.timers.length, 1 );
   h.timers[ 0 ]!(); await flush();

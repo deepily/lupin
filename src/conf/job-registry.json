@@ -719,13 +719,6 @@
             "kind": "systemd",
             "unit": "lupin-cc-memory-watch.service"
           }
-        },
-        {
-          "target": "lupin-credential-watcher",
-          "liveness": {
-            "kind": "systemd",
-            "unit": "lupin-credential-watcher.service"
-          }
         }
       ],
       "owner_confirmed": false

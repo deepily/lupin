@@ -1123,7 +1123,6 @@
     "src/tests/unit/test_coverage_frame_excludes_non_src.py": 81,
     "src/tests/unit/test_coverage_gate_tier_status.py": 89,
     "src/tests/unit/test_credential_file_scrubber.py": 29,
-    "src/tests/unit/test_credential_watch.py": 5,
     "src/tests/unit/test_crud_for_dataframes_agent.py": 3,
     "src/tests/unit/test_crud_for_dataframes_storage.py": 4,
     "src/tests/unit/test_crud_queue_integration.py": 4,
