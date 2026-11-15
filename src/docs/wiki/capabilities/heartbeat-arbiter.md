@@ -1,9 +1,9 @@
 ---
 capability: heartbeat-arbiter
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_arbiter_app.fleet_arbiter_loop.FleetArbiterLoop@f658361fd6
-  - cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterConsumerJob@a504872b6a
+  - cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterConsumerJob@fcfaee9fca
   - cosa.agents.heartbeat_arbiter.arbiter_routing.tier_for@810e74e825
   - cosa.rest.arbiter_bootstrap.submit_arbiter_if_enabled@23da8f20f5
   - cosa.rest.routers.arbiter.get_fleet_state@10c8ded44d
@@ -17,7 +17,7 @@ pins:
 The arbiter polls the fleet's heartbeat events and tells Rick or the managers when a session is stuck, silent or waiting. It runs as the standalone `lupin_arbiter_app` on port 8001. The REST side reads that app's `/state`. [[cc-hooks-heartbeat]] covers the hook side.
 
 ## How it runs
-- `FleetArbiterLoop` builds an `ArbiterConsumerJob`, runs it, and builds a fresh one when the job reaches its time cap or crashes. The job reads each seat's project from that seat's bridge cwd and hands it to the fleet snapshot.
+- `FleetArbiterLoop` builds an `ArbiterConsumerJob`, runs it, and builds a fresh one when the job reaches its time cap or crashes. The job reads each seat's project from that seat's bridge cwd and hands it to the fleet snapshot. `ArbiterConsumerJob` takes an optional `switch`. A tick where `switch.allowed()` is false skips the poll, and so the janitor and pokes inside it, and still sleeps. The error streak is left as it was.
 - Among the switches that ship `false` are in-process bootstrap, follow-through escalation, hwm and bookmark deletion and the orphan-bridge sweep. `submit_arbiter_if_enabled` reads the first and, when it is `false`, logs and returns.
 - `/health` always says `ok`. Its `loops` map marks each loop alive, `DEAD` or not started, and `degraded` is true when any loop is `DEAD`.
 

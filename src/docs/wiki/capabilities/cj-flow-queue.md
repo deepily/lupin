@@ -1,6 +1,6 @@
 ---
 capability: cj-flow-queue
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.running_fifo_queue.RunningFifoQueue@993473a3bb
   - cosa.rest.running_fifo_queue.RunningFifoQueue.get_pool_status@3a08a734df

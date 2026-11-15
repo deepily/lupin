@@ -88,6 +88,10 @@ export function renderSenderCard(
   if (sender.is_worker === true) {
     root.setAttribute("data-worker", "true");
   }
+  // Row 92076977: a quiet worker's card carries the attribute the chip below hangs off.
+  if (sender.worker_quiet === true) {
+    root.setAttribute("data-worker-quiet", "true");
+  }
 
   // 🔴 `!= null`, NOT `!== undefined` — row 8105670f. JavaScript spells "absent"
   // two ways and the server spells it `null`: `to_dict()` emits
@@ -215,6 +219,9 @@ export function renderSenderCard(
       <span class="sender-status">${statusGlyph}</span>
       <span class="sender-project-name">${sender.display_name || sender.sender_id}</span>
       ${sessionBlock}
+      ${sender.worker_quiet === true
+        ? html`<span class="sender-quiet-chip" title="Quiet worker: speakerphone off, ding kept. An urgent notify still speaks.">🤫 quiet</span>`
+        : null}
       <span class="sender-stats-group">
         ${personaBadge}
         ${sender.unread_count > 0 && sender.is_worker !== true

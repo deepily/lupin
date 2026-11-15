@@ -1,6 +1,6 @@
 ---
 capability: reuse-fresh-needs-driver
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_phase5_run.estimate_parts@ec2256ff8d
   - lupin_mcp.reuse_phase5_run.estimate_lines@362dff7594

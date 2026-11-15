@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-admin-snapshots
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers.admin.get_snapshot_manager@f59de6f4af
   - cosa.rest.routers.admin.SnapshotSearchResult@c18c56b120

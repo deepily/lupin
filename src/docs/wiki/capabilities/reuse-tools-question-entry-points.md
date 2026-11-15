@@ -1,6 +1,6 @@
 ---
 capability: reuse-tools-question-entry-points
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_tools.run_question@198b0e87aa
   - lupin_mcp.reuse_tools.check_exists_impl@95010dcb48

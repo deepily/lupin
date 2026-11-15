@@ -32,6 +32,9 @@ Files under `/etc/lupin/secrets` (root, host gid, 0440), written by `lupin-vm.sh
 
 `push-bundle --checkout` alone moves code and restarts nothing, so it leaves schema drift behind.
 
+## Daily promotion
+The registry job `test-promotion` runs `deploy` once a day at 18:00 New York time, with an after-boot catch-up, on the newest working branch tip. It reads the sha the VM runs and defers when `:8000` there is busy. It smokes with the post preflight and rolls back to the earlier sha on a failure. It starts a suspended VM with `vm-start` and puts it back with `vm-suspend`. Its switch `cron job test-promotion enabled` ships false. The wiki page `daily-test-promotion` has the steps. `python -m lupin_mcp.daily_test_promotion --check` prints the plan without touching the VM.
+
 The post preflight also reports the `reuse-vector-refresh` cron line in the ssh user's crontab. When the overlay exists it adds four more checks: `/health` on :8000, schema at head, `db_roles --check`, and a tester login in `lupin_db_test`. An absent overlay prints a `[SKIP]` line and never fails.
 
 ## Checks that print a line instead of acting

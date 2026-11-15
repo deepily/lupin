@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-proof-label-packets
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.proof.label_prep.monolith_every_definition@66a96b13cc
   - cosa.repo.duplicate_check.proof.label_prep.monolith_definitions@d2e7965311

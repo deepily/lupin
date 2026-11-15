@@ -37,6 +37,7 @@
     <link rel="stylesheet" href="/static/css/task-list.css">
     <link rel="stylesheet" href="/static/css/epic-board.css">
     <link rel="stylesheet" href="/static/css/multiplexer/background-jobs.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/cron-jobs.css">
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-header.css">
     <link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">
@@ -318,6 +319,11 @@
              Row d540113f, Rick 2026-11-09: part of the client, not a page of its own. -->
         <section id="background-jobs-pane"
                  data-testid="multiplexer-background-jobs-pane"></section>
+
+        <!-- (5d) SCHEDULED JOBS — each cron job's INI switch, reading GET /api/cron-jobs. An administrator flips it;
+             everyone else sees it read-only. Row 063fc1a8, Rick 2026-11-13. -->
+        <section id="cron-jobs-pane"
+                 data-testid="multiplexer-cron-jobs-pane"></section>
 
         <!-- (6) JOB QUEUES — position 6, VISIBLE by default. Lane 0c
              (2026-07-02) shipped it `hidden` on the belief that legacy hides Job

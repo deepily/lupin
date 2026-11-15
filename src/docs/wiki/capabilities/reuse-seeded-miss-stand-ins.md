@@ -1,6 +1,6 @@
 ---
 capability: reuse-seeded-miss-stand-ins
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_seeded_miss_e2e.SavedAnswerMissing@6ca81a58b2
   - lupin_mcp.reuse_seeded_miss_e2e.words@e562e86bde

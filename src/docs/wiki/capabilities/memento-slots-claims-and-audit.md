@@ -1,6 +1,6 @@
 ---
 capability: memento-slots-claims-and-audit
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.memento_repo_root.repo_root_owning@e8e4cdb494
   - lupin_mcp.memento_repo_root.slot_base_root@224b4ae134

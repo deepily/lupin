@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-daily-run
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_daily.Counting@f2ca3e39f1
   - lupin_mcp.duplicate_check_daily.findings_of@cfdb1b0bd4

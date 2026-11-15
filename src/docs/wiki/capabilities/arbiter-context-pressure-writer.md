@@ -1,16 +1,16 @@
 ---
 capability: arbiter-context-pressure-writer
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_arbiter_app.context_pressure_writer.build_context_pressure_section@2f6023abac
-  - lupin_arbiter_app.context_pressure_writer.ContextPressureWriterLoop@1fc1857cdd
+  - lupin_arbiter_app.context_pressure_writer.ContextPressureWriterLoop@154a1b78c3
 ---
 # Arbiter context-pressure writer
 
 This is the standing publisher of fleet context headroom on port 8001. Each tick it reads the sensors and writes one section, `context_pressure`, into the 8001-local store.
 
 ## What it does
-- `ContextPressureWriterLoop` runs on a daemon thread. Each tick calls `poll_once`, then sleeps. `start` spawns the thread and `stop` signals it and joins.
+- `ContextPressureWriterLoop` runs on a daemon thread. Each tick calls `poll_once`, then sleeps. `start` spawns the thread and `stop` signals it and joins. It takes an optional `switch`, and `run_poll_loop` checks it before every poll.
 - `poll_once` assesses the fleet, applies the budget transform and writes the section. It returns True only when the section was written.
 - The budget policy maps a 1M window to 0.50 and a 200K window to 0.75. Any other size uses the default.
 - `budget_ceiling_tokens` is the window times its fraction. Headroom is the ceiling minus occupancy, and it is signed and never clamped.

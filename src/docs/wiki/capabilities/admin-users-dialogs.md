@@ -1,6 +1,6 @@
 ---
 capability: admin-users-dialogs
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.admin.js.admin-users.showUserDetails@b60535da6a
   - src.lupin_app.static.html.auth.admin.js.admin-users.closeUserModal@3648fc7419

@@ -1,12 +1,12 @@
 ---
 capability: app-startup-tasks-and-asset-tools
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_app.main.load_stt_model@0d41c8f438
   - lupin_app.main.clock_loop@22b2251fc5
-  - lupin_app.main.websocket_heartbeat_loop@93f6feadc0
-  - lupin_app.main.websocket_cleanup_loop@c01b7d0403
-  - lupin_app.main.notification_expiry_sweep_loop@8e6dd7aa7f
+  - lupin_app.main.websocket_heartbeat_loop@71864bd478
+  - lupin_app.main.websocket_cleanup_loop@8058af40d3
+  - lupin_app.main.notification_expiry_sweep_loop@fb9f2a4afc
   - lupin_app.asset_tokens.project_static_root@0e02f2112d
   - lupin_app.asset_tokens.static_url_to_path@f71f8f8b97
   - lupin_app.asset_tokens.source_files@3093a3afc7
@@ -20,9 +20,9 @@ The model loader and background loops that `lifespan` starts, and the file helpe
 ## What it does
 - `load_stt_model` builds the speech-to-text pipeline during startup. `lifespan` then runs one warmup transcription when the warmup file exists. It raises `RuntimeError` when the model cannot load, and `KeyError` for a missing config value.
 - `clock_loop` is always started. It emits a `sys_time_update` event to every connected WebSocket client each 60 seconds.
-- `websocket_heartbeat_loop` runs only when the INI key `websocket heartbeat enabled` is true, and it is true by default. It checks heartbeats at the configured interval, 30 seconds by default, and removes dead connections.
-- `websocket_cleanup_loop` runs only when `websocket cleanup enabled` is true, also by default. It removes sessions older than the maximum age, every hour by default.
-- `notification_expiry_sweep_loop` closes response-required notifications whose asking client walked away. It runs only when `notification expiry sweep enabled` is true, and an absent key means off.
+- `websocket_heartbeat_loop` runs only when the INI key `websocket heartbeat enabled` is true, and it is true by default. It checks heartbeats at the configured interval, 30 seconds by default, and removes dead connections. Each tick it reads the `cron job socket-housekeeping enabled` switch fresh from disk, and a false switch skips the work and still sleeps.
+- `websocket_cleanup_loop` runs only when `websocket cleanup enabled` is true, also by default. It removes sessions older than the maximum age, every hour by default. It reads the same `socket-housekeeping` switch each tick and skips the work when it is false.
+- `notification_expiry_sweep_loop` closes response-required notifications whose asking client walked away. It runs only when `notification expiry sweep enabled` is true, and an absent key means off. Before every pass it also reads the `cron job notification-expiry enabled` switch fresh from disk. A false or unreadable switch skips the pass, still sleeps and keeps the loop alive.
 - The sweep waits `notification grace period seconds` past `expires_at` before marking a row, so a late answer is still honoured. It handles at most `notification expiry sweep batch limit` rows a pass.
 - The sweep does its database work off the event loop, logs a database error and retries on the next tick.
 - `project_static_root` and `static_url_to_path` map the project root and a `/static/...` URL to paths on disk.

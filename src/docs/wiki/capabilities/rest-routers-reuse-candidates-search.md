@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-reuse-candidates-search
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers.reuse_candidates.StageUpload@825f2bbe37
   - cosa.rest.routers.reuse_candidates.data_root@84dd8ed0ba

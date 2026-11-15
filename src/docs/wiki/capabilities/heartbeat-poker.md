@@ -1,8 +1,8 @@
 ---
 capability: heartbeat-poker
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.heartbeat_poker_job.HeartbeatPokerJob@0b6e68006b
+  - cosa.agents.heartbeat_poker_job.HeartbeatPokerJob@500b5e39dd
   - cosa.agents.heartbeat_poker_job.RecipientSpec@0ff47d7734
   - cosa.agents.heartbeat_poker_job.Clock@b12bb6b742
   - cosa.agents.heartbeat_poker_job.SystemClock@dd6dc72e64
@@ -15,7 +15,7 @@ A queue job that pokes a set of sessions on a fixed cadence until a termination 
 
 ## What it does
 - `RecipientSpec` is a frozen record of identifier, identifier type (`persona` or `session_id`) and role (`manager`, `observer` or `watcher`). A bad value raises `ValueError`.
-- `HeartbeatPokerJob` is an agentic job. Its constructor rejects empty recipients, non-positive cadence or cap, a dead-man count under one, no signal kinds and no topic.
+- `HeartbeatPokerJob` is an agentic job. Its constructor rejects empty recipients, non-positive cadence or cap, a dead-man count under one, no signal kinds and no topic. It holds a `switch`, the `cron job pokes enabled` switch unless one is passed in. A tick where the switch is off skips the scoring and the delivery and still sleeps.
 - Each pass checks cancel, then the 12-hour default hard cap, then a termination kind posted on the topic after start. Each exit returns normally, so the job ends `done`.
 - Then it scores the last tick and sends `{kind: heartbeat, workstream, role}` to every recipient. It sleeps one cadence.
 - A recipient is answered when its last commons post is later than the tick. Otherwise its silent streak grows.

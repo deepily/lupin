@@ -130,6 +130,8 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   { sectionId: "epic-board-pane",        icon: "🗂️", title: "Epic Board",      testid: "multiplexer-section-toolbar-epic-board" },
   // The background-jobs accordion, right after the Epic Board (row d540113f, Rick's ruling).
   { sectionId: "background-jobs-pane",   icon: "🔁", title: "Background Jobs", testid: "multiplexer-section-toolbar-background-jobs" },
+  // The scheduled-jobs accordion, right after Background Jobs (row 063fc1a8, Rick's ruling).
+  { sectionId: "cron-jobs-pane",         icon: "⏰", title: "Scheduled Jobs",  testid: "multiplexer-section-toolbar-cron-jobs" },
   // ---------------------------------------------------------------------
   // Phase B pre-allocation (register item 7, row f0e00f01, 2026-09-17).
   //

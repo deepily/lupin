@@ -1,6 +1,6 @@
 ---
 capability: schema-and-claims-check-scripts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.check_schema_parity.get_model_columns@8f2398d34e
   - scripts.check_schema_parity.get_db_columns@86b2a89160

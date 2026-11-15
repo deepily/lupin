@@ -36,7 +36,7 @@ Type=simple
 Environment=PYTHONPATH=__DEPLOY_DIR__
 # --report prints every seat seen each pass; that stream IS the distribution the
 # sizing question needs, so it is captured to disk rather than left on stdout.
-ExecStart=/usr/bin/python3 -m cc_memory_watch --threshold-gb 16 --interval 15 --report --log __LOG_DIR__/cc-memory-alerts.log
+ExecStart=/usr/bin/python3 -m cc_memory_watch --threshold-gb 16 --interval 15 --report --ini __LUPIN_ROOT__/src/conf/lupin-app.ini --log __LOG_DIR__/cc-memory-alerts.log
 # append:, NOT truncate: — a restart (or the overnight power-down) must not start
 # the collection over. Measured 2026-08-25: this is what makes the samples survive.
 StandardOutput=append:__LOG_DIR__/cc-memory-samples.log

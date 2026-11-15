@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-status-rates
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_status.measured_daily@72c9e84974
   - lupin_mcp.duplicate_check_status.baseline_remaining@b22bd8d786

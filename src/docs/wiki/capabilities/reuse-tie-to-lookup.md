@@ -1,6 +1,6 @@
 ---
 capability: reuse-tie-to-lookup
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_tie.commit_facts@bff1db45c9
   - lupin_mcp.reuse_tie.find_tie@2b17d408b3

@@ -1,6 +1,6 @@
 ---
 capability: gcs-and-api-rate-limit-helpers
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.api_resource_manager.ApiResourceManager@c03ce91fde
   - cosa.utils.api_resource_manager.ApiResourceManager.acquire@e45bd02391

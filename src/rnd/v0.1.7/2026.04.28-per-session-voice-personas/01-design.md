@@ -214,6 +214,16 @@ else:
         bridge_data[ "voice_persona" ] = persona
 ```
 
+### Quiet workers across `/clear` and re-spin
+
+A spawned worker starts quiet by default (the key `cc session worker default voice mode`). The
+spawn forwards the key's word in `COSA_VOICE_WORKER_VOICE_MODE`, and the SessionStart hook turns it into
+`speakerphone_on`. A re-spin goes through the spawn path again, so the key applies again. `/clear` rebuilds the
+bridge with the same environment, so a worker returns to the key's mode. A per-session flip back to
+speakerphone is therefore lost at `/clear`. Carrying that flip across `/clear` is its own row, `4d811743`.
+A standing manager gets the mode-aware default whatever role it was spawned with, decided by the persona
+stamp that Phase 4.6 writes.
+
 ## 6. Bundled Bug Fix
 
 Design review (Plan agent) found that `notifications.js:3971-3975` and

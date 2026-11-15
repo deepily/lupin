@@ -1,6 +1,6 @@
 ---
 capability: auth-migration-validation
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.validate-postgres-migration.print_banner@ab1d07319c
   - scripts.validate-postgres-migration.validate_record_counts@65306d1cf2

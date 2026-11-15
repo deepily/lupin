@@ -1,6 +1,6 @@
 ---
 capability: job-host-snapshot
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.host_snapshot.crontab_text@02fd92b2cc
   - lupin_mcp.host_snapshot.unit_state@4d25f83c92

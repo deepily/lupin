@@ -1,6 +1,6 @@
 ---
 capability: xml-model-mixins
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.io_models.xml_models.CodeLinesMixin@45503194f3
   - cosa.agents.io_models.xml_models.CommaListMixin@2a13caa229

@@ -1,6 +1,6 @@
 ---
 capability: embedding-pipeline
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.memory.embedding_provider.EmbeddingProvider@37be6ca656
   - cosa.memory.embedding_provider.EmbeddingProvider.generate_embedding@76920cfb37

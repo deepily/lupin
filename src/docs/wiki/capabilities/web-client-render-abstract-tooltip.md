@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-abstract-tooltip
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.abstractTooltip.computeTooltipPosition@40bd59430b
   - src.lupin_app.static.js.multiplexer.render.abstractTooltip.AbstractTooltipImpl@591ce15d5e

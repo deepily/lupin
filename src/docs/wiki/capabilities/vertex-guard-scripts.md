@@ -1,6 +1,6 @@
 ---
 capability: vertex-guard-scripts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.verify_vertex_logging.make_bq_query_fn@e1f4149200
   - scripts.verify_vertex_logging.print_plan@a7c1c468ee

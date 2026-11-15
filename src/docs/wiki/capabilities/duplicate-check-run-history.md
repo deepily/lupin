@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-run-history
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_history.failure_of@43157d9e67
   - lupin_mcp.duplicate_check_history.counts_of@7147132f71

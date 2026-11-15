@@ -1,6 +1,6 @@
 ---
 capability: debug-and-diagnostic-scripts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.debug.debug_proxy_script_matcher.banner@0d2c6f1838
   - scripts.debug.debug_proxy_script_matcher.pass_fail@474e6a9543

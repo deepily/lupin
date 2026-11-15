@@ -1,6 +1,6 @@
 ---
 capability: podcast-cli
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.__main__.extract_user_id_from_path@8b67e6a3e6
   - cosa.agents.podcast_generator.__main__.main@3c298f16f4

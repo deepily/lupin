@@ -18,6 +18,7 @@ Run: PYTHONPATH=src python -m pytest src/cosa/tests/unit/agents/test_heartbeat_p
 import asyncio
 import json
 from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 
 import pytest
 
@@ -118,6 +119,8 @@ def _make_job( recipients=None, clock=None, commons=None, **overrides ):
         # incident). Tests asserting on notifications override this with a
         # capturing fn (e.g. notify_fn=lambda msg, prio: notes.append( ... )).
         notify_fn                = lambda msg, prio: None,
+        # An always-on switch, so no test reads the real configuration file (row c38a49bd).
+        switch                   = SimpleNamespace( allowed=lambda: True ),
     )
     cfg.update( overrides )
     return HeartbeatPokerJob( **cfg )
@@ -497,3 +500,26 @@ def test_iso_is_after_bad_format_falls_back_lexically():
     # non-ISO strings must not raise — lexical fallback
     assert HeartbeatPokerJob._iso_is_after( "zzz", "aaa" ) is True
     assert HeartbeatPokerJob._iso_is_after( "aaa", "zzz" ) is False
+
+
+def test_a_false_pokes_switch_skips_scoring_and_delivery_and_true_resumes_them( tmp_path ):
+    """The pokes switch: a real TickSwitch over a temporary file, read every tick."""
+    from lupin_mcp import cron_switch_read as csr
+    ini = tmp_path / "lupin-app.ini"
+    ini.write_text( "[Lupin]\ncron job pokes enabled = false\n" )
+    switch = csr.TickSwitch( "pokes", lambda: str( ini ), None, lambda line: None )
+    clock  = FakeClock( cancel_after=3 )
+    gw     = FakeCommonsGateway()
+    job    = _make_job( clock=clock, commons=gw, switch=switch )
+    _run( job, clock )
+    assert gw.sent == [] and job._tick_count == 0 and clock._sleeps == 3
+    ini.write_text( "[Lupin]\ncron job pokes enabled = true\n" )
+    clock2 = FakeClock( cancel_after=2 )
+    job2   = _make_job( clock=clock2, commons=gw, switch=switch )
+    _run( job2, clock2 )
+    assert len( gw.sent ) == 2 and job2._tick_count == 2
+
+
+def test_with_no_switch_given_the_job_builds_the_real_one_for_pokes():
+    job = _make_job( switch=None )
+    assert job._switch.job == "pokes"

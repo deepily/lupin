@@ -1,6 +1,6 @@
 ---
 capability: websocket-events
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.websocket_manager.WebSocketManager@c998a46631
   - cosa.rest.websocket_manager.WebSocketManager.connect@5ecea24bab

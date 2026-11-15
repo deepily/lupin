@@ -1,6 +1,6 @@
 ---
 capability: iterative-debugging-agent
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent@cc6cc3c51e
   - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.run_prompts@af2bd69ea5

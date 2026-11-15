@@ -1,6 +1,6 @@
 ---
 capability: rest-data-repos-notifications
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.db.repositories.notification_repository.NotificationRepository@8a74500c17
   - cosa.rest.db.repositories.fcm_token_repository.FcmTokenRepository@396b382c23

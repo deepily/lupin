@@ -1,6 +1,6 @@
 ---
 capability: dm-tutor-rewrite
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.dm_tutor.agent.DmTutorAgent@2dcf301f00
   - cosa.agents.dm_tutor.agent.rewrite_dm@e214cc20a9

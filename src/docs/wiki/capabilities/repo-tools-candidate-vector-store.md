@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-vector-store
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.vector_store.canonical@335bf66db1
   - cosa.repo.symindex.candidates.vector_store.manifest_hash@d6e63509e6

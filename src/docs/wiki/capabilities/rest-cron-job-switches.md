@@ -1,14 +1,13 @@
 ---
 capability: rest-cron-job-switches
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.cron_job_switches.write_switch@a3609e949b
-  - cosa.rest.cron_job_switches.read_enabled@f527d44865
+  - cosa.rest.cron_job_switches.read_enabled@9bb5246673
   - cosa.rest.cron_job_switches.read_attribution@4a8668291c
-  - cosa.rest.cron_job_switches.is_honoured@5f18453267
-  - cosa.rest.cron_job_switches.build_row@108c246b60
+  - cosa.rest.cron_job_switches.is_honoured@b6664817f8
+  - cosa.rest.cron_job_switches.build_row@ffc17b21ef
   - cosa.rest.cron_job_switches.build_rows@15e2e9c925
-  - cosa.rest.cron_job_switches.switch_key@fb6e422e6c
   - cosa.rest.cron_job_switches.ini_path@0692c2e155
   - cosa.rest.cron_job_switches.state_path@c716314db9
   - cosa.rest.routers.cron_jobs.get_cron_jobs@f9d839ca5b
@@ -17,16 +16,16 @@ pins:
 ---
 # Scheduled-job switches: the API and the accordion
 
-Each job in `src/conf/job-registry.json` has one on/off key in `src/conf/lupin-app.ini`, written `cron job <job> enabled = true|false`. Only a job with `cron_managed` true reads it, at its next start through `lupin_mcp.job_run`. For the configuration side see [[configuration]]. For the guard against hand edits see [[cc-hook-cron-switch-guard]].
+Each job in `src/conf/job-registry.json` has one on/off key in `src/conf/lupin-app.ini`, written `cron job <job> enabled = true|false`. A job reads it in one of two ways. A `cron_managed` job reads it at its next start through `lupin_mcp.job_run`. A loop that runs inside a service checks it before every tick through a `TickSwitch`. The key's name and the parse rule live in [[mcp-cron-switch-read]]. For the configuration side see [[configuration]]. For the guard against hand edits see [[cc-hook-cron-switch-guard]].
 
 ## Reading and writing
-- `cosa.rest.cron_job_switches` reads the key fresh from disk on every call. The configuration manager is a singleton and would keep a stale value. A key that is absent, defined twice or neither true nor false reads as `None`, shown as unknown and never as off.
+- `cosa.rest.cron_job_switches` reads the key fresh from disk on every call. The configuration manager is a singleton and would keep a stale value. A key that is absent, defined twice or neither true nor false reads as `None`, shown as unknown and never as off. `read_enabled` passes the file to `read_switch`, so it applies the same rule as every other reader.
 - `write_switch` is the only function that writes a key. A census test in the unit tier fails on any other writer. It locates the key first, so a key the file lacks or defines twice is refused with nothing written. It then records who flipped it and replaces the line. It never inserts a key.
 - The record is `cron-job-switches-state.json` in the folder of the configuration write lock. It holds attribution only: `on`, `at` and `by` for each job. The switch itself is the key in the INI. `read_attribution` reads it with `atomic_json.load_json_dict`.
 - `LUPIN_CRON_SWITCH_INI` points the module at another file, and the record then sits beside it. Tests use it so the live file is never touched.
 
 ## The endpoint
-- `GET /api/cron-jobs` lists one row per registry job: `enabled`, `honoured`, `drift`, `last_changed_by`, `last_changed_at`. `honoured` is false for a job that does not read its switch. `drift` is true when the file disagrees with the record, meaning a hand edit. `caller_is_admin` is true only for an administrator login.
+- `GET /api/cron-jobs` lists one row per registry job: `enabled`, `honoured`, `drift`, `last_changed_by`, `last_changed_at`. `honoured` is false for a job that does not read its switch. `is_honoured` is true for a `cron_managed` job and for a job whose registry entry names an `enabled_key` and a `switch_reader`. `reads` says which: `run` for a job `job_run` starts, `tick` for a loop that checks a `TickSwitch`, none otherwise. `alarm` is true for one of the alarm jobs, and `inside` names the job whose tick this one runs inside. `drift` is true when the file disagrees with the record, meaning a hand edit. `caller_is_admin` is true only for an administrator login.
 - `PUT /api/cron-jobs/{job}/enabled` takes `{ on: bool }` and needs an administrator login. An API key or a non-admin gets 403, an unknown job 404, and a bad body 422. A job that does not read its switch gets 409, and so does a key the file lacks or defines twice.
 - A flip emits the `cron_job_switch_changed` WebSocket event to every client. A failed announcement does not fail the flip.
 
@@ -34,3 +33,5 @@ Each job in `src/conf/job-registry.json` has one on/off key in `src/conf/lupin-a
 - The legacy client shows the rows in the Scheduled Jobs section of the notifications page. Its code is `cron-jobs.js`. A row shows the switch, who flipped it last, and a note when `drift` is true.
 - Everyone sees the switches. Only an administrator login gets a control that sends the PUT. The control is disabled for a job that does not read its switch and for a key with no value yet.
 - The page updates a row when it receives `cron_job_switch_changed`.
+- The multiplexer has its own copy: the Scheduled Jobs pane, described in [[multiplexer-cron-jobs-pane]]. It polls every 60 seconds, flips with `ApiClient.put`, and repaints a row from the bus event.
+- The `:8000` E2E flips a scratch copy named by `LUPIN_CRON_SWITCH_INI`, never the real file. It refuses to run when the variable is unset. A compose change needs a force-recreate.

@@ -1,6 +1,6 @@
 ---
 capability: podcast-drive-publishing
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.drive_hook.make_job_folder_name@98083b5a3c
   - cosa.agents.podcast_generator.drive_hook.resolve_source_path@9a8d24cb0a

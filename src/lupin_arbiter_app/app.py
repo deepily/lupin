@@ -28,6 +28,7 @@ from fastapi import FastAPI
 from lupin_arbiter_app import __version__
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 from cosa.utils.csv_text import split_csv
+from lupin_mcp import cron_switch_read
 
 
 def _utcnow() -> datetime.datetime:
@@ -288,6 +289,7 @@ def _build_context_pressure_loop( cfg, store, *, clock=None, log_fn=None ):
         clock            = clock,
         log_fn           = log_fn,
         interval_seconds = int( cfg.get( "arbiter context watch interval seconds", default=60, return_type="int" ) ),
+        switch           = cron_switch_read.for_job( "context-pressure-writer", lambda line: log_fn( "job_switch", message=line ) ),
     )
 
 
@@ -619,6 +621,7 @@ def assemble_app(
         blind_threshold_polls  = int( cfg.get( "arbiter health blind threshold polls", default=3, return_type="int" ) ),
         restart_inspect_fn     = lambda name: docker_inspect_restart_count( name, inspect_timeout ),
         restart_loop_threshold = int( cfg.get( "arbiter health restart loop threshold transitions", default=2, return_type="int" ) ),
+        switch                 = cron_switch_read.for_job( "health-watcher", lambda line: health_log_fn( "job_switch", message=line ) ),
     )
     # Reload-blindness announcement (LOUD, not a comment): RestartCount only detects
     # a crash-loop while uvicorn --reload is OFF. If reload is armed on a watched

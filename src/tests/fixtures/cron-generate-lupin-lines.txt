@@ -17,4 +17,6 @@
 0 19 * * * <ROOT>/src/scripts/cron-job.sh io-tmp-sweep cron >> <ROOT>/io/claude_code_hooks/logs/io-tmp-sweep.log 2>&1 # io-tmp-sweep
 @reboot <ROOT>/src/scripts/cron-job.sh io-tmp-sweep boot >> <ROOT>/io/claude_code_hooks/logs/io-tmp-sweep.log 2>&1 # io-tmp-sweep
 */5 * * * * <ROOT>/src/scripts/cron-job.sh host-snapshot cron >> <ROOT>/io/jobs/host-snapshot/cron.log 2>&1 # job-host-snapshot
+0 18 * * * <ROOT>/src/scripts/cron-job.sh test-promotion cron >> /HOME/.lupin/logs/test-promotion.log 2>&1 # test-promotion
+@reboot sleep 600 && <ROOT>/src/scripts/cron-job.sh test-promotion boot >> /HOME/.lupin/logs/test-promotion.log 2>&1 # test-promotion
 2,12,22,32,42,52 * * * * <ROOT>/src/scripts/cron-job.sh hook-link-tick cron >> /HOME/.lupin/logs/hook-link-tick.log 2>&1 # hook-link-tick

@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-audit
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_audit.index_id_finder@39c1679d22
   - lupin_mcp.duplicate_check_audit.queue_audits@48f4a6a0f8

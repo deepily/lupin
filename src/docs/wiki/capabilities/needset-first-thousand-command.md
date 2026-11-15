@@ -1,6 +1,6 @@
 ---
 capability: needset-first-thousand-command
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.first_thousand.run_first_thousand@f0048216c1
   - lupin_mcp.reuse_needset.first_thousand.control_job@da8024fd0c

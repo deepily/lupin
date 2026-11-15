@@ -1,6 +1,6 @@
 ---
 capability: bundle-and-bridge-check-scripts
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.check_bundle_freshness.BuildScriptError@2649363c08
   - scripts.check_bundle_freshness.short_sha@6892a5a2ef

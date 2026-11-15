@@ -258,6 +258,8 @@
     },
     {
       "job": "context-tick",
+      "enabled_key": "cron job context-tick enabled",
+      "switch_reader": "lupin_mcp.job_run:switched_on",
       "catalog": "P1",
       "title": "Context-pressure tick (fleet)",
       "owner": "cheech",
@@ -446,6 +448,41 @@
       "cron_log": "{root}/io/jobs/host-snapshot/cron.log"
     },
     {
+      "job": "test-promotion",
+      "enabled_key": "cron job test-promotion enabled",
+      "catalog": "L31",
+      "title": "Daily test promotion",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 18 * * *"
+        },
+        {
+          "after_boot_seconds": 600
+        }
+      ],
+      "summary_path": "{root}/io/jobs/test-promotion/job-summary.json",
+      "fix_debt": true,
+      "fix_debt_key": "prefix:epic:daily-test-promotion-",
+      "own_summary": true,
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.daily_test_promotion",
+          "--branch",
+          "auto",
+          "--trigger",
+          "hand"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/test-promotion.log",
+      "cron_tag": "test-promotion"
+    },
+    {
       "job": "hook-link-tick",
       "enabled_key": "cron job hook-link-tick enabled",
       "catalog": "L9",
@@ -476,6 +513,8 @@
     },
     {
       "job": "yearly-reminders",
+      "enabled_key": "cron job yearly-reminders enabled",
+      "switch_reader": "lupin_mcp.job_run:switched_on",
       "catalog": "L10",
       "title": "Yearly reminders (password rotation, LoRA review)",
       "owner": "rick",
@@ -497,6 +536,9 @@
     },
     {
       "job": "fleet-arbiter",
+      "alarm": true,
+      "enabled_key": "cron job fleet-arbiter enabled",
+      "switch_reader": "lupin_arbiter_app.fleet_arbiter_loop:build_fleet_arbiter_job_factory",
       "catalog": "L11",
       "title": "Fleet arbiter (:8001)",
       "owner": "cheech",
@@ -511,6 +553,8 @@
     },
     {
       "job": "context-pressure-writer",
+      "enabled_key": "cron job context-pressure-writer enabled",
+      "switch_reader": "lupin_arbiter_app.app:_build_context_pressure_loop",
       "catalog": "L13",
       "title": "Context-pressure writer",
       "owner": "cheech",
@@ -525,6 +569,9 @@
     },
     {
       "job": "health-watcher",
+      "alarm": true,
+      "enabled_key": "cron job health-watcher enabled",
+      "switch_reader": "lupin_arbiter_app.app:assemble_app",
       "catalog": "L14",
       "title": "Health watcher",
       "owner": "cheech",
@@ -539,6 +586,9 @@
     },
     {
       "job": "worktree-janitor",
+      "inside": "fleet-arbiter",
+      "enabled_key": "cron job worktree-janitor enabled",
+      "switch_reader": "lupin_arbiter_app.fleet_arbiter_loop:build_fleet_arbiter_job_factory",
       "catalog": "L12",
       "title": "Worktree janitor",
       "owner": "cheech",
@@ -566,6 +616,8 @@
     },
     {
       "job": "notification-expiry",
+      "enabled_key": "cron job notification-expiry enabled",
+      "switch_reader": "lupin_app.main:notification_expiry_sweep_loop",
       "catalog": "L18",
       "title": "Notification expiry",
       "owner": "cheech",
@@ -582,6 +634,8 @@
     },
     {
       "job": "commons-archival",
+      "enabled_key": "cron job commons-archival enabled",
+      "switch_reader": "lupin_mcp.commons_archival:CommonsArchiver._run_loop",
       "catalog": "L19",
       "title": "Commons archival",
       "owner": "cheech",
@@ -598,6 +652,9 @@
     },
     {
       "job": "notify-outbox",
+      "alarm": true,
+      "enabled_key": "cron job notify-outbox enabled",
+      "switch_reader": "lupin_mcp.notify_outbox:start_flusher",
       "catalog": "L20",
       "title": "Notify outbox flush",
       "owner": "cheech",
@@ -615,6 +672,9 @@
     },
     {
       "job": "socket-housekeeping",
+      "alarm": true,
+      "enabled_key": "cron job socket-housekeeping enabled",
+      "switch_reader": "lupin_app.main:websocket_heartbeat_loop",
       "catalog": "L22",
       "title": "Socket heartbeat, cleanup and transcript tailer",
       "owner": "cheech",
@@ -636,6 +696,8 @@
     },
     {
       "job": "side-services",
+      "enabled_key": "cron job side-services enabled",
+      "switch_reader": "cosa.utils.cc_memory_watch:main",
       "catalog": "L28",
       "title": "Side services",
       "owner": "cheech",
@@ -670,6 +732,8 @@
     },
     {
       "job": "pokes",
+      "enabled_key": "cron job pokes enabled",
+      "switch_reader": "cosa.agents.heartbeat_poker_job:HeartbeatPokerJob.__init__",
       "catalog": "L30",
       "title": "Pokes (when started)",
       "owner": "cheech",

@@ -1,6 +1,6 @@
 ---
 capability: web-client-doc-relative-links
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.docLink.resolveRelativeDocHref@353053c05d
   - src.lupin_app.static.js.multiplexer.render.docLink.rewriteRelativeDocLinks@be4ecf60b2

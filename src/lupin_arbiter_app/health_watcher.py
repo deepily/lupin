@@ -453,6 +453,7 @@ class HealthWatcherLoop:
         blind_threshold_polls   : int                  = 3,
         restart_inspect_fn      : Optional[ Callable[ [ str ], Optional[ int ] ] ] = None,
         restart_loop_threshold  : int                  = 2,
+        switch                  : Optional[ Any ]      = None,
     ) -> None:
         """
         Validate the arguments and build one health tracker and one restart tracker per container.
@@ -461,6 +462,7 @@ class HealthWatcherLoop:
             - containers is a non-empty list of container names
             - interval_seconds, flap_window_seconds, blind_threshold_polls are positive
             - flap_threshold >= 1 and restart_loop_threshold >= 1
+            - switch is None, or a TickSwitch the loop checks before every poll
 
         Ensures:
             - one ContainerHealthTracker per container (flap-excluded if listed)
@@ -491,6 +493,7 @@ class HealthWatcherLoop:
         self._log_fn                = log_fn if log_fn is not None else _default_log_fn
         self._store                 = store
         self._interval_seconds      = interval_seconds
+        self._switch                = switch
         self._blind_threshold_polls = blind_threshold_polls
         self._restart_inspect_fn    = restart_inspect_fn
 
@@ -659,7 +662,7 @@ class HealthWatcherLoop:
 
         One bad poll never exits the loop, because the observer must keep observing.
         """
-        run_poll_loop( self._stop, self.poll_once, self._log, self._clock, self._interval_seconds )
+        run_poll_loop( self._stop, self.poll_once, self._log, self._clock, self._interval_seconds, self._switch )
 
     def start( self ) -> None:
         """Spawn the daemon poll thread."""

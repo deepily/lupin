@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-pool-builder
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.doc_lint.pool_builder.run_git@9183aac4ce
   - cosa.repo.doc_lint.pool_builder.resolve_commit@73b839f6ae

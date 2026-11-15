@@ -1,6 +1,6 @@
 ---
 capability: reuse-real-stage-check
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_real_stage_check.RunRefused@6e0ab10c9c
   - lupin_mcp.reuse_real_stage_check.rank_of@5d1cde8a67

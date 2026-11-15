@@ -1,6 +1,6 @@
 ---
 capability: reap-memento-checks
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reap_memento.seat_memento_slot@d22d72d360
   - lupin_mcp.reap_memento.seat_memento_root_record@fa71113630

@@ -31,6 +31,12 @@
 .cron-state-off     { color : #842029; }
 .cron-state-unknown { color : #6c757d; }
 
+/* The button keeps its own column on line 1, and the full-width spans go below it, so a drift row never pushes it down. */
+.cron-flip {
+    grid-column : 6;
+    grid-row    : 1;
+}
+
 .cron-flip:disabled {
     cursor  : not-allowed;
     opacity : 0.5;
@@ -38,11 +44,31 @@
 
 .cron-error {
     grid-column : 1 / -1;
+    grid-row    : 5;
     color       : #842029;
 }
 
 .cron-drift {
     grid-column : 1 / -1;
+    grid-row    : 2;
     color       : #664d03;
     font-weight : 600;
+}
+
+/* A switch the server could not read: the job skips its ticks, so the row says so in red (row c38a49bd). */
+.cron-unreadable {
+    background-color : #f8d7da;
+}
+
+.cron-unreadable-note {
+    grid-column : 1 / -1;
+    grid-row    : 3;
+    color       : #842029;
+    font-weight : 600;
+}
+
+.cron-inside {
+    grid-column : 1 / -1;
+    grid-row    : 4;
+    color       : #6c757d;
 }

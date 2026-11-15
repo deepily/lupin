@@ -17,7 +17,7 @@ from lupin_mcp import job_run as jrun
 from tests.unit.test_librarian_tick import cron   # noqa: F401  (fixture: the fake crontab and the fake lock)
 
 
-ON = types.SimpleNamespace( get_required=lambda key, return_type="string": True )     # a configuration stand-in whose every switch is on
+ON = types.SimpleNamespace( get_required=lambda key, return_type="string": "true" )     # a configuration stand-in whose every switch is on: the text the real get_required returns
 
 
 def job( name, schedule, **extra ):
@@ -361,9 +361,9 @@ def test_main_passes_own_summary_through_as_no_record_written( tree, monkeypatch
     assert code == 0 and not ( tree / "io" / "jobs" / "alpha" / "job-summary.json" ).exists()
 
 
-def test_the_four_jobs_that_write_their_own_record_are_marked_so_in_the_shipped_registry():
+def test_the_five_jobs_that_write_their_own_record_are_marked_so_in_the_shipped_registry():
     own = { j[ "job" ] for j in jr.load_registry( REAL_ROOT )[ "jobs" ] if j.get( "own_summary" ) }
-    assert own == { "duplicate-check", "wiki-librarian", "vector-refresh", "reuse-behaviour" }
+    assert own == { "duplicate-check", "wiki-librarian", "vector-refresh", "reuse-behaviour", "test-promotion" }
 
 
 def test_exit_codes_a_job_lists_as_clean_are_recorded_clean_and_the_rest_failed( tmp_path, monkeypatch ):

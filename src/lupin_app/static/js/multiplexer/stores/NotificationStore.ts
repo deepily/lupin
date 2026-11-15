@@ -347,6 +347,9 @@ interface ServerNotificationFields {
   priority            ?: string;
   suppress_ding       ?: boolean;
   tts_raw             ?: boolean;
+  // Row 92076977: the server stamps this on a quiet worker's notifications. It lowers `high` to
+  // `medium` for the speech gate. `urgent` still speaks.
+  worker_quiet        ?: boolean;
 }
 
 interface ResponsePayload {
@@ -909,7 +912,9 @@ class NotificationStoreImpl implements NotificationStore {
     //     suppress_ding condition.
     //   • ttsText = tts_raw === true ? message : formatTtsMessage(...) — the
     //     fire-and-forget default-contextualized derivation (legacy :5987-5989).
-    if ( raw.priority === "high" || raw.priority === "urgent" ) {
+    // A quiet worker's `high` is spoken as `medium`, which is not spoken. Its `urgent` is untouched.
+    // The multiplexer plays no ding of its own, so the legacy client's kept ding has no counterpart here.
+    if ( ( raw.priority === "high" && raw.worker_quiet !== true ) || raw.priority === "urgent" ) {
       // normalize() above guarantees norm.message is a NON-EMPTY string — a
       // message-less frame returns null at `if (!norm) return` before reaching
       // here — so reading norm.message needs no nullish guard and stays typed

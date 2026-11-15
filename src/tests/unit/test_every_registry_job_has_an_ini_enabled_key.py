@@ -1,13 +1,13 @@
-"""Census guard: every cron-managed registry job has a run-time switch in the INI."""
+"""Census guard: every job that reads a switch has its INI key, and no other job has one."""
 import json
 import re
 
 import cosa.utils.util as cu
+from lupin_mcp.cron_switch_read import parse_switch
 
 REGISTRY = "/src/conf/job-registry.json"
 INI      = "/src/conf/lupin-app.ini"
 SPLAINER = "/src/conf/lupin-app-splainer.ini"
-HELD_OFF = { "duplicate-check" }
 
 
 def read( path ):
@@ -24,28 +24,39 @@ def switch_values( text ):
 
 
 def missing_switches( jobs, ini_text ):
-    """Ensures: returns the managed jobs whose key is not canonical or has no true/false line."""
+    """
+    Ensures: returns the jobs that read a switch but lack a true or false canonical key.
+
+    A job reads a switch when it is cron-managed or names a switch_reader.
+    """
     have = switch_values( ini_text )
-    return [ j[ "job" ] for j in jobs if j.get( "cron_managed" ) and ( j.get( "enabled_key" ) != f"cron job {j[ 'job' ]} enabled" or have.get( j.get( "enabled_key" ) ) not in ( "true", "false" ) ) ]
+    return [ j[ "job" ] for j in jobs if ( j.get( "cron_managed" ) or j.get( "switch_reader" ) ) and ( j.get( "enabled_key" ) != f"cron job {j[ 'job' ]} enabled" or have.get( j.get( "enabled_key" ) ) not in ( "true", "false" ) ) ]
 
 
-def test_the_registry_holds_twelve_cron_managed_jobs_and_each_has_a_switch_in_the_ini():
+def test_the_registry_holds_thirteen_cron_managed_jobs_and_each_has_a_switch_in_the_ini():
     jobs = registry_jobs()
-    assert len( jobs ) == 24 and len( [ j for j in jobs if j.get( "cron_managed" ) ] ) == 12
+    assert len( jobs ) == 25 and len( [ j for j in jobs if j.get( "cron_managed" ) ] ) == 13
     assert missing_switches( jobs, read( INI ) ) == []
 
 
-def test_no_job_outside_cron_management_carries_a_key_that_controls_nothing():
+def test_a_job_outside_cron_management_carries_a_key_only_when_it_names_the_loop_that_reads_it():
     unmanaged = [ j for j in registry_jobs() if not j.get( "cron_managed" ) ]
     assert len( unmanaged ) == 12
-    assert [ j[ "job" ] for j in unmanaged if "enabled_key" in j ] == []
-    assert sorted( switch_values( read( INI ) ) ) == sorted( j[ "enabled_key" ] for j in registry_jobs() if j.get( "cron_managed" ) )
+    assert [ j[ "job" ] for j in unmanaged if "enabled_key" in j and not j.get( "switch_reader" ) ] == []
+    assert sorted( switch_values( read( INI ) ) ) == sorted( j[ "enabled_key" ] for j in registry_jobs() if "enabled_key" in j )
 
 
-def test_only_the_duplicate_check_ships_switched_off():
+def test_every_switch_reads_as_on_or_off_and_no_test_pins_which():
+    """
+    Every switch reads on or off, and no value is pinned.
+
+    Ensures: Rick flips values through the endpoint, so only the key set and a readable value are asserted.
+    """
     have = switch_values( read( INI ) )
-    assert sorted( k for k, v in have.items() if v == "false" ) == sorted( f"cron job {j} enabled" for j in HELD_OFF )
-    assert len( [ v for v in have.values() if v == "true" ] ) == 11
+    keys = [ j[ "enabled_key" ] for j in registry_jobs() if "enabled_key" in j ]
+    assert len( keys ) > 0
+    assert sorted( have ) == sorted( keys )
+    assert [ k for k in keys if parse_switch( have[ k ] ) is None ] == []
 
 
 def test_every_switch_has_a_splainer_twin():

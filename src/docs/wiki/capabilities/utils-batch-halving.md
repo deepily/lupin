@@ -1,6 +1,6 @@
 ---
 capability: utils-batch-halving
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.batch_halving.split_batch@1d5480dd2b
   - cosa.utils.batch_halving.embed_in_halves@d22a91fdb0

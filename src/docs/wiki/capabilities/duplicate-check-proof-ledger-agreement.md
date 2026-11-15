@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-proof-ledger-agreement
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.proof.ledger_agreement.read_ledger@b7a66d6c0e
   - cosa.repo.duplicate_check.proof.ledger_agreement.paired@f5b41167a7

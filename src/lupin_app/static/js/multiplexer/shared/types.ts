@@ -86,6 +86,8 @@ export type LupinEventType =
   // Row 8796333b slice 1 — server invalidation push: a commit appended task-store events. No delta;
   // TaskListStore re-reads on it. The 60s poll stays as the safety net.
   | "task_store_changed"
+  // Row 063fc1a8 — an administrator flipped a scheduled job's switch; the payload is the job's row.
+  | "cron_job_switch_changed"
   // R5 (2026-07-01) — session-name/topic control event. NotificationStore
   // intercepts a `session_topic` notification (raw notification_type), skips
   // carding it (legacy notifications.js:5862 "skip history card"), and re-emits
@@ -766,6 +768,10 @@ export interface SenderRecord {
   // header's `.sender-session-name` span. Client-persisted (localStorage
   // mirror in SenderStore) since the cold-load hydration does NOT carry it.
   session_name?            : string;
+  // True while the server stamps `worker_quiet` on this sender's notifications: a spawned, non-manager
+  // session whose speakerphone is off. It drives the quiet chip on the sender card. A speakerphone_changed
+  // that turns the speakerphone on clears it. It is not `conversation_mode_active`, the pinned-conversation flag.
+  worker_quiet?            : boolean;
 }
 
 // R5 (2026-07-01) — payload of the `session_topic` bus event (NotificationStore
@@ -1426,6 +1432,7 @@ export interface BootCompletePayload {
     holdingAreaRenderer?         : string;
     epicBoardRenderer?           : string;
     backgroundJobsRenderer?      : string;
+    cronJobsRenderer?            : string;
     // Row 470b7509 — Finished Tasks, and it walked into the trap the comment
     // above predicts: the mount + the payload literal were both edited, both
     // guards stayed green, and `tsc` is what named this file. That is still

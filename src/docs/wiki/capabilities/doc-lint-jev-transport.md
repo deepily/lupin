@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-jev-transport
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.doc_lint.jev_transport.JevConfigError@49756aa91e
   - cosa.repo.doc_lint.jev_transport.JevCallError@906f2317fd

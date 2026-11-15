@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-shadow-audit-queue
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.shadow_audit.enqueue_if_sampled@7e5d77b780
   - cosa.repo.symindex.candidates.shadow_audit.enqueue_pending@2a7888df6f

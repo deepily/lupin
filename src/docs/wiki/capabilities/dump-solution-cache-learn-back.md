@@ -1,6 +1,6 @@
 ---
 capability: dump-solution-cache-learn-back
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.dump_solution_cache.latest_snapshot_row@a0102e1bd7
   - scripts.dump_solution_cache.queue_jobs@d6ac9b7465

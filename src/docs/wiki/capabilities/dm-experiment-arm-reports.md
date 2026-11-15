@@ -1,6 +1,6 @@
 ---
 capability: dm-experiment-arm-reports
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.dm-experiment.analyze_arms.co_primary@b73dbe238d
   - scripts.dm-experiment.analyze_arms.order_effect@f1eab4365f

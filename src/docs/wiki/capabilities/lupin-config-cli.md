@@ -1,6 +1,6 @@
 ---
 capability: lupin-config-cli
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.lupin_config.get_config_path@118bcf619d
   - scripts.lupin_config.print_header@10d4f4187e

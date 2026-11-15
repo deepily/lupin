@@ -1,6 +1,6 @@
 ---
 capability: reuse-stage-one-analysis-passes
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_stage1_analysis.pass_one@b6ede74629
   - lupin_mcp.reuse_stage1_analysis.pass_two@8f8f015a91

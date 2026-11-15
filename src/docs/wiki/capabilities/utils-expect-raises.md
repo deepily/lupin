@@ -1,6 +1,6 @@
 ---
 capability: utils-expect-raises
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.expect_raises.expect_raises@819b399b2a
 ---

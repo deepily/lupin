@@ -21,6 +21,19 @@ import pytest
 from lupin_app import bootstrap_helpers
 from lupin_app import main
 
+
+class _AlwaysOn:
+    """A switch that always allows the tick."""
+
+    def allowed( self ):
+        return True
+
+
+@pytest.fixture( autouse=True )
+def _switch_is_on( monkeypatch ):
+    """Keep the loop switch on, so these tests cover the work and not the switch."""
+    monkeypatch.setattr( main.cron_switch_read, "for_job", lambda job, log=print: _AlwaysOn() )
+
 _MAIN_PATH = Path( main.__file__ )
 
 

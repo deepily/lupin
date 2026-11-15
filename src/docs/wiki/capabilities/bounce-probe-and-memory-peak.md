@@ -1,6 +1,6 @@
 ---
 capability: bounce-probe-and-memory-peak
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.bounce_busy_probe.classify@1ab50c5e04
   - scripts.bounce_busy_probe.probe@b6594de86b

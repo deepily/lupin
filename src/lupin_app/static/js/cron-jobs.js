@@ -3,8 +3,13 @@
  *
  * Shows each cron job's on/off switch, read from lupin-app.ini by GET /api/cron-jobs, and lets an
  * administrator flip it with PUT /api/cron-jobs/{job}/enabled. A flip edits the INI key the job
- * reads at its next start; it does not stop a run already going. Anyone who is not an administrator
- * sees the switches read-only: the server's `caller_is_admin` decides, never this file.
+ * reads at its next start, or at its next tick for a loop inside a server; it does not stop a run
+ * already going. Anyone who is not an administrator sees the switches read-only: the server's
+ * `caller_is_admin` decides, never this file.
+ *
+ * Turning off an alarm job (row.alarm, set in the registry) takes two clicks: the first asks for
+ * confirmation, because an alarm job being off silences what would report it (Rick, 13 Nov).
+ * A switch the server could not read shows as a red "switch unreadable" row (row c38a49bd).
  *
  * Every text goes in through textContent, never innerHTML. The multiplexer gets its own copy later
  * (no shared runtime code between the two clients, ruling 87812328).
@@ -22,12 +27,28 @@
     const NOT_REPORTED  = "not reported";
     const DRIFT_TEXT    = "changed outside the endpoint";
     const STATE_TEXT    = { true : "ON", false : "OFF", null : "UNKNOWN" };
+    const READS_TEXT    = { run : "reads its switch at each run", tick : "reads its switch every tick" };
+    const UNREADABLE    = "switch unreadable: the key is missing from the configuration file or holds neither true nor false";
+    const CONFIRM_TEXT  = "Turning this off also silences what would report it. Click again to confirm.";
 
-    let current = { jobs : [], caller_is_admin : false };
+    let current        = { jobs : [], caller_is_admin : false };
+    let pendingConfirm = null;      // the job whose turn-off is waiting for its confirming click
 
     // ─── Text rules (no DOM, no clock) ─────────────────────────────────
 
     function stateText( enabled ) { return STATE_TEXT[ String( enabled ) ]; }
+
+    function readsText( row ) {
+        if ( row.reads in READS_TEXT ) return READS_TEXT[ row.reads ];
+        return row.honoured ? "reads its switch" : "does not read its switch yet";
+    }
+
+    // A job that runs inside another job's tick is off while that job is off, whatever its own switch says.
+    function insideText( row, jobs ) {
+        if ( typeof row.inside !== "string" ) return null;
+        const host = jobs.find( ( j ) => j.job === row.inside );
+        return host !== undefined && host.enabled === false ? "off while " + row.inside + " is off" : null;
+    }
 
     function changedText( row ) {
         if ( row.last_changed_by === null || row.last_changed_at === null ) return NOT_REPORTED;
@@ -52,15 +73,19 @@
         return node;
     }
 
-    function renderRow( row, canFlip, onFlip ) {
-        const item = el( "div", "cron-item", null, "cron-item" );
+    function renderRow( row, canFlip, onFlip, jobs ) {
+        const unreadable = row.honoured && row.enabled === null;
+        const item = el( "div", unreadable ? "cron-item cron-unreadable" : "cron-item", null, "cron-item" );
         item.setAttribute( "data-job", row.job );
         item.appendChild( el( "span", "cron-title", row.title, "cron-title" ) );
         item.appendChild( el( "span", "cron-schedule", row.schedule, "cron-schedule" ) );
         item.appendChild( el( "span", "cron-state cron-state-" + stateText( row.enabled ).toLowerCase(), stateText( row.enabled ), "cron-state" ) );
         item.appendChild( el( "span", "cron-changed", changedText( row ), "cron-changed" ) );
-        item.appendChild( el( "span", "cron-honoured", row.honoured ? "reads its switch" : "does not read its switch yet", "cron-honoured" ) );
+        item.appendChild( el( "span", "cron-honoured", readsText( row ), "cron-honoured" ) );
         if ( row.drift ) item.appendChild( el( "span", "cron-drift", DRIFT_TEXT, "cron-drift" ) );
+        if ( unreadable ) item.appendChild( el( "span", "cron-unreadable-note", UNREADABLE, "cron-unreadable" ) );
+        const inside = insideText( row, jobs || [] );
+        if ( inside !== null ) item.appendChild( el( "span", "cron-inside", inside, "cron-inside" ) );
         const button = el( "button", "cron-flip", row.enabled === true ? "Turn off" : "Turn on", "cron-flip" );
         button.type = "button";
         button.disabled = !canFlip || row.enabled === null || !row.honoured;     // no key to flip yet, or nothing reads it
@@ -77,9 +102,10 @@
         current = summary;
         mount.replaceChildren();
         mount.appendChild( el( "p", "cron-note", summary.caller_is_admin
-            ? "Flipping a switch takes effect at the job's next start. A run already going is not stopped."
+            ? "Flipping a switch takes effect at the job's next start, or next tick for a loop. A run already going is not stopped."
             : "Read-only: only an administrator can flip a switch.", "cron-note" ) );
-        for ( const row of summary.jobs ) mount.appendChild( renderRow( row, summary.caller_is_admin, onFlip ) );
+        pendingConfirm = null;      // a redraw drops a half-finished confirmation, so one stale click never turns a job off
+        for ( const row of summary.jobs ) mount.appendChild( renderRow( row, summary.caller_is_admin, onFlip, summary.jobs ) );
         const count = document.getElementById( "cron-jobs-count" );
         const off   = summary.jobs.filter( ( j ) => j.enabled === false ).length;
         if ( count !== null ) count.textContent = summary.jobs.length + ( off > 0 ? " (" + off + " off)" : "" );
@@ -120,13 +146,26 @@
         const index = current.jobs.findIndex( ( j ) => j.job === row.job );
         if ( index === -1 ) return;
         current.jobs[ index ] = row;
-        render( target, current, flip );
+        render( target, current, requestFlip );
     }
 
     // The queue socket frame is { type, timestamp, ...row }.
     function applyEvent( frame ) {
         if ( frame === null || typeof frame !== "object" || typeof frame.job !== "string" ) return;
         applyRow( frame );
+    }
+
+    // The click handler: an alarm job's turn-off waits for a second, confirming click.
+    function requestFlip( row ) {
+        if ( row.alarm === true && row.enabled === true && pendingConfirm !== row.job ) {
+            pendingConfirm = row.job;
+            const item = itemFor( row.job );
+            if ( item !== null ) item.querySelector( ".cron-flip" ).textContent = "Confirm: turn off";
+            showError( row.job, CONFIRM_TEXT );
+            return Promise.resolve( "confirm" );
+        }
+        pendingConfirm = null;
+        return flip( row );
     }
 
     async function flip( row ) {
@@ -155,7 +194,7 @@
             const resp = await authFetch( LIST_URL );
             if ( !resp.ok ) throw new Error( "HTTP " + resp.status );
             const summary = await resp.json();
-            render( target, summary, flip );
+            render( target, summary, requestFlip );
             errorEl.hidden = true;
         } catch ( err ) {
             errorEl.textContent = "Could not load the scheduled jobs: " + ( err instanceof Error ? err.message : String( err ) );
@@ -170,7 +209,7 @@
         window.setInterval( refresh, POLL_MS );
     }
 
-    window.cronJobs = { refresh, start, render, renderRow, applyEvent, flip, stateText, changedText, flipFailureText, flipPath };
+    window.cronJobs = { refresh, start, render, renderRow, applyEvent, flip, requestFlip, stateText, readsText, insideText, changedText, flipFailureText, flipPath };
 
     if ( document.readyState === "loading" ) document.addEventListener( "DOMContentLoaded", start );
     else start();

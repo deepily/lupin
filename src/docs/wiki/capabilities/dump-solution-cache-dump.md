@@ -1,6 +1,6 @@
 ---
 capability: dump-solution-cache-dump
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.dump_solution_cache.databases_for@1fd508e2c3
   - scripts.dump_solution_cache.tables_for@ffb8e824ba

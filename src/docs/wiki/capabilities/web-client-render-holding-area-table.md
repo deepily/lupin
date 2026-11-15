@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-holding-area-table
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.holdingAreaTable.holdingApproveAllTitle@9abd298fc5
   - src.lupin_app.static.js.multiplexer.render.templates.holdingAreaTable.holdingWontFixAllTitle@306ccb2f92

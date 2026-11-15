@@ -490,6 +490,8 @@ const QUEUE_SUBSCRIBED_EVENTS: ReadonlyArray<string> = [
   "cc_transcript_state",
   // Row 8796333b slice 1: task panes re-read when the store commits a change.
   "task_store_changed",
+  // Row 063fc1a8: an administrator flipped a scheduled job's switch. Queue socket only.
+  "cron_job_switch_changed",
   "auth_success",
   "auth_error",
   "connect",

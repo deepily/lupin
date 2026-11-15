@@ -1,6 +1,6 @@
 ---
 capability: swe-team-notifications
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.swe_team.cosa_interface.get_sender_id@63b6e070e0
   - cosa.agents.swe_team.voice_io.reconfigure@8265f4719a

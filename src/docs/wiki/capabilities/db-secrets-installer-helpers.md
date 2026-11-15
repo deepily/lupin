@@ -1,6 +1,6 @@
 ---
 capability: db-secrets-installer-helpers
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.install_db_secrets.Refusal@113e9cff1b
   - scripts.install_db_secrets.Host@a6622caa5c

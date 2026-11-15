@@ -1,6 +1,6 @@
 ---
 capability: reuse-run-harness-server
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_harness.server.port_is_free@603d8c79fd
   - lupin_mcp.reuse_harness.server.answers_health@b5582782ef

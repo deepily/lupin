@@ -29,6 +29,7 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.routers import cron_jobs
 from lupin_mcp import config_write_lock
 from lupin_mcp import fleet_cap_ini_io as io
+from tests.helpers.main_ini_fence import main_ini_fence   # noqa: F401 - autouse: the main checkout's INI is fenced in every test here
 
 LIST_PATH = "/api/cron-jobs"
 
@@ -51,6 +52,7 @@ def ini( tmp_path, monkeypatch ):
     path = tmp_path / "lupin-app.ini"
     path.write_text( _ini_text(), encoding="utf-8" )
     monkeypatch.setenv( sw.INI_OVERRIDE_ENV, str( path ) )
+    assert sw.ini_path() == str( path ), "the resolver must name the temp file, or the writes below would reach the real one"
     return path
 
 
@@ -88,7 +90,7 @@ def test_the_list_has_one_row_per_registry_job( ini ):
     rows = _client().get( LIST_PATH ).json()[ "jobs" ]
     names = [ r[ "job" ] for r in rows ]
     assert len( rows ) == len( json.load( open( os.path.join( cu.get_project_root(), "src/conf/job-registry.json" ) ) )[ "jobs" ] )
-    assert len( rows ) == 24
+    assert len( rows ) == 25
     assert names == [ e[ "job" ] for e in _registry() ]
     first = rows[ 0 ]
     assert first[ "key" ] == f"cron job {first[ 'job' ]} enabled"
@@ -295,18 +297,21 @@ def test_a_failed_announcement_does_not_fail_the_flip( ini, monkeypatch, capsys 
 
 # ── honoured and drift (María's amendments 1 and 3) ──────────────────────────
 
-def test_honoured_is_computed_from_the_registry_and_names_twelve_jobs( ini ):
+def test_honoured_is_computed_from_the_registry_and_names_twenty_five_jobs( ini ):
     rows = _client().get( LIST_PATH ).json()[ "jobs" ]
     honoured = sorted( r[ "job" ] for r in rows if r[ "honoured" ] )
-    pinned   = sorted( e[ "job" ] for e in json.load( open( os.path.join( cu.get_project_root(), "src/conf/job-registry.json" ) ) )[ "jobs" ] if e.get( "cron_managed" ) is True )
-    assert honoured == pinned and len( honoured ) == 12
-    assert all( r[ "honoured" ] is False for r in rows if r[ "job" ] in ( "fleet-arbiter", "context-tick", "yearly-reminders" ) )
+    entries  = json.load( open( os.path.join( cu.get_project_root(), "src/conf/job-registry.json" ) ) )[ "jobs" ]
+    pinned   = sorted( e[ "job" ] for e in entries if e.get( "cron_managed" ) is True or "switch_reader" in e )
+    assert honoured == pinned and len( honoured ) == 25      # 13 cron-managed (test-promotion among them), context-tick and yearly-reminders run through job_run; 4 arbiter loops, 4 server loops and the poker job check a TickSwitch; side-services names the memory watcher's loop (row c38a49bd)
+    assert "fleet-arbiter" in honoured and "side-services" in honoured
+    assert all( r[ "honoured" ] is True for r in rows ), "every registry job reads its switch now"
 
 
-def test_a_job_that_does_not_read_its_switch_answers_409_and_writes_nothing( ini, announced ):
+def test_a_job_that_does_not_read_its_switch_answers_409_and_writes_nothing( ini, announced, monkeypatch ):
+    monkeypatch.setattr( sw, "is_honoured", lambda entry: entry[ "job" ] != "notify-outbox" )     # every shipped job is honoured now, so one is made not to be
     before = ini.read_text()
-    response = _put( _client(), "fleet-arbiter", { "on": False } )
-    assert response.status_code == 409 and "fleet-arbiter" in response.json()[ "detail" ]
+    response = _put( _client(), "notify-outbox", { "on": False } )
+    assert response.status_code == 409 and "notify-outbox" in response.json()[ "detail" ]
     assert ini.read_text() == before and announced == []
     assert not os.path.exists( sw.state_path() )
 

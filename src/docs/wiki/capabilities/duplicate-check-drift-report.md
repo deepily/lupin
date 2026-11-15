@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-drift-report
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_drift.week_of_text@c70029b17f
   - lupin_mcp.duplicate_check_drift.run_documents@092059e5b4

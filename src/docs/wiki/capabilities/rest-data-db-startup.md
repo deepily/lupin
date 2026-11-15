@@ -1,6 +1,6 @@
 ---
 capability: rest-data-db-startup
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.db.auto_migrate.build_alembic_config@341eae8102
   - cosa.rest.db.auto_migrate.next_backoff@37ce220dd0

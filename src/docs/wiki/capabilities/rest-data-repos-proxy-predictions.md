@@ -1,6 +1,6 @@
 ---
 capability: rest-data-repos-proxy-predictions
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.db.repositories.proxy_decision_repository.ProxyDecisionRepository@094813f6d3
   - cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository@ddeeee6a9c

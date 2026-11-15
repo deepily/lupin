@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-model-transport
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.doc_lint.model_transport.record_calls@adaa91ee5d
   - cosa.repo.doc_lint.model_transport.ModelCallError@0f1f3577ec

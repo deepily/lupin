@@ -1,8 +1,8 @@
 ---
 capability: web-client-render-cards-sender
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.templates.senderCard.renderSenderCard@1a5f253f50
+  - src.lupin_app.static.js.multiplexer.render.templates.senderCard.renderSenderCard@eeb9983902
   - src.lupin_app.static.js.multiplexer.render.templates.senderCard.renderVoiceInputRow@351c0ac188
   - src.lupin_app.static.js.multiplexer.render.templates.senderCard.activeIndicator@80151e6632
   - src.lupin_app.static.js.multiplexer.render.templates.senderCard.senderStatusGlyph@50f3a6f01c

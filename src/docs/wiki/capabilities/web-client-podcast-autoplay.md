@@ -1,6 +1,6 @@
 ---
 capability: web-client-podcast-autoplay
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.podcastLinks.removePodcastOverlay@431a5f121a
   - src.lupin_app.static.js.multiplexer.render.podcastLinks.isPodcastOverlayOpen@c43862cd01

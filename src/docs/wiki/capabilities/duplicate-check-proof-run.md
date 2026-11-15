@@ -1,6 +1,6 @@
 ---
 capability: duplicate-check-proof-run
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.proof.monolith_pairs.assemble_pairs@d7d0b7293b
   - cosa.repo.duplicate_check.proof.monolith_pairs.blob_sha@c072f42015

@@ -1,6 +1,6 @@
 ---
 capability: needset-probe-d-e
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.probe_d_e.drafted_rows@9d721caf69
   - lupin_mcp.reuse_needset.probe_d_e.passes_agree@0dcd7e4117

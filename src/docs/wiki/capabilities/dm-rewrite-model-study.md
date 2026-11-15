@@ -1,6 +1,6 @@
 ---
 capability: dm-rewrite-model-study
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.research.phi4_flash_lite_study.freeze_corpus.freeze@667c1e7083
   - cosa.research.phi4_flash_lite_study.freeze_corpus.assert_snapshot_is_not_live@be6f2b6d3e

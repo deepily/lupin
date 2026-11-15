@@ -1,6 +1,6 @@
 ---
 capability: needset-launch-guards
-pin_algorithm: py3.13.x095bff/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.launch_preflight.begun_run_names@69f4ef457a
   - lupin_mcp.reuse_needset.launch_preflight.next_run_name@d42595b2d3

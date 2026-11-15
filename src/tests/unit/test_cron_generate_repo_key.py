@@ -38,7 +38,7 @@ def normalised_lines( root=REAL_ROOT ):
 def test_lupins_generated_lines_are_the_ones_captured_before_the_repo_key_existed( fixed_places ):
     """Compare the real registry's lines with a golden file the unchanged generator wrote."""
     golden = GOLDEN.read_text().splitlines()
-    assert len( golden ) == 20, "the header and Lupin's 19 job lines"
+    assert len( golden ) == 22, "the header and Lupin's 21 job lines"
     assert normalised_lines() == golden
 
 
