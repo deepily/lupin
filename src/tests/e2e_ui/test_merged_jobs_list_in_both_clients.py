@@ -131,7 +131,9 @@ def test_a_switch_flip_from_line_2_changes_the_ini_file_and_the_row_stays_open( 
     state, flip = line2.get_by_test_id( "cron-state" ), line2.get_by_test_id( "cron-flip" )
     assert state.inner_text() == "ON" and flip.is_enabled() and _on_disk( scratch_ini ) == "true"
     flip.click()
-    page.wait_for_function( "( el ) => el.textContent === 'OFF'", arg=state.element_handle(), timeout=PAINT_MS )
+    # A selector, never a handle: the repaint replaces the element, so a handle taken before the click keeps reading the old one.
+    page.wait_for_function( "( sel ) => document.querySelector( sel ).textContent === 'OFF'",
+                            arg=f"{client[ 'list' ]} > [data-testid=jobs-item][data-job=duplicate-check] [data-testid=cron-state]", timeout=PAINT_MS )
     assert _on_disk( scratch_ini ) == "false", "the page said OFF but the file did not change"
     assert item.get_by_test_id( "jobs-panel" ).is_visible(), "the row the reader flipped from stays open after its repaint"
     assert item.get_by_test_id( "jobs-line2" ).get_by_test_id( "cron-flip" ).inner_text() == "Turn on"
