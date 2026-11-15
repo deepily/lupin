@@ -544,3 +544,69 @@ def test_smoke_all_classes_are_importable():
     assert TestTfeExecuteStoresPlanPath is not None
     assert TestDeadQueueSerializerExposesArtifacts is not None
     assert TestTfeCompletionReport is not None
+
+
+# =============================================================================
+# Row 94550b8a — TFE notifications must carry TFE's sender_id, not the BFE's
+# =============================================================================
+
+class TestTfeNotificationSenderId:
+    """A running job's progress notification carries TFE's sender id."""
+
+    @pytest.mark.asyncio
+    async def test_progress_notification_carries_tfe_sender_id_not_bfe( self ):
+        from cosa.agents.test_fix_expediter import cosa_interface as tfe_ci
+
+        tfe      = _make_tfe_job()
+        captured = []
+
+        async def _phase0_sends_progress( *args, **kwargs ):
+            await tfe_ci.notify_progress( "mock progress", job_id=tfe.id_hash )
+            return []
+
+        with patch( "cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator" ) as MockOrch, \
+             patch( "cosa.agents.test_fix_expediter.snapshot_loader.load_from_path" ) as mock_load, \
+             patch( "cosa.agents.test_fix_expediter.config.TestFixExpediterConfig" ) as MockCfg, \
+             patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async",
+                    side_effect=lambda request: captured.append( request ) ):
+            mock_load.return_value = MagicMock( user_email="forensics@test.com" )
+            MockCfg.from_config.return_value = MagicMock()
+            MockCfg.return_value = MagicMock()
+            orch_instance = MagicMock()
+            orch_instance.last_plan_path      = None
+            orch_instance.proposed_fixes      = []
+            orch_instance.selected_fixes      = []
+            orch_instance.diagnoses           = {}
+            orch_instance.remediation_context = MagicMock( failures=[] )
+            orch_instance.run_phase0_cluster    = AsyncMock( side_effect=_phase0_sends_progress )
+            orch_instance.run_phase1_diagnose   = AsyncMock( return_value=[] )
+            orch_instance.run_phase2_propose    = AsyncMock( return_value=None )
+            orch_instance.run_phase3_fix        = AsyncMock( return_value=[] )
+            orch_instance.run_phase5_git        = AsyncMock( return_value=None )
+            orch_instance.run_phase6_validation = AsyncMock( return_value=None )
+            MockOrch.return_value = orch_instance
+
+            await tfe._execute()
+
+        # _execute sends its own start-up notices too; pick out the one this test sent
+        mine = [ r for r in captured if r.message == "mock progress" ]
+        assert len( mine ) == 1, "the progress notification must reach the sender exactly once"
+        sender_id = mine[ 0 ].sender_id
+        assert sender_id.startswith( "test.fix.expediter@" ), f"TFE notification went out as {sender_id}"
+        assert sender_id.endswith( f"#{tfe.base_id}" ), f"job suffix missing from {sender_id}"
+        assert mine[ 0 ].target_user == "forensics@test.com"
+
+
+class TestTfeProxyProfileSenderId:
+    """The TFE proxy profile lists the id TFE sends under."""
+
+    def test_profile_sender_id_is_the_one_tfe_sends_under( self ):
+        import json
+        import cosa.utils.util as cu
+        from cosa.agents.test_fix_expediter import cosa_interface as tfe_ci
+
+        path    = cu.get_project_root() + "/src/conf/notification-proxy-scripts/tfe.json"
+        listed  = json.load( open( path ) )[ "sender_ids" ]
+        sent_as = tfe_ci._get_sender_id( suffix="tfe-1" ).split( "#" )[ 0 ]
+        assert listed == [ "test.fix.expediter@lupin.deepily.ai" ]
+        assert sent_as in listed, f"profile lists {listed} but TFE sends as {sent_as}"

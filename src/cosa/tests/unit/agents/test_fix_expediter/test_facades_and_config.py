@@ -66,32 +66,45 @@ class TestPackageInit( unittest.TestCase ):
 class TestCosaInterface( unittest.TestCase ):
 
     def test_sender_id_constant_and_helper( self ):
-        self.assertEqual( tfe_ci.SENDER_ID, "test_fix_expediter@lupin.deepily.ai" )
-        self.assertEqual( tfe_ci._get_sender_id(), tfe_ci.SENDER_ID )
+        # SENDER_ID is a mutable module global (a job sets its own suffix), so test the builder
+        self.assertTrue( tfe_ci.SENDER_ID.startswith( "test.fix.expediter@" ) )
+        self.assertEqual( tfe_ci._get_sender_id(), tfe_ci._dispatcher.build_sender_id() )
+        self.assertTrue( tfe_ci._get_sender_id( suffix="tfe-1" ).endswith( "#tfe-1" ) )
 
-    def test_notify_progress_delegates_to_bfe( self ):
-        with patch.object( tfe_ci, "_bfe_notify_progress", AsyncMock( return_value="NP" ) ) as m:
-            out = _run( tfe_ci.notify_progress( "msg", priority="high" ) )
-        self.assertEqual( out, "NP" )
-        m.assert_awaited_once_with( "msg", priority="high" )
+    def test_sender_id_is_not_the_bfe_one( self ):
+        from cosa.agents.bug_fix_expediter import cosa_interface as bfe_ci
+        self.assertNotEqual( tfe_ci._dispatcher.agent_type, bfe_ci._dispatcher.agent_type )
+        self.assertNotIn( "bug.fix.expediter", tfe_ci._get_sender_id() )
 
-    def test_ask_confirmation_delegates_to_bfe( self ):
-        with patch.object( tfe_ci, "_bfe_ask_confirmation", AsyncMock( return_value=True ) ) as m:
-            out = _run( tfe_ci.ask_confirmation( "ok?", default="yes" ) )
-        self.assertTrue( out )
-        m.assert_awaited_once_with( "ok?", default="yes" )
+    def _dispatcher_mock( self ):
+        return MagicMock( notify_progress=AsyncMock( return_value=None ),
+                          ask_confirmation=AsyncMock( return_value=True ),
+                          get_feedback=AsyncMock( return_value="fb" ),
+                          present_choices=AsyncMock( return_value={ "a": 1 } ) )
 
-    def test_get_feedback_delegates_to_bfe( self ):
-        with patch.object( tfe_ci, "_bfe_get_feedback", AsyncMock( return_value="fb" ) ) as m:
-            out = _run( tfe_ci.get_feedback( "prompt", timeout=5 ) )
-        self.assertEqual( out, "fb" )
-        m.assert_awaited_once_with( "prompt", timeout=5 )
+    def test_wrappers_run_on_tfe_dispatcher_with_tfe_identity( self ):
+        d = self._dispatcher_mock()
+        with patch.object( tfe_ci, "_dispatcher", d ), \
+             patch.object( tfe_ci, "SENDER_ID", "test.fix.expediter@lupin.deepily.ai#x" ), \
+             patch.object( tfe_ci, "TARGET_USER", "u@x.com" ), \
+             patch.object( tfe_ci, "SESSION_NAME", "sess" ):
+            _run( tfe_ci.notify_progress( "msg", priority="high", progress_group_id="pg-1" ) )
+            self.assertTrue( _run( tfe_ci.ask_confirmation( "ok?", default="yes", priority="low" ) ) )
+            self.assertEqual( _run( tfe_ci.get_feedback( "prompt", timeout=5 ) ), "fb" )
+            self.assertEqual( _run( tfe_ci.present_choices( [ { "q": 1 } ], title="T" ) ), { "a": 1 } )
+        self.assertEqual( d.sender_id, "test.fix.expediter@lupin.deepily.ai#x" )
+        self.assertEqual( d.target_user, "u@x.com" )
+        self.assertEqual( d.session_name, "sess" )
+        d.notify_progress.assert_awaited_once()
+        self.assertEqual( d.notify_progress.await_args.kwargs[ "progress_group_id" ], "pg-1" )
+        d.ask_confirmation.assert_awaited_once()
+        d.get_feedback.assert_awaited_once()
+        d.present_choices.assert_awaited_once()
 
-    def test_present_choices_delegates_to_bfe( self ):
-        with patch.object( tfe_ci, "_bfe_present_choices", AsyncMock( return_value={ "a": 1 } ) ) as m:
-            out = _run( tfe_ci.present_choices( [ { "q": 1 } ], title="T" ) )
-        self.assertEqual( out, { "a": 1 } )
-        m.assert_awaited_once_with( [ { "q": 1 } ], title="T" )
+    def test_smoke_test_runs( self ):
+        with redirect_stdout( io.StringIO() ) as out:
+            tfe_ci.quick_smoke_test()
+        self.assertIn( "completed successfully", out.getvalue() )
 
 
 def _echo_get( ini_key, default=None, return_type=None ):

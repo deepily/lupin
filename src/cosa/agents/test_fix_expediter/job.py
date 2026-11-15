@@ -216,8 +216,9 @@ class TestFixExpediterJob( AgenticJobBase ):
         """
         Run the TFE pipeline and return its conversational answer.
 
-        Sets cosa-voice routing (SENDER_ID and TARGET_USER) for the delegated
-        notification dispatcher of the bug fix expediter. It then loads the
+        Sets cosa-voice routing (SENDER_ID and TARGET_USER) for TFE's own
+        notification dispatcher, and TARGET_USER for the bug fix expediter's
+        interface that voice_io is bound to. It then loads the
         snapshot, builds the orchestrator and walks the phases. A crash emits an
         urgent voice notification with the full traceback and re-raises,
         so the handler in do_all captures `self.error`.
@@ -229,19 +230,19 @@ class TestFixExpediterJob( AgenticJobBase ):
         )
         from cosa.agents.test_fix_expediter.orchestrator import TFEOrchestrator
         from cosa.agents.test_fix_expediter import voice_io
-        # TFE's cosa_interface.py is a thin delegator that forwards to BFE's
-        # cosa_interface module. BFE's dispatcher reads SENDER_ID and TARGET_USER
-        # from its OWN module-level state, so we must set them on BFE's module
-        # directly for TFE notifications to route correctly. This was the root
-        # cause of tfe-d9e6b50f's "present_choices failed: Cannot resolve
-        # target_user" crash at the Phase 2 voice gate.
-        # See: the TFE forensics capture plan, Fix 7 (removed from the tree; see 8420e8b0a^)
+        # TFE's cosa_interface owns its dispatcher, so TFE notifications carry TFE's
+        # sender_id. voice_io is still bound to BFE's interface, which reads
+        # TARGET_USER from its own module state, so that one stays set there.
+        # (tfe-d9e6b50f's "Cannot resolve target_user" crash at the Phase 2 voice gate.)
         from cosa.agents.bug_fix_expediter import cosa_interface as _bfe_ci
+        from cosa.agents.test_fix_expediter import cosa_interface as _tfe_ci
 
         _bfe_ci.TARGET_USER = self.user_email
-        _bfe_ci.SENDER_ID   = _bfe_ci._get_sender_id( suffix=self.base_id )
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=_bfe_ci.SENDER_ID, target_user=self.user_email )
+        _tfe_ci.TARGET_USER = self.user_email
+        _tfe_ci.SENDER_ID   = _tfe_ci._get_sender_id( suffix=self.base_id )
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool.
+        # The context value wins over BFE's dispatcher state too, so voice_io sends as TFE as well.
+        set_dispatch_context( sender_id=_tfe_ci.SENDER_ID, target_user=self.user_email )
 
         # Config load has its own fallback; not inside the main try/except
         # because using defaults is acceptable, not a TFE failure.

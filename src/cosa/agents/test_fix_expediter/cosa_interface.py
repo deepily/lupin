@@ -1,63 +1,49 @@
 """
 COSA interface for the TestFixExpediter agent.
 
-Provides the SENDER_ID constant and thin wrappers around cosa-voice MCP
-tools, matching the pattern established by BFE's cosa_interface.py and
-mandated by the agentic-voice-workflow skill.
+Provides the SENDER_ID constant and the four cosa-voice wrappers, built by
+the shared make_interface_functions factory exactly as BFE's cosa_interface.py
+builds them, over TFE's own dispatcher.
 
-The SENDER_ID format is `{agent_name}@{project}.deepily.ai` so cosa-voice
-notifications are attributable to TFE in the notification history UI.
+The SENDER_ID format is `test.fix.expediter@{project}.deepily.ai[#{suffix}]` so
+cosa-voice notifications are attributable to TFE in the notification history UI.
 """
 
+import inspect
 from typing import Optional
 
 import cosa.utils.util as cu
+from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher, make_interface_functions
 
-# Reuse BFE's cosa_interface implementations — they're agent-agnostic
-# façades over the cosa-voice MCP tools. TFE uses the same tools with
-# its own SENDER_ID.
-from cosa.agents.bug_fix_expediter.cosa_interface import (
-    notify_progress as _bfe_notify_progress,
-    ask_confirmation as _bfe_ask_confirmation,
-    get_feedback as _bfe_get_feedback,
-    present_choices as _bfe_present_choices,
-)
+AGENT_TYPE = "test.fix.expediter"
+
+_dispatcher = AgentNotificationDispatcher( agent_type=AGENT_TYPE, default_priority="high" )
 
 
-SENDER_ID = "test_fix_expediter@lupin.deepily.ai"
+def _get_sender_id( suffix: str = None ) -> str:
+    """
+    Get sender_id for Test Fix Expediter notifications.
+
+    Requires:
+        - suffix is None or a non-empty string
+
+    Ensures:
+        - Returns sender_id in format: test.fix.expediter@{project}.deepily.ai[#{suffix}]
+
+    Returns:
+        str: Sender ID for notification identity
+    """
+    return _dispatcher.build_sender_id( suffix=suffix )
 
 
-def _get_sender_id() -> str:
-    """Return the TFE sender_id for notification routing."""
-    return SENDER_ID
+SENDER_ID: str                = _get_sender_id()
+SESSION_NAME: Optional[ str ] = None
+TARGET_USER: Optional[ str ]  = None
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# Thin wrappers — identical to BFE's implementations but namespaced here
-# so TFE's code imports from its own package (keeps the agentic-voice-workflow
-# skill's mandated layout consistent). The SENDER_ID is used by
-# voice_io.py when it constructs notification payloads.
-# ─────────────────────────────────────────────────────────────────────────
-
-
-async def notify_progress( *args, **kwargs ):
-    """Delegate to BFE's notify_progress (shared cosa-voice facade)."""
-    return await _bfe_notify_progress( *args, **kwargs )
-
-
-async def ask_confirmation( *args, **kwargs ):
-    """Delegate to BFE's ask_confirmation."""
-    return await _bfe_ask_confirmation( *args, **kwargs )
-
-
-async def get_feedback( *args, **kwargs ):
-    """Delegate to BFE's get_feedback."""
-    return await _bfe_get_feedback( *args, **kwargs )
-
-
-async def present_choices( *args, **kwargs ):
-    """Delegate to BFE's present_choices."""
-    return await _bfe_present_choices( *args, **kwargs )
+# The four wrappers are the shared factory's, bound to this module's own dispatcher,
+# so a TFE notification carries TFE's sender_id and never the bug fix expediter's.
+notify_progress, ask_confirmation, get_feedback, present_choices = make_interface_functions( globals(), notify_extras=( "progress_group_id", ), ask_extras=( "priority", ), feedback_extras=( "priority", "response_default" ), choices_extras=( "priority", "response_default" ) )
 
 
 def quick_smoke_test():
@@ -66,16 +52,16 @@ def quick_smoke_test():
 
     try:
         # 1: SENDER_ID constant
-        assert SENDER_ID == "test_fix_expediter@lupin.deepily.ai"
-        assert _get_sender_id() == SENDER_ID
+        assert SENDER_ID.startswith( "test.fix.expediter@" )
+        assert _get_sender_id().startswith( "test.fix.expediter@" )
         print( f"✓ SENDER_ID = {SENDER_ID}" )
 
         # 2: Functions exist
-        assert callable( notify_progress )
-        assert callable( ask_confirmation )
-        assert callable( get_feedback )
-        assert callable( present_choices )
-        print( "✓ All 4 cosa-voice wrappers are callable" )
+        assert inspect.iscoroutinefunction( notify_progress )
+        assert inspect.iscoroutinefunction( ask_confirmation )
+        assert inspect.iscoroutinefunction( get_feedback )
+        assert inspect.iscoroutinefunction( present_choices )
+        print( "✓ All 4 cosa-voice wrappers are coroutine functions" )
 
         print( "\n✓ TFE cosa_interface smoke test completed successfully" )
 

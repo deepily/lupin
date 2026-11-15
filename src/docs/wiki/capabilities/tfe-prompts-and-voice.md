@@ -28,7 +28,7 @@ The per-cluster prompts for each agent role, and the voice functions the test fi
 - `build_verification_prompt` tells the tester to run pytest filtered to the cluster's failing tests only.
 - `build_redelegation_prompt` hands the tester's failure report back to the coder for another iteration.
 - The fix prompt builders register under the key `tfe` in `FIX_PROMPT_BUILDERS` when the module is imported.
-- `notify_progress`, `ask_confirmation`, `get_feedback` and `present_choices` pass straight through to the bug fix expediter's versions.
+- `notify_progress`, `ask_confirmation`, `get_feedback` and `present_choices` come from the shared `make_interface_functions` factory. They are bound to TFE's own dispatcher, agent type `test.fix.expediter`.
 
 ## Invariants
-- The sender id is `test_fix_expediter@lupin.deepily.ai`, so notifications are attributed to this agent.
+- The sender id is `test.fix.expediter@lupin.deepily.ai`, with `#<job id>` appended while a job runs. Notifications are attributed to this agent, never to the bug fix expediter.

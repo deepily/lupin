@@ -1,7 +1,7 @@
 {
     "profile_name" : "tfe",
     "description"  : "Auto-approve TestFixExpediter voice gates for CI + live pipeline tests. Session 1cfcdf73 (2026-04-10), step 15.",
-    "sender_ids"   : [ "test_fix_expediter@lupin.deepily.ai" ],
+    "sender_ids"   : [ "test.fix.expediter@lupin.deepily.ai" ],
     "entries" : [
         {
             "question_pattern" : "Diagnosis complete\\..*Proceed to proposal phase",
