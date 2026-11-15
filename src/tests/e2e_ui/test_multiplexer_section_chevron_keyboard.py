@@ -72,7 +72,6 @@ ALL_CHEVRON_HEADERS = [
     "multiplexer-holding-area-header",
     "multiplexer-epic-board-header",
     "multiplexer-background-jobs-header", # Background Jobs pane, 890995c41 (row 50393d00)
-    "multiplexer-cron-jobs-header",       # Scheduled Jobs pane, 4ae37fd96 (row 063fc1a8)
     "multiplexer-jobs-header",
     # The seven below are B-1..B-7 in page order. The first four (*) are the ones
     # this guard caught missing while their panes were already live; B-3, B-6 and
