@@ -466,6 +466,14 @@ test( "a job that carries a target name draws it in its title and gives its row 
   assert.equal( item.getAttribute( "data-target" ), "x/y" );
 } );
 
+test( "the multiplexer writes the abstract raw, so a percent sign and a newline are kept as typed", () => {
+  const job = find( "duplicate-check" );
+  job.reasons[ 0 ]!.text = "100% done\nsecond line";
+  const attr = renderJob( document, job, TODAY, mkActions() ).querySelector( "[data-testid=jobs-abstract]" )!.getAttribute( "data-abstract" ) as string;
+  assert.ok( attr.includes( "100% done\nsecond line" ) );
+  assert.equal( attr, abstractMarkdown( job, TODAY ) );
+} );
+
 // ── abstractMarkdown ────────────────────────────────────────────────────────
 
 const headings = ( md: string ) => [ ...md.matchAll( /^## (.+)$/gm ) ].map( ( m ) => m[ 1 ] );
@@ -768,12 +776,30 @@ test( "a failed switch list names itself, keeps the jobs drawn, and keeps the la
   assert.equal( errOf().hidden, true );
 } );
 
-test( "when the summary has never loaded nothing is drawn, only the banner; a switch frame then changes nothing visible", async () => {
+test( "when the summary has never loaded every switch is still drawn, as a NOT REPORTING row, with the banner; a switch frame repaints it", async () => {
   const h = harness();
   h.answer.summary = async () => { throw new ApiError( 503, "/api/jobs/summary", "down" ); };
   const { root } = await mounted( h );
-  assert.equal( root.querySelectorAll( "[data-testid=jobs-item]" ).length, 0 );
+  assert.equal( root.querySelectorAll( "[data-testid=jobs-accordion] > [data-testid=jobs-item]" ).length, 5, "the five switch rows" );
+  assert.equal( rowOf( "duplicate-check" ).querySelector( "[data-testid=jobs-badge]" )!.textContent, "NOT REPORTING" );
   assert.equal( errOf().textContent, "Could not load the jobs: HTTP 503" );
+  assert.equal( countOf(), "5 (2 off)" );
+  assert.equal( root.querySelector( "[data-testid=multiplexer-background-jobs-header]" )!.getAttribute( "title" ), "0 jobs" );
+  ( rowOf( "duplicate-check" ).querySelector( "[data-testid=jobs-disclose]" ) as HTMLElement ).click();
+  flipOf( "duplicate-check" ).click(); await flush();
+  assert.deepEqual( h.puts, [ { path : "/api/cron-jobs/duplicate-check/enabled", body : { on : false } } ], "the switch still flips" );
+  assert.equal( stateOf( "duplicate-check" ), "OFF" );
+  emit( h, cronRow( "context-tick", { enabled : true } ) );
+  assert.equal( stateOf( "context-tick" ), "ON" );
+} );
+
+test( "when neither door has ever answered nothing is drawn but the banner", async () => {
+  const h = harness();
+  h.answer.summary = async () => { throw new ApiError( 503, "/api/jobs/summary", "down" ); };
+  h.answer.cron    = async () => { throw new ApiError( 500, "/api/cron-jobs", "down" ); };
+  const { root } = await mounted( h );
+  assert.equal( root.querySelectorAll( "[data-testid=jobs-item]" ).length, 0 );
+  assert.equal( errOf().textContent, "Could not load the jobs: HTTP 503 Could not load the scheduled jobs: HTTP 500" );
   assert.equal( countOf(), "…" );
   emit( h, cronRow( "duplicate-check", { enabled : false } ) );
   assert.equal( root.querySelectorAll( "[data-testid=jobs-item]" ).length, 0 );

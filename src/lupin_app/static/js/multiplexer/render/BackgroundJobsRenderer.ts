@@ -179,17 +179,18 @@ class BackgroundJobsRendererImpl implements BackgroundJobsRenderer {
     this.paint();
   }
 
-  // Draw the list from the last good answers. Nothing is drawn until the summary has arrived once.
+  // Draw the list from the last good answers. Before the summary has arrived, every switch is drawn as a row of its own.
   private paint(): void {
     const mountEl = this.mountEl as HTMLElement;
     const header  = this.header as SectionHeaderHandle;
-    if ( this.summary === null ) return;
+    if ( this.summary === null && this.cron.jobs.length === 0 ) return;
+    const summary: JobsSummary = this.summary ?? { schema : "jobs-summary/1", generated_at : "", caller_is_operator : false, jobs : [] };
     this.pendingConfirm = null;        // a redraw drops a half-finished confirmation, so one stale click never turns a job off
-    const merged = mergeJobs( this.summary.jobs, this.cron.jobs );
-    renderAccordion( this.doc, mountEl, { ...this.summary, jobs : merged }, this.actions( this.summary.caller_is_operator ) );
+    const merged = mergeJobs( summary.jobs, this.cron.jobs );
+    renderAccordion( this.doc, mountEl, { ...summary, jobs : merged }, this.actions( summary.caller_is_operator ) );
     const off = this.cron.jobs.filter( ( j ) => j.enabled === false ).length;
     header.countEl.textContent = `${ merged.length }${ off > 0 ? ` (${ off } off)` : "" }`;
-    header.header.setAttribute( "title", headerLine( this.summary.jobs ) );
+    header.header.setAttribute( "title", headerLine( summary.jobs ) );
   }
 
   private actions( canRun: boolean ): JobsActions {

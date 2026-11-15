@@ -283,6 +283,42 @@ test( "unsafe hrefs are drawn as text in the abstract, never as links, and write
   assert.equal( api.mdLink === undefined, true, "the markdown helpers stay private; only abstractMarkdown is exposed" );
 } );
 
+test( "the 📋 attribute keeps a percent sign and a newline: %25 and %0A in the attribute, and the same text back out", async () => {
+  const api = await load();
+  const job = clone( FIXTURE.jobs[ 0 ]! );
+  job.reasons[ 0 ]!.text = "100% done\nsecond line";
+  const item = api.renderJob( job, FIXTURE.generated_at, { canRun : false, runNow : async () => "" } ) as HTMLElement;
+  const attr = item.querySelector( "[data-testid=jobs-abstract]" )!.getAttribute( "data-abstract" ) as string;
+  assert.ok( attr.includes( "100%25%20done%0Asecond%20line" ), "the percent is %25 and the newline is %0A" );
+  assert.equal( decodeURIComponent( attr ), api.abstractMarkdown( job, FIXTURE.generated_at ) );
+  assert.ok( decodeURIComponent( attr ).includes( "100% done\nsecond line" ) );
+} );
+
+test( "before the summary has loaded every switch is still drawn, as a NOT REPORTING row, with the banner; a frame repaints it", async () => {
+  net.reply = () => ( { ok : false, status : 503, json : async () => ( {} ) } );
+  await load();
+  const mount = byId( "background-jobs-container" );
+  assert.equal( mount.querySelectorAll( ":scope > [data-testid=jobs-item]" ).length, 3, "the three switch rows" );
+  assert.equal( mount.querySelector( "[data-job=duplicate-check] [data-testid=jobs-badge]" )!.textContent, "NOT REPORTING" );
+  assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: HTTP 503" );
+  assert.equal( byId( "background-jobs-count" ).textContent, "3 (2 off)" );
+  assert.equal( byId( "background-jobs-summary" ).textContent, "0 jobs" );
+  g.window.cronJobs.applyEvent( { ...CRON_ROWS[ 0 ], enabled : false } );
+  assert.equal( mount.querySelector( "[data-job=duplicate-check] [data-testid=cron-state]" )!.textContent, "OFF" );
+} );
+
+test( "when neither door has ever answered the list draws nothing but the banner", async () => {
+  net.reply = () => ( { ok : false, status : 503, json : async () => ( {} ) } );
+  net.cron  = () => ( { ok : false, status : 500, json : async () => ( {} ) } );
+  await load();
+  const mount = byId( "background-jobs-container" );
+  assert.equal( mount.children.length, 0 );
+  assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: HTTP 503 Could not load the scheduled jobs: HTTP 500" );
+  assert.equal( byId( "background-jobs-count" ).textContent, "…" );
+  g.window.cronJobs.applyEvent( { ...CRON_ROWS[ 0 ], enabled : false } );
+  assert.equal( mount.children.length, 0 );
+} );
+
 test( "the legacy copy and the multiplexer's copy DRAW THE SAME THING for all 23 fixture jobs (two copies, no shared code)", async () => {
   const api = await load();
   const legacy = byId( "background-jobs-container" );

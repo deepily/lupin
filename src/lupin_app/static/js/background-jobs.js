@@ -563,18 +563,20 @@
 
     const failureText = ( err ) => err instanceof Error ? err.message : String( err );
 
-    // Draw the list from the last good answers. Nothing is drawn until the summary has arrived once.
+    // Draw the list from the last good answers. Before the summary has arrived, every switch is drawn as a row of its own.
     function repaint() {
         const mount     = document.getElementById( "background-jobs-container" );
         const count     = document.getElementById( "background-jobs-count" );
         const summaryEl = document.getElementById( "background-jobs-summary" );
-        if ( lastSummary === null || mount === null || count === null || summaryEl === null ) return;
+        if ( mount === null || count === null || summaryEl === null ) return;
+        if ( lastSummary === null && window.cronJobs.rows().length === 0 ) return;
+        const summary = lastSummary ?? { generated_at : "", caller_is_operator : false, jobs : [] };
         window.cronJobs.resetConfirm();      // a redraw drops a half-finished confirmation, so one stale click never turns a job off
-        const merged = mergeJobs( lastSummary.jobs, window.cronJobs.rows() );
-        renderAccordion( mount, { ...lastSummary, jobs : merged }, { canRun : lastSummary.caller_is_operator, runNow } );
+        const merged = mergeJobs( summary.jobs, window.cronJobs.rows() );
+        renderAccordion( mount, { ...summary, jobs : merged }, { canRun : summary.caller_is_operator, runNow } );
         const off = window.cronJobs.rows().filter( ( j ) => j.enabled === false ).length;
         count.textContent = merged.length + ( off > 0 ? " (" + off + " off)" : "" );
-        summaryEl.textContent = headerLine( lastSummary.jobs );
+        summaryEl.textContent = headerLine( summary.jobs );
     }
 
     async function refresh() {
