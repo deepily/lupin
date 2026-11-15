@@ -225,11 +225,6 @@ export {
   type BackgroundJobsRenderer,
   type BackgroundJobsRendererOptions,
 } from "./BackgroundJobsRenderer";
-export {
-  createCronJobsRenderer,
-  type CronJobsRenderer,
-  type CronJobsRendererOptions,
-} from "./CronJobsRenderer";
 // Section-toolbar + accordion-collapse parity (2026-06-23).
 export {
   createSectionToolbarRenderer,

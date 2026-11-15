@@ -10,8 +10,8 @@ pins:
   - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.nextSort@24a42c7258
   - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.sortJobs@8367d37386
   - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.headerLine@f355279ed1
-  - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.badgeText@39447abf00
-  - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.lastRunText@32160e5eb6
+  - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.badgeText@1354826d48
+  - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.lastRunText@8a7070e8c9
   - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.lastFinishedText@7528b11f10
   - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.scanText@56e110d587
   - src.lupin_app.static.js.multiplexer.jobs.jobsFormat.freshnessText@46d3834855

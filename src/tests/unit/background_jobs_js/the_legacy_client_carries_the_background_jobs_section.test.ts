@@ -1,7 +1,8 @@
-// The legacy notifications client carries the background-jobs section (row d540113f).
+// The legacy client carries the background-jobs list (rows d540113f, c80ef763).
 //
 // Rick ruled that the accordion belongs in the legacy client and the multiplexer, not on a page of
-// its own. This file is the legacy half's witness. background-jobs.js is plain browser JS in an
+// its own, and (row c80ef763) that each job's on/off switch is on its second line. This file is the
+// legacy half's witness. background-jobs.js and cron-jobs.js are plain browser JS in an
 // IIFE with no exports and in no tsconfig, so it is loaded the way notifications_js/ loads its
 // subject: the actual bytes, run through vm.runInThisContext against a DOM parsed out of the
 // actual notifications.html. It has no c8 number, because c8 cannot see a vm-run string. These
@@ -22,6 +23,8 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { renderAccordion as muxRender } from "../../../lupin_app/static/js/multiplexer/jobs/jobsRender";
+import { mergeJobs as muxMerge } from "../../../lupin_app/static/js/multiplexer/jobs/mergedRows";
+import { abstractMarkdown as muxAbstract } from "../../../lupin_app/static/js/multiplexer/jobs/abstractText";
 import type { JobsSummary } from "../../../lupin_app/static/js/multiplexer/jobs/types";
 
 const HERE      = dirname( fileURLToPath( import.meta.url ) );
@@ -29,6 +32,8 @@ const STATIC    = resolve( HERE, "../../../lupin_app/static" );
 const HTML      = readFileSync( resolve( STATIC, "html/notifications.html" ), "utf8" );
 const JS_PATH   = resolve( STATIC, "js/background-jobs.js" );
 const JS_SRC    = readFileSync( JS_PATH, "utf8" );
+const CRON_PATH = resolve( STATIC, "js/cron-jobs.js" );
+const CRON_SRC  = readFileSync( CRON_PATH, "utf8" );
 const FIXTURE   = JSON.parse( readFileSync( resolve( HERE, "../../fixtures/jobs/jobs-summary.fixture.json" ), "utf8" ) ) as JobsSummary;
 
 type G = Record<string, any>;
@@ -45,7 +50,15 @@ function sectionMarkup(): string {
   return m![ 0 ];
 }
 
-interface Net { urls: string[]; posts: string[]; reply: () => { ok: boolean; status: number; json: () => Promise<unknown> } }
+type Reply = () => { ok: boolean; status: number; json: () => Promise<unknown> };
+interface Net { urls: string[]; posts: string[]; reply: Reply; cron: Reply }
+
+// The switch rows the page asks for beside the summary (shape of GET /api/cron-jobs). "reporting-off" names no summary job.
+const CRON_ROWS = [
+  { job : "duplicate-check", title : "Duplicate check", schedule : "cron 0 10-22 * * *", key : "k-a", enabled : true,  honoured : true, drift : false, last_changed_by : null, last_changed_at : null },
+  { job : "wiki-librarian",  title : "Wiki librarian",  schedule : "cron 17 10 * * *",   key : "k-b", enabled : false, honoured : true, drift : false, last_changed_by : null, last_changed_at : null },
+  { job : "reporting-off",   title : "Reporting off",   schedule : "cron 0 1 * * *",     key : "k-c", enabled : false, honoured : true, drift : false, last_changed_by : null, last_changed_at : null },
+];
 let net: Net;
 let timers: Array<() => void>;
 
@@ -55,10 +68,11 @@ beforeEach( () => {
   document.body.innerHTML = sectionMarkup();
   timers = [];
   g.window.setInterval = ( fn: () => void ) => { timers.push( fn ); return timers.length; };
-  net = { urls : [], posts : [], reply : () => ( { ok : true, status : 200, json : async () => clone( FIXTURE ) } ) };
+  net = { urls : [], posts : [], reply : () => ( { ok : true, status : 200, json : async () => clone( FIXTURE ) } ),
+          cron : () => ( { ok : true, status : 200, json : async () => ( { jobs : clone( CRON_ROWS ), caller_is_admin : true } ) } ) };
   g.fetch = async ( url: string, opts?: { method?: string } ) => {
     ( opts?.method === "POST" ? net.posts : net.urls ).push( url );
-    return net.reply();
+    return url === "/api/cron-jobs" ? net.cron() : net.reply();
   };
   g.localStorage.setItem( "lupin_access_token", "tok" );
   delete g.window.notificationsUI;
@@ -66,6 +80,8 @@ beforeEach( () => {
 
 async function load(): Promise<G> {
   delete g.window.backgroundJobs;
+  delete g.window.cronJobs;
+  vm.runInThisContext( CRON_SRC, { filename : CRON_PATH } );        // the switch module loads first, as on the page
   vm.runInThisContext( JS_SRC, { filename : JS_PATH } );
   await flush();
   return g.window.backgroundJobs as G;
@@ -86,26 +102,30 @@ test( "the script tag's ?v= token is the first 12 hex of the file's sha256, so a
   const m = HTML.match( /\/static\/js\/background-jobs\.js\?v=([0-9a-f]{12})/ );
   assert.ok( m, "no tokened script tag" );
   assert.equal( m![ 1 ], createHash( "sha256" ).update( readFileSync( JS_PATH ) ).digest( "hex" ).slice( 0, 12 ) );
+  const cron = HTML.match( /\/static\/js\/cron-jobs\.js\?v=([0-9a-f]{12})/ );
+  assert.ok( cron, "no tokened script tag for the switch module" );
+  assert.equal( cron![ 1 ], createHash( "sha256" ).update( readFileSync( CRON_PATH ) ).digest( "hex" ).slice( 0, 12 ) );
+  assert.ok( cron!.index! < m!.index!, "cron-jobs.js loads first: the list calls it" );
   const css = HTML.match( /\/static\/css\/background-jobs-legacy\.css\?v=([0-9a-f]{12})/ );
   assert.ok( css, "no tokened stylesheet link" );
   assert.equal( css![ 1 ], createHash( "sha256" ).update( readFileSync( resolve( STATIC, "css/background-jobs-legacy.css" ) ) ).digest( "hex" ).slice( 0, 12 ) );
 } );
 
-test( "on load it fetches /api/jobs/summary with the bearer token, draws 23 jobs, counts and summarises them, and polls", async () => {
+test( "on load it fetches both doors with the bearer token, draws 23 jobs and the switch no job names, counts and summarises them, and polls", async () => {
   await load();
-  assert.deepEqual( net.urls, [ "/api/jobs/summary" ] );
-  assert.equal( byId( "background-jobs-container" ).querySelectorAll( ":scope > [data-testid=jobs-item]" ).length, 23 );
-  assert.equal( byId( "background-jobs-count" ).textContent, "23" );
+  assert.deepEqual( [ ...net.urls ].sort(), [ "/api/cron-jobs", "/api/jobs/summary" ] );
+  assert.equal( byId( "background-jobs-container" ).querySelectorAll( ":scope > [data-testid=jobs-item]" ).length, 24 );
+  assert.equal( byId( "background-jobs-count" ).textContent, "24 (2 off)" );
   assert.match( byId( "background-jobs-summary" ).textContent as string, /^23 jobs: 10 healthy, 3 failing, 1 silent, 9 unknown$/ );
   assert.equal( byId( "background-jobs-error" ).hidden, true );
   assert.equal( timers.length, 1 );
   timers[ 0 ]!(); await flush();
-  assert.equal( net.urls.length, 2 );
+  assert.equal( net.urls.length, 4 );
 } );
 
 test( "the request carries Authorization: Bearer <token> and merges caller headers", async () => {
   let seen: Record<string, string> = {};
-  g.fetch = async ( _u: string, o: { headers: Record<string, string> } ) => { seen = o.headers; return net.reply(); };
+  g.fetch = async ( u: string, o: { headers: Record<string, string> } ) => { seen = o.headers; return u === "/api/cron-jobs" ? net.cron() : net.reply(); };
   await load();
   assert.equal( seen.Authorization, "Bearer tok" );
   g.localStorage.removeItem( "lupin_access_token" );
@@ -120,14 +140,14 @@ test( "the refresh button reloads without collapsing the section; a failed reloa
   btn.click(); await flush();
   assert.equal( byId( "background-jobs-error" ).hidden, false );
   assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: HTTP 503" );
-  assert.equal( byId( "background-jobs-container" ).children.length, 24 );   // header row + 23 jobs
+  assert.equal( byId( "background-jobs-container" ).children.length, 26 );   // switch note + header row + 24 jobs
   g.fetch = async () => { throw new Error( "network down" ); };
   btn.click(); await flush();
-  assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: network down" );
+  assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: network down Could not load the scheduled jobs: network down" );
   g.fetch = async () => { throw "plain text"; };
   btn.click(); await flush();
-  assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: plain text" );
-  g.fetch = async () => net.reply();
+  assert.match( byId( "background-jobs-error" ).textContent as string, /^Could not load the jobs: plain text/ );
+  g.fetch = async ( url: string ) => ( url === "/api/cron-jobs" ? net.cron() : net.reply() );
   net.reply = () => ( { ok : true, status : 200, json : async () => clone( FIXTURE ) } );
   btn.click(); await flush();
   assert.equal( byId( "background-jobs-error" ).hidden, true );
@@ -149,7 +169,7 @@ test( "a script loaded while the page is still parsing waits for DOMContentLoade
     await flush();
     assert.equal( net.urls.length, 0 );
     document.dispatchEvent( new Event( "DOMContentLoaded" ) ); await flush();
-    assert.equal( net.urls.length, 1 );
+    assert.equal( net.urls.length, 2 );
   } finally { delete ( document as unknown as G ).readyState; }
 } );
 
@@ -209,19 +229,41 @@ test( "each Run now refusal gets its own plain sentence, and a network failure i
   assert.equal( ( item.querySelector( "[data-testid=jobs-run-status]" ) as HTMLElement ).textContent, "Run now failed: nope" );
 } );
 
-test( "clicking a line expands its panel and clicking again collapses it; every job starts collapsed", async () => {
-  await load();
+test( "the ⋯ opens and closes lines 2 and 3, every job starts closed, and an open row stays open across a redraw", async () => {
+  const api = await load();
   const first = byId( "background-jobs-container" ).querySelector( "[data-testid=jobs-item]" ) as HTMLElement;
-  const line  = first.querySelector( "[data-testid=jobs-line]" ) as HTMLElement;
-  const panel = first.querySelector( "[data-testid=jobs-panel]" ) as HTMLElement;
-  assert.deepEqual( [ line.getAttribute( "aria-expanded" ), panel.hidden ], [ "false", true ] );
-  line.click();
-  assert.deepEqual( [ line.getAttribute( "aria-expanded" ), panel.hidden, line.querySelector( ".jobs-caret" )!.textContent ], [ "true", false, "▼" ] );
-  line.click();
-  assert.deepEqual( [ line.getAttribute( "aria-expanded" ), panel.hidden, line.querySelector( ".jobs-caret" )!.textContent ], [ "false", true, "▶" ] );
+  const toggle = first.querySelector( "[data-testid=jobs-disclose]" ) as HTMLElement;
+  const panel  = first.querySelector( "[data-testid=jobs-panel]" ) as HTMLElement;
+  assert.deepEqual( [ toggle.getAttribute( "aria-expanded" ), panel.hidden, toggle.textContent ], [ "false", true, "⋯" ] );
+  assert.equal( first.querySelectorAll( "[data-testid=jobs-line]" ).length, 1 );
+  assert.ok( first.querySelector( ".jobs-caret" ) === null, "the expand caret is gone" );
+  toggle.click();
+  assert.deepEqual( [ toggle.getAttribute( "aria-expanded" ), panel.hidden ], [ "true", false ] );
+  assert.equal( panel.querySelectorAll( "[data-testid=jobs-line2], [data-testid=jobs-line3]" ).length, 2 );
+  api.repaint();                                                                 // a poll redraws: the row stays open
+  const again = byId( "background-jobs-container" ).querySelector( "[data-testid=jobs-item]" ) as HTMLElement;
+  assert.equal( again.querySelector( "[data-testid=jobs-disclose]" )!.getAttribute( "aria-expanded" ), "true" );
+  ( again.querySelector( "[data-testid=jobs-disclose]" ) as HTMLElement ).click();
+  assert.deepEqual( [ again.querySelector( "[data-testid=jobs-disclose]" )!.getAttribute( "aria-expanded" ), ( again.querySelector( "[data-testid=jobs-panel]" ) as HTMLElement ).hidden ], [ "false", true ] );
 } );
 
-test( "unsafe hrefs are drawn as text, never as links, and writer text is never parsed as markup", async () => {
+test( "the first line carries no Scan, Fix or Clears; line 2 carries the figures that apply; line 3 carries Run now or says there is none", async () => {
+  await load();
+  const dup = byId( "background-jobs-container" ).querySelector( "[data-job=duplicate-check]" ) as HTMLElement;
+  const line = dup.querySelector( "[data-testid=jobs-line]" ) as HTMLElement;
+  assert.equal( line.querySelectorAll( "[data-testid=jobs-scan-cell], [data-testid=jobs-fix-cell], [data-testid=jobs-clears-cell]" ).length, 0 );
+  assert.ok( !( line.textContent as string ).includes( "2,124" ) );
+  assert.deepEqual( [ "jobs-fig-scan", "jobs-fig-fix", "jobs-fig-clears" ].map( ( id ) => ( dup.querySelector( `[data-testid=jobs-line2] [data-testid=${ id }]` ) as HTMLElement ).textContent ),
+    [ "Scan: 2,124 ▲", "Fix: unfiled 107 ▲", "Clears: never at this rate" ] );
+  assert.equal( dup.querySelectorAll( "[data-testid=jobs-line3] [data-testid=jobs-run-now]" ).length, 1 );
+  const arbiter = byId( "background-jobs-container" ).querySelector( "[data-job=fleet-arbiter]" ) as HTMLElement;
+  assert.equal( arbiter.querySelector( "[data-testid=jobs-line3]" )!.textContent, "Nothing to run by hand, and no targets." );
+  const census = byId( "background-jobs-container" ).querySelector( "[data-job=worktree-census]" ) as HTMLElement;
+  assert.deepEqual( Array.from( census.querySelectorAll( "[data-testid=jobs-target]" ) ).map( ( t ) => t.getAttribute( "data-target" ) ), [ "cosa-voice", "lupin", "planning-is-prompting" ] );
+  assert.equal( census.querySelectorAll( "[data-testid=jobs-target-abstract]" ).length, 3 );
+} );
+
+test( "unsafe hrefs are drawn as text in the abstract, never as links, and writer text is never parsed as markup", async () => {
   const api = await load();
   for ( const bad of [ null, "http://x/y", "//evil/x", "/a\\b", "javascript:alert(1)" ] ) assert.equal( api.isSafeHref( bad ), false, String( bad ) );
   assert.equal( api.isSafeHref( "/app/docs?path=lupin/x.md" ), true );
@@ -229,11 +271,52 @@ test( "unsafe hrefs are drawn as text, never as links, and writer text is never 
   job.rows[ 0 ]!.href = "javascript:alert(1)"; job.rows[ 0 ]!.title = "<img src=x onerror=alert(1)>";
   job.evidence[ 0 ]!.href = "//evil/x";
   job.detail_link = "http://evil/x";
+  const md = api.abstractMarkdown( job, FIXTURE.generated_at ) as string;
+  assert.equal( /(^|[^\\])<img/.test( md ), false, "every < is escaped" );
+  assert.ok( md.includes( "\\<img src=x onerror=alert(1)\\>" ) );
+  assert.equal( md.includes( "](javascript" ) || md.includes( "](//" ) || md.includes( "](http" ), false );
+  assert.equal( md.includes( "Open the detail page" ), false );
   const item = api.renderJob( job, FIXTURE.generated_at, { canRun : false, runNow : async () => "" } ) as HTMLElement;
   assert.ok( item.querySelector( "img" ) === null, "item has no img" );
-  assert.equal( item.querySelector( "[data-testid=jobs-row-title]" )!.textContent, "<img src=x onerror=alert(1)>" );
-  assert.equal( item.querySelector( "[data-testid=jobs-evidence-path]" ) !== null, true );
-  assert.ok( item.querySelector( "[data-testid=jobs-detail-link]" ) === null, "item has no [data-testid=jobs-detail-link]" );
+  assert.equal( decodeURIComponent( item.querySelector( "[data-testid=jobs-abstract]" )!.getAttribute( "data-abstract" ) as string ), md, "the 📋 carries the URI-encoded abstract" );
+  assert.ok( item.querySelector( "[data-testid=jobs-abstract]" )!.classList.contains( "abstract-indicator" ) );
+  assert.equal( api.mdLink === undefined, true, "the markdown helpers stay private; only abstractMarkdown is exposed" );
+} );
+
+test( "the 📋 attribute keeps a percent sign and a newline: %25 and %0A in the attribute, and the same text back out", async () => {
+  const api = await load();
+  const job = clone( FIXTURE.jobs[ 0 ]! );
+  job.reasons[ 0 ]!.text = "100% done\nsecond line";
+  const item = api.renderJob( job, FIXTURE.generated_at, { canRun : false, runNow : async () => "" } ) as HTMLElement;
+  const attr = item.querySelector( "[data-testid=jobs-abstract]" )!.getAttribute( "data-abstract" ) as string;
+  assert.ok( attr.includes( "100%25%20done%0Asecond%20line" ), "the percent is %25 and the newline is %0A" );
+  assert.equal( decodeURIComponent( attr ), api.abstractMarkdown( job, FIXTURE.generated_at ) );
+  assert.ok( decodeURIComponent( attr ).includes( "100% done\nsecond line" ) );
+} );
+
+test( "before the summary has loaded every switch is still drawn, as a NOT REPORTING row, with the banner; a frame repaints it", async () => {
+  net.reply = () => ( { ok : false, status : 503, json : async () => ( {} ) } );
+  await load();
+  const mount = byId( "background-jobs-container" );
+  assert.equal( mount.querySelectorAll( ":scope > [data-testid=jobs-item]" ).length, 3, "the three switch rows" );
+  assert.equal( mount.querySelector( "[data-job=duplicate-check] [data-testid=jobs-badge]" )!.textContent, "NOT REPORTING" );
+  assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: HTTP 503" );
+  assert.equal( byId( "background-jobs-count" ).textContent, "3 (2 off)" );
+  assert.equal( byId( "background-jobs-summary" ).textContent, "0 jobs" );
+  g.window.cronJobs.applyEvent( { ...CRON_ROWS[ 0 ], enabled : false } );
+  assert.equal( mount.querySelector( "[data-job=duplicate-check] [data-testid=cron-state]" )!.textContent, "OFF" );
+} );
+
+test( "when neither door has ever answered the list draws nothing but the banner", async () => {
+  net.reply = () => ( { ok : false, status : 503, json : async () => ( {} ) } );
+  net.cron  = () => ( { ok : false, status : 500, json : async () => ( {} ) } );
+  await load();
+  const mount = byId( "background-jobs-container" );
+  assert.equal( mount.children.length, 0 );
+  assert.equal( byId( "background-jobs-error" ).textContent, "Could not load the jobs: HTTP 503 Could not load the scheduled jobs: HTTP 500" );
+  assert.equal( byId( "background-jobs-count" ).textContent, "…" );
+  g.window.cronJobs.applyEvent( { ...CRON_ROWS[ 0 ], enabled : false } );
+  assert.equal( mount.children.length, 0 );
 } );
 
 test( "the legacy copy and the multiplexer's copy DRAW THE SAME THING for all 23 fixture jobs (two copies, no shared code)", async () => {
@@ -241,12 +324,17 @@ test( "the legacy copy and the multiplexer's copy DRAW THE SAME THING for all 23
   const legacy = byId( "background-jobs-container" );
   const mux    = document.createElement( "div" );
   document.body.appendChild( mux );
-  muxRender( document, mux, clone( FIXTURE ), { canRun : true, runNow : async () => "" } );
+  const merged = muxMerge( FIXTURE.jobs, clone( CRON_ROWS ) as never );
+  muxRender( document, mux, { ...clone( FIXTURE ), jobs : merged }, { canRun : true, runNow : async () => "", canFlip : true, cronRows : clone( CRON_ROWS ) as never, requestFlip : () => {}, open : new Set() } );
   // Heading levels differ (h2 in the multiplexer, h4 here), so compare text and test ids.
   const shape = ( root: Element ) => [ ...root.querySelectorAll( "[data-testid]" ) ].map( ( e ) => `${ e.getAttribute( "data-testid" ) }|${ e.textContent }` );
   const a = shape( legacy ), b = shape( mux );
-  assert.ok( a.length > 900, `only ${ a.length } nodes compared: the comparison is not reaching the jobs` );
+  assert.ok( a.length > 300, `only ${ a.length } nodes compared: the comparison is not reaching the jobs` );
   assert.deepEqual( a, b );
+  const abstracts = ( root: Element, decode: boolean ) => [ ...root.querySelectorAll( ".abstract-indicator" ) ].map( ( e ) => decode ? decodeURIComponent( e.getAttribute( "data-abstract" ) as string ) : e.getAttribute( "data-abstract" ) );
+  assert.equal( abstracts( legacy, true ).length, 24 + 8, "24 rows and 8 target lines" );
+  assert.deepEqual( abstracts( legacy, true ), abstracts( mux, false ), "the two copies write the same abstract for every row and target" );
+  assert.equal( muxAbstract( FIXTURE.jobs[ 0 ]!, FIXTURE.generated_at ), api.abstractMarkdown( FIXTURE.jobs[ 0 ]!, FIXTURE.generated_at ) );
   assert.equal( api.headerLine( [] ), "0 jobs" );
   assert.equal( api.headerLine( [ FIXTURE.jobs[ 0 ]! ] ).startsWith( "1 job: 1 " ), true );
   assert.equal( api.formatWhen( "2026-11-07T19:31:02-05:00", FIXTURE.generated_at ), "19:31" );
@@ -291,7 +379,7 @@ test( "the legacy accordion ends with the switched-off line when the server send
   const last = mount.lastElementChild as HTMLElement;
   assert.equal( last.getAttribute( "data-testid" ), "background-jobs-off-line" );
   assert.equal( last.textContent, "8 jobs have reporting switched off" );
-  assert.equal( mount.children.length, 25 );   // header row + 23 jobs + the off line
+  assert.equal( mount.children.length, 26 );   // switch note + header row + 23 jobs + the off line
 } );
 
 test( "row 399a266f: with notificationsUI present the request goes through its authedFetch, so a stale stored token is refreshed before it is sent", async () => {
@@ -305,10 +393,10 @@ test( "row 399a266f: with notificationsUI present the request goes through its a
       return g.fetch( url, { ...o, headers : { Authorization : "Bearer fresh", ...( o.headers ?? {} ) } } );
     }
   };
-  g.fetch = async ( _u: string, o: { headers: Record<string, string> } ) => { sent.push( o.headers ); return net.reply(); };
+  g.fetch = async ( u: string, o: { headers: Record<string, string> } ) => { sent.push( o.headers ); return u === "/api/cron-jobs" ? net.cron() : net.reply(); };
   await load();
-  assert.equal( refreshed, 1 );
-  assert.equal( sent.length, 1 );
+  assert.equal( refreshed, 2, "both doors" );
+  assert.equal( sent.length, 2 );
   assert.equal( sent[ 0 ]!.Authorization, "Bearer fresh" );
 } );
 
@@ -317,7 +405,7 @@ test( "row 399a266f: without notificationsUI the fallback still sends the stored
   const orig = console.error;
   console.error = ( ...a: unknown[] ) => { errs.push( a.join( " " ) ); };
   try { await load(); } finally { console.error = orig; }
-  assert.deepEqual( net.urls, [ "/api/jobs/summary" ] );
+  assert.deepEqual( [ ...net.urls ].sort(), [ "/api/cron-jobs", "/api/jobs/summary" ] );
   assert.ok( errs.some( ( e ) => e.includes( "UNREFRESHED" ) ), "no loud console error" );
 } );
 
@@ -348,7 +436,7 @@ test( "the legacy accordion draws a header row naming every column, sorts on a h
   const api = await load();
   const mount = byId( "background-jobs-container" );
   const heads = Array.from( mount.querySelectorAll( "[data-testid=jobs-header] [role=columnheader]" ) ).map( ( h ) => h.textContent );
-  assert.deepEqual( heads, [ "", "", "Service", "Status", "Last run", "Last finished", "Scan", "Fix", "Clears" ] );
+  assert.deepEqual( heads, [ "", "", "Service", "Status", "Last run", "Last finished", "" ] );
   const titles = () => Array.from( mount.querySelectorAll( ":scope > [data-testid=jobs-item] > .jobs-heading [data-testid=jobs-title]" ) ).map( ( t ) => t.textContent );
   const click  = ( id: string ) => ( mount.querySelector( "[data-testid=" + id + "]" ) as HTMLElement ).click();
   click( "jobs-sort-name" );
@@ -367,15 +455,16 @@ test( "the legacy accordion draws a header row naming every column, sorts on a h
   assert.equal( states[ states.length - 1 ], "healthy" );
 } );
 
-test( "both sheets size the line grid so it fits its container: only the first four tracks are fixed, every text track can shrink (row 4b807ffd)", () => {
+test( "both sheets size the line grid so it fits its container: the ⋯, dot and 📋 tracks and the status track are fixed, every text track can shrink (rows 4b807ffd, c80ef763)", () => {
   for ( const sheet of [ "css/background-jobs-legacy.css", "css/multiplexer/background-jobs.css" ] ) {
     const css = readFileSync( resolve( STATIC, sheet ), "utf8" );
     const m   = css.match( /\.jobs-line,\s*\.jobs-line-grid \{[^}]*?grid-template-columns\s*:\s*([^;]+);/ );
     assert.ok( m, sheet + " declares no line grid" );
     const tracks = m![ 1 ]!.replace( /\/\*.*$/, "" ).match( /minmax\([^)]*\)|\S+/g )!;
-    assert.equal( tracks.length, 9, sheet );
-    assert.deepEqual( tracks.slice( 0, 2 ), [ "1rem", "1.25rem" ] );
+    assert.equal( tracks.length, 7, sheet );
+    assert.deepEqual( tracks.slice( 0, 2 ), [ "1.75rem", "1.25rem" ] );
     assert.equal( tracks[ 3 ], "8rem", "the status column stays narrow" );
-    for ( const i of [ 2, 4, 5, 6, 7, 8 ] ) assert.match( tracks[ i ]!, /^minmax\(0, [\d.]+fr\)$/, sheet + " track " + i + " must shrink" );
+    assert.equal( tracks[ 6 ], "1.75rem", "the 📋 column is narrow" );
+    for ( const i of [ 2, 4, 5 ] ) assert.match( tracks[ i ]!, /^minmax\(0, [\d.]+fr\)$/, sheet + " track " + i + " must shrink" );
   }
 } );

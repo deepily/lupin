@@ -1,20 +1,26 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Background-jobs pane.
 //
-// A collapsible multiplexer section that holds the jobs accordion (row d540113f).
-// Rick ruled that the accordion belongs to both notification clients, not to a page of its own.
-// It sits right after the Epic Board.
+// Rows d540113f and c80ef763: the one jobs list. A collapsible multiplexer section that holds the jobs list. Rick ruled that the list belongs to both
+// notification clients, not to a page of its own, and (row c80ef763) that the Scheduled Jobs pane is
+// part of it: each job's on/off switch sits on its second line. It sits right after the Epic Board.
 //
-// The pane computes no health. It asks GET /api/jobs/summary and formats the answer through
-// ../jobs/jobsRender. Its one action is Run now: POST /api/jobs/{job}/run.
+// The pane computes no health. It asks GET /api/jobs/summary and GET /api/cron-jobs together, joins
+// them by job id (../jobs/mergedRows) and formats the answer through ../jobs/jobsRender. Its two
+// actions are Run now (POST /api/jobs/{job}/run) and the switch (PUT /api/cron-jobs/{job}/enabled).
+// A `cron_job_switch_changed` frame (queue socket) repaints a switch flipped in another client.
 //
-// The legacy client carries its own independent copy (static/js/background-jobs.js); the two share
-// no runtime code, by Rick's no-shared-code ruling (row 87812328).
+// The legacy client carries its own independent copy (static/js/background-jobs.js and cron-jobs.js);
+// the two share no runtime code, by Rick's no-shared-code ruling (row 87812328).
 
 import { ApiError } from "../api/ApiClient";
+import type { EventBus } from "../shared/EventBus";
+import { CRON_CONFIRM_TEXT, CRON_JOBS_PATH, cronFlipFailureText, cronFlipPath, refusalDetail } from "../jobs/cronFormat";
+import type { CronJobRow, CronJobsSummary } from "../jobs/cronFormat";
 import { headerLine } from "../jobs/jobsFormat";
 import { renderAccordion } from "../jobs/jobsRender";
 import type { JobsActions } from "../jobs/jobsRender";
+import { mergeJobs } from "../jobs/mergedRows";
 import type { JobEntry, JobRunStarted, JobsSummary } from "../jobs/types";
 import { teardownScaffold } from "./dom";
 import { renderSectionHeader, wireSectionCollapse } from "./templates/sectionHeader";
@@ -29,6 +35,7 @@ export const JOBS_POLL_MS      = 60_000;
 export interface BackgroundJobsApi {
   get<T>( path: string ): Promise<T>;
   post<T>( path: string, body: unknown ): Promise<T>;
+  put<T>( path: string, body: unknown ): Promise<T>;
 }
 
 /** The pane's public surface. */
@@ -41,9 +48,10 @@ export interface BackgroundJobsRenderer {
   refresh(): Promise<void>;
 }
 
-/** Options for `createBackgroundJobsRenderer`. Only `api` is required. */
+/** Options for `createBackgroundJobsRenderer`. Only `api` and `eventBus` are required. */
 export interface BackgroundJobsRendererOptions {
   api              : BackgroundJobsApi;
+  eventBus         : EventBus;
   doc?             : Document;
   setIntervalFn?   : ( fn: () => void, ms: number ) => number;
   clearIntervalFn? : ( id: number ) => void;
@@ -53,16 +61,6 @@ export interface BackgroundJobsRendererOptions {
 export function runNowPath( job: JobEntry ): string {
   const base = `/api/jobs/${ encodeURIComponent( job.job ) }/run`;
   return job.target === null ? base : `${ base }?target=${ encodeURIComponent( job.target ) }`;
-}
-
-/** The `detail` sentence of a refusal body, or null. */
-function refusalDetail( err: ApiError ): string | null {
-  const start = err.message.indexOf( "{" );
-  if ( start < 0 ) return null;
-  try {
-    const body = JSON.parse( err.message.slice( start ) ) as { detail?: unknown };
-    return typeof body.detail === "string" && body.detail !== "" ? body.detail : null;
-  } catch { return null; }
 }
 
 /**
@@ -83,6 +81,7 @@ export function runNowFailureText( err: unknown ): string {
 
 class BackgroundJobsRendererImpl implements BackgroundJobsRenderer {
   private readonly api            : BackgroundJobsApi;
+  private readonly bus            : EventBus;
   private readonly doc            : Document;
   private readonly setIntervalFn  : ( fn: () => void, ms: number ) => number;
   private readonly clearIntervalFn: ( id: number ) => void;
@@ -92,10 +91,16 @@ class BackgroundJobsRendererImpl implements BackgroundJobsRenderer {
   private errorEl     : HTMLElement | null = null;
   private mountEl     : HTMLElement | null = null;
   private collapseOff : ( () => void ) | null = null;
+  private busOff      : ( () => void ) | null = null;
   private pollId      : number | null = null;
+  private summary     : JobsSummary | null = null;                       // the last good answer of each door
+  private cron        : CronJobsSummary = { jobs : [], caller_is_admin : false };
+  private readonly open = new Set<string>();                              // the rows whose ⋯ is open, kept across a repaint
+  private pendingConfirm : string | null = null;                          // the job whose turn-off waits for its confirming click
 
   constructor( opts: BackgroundJobsRendererOptions ) {
     this.api             = opts.api;
+    this.bus             = opts.eventBus;
     this.doc             = opts.doc ?? document;
     this.setIntervalFn   = opts.setIntervalFn ?? ( ( fn, ms ) => window.setInterval( fn, ms ) );
     this.clearIntervalFn = opts.clearIntervalFn ?? ( ( id ) => window.clearInterval( id ) );
@@ -137,35 +142,55 @@ class BackgroundJobsRendererImpl implements BackgroundJobsRenderer {
 
     root.replaceChildren( this.header.header, content );
     this.collapseOff = wireSectionCollapse( root, this.header );
+    this.busOff      = this.bus.on<CronJobRow>( "cron_job_switch_changed", ( e ) => this.applyRow( e.payload ) );
     this.pollId = this.setIntervalFn( () => { void this.refresh(); }, JOBS_POLL_MS );
     void this.refresh();
   }
 
   unmount(): void {
     if ( this.pollId !== null ) this.clearIntervalFn( this.pollId );
+    if ( this.busOff !== null ) this.busOff();
     teardownScaffold( [], this.collapseOff, this.root );
-    this.pollId = null; this.collapseOff = null; this.root = null;
+    this.pollId = null; this.collapseOff = null; this.busOff = null; this.root = null;
     this.header = null; this.errorEl = null; this.mountEl = null;
   }
 
   async refresh(): Promise<void> {
-    const mountEl = this.mountEl, errorEl = this.errorEl, header = this.header;
-    if ( mountEl === null || errorEl === null || header === null ) return;
-    try {
-      const summary = await this.api.get<JobsSummary>( JOBS_SUMMARY_PATH );
-      if ( this.mountEl === null ) return;                       // unmounted while the request was out
-      renderAccordion( this.doc, mountEl, summary, this.actions( summary.caller_is_operator ) );
-      header.countEl.textContent = String( summary.jobs.length );
-      errorEl.hidden = true;
-      this.updateHeadline( headerLine( summary.jobs ) );
-    } catch ( err ) {
-      errorEl.textContent = `Could not load the jobs: ${ err instanceof ApiError ? `HTTP ${ err.status }` : String( err ) }`;
-      errorEl.hidden = false;
-    }
+    const errorEl = this.errorEl;
+    if ( this.mountEl === null || errorEl === null ) return;
+    const [ jobs, cron ] = await Promise.allSettled( [ this.api.get<JobsSummary>( JOBS_SUMMARY_PATH ), this.api.get<CronJobsSummary>( CRON_JOBS_PATH ) ] );
+    if ( this.mountEl === null ) return;                       // unmounted while the requests were out
+    const problems: string[] = [];
+    if ( jobs.status === "fulfilled" ) this.summary = jobs.value;
+    else problems.push( `Could not load the jobs: ${ failureText( jobs.reason ) }` );
+    if ( cron.status === "fulfilled" ) this.cron = cron.value;
+    else problems.push( `Could not load the scheduled jobs: ${ failureText( cron.reason ) }` );
+    this.paint();
+    errorEl.textContent = problems.join( " " );
+    errorEl.hidden = problems.length === 0;
   }
 
-  private updateHeadline( line: string ): void {
-    ( this.header as SectionHeaderHandle ).header.setAttribute( "title", line );
+  // One switch row came back from the server (a flip's answer, or another client's frame): swap it in place.
+  private applyRow( row: CronJobRow ): void {
+    if ( this.mountEl === null || row === null || typeof row !== "object" || typeof row.job !== "string" ) return;
+    const index = this.cron.jobs.findIndex( ( j ) => j.job === row.job );
+    if ( index === -1 ) return;
+    this.cron.jobs[ index ] = row;
+    this.paint();
+  }
+
+  // Draw the list from the last good answers. Before the summary has arrived, every switch is drawn as a row of its own.
+  private paint(): void {
+    const mountEl = this.mountEl as HTMLElement;
+    const header  = this.header as SectionHeaderHandle;
+    if ( this.summary === null && this.cron.jobs.length === 0 ) return;
+    const summary: JobsSummary = this.summary ?? { schema : "jobs-summary/1", generated_at : "", caller_is_operator : false, jobs : [] };
+    this.pendingConfirm = null;        // a redraw drops a half-finished confirmation, so one stale click never turns a job off
+    const merged = mergeJobs( summary.jobs, this.cron.jobs );
+    renderAccordion( this.doc, mountEl, { ...summary, jobs : merged }, this.actions( summary.caller_is_operator ) );
+    const off = this.cron.jobs.filter( ( j ) => j.enabled === false ).length;
+    header.countEl.textContent = `${ merged.length }${ off > 0 ? ` (${ off } off)` : "" }`;
+    header.header.setAttribute( "title", headerLine( summary.jobs ) );
   }
 
   private actions( canRun: boolean ): JobsActions {
@@ -179,8 +204,35 @@ class BackgroundJobsRendererImpl implements BackgroundJobsRenderer {
           return runNowFailureText( err );
         }
       },
+      canFlip     : this.cron.caller_is_admin,
+      cronRows    : this.cron.jobs,
+      requestFlip : ( row, note, button ) => { void this.requestFlip( row, note, button ); },
+      open        : this.open,
     };
   }
+
+  // An alarm job's turn-off waits for a second, confirming click.
+  private async requestFlip( row: CronJobRow, note: HTMLElement, button: HTMLElement ): Promise<void> {
+    if ( row.alarm === true && row.enabled === true && this.pendingConfirm !== row.job ) {
+      this.pendingConfirm = row.job;
+      button.textContent  = "Confirm: turn off";
+      note.textContent    = CRON_CONFIRM_TEXT;
+      note.hidden         = false;
+      return;
+    }
+    this.pendingConfirm = null;
+    try {
+      this.applyRow( await this.api.put<CronJobRow>( cronFlipPath( row.job ), { on : row.enabled !== true } ) );
+    } catch ( err ) {
+      note.textContent = cronFlipFailureText( err );
+      note.hidden = false;
+    }
+  }
+}
+
+/** The reason a door failed, in a few words. */
+function failureText( reason: unknown ): string {
+  return reason instanceof ApiError ? `HTTP ${ reason.status }` : String( reason );
 }
 
 /** Build the renderer. It paints nothing until `mount()` is called. */

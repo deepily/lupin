@@ -1,29 +1,31 @@
 /*
- * Scheduled jobs: the accordion section of the legacy notifications client (row 063fc1a8).
+ * Scheduled jobs: each cron job's on/off switch, for the legacy notifications client (rows 063fc1a8, c80ef763).
  *
- * Shows each cron job's on/off switch, read from lupin-app.ini by GET /api/cron-jobs, and lets an
- * administrator flip it with PUT /api/cron-jobs/{job}/enabled. A flip edits the INI key the job
- * reads at its next start, or at its next tick for a loop inside a server; it does not stop a run
- * already going. Anyone who is not an administrator sees the switches read-only: the server's
+ * Row c80ef763 merged the Scheduled Jobs section into the Background Jobs list. This file no longer
+ * owns a section: it reads each switch from lupin-app.ini through GET /api/cron-jobs, draws a job's
+ * switch for line 2 of its row (switchCells), and lets an administrator flip it with
+ * PUT /api/cron-jobs/{job}/enabled. background-jobs.js owns the list, the polling and the redraw, and
+ * calls load() and switchCells(); this file must load first. A flip edits the INI key the job reads
+ * at its next start, or at its next tick for a loop inside a server; it does not stop a run already
+ * going. Anyone who is not an administrator sees the switches read-only: the server's
  * `caller_is_admin` decides, never this file.
  *
  * Turning off an alarm job (row.alarm, set in the registry) takes two clicks: the first asks for
  * confirmation, because an alarm job being off silences what would report it (Rick, 13 Nov).
- * A switch the server could not read shows as a red "switch unreadable" row (row c38a49bd).
+ * A switch the server could not read shows as a red "switch unreadable" note (row c38a49bd).
  *
- * Every text goes in through textContent, never innerHTML. The multiplexer gets its own copy later
- * (no shared runtime code between the two clients, ruling 87812328).
+ * Every text goes in through textContent, never innerHTML. The multiplexer has its own copy
+ * (jobs/cronFormat.ts and render/BackgroundJobsRenderer.ts): no shared runtime code between the two
+ * clients, ruling 87812328.
  *
- * Mounts into #cron-jobs-container and #cron-jobs-count; the page owns the section chrome.
  * The queue socket's `cron_job_switch_changed` frame reaches applyEvent through notifications.js.
- * Exposes window.cronJobs for the unit tests and the console.
+ * Exposes window.cronJobs for background-jobs.js, the unit tests and the console.
  */
 
 ( function() {
     "use strict";
 
     const LIST_URL      = "/api/cron-jobs";
-    const POLL_MS       = 60 * 1000;
     const NOT_REPORTED  = "not reported";
     const DRIFT_TEXT    = "changed outside the endpoint";
     const STATE_TEXT    = { true : "ON", false : "OFF", null : "UNKNOWN" };
@@ -33,6 +35,7 @@
 
     let current        = { jobs : [], caller_is_admin : false };
     let pendingConfirm = null;      // the job whose turn-off is waiting for its confirming click
+    let listener       = null;      // what to call when a row changed: the list's repaint
 
     // ─── Text rules (no DOM, no clock) ─────────────────────────────────
 
@@ -73,42 +76,29 @@
         return node;
     }
 
-    function renderRow( row, canFlip, onFlip, jobs ) {
+    // One job's switch for line 2 of its row: schedule, state, changed, reads, the notes, Turn on / Turn off and the error span.
+    function switchCells( row ) {
         const unreadable = row.honoured && row.enabled === null;
-        const item = el( "div", unreadable ? "cron-item cron-unreadable" : "cron-item", null, "cron-item" );
+        const item = el( "span", unreadable ? "cron-item cron-unreadable" : "cron-item", null, "cron-item" );
         item.setAttribute( "data-job", row.job );
-        item.appendChild( el( "span", "cron-title", row.title, "cron-title" ) );
         item.appendChild( el( "span", "cron-schedule", row.schedule, "cron-schedule" ) );
         item.appendChild( el( "span", "cron-state cron-state-" + stateText( row.enabled ).toLowerCase(), stateText( row.enabled ), "cron-state" ) );
         item.appendChild( el( "span", "cron-changed", changedText( row ), "cron-changed" ) );
         item.appendChild( el( "span", "cron-honoured", readsText( row ), "cron-honoured" ) );
         if ( row.drift ) item.appendChild( el( "span", "cron-drift", DRIFT_TEXT, "cron-drift" ) );
         if ( unreadable ) item.appendChild( el( "span", "cron-unreadable-note", UNREADABLE, "cron-unreadable" ) );
-        const inside = insideText( row, jobs || [] );
+        const inside = insideText( row, current.jobs );
         if ( inside !== null ) item.appendChild( el( "span", "cron-inside", inside, "cron-inside" ) );
         const button = el( "button", "cron-flip", row.enabled === true ? "Turn off" : "Turn on", "cron-flip" );
         button.type = "button";
-        button.disabled = !canFlip || row.enabled === null || !row.honoured;     // no key to flip yet, or nothing reads it
-        button.addEventListener( "click", () => onFlip( row ) );
+        button.disabled = !current.caller_is_admin || row.enabled === null || !row.honoured;     // no key to flip yet, or nothing reads it
+        button.addEventListener( "click", () => requestFlip( row ) );
         item.appendChild( button );
         const note = el( "span", "cron-error", null, "cron-error" );
         note.setAttribute( "role", "alert" );
         note.hidden = true;
         item.appendChild( note );
         return item;
-    }
-
-    function render( mount, summary, onFlip ) {
-        current = summary;
-        mount.replaceChildren();
-        mount.appendChild( el( "p", "cron-note", summary.caller_is_admin
-            ? "Flipping a switch takes effect at the job's next start, or next tick for a loop. A run already going is not stopped."
-            : "Read-only: only an administrator can flip a switch.", "cron-note" ) );
-        pendingConfirm = null;      // a redraw drops a half-finished confirmation, so one stale click never turns a job off
-        for ( const row of summary.jobs ) mount.appendChild( renderRow( row, summary.caller_is_admin, onFlip, summary.jobs ) );
-        const count = document.getElementById( "cron-jobs-count" );
-        const off   = summary.jobs.filter( ( j ) => j.enabled === false ).length;
-        if ( count !== null ) count.textContent = summary.jobs.length + ( off > 0 ? " (" + off + " off)" : "" );
     }
 
     // ─── Network + wiring ──────────────────────────────────────────────
@@ -125,7 +115,7 @@
     function flipPath( job ) { return LIST_URL + "/" + encodeURIComponent( job.job ) + "/enabled"; }
 
     function itemFor( jobName ) {
-        for ( const item of document.querySelectorAll( "#cron-jobs-container .cron-item" ) ) if ( item.getAttribute( "data-job" ) === jobName ) return item;
+        for ( const item of document.querySelectorAll( "#background-jobs-container .cron-item" ) ) if ( item.getAttribute( "data-job" ) === jobName ) return item;
         return null;
     }
 
@@ -137,16 +127,20 @@
         note.hidden = false;
     }
 
-    function mount() { return document.getElementById( "cron-jobs-container" ); }
+    // Ask the switch list again. Rejects with the reason, so the list can name it.
+    async function load() {
+        const resp = await authFetch( LIST_URL );
+        if ( !resp.ok ) throw new Error( "HTTP " + resp.status );
+        current = await resp.json();
+        return current;
+    }
 
-    // One row came back from the server (a flip's answer, or another client's event): swap it in place.
+    // One row came back from the server (a flip's answer, or another client's event): swap it in place and tell the list.
     function applyRow( row ) {
-        const target = mount();
-        if ( target === null ) return;
         const index = current.jobs.findIndex( ( j ) => j.job === row.job );
         if ( index === -1 ) return;
         current.jobs[ index ] = row;
-        render( target, current, requestFlip );
+        if ( listener !== null ) listener();
     }
 
     // The queue socket frame is { type, timestamp, ...row }.
@@ -186,31 +180,23 @@
         }
     }
 
-    async function refresh() {
-        const target  = mount();
-        const errorEl = document.getElementById( "cron-jobs-error" );
-        if ( target === null || errorEl === null ) return;
-        try {
-            const resp = await authFetch( LIST_URL );
-            if ( !resp.ok ) throw new Error( "HTTP " + resp.status );
-            const summary = await resp.json();
-            render( target, summary, requestFlip );
-            errorEl.hidden = true;
-        } catch ( err ) {
-            errorEl.textContent = "Could not load the scheduled jobs: " + ( err instanceof Error ? err.message : String( err ) );
-            errorEl.hidden = false;
-        }
-    }
+    // The rows the last load or event left in hand.
+    function jobRows() { return current.jobs; }
 
-    function start() {
-        const button = document.getElementById( "cron-jobs-refresh" );
-        if ( button !== null ) button.addEventListener( "click", ( e ) => { e.stopPropagation(); refresh(); } );
-        refresh();
-        window.setInterval( refresh, POLL_MS );
-    }
+    // Whether the server said the caller is an administrator.
+    function callerCanFlip() { return current.caller_is_admin; }
 
-    window.cronJobs = { refresh, start, render, renderRow, applyEvent, flip, requestFlip, stateText, readsText, insideText, changedText, flipFailureText, flipPath };
+    // Register what to call when a row changed: the list's repaint.
+    function setChangeListener( fn ) { listener = fn; }
 
-    if ( document.readyState === "loading" ) document.addEventListener( "DOMContentLoaded", start );
-    else start();
+    // Forget a turn-off that was waiting for its confirming click.
+    function resetPendingConfirm() { pendingConfirm = null; }
+
+    window.cronJobs = {
+        load, switchCells, applyEvent, flip, requestFlip, stateText, readsText, insideText, changedText, flipFailureText, flipPath,
+        rows         : jobRows,
+        canFlip      : callerCanFlip,
+        onChange     : setChangeListener,
+        resetConfirm : resetPendingConfirm,
+    };
 } )();
