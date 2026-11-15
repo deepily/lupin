@@ -55,9 +55,12 @@ def ini( tmp_path, value="true", extra="" ):
     return str( path )
 
 
+SEARCHED = "\n".join( f"SEARCHED {sym} :: {SID} :: none :: nothing near it" for sym in ( "lupin_mcp.new_helper", "m.q" ) )   # the line each ruling of RULINGS needs
+
+
 def commit_doc( repo, name, *lines, rulings=True ):
     """Ensures: commits a Markdown file with the rulings, a template and these lines."""
-    body = "# review\n\n" + ( RULINGS + "\n\n" if rulings else "" ) + "```text\n" + TEMPLATE + "\n```\n\n" + "\n".join( lines ) + "\n"
+    body = "# review\n\n" + ( RULINGS + "\n" + SEARCHED + "\n\n" if rulings else "" ) + "```text\n" + TEMPLATE + "\n```\n\n" + "\n".join( lines ) + "\n"
     ( repo / name ).write_text( body, encoding="utf-8" )
     git( repo, "add", name )
     git( repo, "commit", "-q", "-m", f"add {name}" )
@@ -285,7 +288,7 @@ def test_a_new_function_with_no_outcome_line_is_found_from_git_and_refused( repo
 
 def test_a_ruling_and_an_outcome_line_cover_a_new_function( repo, data, tmp_path ):
     commit_code( repo, "pkg/mod.py", "def fresh():\n    return 3\n" )
-    ( repo / "review.md" ).write_text( f"RULING repo:pkg.mod.fresh :: DUPLICATE :: reuse-receipt: {RID}\n{GOOD}\n", encoding="utf-8" )
+    ( repo / "review.md" ).write_text( f"RULING repo:pkg.mod.fresh :: DUPLICATE :: reuse-receipt: {RID}\nSEARCHED repo:pkg.mod.fresh :: {SID} :: none :: nothing near it\n{GOOD}\n", encoding="utf-8" )
     git( repo, "add", "review.md" )
     git( repo, "commit", "-q", "-m", "review" )
     code, text = run( repo, data, tmp_path )
@@ -485,3 +488,35 @@ def test_an_empty_since_is_allowed_while_gating_is_off_and_a_set_one_is_allowed_
     assert code == 0 and "gating is off (report only)" in out.getvalue(), "the shipped state: gating false, since empty"
     code, text = run( repo, data, tmp_path, value="true" )
     assert code == 0 and "REUSE GATE PASSED" in text, "gating true with a since set runs the gate"
+
+
+def test_a_function_nested_in_a_function_is_not_a_new_definition( repo, data, tmp_path ):
+    commit_code( repo, "pkg/mod.py", "def outer():\n    def inner():\n        return 1\n    return inner\n\n\nclass K:\n    def m( self ):\n        def deep():\n            return 2\n        return deep\n" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "MISSING repo:pkg.mod.outer is new" in text and "MISSING repo:pkg.mod.K.m is new" in text
+    assert "<locals>" not in text, "a nested helper is never listed, so no outcome line is owed for it"
+    assert ( count( text, "Total Tests" ), count( text, "Failed" ) ) == ( 3, 2 )
+
+
+def test_a_ruling_with_no_searched_line_is_refused_naming_the_definition_and_a_searched_line_clears_it( repo, data, tmp_path ):
+    commit_doc( repo, "review.md", GOOD, rulings=False )
+    ( repo / "bare.md" ).write_text( f"RULING repo:pkg.mod.bare :: DUPLICATE :: reuse-receipt: {RID}\n", encoding="utf-8" )
+    git( repo, "add", "bare.md" )
+    git( repo, "commit", "-q", "-m", "bare" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "MISSING repo:pkg.mod.bare has a RULING line and no SEARCHED line" in text
+    ( repo / "bare.md" ).write_text( f"RULING repo:pkg.mod.bare :: DUPLICATE :: reuse-receipt: {RID}\nSEARCHED repo:pkg.mod.bare :: {SID} :: none :: nothing near it\n", encoding="utf-8" )
+    git( repo, "commit", "-q", "-am", "searched" )
+    code, text = run( repo, data, tmp_path )
+    assert "no SEARCHED line" not in text
+
+
+def test_a_ruling_with_no_searched_line_from_before_since_is_exempt( repo, data, tmp_path ):
+    ( repo / "old.md" ).write_text( f"RULING repo:pkg.mod.bare :: DUPLICATE :: reuse-receipt: {RID}\n", encoding="utf-8" )
+    git( repo, "add", "old.md" )
+    git( repo, "commit", "-q", "-m", "old ruling" )
+    since = sha_of( repo )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "no SEARCHED line" in text
+    code, text = run( repo, data, tmp_path, lines=f"reuse merge gate since = {since}\n" )
+    assert code == 0 and "no SEARCHED line" not in text, "a ruling on main before since stays exempt"

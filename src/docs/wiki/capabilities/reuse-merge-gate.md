@@ -7,8 +7,8 @@ pins:
   - lupin_mcp.reuse_merge_gate.resolve_base@e7a487a057
   - lupin_mcp.reuse_merge_gate.effective_base@d7bf2a56d9
   - lupin_mcp.reuse_merge_gate.added_text_by_file@9ee8144d1c
-  - lupin_mcp.reuse_merge_gate.added_definition_ids@378c57458e
-  - lupin_mcp.reuse_merge_gate.run@0682ee5040
+  - lupin_mcp.reuse_merge_gate.added_definition_ids@8968b41366
+  - lupin_mcp.reuse_merge_gate.run@5648c52f10
   - lupin_mcp.reuse_merge_gate.summary@c915c6ed8e
   - lupin_mcp.reuse_merge_gate.main@8dfbeebc88
 ---
@@ -22,8 +22,8 @@ pins:
 - `read_since( ini )` reads `reuse merge gate since`, or None when empty. It raises `ValueError` for a value that is not a hexadecimal commit.
 - `effective_base( root, sha, since )` moves the base up to `since` only when `since` lies between the base and HEAD. It raises `ValueError` when git does not know the commit.
 - `added_text_by_file( root, base_sha )` returns `{ path: text }` for each added or changed `.md` file. Each added line keeps its own line number. It returns None when git cannot diff.
-- `added_definition_ids( root, base_sha )` lists the ids of definitions new since the base, by the daily check's window. A renamed file is read under its old path, through the daily check's `definitions_held_at_start`. Its two detached worktrees are always removed.
-- `run( root, base, diff_path, data_dir, log_dir, gating, since )` judges every added line and records each once in `refusals.jsonl`. It lists new definitions with no outcome line. A symbol index diff at `diff_path` replaces the definitions found from git.
+- `added_definition_ids( root, base_sha )` lists the ids of definitions new since the base, by the daily check's window. A renamed file is read under its old path, through the daily check's `definitions_held_at_start`. A definition whose qualified name holds `<locals>` (a function nested in a function) is not listed, since no other file can reuse it. Its two detached worktrees are always removed.
+- `run( root, base, diff_path, data_dir, log_dir, gating, since )` judges every added line and records each once in `refusals.jsonl`. It lists new definitions with no outcome line. It also lists each ruled definition with no `SEARCHED` line (`missing_searched_refusals`). A line before `since` is not read, so it is exempt. A symbol index diff at `diff_path` replaces the definitions found from git.
 - `summary( result, gating )` builds the lines the test-suite job reads. The unit is checks: one for the scan, one per outcome line, one per new definition.
 - `main( argv, out )` is the command line.
 

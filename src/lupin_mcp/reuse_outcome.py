@@ -189,3 +189,18 @@ def missing_outcome_refusals( added, outcomes, rulings ):
     with_outcome = { o[ "receipt" ] for o in outcomes if o[ "receipt" ] not in tokens } | { o[ "detail" ].split()[ 0 ] for o in outcomes if o[ "receipt" ] == EXCLUDED_TOKEN }
     return [ { "symbol": sym, "reason": f"{sym} is new in the diff and has no outcome line" }
              for sym in added if sym not in with_outcome and not any( row[ "receipt" ] in with_outcome for row in rulings.get( sym, [] ) ) ]
+
+
+def missing_searched_refusals( rulings, searched ):
+    """
+    Name the ruled definitions that have no `SEARCHED` line.
+
+    Requires:
+        - rulings is what reuse_exit_gate.parse_rulings returns; searched is what parse_searched returns, over the same added documents
+    Ensures:
+        - a definition passes when `searched` holds at least one search under its symbol id; a `none` line counts, since it is the line for an empty search
+        - returns [ { symbol, reason } ] in the order of rulings, one per ruled definition with none, the reason naming it
+        - the lines judged are the ones the caller read, so a ruling from before the gate's `since` commit is never here
+    """
+    return [ { "symbol": sym, "reason": f"{sym} has a RULING line and no SEARCHED line; the reviewer skill needs one per shortlisted candidate, or a `none` line for an empty search" }
+             for sym in rulings if not searched.get( sym ) ]

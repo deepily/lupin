@@ -47,6 +47,7 @@ from lupin_mcp.reuse_needset import source_at
 WORKTREE_PREFIX  = "reuse-gate-"                                    # the detached worktrees of this gate, beside the daily check's
 UNREADABLE       = ( OSError, ValueError, RuntimeError, SyntaxError, needset_errors.NeedsetError, dc_errors.DuplicateCheckError )     # what makes a run "could not check"
 BASE_CANDIDATES  = ( "main", "origin/main" )                    # the branches a branch is merged into, when --base and the key `reuse merge gate base` are both absent
+LOCALS_MARK      = "<locals>"                                # the index's mark of a function nested in a function; the gate does not count such a definition
 SINCE_KEY        = "reuse merge gate since"                  # a commit; only definitions and lines added after it are checked
 BASE_KEY         = "reuse merge gate base"                   # the branches to measure from, separated by spaces; the nearest merge base wins
 SHA_RE           = re.compile( r"[0-9a-f]{7,40}" )
@@ -176,6 +177,7 @@ def added_definition_ids( root, base_sha ):
         - the window and the changed files are the daily check's own (`window_of`, `changed_files`)
         - a file the symbol index does not hold (a test file, a skipped folder) lists nothing, by the indexer's own rule (`is_indexed`)
         - a definition is new when its file and name are absent at base_sha; a definition whose text changed is not new
+        - a definition whose qualified name holds `<locals>` is not listed, because a helper nested in a function cannot be reused from another file
         - a renamed file is read against the path it had at base_sha, so a function counts as new only when it is absent under the old path
         - ids follow the symbol index's rule (module and name, the repository prefix, `#2` for a repeat), so they match a ruling's symbol
         - the two detached worktrees are removed whether the call ends or fails
@@ -200,7 +202,7 @@ def added_definition_ids( root, base_sha ):
     spec    = sp.spec_for( root )
     records = [ { "lang": d[ "lang" ], "file": d[ "file" ], "name": d[ "name" ], "line": d[ "line" ],
                   "module": py_index.module_name( spec, spec.root / d[ "file" ] ) if d[ "lang" ] == "py" else "" }
-                for d in found if ( d[ "file" ], d[ "name" ] ) not in held ]
+                for d in found if ( d[ "file" ], d[ "name" ] ) not in held and LOCALS_MARK not in d[ "name" ] ]
     records.sort( key=lambda r: ( r[ "file" ], r[ "line" ] ) )
     build._assign_ids( spec, records )
     return sorted( r[ "id" ] for r in records )
@@ -215,6 +217,7 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None ):
         - base is a branch name, a list of names, or None
         - diff_path is a symbol index diff file, or None for the definitions added_definition_ids finds
     Ensures:
+        - a ruling on a definition with no `SEARCHED` line for it, in any added document, is one more entry of "missing"
         - returns { "refusals": [ { path, n, line, reasons } ], "missing": [ { symbol, reason } ], "lines": int, "definitions": int, "appended": int }
         - returns { "error": text } when the gate could not check: an unreadable or ill-shaped diff file, an unreadable call log, a diff with `algorithm_changed`, no base, or a record that could not be written
         - refusals.jsonl in data_dir gains one record per judged line, once per document text
@@ -233,7 +236,7 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None ):
     files = added_text_by_file( root, sha )
     if files is None: return { "error": f"git could not diff {sha} against HEAD" }
     receipts, searches, exclusions = eg.receipts_by_id( records ), eg.searches_by_receipt( records, data_dir ), eg.exclusions_by_symbol( records )
-    refusals, outcomes, rulings, lines, appended = [], [], {}, 0, 0
+    refusals, outcomes, rulings, searched, lines, appended = [], [], {}, {}, 0, 0
     for path, text in files.items():
         file_rulings = eg.parse_rulings( text )
         verdicts     = rr.judge( text, receipts, searches, exclusions, file_rulings, root )
@@ -243,8 +246,9 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None ):
         except OSError as e: return { "error": f"{type( e ).__name__}: {e}" }
         outcomes    += ro.parse_outcomes( text )
         for sym, rows in file_rulings.items(): rulings.setdefault( sym, [] ).extend( rows )
+        for sym, by_search in eg.parse_searched( text ).items(): searched.setdefault( sym, {} ).update( by_search )
         refusals    += [ { "path": path, "n": v[ "n" ], "line": v[ "line" ], "reasons": v[ "reasons" ] } for v in verdicts if v[ "status" ] == "refused" ]
-    missing = ro.missing_outcome_refusals( diff.get( "added", [] ), outcomes, rulings )
+    missing = ro.missing_outcome_refusals( diff.get( "added", [] ), outcomes, rulings ) + ro.missing_searched_refusals( rulings, searched )
     return { "refusals": refusals, "missing": missing, "lines": lines, "definitions": len( diff.get( "added", [] ) ), "appended": appended }
 
 

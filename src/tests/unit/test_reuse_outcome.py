@@ -325,3 +325,13 @@ def test_a_dart_file_in_a_dart_root_is_held_by_the_index_and_the_rest_are_not( t
     assert [ ro.is_indexed( p, tmp_path ) for p in unheld ] == [ False ] * len( unheld ), "a skipped folder, skipped endings, another language and a folder that is not a root"
     line = ro.parse_outcomes( f"REUSE-OUTCOME unindexed :: unindexed :: WROTE_NEW lib/a.dart is code :: {PLAN}#12.3-B4" )
     assert len( ro.token_refusals( line, {}, tmp_path ) ) == 1, "an unindexed claim for the held file is refused in that tree"
+
+
+def test_a_ruled_definition_with_no_searched_line_is_named_in_ruling_order():
+    rulings  = { "a.x": [ { "ruling": "DUPLICATE", "receipt": "r1", "search": None } ], "a.y": [ { "ruling": "DUPLICATE", "receipt": "r2", "search": None } ],
+                 "a.z": [ { "ruling": "DUPLICATE", "receipt": "r3", "search": None } ] }
+    searched = { "a.y": { "rs-0123456789": { "none": { "value": None, "why": "nothing near it" } } }, "a.z": {} }
+    out      = ro.missing_searched_refusals( rulings, searched )
+    assert [ m[ "symbol" ] for m in out ] == [ "a.x", "a.z" ], "a `none` line counts; an empty search map does not"
+    assert "a.x has a RULING line and no SEARCHED line" in out[ 0 ][ "reason" ]
+    assert ro.missing_searched_refusals( {}, {} ) == []
