@@ -1,15 +1,20 @@
 /*
- * Background jobs: the accordion section of the legacy notifications client (row d540113f).
+ * Background jobs: the one jobs list of the legacy notifications client (rows d540113f, c80ef763).
  *
- * Rick ruled that the accordion belongs to the legacy client and the multiplexer, not to a page of
- * its own. This file is the legacy copy. The multiplexer has its own
- * (js/multiplexer/render/BackgroundJobsRenderer.ts and jobs/); the two share no runtime code, by
- * Rick's no-shared-code ruling (row 87812328).
+ * Rick ruled that the list belongs to the legacy client and the multiplexer, not to a page of its
+ * own, and (row c80ef763) that the Scheduled Jobs list is part of it. This file is the legacy copy.
+ * The multiplexer has its own (js/multiplexer/render/BackgroundJobsRenderer.ts and jobs/); the two
+ * share no runtime code, by Rick's no-shared-code ruling (row 87812328).
  *
- * The section computes no health. It asks GET /api/jobs/summary and formats the answer. Its one
- * action is Run now: POST /api/jobs/{job}/run. Every text goes in through textContent, never
- * innerHTML, and a link is drawn only for a path on this server, because the reader passes through
- * strings that job writers produced.
+ * One row per service. The collapsed line holds Service, Status, Last run and Last finished, a ⋯
+ * button and a 📋. The ⋯ opens a second line (the Scan, Fix and Clears figures and the job's on/off
+ * switch, drawn by cron-jobs.js, which must load first) and a third (Run now and the job's
+ * targets). The long text is the 📋 abstract; notifications.js's delegated click handler opens it.
+ *
+ * The list computes no health. It asks GET /api/jobs/summary and GET /api/cron-jobs together and
+ * joins them by job id. Its action is Run now: POST /api/jobs/{job}/run; the switch is cron-jobs.js's.
+ * Every text goes in through textContent, never innerHTML, and a link is drawn only for a path on
+ * this server, because the reader passes through strings that job writers produced.
  *
  * Mounts into #background-jobs-container and #background-jobs-count; the page owns the section chrome.
  * Exposes window.backgroundJobs = { refresh, formatWhen, ... } for the unit tests and the console.
@@ -20,7 +25,6 @@
 
     const SUMMARY_URL   = "/api/jobs/summary";
     const POLL_MS       = 60 * 1000;
-    const SVG_NS        = "http://www.w3.org/2000/svg";
     const NOT_REPORTED  = "not reported";
     const STATE_ORDER   = [ "healthy", "behind", "failing", "silent", "unknown" ];   // the order of the header line's counts
     const DEFAULT_SORT  = { id : null, direction : "asc" };   // no header picked: service name A to Z
@@ -86,6 +90,7 @@
     }
 
     function badgeText( job ) {
+        if ( job.cron_only === true ) return "NOT REPORTING";      // a switch whose job the summary leaves out (reporting switched off)
         const states = [ job.state ];
         for ( const reason of job.reasons ) {
             if ( !states.includes( reason.state ) && reason.state !== "healthy" ) states.push( reason.state );
@@ -97,6 +102,7 @@
     }
 
     function lastRunText( job, todayIso ) {
+        if ( job.cron_only === true ) return NOT_REPORTED;
         if ( job.liveness !== null ) {
             if ( job.liveness.up === null ) return "unit " + job.liveness.unit + " is not loaded";
             return job.liveness.up ? "up (" + job.liveness.unit + ")" : "down (" + job.liveness.unit + ")";
@@ -201,6 +207,117 @@
         return href !== null && href.startsWith( "/" ) && !href.startsWith( "//" ) && !href.includes( "\\" );
     }
 
+    // ─── Merge the two doors ───────────────────────────────────────────
+
+    // The entry for a switch the summary does not report on (a job with reporting switched off).
+    function cronOnlyEntry( row ) {
+        return {
+            job : row.job, target : null, title : row.title, owner : "", audience : [], notify_interval_seconds : null,
+            state : "unknown", running : false, unscheduled : false, schedule_unverified : false, machine_was_off : false,
+            reasons : [], applies : { scan_debt : false, fix_debt : false }, last_attempt : null, last_finished : null,
+            consecutive_failures : null, work_found_last_run : null, strip : [], scan_debt : null, fix_debt : null,
+            schedule : null, liveness : null, evidence : [], rows : [], detail_link : null, runnable : false,
+            unknown_reason : null, targets : [], cron : row, cron_only : true,
+        };
+    }
+
+    // One entry per summary job (a copy carrying its switch row, or null), then one per switch no summary job names. Inputs untouched.
+    function mergeJobs( jobs, cronRows ) {
+        const byJob  = new Map( cronRows.map( ( r ) => [ r.job, r ] ) );
+        const merged = jobs.map( ( j ) => ( { ...j, cron : byJob.get( j.job ) ?? null } ) );
+        const named  = new Set( jobs.map( ( j ) => j.job ) );
+        return [ ...merged, ...cronRows.filter( ( r ) => !named.has( r.job ) ).map( cronOnlyEntry ) ];
+    }
+
+    // ─── The 📋 abstract (markdown; no DOM, no clock) ──────────────────
+
+    function mdText( text ) { return text.replace( /[\\`*_{}[\]<>#|~]/g, ( c ) => "\\" + c ); }
+
+    function mdLink( href, label ) {
+        if ( !isSafeHref( href ) ) return mdText( label );
+        return "[" + mdText( label ) + "](" + href.replace( /[() ]/g, ( c ) => "%" + c.charCodeAt( 0 ).toString( 16 ).toUpperCase() ) + ")";
+    }
+
+    function mdSection( title, lines ) { return "## " + title + "\n\n" + lines.join( "\n" ) + "\n"; }
+
+    function reasonLines( job ) {
+        if ( job.reasons.length === 0 && job.unknown_reason === null ) return [ "No rule is true: nothing to report." ];
+        const lines = job.reasons.map( ( r ) => "- " + mdText( r.text ) );
+        if ( job.unknown_reason !== null ) lines.push( "- " + mdText( job.unknown_reason ) );
+        if ( job.machine_was_off ) lines.push( "- Missed while the machine was off." );
+        return lines;
+    }
+
+    function stripLines( job, todayIso ) {
+        if ( job.strip.length === 0 ) return [ NOT_REPORTED ];
+        return job.strip.map( ( e, i ) => ( i + 1 ) + ". " + formatWhen( e.at, todayIso ) + " " + ( e.outcome === "missed" ? "MISSED (due, no run)" : mdText( e.outcome ) ) );
+    }
+
+    function scanLines( job, todayIso ) {
+        const debt = job.scan_debt;
+        if ( debt === null ) return [ NOT_REPORTED ];
+        const count = debt.count === null ? NOT_REPORTED : ( formatCount( debt.count ) + " " + ( debt.unit ?? "" ) ).trim();
+        const trend = trendArrow( debt.points );
+        return [
+            "- Count: " + mdText( count ) + ( trend === "" ? "" : " " + trend ),
+            "- As of: " + formatWhen( debt.as_of, todayIso ),
+            "- Drained last run: " + formatCount( debt.drained_last_run ),
+            "- Arrived last interval: " + formatCount( debt.arrived_last_interval ),
+            "- Never checked: " + formatCount( debt.never_checked ),
+            "- Clears in: " + ( clearsText( job ) || NOT_REPORTED ),
+        ];
+    }
+
+    function fixLines( job ) {
+        const debt = job.fix_debt;
+        if ( debt === null ) return [ NOT_REPORTED ];
+        if ( debt.kind === "reported" ) return [ "- Named, not acted on: " + formatCount( debt.open_reported ) ];
+        const trend = trendArrow( debt.points );
+        const lines = [
+            "- Unfiled: " + formatCount( debt.unfiled ) + ( trend === "" ? "" : " " + trend ),
+            "- Filed in total: " + formatCount( debt.filed_total ),
+            "- Open now: " + formatCount( debt.open_now ),
+            "- Closed in window: " + formatCount( debt.closed_in_window ),
+            "- Own mark: " + mdText( debt.own_mark ?? NOT_REPORTED ),
+        ];
+        if ( isSafeHref( debt.store_href ) ) lines.push( "- " + mdLink( debt.store_href, "Rows in the task store" ) );
+        return lines;
+    }
+
+    function scheduleLines( job, todayIso ) {
+        const s     = job.schedule;
+        const lines = [];
+        if ( job.liveness !== null ) lines.push( "- Liveness: " + mdText( job.liveness.kind ) + " unit " + mdText( job.liveness.unit ) );
+        if ( job.schedule_unverified ) lines.push( "- Check: schedule unverified: the installed schedule could not be read" );
+        lines.push( "- Runs: " + ( s === null || s.entries.length === 0 ? "unscheduled" : mdText( s.entries.join( "; " ) ) ) );
+        lines.push( "- Last due: " + ( s === null ? NOT_REPORTED : formatWhen( s.last_due, todayIso ) ) );
+        lines.push( "- Next due: " + ( s === null ? NOT_REPORTED : formatWhen( s.next_due, todayIso ) ) );
+        lines.push( "- Grace: " + graceText( job ) );
+        lines.push( "- Tells Rick: " + notifyIntervalText( job ) );
+        return lines;
+    }
+
+    function peopleLines( job ) {
+        const lines = [ "- Owner: " + mdText( job.owner ), "- Told: " + ( job.audience.length === 0 ? "the owner" : mdText( job.audience.join( ", " ) ) ) ];
+        for ( const row of job.rows ) lines.push( "- " + mdLink( row.href, row.title ) );
+        if ( isSafeHref( job.detail_link ) ) lines.push( "- " + mdLink( job.detail_link, "Open the detail page" ) );
+        return lines;
+    }
+
+    // The markdown abstract for one job: what the expanded panel used to show, behind the 📋.
+    function abstractMarkdown( job, todayIso ) {
+        const parts = [ "# " + mdText( job.title ) + ( job.target === null ? "" : " (" + mdText( job.target ) + ")" ) + "\n", mdSection( "Reasons", reasonLines( job ) ) ];
+        if ( job.liveness === null ) parts.push( mdSection( "Last attempts", stripLines( job, todayIso ) ) );
+        if ( job.applies.scan_debt && job.liveness === null ) parts.push( mdSection( "Scan debt", scanLines( job, todayIso ) ) );
+        if ( job.applies.fix_debt ) parts.push( mdSection( "Fix debt", fixLines( job ) ) );
+        parts.push( mdSection( "Schedule", scheduleLines( job, todayIso ) ) );
+        parts.push( mdSection( "Evidence", job.evidence.length === 0 ? [ NOT_REPORTED ] : job.evidence.map( ( e ) => "- " + mdLink( e.href, e.label + ": " + e.path ) ) ) );
+        parts.push( mdSection( "People", peopleLines( job ) ) );
+        const names = notReportedNames( job );
+        parts.push( mdSection( "Not reported", [ names.length === 0 ? "Every figure was reported." : mdText( names.join( ", " ) ) ] ) );
+        return parts.join( "\n" );
+    }
+
     // ─── DOM ───────────────────────────────────────────────────────────
 
     function el( tag, className, text, testid ) {
@@ -209,183 +326,6 @@
         if ( text !== null ) node.textContent = text;
         if ( testid !== null ) node.setAttribute( "data-testid", testid );
         return node;
-    }
-
-    function link( href, text, testid ) {
-        const a = document.createElement( "a" );
-        a.href = href;
-        a.textContent = text;
-        a.setAttribute( "data-testid", testid );
-        return a;
-    }
-
-    function sparkline( points, label ) {
-        if ( points.length < 2 ) return null;
-        const values = points.map( ( p ) => p.value );
-        const lo     = Math.min( ...values );
-        const span   = Math.max( ...values ) - lo;
-        const coords = values.map( ( v, i ) => {
-            const x = ( i / ( values.length - 1 ) ) * 118 + 1;
-            const y = span === 0 ? 12 : 23 - ( ( v - lo ) / span ) * 22;
-            return x.toFixed( 1 ) + "," + y.toFixed( 1 );
-        } );
-        const svg = document.createElementNS( SVG_NS, "svg" );
-        svg.setAttribute( "viewBox", "0 0 120 24" );
-        svg.setAttribute( "width", "120" );
-        svg.setAttribute( "height", "24" );
-        svg.setAttribute( "role", "img" );
-        svg.setAttribute( "aria-label", label + ": " + values.join( ", " ) );
-        svg.setAttribute( "data-testid", "jobs-sparkline" );
-        const line = document.createElementNS( SVG_NS, "polyline" );
-        line.setAttribute( "points", coords.join( " " ) );
-        line.setAttribute( "fill", "none" );
-        line.setAttribute( "stroke", "currentColor" );
-        line.setAttribute( "stroke-width", "1.5" );
-        svg.appendChild( line );
-        return svg;
-    }
-
-    function addRow( list, name, value, testid ) {
-        list.appendChild( el( "dt", null, name, null ) );
-        list.appendChild( el( "dd", null, value, testid ) );
-    }
-
-    function block( title, testid ) {
-        const section = el( "section", "jobs-block", null, testid );
-        section.appendChild( el( "h3", null, title, null ) );
-        return section;
-    }
-
-    function notReportedParagraph( section ) {
-        section.appendChild( el( "p", null, NOT_REPORTED, null ) );
-        return section;
-    }
-
-    function reasonsBlock( job ) {
-        const section = block( "Reasons", "jobs-reasons" );
-        if ( job.reasons.length === 0 && job.unknown_reason === null ) {
-            section.appendChild( el( "p", null, "No rule is true: nothing to report.", null ) );
-            return section;
-        }
-        const ul = document.createElement( "ul" );
-        for ( const reason of job.reasons ) ul.appendChild( el( "li", null, reason.text, "jobs-reason" ) );
-        if ( job.unknown_reason !== null ) ul.appendChild( el( "li", null, job.unknown_reason, "jobs-reason" ) );
-        if ( job.machine_was_off ) ul.appendChild( el( "li", null, "Missed while the machine was off.", "jobs-reason" ) );
-        section.appendChild( ul );
-        return section;
-    }
-
-    function stripBlock( job, todayIso ) {
-        const section = block( "Last attempts", "jobs-strip" );
-        if ( job.strip.length === 0 ) return notReportedParagraph( section );
-        const ol = document.createElement( "ol" );
-        ol.className = "jobs-strip-list";
-        for ( const entry of job.strip ) {
-            const text = entry.outcome === "missed"
-                ? formatWhen( entry.at, todayIso ) + " MISSED (due, no run)"
-                : formatWhen( entry.at, todayIso ) + " " + entry.outcome;
-            const li = el( "li", "jobs-strip-" + entry.outcome, text, "jobs-strip-entry" );
-            li.setAttribute( "data-outcome", entry.outcome );
-            ol.appendChild( li );
-        }
-        section.appendChild( ol );
-        return section;
-    }
-
-    function scanBlock( job, todayIso ) {
-        if ( !job.applies.scan_debt || job.liveness !== null ) return null;
-        const section = block( "Scan debt", "jobs-scan" );
-        const debt    = job.scan_debt;
-        if ( debt === null ) return notReportedParagraph( section );
-        const dl = document.createElement( "dl" );
-        addRow( dl, "Count", debt.count === null ? NOT_REPORTED : ( formatCount( debt.count ) + " " + ( debt.unit ?? "" ) ).trim(), "jobs-scan-count" );
-        addRow( dl, "As of", formatWhen( debt.as_of, todayIso ), "jobs-scan-as-of" );
-        addRow( dl, "Drained last run", formatCount( debt.drained_last_run ), "jobs-scan-drained" );
-        addRow( dl, "Arrived last interval", formatCount( debt.arrived_last_interval ), "jobs-scan-arrived" );
-        addRow( dl, "Never checked", formatCount( debt.never_checked ), "jobs-scan-never" );
-        addRow( dl, "Clears in", clearsText( job ) || NOT_REPORTED, "jobs-scan-clears" );
-        section.appendChild( dl );
-        const spark = sparkline( debt.points, "scan debt" );
-        if ( spark !== null ) section.appendChild( spark );
-        return section;
-    }
-
-    function fixBlock( job ) {
-        if ( !job.applies.fix_debt ) return null;
-        const section = block( "Fix debt", "jobs-fix" );
-        const debt    = job.fix_debt;
-        if ( debt === null ) return notReportedParagraph( section );
-        const dl = document.createElement( "dl" );
-        if ( debt.kind === "reported" ) {
-            addRow( dl, "Named, not acted on", formatCount( debt.open_reported ), "jobs-fix-reported" );
-        } else {
-            addRow( dl, "Unfiled", formatCount( debt.unfiled ), "jobs-fix-unfiled" );
-            addRow( dl, "Filed in total", formatCount( debt.filed_total ), "jobs-fix-filed" );
-            addRow( dl, "Open now", formatCount( debt.open_now ), "jobs-fix-open" );
-            addRow( dl, "Closed in window", formatCount( debt.closed_in_window ), "jobs-fix-closed" );
-            addRow( dl, "Own mark", debt.own_mark ?? NOT_REPORTED, "jobs-fix-mark" );
-        }
-        section.appendChild( dl );
-        const spark = sparkline( debt.points, "rows opened" );
-        if ( spark !== null ) section.appendChild( spark );
-        if ( isSafeHref( debt.store_href ) ) section.appendChild( link( debt.store_href, "Rows in the task store", "jobs-fix-store-link" ) );
-        return section;
-    }
-
-    function scheduleBlock( job, todayIso ) {
-        const section = block( "Schedule", "jobs-schedule" );
-        const dl      = document.createElement( "dl" );
-        const s       = job.schedule;
-        if ( job.liveness !== null ) addRow( dl, "Liveness", job.liveness.kind + " unit " + job.liveness.unit, "jobs-liveness" );
-        if ( job.schedule_unverified ) addRow( dl, "Check", "schedule unverified: the installed schedule could not be read", "jobs-schedule-unverified" );
-        addRow( dl, "Runs", s === null || s.entries.length === 0 ? "unscheduled" : s.entries.join( "; " ), "jobs-schedule-entries" );
-        addRow( dl, "Last due", s === null ? NOT_REPORTED : formatWhen( s.last_due, todayIso ), "jobs-schedule-last-due" );
-        addRow( dl, "Next due", s === null ? NOT_REPORTED : formatWhen( s.next_due, todayIso ), "jobs-schedule-next-due" );
-        addRow( dl, "Grace", graceText( job ), "jobs-schedule-grace" );
-        addRow( dl, "Tells Rick", notifyIntervalText( job ), "jobs-notify-interval" );
-        section.appendChild( dl );
-        return section;
-    }
-
-    function evidenceBlock( job ) {
-        const section = block( "Evidence", "jobs-evidence" );
-        if ( job.evidence.length === 0 ) return notReportedParagraph( section );
-        const ul = document.createElement( "ul" );
-        for ( const item of job.evidence ) {
-            const li = document.createElement( "li" );
-            if ( isSafeHref( item.href ) ) li.appendChild( link( item.href, item.label + ": " + item.path, "jobs-evidence-link" ) );
-            else li.appendChild( el( "span", null, item.label + ": " + item.path, "jobs-evidence-path" ) );
-            ul.appendChild( li );
-        }
-        section.appendChild( ul );
-        return section;
-    }
-
-    function peopleBlock( job ) {
-        const section = block( "People", "jobs-people" );
-        const dl      = document.createElement( "dl" );
-        addRow( dl, "Owner", job.owner, "jobs-owner" );
-        addRow( dl, "Told", job.audience.length === 0 ? "the owner" : job.audience.join( ", " ), "jobs-audience" );
-        section.appendChild( dl );
-        if ( job.rows.length > 0 ) {
-            const ul = document.createElement( "ul" );
-            for ( const row of job.rows ) {
-                const li = document.createElement( "li" );
-                if ( isSafeHref( row.href ) ) li.appendChild( link( row.href, row.title, "jobs-row-link" ) );
-                else li.appendChild( el( "span", null, row.title, "jobs-row-title" ) );
-                ul.appendChild( li );
-            }
-            section.appendChild( ul );
-        }
-        if ( isSafeHref( job.detail_link ) ) section.appendChild( link( job.detail_link, "Open the detail page", "jobs-detail-link" ) );
-        return section;
-    }
-
-    function notReportedBlock( job ) {
-        const section = block( "Not reported", "jobs-not-reported" );
-        const names   = notReportedNames( job );
-        section.appendChild( el( "p", null, names.length === 0 ? "Every figure was reported." : names.join( ", " ), "jobs-not-reported-names" ) );
-        return section;
     }
 
     function runNowBlock( job, actions ) {
@@ -414,6 +354,55 @@
         return ( "jobs-" + job.job + ( job.target === null ? "" : "-" + job.target ) ).replace( /[^A-Za-z0-9_-]/g, "-" );
     }
 
+    // The ids of the rows whose ⋯ is open: a repaint reads it and a toggle writes it, so a redraw keeps a row open.
+    const openIds = new Set();
+
+    // The 📋 that opens the job's abstract; notifications.js's delegated click handler does the rest.
+    function abstractIndicator( job, todayIso, testid ) {
+        const span = el( "span", "abstract-indicator jobs-abstract", "📋", testid );
+        span.setAttribute( "data-abstract", encodeURIComponent( abstractMarkdown( job, todayIso ) ) );      // URI-encoded: the legacy handler decodes it
+        span.setAttribute( "role", "button" );
+        span.setAttribute( "tabindex", "0" );
+        span.setAttribute( "title", "View details" );
+        return span;
+    }
+
+    // Line 2: the figures that apply to the job, then its switch (drawn by cron-jobs.js).
+    function lineTwo( job ) {
+        const line = el( "div", "jobs-line2", null, "jobs-line2" );
+        const figures = [ [ "Scan", scanText( job ), "jobs-fig-scan" ], [ "Fix", fixText( job ), "jobs-fig-fix" ], [ "Clears", clearsText( job ), "jobs-fig-clears" ] ];
+        for ( const [ label, text, testid ] of figures ) if ( text !== "" ) line.appendChild( el( "span", "jobs-fig", label + ": " + text, testid ) );
+        if ( job.cron !== undefined && job.cron !== null ) line.appendChild( window.cronJobs.switchCells( job.cron ) );
+        return line;
+    }
+
+    // One target of a job, as a compact line inside the parent's third line.
+    function targetLine( target, todayIso ) {
+        const line = el( "div", "jobs-target", null, "jobs-target" );
+        line.setAttribute( "data-job", target.job );
+        line.setAttribute( "data-target", target.target ?? "" );
+        line.setAttribute( "data-state", target.state );
+        line.append(
+            el( "span", "jobs-dot jobs-state-" + target.state, "●", null ),
+            el( "span", "jobs-title", target.target === null ? target.title : target.title + " (" + target.target + ")", "jobs-target-title" ),
+            el( "span", "jobs-badge", badgeText( target ), "jobs-target-badge" ),
+            el( "span", "jobs-last-run", lastRunText( target, todayIso ), "jobs-target-last-run" ),
+            abstractIndicator( target, todayIso, "jobs-target-abstract" )
+        );
+        return line;
+    }
+
+    // Line 3: Run now, then the job's targets.
+    function lineThree( job, todayIso, actions, sort ) {
+        const line = el( "div", "jobs-line3", null, "jobs-line3" );
+        const run  = runNowBlock( job, actions );
+        if ( run !== null ) line.appendChild( run );
+        for ( const target of sortJobs( job.targets, sort.id, sort.direction ) ) line.appendChild( targetLine( target, todayIso ) );
+        if ( line.childElementCount === 0 ) line.textContent = "Nothing to run by hand, and no targets.";
+        return line;
+    }
+
+    // One job: the collapsed line and its hidden second and third lines. The ⋯ button's aria-expanded tracks them.
     function renderJob( job, todayIso, actions, sort = DEFAULT_SORT ) {
         const id      = itemId( job );
         const item    = el( "section", "jobs-item", null, "jobs-item" );
@@ -423,69 +412,64 @@
 
         const heading = document.createElement( "h4" );
         heading.className = "jobs-heading";
-        const button = document.createElement( "button" );
-        button.type = "button";
-        button.className = "jobs-line";
-        button.id = id + "-line";
-        button.setAttribute( "aria-expanded", "false" );
-        button.setAttribute( "aria-controls", id + "-panel" );
-        button.setAttribute( "data-testid", "jobs-line" );
+        const line = el( "div", "jobs-line", null, "jobs-line" );
+        line.id = id + "-line";
+
+        const toggle = document.createElement( "button" );
+        toggle.type = "button";
+        toggle.className = "task-disclose-button jobs-disclose";
+        toggle.setAttribute( "data-task-id", id );
+        toggle.setAttribute( "data-testid", "jobs-disclose" );
+        toggle.setAttribute( "aria-controls", id + "-panel" );
+        toggle.setAttribute( "title", "Show row controls" );
+        toggle.textContent = "⋯";
+        const first = el( "span", "jobs-disclose-cell", null, null );
+        first.appendChild( toggle );
+        line.appendChild( first );
         const cells = [
-            [ "jobs-caret", "▶" ],
             [ "jobs-dot jobs-state-" + job.state, "●" ],
             [ "jobs-title", job.target === null ? job.title : job.title + " (" + job.target + ")" ],
             [ "jobs-badge", badgeText( job ) ],
             [ "jobs-last-run", lastRunText( job, todayIso ) ],
-            [ "jobs-last-finished", job.liveness === null ? lastFinishedText( job, todayIso ) : "" ],
-            [ "jobs-scan-cell", scanText( job ) ],
-            [ "jobs-fix-cell", fixText( job ) ],
-            [ "jobs-clears-cell", clearsText( job ) ],
+            [ "jobs-last-finished", job.liveness === null && job.cron_only !== true ? lastFinishedText( job, todayIso ) : "" ],
         ];
         for ( const [ cls, text ] of cells ) {
             const span = el( "span", cls, text, cls.split( " " )[ 0 ] );
             if ( cls.startsWith( "jobs-dot" ) ) span.setAttribute( "aria-hidden", "true" );
-            button.appendChild( span );
+            line.appendChild( span );
         }
-        heading.appendChild( button );
+        line.appendChild( abstractIndicator( job, todayIso, "jobs-abstract" ) );
+        heading.appendChild( line );
         item.appendChild( heading );
 
         const panel = el( "div", "jobs-panel", null, "jobs-panel" );
         panel.id = id + "-panel";
         panel.setAttribute( "role", "region" );
-        panel.setAttribute( "aria-labelledby", button.id );
-        panel.hidden = true;
-        panel.appendChild( reasonsBlock( job ) );
-        if ( job.liveness === null ) panel.appendChild( stripBlock( job, todayIso ) );
-        for ( const part of [ scanBlock( job, todayIso ), fixBlock( job ) ] ) if ( part !== null ) panel.appendChild( part );
-        panel.appendChild( scheduleBlock( job, todayIso ) );
-        panel.appendChild( evidenceBlock( job ) );
-        panel.appendChild( peopleBlock( job ) );
-        panel.appendChild( notReportedBlock( job ) );
-        const run = runNowBlock( job, actions );
-        if ( run !== null ) panel.appendChild( run );
-        for ( const target of sortJobs( job.targets, sort.id, sort.direction ) ) panel.appendChild( renderJob( target, todayIso, actions, sort ) );
+        panel.setAttribute( "aria-labelledby", line.id );
+        panel.append( lineTwo( job ), lineThree( job, todayIso, actions, sort ) );
+        const opened = openIds.has( id );
+        panel.hidden = !opened;
+        toggle.setAttribute( "aria-expanded", opened ? "true" : "false" );
         item.appendChild( panel );
 
-        button.addEventListener( "click", () => {
-            const open = button.getAttribute( "aria-expanded" ) === "true";
-            button.setAttribute( "aria-expanded", open ? "false" : "true" );
+        toggle.addEventListener( "click", () => {
+            const open = toggle.getAttribute( "aria-expanded" ) === "true";
+            toggle.setAttribute( "aria-expanded", open ? "false" : "true" );
             panel.hidden = open;
-            button.querySelector( ".jobs-caret" ).textContent = open ? "▶" : "▼";
+            if ( open ) openIds.delete( id ); else openIds.add( id );
         } );
         return item;
     }
 
     // The columns of one collapsed line, in grid order. `sortId` names the SORT_ORDERS entry a header click picks, or null.
     const COLUMNS = [
-        { cls : "jobs-caret",         label : "",              sortId : null },
+        { cls : "jobs-disclose-cell", label : "",              sortId : null },
         { cls : "jobs-dot",           label : "",              sortId : null },
         { cls : "jobs-title",         label : "Service",       sortId : "name" },
         { cls : "jobs-badge",         label : "Status",        sortId : "health" },
         { cls : "jobs-last-run",      label : "Last run",      sortId : "last-run" },
         { cls : "jobs-last-finished", label : "Last finished", sortId : null },
-        { cls : "jobs-scan-cell",     label : "Scan",          sortId : null },
-        { cls : "jobs-fix-cell",      label : "Fix",           sortId : null },
-        { cls : "jobs-clears-cell",   label : "Clears",        sortId : null },
+        { cls : "jobs-abstract",      label : "",              sortId : null },
     ];
 
     // Clicking a sortable header: a new column sorts ascending, a second click descending, a third returns to the default order.
@@ -516,9 +500,14 @@
 
     let currentSort = DEFAULT_SORT;
 
+    // `summary.jobs` is already merged (mergeJobs): every item is one job, with its switch when it has one.
     function renderAccordion( mount, summary, actions, sort = currentSort ) {
         mount.replaceChildren();
         currentSort = sort;
+        const cron = window.cronJobs;
+        if ( cron.rows().length > 0 ) mount.appendChild( el( "p", "cron-note", cron.canFlip()
+            ? "Flipping a switch takes effect at the job's next start, or next tick for a loop. A run already going is not stopped."
+            : "Read-only: only an administrator can flip a switch.", "cron-note" ) );
         mount.appendChild( headerRow( sort, ( next ) => renderAccordion( mount, summary, actions, next ) ) );
         for ( const job of sortJobs( summary.jobs, sort.id, sort.direction ) ) mount.appendChild( renderJob( job, summary.generated_at, actions, sort ) );
         if ( summary.reporting_off_line ) {                      // row 4aa0ba1b: the server drops a switched-off job and says how many
@@ -570,34 +559,49 @@
         }
     }
 
-    async function refresh() {
-        const mount   = document.getElementById( "background-jobs-container" );
-        const count   = document.getElementById( "background-jobs-count" );
-        const errorEl = document.getElementById( "background-jobs-error" );
+    let lastSummary = null;          // the last good summary; a failed poll leaves it on screen
+
+    const failureText = ( err ) => err instanceof Error ? err.message : String( err );
+
+    // Draw the list from the last good answers. Nothing is drawn until the summary has arrived once.
+    function repaint() {
+        const mount     = document.getElementById( "background-jobs-container" );
+        const count     = document.getElementById( "background-jobs-count" );
         const summaryEl = document.getElementById( "background-jobs-summary" );
-        if ( mount === null || count === null || errorEl === null || summaryEl === null ) return;
-        try {
-            const resp = await authFetch( SUMMARY_URL );
-            if ( !resp.ok ) throw new Error( "HTTP " + resp.status );
-            const summary = await resp.json();
-            renderAccordion( mount, summary, { canRun : summary.caller_is_operator, runNow } );
-            count.textContent = String( summary.jobs.length );
-            summaryEl.textContent = headerLine( summary.jobs );
-            errorEl.hidden = true;
-        } catch ( err ) {
-            errorEl.textContent = "Could not load the jobs: " + ( err instanceof Error ? err.message : String( err ) );
-            errorEl.hidden = false;
-        }
+        if ( lastSummary === null || mount === null || count === null || summaryEl === null ) return;
+        window.cronJobs.resetConfirm();      // a redraw drops a half-finished confirmation, so one stale click never turns a job off
+        const merged = mergeJobs( lastSummary.jobs, window.cronJobs.rows() );
+        renderAccordion( mount, { ...lastSummary, jobs : merged }, { canRun : lastSummary.caller_is_operator, runNow } );
+        const off = window.cronJobs.rows().filter( ( j ) => j.enabled === false ).length;
+        count.textContent = merged.length + ( off > 0 ? " (" + off + " off)" : "" );
+        summaryEl.textContent = headerLine( lastSummary.jobs );
+    }
+
+    async function refresh() {
+        const errorEl = document.getElementById( "background-jobs-error" );
+        if ( document.getElementById( "background-jobs-container" ) === null || errorEl === null ) return;
+        const [ jobs, cron ] = await Promise.allSettled( [
+            authFetch( SUMMARY_URL ).then( ( resp ) => { if ( !resp.ok ) throw new Error( "HTTP " + resp.status ); return resp.json(); } ),
+            window.cronJobs.load(),
+        ] );
+        const problems = [];
+        if ( jobs.status === "fulfilled" ) lastSummary = jobs.value;
+        else problems.push( "Could not load the jobs: " + failureText( jobs.reason ) );
+        if ( cron.status === "rejected" ) problems.push( "Could not load the scheduled jobs: " + failureText( cron.reason ) );
+        repaint();
+        errorEl.textContent = problems.join( " " );
+        errorEl.hidden = problems.length === 0;
     }
 
     function start() {
         const button = document.getElementById( "background-jobs-refresh" );
         if ( button !== null ) button.addEventListener( "click", ( e ) => { e.stopPropagation(); refresh(); } );
+        window.cronJobs.onChange( repaint );      // a flip, or another client's frame, repaints the list
         refresh();
         window.setInterval( refresh, POLL_MS );
     }
 
-    window.backgroundJobs = { refresh, start, renderAccordion, renderJob, sortJobs, SORT_ORDERS, HEALTH_URGENCY, headerLine, formatWhen, runNowPath, runNowFailureText, isSafeHref };
+    window.backgroundJobs = { refresh, start, repaint, renderAccordion, renderJob, sortJobs, mergeJobs, abstractMarkdown, SORT_ORDERS, HEALTH_URGENCY, headerLine, formatWhen, runNowPath, runNowFailureText, isSafeHref };
 
     if ( document.readyState === "loading" ) document.addEventListener( "DOMContentLoaded", start );
     else start();

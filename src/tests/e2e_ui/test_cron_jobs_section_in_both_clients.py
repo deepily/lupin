@@ -41,8 +41,8 @@ ALARM_KEY   = switches.switch_key( ALARM_JOB )
 PAINT_MS    = 20_000
 
 CLIENTS = {
-    "legacy"      : { "url": "/app/notifications?classic=1", "list": "#cron-jobs-container" },
-    "multiplexer" : { "url": "/app/multiplexer",             "list": "#cron-jobs-pane [data-testid=cron-jobs-container]" },
+    "legacy"      : { "url": "/app/notifications?classic=1", "list": "#background-jobs-container" },
+    "multiplexer" : { "url": "/app/multiplexer",             "list": "#background-jobs-pane [data-testid=jobs-accordion]" },
 }
 
 
@@ -86,11 +86,20 @@ def _on_disk( path ):
     return ini_io.read_value_from_disk( path, KEY ).strip().lower()
 
 
-def _open( page, client ):
-    page.goto( f"{BASE_URL}{client[ 'url' ]}" )
-    row = page.locator( f"{client[ 'list' ]} [data-testid=cron-item][data-job={JOB}]" )
+def _show( page, client, job=JOB ):
+    """Open the job's second line with the ⋯ and return its switch."""
+    item = page.locator( f"{client[ 'list' ]} [data-testid=jobs-item][data-job={job}]" )
+    item.wait_for( state="visible", timeout=PAINT_MS )
+    toggle = item.get_by_test_id( "jobs-disclose" )
+    if toggle.get_attribute( "aria-expanded" ) != "true": toggle.click()
+    row = item.locator( "[data-testid=cron-item]" )
     row.wait_for( state="visible", timeout=PAINT_MS )
     return row
+
+
+def _open( page, client ):
+    page.goto( f"{BASE_URL}{client[ 'url' ]}" )
+    return _show( page, client )
 
 
 def test_an_admin_sees_an_enabled_toggle_and_a_click_flips_the_ini_value( admin_page, scratch_ini, client ):
@@ -116,7 +125,7 @@ def test_an_admin_sees_an_enabled_toggle_and_a_click_flips_the_ini_value( admin_
 def test_a_flip_in_one_page_reaches_a_second_open_page_without_a_reload( admin_page, scratch_ini, client ):
     first   = _open( admin_page, client )
     second  = admin_page.context.new_page()
-    other   = _open( second, client )
+    other   = _open( second, client )                # opens its own second line: the frame repaints it in place
     assert other.get_by_test_id( "cron-state" ).inner_text() == "ON"
     first.get_by_test_id( "cron-flip" ).click()
     # The poll is 60 s; the socket frame is the only thing fast enough to move the second page inside this wait.
@@ -136,7 +145,7 @@ def test_a_user_who_is_not_an_admin_sees_the_switches_read_only( logged_in_page,
     assert _on_disk( scratch_ini ) == "true"
 
 
-def test_on_a_drift_row_the_toggle_stays_on_the_job_title_line( admin_page, scratch_ini, client ):
+def test_on_a_drift_row_the_note_and_the_toggle_are_both_on_line_2( admin_page, scratch_ini, client ):
     row = _open( admin_page, client )
     row.get_by_test_id( "cron-flip" ).click()
     expect( row.get_by_test_id( "cron-state" ) ).to_have_text( "OFF", timeout=PAINT_MS )
@@ -144,16 +153,16 @@ def test_on_a_drift_row_the_toggle_stays_on_the_job_title_line( admin_page, scra
     row = _open( admin_page, client )
     drift = row.get_by_test_id( "cron-drift" )
     assert drift.is_visible(), "the file disagrees with the last recorded flip, so the row must say so"
-    title, toggle = row.get_by_test_id( "cron-title" ).bounding_box(), row.get_by_test_id( "cron-flip" ).bounding_box()
-    assert toggle[ "y" ] < title[ "y" ] + title[ "height" ] and toggle[ "y" ] + toggle[ "height" ] > title[ "y" ], \
-        f"the toggle ({toggle}) must sit on the same line as the job title ({title}) on a drift row"
-    assert drift.bounding_box()[ "y" ] >= toggle[ "y" ] + toggle[ "height" ] - 1, "the drift note goes below the toggle line"
+    assert row.get_by_test_id( "cron-flip" ).is_visible(), "the toggle stays reachable on a drift row"
+    line2 = row.locator( "xpath=ancestor::*[@data-testid='jobs-line2']" )
+    assert line2.count() == 1, "the switch, and so its drift note, sits on line 2 of the job's row"
+    first_line = row.locator( "xpath=ancestor::*[@data-testid='jobs-item']" ).get_by_test_id( "jobs-line" )
+    assert first_line.get_by_test_id( "cron-drift" ).count() == 0, "the first line stays one clean line"
 
 
 def test_turning_off_an_alarm_job_takes_a_confirming_click( admin_page, scratch_ini, client ):
     admin_page.goto( f"{BASE_URL}{client[ 'url' ]}" )
-    row = admin_page.locator( f"{client[ 'list' ]} [data-testid=cron-item][data-job={ALARM_JOB}]" )
-    row.wait_for( state="visible", timeout=PAINT_MS )
+    row = _show( admin_page, client, ALARM_JOB )
     toggle = row.get_by_test_id( "cron-flip" )
     toggle.click()
     assert toggle.inner_text() == "Confirm: turn off"

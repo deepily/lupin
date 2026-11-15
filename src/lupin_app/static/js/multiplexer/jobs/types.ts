@@ -5,8 +5,13 @@
 // the seven additions. The reader computes health and the page only formats what it is given,
 // so there is one definition of silent.
 //
+// Row c80ef763: the list also carries each job's on/off switch. `mergeJobs` (mergedRows.ts) attaches the
+// switch row to its job, and gives a switch with no reporting entry an entry of its own.
+//
 // Null always means not reported. A debt that does not apply to a job is declared false in
 // `applies` and is then not shown at all, so the two cases look different.
+
+import type { CronJobRow } from "./cronFormat";
 
 /** The five health states, worst first. */
 export type JobState = "unknown" | "silent" | "failing" | "behind" | "healthy";
@@ -161,6 +166,10 @@ export interface JobEntry {
   runnable                  : boolean;
   unknown_reason            : string | null;
   targets                   : JobEntry[];
+  /** The job's switch row, attached by `mergeJobs`; null when the switch list lacks it. */
+  cron?                     : CronJobRow | null;
+  /** True for an entry `mergeJobs` made for a switch the summary does not report on. */
+  cron_only?                : boolean;
 }
 
 /** The whole response of GET /api/jobs/summary. */

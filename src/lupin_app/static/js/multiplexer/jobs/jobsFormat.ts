@@ -159,8 +159,10 @@ export function headerLine( jobs: readonly JobEntry[] ): string {
  * An example is "FAILING · BEHIND".
  *
  * An unscheduled job also carries an unscheduled label. It is a badge and not a state.
+ * A switch with no reporting entry (`cron_only`) says "NOT REPORTING".
  */
 export function badgeText( job: JobEntry ): string {
+  if ( job.cron_only === true ) return "NOT REPORTING";      // a switch whose job the summary leaves out (reporting switched off)
   const states = [ job.state ];
   for ( const reason of job.reasons ) {
     if ( !states.includes( reason.state ) && reason.state !== "healthy" ) states.push( reason.state );
@@ -173,6 +175,7 @@ export function badgeText( job: JobEntry ): string {
 
 /** What a skipped, clean or failed attempt reads as on the collapsed line. */
 export function lastRunText( job: JobEntry, todayIso: string ): string {
+  if ( job.cron_only === true ) return NOT_REPORTED;
   if ( job.liveness !== null ) {
     if ( job.liveness.up === null ) return `unit ${ job.liveness.unit } is not loaded`;
     return job.liveness.up ? `up (${ job.liveness.unit })` : `down (${ job.liveness.unit })`;

@@ -1,9 +1,11 @@
-// The legacy notifications client carries the scheduled-jobs section (row 063fc1a8).
+// The legacy client carries each job's switch in the jobs list (rows 063fc1a8, c80ef763).
 //
-// cron-jobs.js is plain browser JS in an IIFE, in no tsconfig, so it is loaded the way
-// background_jobs_js/ loads its subject: the actual bytes, run through vm.runInThisContext against
-// a DOM parsed out of the actual notifications.html. It has no c8 number; these behavioural
-// assertions are its gate. The rows are the shape GET /api/cron-jobs returns.
+// Row c80ef763 merged the Scheduled Jobs section into the Background Jobs list: cron-jobs.js no longer owns a
+// section, it supplies the switch (window.cronJobs.switchCells) that background-jobs.js draws on line 2 of a
+// job's row. Both scripts are plain browser JS in IIFEs, in no tsconfig, so they are loaded the way
+// background_jobs_js/ loads its subject: the actual bytes, run through vm.runInThisContext against a DOM
+// parsed out of the actual notifications.html. They have no c8 number; these behavioural assertions are
+// their gate. The switch rows are the shape GET /api/cron-jobs returns.
 //
 // Run via: npx tsx --test src/tests/unit/cron_jobs_js/the_legacy_client_carries_the_scheduled_jobs_section.test.ts
 
@@ -17,11 +19,14 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-const HERE    = dirname( fileURLToPath( import.meta.url ) );
-const STATIC  = resolve( HERE, "../../../lupin_app/static" );
-const HTML    = readFileSync( resolve( STATIC, "html/notifications.html" ), "utf8" );
-const JS_PATH = resolve( STATIC, "js/cron-jobs.js" );
-const JS_SRC  = readFileSync( JS_PATH, "utf8" );
+const HERE       = dirname( fileURLToPath( import.meta.url ) );
+const STATIC     = resolve( HERE, "../../../lupin_app/static" );
+const HTML       = readFileSync( resolve( STATIC, "html/notifications.html" ), "utf8" );
+const CRON_PATH  = resolve( STATIC, "js/cron-jobs.js" );
+const CRON_SRC   = readFileSync( CRON_PATH, "utf8" );
+const JOBS_PATH  = resolve( STATIC, "js/background-jobs.js" );
+const JOBS_SRC   = readFileSync( JOBS_PATH, "utf8" );
+const FIXTURE    = JSON.parse( readFileSync( resolve( HERE, "../../fixtures/jobs/jobs-summary.fixture.json" ), "utf8" ) );
 
 type G = Record<string, any>;
 const g = globalThis as unknown as G;
@@ -29,77 +34,88 @@ const g = globalThis as unknown as G;
 const byId  = ( id: string ) => document.getElementById( id ) as HTMLElement;
 const flush = () => new Promise( ( r ) => setImmediate( r ) );
 
-const ROW_A = { job : "duplicate-check", title : "Duplicate check", schedule : "cron 0 10-22 * * *", key : "cron job duplicate-check enabled", enabled : true,  honoured : true,  drift : false, last_changed_by : null, last_changed_at : null };
-const ROW_B = { job : "wiki-librarian",  title : "Wiki librarian",  schedule : "cron 17 10 * * *",   key : "cron job wiki-librarian enabled",  enabled : false, honoured : true,  drift : false, last_changed_by : "rick@example.com", last_changed_at : "2026-11-13T19:30:00-05:00" };
-const ROW_C = { job : "disk-report",     title : "Disk report",     schedule : "cron 0 19 * * 0",    key : "cron job disk-report enabled",     enabled : null,  honoured : true,  drift : false, last_changed_by : null, last_changed_at : null };
+const ROW_A = { job : "duplicate-check", title : "Duplicate check", schedule : "cron 0 10-22 * * *", key : "k-a", enabled : true,  honoured : true,  drift : false, last_changed_by : null, last_changed_at : null };
+const ROW_B = { job : "wiki-librarian",  title : "Wiki librarian",  schedule : "cron 17 10 * * *",   key : "k-b", enabled : false, honoured : true,  drift : false, last_changed_by : "rick@example.com", last_changed_at : "2026-11-13T19:30:00-05:00" };
+const ROW_C = { job : "disk-report",     title : "Disk report",     schedule : "cron 0 19 * * 0",    key : "k-c", enabled : null,  honoured : true,  drift : false, last_changed_by : null, last_changed_at : null };
 
 const clone = <T,>( v: T ): T => JSON.parse( JSON.stringify( v ) );
 
+/** The section exactly as the page declares it: the one list. */
 function sectionMarkup(): string {
-  const m = HTML.match( /<div class="collapsible-section" id="section-cron-jobs">[\s\S]*?\n        <\/div>\n(?=\n)/ );
-  assert.ok( m, "notifications.html declares no #section-cron-jobs" );
+  const m = HTML.match( /<div class="collapsible-section" id="section-background-jobs">[\s\S]*?\n        <\/div>\n(?=\n)/ );
+  assert.ok( m, "notifications.html declares no #section-background-jobs" );
   return m![ 0 ];
 }
 
 interface Call { url: string; opts?: { method?: string; body?: string; headers?: Record<string, string> } }
+type Reply = () => { ok: boolean; status: number; json: () => Promise<unknown> };
 let calls: Call[];
-let listReply: () => { ok: boolean; status: number; json: () => Promise<unknown> };
-let putReply: () => { ok: boolean; status: number; json: () => Promise<unknown> };
+let summaryReply: Reply;
+let listReply: Reply;
+let putReply: Reply;
 let timers: Array<() => void>;
 
 before( () => { if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register(); } );
 
 beforeEach( () => {
   document.body.innerHTML = sectionMarkup();
-  timers    = [];
-  calls     = [];
+  timers       = [];
+  calls        = [];
   g.window.setInterval = ( fn: () => void ) => { timers.push( fn ); return timers.length; };
-  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : clone( [ ROW_A, ROW_B, ROW_C ] ), caller_is_admin : true } ) } );
-  putReply  = () => ( { ok : true, status : 200, json : async () => ( { ...ROW_A, enabled : false, honoured : true,  drift : false, last_changed_by : "rick@example.com", last_changed_at : "2026-11-13T20:00:00-05:00" } ) } );
-  g.fetch = async ( url: string, opts?: Call[ "opts" ] ) => { calls.push( { url, opts } ); return opts?.method === "PUT" ? putReply() : listReply(); };
+  summaryReply = () => ( { ok : true, status : 200, json : async () => clone( FIXTURE ) } );
+  listReply    = () => ( { ok : true, status : 200, json : async () => ( { jobs : clone( [ ROW_A, ROW_B, ROW_C ] ), caller_is_admin : true } ) } );
+  putReply     = () => ( { ok : true, status : 200, json : async () => ( { ...ROW_A, enabled : false, honoured : true,  drift : false, last_changed_by : "rick@example.com", last_changed_at : "2026-11-13T20:00:00-05:00" } ) } );
+  g.fetch = async ( url: string, opts?: Call[ "opts" ] ) => {
+    calls.push( { url, opts } );
+    if ( opts?.method === "PUT" ) return putReply();
+    return url === "/api/cron-jobs" ? listReply() : summaryReply();
+  };
   g.localStorage.setItem( "lupin_access_token", "tok" );
   delete g.window.notificationsUI;
 } );
 
+/** Load both scripts the way the page does: the switch module first, then the list. */
 async function load(): Promise<G> {
   delete g.window.cronJobs;
-  vm.runInThisContext( JS_SRC, { filename : JS_PATH } );
+  delete g.window.backgroundJobs;
+  vm.runInThisContext( CRON_SRC, { filename : CRON_PATH } );
+  vm.runInThisContext( JOBS_SRC, { filename : JOBS_PATH } );
   await flush();
   return g.window.cronJobs as G;
 }
 
-const items = () => Array.from( byId( "cron-jobs-container" ).querySelectorAll( ":scope > [data-testid=cron-item]" ) ) as HTMLElement[];
+const items = () => Array.from( byId( "background-jobs-container" ).querySelectorAll( "[data-testid=cron-item]" ) ) as HTMLElement[];
 const item  = ( job: string ) => items().find( ( i ) => i.getAttribute( "data-job" ) === job )!;
 const flipButton = ( job: string ) => item( job ).querySelector( "[data-testid=cron-flip]" ) as HTMLButtonElement;
 const stateOf = ( job: string ) => item( job ).querySelector( "[data-testid=cron-state]" )!.textContent;
+const errorOf = () => byId( "background-jobs-error" );
 
-test( "the page puts the section after Background Jobs and before the filter settings, once, with fresh tokens", () => {
-  const jobs = HTML.indexOf( 'id="section-background-jobs"' );
-  const mine = HTML.indexOf( 'id="section-cron-jobs"' );
-  const next = HTML.indexOf( 'id="filter-settings-section"' );
-  assert.ok( jobs > 0 && jobs < mine && mine < next, "section order" );
-  assert.equal( ( HTML.match( /id="section-cron-jobs"/g ) ?? [] ).length, 1 );
-  const js = HTML.match( /\/static\/js\/cron-jobs\.js\?v=([0-9a-f]{12})/ );
-  assert.ok( js, "no tokened script tag" );
-  assert.equal( js![ 1 ], createHash( "sha256" ).update( readFileSync( JS_PATH ) ).digest( "hex" ).slice( 0, 12 ) );
-  const css = HTML.match( /\/static\/css\/cron-jobs-legacy\.css\?v=([0-9a-f]{12})/ );
-  assert.ok( css, "no tokened stylesheet link" );
-  assert.equal( css![ 1 ], createHash( "sha256" ).update( readFileSync( resolve( STATIC, "css/cron-jobs-legacy.css" ) ) ).digest( "hex" ).slice( 0, 12 ) );
+test( "the page has no Scheduled Jobs section or sheet; the switch script loads before the list script, and both tokens are fresh", () => {
+  assert.equal( HTML.includes( 'id="section-cron-jobs"' ), false );
+  assert.equal( HTML.includes( "cron-jobs-legacy.css" ), false );
+  assert.equal( HTML.includes( "cron-jobs-container" ), false );
+  const cron = HTML.match( /\/static\/js\/cron-jobs\.js\?v=([0-9a-f]{12})/ );
+  const jobs = HTML.match( /\/static\/js\/background-jobs\.js\?v=([0-9a-f]{12})/ );
+  assert.ok( cron && jobs, "no tokened script tags" );
+  assert.ok( cron!.index! < jobs!.index!, "cron-jobs.js must load first: background-jobs.js calls it" );
+  assert.equal( cron![ 1 ], createHash( "sha256" ).update( readFileSync( CRON_PATH ) ).digest( "hex" ).slice( 0, 12 ) );
+  assert.equal( jobs![ 1 ], createHash( "sha256" ).update( readFileSync( JOBS_PATH ) ).digest( "hex" ).slice( 0, 12 ) );
 } );
 
-test( "on load it fetches /api/cron-jobs, draws one row per job with its state, counts the off ones, and polls", async () => {
+test( "on load the list asks both doors, draws a switch on each job's second line, counts the off ones, and polls", async () => {
   await load();
-  assert.deepEqual( calls.map( ( c ) => c.url ), [ "/api/cron-jobs" ] );
+  assert.deepEqual( calls.map( ( c ) => c.url ).sort(), [ "/api/cron-jobs", "/api/jobs/summary" ] );
   assert.equal( items().length, 3 );
   assert.deepEqual( [ "duplicate-check", "wiki-librarian", "disk-report" ].map( stateOf ), [ "ON", "OFF", "UNKNOWN" ] );
-  assert.equal( byId( "cron-jobs-count" ).textContent, "3 (1 off)" );
+  assert.equal( byId( "background-jobs-count" ).textContent, "23 (1 off)" );
   assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-schedule]" )!.textContent, "cron 0 10-22 * * *" );
   assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-changed]" )!.textContent, "not reported" );
   assert.equal( item( "wiki-librarian" ).querySelector( "[data-testid=cron-changed]" )!.textContent, "rick@example.com, 2026-11-13 19:30" );
-  assert.equal( byId( "cron-jobs-error" ).hidden, true );
+  assert.equal( item( "duplicate-check" ).parentElement!.getAttribute( "data-testid" ), "jobs-line2", "the switch is on line 2" );
+  assert.equal( errorOf().hidden, true );
   assert.equal( timers.length, 1 );
   timers[ 0 ]!(); await flush();
-  assert.equal( calls.length, 2 );
+  assert.equal( calls.length, 4 );
 } );
 
 test( "an administrator sees live buttons; an unknown switch has none to flip", async () => {
@@ -108,20 +124,21 @@ test( "an administrator sees live buttons; an unknown switch has none to flip", 
   assert.equal( flipButton( "duplicate-check" ).textContent, "Turn off" );
   assert.equal( flipButton( "wiki-librarian" ).textContent, "Turn on" );
   assert.equal( flipButton( "disk-report" ).disabled, true );
-  assert.match( byId( "cron-jobs-container" ).querySelector( "[data-testid=cron-note]" )!.textContent as string, /^Flipping a switch takes effect/ );
+  assert.match( byId( "background-jobs-container" ).querySelector( "[data-testid=cron-note]" )!.textContent as string, /^Flipping a switch takes effect/ );
 } );
 
 test( "anyone who is not an administrator sees every button disabled and a read-only note", async () => {
   listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : clone( [ ROW_A, ROW_B ] ), caller_is_admin : false } ) } );
   await load();
   assert.ok( items().every( ( i ) => ( i.querySelector( "[data-testid=cron-flip]" ) as HTMLButtonElement ).disabled ) );
-  assert.match( byId( "cron-jobs-container" ).querySelector( "[data-testid=cron-note]" )!.textContent as string, /^Read-only/ );
+  assert.match( byId( "background-jobs-container" ).querySelector( "[data-testid=cron-note]" )!.textContent as string, /^Read-only/ );
   flipButton( "duplicate-check" ).click(); await flush();
   assert.equal( calls.filter( ( c ) => c.opts?.method === "PUT" ).length, 0 );
 } );
 
-test( "a click sends PUT with the opposite state and the bearer token, then draws the row the server returned", async () => {
+test( "a click sends PUT with the opposite state and the bearer token, then draws the row the server returned, with its second line still open", async () => {
   await load();
+  ( byId( "background-jobs-container" ).querySelector( "[data-job=duplicate-check] [data-testid=jobs-disclose]" ) as HTMLElement ).click();
   flipButton( "duplicate-check" ).click(); await flush();
   const put = calls.find( ( c ) => c.opts?.method === "PUT" )!;
   assert.equal( put.url, "/api/cron-jobs/duplicate-check/enabled" );
@@ -129,8 +146,9 @@ test( "a click sends PUT with the opposite state and the bearer token, then draw
   assert.equal( put.opts!.headers![ "Authorization" ], "Bearer tok" );
   assert.equal( put.opts!.headers![ "Content-Type" ], "application/json" );
   assert.equal( stateOf( "duplicate-check" ), "OFF" );
-  assert.equal( byId( "cron-jobs-count" ).textContent, "3 (2 off)" );
+  assert.equal( byId( "background-jobs-count" ).textContent, "23 (2 off)" );
   assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-changed]" )!.textContent, "rick@example.com, 2026-11-13 20:00" );
+  assert.equal( ( item( "duplicate-check" ).closest( "[data-testid=jobs-panel]" ) as HTMLElement ).hidden, false, "the row flipped from stays open" );
   flipButton( "wiki-librarian" ).click(); await flush();
   assert.deepEqual( JSON.parse( calls.filter( ( c ) => c.opts?.method === "PUT" )[ 1 ]!.opts!.body as string ), { on : true } );
 } );
@@ -164,13 +182,13 @@ test( "a socket frame for a listed job redraws that row; a frame for an unknown 
   const cron = await load();
   cron.applyEvent( { type : "cron_job_switch_changed", timestamp : "t", ...ROW_C, enabled : true, last_changed_by : "rick@example.com", last_changed_at : "2026-11-13T21:00:00-05:00" } );
   assert.equal( stateOf( "disk-report" ), "ON" );
-  assert.equal( byId( "cron-jobs-count" ).textContent, "3 (1 off)" );
-  const before = byId( "cron-jobs-container" ).innerHTML;
+  assert.equal( byId( "background-jobs-count" ).textContent, "23 (1 off)" );
+  const before = byId( "background-jobs-container" ).innerHTML;
   cron.applyEvent( { type : "cron_job_switch_changed", ...ROW_A, job : "no-such-job" } );
   cron.applyEvent( null );
   cron.applyEvent( "text" );
   cron.applyEvent( { type : "cron_job_switch_changed" } );
-  assert.equal( byId( "cron-jobs-container" ).innerHTML, before );
+  assert.equal( byId( "background-jobs-container" ).innerHTML, before );
 } );
 
 test( "a frame that arrives with no section on the page is ignored", async () => {
@@ -179,46 +197,52 @@ test( "a frame that arrives with no section on the page is ignored", async () =>
   cron.applyEvent( { type : "cron_job_switch_changed", ...ROW_A } );
 } );
 
-test( "a failed load shows the error and keeps the section; the refresh button reloads", async () => {
+test( "a failed switch list names itself and the jobs still draw; a failed summary names itself; the refresh button reloads", async () => {
   listReply = () => ( { ok : false, status : 401, json : async () => ( {} ) } );
   await load();
-  assert.equal( byId( "cron-jobs-error" ).hidden, false );
-  assert.match( byId( "cron-jobs-error" ).textContent as string, /Could not load the scheduled jobs: HTTP 401/ );
+  assert.equal( errorOf().hidden, false );
+  assert.equal( errorOf().textContent, "Could not load the scheduled jobs: HTTP 401" );
+  assert.equal( byId( "background-jobs-container" ).querySelectorAll( ":scope > [data-testid=jobs-item]" ).length, 23 );
+  assert.equal( items().length, 0 );
+  summaryReply = () => ( { ok : false, status : 503, json : async () => ( {} ) } );
+  byId( "background-jobs-refresh" ).click(); await flush();
+  assert.equal( errorOf().textContent, "Could not load the jobs: HTTP 503 Could not load the scheduled jobs: HTTP 401" );
+  summaryReply = () => ( { ok : true, status : 200, json : async () => clone( FIXTURE ) } );
   listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : clone( [ ROW_A ] ), caller_is_admin : true } ) } );
-  byId( "cron-jobs-refresh" ).click(); await flush();
-  assert.equal( byId( "cron-jobs-error" ).hidden, true );
+  byId( "background-jobs-refresh" ).click(); await flush();
+  assert.equal( errorOf().hidden, true );
   assert.equal( items().length, 1 );
   g.fetch = async () => { throw "plain string"; };
-  byId( "cron-jobs-refresh" ).click(); await flush();
-  assert.match( byId( "cron-jobs-error" ).textContent as string, /plain string/ );
+  byId( "background-jobs-refresh" ).click(); await flush();
+  assert.match( errorOf().textContent as string, /plain string/ );
 } );
 
 test( "authedFetch is used when the page offers it; the bare token path says so loudly", async () => {
   let used = 0;
-  g.window.notificationsUI = { authedFetch : async ( url: string, opts: unknown ) => { used += 1; calls.push( { url, opts: opts as Call[ "opts" ] } ); return listReply(); } };
+  g.window.notificationsUI = { authedFetch : async ( url: string, opts: unknown ) => { used += 1; calls.push( { url, opts: opts as Call[ "opts" ] } ); return url === "/api/cron-jobs" ? listReply() : summaryReply(); } };
   await load();
-  assert.equal( used, 1 );
+  assert.equal( used, 2, "both doors go through it" );
   delete g.window.notificationsUI;
   const seen: unknown[] = [];
   const original = console.error;
   console.error = ( ...a: unknown[] ) => { seen.push( a ); };
   try { await load(); } finally { console.error = original; }
-  assert.equal( seen.length, 1 );
+  assert.ok( seen.length >= 1 );
 } );
 
-test( "with no section mounted the script does nothing", async () => {
+test( "with no list on the page the scripts do nothing", async () => {
   document.body.innerHTML = "";
-  const cron = await load();
-  await cron.refresh();
+  await load();
+  await g.window.backgroundJobs.refresh();
   assert.equal( calls.length, 0 );
-  cron.applyEvent( { ...ROW_A } );
+  g.window.cronJobs.applyEvent( { ...ROW_A } );
 } );
 
-test( "text goes in through textContent: markup in a title is shown as text", async () => {
-  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ROW_A, title : "<img src=x onerror=alert(1)>" } ], caller_is_admin : true } ) } );
+test( "text goes in through textContent: markup in a schedule is shown as text", async () => {
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ROW_A, schedule : "<img src=x onerror=alert(1)>" } ], caller_is_admin : true } ) } );
   await load();
-  assert.equal( byId( "cron-jobs-container" ).querySelectorAll( "img" ).length, 0 );
-  assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-title]" )!.textContent, "<img src=x onerror=alert(1)>" );
+  assert.equal( byId( "background-jobs-container" ).querySelectorAll( "img" ).length, 0 );
+  assert.equal( item( "duplicate-check" ).querySelector( "[data-testid=cron-schedule]" )!.textContent, "<img src=x onerror=alert(1)>" );
 } );
 
 test( "a job that does not read its switch says so and has its button disabled; a drifted row is marked", async () => {
@@ -239,10 +263,20 @@ test( "a 409 that names the unread switch shows the server's words", async () =>
   assert.match( item( "duplicate-check" ).querySelector( "[data-testid=cron-error]" )!.textContent as string, /^'x' does not read its switch yet/ );
 } );
 
+test( "a switch whose job the summary leaves out still gets its own row, marked NOT REPORTING", async () => {
+  listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ROW_A }, { ...ROW_B, job : "reporting-off", title : "Reporting off" } ], caller_is_admin : true } ) } );
+  await load();
+  const row = byId( "background-jobs-container" ).querySelector( "[data-job=reporting-off]" ) as HTMLElement;
+  assert.equal( row.querySelector( "[data-testid=jobs-badge]" )!.textContent, "NOT REPORTING" );
+  assert.equal( row.querySelector( "[data-testid=jobs-title]" )!.textContent, "Reporting off" );
+  assert.equal( byId( "background-jobs-count" ).textContent, "24 (1 off)" );
+  assert.equal( stateOf( "reporting-off" ), "OFF" );
+} );
+
 // ── Row c38a49bd step 7: how a row says it reads its switch, an unreadable switch, alarm jobs, and a job inside another ──
 
-const ARBITER = { ...ROW_A, job : "fleet-arbiter",    title : "Fleet arbiter (:8001)", key : "cron job fleet-arbiter enabled",    reads : "tick", alarm : true,  inside : null };
-const JANITOR = { ...ROW_A, job : "worktree-janitor", title : "Worktree janitor",      key : "cron job worktree-janitor enabled", reads : "tick", alarm : false, inside : "fleet-arbiter" };
+const ARBITER = { ...ROW_A, job : "fleet-arbiter",    title : "Fleet arbiter (:8001)", key : "k-arb", reads : "tick", alarm : true,  inside : null };
+const JANITOR = { ...ROW_A, job : "worktree-janitor", title : "Worktree janitor",      key : "k-jan", reads : "tick", alarm : false, inside : "fleet-arbiter" };
 const putCount = () => calls.filter( ( c ) => c.opts?.method === "PUT" ).length;
 
 test( "a row says whether its job reads the switch at each run or every tick", async () => {
@@ -277,9 +311,9 @@ test( "turning off an alarm job takes a confirming second click; the first sends
 
 test( "a redraw between the two clicks cancels the confirmation, so one later click only asks again", async () => {
   listReply = () => ( { ok : true, status : 200, json : async () => ( { jobs : [ { ...ARBITER } ], caller_is_admin : true } ) } );
-  const ui = await load();
+  await load();
   flipButton( "fleet-arbiter" ).click(); await flush();
-  await ui.refresh();
+  await g.window.backgroundJobs.refresh();
   flipButton( "fleet-arbiter" ).click(); await flush();
   assert.equal( putCount(), 0 );
   assert.equal( flipButton( "fleet-arbiter" ).textContent, "Confirm: turn off" );

@@ -45,6 +45,7 @@ src/tests/e2e_ui/test_multiplexer_horizontal_pane_open_parity.py
 src/tests/e2e_ui/test_multiplexer_jobs_pane_legacy_words.py
 src/tests/e2e_ui/test_background_jobs_section_in_both_clients.py
 src/tests/e2e_ui/test_cron_jobs_section_in_both_clients.py
+src/tests/e2e_ui/test_merged_jobs_list_in_both_clients.py
 src/tests/e2e_ui/test_multiplexer_layout_mode_toolbar_centering.py
 src/tests/e2e_ui/test_multiplexer_missed_badge.py
 src/tests/e2e_ui/test_multiplexer_phase5_visual.py
