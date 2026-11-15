@@ -516,6 +516,29 @@ def normalize_dynamic_content( browser_page, page_name ):
     return report
 
 
+# Where the mouse rests for every visual capture: the page corner, which is where a fresh page's
+# pointer already sits. A form login leaves the pointer wherever its submit button was, and that
+# point can be over a table row or a card, so its hover style then lands in the baseline (row d336bc7e).
+CAPTURE_MOUSE_PARK = ( 0, 0 )
+
+_SETTLE_TRANSITIONS_JS = "() => Promise.allSettled( document.getAnimations().map( a => a.finished ) )"
+
+
+def park_mouse_for_capture( browser_page ):
+    """
+    Move the pointer to CAPTURE_MOUSE_PARK and let the hover transitions it ends finish.
+
+    Requires:
+        - browser_page is a Playwright page
+
+    Ensures:
+        - the pointer is at CAPTURE_MOUSE_PARK, whatever the test did before
+        - running animations and transitions have finished, so no hover style is caught mid-fade
+    """
+    browser_page.mouse.move( *CAPTURE_MOUSE_PARK )
+    browser_page.evaluate( _SETTLE_TRANSITIONS_JS )
+
+
 def prepare_page_for_capture( browser_page, page_name ):
     """
     Freeze, normalize and settle the page, then normalize AGAIN as the last step.
@@ -533,6 +556,8 @@ def prepare_page_for_capture( browser_page, page_name ):
     Ensures:
         - live feeds are frozen before any text is pinned (the freeze rewrites
           whole entries, so pinning first would pin text about to be replaced)
+        - the pointer is parked at CAPTURE_MOUSE_PARK before the settle waits, so no
+          hover style from an earlier login click or test reaches the snapshot
         - the final browser round-trip is the dynamic-content normalizer
         - both normalizer passes matched the same count per selector
         - returns the final {selector: match_count} report
@@ -543,8 +568,9 @@ def prepare_page_for_capture( browser_page, page_name ):
     """
     freeze_live_feeds( browser_page, page_name )
     freeze_users_table( browser_page, page_name )
+    park_mouse_for_capture( browser_page )
 
-    first = normalize_dynamic_content( browser_page, page_name )
+    first =normalize_dynamic_content( browser_page, page_name )
 
     normalize_table_columns( browser_page, page_name )
 
@@ -1525,6 +1551,8 @@ def test_prepare_page_for_capture_freezes_the_users_table_on_admin_users():
     calls = []
 
     class _CapturePage:
+        mouse = _RecordingMouse( [] )
+
         def evaluate( self, js, payload=None ):
             calls.append( ( js, payload ) )
             if js == _FREEZE_USERS_TABLE_JS: return { "container": True, "injected": len( payload ) }
@@ -1748,6 +1776,16 @@ def test_table_column_indices_are_within_the_row_they_index():
 # animation frames. A push landing in that window put the live clock back into the
 # snapshot. prepare_page_for_capture normalizes again after the waits.
 
+class _RecordingMouse:
+    """A stand-in mouse that appends each move to the page's call list, so order is visible."""
+
+    def __init__( self, calls ):
+        self.calls = calls
+
+    def move( self, x, y ):
+        self.calls.append( ( "mouse.move", x, y ) )
+
+
 class _PushedClockPage:
     """
     A stand-in page with one live clock that a simulated server push repaints.
@@ -1761,9 +1799,12 @@ class _PushedClockPage:
     def __init__( self ):
         self.dom   = { s[ "sel" ]: "live" for s in NORMALIZE_SPECS if "notifications" in s[ "pages" ] }
         self.calls = []
+        self.mouse = _RecordingMouse( self.calls )
 
     def evaluate( self, js, arg=None ):
         self.calls.append( js )
+        if js is _SETTLE_TRANSITIONS_JS:
+            return None
         if js is _NORMALIZE_JS:
             for spec in arg:
                 self.dom[ spec[ "sel" ] ] = spec[ "text" ]
@@ -1818,6 +1859,25 @@ def test_prepare_fails_when_the_second_pass_matches_a_different_count():
     with pytest.raises( AssertionError ) as exc:
         prepare_page_for_capture( _ShrinkingPage(), "notifications" )
     assert "#auth-status" in str( exc.value )
+
+
+def test_the_pointer_is_parked_and_settled_before_the_final_normalize():
+    """
+    The pointer is parked and transitions settle before the final normalize.
+
+    Ensures:
+        - exactly one move, to CAPTURE_MOUSE_PARK
+        - the transition wait runs right after the move
+        - both come before the first normalizer pass, so nothing hovered survives into the capture
+    """
+    page = _PushedClockPage()
+
+    prepare_page_for_capture( page, "notifications" )
+
+    moves = [ i for i, call in enumerate( page.calls ) if isinstance( call, tuple ) ]
+    assert [ page.calls[ i ] for i in moves ] == [ ( "mouse.move", *CAPTURE_MOUSE_PARK ) ]
+    assert page.calls[ moves[ 0 ] + 1 ] is _SETTLE_TRANSITIONS_JS, "the hover transition was not awaited after the move"
+    assert moves[ 0 ] < page.calls.index( _NORMALIZE_JS ), "the pointer moved after the normalizer had already run"
 
 
 def test_the_visual_test_captures_straight_after_prepare_page_for_capture():
