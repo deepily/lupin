@@ -57,12 +57,12 @@ def env( tmp_path, repo ):
     ( data / "search-records" / f"{SID}.json" ).write_text( REAL_RECORD.read_text( encoding="utf-8" ), encoding="utf-8" )
     ini = tmp_path / "lupin-app.ini"
     since = subprocess.run( [ "git", "-C", str( repo ), "rev-parse", "main" ], capture_output=True, text=True, check=True ).stdout.strip()
-    ini.write_text( f"[x]\nreuse review gating = true\nreuse merge gate since = {since}\n", encoding="utf-8" )
+    ini.write_text( f"[x]\nreuse review gating = true\nreuse merge gate since = {since}\nreuse searched since = {since}\n", encoding="utf-8" )
     return dict( os.environ, LUPIN_REUSE_DATA_DIR=str( data ), LUPIN_REUSE_REVIEW_INI=str( ini ) )
 
 
 def _commit_doc( repo, *lines ):
-    ( repo / "review.md" ).write_text( "# review\n\n" + RULINGS + "\n\n" + "\n".join( lines ) + "\n", encoding="utf-8" )
+    ( repo / "review.md" ).write_text( "# review\n\n" + RULINGS + "\n" + "\n".join( f"SEARCHED {sym} :: {SID} :: none :: nothing near it" for sym in ( "lupin_mcp.new_helper", "m.q" ) ) + "\n\n" + "\n".join( lines ) + "\n", encoding="utf-8" )
     _git( repo, "add", "review.md" )
     _git( repo, "commit", "-qm", "review" )
 
