@@ -521,7 +521,20 @@ def normalize_dynamic_content( browser_page, page_name ):
 # point can be over a table row or a card, so its hover style then lands in the baseline (row d336bc7e).
 CAPTURE_MOUSE_PARK = ( 0, 0 )
 
-_SETTLE_TRANSITIONS_JS = "() => Promise.allSettled( document.getAnimations().map( a => a.finished ) )"
+# Only animations that can end are awaited: an endless one (a spinner, a pulse) never resolves `.finished`,
+# and waiting on it hung the notifications page for 16+ minutes (ts-c3d9fd54). The race against a timer
+# bounds even a finite animation that is very long.
+CAPTURE_SETTLE_TIMEOUT_MS = 2000
+
+_SETTLE_TRANSITIONS_JS = (
+    "() => {"
+    " const finishable = document.getAnimations().filter( a => a instanceof CSSTransition"
+    " || ( a.effect !== null && Number.isFinite( a.effect.getComputedTiming().iterations ) ) );"
+    " const settled = Promise.allSettled( finishable.map( a => a.finished ) );"
+    f" const timeout = new Promise( resolve => setTimeout( resolve, {CAPTURE_SETTLE_TIMEOUT_MS} ) );"
+    " return Promise.race( [ settled, timeout ] ).then( () => undefined );"
+    " }"
+)
 
 
 def park_mouse_for_capture( browser_page ):
@@ -1878,6 +1891,65 @@ def test_the_pointer_is_parked_and_settled_before_the_final_normalize():
     assert [ page.calls[ i ] for i in moves ] == [ ( "mouse.move", *CAPTURE_MOUSE_PARK ) ]
     assert page.calls[ moves[ 0 ] + 1 ] is _SETTLE_TRANSITIONS_JS, "the hover transition was not awaited after the move"
     assert moves[ 0 ] < page.calls.index( _NORMALIZE_JS ), "the pointer moved after the normalizer had already run"
+
+
+_ENDLESS_PAGE = """<style>
+  @keyframes spin { to { transform: rotate( 360deg ); } }
+  .spin  { animation: spin 1s linear infinite; }
+  .once  { animation: spin 100ms linear 1; }
+  .fade  { transition: opacity 100ms; opacity: 1; }
+  .fade.out { opacity: 0.2; }
+</style>
+<div class="spin">a</div><div class="spin">b</div><div class="once">c</div><div class="fade">d</div>"""
+
+
+def test_the_settle_script_filters_to_animations_that_can_finish():
+    """
+    Pin the settle script's text: it keeps finishable animations only and races a timer.
+
+    Ensures:
+        - it no longer maps `.finished` over every animation
+        - it names CSSTransition and a finite-iterations check
+        - it carries a timeout
+    """
+    js = _SETTLE_TRANSITIONS_JS
+    assert "CSSTransition" in js
+    assert "Number.isFinite" in js and "iterations" in js
+    assert "Promise.race" in js and str( CAPTURE_SETTLE_TIMEOUT_MS ) in js
+    assert "document.getAnimations().map" not in js, "every animation is awaited again, endless ones included"
+
+
+def test_the_settle_script_returns_on_a_page_with_endless_animations_in_a_real_browser():
+    """
+    Run the settle script in Chromium on a page with two endless spinners and a transition.
+
+    Ensures:
+        - the endless animations are really present (so the old script would have hung)
+        - the script returns well inside the timeout, having awaited the finite ones
+        - the finite animation and the transition have finished by then
+    """
+    import time
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        try:
+            page = browser.new_page()
+            page.set_content( _ENDLESS_PAGE )
+            page.evaluate( "() => { document.querySelector( '.fade' ).classList.add( 'out' ); }" )
+            counts = page.evaluate( "() => ( { total: document.getAnimations().length,"
+                                    " endless: document.getAnimations().filter( a => !Number.isFinite( a.effect.getComputedTiming().iterations ) ).length } )" )
+            assert counts[ "endless" ] == 2, counts
+
+            started = time.monotonic()
+            page.evaluate( _SETTLE_TRANSITIONS_JS )
+            elapsed = time.monotonic() - started
+
+            assert elapsed < CAPTURE_SETTLE_TIMEOUT_MS / 1000 * 0.8, f"waited {elapsed:.2f}s: it sat on the endless animations"
+            states = page.evaluate( "() => document.getAnimations().filter( a => Number.isFinite( a.effect.getComputedTiming().iterations ) ).map( a => a.playState )" )
+            assert states == [] or set( states ) == { "finished" }, states
+        finally:
+            browser.close()
 
 
 def test_the_visual_test_captures_straight_after_prepare_page_for_capture():
