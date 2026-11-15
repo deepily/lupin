@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -30,9 +30,16 @@ MULTIPLEXER_URL = f"{BASE_URL}/app/multiplexer"
 APP_ZONE = ZoneInfo( "America/New_York" )
 
 
-def _frozen_at( hour, minute, second=0 ):
-    """The moment to freeze the page clock: today in the app zone, at this time of day."""
-    return datetime.combine( datetime.now( APP_ZONE ).date(), time( hour, minute, second ), tzinfo=APP_ZONE )
+def _just_before_midnight():
+    """
+    The moment to freeze the page clock for the midnight test: 23:59:50 yesterday.
+
+    It lies behind the real clock, so the access tokens stay valid.
+    A token lasts 30 minutes, and the page calls it expired within a minute of its expiry.
+    A frozen moment ahead of the real clock would make every token read as expired.
+    """
+    yesterday = datetime.now( APP_ZONE ).date() - timedelta( days=1 )
+    return datetime.combine( yesterday, time( 23, 59, 50 ), tzinfo=APP_ZONE )
 
 
 SENDER_A = "mv-keep-a"
@@ -93,7 +100,7 @@ def _assert_one_date_accordion( page, card_a, when ):
 
 def _open( page, keep_place, no_move_before=False, frozen=None ):
     """Seed auth, freeze the page clock, open the page, wait for the test hook."""
-    page.clock.set_fixed_time( frozen or _frozen_at( 13, 0 ) )
+    page.clock.set_fixed_time( frozen or datetime.now( APP_ZONE ) )
     email, password = _get_credentials()
     resp = requests.post( f"{BASE_URL}/auth/login", json={ "email": email, "password": password }, timeout=10 )
     assert resp.status_code == 200, f"login failed: { resp.status_code } { resp.text }"
@@ -231,6 +238,6 @@ def test_pinned_history_holds_with_the_page_clock_at_one_minute_to_midnight( pag
         - the seeded rows and the streamed ones fall on one date however long the run takes
         - the history is still scrolled afterwards
     """
-    card_a = _scrolled_history( page, keep_place=True, frozen=_frozen_at( 23, 59, 50 ) )
+    card_a = _scrolled_history( page, keep_place=True, frozen=_just_before_midnight() )
     after  = _stream_progress_group( page, card_a )
     assert after[ "scrollTop" ] >= 100, f"the pinned history went back to the top: 100 -> { after[ 'scrollTop' ] }"

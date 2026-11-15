@@ -26,9 +26,16 @@ SCROLLED_TO    = 100
 APP_ZONE       = ZoneInfo( "America/New_York" )
 
 
-def _frozen_at( hour, minute, second=0 ):
-    """The moment to freeze the page clock: today in the app zone, at this time of day."""
-    return datetime.combine( datetime.now( APP_ZONE ).date(), time( hour, minute, second ), tzinfo=APP_ZONE )
+def _just_before_midnight():
+    """
+    The moment to freeze the page clock for the midnight test: 23:59:50 yesterday.
+
+    It lies behind the real clock, so the access tokens stay valid.
+    A token lasts 30 minutes, and the page calls it expired within a minute of its expiry.
+    A frozen moment ahead of the real clock would make every token read as expired.
+    """
+    yesterday = datetime.now( APP_ZONE ).date() - timedelta( days=1 )
+    return datetime.combine( yesterday, time( 23, 59, 50 ), tzinfo=APP_ZONE )
 
 
 ARRIVE_JS = """
@@ -78,10 +85,11 @@ def _page_with_scrolled_history( logged_in_page, keep_place, frozen=None ):
     Ensures:
         - Keep place is set in storage before the reload, so the client reads it at start
         - card B is first, card A's history pane scrolls and is scrolled to SCROLLED_TO
-        - the page's Date is frozen at `frozen` (default 13:00 in the app zone), so no run can cross midnight
+        - the page's Date is frozen at `frozen`, so no run can cross midnight
+        - the default is the real current instant, which keeps the access tokens valid
     """
     page = logged_in_page
-    page.clock.set_fixed_time( frozen or _frozen_at( 13, 0 ) )
+    page.clock.set_fixed_time( frozen or datetime.now( APP_ZONE ) )
     page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
     page.evaluate( f"() => localStorage.setItem( '{KEEP_PLACE_KEY}', '{ 'true' if keep_place else 'false' }' )" )
@@ -135,7 +143,7 @@ class TestKeepPlaceHoldsTheHistoryPane:
         The run that failed had crossed local midnight.
         With the clock frozen, seeding and arrivals all fall on one date however long the test takes.
         """
-        page = _page_with_scrolled_history( logged_in_page, keep_place=True, frozen=_frozen_at( 23, 59, 50 ) )
+        page = _page_with_scrolled_history( logged_in_page, keep_place=True, frozen=_just_before_midnight() )
         for index in range( 3 ):
             _arrive( page, SENDER_A, f"history-a-new-{index}" )
             page.wait_for_timeout( 200 )
