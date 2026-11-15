@@ -40,6 +40,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 import cosa.utils.util as cu
+from cosa.utils.bounded_retry import RetryPolicy, retry_call
 
 
 # Sentinel table proving the schema was bootstrapped (any env). If app tables
@@ -65,21 +66,6 @@ DB_WAIT_INITIAL_BACKOFF  = 1.0
 DB_WAIT_MAX_BACKOFF      = 8.0
 
 
-def next_backoff( current, maximum=DB_WAIT_MAX_BACKOFF ):
-    """
-    Double a retry delay, capped.
-
-    Requires:
-        - current is a positive number; maximum is a positive number
-
-    Ensures:
-        - returns min( current * 2, maximum )
-        - never returns more than maximum, so a long budget cannot turn into
-          one enormous sleep that blows past the deadline in a single step
-    """
-    return min( current * 2, maximum )
-
-
 def wait_for_database( probe, timeout=DB_WAIT_TIMEOUT_SECONDS,
                        initial_backoff=DB_WAIT_INITIAL_BACKOFF,
                        sleep=None, now=None, on_retry=None ):
@@ -103,26 +89,13 @@ def wait_for_database( probe, timeout=DB_WAIT_TIMEOUT_SECONDS,
           the operator sees the real driver error and not a wrapper
         - never sleeps past the deadline
     """
-    import time as _time
-
-    sleep = sleep or _time.sleep
-    now   = now   or _time.monotonic
-
-    deadline = now() + timeout
-    backoff  = initial_backoff
-    attempt  = 0
-
-    while True:
-        attempt += 1
-        try:
-            return probe()
-        except Exception as error:
-            remaining = deadline - now()
-            if remaining <= 0:
-                raise
-            if on_retry: on_retry( attempt, error, min( backoff, remaining ) )
-            sleep( min( backoff, remaining ) )
-            backoff = next_backoff( backoff )
+    policy = RetryPolicy(
+        max_attempts     = None,
+        initial_backoff  = initial_backoff,
+        max_backoff      = DB_WAIT_MAX_BACKOFF,
+        deadline_seconds = timeout,
+    )
+    return retry_call( probe, policy, on_retry=on_retry, sleep=sleep, now=now )
 
 
 def resolve_database_url( database_url=None ):

@@ -3,7 +3,6 @@ capability: rest-data-db-startup
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.db.auto_migrate.build_alembic_config@341eae8102
-  - cosa.rest.db.auto_migrate.next_backoff@37ce220dd0
   - cosa.rest.db.auto_migrate.resolve_database_url@fe83ed0205
   - cosa.rest.db.auto_migrate.wait_for_database@fd695c3efb
   - cosa.rest.db.database.announce_empty_db_password_once@366b20cb2c
@@ -22,7 +21,7 @@ The small functions the server uses to find its database, size its connection po
 - `swap_database( new_env )` sets `LUPIN_ENV` and re-picks any login that was filled in from `.env`. It then disposes the old engine and builds a new engine and sessions. It runs `SELECT 1` and returns the URL with the password replaced by `***`.
 - `resolve_database_url( database_url )` takes the argument, then `DATABASE_URL`, then `get_database_url()`.
 - `build_alembic_config( database_url )` builds the Alembic config in code, with `script_location` set to `src/migrations` under the project root. A given URL goes to `env.py` on `config.attributes["injected_db_url"]`.
-- `wait_for_database( probe )` calls `probe` until it succeeds. It sleeps 1 second, doubling up to 8 seconds, for at most 60 seconds, then re-raises the last error unchanged. `next_backoff` is the capped doubling.
+- `wait_for_database( probe )` calls `probe` until it succeeds. It sleeps 1 second, doubling up to 8 seconds, for at most 60 seconds, then re-raises the last error unchanged. It retries through `cosa.utils.bounded_retry.retry_call`, which supplies the capped doubling.
 
 ## Don't
 - Don't set `LUPIN_ENV=testing` to get `NullPool` on a cloud-backed deployment. The cloud flag is checked first and wins.

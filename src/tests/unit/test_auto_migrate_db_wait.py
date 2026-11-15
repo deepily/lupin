@@ -17,7 +17,6 @@ Every test here injects sleep and clock, so the suite stays instant.
 import pytest
 
 from cosa.rest.db.auto_migrate import (
-    next_backoff,
     wait_for_database,
     DB_WAIT_INITIAL_BACKOFF,
     DB_WAIT_MAX_BACKOFF,
@@ -40,25 +39,16 @@ class FakeClock:
         self.t += seconds
 
 
-class TestNextBackoff:
+class TestBackoffCap:
 
-    def test_doubles( self ):
-        assert next_backoff( 1.0, maximum=100 ) == 2.0
-
-    def test_caps_at_the_maximum( self ):
-        assert next_backoff( 64.0, maximum=8.0 ) == 8.0
-
-    def test_never_exceeds_the_cap_however_large_the_input( self ):
+    def test_delays_double_and_stop_at_the_shipped_cap( self ):
         # The cap is what stops a long budget becoming one enormous sleep.
-        for value in ( 8.0, 100.0, 1_000_000.0 ):
-            assert next_backoff( value, maximum=8.0 ) <= 8.0
-
-    def test_the_shipped_default_cap_is_reachable_from_the_shipped_start( self ):
-        delay, steps = DB_WAIT_INITIAL_BACKOFF, 0
-        while delay < DB_WAIT_MAX_BACKOFF and steps < 50:
-            delay = next_backoff( delay )
-            steps += 1
-        assert delay == DB_WAIT_MAX_BACKOFF
+        clock = FakeClock()
+        with pytest.raises( OSError ):
+            wait_for_database( _always_refused, timeout=200.0, initial_backoff=DB_WAIT_INITIAL_BACKOFF,
+                               sleep=clock.sleep, now=clock.now )
+        assert clock.sleeps[ :5 ] == [ 1.0, 2.0, 4.0, 8.0, 8.0 ]
+        assert max( clock.sleeps ) == DB_WAIT_MAX_BACKOFF
 
 
 class TestWaitForDatabase:
