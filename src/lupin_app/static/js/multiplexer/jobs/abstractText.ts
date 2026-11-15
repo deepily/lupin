@@ -74,7 +74,7 @@ function scanLines( job: JobEntry, todayIso: string ): string[] {
 function fixLines( job: JobEntry ): string[] {
   const debt = job.fix_debt;
   if ( debt === null ) return [ NOT_REPORTED ];
-  if ( debt.kind === "reported" ) return [ `- Named, not acted on: ${ formatCount( debt.open_reported ) }` ];
+  if ( debt.kind === "reported" ) return [ `- Named, not acted on: ${ formatCount( debt.open_reported ) }`, ...trendLine( "rows opened", debt.points ) ];
   const trend = trendArrow( debt.points );
   const lines = [
     `- Unfiled: ${ formatCount( debt.unfiled ) }${ trend === "" ? "" : ` ${ trend }` }`,

@@ -524,7 +524,17 @@ test( "row d514a7e9: the legacy abstract carries the trends as text named scan d
   assert.match( md, /- Unfiled: 107 ▲/ );
   const one = jobOf( "duplicate-check" ); one.scan_debt.points = one.scan_debt.points.slice( 0, 1 ); one.fix_debt.points = one.fix_debt.points.slice( 0, 1 );
   assert.equal( both( api, one ).includes( "Trend" ), false );
-  assert.equal( both( api, jobOf( "disk-report" ) ).includes( "Trend (rows opened)" ), false );
+  assert.equal( both( api, jobOf( "disk-report" ) ).includes( "Trend (rows opened)" ), false, "a named pile with no points draws no trend" );
+} );
+
+test( "row d514a7e9: the legacy abstract of a named pile (reported fix debt) with points carries its rows-opened trend", async () => {
+  const api = await load();
+  const job = jobOf( "disk-report" );
+  assert.equal( job.fix_debt.kind, "reported" );
+  job.fix_debt.points = [ { at : "2026-11-05T10:00:00-05:00", value : 12 }, { at : "2026-11-06T10:00:00-05:00", value : 20 } ];
+  assert.match( both( api, job ), /- Named, not acted on: 20\n- Trend \(rows opened\): 12, 20\n/ );
+  job.fix_debt.points = job.fix_debt.points.slice( 0, 1 );
+  assert.equal( both( api, job ).includes( "Trend" ), false, "one point draws nothing" );
 } );
 
 test( "row d514a7e9: the legacy abstract of a parent carries one Target block per target with its own sections, and a switch-only job a short one", async () => {

@@ -1108,7 +1108,17 @@ test( "row d514a7e9: the old sparklines come back as text named scan debt and ro
   assert.match( md, /- Unfiled: 107 ▲/ );
   const one = find( "duplicate-check" ); one.scan_debt!.points = one.scan_debt!.points.slice( 0, 1 ); one.fix_debt!.points = one.fix_debt!.points.slice( 0, 1 );
   assert.equal( abstractMarkdown( one, TODAY ).includes( "Trend" ), false );
-  assert.equal( abstractMarkdown( find( "disk-report" ), TODAY ).includes( "Trend (rows opened)" ), false, "a named pile has no rows-opened series" );
+  assert.equal( abstractMarkdown( find( "disk-report" ), TODAY ).includes( "Trend (rows opened)" ), false, "a named pile with no points draws no trend" );
+} );
+
+test( "row d514a7e9: a named pile (reported fix debt) with points carries its rows-opened trend, as the old fold drew it", () => {
+  const job = find( "disk-report" );
+  assert.equal( job.fix_debt!.kind, "reported" );
+  job.fix_debt!.points = [ { at : "2026-11-05T10:00:00-05:00", value : 12 }, { at : "2026-11-06T10:00:00-05:00", value : 20 } ];
+  const md = abstractMarkdown( job, TODAY );
+  assert.match( md, /- Named, not acted on: 20\n- Trend \(rows opened\): 12, 20\n/ );
+  job.fix_debt!.points = job.fix_debt!.points.slice( 0, 1 );
+  assert.equal( abstractMarkdown( job, TODAY ).includes( "Trend" ), false, "one point draws nothing" );
 } );
 
 test( "row d514a7e9: a parent's abstract carries one Target block per target, each with its own sections, one level down", () => {

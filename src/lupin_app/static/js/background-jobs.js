@@ -279,7 +279,7 @@
     function fixLines( job ) {
         const debt = job.fix_debt;
         if ( debt === null ) return [ NOT_REPORTED ];
-        if ( debt.kind === "reported" ) return [ "- Named, not acted on: " + formatCount( debt.open_reported ) ];
+        if ( debt.kind === "reported" ) return [ "- Named, not acted on: " + formatCount( debt.open_reported ), ...trendLines( "rows opened", debt.points ) ];
         const trend = trendArrow( debt.points );
         const lines = [
             "- Unfiled: " + formatCount( debt.unfiled ) + ( trend === "" ? "" : " " + trend ),
