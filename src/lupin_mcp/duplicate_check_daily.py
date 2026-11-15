@@ -3,9 +3,9 @@ The daily duplicate check: judge the new definitions of main against the rest of
 
 The window runs from the last successful run to now. The pool and the new definitions come from a detached worktree
 at the window's end commit. The pool leaves out every earlier version of a new definition. Judge calls are capped per run.
-What the cap leaves is carried to the next run. It is the daily check of the third remediation plan.
-With --ceiling the cap is the carried backlog plus the day's inflow, up to the ceiling. With --baseline the new definitions are every
-definition of the tree, and the carried ones are drained over several runs. A carried count that rises on several daily runs in a row alerts Rick.
+What the cap leaves is left to judge on the next run. It is the daily check of the third remediation plan.
+With --ceiling the cap is the number left to judge plus the day's inflow, up to the ceiling. With --baseline the new definitions are every
+definition of the tree, and the ones left to judge are drained over several runs. A left-to-judge count that rises on several daily runs in a row alerts Rick.
 """
 import argparse
 import contextlib
@@ -63,14 +63,14 @@ HOUR_SECONDS      = 3600
 HOUR_FILL         = 0.8               # share of an hour a chunk of judge calls is sized to fill, so a run ends before the next slot
 SECONDS_PER_CALL  = 3.5               # wall-clock seconds a judge call took on 6 Nov at parallel 4, until the history gives a better figure
 MIN_BASELINE_CALLS = 20               # the baseline gets what the daily work leaves of the chunk only when that is at least this many calls
-ADAPTIVE_RISE_LIMIT = 6               # hourly runs in a row with a larger carried count before Rick is told
+ADAPTIVE_RISE_LIMIT = 6               # hourly runs in a row with a larger left-to-judge count before Rick is told
 BACKOFF_SECONDS   = 5400              # after a rate limit the next slot is skipped: no run starts until this long has passed
 SKIPPED           = "skipped"
 ALL_FAILED_CALLS  = 20                # a run that made this many calls and judged none is a broken run, not a quiet one
 ROW_SCAN_LIMIT    = 50000             # rows the store count reads before it gives up and reports nothing
 TERMINAL          = ( "done", "dropped", "wont_fix" )
 BASELINE_SCHEDULE = "7 11 * * *"      # 11:07, an hour after the daily run and 30 minutes before the 11:37 shadow audit drain; a morning slot, never after last call
-RISE_LIMIT        = 3                 # daily runs in a row with a larger carried count before Rick is told
+RISE_LIMIT        = 3                 # daily runs in a row with a larger left-to-judge count before Rick is told
 INSTALLED_LINES   = ( 2, 3 )          # the daily slot and the reboot line, with the baseline line when it was asked for
 BASELINE          = "baseline.json"
 BASELINE_DONE     = "complete"
@@ -88,7 +88,7 @@ STAGE_GUARD       = "branch_guard"
 STAGE_BASELINE    = "baseline"        # the stage named in a result file when the baseline part of an hourly slot raised after the daily part had finished
 STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
-UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable", "owed", "usage", "rate_limited", "backoff_until", "pairs" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
+UNREACHED         = ( "window", "judged", "left_to_judge", "advanced_to", "clusters", "findings", "unreadable", "backlog_total", "usage", "rate_limited", "backoff_until", "pairs" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
 CARRIED           = behaviour.CARRIED     # names copied into the cron lines from the installer's environment
 
 
@@ -389,12 +389,12 @@ def read_baseline( folder ):
 
 def rising_guard( folder, doc, now, runs, notifier ):
     """
-    Tell Rick when the carried count has risen on several daily runs in a row.
+    Tell Rick when the count left to judge has risen on several daily runs in a row.
 
     Requires:
         - doc is the finished result document of a daily run; notifier takes ( spoken, abstract ) and returns whether it was sent, or is None
     Ensures:
-        - returns None unless this run's carried count, with the history's, rose on each of the last runs measured daily runs
+        - returns None unless this run's left-to-judge count, with the history's, rose on each of the last runs measured daily runs
         - otherwise returns { runs, series, notified }; a notifier that is missing or raises gives notified False
         - alerts on the first run that crosses the line only: while the count keeps rising, the later runs return repeat True and notified False, until a fall resets it
     """
@@ -406,8 +406,8 @@ def rising_guard( folder, doc, now, runs, notifier ):
     shown  = ", ".join( str( n ) for n in rising[ "series" ] )
     sent   = False
     if notifier is not None:
-        try: sent = notifier( f"The daily duplicate check is falling behind: its carried count rose on {runs} runs in a row, to {rising[ 'series' ][ -1 ]}.",
-                              f"Carried definitions, oldest run first: {shown}. Raise the ceiling or add a slot; the history is `python -m lupin_mcp.duplicate_check_history`." )
+        try: sent = notifier( f"The daily duplicate check is falling behind: its count left to judge rose on {runs} runs in a row, to {rising[ 'series' ][ -1 ]}.",
+                              f"Definitions left to judge, oldest run first: {shown}. Raise the ceiling or add a slot; the history is `python -m lupin_mcp.duplicate_check_history`." )
         except Exception: sent = False       # a broken notifier must not stop the run from advancing
     return { **rising, "notified": sent }
 
@@ -734,11 +734,12 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - after the frozen configuration is verified and before any pool, embedding or worktree work, calls_left checks the judge model's daily call budget: a spent budget writes that file with status skipped, a note, judge_calls 0 and judge_model, and nothing else changes; a missing or malformed budget fails the run at stage setup naming the key; otherwise the run's cap is lowered to the calls left
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - an exception while reading the frozen configuration, choosing the window or making the worktree writes that file with status failed, stage setup and the error, removes a worktree it began, and moves nothing
-        - the result holds test_code_dropped { owed, pool }: how many test-code definitions (is_test_code) were left out of the owed set and of the comparison pool
+        - the result holds backlog_total, the new definitions the run was given, and left_to_judge, the ids of those it did not reach (a result file before schema 3 called them owed and carried)
+        - the result holds test_code_dropped { backlog, pool }: how many test-code definitions (is_test_code) were left out of the backlog and of the comparison pool
         - every definition the run judged gets one line in interim-judge-manifest.jsonl, and each finding carries the model or models that ruled it as judge_model, and reused_from_model when a saved ruling made it
-        - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
-        - a baseline run leaves last-success alone and writes baseline.json: status complete when nothing is carried, else in_progress; once complete, a baseline run judges nothing
-        - a daily run whose carried count, with the history's, rose on the last rise_limit measured daily runs records that as rising and alerts through the notifier
+        - last-success.json advances to the last commit fully judged; definitions the cap left are left to judge on the next run
+        - a baseline run leaves last-success alone and writes baseline.json: status complete when nothing is left to judge, else in_progress; once complete, a baseline run judges nothing
+        - a daily run whose left-to-judge count, with the history's, rose on the last rise_limit measured daily runs records that as rising and alerts through the notifier
         - a filer that raises is caught: the result holds filing { error } and the run ends as if it had filed nothing
         - the same holds for an auditor, whose answer is kept as audit
         - the detached worktrees are removed whether the run ends or fails
@@ -767,7 +768,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         doc = { **base, "status": "failed", "stage": STAGE_GUARD, **refused, "reinstall": command, "notified": sent, "repeat": repeated, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
         return record( folder, stem, doc, now )
     if baseline and ( read_baseline( folder ) or { } ).get( "status" ) == BASELINE_DONE:
-        return record( folder, stem, { **base, "status": "ok", "note": "baseline complete", "judged": 0, "judge_calls": 0, "carried": [], "elapsed_seconds": round( clock() - started, 3 ) }, now )
+        return record( folder, stem, { **base, "status": "ok", "note": "baseline complete", "judged": 0, "judge_calls": 0, "left_to_judge": [], "elapsed_seconds": round( clock() - started, 3 ) }, now )
     until    = backoff_until( folder, now )
     if until is not None:
         return record( folder, stem, { **base, "status": SKIPPED, "note": f"backing off after a rate limit until {until}", "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }, now )
@@ -795,10 +796,10 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     used0 = spend()
     try:
         fresh = baseline_definitions( tree, window ) if baseline else new_definitions( tree, root, window )
-        doc[ "owed" ] = len( fresh[ "defs" ] )
+        doc[ "backlog_total" ] = len( fresh[ "defs" ] )
         left  = []
         pool  = pool_without_earlier_versions( tree, fresh[ "defs" ], left )
-        doc[ "test_code_dropped" ] = { "owed": fresh[ "test_dropped" ], "pool": left[ 0 ] }
+        doc[ "test_code_dropped" ] = { "backlog": fresh[ "test_dropped" ], "pool": left[ 0 ] }
         if ceiling is not None: cap = min( ceiling, len( fresh[ "defs" ] ) )
         cap = min( cap, budget_left )        # the day's budget bounds the run, not only the start of it
         out   = { "verdicts": [], "unjudged": [], "dropped": { "count": 0, "ids": [] } }
@@ -816,7 +817,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     moved  = progress( fresh[ "defs" ], fresh[ "commit_of" ], out[ "unjudged" ], window )
     doc.update( usage=usage_since( used0, spend(), count.calls ), rate_limited=count.limited, backoff_until=( now + datetime.timedelta( seconds=BACKOFF_SECONDS ) ).isoformat() if count.limited else None )
     doc.update( judge_failed=count.failed, status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
-                carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, pairs=pair_counts( out[ "verdicts" ] ), unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
+                left_to_judge=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, pairs=pair_counts( out[ "verdicts" ] ), unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
     if count.calls and count.failed == count.calls and not count.limited:       # every new call failed without a limit to explain it (a limit already backs off and alerts): a ruling replayed from the ledger is not a judgment of this run, so judged cannot hide it
         doc.update( status="failed", stage=STAGE_JUDGING, error=f"all {count.calls} new judge calls failed; the {doc[ 'judged' ]} judged were replayed from the ledger or earlier" )
@@ -831,7 +832,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         if hook not in parts: continue
         try: doc[ key ] = parts[ hook ]( found, folder )
         except Exception as e: doc[ key ] = { "error": f"{type( e ).__name__}: {e}" }       # a broken store client or config must not stop last-success, or the next run re-judges and re-spends the cap
-    if baseline: write_json( folder / BASELINE, { "status": BASELINE_OPEN if moved[ "carried" ] else BASELINE_DONE, "end": window[ "end" ], "carried": len( moved[ "carried" ] ), "at": now.isoformat(), "branch": branch } )
+    if baseline: write_json( folder / BASELINE, { "status": BASELINE_OPEN if moved[ "carried" ] else BASELINE_DONE, "end": window[ "end" ], "left_to_judge": len( moved[ "carried" ] ), "at": now.isoformat(), "branch": branch } )
     else:
         write_json( folder / LAST_SUCCESS, { "commit": moved[ "advanced_to" ], "at": now.isoformat(), "branch": branch } )
         rising = rising_guard( folder, doc, now, rise_limit, parts.get( "notifier" ) )
@@ -885,15 +886,15 @@ def announce( parts, folder, docs, now, zero_before ):
 
 def adaptive_run( root, now, trigger, cli_path, parts, branch, parallel, ceiling, rise_limit=ADAPTIVE_RISE_LIMIT, clock=time.monotonic ):
     """
-    Run one hourly slot, the day's owed work first and then the baseline.
+    Run one hourly slot, the day's new definitions first and then the baseline.
 
     Requires:
         - ceiling is the most judge calls the slot may make, at least 1; the other arguments are run's
     Ensures:
         - the chunk is chunk_for( ceiling ): what fits in the hour at the measured speed
-        - a daily run takes the chunk; when it finishes everything owed (status ok) and the baseline is not complete, a baseline run takes what the daily run left, if at least MIN_BASELINE_CALLS
-        - with nothing owed the daily run exits in seconds without a judge call
-        - a daily run that was backed off, failed or carried definitions is not followed by a baseline run
+        - a daily run takes the chunk; when it judges every new definition (status ok) and the baseline is not complete, a baseline run takes what the daily run left, if at least MIN_BASELINE_CALLS
+        - with no new definition the daily run exits in seconds without a judge call
+        - a daily run that was backed off, failed or left definitions to judge is not followed by a baseline run
         - announce is called once, after both runs
         - a baseline run that raises is recorded as its own failed run (stage baseline, the error, judge_calls None); the daily run's record and last-success stand, announce and the caller's summary still happen, and exit_code reads 1
         - returns the result documents, daily first
@@ -1123,7 +1124,7 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
         - argv holds at most one of --cap ( a fixed number of judge calls ) and --ceiling ( the most judge calls an adaptive run may make )
         - with neither, the ceiling is the lupin `duplicate check ceiling` INI key, and a blank or missing key refuses the run naming the key
         - config is None for the live ConfigurationManager, or an object with the same get method
-        - --adaptive ( with --ceiling ) runs the hourly slot: the day's owed definitions, then the baseline with the rest of the chunk, then a note to Rick
+        - --adaptive ( with --ceiling ) runs the hourly slot: the day's new definitions, then the baseline with the rest of the chunk, then a note to Rick
         - --branch auto judges the newest local wip-* branch
         - argv also holds --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch, --parallel, --baseline ( judge every definition of the tree ), --rise-limit ( default RISE_LIMIT ) and, with the cron modes, --with-baseline ( add the baseline line )
         - one of --print-install, --install, --uninstall or --status, with --python, works on the cron lines instead of running

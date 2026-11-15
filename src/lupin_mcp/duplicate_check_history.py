@@ -16,18 +16,48 @@ import sys
 import cosa.utils.util as cu
 from cosa.repo import code_health_settings as chs
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 RUNS_FILE      = "runs.jsonl"
 FOLDER         = "duplicate-check-daily"
 MODE_DAILY     = "daily"
 MODE_BASELINE  = "baseline"
-MEASURED       = ( "ok", "carried" )                                 # statuses whose carried count is a measurement
+MEASURED       = ( "ok", "carried" )                                 # statuses whose left-to-judge count is a measurement; "carried" is the status of a run the cap left definitions in
+LEGACY_NAME    = { "backlog_total": "owed", "left_to_judge": "carried" }      # the names schema 1 and 2 wrote; backlog_total is every new definition the run was given, left_to_judge what it did not reach
 RUN_FILE       = re.compile( r"^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})-([a-z]+)\.json$" )
 UNKNOWN_COMMIT = "unknown"
 FILING_KEYS    = ( "filed", "already_filed", "queued_for_retry", "refused" )
 TABLE_COLUMNS  = ( ( "started_at", "started" ), ( "mode", "mode" ), ( "trigger", "trigger" ), ( "status", "status" ), ( "judge_calls", "calls" ),
-                   ( "judged", "judged" ), ( "carried", "carried" ), ( "findings", "findings" ), ( "groups", "groups" ), ( "filed", "filed" ),
+                   ( "left_to_judge", "left to judge" ), ( "judged", "judged" ), ( "findings", "findings" ), ( "groups", "groups" ), ( "filed", "filed" ),
                    ( "elapsed_seconds", "secs" ) )
+
+
+def either( doc, new ):
+    """
+    Read a count under its schema 3 name, or under the name schema 1 and 2 wrote.
+
+    Requires:
+        - new is a key of LEGACY_NAME
+    Ensures:
+        - returns doc[ new ] when doc has it, else doc's value under the old name, else None
+    """
+    return doc[ new ] if new in doc else doc.get( LEGACY_NAME[ new ] )
+
+
+def upgraded( line ):
+    """
+    Give a history line the schema 3 names, whichever schema wrote it.
+
+    Requires:
+        - line is a history line, as read from runs.jsonl
+    Ensures:
+        - returns a copy in which owed is now backlog_total and carried is now left_to_judge
+        - a name the line does not hold is not added, so a line from before the field existed still reads as not measured
+        - a line already in schema 3 comes back equal to itself
+    """
+    out = dict( line )
+    for new, old in LEGACY_NAME.items():
+        if old in out and new not in out: out[ new ] = out.pop( old )
+    return out
 
 
 def failure_of( doc ):
@@ -87,8 +117,9 @@ def line_of( doc, run_file, backfilled=False ):
         - returns the same keys for every run, a failed one included
         - a number the run could not measure is None
         - findings_by_commit counts findings per commit, under "unknown" for a finding with none
+        - a result file written before schema 3 names the two counts owed and carried; either name is read, and the line always gets backlog_total (the new definitions the run was given) and left_to_judge (how many of them it did not reach)
         - judge_model, the model the run's calls went to, is copied when the run reached the point of naming it (None before that, and on every line written before this key existed)
-        - branch, owed, rate_limited, backoff_until and the usage of the run's judge calls (input, output, cache write and cache read tokens, notional cost, calls the SDK reported) are copied when the run measured them, else None
+        - branch, backlog_total, rate_limited, backoff_until and the usage of the run's judge calls (input, output, cache write and cache read tokens, notional cost, calls the SDK reported) are copied when the run measured them, else None
         - calls_per_hour is the judge calls over the elapsed time scaled to an hour, None for a run that made no call
     """
     window   = doc.get( "window" )
@@ -100,18 +131,18 @@ def line_of( doc, run_file, backfilled=False ):
         for f in found:
             sha            = f.get( "commit" ) or UNKNOWN_COMMIT
             by_commit[ sha ] = by_commit.get( sha, 0 ) + 1
-    carried = doc.get( "carried" )
+    left    = either( doc, "left_to_judge" )
     usage   = doc.get( "usage" ) or { }
     calls   = doc.get( "judge_calls" )
     secs    = doc.get( "elapsed_seconds" )
     return { "schema_version": SCHEMA_VERSION, "run_file": run_file, "started_at": doc[ "started_at" ], "elapsed_seconds": doc.get( "elapsed_seconds" ),
              "trigger": doc[ "trigger" ], "mode": doc.get( "mode", MODE_DAILY ), "status": doc[ "status" ], "failure": failure_of( doc ),
              "window_start": window[ "start" ] if window else None, "window_end": window[ "end" ] if window else None, "commits": window[ "commits" ] if window else None,
-             "judged": doc.get( "judged" ), "carried": len( carried ) if carried is not None else None, "cap": doc.get( "cap" ), "ceiling": doc.get( "ceiling" ),
+             "left_to_judge": len( left ) if left is not None else None, "judged": doc.get( "judged" ), "cap": doc.get( "cap" ), "ceiling": doc.get( "ceiling" ),
              "judge_calls": doc.get( "judge_calls" ), "findings": len( found ) if found is not None else None, "groups": len( clusters ) if clusters is not None else None,
              "group_sizes": sorted( len( g ) for g in clusters ) if clusters is not None else None, "findings_by_commit": by_commit,
              **counts_of( doc.get( "filing" ) ), "unreadable": len( doc[ "unreadable" ] ) if doc.get( "unreadable" ) is not None else None, "backfilled": backfilled,
-             "branch": doc.get( "branch" ), "judge_model": doc.get( "judge_model" ), "owed": doc.get( "owed" ), "rate_limited": doc.get( "rate_limited" ), "backoff_until": doc.get( "backoff_until" ),
+             "branch": doc.get( "branch" ), "judge_model": doc.get( "judge_model" ), "backlog_total": either( doc, "backlog_total" ), "rate_limited": doc.get( "rate_limited" ), "backoff_until": doc.get( "backoff_until" ),
              "input_tokens": usage.get( "input_tokens" ), "output_tokens": usage.get( "output_tokens" ), "cache_creation_tokens": usage.get( "cache_creation_input_tokens" ),
              "cache_read_tokens": usage.get( "cache_read_input_tokens" ), "cost_usd": usage.get( "cost_usd" ), "usage_calls": usage.get( "calls" ),
              "calls_per_hour": round( calls / secs * 3600 ) if calls and secs else None }
@@ -153,7 +184,7 @@ def read_history( folder ):
     Read the history, oldest run first, and say which lines could not be read.
 
     Ensures:
-        - returns { lines, bad }: lines are the readable history lines sorted by started_at, bad the 1-based numbers of the file's lines that are not a JSON object with an ISO-8601 started_at
+        - returns { lines, bad }: lines are the readable history lines, each upgraded by upgraded, sorted by started_at, bad the 1-based numbers of the file's lines that are not a JSON object with an ISO-8601 started_at
         - the sort keeps file order between equal times, so a backfill after newer runs still reads in time order
         - a missing file gives no lines and no bad ones
     """
@@ -168,7 +199,7 @@ def read_history( folder ):
         except ( json.JSONDecodeError, TypeError, KeyError, ValueError ):
             bad.append( number )
             continue
-        found.append( ( when, line ) )
+        found.append( ( when, upgraded( line ) ) )
     found.sort( key=lambda pair: pair[ 0 ] )
     return { "lines": [ line for _, line in found ], "bad": bad }
 
@@ -208,11 +239,11 @@ def rising_run( lines, runs ):
     Requires:
         - lines are history lines in time order; runs is a whole number, at least 1
     Ensures:
-        - considers only daily runs that measured their carried count; failed runs and baseline runs are skipped, not counted as a fall
-        - returns { runs, series } when the last runs steps each rose, series being the runs + 1 carried counts, oldest first
+        - considers only daily runs that measured their left-to-judge count; failed runs and baseline runs are skipped, not counted as a fall
+        - returns { runs, series } when the last runs steps each rose, series being the runs + 1 left-to-judge counts, oldest first
         - returns None otherwise, and when there are not enough measured runs
     """
-    series = [ l[ "carried" ] for l in lines if l[ "mode" ] == MODE_DAILY and l[ "status" ] in MEASURED and l[ "carried" ] is not None ][ -( runs + 1 ): ]
+    series = [ l[ "left_to_judge" ] for l in lines if l[ "mode" ] == MODE_DAILY and l[ "status" ] in MEASURED and l[ "left_to_judge" ] is not None ][ -( runs + 1 ): ]
     if len( series ) < runs + 1 or any( b <= a for a, b in zip( series, series[ 1: ] ) ): return None
     return { "runs": runs, "series": series }
 

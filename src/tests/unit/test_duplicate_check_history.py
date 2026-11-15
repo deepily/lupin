@@ -1,5 +1,6 @@
 """The duplicate check run history: line writer, backfill, rising-backlog test, table."""
 import json
+import pathlib
 
 import pytest
 
@@ -11,32 +12,32 @@ KEYS = set( hist.line_of( { "status": "failed", "trigger": "hand", "started_at":
 def ok_doc( **over ):
     """Ensures: returns a successful result document."""
     base = { "status": "carried", "trigger": "cron", "started_at": "2026-11-06T19:06:59-05:00", "elapsed_seconds": 1040.589, "cap": 300, "judge_calls": 300, "judged": 304,
-             "window": { "start": "aaa", "end": "bbb", "commits": 65 }, "carried": [ "a", "b" ], "unreadable": [ { "id": "u" } ],
+             "window": { "start": "aaa", "end": "bbb", "commits": 65 }, "left_to_judge": [ "a", "b" ], "unreadable": [ { "id": "u" } ],
              "clusters": [ [ "x", "y" ], [ "p", "q", "r" ] ], "findings": [ { "commit": "c1" }, { "commit": "c1" }, { "commit": None } ],
              "filing": { "filed": [ 1, 2 ], "already_filed": [], "queued_for_retry": [ 1 ], "refused": [] } }
     return { **base, **over }
 
 
-def line( carried, mode="daily", status="carried" ):
+def line( left, mode="daily", status="carried" ):
     """Ensures: returns a minimal history line."""
-    return { "mode": mode, "status": status, "carried": carried }
+    return { "mode": mode, "status": status, "left_to_judge": left }
 
 
 def test_a_successful_run_flattens_to_one_line_with_counts_group_sizes_and_findings_by_commit():
     got = hist.line_of( ok_doc(), "2026-11-06-190659-cron.json" )
-    assert got == { "schema_version": 2, "run_file": "2026-11-06-190659-cron.json", "started_at": "2026-11-06T19:06:59-05:00", "elapsed_seconds": 1040.589, "trigger": "cron",
-                    "mode": "daily", "status": "carried", "failure": None, "window_start": "aaa", "window_end": "bbb", "commits": 65, "judged": 304, "carried": 2, "cap": 300,
+    assert got == { "schema_version": 3, "run_file": "2026-11-06-190659-cron.json", "started_at": "2026-11-06T19:06:59-05:00", "elapsed_seconds": 1040.589, "trigger": "cron",
+                    "mode": "daily", "status": "carried", "failure": None, "window_start": "aaa", "window_end": "bbb", "commits": 65, "left_to_judge": 2, "judged": 304, "cap": 300,
                     "ceiling": None, "judge_calls": 300, "findings": 3, "groups": 2, "group_sizes": [ 2, 3 ], "findings_by_commit": { "c1": 2, "unknown": 1 },
                     "filed": 2, "already_filed": 0, "queued_for_retry": 1, "refused": 0, "unreadable": 1, "backfilled": False,
-                    "branch": None, "judge_model": None, "owed": None, "rate_limited": None, "backoff_until": None, "input_tokens": None, "output_tokens": None, "cache_creation_tokens": None,
+                    "branch": None, "judge_model": None, "backlog_total": None, "rate_limited": None, "backoff_until": None, "input_tokens": None, "output_tokens": None, "cache_creation_tokens": None,
                     "cache_read_tokens": None, "cost_usd": None, "usage_calls": None, "calls_per_hour": 1038 }
 
 
 def test_a_run_that_recorded_usage_carries_the_branch_the_tokens_and_the_calls_an_hour():
-    doc = { **ok_doc(), "branch": "wip-x", "owed": 310, "rate_limited": 1, "backoff_until": "2026-11-07T21:00:00-05:00",
+    doc = { **ok_doc(), "branch": "wip-x", "backlog_total": 310, "rate_limited": 1, "backoff_until": "2026-11-07T21:00:00-05:00",
             "usage": { "calls": 300, "input_tokens": 600, "output_tokens": 1200, "cache_creation_input_tokens": 65460, "cache_read_input_tokens": 11382, "cost_usd": 3.9 } }
     got = hist.line_of( doc, "f.json" )
-    assert ( got[ "branch" ], got[ "owed" ], got[ "rate_limited" ], got[ "backoff_until" ] ) == ( "wip-x", 310, 1, "2026-11-07T21:00:00-05:00" )
+    assert ( got[ "branch" ], got[ "backlog_total" ], got[ "rate_limited" ], got[ "backoff_until" ] ) == ( "wip-x", 310, 1, "2026-11-07T21:00:00-05:00" )
     assert ( got[ "input_tokens" ], got[ "output_tokens" ], got[ "cache_creation_tokens" ], got[ "cache_read_tokens" ], got[ "cost_usd" ], got[ "usage_calls" ] ) == ( 600, 1200, 65460, 11382, 3.9, 300 )
 
 
@@ -48,7 +49,7 @@ def test_a_run_with_no_calls_or_no_time_has_no_calls_an_hour():
 def test_a_failed_run_has_the_same_keys_and_none_for_what_it_never_measured():
     got = hist.line_of( { "status": "failed", "trigger": "hand", "started_at": "t", "stage": "judging", "error": "boom", "cap": 100, "judge_calls": 7 }, "f.json" )
     assert set( got ) == KEYS
-    assert ( got[ "failure" ], got[ "carried" ], got[ "findings" ], got[ "group_sizes" ], got[ "window_start" ], got[ "filed" ], got[ "judge_calls" ] ) == ( "judging: boom", None, None, None, None, None, 7 )
+    assert ( got[ "failure" ], got[ "left_to_judge" ], got[ "findings" ], got[ "group_sizes" ], got[ "window_start" ], got[ "filed" ], got[ "judge_calls" ] ) == ( "judging: boom", None, None, None, None, None, 7 )
 
 
 @pytest.mark.parametrize( "doc,want", [ ( { "status": "ok" }, None ),
@@ -112,7 +113,7 @@ def test_failed_and_baseline_runs_are_skipped_not_counted_as_a_fall():
 
 def test_the_table_has_a_header_one_row_per_run_a_dash_for_what_was_not_measured_and_pads_to_the_widest_cell():
     rows = hist.table( [ hist.line_of( ok_doc(), "a.json" ), hist.line_of( { "status": "failed", "trigger": "hand", "started_at": "2026-11-07T01:02:03-05:00" }, "b.json" ) ] ).splitlines()
-    assert len( rows ) == 3 and rows[ 0 ].split() == [ "started", "mode", "trigger", "status", "calls", "judged", "carried", "findings", "groups", "filed", "secs" ]
+    assert len( rows ) == 3 and rows[ 0 ].split() == [ "started", "mode", "trigger", "status", "calls", "left", "to", "judge", "judged", "findings", "groups", "filed", "secs" ]
     assert rows[ 1 ].split()[ :2 ] == [ "2026-11-06", "19:06" ] and rows[ 1 ].split()[ -1 ] == "1041"
     assert rows[ 2 ].split()[ -5: ] == [ "-", "-", "-", "-", "-" ]
     assert len( { len( r ) for r in rows } ) == 1
@@ -182,3 +183,37 @@ def test_calls_on_sums_one_days_calls_for_one_model_and_charges_unnamed_lines_to
     assert hist.calls_on( lines, "2026-11-13", "opus" ) == 135, "100 + 30 + the 5 of the unnamed line; None calls add 0; yesterday and sonnet do not count"
     assert hist.calls_on( lines, "2026-11-13", "sonnet" ) == 12
     assert hist.calls_on( lines, "2026-11-14", "opus" ) == 0 and hist.calls_on( [], "2026-11-13", "opus" ) == 0
+
+
+REAL_SCHEMA_2 = pathlib.Path( __file__ ).parent.parent / "fixtures" / "duplicate-check" / "runs-schema-2.jsonl"       # three lines copied byte for byte from the live runs.jsonl: the 9 Nov daily, the 14 Nov 14:50 baseline, the 14 Nov 20:00 daily
+
+
+def test_real_schema_2_lines_read_under_the_new_names_with_the_arithmetic_intact( tmp_path ):
+    lines_in = [ json.loads( t ) for t in REAL_SCHEMA_2.read_text( encoding="utf-8" ).splitlines() ]
+    assert len( lines_in ) == 3 and all( l[ "schema_version" ] == 2 and "owed" in l and "carried" in l for l in lines_in ), "the fixture is real schema 2 lines, not rewritten ones"
+    ( tmp_path / hist.RUNS_FILE ).write_text( REAL_SCHEMA_2.read_text( encoding="utf-8" ), encoding="utf-8" )
+    got = hist.read_history( tmp_path )
+    assert got[ "bad" ] == [] and len( got[ "lines" ] ) == 3
+    assert [ ( l[ "mode" ], l[ "backlog_total" ], l[ "judged" ], l[ "left_to_judge" ] ) for l in got[ "lines" ] ] == [ ( "daily", 487, 485, 2 ), ( "baseline", 12347, 5412, 6935 ), ( "daily", 283, 283, 0 ) ]
+    assert all( "owed" not in l and "carried" not in l for l in got[ "lines" ] )
+    assert all( l[ "backlog_total" ] - l[ "judged" ] == l[ "left_to_judge" ] for l in got[ "lines" ] ), "the 14 Nov measurement: 12,347 - 5,412 = 6,935"
+
+
+def test_either_reads_the_new_name_first_then_the_old_one_then_none():
+    assert hist.either( { "left_to_judge": 4, "carried": 9 }, "left_to_judge" ) == 4
+    assert hist.either( { "carried": 9 }, "left_to_judge" ) == 9
+    assert hist.either( { "owed": 7 }, "backlog_total" ) == 7
+    assert hist.either( { }, "backlog_total" ) is None
+
+
+def test_upgraded_renames_the_old_names_adds_none_that_are_absent_and_leaves_a_new_line_alone():
+    old = { "owed": 5, "carried": 2, "status": "ok" }
+    assert hist.upgraded( old ) == { "backlog_total": 5, "left_to_judge": 2, "status": "ok" } and old == { "owed": 5, "carried": 2, "status": "ok" }, "a copy, never the caller's line"
+    assert hist.upgraded( { "carried": 2 } ) == { "left_to_judge": 2 }, "a line from before owed existed gets no backlog_total"
+    new = { "backlog_total": 5, "left_to_judge": 2 }
+    assert hist.upgraded( new ) == new
+
+
+def test_a_pre_schema_3_result_file_is_flattened_to_the_new_names():
+    got = hist.line_of( { **{ k: v for k, v in ok_doc().items() if k != "left_to_judge" }, "carried": [ "a", "b", "c" ], "owed": 310 }, "old.json" )
+    assert got[ "left_to_judge" ] == 3 and got[ "backlog_total" ] == 310 and "owed" not in got and "carried" not in got

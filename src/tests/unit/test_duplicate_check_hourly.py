@@ -92,21 +92,21 @@ def test_the_back_off_holds_while_the_newest_unskipped_run_names_a_later_time( t
     assert dd.backoff_until( tmp_path, now ) is None, "a later run with no limit clears it"
 
 
-def test_a_run_records_the_branch_what_was_owed_and_the_tokens_the_calls_used( repo, tmp_path ):
+def test_a_run_records_the_branch_the_backlog_total_and_the_tokens_the_calls_used( repo, tmp_path ):
     history( repo )
     meter = Meter()
     doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, usage=meter ), branch="main" )
-    assert ( doc[ "branch" ], doc[ "owed" ], doc[ "rate_limited" ], doc[ "backoff_until" ] ) == ( "main", 3, 0, None )
+    assert ( doc[ "branch" ], doc[ "backlog_total" ], doc[ "rate_limited" ], doc[ "backoff_until" ] ) == ( "main", 3, 0, None )
     assert doc[ "usage" ] == { "calls": 3, "input_tokens": 5, "output_tokens": 7, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 11, "cost_usd": 0.1235 }
     row = hist.read_lines( tmp_path / "io" / "duplicate-check-daily" )[ 0 ]
-    assert ( row[ "branch" ], row[ "owed" ], row[ "cache_creation_tokens" ], row[ "cache_read_tokens" ], row[ "usage_calls" ] ) == ( "main", 3, 100, 11, 3 )
+    assert ( row[ "branch" ], row[ "backlog_total" ], row[ "cache_creation_tokens" ], row[ "cache_read_tokens" ], row[ "usage_calls" ] ) == ( "main", 3, 100, 11, 3 )
 
 
 def test_a_rate_limit_carries_the_work_records_the_limit_and_skips_the_next_slot_then_resumes( repo, tmp_path ):
     history( repo )
     limited = parts_of( tmp_path, backend=LimitedBackend() )
     doc     = dd.run( repo, NOW, "cron", 10, "/bin/claude", limited )
-    assert doc[ "status" ] == "carried" and doc[ "rate_limited" ] >= 1 and len( doc[ "carried" ] ) == 3 and doc[ "judged" ] == 0
+    assert doc[ "status" ] == "carried" and doc[ "rate_limited" ] >= 1 and len( doc[ "left_to_judge" ] ) == 3 and doc[ "judged" ] == 0
     assert doc[ "backoff_until" ] == ( NOW + datetime.timedelta( seconds=dd.BACKOFF_SECONDS ) ).isoformat()
     skipped = dd.run( repo, NOW + datetime.timedelta( hours=1 ), "cron", 10, "/bin/claude", parts_of( tmp_path ) )
     assert skipped[ "status" ] == "skipped" and "backing off" in skipped[ "note" ] and skipped[ "judge_calls" ] == 0 and skipped[ "judged" ] is None
@@ -401,7 +401,7 @@ def test_a_baseline_recorded_on_another_branch_is_refused_without_an_urgent_hook
     history( repo )
     git( repo, "branch", "wip-b" )
     folder = tmp_path / "io" / "duplicate-check-daily"
-    dd.write_json( folder / dd.BASELINE, { "status": dd.BASELINE_OPEN, "branch": "wip-a", "carried": 5 } )
+    dd.write_json( folder / dd.BASELINE, { "status": dd.BASELINE_OPEN, "branch": "wip-a", "left_to_judge": 5 } )
     doc = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path ), branch="wip-b", ceiling=10, baseline=True )
     assert doc[ "refusal" ] == "branch_changed" and doc[ "notified" ] is False
 
@@ -491,7 +491,7 @@ def test_a_run_whose_new_calls_all_failed_without_a_limit_is_failed_not_carried_
     history( repo )
     broken = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path, backend=FakeBackend( call_error=True ) ) )
     assert broken[ "status" ] == "failed" and broken[ "stage" ] == dd.STAGE_JUDGING and broken[ "judge_failed" ] == broken[ "judge_calls" ] > 0 and broken[ "rate_limited" ] == 0
-    assert "all " in broken[ "error" ] and len( broken[ "carried" ] ) == 3, "the work is still carried for the next run"
+    assert "all " in broken[ "error" ] and len( broken[ "left_to_judge" ] ) == 3, "the work is still left to judge on the next run"
     mixed = dd.run( repo, NOW + datetime.timedelta( hours=1 ), "cron", 10, "/bin/claude", parts_of( tmp_path ) )
     assert mixed[ "status" ] == "ok" and mixed[ "judge_failed" ] == 0
 

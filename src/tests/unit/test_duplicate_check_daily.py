@@ -77,7 +77,7 @@ def test_a_first_run_judges_the_last_24_hours_once_clusters_the_duplicates_and_a
     parts = parts_of( tmp_path )
     doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts )
     assert doc[ "window" ] == { "start": c1, "end": c3, "commits": 2 }, "the 24 hour window starts at the newest commit older than a day"
-    assert doc[ "status" ] == "ok" and doc[ "judged" ] == 3 and doc[ "judge_calls" ] == 3 and doc[ "carried" ] == [] and doc[ "advanced_to" ] == c3
+    assert doc[ "status" ] == "ok" and doc[ "judged" ] == 3 and doc[ "judge_calls" ] == 3 and doc[ "left_to_judge" ] == [] and doc[ "advanced_to" ] == c3
     assert len( doc[ "clusters" ] ) == 1 and len( doc[ "clusters" ][ 0 ] ) == 3, "a1, a2 and a3 share a marker"
     assert doc[ "trigger" ] == "hand" and doc[ "elapsed_seconds" ] >= 0 and doc[ "cap" ] == 10
     assert json.loads( ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).read_text() )[ "commit" ] == c3
@@ -101,7 +101,7 @@ def test_the_cap_stops_at_a_commit_boundary_and_the_rest_carries_with_progress_k
     c1, c2, c3 = history( repo )
     parts = parts_of( tmp_path )
     one   = dd.run( repo, NOW, "cron", 1, "/bin/claude", parts )
-    assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 1 and len( one[ "carried" ] ) == 2 and one[ "advanced_to" ] == c1 and one[ "judged" ] == 1
+    assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 1 and len( one[ "left_to_judge" ] ) == 2 and one[ "advanced_to" ] == c1 and one[ "judged" ] == 1
     two   = dd.run( repo, NOW + datetime.timedelta( minutes=5 ), "cron", 10, "/bin/claude", parts )
     assert two[ "judge_calls" ] == 2, "the function judged yesterday came from the ledger, the other two were asked"
     assert two[ "status" ] == "ok" and two[ "advanced_to" ] == c3 and two[ "window" ][ "start" ] == c1
@@ -638,7 +638,7 @@ def test_a_new_definition_naming_the_lookup_tool_is_judged_with_the_name_replace
     Recording.prompts = []
     doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, backend=Recording() ) )
     assert doc[ "status" ] == "ok" and doc[ "advanced_to" ] == c2 and doc[ "judge_calls" ] == 3, "the definition that names the tool was asked too"
-    assert doc[ "unreadable" ] == [] and doc[ "carried" ] == []
+    assert doc[ "unreadable" ] == [] and doc[ "left_to_judge" ] == []
     seen = "\n".join( Recording.prompts )
     assert "check_exists" not in seen and "TOOLNAME" in seen, "the judge saw the placeholder, never the tool name"
 
@@ -805,7 +805,7 @@ def test_every_run_appends_one_history_line_and_the_result_file_carries_the_sche
     lines  = hist.read_lines( folder )
     assert len( lines ) == 1 and lines[ 0 ][ "run_file" ] == "2026-11-03-120000-hand.json" and lines[ 0 ][ "status" ] == "ok"
     assert doc[ "schema_version" ] == hist.SCHEMA_VERSION and doc[ "started_at" ] == NOW.isoformat() and lines[ 0 ][ "started_at" ] == NOW.isoformat()
-    assert ( lines[ 0 ][ "judged" ], lines[ 0 ][ "judge_calls" ], lines[ 0 ][ "carried" ], lines[ 0 ][ "mode" ] ) == ( 3, 3, 0, "daily" )
+    assert ( lines[ 0 ][ "judged" ], lines[ 0 ][ "judge_calls" ], lines[ 0 ][ "left_to_judge" ], lines[ 0 ][ "mode" ] ) == ( 3, 3, 0, "daily" )
 
 
 def test_a_failed_run_appends_a_line_with_the_same_keys_and_the_result_file_gains_the_unmeasured_keys_as_none( repo, tmp_path ):
@@ -814,7 +814,7 @@ def test_a_failed_run_appends_a_line_with_the_same_keys_and_the_result_file_gain
     dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
     doc = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", 10, None, parts_of( tmp_path ) )
     good, bad = hist.read_lines( folder )
-    assert set( good ) == set( bad ) and bad[ "status" ] == "failed" and bad[ "failure" ].startswith( "claude_binary: " ) and bad[ "carried" ] is None
+    assert set( good ) == set( bad ) and bad[ "status" ] == "failed" and bad[ "failure" ].startswith( "claude_binary: " ) and bad[ "left_to_judge" ] is None
     assert all( doc[ k ] is None for k in dd.UNREACHED ) and doc[ "schema_version" ] == hist.SCHEMA_VERSION
 
 
@@ -834,9 +834,9 @@ def test_with_a_ceiling_below_the_work_the_ceiling_is_the_cap_and_the_rest_carri
     history( repo )
     parts = parts_of( tmp_path )
     one   = dd.run( repo, NOW, "cron", None, "/bin/claude", parts, ceiling=2 )
-    assert ( one[ "cap" ], one[ "judge_calls" ], one[ "status" ], len( one[ "carried" ] ) ) == ( 2, 2, "carried", 1 )
+    assert ( one[ "cap" ], one[ "judge_calls" ], one[ "status" ], len( one[ "left_to_judge" ] ) ) == ( 2, 2, "carried", 1 )
     two   = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", None, "/bin/claude", parts, ceiling=2 )
-    assert ( two[ "status" ], two[ "judge_calls" ], two[ "carried" ] ) == ( "ok", 1, [] ), "the three-call day was finished in two runs of at most two calls"
+    assert ( two[ "status" ], two[ "judge_calls" ], two[ "left_to_judge" ] ) == ( "ok", 1, [] ), "the three-call day was finished in two runs of at most two calls"
 
 
 def test_a_baseline_run_judges_every_definition_of_the_tree_leaves_last_success_alone_and_marks_the_baseline_complete( repo, tmp_path ):
@@ -853,8 +853,8 @@ def test_a_baseline_that_the_cap_cuts_short_stays_in_progress_and_later_runs_fin
     folder = folder_of( tmp_path )
     parts  = parts_of( tmp_path )
     one    = dd.run( repo, NOW, "hand", 2, "/bin/claude", parts, baseline=True )
-    assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 2 and len( one[ "carried" ] ) == 3
-    assert dd.read_baseline( folder ) == { "status": dd.BASELINE_OPEN, "end": git( repo, "rev-parse", "main" ), "carried": 3, "at": NOW.isoformat(), "branch": "main" }
+    assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 2 and len( one[ "left_to_judge" ] ) == 3
+    assert dd.read_baseline( folder ) == { "status": dd.BASELINE_OPEN, "end": git( repo, "rev-parse", "main" ), "left_to_judge": 3, "at": NOW.isoformat(), "branch": "main" }
     two    = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts, baseline=True )
     assert two[ "judge_calls" ] == 3 and two[ "status" ] == "ok" and dd.read_baseline( folder )[ "status" ] == dd.BASELINE_DONE
     calls = parts[ "backend" ].calls
@@ -890,33 +890,34 @@ def seed( tmp_path, *carried ):
 def test_the_rising_guard_names_the_series_and_tells_rick_once_per_run_through_the_notifier( tmp_path ):
     seed( tmp_path, 1, 2 )
     notifier = Notifier()
-    got = dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "carried": [ "a", "b", "c" ] }, NOW, 2, notifier )
+    got = dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b", "c" ] }, NOW, 2, notifier )
     assert got == { "runs": 2, "series": [ 1, 2, 3 ], "notified": True }
-    assert "rose on 2 runs in a row, to 3" in notifier.sent[ 0 ][ 0 ] and "1, 2, 3" in notifier.sent[ 0 ][ 1 ] and "/" not in notifier.sent[ 0 ][ 0 ]
+    assert "count left to judge rose on 2 runs in a row, to 3" in notifier.sent[ 0 ][ 0 ] and "left to judge, oldest run first: 1, 2, 3" in notifier.sent[ 0 ][ 1 ] and "/" not in notifier.sent[ 0 ][ 0 ]
+    assert "carried" not in notifier.sent[ 0 ][ 0 ] + notifier.sent[ 0 ][ 1 ] and "owed" not in notifier.sent[ 0 ][ 0 ] + notifier.sent[ 0 ][ 1 ]
 
 
 @pytest.mark.parametrize( "notifier,sent", [ ( None, False ), ( Notifier( answer=False ), False ), ( Notifier( answer=RuntimeError( "down" ) ), False ) ] )
 def test_a_missing_refusing_or_broken_notifier_leaves_the_guard_result_with_notified_false( tmp_path, notifier, sent ):
     seed( tmp_path, 1, 2 )
-    got = dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "carried": [ "a", "b", "c" ] }, NOW, 2, notifier )
+    got = dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b", "c" ] }, NOW, 2, notifier )
     assert got[ "notified" ] is sent and got[ "series" ] == [ 1, 2, 3 ]
 
 
 def test_a_fall_or_a_flat_step_or_too_little_history_raises_no_alarm( tmp_path ):
     seed( tmp_path, 5, 2 )
     notifier = Notifier()
-    assert dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "carried": [ "a", "b", "c" ] }, NOW, 2, notifier ) is None
-    assert dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "carried": [ "a", "b" ] }, NOW, 1, notifier ) is None
-    assert dd.rising_guard( folder_of( tmp_path / "none" ), { "status": "carried", "trigger": "cron", "carried": [ "a" ] }, NOW, 2, notifier ) is None
+    assert dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b", "c" ] }, NOW, 2, notifier ) is None
+    assert dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b" ] }, NOW, 1, notifier ) is None
+    assert dd.rising_guard( folder_of( tmp_path / "none" ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a" ] }, NOW, 2, notifier ) is None
     assert notifier.sent == []
 
 
-def test_a_daily_run_whose_carried_count_rose_on_the_last_runs_records_rising_and_alerts_and_a_baseline_run_never_does( repo, tmp_path ):
+def test_a_daily_run_whose_left_to_judge_count_rose_on_the_last_runs_records_rising_and_alerts_and_a_baseline_run_never_does( repo, tmp_path ):
     history( repo )
     seed( tmp_path, 0, 1 )
     notifier = Notifier()
     doc = dd.run( repo, NOW, "cron", 1, "/bin/claude", parts_of( tmp_path, notifier=notifier ), rise_limit=2 )
-    assert len( doc[ "carried" ] ) == 2 and doc[ "rising" ] == { "runs": 2, "series": [ 0, 1, 2 ], "notified": True } and len( notifier.sent ) == 1
+    assert len( doc[ "left_to_judge" ] ) == 2 and doc[ "rising" ] == { "runs": 2, "series": [ 0, 1, 2 ], "notified": True } and len( notifier.sent ) == 1
     base = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 1, "/bin/claude", parts_of( tmp_path, notifier=notifier ), baseline=True, rise_limit=1 )
     assert "rising" not in base and len( notifier.sent ) == 1
 
@@ -1021,7 +1022,7 @@ def test_a_failure_while_judging_appends_a_failed_history_line_naming_the_stage_
     monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh, left=None: ( _ for _ in () ).throw( RuntimeError( "pool broke" ) ) )
     doc  = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path ) )
     line = failed_line( tmp_path )
-    assert line[ "failure" ] == "judging: RuntimeError: pool broke" and line[ "window_end" ] == doc[ "window" ][ "end" ] and line[ "carried" ] is None
+    assert line[ "failure" ] == "judging: RuntimeError: pool broke" and line[ "window_end" ] == doc[ "window" ][ "end" ] and line[ "left_to_judge" ] is None
     assert doc[ "schema_version" ] == hist.SCHEMA_VERSION and doc[ "findings" ] is None and not ( folder_of( tmp_path ) / dd.LAST_SUCCESS ).exists()
 
 
@@ -1114,13 +1115,13 @@ def test_the_live_parts_give_the_branch_guard_the_crontab_reader():
 def test_the_rising_alert_fires_on_the_first_crossing_only_and_a_fall_resets_it( repo, tmp_path ):
     seed( tmp_path, 1, 2 )
     notifier = Notifier()
-    doc = { "status": "carried", "trigger": "cron", "carried": [ "a", "b", "c" ] }
+    doc = { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b", "c" ] }
     first = dd.rising_guard( folder_of( tmp_path ), doc, NOW, 2, notifier )
     assert first[ "notified" ] is True and "repeat" not in first
     hist.append_line( folder_of( tmp_path ), hist.line_of( { **doc, "started_at": NOW.isoformat() }, "x.json" ) )
-    again = dd.rising_guard( folder_of( tmp_path ), { **doc, "carried": [ 1, 2, 3, 4 ] }, NOW + datetime.timedelta( hours=6 ), 2, notifier )
+    again = dd.rising_guard( folder_of( tmp_path ), { **doc, "left_to_judge": [ 1, 2, 3, 4 ] }, NOW + datetime.timedelta( hours=6 ), 2, notifier )
     assert again[ "repeat" ] is True and again[ "notified" ] is False and again[ "series" ] == [ 2, 3, 4 ] and len( notifier.sent ) == 1
-    hist.append_line( folder_of( tmp_path ), hist.line_of( { **doc, "carried": [], "started_at": ( NOW + datetime.timedelta( hours=7 ) ).isoformat() }, "y.json" ) )
+    hist.append_line( folder_of( tmp_path ), hist.line_of( { **doc, "left_to_judge": [], "started_at": ( NOW + datetime.timedelta( hours=7 ) ).isoformat() }, "y.json" ) )
     after_fall = dd.rising_guard( folder_of( tmp_path ), doc, NOW + datetime.timedelta( hours=8 ), 2, notifier )
     assert after_fall is None, "after a fall the series is short again"
 
@@ -1215,11 +1216,11 @@ def test_a_window_that_adds_only_test_files_owes_nothing_and_a_mixed_window_owes
     commit( repo, { "client/base.py": function( "base", [ "MARKB" ], 2 ) }, "base", 48 )
     commit( repo, { "tests/test_t.py": function( "test_one", [ "MARKT" ], 3 ), "client/conftest.py": function( "fix", [ "MARKF" ], 4 ), "client/mod.py": SMOKE }, "tests only", 5 )
     only   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
-    assert only[ "owed" ] == 0 and only[ "judge_calls" ] == 0
-    assert only[ "test_code_dropped" ][ "owed" ] == 4, "test_one, fix, quick_smoke_test and its local helper"
+    assert only[ "backlog_total" ] == 0 and only[ "judge_calls" ] == 0
+    assert only[ "test_code_dropped" ][ "backlog" ] == 4, "test_one, fix, quick_smoke_test and its local helper"
     commit( repo, { "client/code.py": function( "real", [ "MARKR" ], 5 ), "tests/test_u.py": function( "test_two", [ "MARKU" ], 6 ) }, "mixed", 2 )
     mixed = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
-    assert mixed[ "owed" ] == 1 and mixed[ "test_code_dropped" ][ "owed" ] == 1
+    assert mixed[ "backlog_total" ] == 1 and mixed[ "test_code_dropped" ][ "backlog" ] == 1
 
 
 def test_the_pool_leaves_test_code_out_and_reports_how_many_and_a_run_records_it( repo, tmp_path ):
@@ -1232,7 +1233,7 @@ def test_the_pool_leaves_test_code_out_and_reports_how_many_and_a_run_records_it
     assert not [ n for n in names if dd.is_test_code( *n ) ], "no test definition is offered as a candidate"
     assert left[ 0 ] == 2, "the smoke test and its local; the pool's file list does not read a tests/ folder of this fixture"
     doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
-    assert doc[ "test_code_dropped" ] == { "owed": 3, "pool": 2 }, "owed: test_fake, the smoke test and its local"
+    assert doc[ "test_code_dropped" ] == { "backlog": 3, "pool": 2 }, "backlog: test_fake, the smoke test and its local"
     assert dd.pool_without_earlier_versions( repo, [] ) == pool, "the count argument is optional"
 
 
