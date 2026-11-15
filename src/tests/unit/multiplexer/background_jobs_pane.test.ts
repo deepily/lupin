@@ -1022,7 +1022,7 @@ test( "the accordion draws a header row naming every column, sorts on a heading 
   const summary = { ...clone( FIXTURE ), jobs : [ mkJob( "bb", "unknown" ), mkJob( "aa", "failing" ), mkJob( "cc", "healthy" ) ] } as JobsSummary;
   renderAccordion( document, mount, summary, mkActions() );
   const heads = () => Array.from( mount.querySelectorAll( "[data-testid=jobs-header] [role=columnheader]" ) ).map( ( h ) => h.textContent );
-  assert.deepEqual( heads(), [ "", "", "Service", "Status", "Last run", "Last finished", "" ] );
+  assert.deepEqual( heads(), [ "", "Service", "Status", "Last run", "Last finished", "", "" ] );
   const order = () => Array.from( mount.querySelectorAll( ":scope > [data-testid=jobs-item]" ) ).map( ( i ) => i.getAttribute( "data-job" ) );
   assert.deepEqual( order(), [ "aa", "bb", "cc" ], "default order is service name A to Z" );
   ( mount.querySelector( "[data-testid=jobs-sort-name]" ) as HTMLElement ).click();
@@ -1052,4 +1052,93 @@ test( "sort by last run goes oldest first ascending and newest first descending,
   assert.deepEqual( F.sortJobs( input, { id : "last-run", direction : "desc" } ).map( ( j ) => j.job ), [ "utc", "new", "old", "bad", "none" ] );
   assert.deepEqual( F.HEALTH_URGENCY, [ "healthy", "behind", "silent", "unknown", "failing" ] );
   assert.deepEqual( F.STATE_ORDER, [ "healthy", "behind", "failing", "silent", "unknown" ], "the default order keeps its own ranking" );
+} );
+
+// ── row d514a7e9: the ⋯ at the right, and the abstract carries the old folds' detail ───────────────
+
+test( "row d514a7e9: the ⋯ is the last child of the first line, right after the 📋, and the header's last column matches", () => {
+  const item  = drawAll().querySelector( "[data-job=duplicate-check]" ) as HTMLElement;
+  const line  = item.querySelector( "[data-testid=jobs-line]" ) as HTMLElement;
+  const kids  = [ ...line.children ] as HTMLElement[];
+  assert.ok( kids[ kids.length - 1 ]!.querySelector( "[data-testid=jobs-disclose]" ) !== null, "the ⋯ cell is last" );
+  assert.equal( kids[ kids.length - 2 ]!.getAttribute( "data-testid" ), "jobs-abstract", "the 📋 sits just before it" );
+  assert.equal( line.querySelector( "[data-testid=jobs-disclose]" )!.closest( ".jobs-disclose-cell" ), kids[ kids.length - 1 ] );
+  assert.equal( kids[ 0 ]!.className.startsWith( "jobs-dot" ), true, "the dot leads now" );
+  const heads = [ ...drawAll().querySelectorAll( "[data-testid=jobs-header] [role=columnheader]" ) ] as HTMLElement[];
+  assert.equal( heads[ heads.length - 1 ]!.classList.contains( "jobs-disclose-cell" ), true );
+  assert.equal( heads.length, kids.length, "one header cell per line cell" );
+} );
+
+const mkSwitch = ( over: Partial<CronJobRow> = {} ) => cronRow( "duplicate-check", { schedule : "cron 0 10-22 * * *", last_changed_by : "rick", last_changed_at : "2026-11-13T21:05:44-05:00", reads : "run", ...over } );
+const withSwitch = ( over: Partial<CronJobRow> = {}, job = "duplicate-check" ): JobEntry => ( { ...find( job ), cron : mkSwitch( over ) } );
+
+test( "row d514a7e9: a job's abstract carries its Switch section after Schedule, one line per old Scheduled Jobs field", () => {
+  const md = abstractMarkdown( withSwitch(), TODAY, [ mkSwitch() ] );
+  assert.deepEqual( headings( md ), [ "Reasons", "Last attempts", "Scan debt", "Fix debt", "Schedule", "Switch", "Evidence", "People", "Not reported" ] );
+  assert.match( md, /## Switch\n\n- State: ON\n/ );
+  assert.ok( md.includes( "- Cron schedule: cron 0 10-22 \\* \\* \\*\n" ), "the schedule text, escaped for markdown" );
+  assert.match( md, /- Last changed: rick, 2026-11-13 21:05\n/ );
+  assert.match( md, /- Reads: reads its switch at each run\n/ );
+  assert.equal( md.includes( "changed outside the endpoint" ), false, "no drift line without drift" );
+  assert.equal( md.includes( "switch unreadable" ), false );
+  assert.equal( abstractMarkdown( find( "duplicate-check" ), TODAY ).includes( "## Switch" ), false, "no switch, no section" );
+} );
+
+test( "row d514a7e9: the Switch section says OFF, UNKNOWN, drift, unreadable and inside-an-off-host, each only when true", () => {
+  const off = abstractMarkdown( withSwitch( { enabled : false, last_changed_by : null, last_changed_at : null, reads : "tick" } ), TODAY, [] );
+  assert.match( off, /- State: OFF\n/ );
+  assert.match( off, /- Last changed: not reported\n/ );
+  assert.match( off, /- Reads: reads its switch every tick\n/ );
+  assert.match( abstractMarkdown( withSwitch( { drift : true } ), TODAY, [] ), /- Check: changed outside the endpoint\n/ );
+  const unreadable = abstractMarkdown( withSwitch( { enabled : null } ), TODAY, [] );
+  assert.match( unreadable, /- State: UNKNOWN\n/ );
+  assert.match( unreadable, /- Check: switch unreadable: the key is missing/ );
+  const host = cronRow( "fleet-arbiter", { enabled : false } );
+  const inside = abstractMarkdown( withSwitch( { inside : "fleet-arbiter" } ), TODAY, [ host ] );
+  assert.match( inside, /- Check: off while fleet-arbiter is off\n/ );
+  assert.equal( abstractMarkdown( withSwitch( { inside : "fleet-arbiter" } ), TODAY, [ { ...host, enabled : true } ] ).includes( "off while" ), false );
+  assert.equal( abstractMarkdown( withSwitch( { reads : null, honoured : false } ), TODAY, [] ).includes( "- Reads: does not read its switch yet\n" ), true );
+} );
+
+test( "row d514a7e9: the old sparklines come back as text named scan debt and rows opened, the arrows stay, and one point draws nothing", () => {
+  const md = abstractMarkdown( find( "duplicate-check" ), TODAY );
+  assert.match( md, /- Trend \(scan debt\): 1030, 1500, 1820, 2124\n/ );
+  assert.match( md, /- Trend \(rows opened\): 28, 40, 55, 73\n/ );
+  assert.match( md, /- Count: 2,124 definitions ▲/ );
+  assert.match( md, /- Unfiled: 107 ▲/ );
+  const one = find( "duplicate-check" ); one.scan_debt!.points = one.scan_debt!.points.slice( 0, 1 ); one.fix_debt!.points = one.fix_debt!.points.slice( 0, 1 );
+  assert.equal( abstractMarkdown( one, TODAY ).includes( "Trend" ), false );
+  assert.equal( abstractMarkdown( find( "disk-report" ), TODAY ).includes( "Trend (rows opened)" ), false, "a named pile has no rows-opened series" );
+} );
+
+test( "row d514a7e9: a parent's abstract carries one Target block per target, each with its own sections, one level down", () => {
+  const job = find( "worktree-census" );      // its three targets are not liveness jobs, so each has Last attempts and a Fix debt
+  assert.equal( job.targets.length, 3 );
+  job.targets[ 0 ]!.reasons = [ { state : "failing", text : "target reason text" } as JobEntry[ "reasons" ][ number ] ];
+  job.targets[ 0 ]!.strip = [ { at : "2026-11-06T10:00:00-05:00", outcome : "clean" } as JobEntry[ "strip" ][ number ] ];
+  const md = abstractMarkdown( job, TODAY );
+  assert.deepEqual( [ ...md.matchAll( /^## Target: (.+)$/gm ) ].map( ( m ) => m[ 1 ] ), job.targets.map( ( t ) => `${ t.title } (${ t.target })` ) );
+  const first = md.slice( md.indexOf( "## Target: " ), md.indexOf( "## Target: ", md.indexOf( "## Target: " ) + 1 ) );
+  for ( const h of [ "Reasons", "Last attempts", "Fix debt", "Schedule", "Evidence", "People", "Not reported" ] ) assert.ok( first.includes( `### ${ h }\n` ), `target block has ${ h }` );
+  assert.match( first, /- target reason text\n/ );
+  assert.match( first, /### Last attempts\n\n1\. .* clean/ );
+  assert.equal( abstractMarkdown( find( "duplicate-check" ), TODAY ).includes( "## Target:" ), false );
+  job.targets[ 2 ]!.target = null;
+  assert.match( abstractMarkdown( job, TODAY ), new RegExp( `^## Target: ${ job.targets[ 2 ]!.title }$`, "m" ), "a target with no name has no parentheses" );
+} );
+
+test( "row d514a7e9: a switch-only job's abstract is its title, its Switch and one plain line, with none of the empty sections", () => {
+  const entry = cronOnlyEntry( mkSwitch( { job : "reporting-off", title : "Reporting off", enabled : false } ) );
+  const md = abstractMarkdown( entry, TODAY, [ entry.cron! ] );
+  assert.ok( md.startsWith( "# Reporting off\n" ) );
+  assert.deepEqual( headings( md ), [ "Switch" ] );
+  assert.match( md, /- State: OFF\n/ );
+  assert.match( md, /No run reports for this job: reporting is switched off\.\n$/ );
+  for ( const gone of [ "No rule is true", "Owner", "Not reported", "Evidence" ] ) assert.equal( md.includes( gone ), false, gone );
+} );
+
+test( "row d514a7e9: the 📋 on a switch job's line carries the Switch section, drawn with the page's switch rows", () => {
+  const entry = withSwitch();
+  const item  = renderJob( document, entry, TODAY, mkActions( { cronRows : [ entry.cron! ] } ) );
+  assert.match( ( item.querySelector( "[data-testid=jobs-abstract]" ) as HTMLElement ).getAttribute( "data-abstract" ) as string, /## Switch\n\n- State: ON/ );
 } );

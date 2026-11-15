@@ -95,7 +95,9 @@ def test_the_first_line_is_one_clean_line_per_service( logged_in_page, client ):
         assert line.get_by_test_id( testid ).count() == 1, testid
     assert page.locator( f"{client[ 'list' ]} [data-testid=jobs-scan-cell], {client[ 'list' ]} [data-testid=jobs-fix-cell], {client[ 'list' ]} [data-testid=jobs-clears-cell]" ).count() == 0
     heads = page.locator( f"{client[ 'list' ]} [data-testid=jobs-header] [role=columnheader]" ).all_inner_texts()
-    assert [ h.split( " " )[ 0 ] for h in heads ] == [ "", "", "Service", "Status", "Last", "Last", "" ], heads
+    assert [ h.split( " " )[ 0 ] for h in heads ] == [ "", "Service", "Status", "Last", "Last", "", "" ], heads
+    xs = { testid: line.get_by_test_id( testid ).bounding_box()[ "x" ] for testid in ( "jobs-last-finished", "jobs-abstract", "jobs-disclose" ) }
+    assert xs[ "jobs-last-finished" ] < xs[ "jobs-abstract" ] < xs[ "jobs-disclose" ], f"the ⋯ sits at the right-hand end, after the 📋 (row d514a7e9): {xs}"
     assert "Scan" not in " ".join( heads ) and "Fix" not in " ".join( heads ) and "Clears" not in " ".join( heads )
     assert page.get_by_test_id( "cron-jobs-container" ).count() == 0, "there is no separate Scheduled Jobs list"
     assert page.get_by_test_id( "multiplexer-section-toolbar-cron-jobs" ).count() == 0
@@ -155,6 +157,8 @@ def test_the_clipboard_emoji_opens_the_abstract_and_the_long_text_is_not_in_the_
     for expected in ( "Duplicate check", "Reasons", "Last attempts", "Scan debt", "Fix debt", "Schedule", "People", "Not reported" ):
         assert expected in text, f"{expected!r} missing from the abstract: {text[ :300 ]!r}"
     assert "Open the detail page" in text, "the detail link is carried by the abstract"
+    for expected in ( "Switch", "State: ON", "Cron schedule: cron 0 10-22", "Last changed: not reported", "Trend (scan debt): 1030, 1500, 1820, 2124", "Trend (rows opened): 28, 40, 55, 73" ):
+        assert expected in text, f"{expected!r}: the old Scheduled Jobs fold and sparkline detail is back in the abstract (row d514a7e9): {text[ :300 ]!r}"
 
 
 def test_a_switch_the_summary_does_not_report_on_still_gets_its_own_row( logged_in_page, client ):

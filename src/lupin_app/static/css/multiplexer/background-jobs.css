@@ -21,7 +21,7 @@
 .jobs-line,
 .jobs-line-grid {
     display               : grid;
-    grid-template-columns : 1.75rem 1.25rem minmax(0, 1.4fr) 8rem minmax(0, 1.7fr) minmax(0, 1.2fr) 1.75rem;   /* fits the container: the text columns shrink and wrap, so no column runs off the right edge */
+    grid-template-columns : 1.25rem minmax(0, 1.4fr) 8rem minmax(0, 1.7fr) minmax(0, 1.2fr) 1.75rem 1.75rem;   /* fits the container: the text columns shrink and wrap, so no column runs off the right edge */
     align-items           : baseline;
     gap                   : 0.5rem;
     width                 : 100%;

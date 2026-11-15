@@ -26,6 +26,8 @@
     const SUMMARY_URL   = "/api/jobs/summary";
     const POLL_MS       = 60 * 1000;
     const NOT_REPORTED  = "not reported";
+    const DRIFT_TEXT      = "changed outside the endpoint";                  // the words cron-jobs.js shows on the switch, repeated for the abstract
+    const UNREADABLE_TEXT = "switch unreadable: the key is missing from the configuration file or holds neither true nor false";
     const STATE_ORDER   = [ "healthy", "behind", "failing", "silent", "unknown" ];   // the order of the header line's counts
     const DEFAULT_SORT  = { id : null, direction : "asc" };   // no header picked: service name A to Z
     const STATE_LABEL   = { unknown : "UNKNOWN", silent : "SILENT", failing : "FAILING", behind : "BEHIND", healthy : "healthy" };
@@ -238,7 +240,12 @@
         return "[" + mdText( label ) + "](" + href.replace( /[() ]/g, ( c ) => "%" + c.charCodeAt( 0 ).toString( 16 ).toUpperCase() ) + ")";
     }
 
-    function mdSection( title, lines ) { return "## " + title + "\n\n" + lines.join( "\n" ) + "\n"; }
+    function mdSection( title, lines, level = 2 ) { return "#".repeat( level ) + " " + title + "\n\n" + lines.join( "\n" ) + "\n"; }
+
+    // The series the old sparkline drew, as the text its aria-label carried ("scan debt: 1, 2, 3"). Nothing under two points.
+    function trendLines( label, points ) {
+        return points.length < 2 ? [] : [ "- Trend (" + label + "): " + points.map( ( p ) => p.value ).join( ", " ) ];
+    }
 
     function reasonLines( job ) {
         if ( job.reasons.length === 0 && job.unknown_reason === null ) return [ "No rule is true: nothing to report." ];
@@ -265,6 +272,7 @@
             "- Arrived last interval: " + formatCount( debt.arrived_last_interval ),
             "- Never checked: " + formatCount( debt.never_checked ),
             "- Clears in: " + ( clearsText( job ) || NOT_REPORTED ),
+            ...trendLines( "scan debt", debt.points ),
         ];
     }
 
@@ -280,6 +288,7 @@
             "- Closed in window: " + formatCount( debt.closed_in_window ),
             "- Own mark: " + mdText( debt.own_mark ?? NOT_REPORTED ),
         ];
+        lines.push( ...trendLines( "rows opened", debt.points ) );
         if ( isSafeHref( debt.store_href ) ) lines.push( "- " + mdLink( debt.store_href, "Rows in the task store" ) );
         return lines;
     }
@@ -297,6 +306,23 @@
         return lines;
     }
 
+    // What the old Scheduled Jobs row showed: state, schedule, who flipped it and when, how it reads the switch, and the three warnings.
+    // The text rules are cron-jobs.js's, which must load first.
+    function switchLines( row, cronRows ) {
+        const cron  = window.cronJobs;
+        const lines = [
+            "- State: " + cron.stateText( row.enabled ),
+            "- Cron schedule: " + mdText( row.schedule ),
+            "- Last changed: " + mdText( cron.changedText( row ) ),
+            "- Reads: " + cron.readsText( row ),
+        ];
+        if ( row.drift ) lines.push( "- Check: " + DRIFT_TEXT );
+        if ( row.honoured && row.enabled === null ) lines.push( "- Check: " + UNREADABLE_TEXT );
+        const inside = cron.insideText( row, cronRows );
+        if ( inside !== null ) lines.push( "- Check: " + mdText( inside ) );
+        return lines;
+    }
+
     function peopleLines( job ) {
         const lines = [ "- Owner: " + mdText( job.owner ), "- Told: " + ( job.audience.length === 0 ? "the owner" : mdText( job.audience.join( ", " ) ) ) ];
         for ( const row of job.rows ) lines.push( "- " + mdLink( row.href, row.title ) );
@@ -304,17 +330,33 @@
         return lines;
     }
 
-    // The markdown abstract for one job: what the expanded panel used to show, behind the 📋.
-    function abstractMarkdown( job, todayIso ) {
-        const parts = [ "# " + mdText( job.title ) + ( job.target === null ? "" : " (" + mdText( job.target ) + ")" ) + "\n", mdSection( "Reasons", reasonLines( job ) ) ];
-        if ( job.liveness === null ) parts.push( mdSection( "Last attempts", stripLines( job, todayIso ) ) );
-        if ( job.applies.scan_debt && job.liveness === null ) parts.push( mdSection( "Scan debt", scanLines( job, todayIso ) ) );
-        if ( job.applies.fix_debt ) parts.push( mdSection( "Fix debt", fixLines( job ) ) );
-        parts.push( mdSection( "Schedule", scheduleLines( job, todayIso ) ) );
-        parts.push( mdSection( "Evidence", job.evidence.length === 0 ? [ NOT_REPORTED ] : job.evidence.map( ( e ) => "- " + mdLink( e.href, e.label + ": " + e.path ) ) ) );
-        parts.push( mdSection( "People", peopleLines( job ) ) );
+    // The sections every job has, at a heading level; a target's block uses the same ones one level down. `switchPart` goes after Schedule.
+    function jobSections( job, todayIso, level, switchPart ) {
+        const parts = [ mdSection( "Reasons", reasonLines( job ), level ) ];
+        if ( job.liveness === null ) parts.push( mdSection( "Last attempts", stripLines( job, todayIso ), level ) );
+        if ( job.applies.scan_debt && job.liveness === null ) parts.push( mdSection( "Scan debt", scanLines( job, todayIso ), level ) );
+        if ( job.applies.fix_debt ) parts.push( mdSection( "Fix debt", fixLines( job ), level ) );
+        parts.push( mdSection( "Schedule", scheduleLines( job, todayIso ), level ) );
+        if ( switchPart !== null ) parts.push( switchPart );
+        parts.push( mdSection( "Evidence", job.evidence.length === 0 ? [ NOT_REPORTED ] : job.evidence.map( ( e ) => "- " + mdLink( e.href, e.label + ": " + e.path ) ), level ) );
+        parts.push( mdSection( "People", peopleLines( job ), level ) );
         const names = notReportedNames( job );
-        parts.push( mdSection( "Not reported", [ names.length === 0 ? "Every figure was reported." : mdText( names.join( ", " ) ) ] ) );
+        parts.push( mdSection( "Not reported", [ names.length === 0 ? "Every figure was reported." : mdText( names.join( ", " ) ) ], level ) );
+        return parts;
+    }
+
+    // The markdown abstract for one job: what the old fold showed, behind the 📋. Its switch (Switch section), a Target block per target, and its trends as text.
+    // A switch-only job (cron_only) carries its title, its Switch and one line saying why nothing else is reported.
+    function abstractMarkdown( job, todayIso, cronRows = [] ) {
+        const title = "# " + mdText( job.title ) + ( job.target === null ? "" : " (" + mdText( job.target ) + ")" ) + "\n";
+        const row   = job.cron ?? null;
+        const own   = row === null ? null : mdSection( "Switch", switchLines( row, cronRows ) );
+        if ( job.cron_only === true && own !== null ) return [ title, own, "No run reports for this job: reporting is switched off.\n" ].join( "\n" );
+        const parts = [ title, ...jobSections( job, todayIso, 2, own ) ];
+        for ( const target of job.targets ) {
+            parts.push( "## Target: " + mdText( target.title ) + ( target.target === null ? "" : " (" + mdText( target.target ) + ")" ) + "\n" );
+            parts.push( ...jobSections( target, todayIso, 3, null ) );
+        }
         return parts.join( "\n" );
     }
 
@@ -358,9 +400,9 @@
     const openIds = new Set();
 
     // The 📋 that opens the job's abstract; notifications.js's delegated click handler does the rest.
-    function abstractIndicator( job, todayIso, testid ) {
+    function abstractIndicator( job, todayIso, testid, cronRows ) {
         const span = el( "span", "abstract-indicator jobs-abstract", "📋", testid );
-        span.setAttribute( "data-abstract", encodeURIComponent( abstractMarkdown( job, todayIso ) ) );      // URI-encoded: the legacy handler decodes it
+        span.setAttribute( "data-abstract", encodeURIComponent( abstractMarkdown( job, todayIso, cronRows ) ) );      // URI-encoded: the legacy handler decodes it
         span.setAttribute( "role", "button" );
         span.setAttribute( "tabindex", "0" );
         span.setAttribute( "title", "View details" );
@@ -387,7 +429,7 @@
             el( "span", "jobs-title", target.target === null ? target.title : target.title + " (" + target.target + ")", "jobs-target-title" ),
             el( "span", "jobs-badge", badgeText( target ), "jobs-target-badge" ),
             el( "span", "jobs-last-run", lastRunText( target, todayIso ), "jobs-target-last-run" ),
-            abstractIndicator( target, todayIso, "jobs-target-abstract" )
+            abstractIndicator( target, todayIso, "jobs-target-abstract", [] )      // a target has no switch of its own
         );
         return line;
     }
@@ -423,9 +465,8 @@
         toggle.setAttribute( "aria-controls", id + "-panel" );
         toggle.setAttribute( "title", "Show row controls" );
         toggle.textContent = "⋯";
-        const first = el( "span", "jobs-disclose-cell", null, null );
-        first.appendChild( toggle );
-        line.appendChild( first );
+        const last = el( "span", "jobs-disclose-cell", null, null );
+        last.appendChild( toggle );
         const cells = [
             [ "jobs-dot jobs-state-" + job.state, "●" ],
             [ "jobs-title", job.target === null ? job.title : job.title + " (" + job.target + ")" ],
@@ -438,7 +479,8 @@
             if ( cls.startsWith( "jobs-dot" ) ) span.setAttribute( "aria-hidden", "true" );
             line.appendChild( span );
         }
-        line.appendChild( abstractIndicator( job, todayIso, "jobs-abstract" ) );
+        line.appendChild( abstractIndicator( job, todayIso, "jobs-abstract", window.cronJobs.rows() ) );
+        line.appendChild( last );      // Rick, 15 Nov: the ⋯ sits at the right-hand end of the row
         heading.appendChild( line );
         item.appendChild( heading );
 
@@ -463,13 +505,13 @@
 
     // The columns of one collapsed line, in grid order. `sortId` names the SORT_ORDERS entry a header click picks, or null.
     const COLUMNS = [
-        { cls : "jobs-disclose-cell", label : "",              sortId : null },
-        { cls : "jobs-dot",           label : "",              sortId : null },
+        { cls : "jobs-dot",          label : "",              sortId : null },
         { cls : "jobs-title",         label : "Service",       sortId : "name" },
         { cls : "jobs-badge",         label : "Status",        sortId : "health" },
         { cls : "jobs-last-run",      label : "Last run",      sortId : "last-run" },
         { cls : "jobs-last-finished", label : "Last finished", sortId : null },
         { cls : "jobs-abstract",      label : "",              sortId : null },
+        { cls : "jobs-disclose-cell", label : "",              sortId : null },
     ];
 
     // Clicking a sortable header: a new column sorts ascending, a second click descending, a third returns to the default order.

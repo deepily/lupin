@@ -67,9 +67,9 @@ function itemId( job: JobEntry ): string {
 }
 
 /** The 📋 of a job: the delegated click handler opens its abstract. */
-function abstractIndicator( doc: Document, job: JobEntry, todayIso: string, testid: string ): HTMLElement {
+function abstractIndicator( doc: Document, job: JobEntry, todayIso: string, testid: string, cronRows: readonly CronJobRow[] ): HTMLElement {
   const span = el( doc, "span", "abstract-indicator jobs-abstract", "📋", testid );
-  span.setAttribute( "data-abstract", abstractMarkdown( job, todayIso ) );      // raw: the multiplexer reads it raw
+  span.setAttribute( "data-abstract", abstractMarkdown( job, todayIso, cronRows ) );      // raw: the multiplexer reads it raw
   span.setAttribute( "role", "button" );
   span.setAttribute( "tabindex", "0" );
   span.setAttribute( "title", "View details" );
@@ -124,7 +124,7 @@ function targetLine( doc: Document, target: JobEntry, todayIso: string ): HTMLEl
     el( doc, "span", "jobs-title", target.target === null ? target.title : `${ target.title } (${ target.target })`, "jobs-target-title" ),
     el( doc, "span", "jobs-badge", badgeText( target ), "jobs-target-badge" ),
     el( doc, "span", "jobs-last-run", lastRunText( target, todayIso ), "jobs-target-last-run" ),
-    abstractIndicator( doc, target, todayIso, "jobs-target-abstract" ),
+    abstractIndicator( doc, target, todayIso, "jobs-target-abstract", [] ),      // a target has no switch of its own
   );
   return line;
 }
@@ -170,15 +170,15 @@ export function renderJob( doc: Document, job: JobEntry, todayIso: string, actio
     [ "jobs-last-run", lastRunText( job, todayIso ) ],
     [ "jobs-last-finished", job.liveness === null && job.cron_only !== true ? lastFinishedText( job, todayIso ) : "" ],
   ];
-  const first = el( doc, "span", "jobs-disclose-cell", null, null );
-  first.appendChild( toggle );
-  line.appendChild( first );
+  const last = el( doc, "span", "jobs-disclose-cell", null, null );
+  last.appendChild( toggle );
   for ( const [ cls, text ] of cells ) {
     const span = el( doc, "span", cls, text, cls.split( " " )[ 0 ] as string );
     if ( cls.startsWith( "jobs-dot" ) ) span.setAttribute( "aria-hidden", "true" );
     line.appendChild( span );
   }
-  line.appendChild( abstractIndicator( doc, job, todayIso, "jobs-abstract" ) );
+  line.appendChild( abstractIndicator( doc, job, todayIso, "jobs-abstract", actions.cronRows ) );
+  line.appendChild( last );                                    // Rick, 15 Nov: the ⋯ sits at the right-hand end of the row
   heading.appendChild( line );
   item.appendChild( heading );
 
@@ -203,13 +203,13 @@ export function renderJob( doc: Document, job: JobEntry, todayIso: string, actio
 
 /** The columns of one line, in grid order; `sortId` names the entry a click picks. */
 const COLUMNS: ReadonlyArray<{ cls: string; label: string; sortId: string | null }> = [
-  { cls: "jobs-disclose-cell", label: "",              sortId: null },
   { cls: "jobs-dot",           label: "",              sortId: null },
   { cls: "jobs-title",         label: "Service",       sortId: "name" },
   { cls: "jobs-badge",         label: "Status",        sortId: "health" },
   { cls: "jobs-last-run",      label: "Last run",      sortId: "last-run" },
   { cls: "jobs-last-finished", label: "Last finished", sortId: null },
   { cls: "jobs-abstract",      label: "",              sortId: null },
+  { cls: "jobs-disclose-cell", label: "",              sortId: null },
 ];
 
 function arrow( sort: JobSort ): string { return sort.direction === "asc" ? " ▲" : " ▼"; }

@@ -24,7 +24,12 @@ Two pure modules behind the one jobs list. Neither touches the DOM or the clock.
 - `mergeJobs` joins the summary's jobs with the switch rows by job id. Each job carries its switch row, or null. A switch no job names (a job with reporting switched off) gets its own entry from `cronOnlyEntry`, marked `cron_only`, state unknown, with no figures. Neither input is changed, and targets stay nested under their job.
 
 ## The abstract
-- `abstractMarkdown` writes the text the expanded panel used to show, as markdown. The sections are Reasons, Last attempts, Scan debt, Fix debt, Schedule, Evidence, People and Not reported. A liveness job has no attempts or scan debt, and a debt that does not apply is left out. The 📋 on the row carries it.
+- `abstractMarkdown` writes the text the expanded panel used to show, as markdown. The sections are Reasons, Last attempts, Scan debt, Fix debt, Schedule, Switch, Evidence, People and Not reported. A liveness job has no attempts or scan debt, and a debt that does not apply is left out. The 📋 on the row carries it.
+- Switch is what the old Scheduled Jobs row showed. It lists the state, the cron schedule, the last flip and how the job reads its switch. A Check line names drift, an unreadable switch or an off host job.
+- Switch appears only for a job that has one. It takes the switch list as a third argument, so the host check can find the host.
+- The old sparklines come back as text: `Trend (scan debt)` and `Trend (rows opened)`, from two points up. The arrows on Count and Unfiled stay.
+- Each target of a job follows as a `## Target:` block with the same sections one level down. That is the per-service report the old nested panels gave.
+- A switch-only job (`cron_only`) gets its title, its Switch and one line saying reporting is switched off, with none of the empty sections.
 - `mdText` escapes the characters markdown would act on, so writer text reads as written. `mdLink` draws a link only for a path on this server; any other address is plain escaped text.
 - `titleLine`, `section`, `reasonLines`, `stripLines`, `scanLines`, `fixLines`, `scheduleLines` and `peopleLines` build the parts. A missing figure says `not reported`, never zero.
 

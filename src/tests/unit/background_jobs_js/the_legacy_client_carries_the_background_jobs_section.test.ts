@@ -436,7 +436,7 @@ test( "the legacy accordion draws a header row naming every column, sorts on a h
   const api = await load();
   const mount = byId( "background-jobs-container" );
   const heads = Array.from( mount.querySelectorAll( "[data-testid=jobs-header] [role=columnheader]" ) ).map( ( h ) => h.textContent );
-  assert.deepEqual( heads, [ "", "", "Service", "Status", "Last run", "Last finished", "" ] );
+  assert.deepEqual( heads, [ "", "Service", "Status", "Last run", "Last finished", "", "" ] );
   const titles = () => Array.from( mount.querySelectorAll( ":scope > [data-testid=jobs-item] > .jobs-heading [data-testid=jobs-title]" ) ).map( ( t ) => t.textContent );
   const click  = ( id: string ) => ( mount.querySelector( "[data-testid=" + id + "]" ) as HTMLElement ).click();
   click( "jobs-sort-name" );
@@ -462,9 +462,85 @@ test( "both sheets size the line grid so it fits its container: the ⋯, dot and
     assert.ok( m, sheet + " declares no line grid" );
     const tracks = m![ 1 ]!.replace( /\/\*.*$/, "" ).match( /minmax\([^)]*\)|\S+/g )!;
     assert.equal( tracks.length, 7, sheet );
-    assert.deepEqual( tracks.slice( 0, 2 ), [ "1.75rem", "1.25rem" ] );
-    assert.equal( tracks[ 3 ], "8rem", "the status column stays narrow" );
-    assert.equal( tracks[ 6 ], "1.75rem", "the 📋 column is narrow" );
-    for ( const i of [ 2, 4, 5 ] ) assert.match( tracks[ i ]!, /^minmax\(0, [\d.]+fr\)$/, sheet + " track " + i + " must shrink" );
+    assert.equal( tracks[ 0 ], "1.25rem", "the dot column leads" );
+    assert.equal( tracks[ 2 ], "8rem", "the status column stays narrow" );
+    assert.deepEqual( tracks.slice( 5 ), [ "1.75rem", "1.75rem" ], "the 📋 and then the ⋯ columns are narrow, at the right-hand end" );
+    for ( const i of [ 1, 3, 4 ] ) assert.match( tracks[ i ]!, /^minmax\(0, [\d.]+fr\)$/, sheet + " track " + i + " must shrink" );
   }
+} );
+
+// ── row d514a7e9: the ⋯ at the right, and the abstract carries the old folds' detail ───────────────
+
+const jobOf = ( name: string ) => clone( FIXTURE.jobs.find( ( j ) => j.job === name )! ) as any;
+const sw    = ( over: Record<string, unknown> = {} ) => ( { ...CRON_ROWS[ 0 ], schedule : "cron 0 10-22 * * *", last_changed_by : "rick", last_changed_at : "2026-11-13T21:05:44-05:00", reads : "run", ...over } );
+const both  = ( api: G, job: any, rows: any[] = [] ) => {
+  const legacy = api.abstractMarkdown( job, FIXTURE.generated_at, rows );
+  assert.equal( legacy, muxAbstract( job, FIXTURE.generated_at, rows ), "the two copies write the same abstract" );
+  return legacy as string;
+};
+
+test( "row d514a7e9: in the legacy client the ⋯ is the last child of each first line, right after the 📋, and the header's last column matches", async () => {
+  await load();
+  const mount = byId( "background-jobs-container" );
+  const line  = mount.querySelector( "[data-job=duplicate-check] [data-testid=jobs-line]" ) as HTMLElement;
+  const kids  = [ ...line.children ] as HTMLElement[];
+  assert.ok( kids[ kids.length - 1 ]!.querySelector( "[data-testid=jobs-disclose]" ) !== null, "the ⋯ cell is last" );
+  assert.equal( kids[ kids.length - 2 ]!.getAttribute( "data-testid" ), "jobs-abstract" );
+  assert.equal( kids[ 0 ]!.className.startsWith( "jobs-dot" ), true, "the dot leads now" );
+  const heads = [ ...mount.querySelectorAll( "[data-testid=jobs-header] [role=columnheader]" ) ] as HTMLElement[];
+  assert.equal( heads[ heads.length - 1 ]!.classList.contains( "jobs-disclose-cell" ), true );
+  assert.equal( heads.length, kids.length );
+} );
+
+test( "row d514a7e9: the legacy abstract carries the Switch section, one line per old Scheduled Jobs field, each warning only when true", async () => {
+  const api = await load();
+  const md  = both( api, { ...jobOf( "duplicate-check" ), cron : sw() }, [ sw() ] );
+  assert.match( md, /## Schedule\n[\s\S]*## Switch\n\n- State: ON\n/ );
+  assert.ok( md.includes( "- Cron schedule: cron 0 10-22 \\* \\* \\*\n" ) );
+  assert.match( md, /- Last changed: rick, 2026-11-13 21:05\n/ );
+  assert.match( md, /- Reads: reads its switch at each run\n/ );
+  for ( const never of [ "changed outside the endpoint", "switch unreadable", "off while" ] ) assert.equal( md.includes( never ), false, never );
+  assert.equal( both( api, jobOf( "duplicate-check" ) ).includes( "## Switch" ), false, "no switch, no section" );
+  const off = both( api, { ...jobOf( "duplicate-check" ), cron : sw( { enabled : false, last_changed_by : null, last_changed_at : null, reads : "tick" } ) } );
+  assert.match( off, /- State: OFF\n/ );
+  assert.match( off, /- Last changed: not reported\n/ );
+  assert.match( off, /- Reads: reads its switch every tick\n/ );
+  assert.match( both( api, { ...jobOf( "duplicate-check" ), cron : sw( { drift : true } ) } ), /- Check: changed outside the endpoint\n/ );
+  const bad = both( api, { ...jobOf( "duplicate-check" ), cron : sw( { enabled : null } ) } );
+  assert.match( bad, /- State: UNKNOWN\n/ );
+  assert.match( bad, /- Check: switch unreadable: the key is missing/ );
+  const host = sw( { job : "fleet-arbiter", enabled : false } );
+  assert.match( both( api, { ...jobOf( "duplicate-check" ), cron : sw( { inside : "fleet-arbiter" } ) }, [ host ] ), /- Check: off while fleet-arbiter is off\n/ );
+  assert.equal( both( api, { ...jobOf( "duplicate-check" ), cron : sw( { inside : "fleet-arbiter" } ) }, [ { ...host, enabled : true } ] ).includes( "off while" ), false );
+  assert.ok( both( api, { ...jobOf( "duplicate-check" ), cron : sw( { reads : null, honoured : false } ) } ).includes( "- Reads: does not read its switch yet\n" ) );
+} );
+
+test( "row d514a7e9: the legacy abstract carries the trends as text named scan debt and rows opened, with the arrows kept", async () => {
+  const api = await load();
+  const md  = both( api, jobOf( "duplicate-check" ) );
+  assert.match( md, /- Trend \(scan debt\): 1030, 1500, 1820, 2124\n/ );
+  assert.match( md, /- Trend \(rows opened\): 28, 40, 55, 73\n/ );
+  assert.match( md, /- Count: 2,124 definitions ▲/ );
+  assert.match( md, /- Unfiled: 107 ▲/ );
+  const one = jobOf( "duplicate-check" ); one.scan_debt.points = one.scan_debt.points.slice( 0, 1 ); one.fix_debt.points = one.fix_debt.points.slice( 0, 1 );
+  assert.equal( both( api, one ).includes( "Trend" ), false );
+  assert.equal( both( api, jobOf( "disk-report" ) ).includes( "Trend (rows opened)" ), false );
+} );
+
+test( "row d514a7e9: the legacy abstract of a parent carries one Target block per target with its own sections, and a switch-only job a short one", async () => {
+  const api = await load();
+  const job = jobOf( "worktree-census" );
+  job.targets[ 0 ].reasons = [ { state : "failing", text : "target reason text" } ];
+  job.targets[ 0 ].strip   = [ { at : "2026-11-06T10:00:00-05:00", outcome : "clean" } ];
+  const md = both( api, job );
+  assert.deepEqual( [ ...md.matchAll( /^## Target: (.+)$/gm ) ].map( ( m ) => m[ 1 ] ), job.targets.map( ( t: any ) => `${ t.title } (${ t.target })` ) );
+  const first = md.slice( md.indexOf( "## Target: " ), md.indexOf( "## Target: ", md.indexOf( "## Target: " ) + 1 ) );
+  for ( const h of [ "Reasons", "Last attempts", "Fix debt", "Schedule", "Evidence", "People", "Not reported" ] ) assert.ok( first.includes( `### ${ h }\n` ), `target block has ${ h }` );
+  assert.match( first, /- target reason text\n/ );
+  assert.equal( both( api, jobOf( "duplicate-check" ) ).includes( "## Target:" ), false );
+  const only = both( api, api.mergeJobs( [], [ sw( { job : "reporting-off", title : "Reporting off", enabled : false } ) ] )[ 0 ], [] );
+  assert.ok( only.startsWith( "# Reporting off\n" ) );
+  assert.deepEqual( [ ...only.matchAll( /^## (.+)$/gm ) ].map( ( m ) => m[ 1 ] ), [ "Switch" ] );
+  assert.match( only, /No run reports for this job: reporting is switched off\.\n$/ );
+  for ( const gone of [ "No rule is true", "Owner", "Not reported", "Evidence" ] ) assert.equal( only.includes( gone ), false, gone );
 } );
