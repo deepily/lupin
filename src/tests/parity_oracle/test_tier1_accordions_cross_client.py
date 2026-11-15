@@ -98,13 +98,10 @@ test credentials; both are skips, not failures.
 
 from __future__ import annotations
 
-import functools
 import hashlib
-import http.server
 import json
 import os
 import subprocess
-import threading
 from pathlib import Path
 
 import pytest
@@ -149,23 +146,6 @@ def tokens():
     if not email or not password:
         pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD not set" )
     return app_login.login( BASE_URL, email, password )[ "tokens" ]
-
-
-@pytest.fixture( scope="module" )
-def static_origin():
-    """This repo's own `src/lupin_app/` over loopback — the MUX side's venue, so
-    the structural comparison reads the tree under edit rather than the served one."""
-    directory = str( repo_root() / "src" / "lupin_app" )
-    handler   = functools.partial( http.server.SimpleHTTPRequestHandler, directory=directory )
-    server    = http.server.ThreadingHTTPServer( ( "127.0.0.1", 0 ), handler )
-    thread    = threading.Thread( target=server.serve_forever, daemon=True )
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[ 1 ]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join( timeout=5 )
 
 
 def _stub_pane_apis( page, scenario: dict ):

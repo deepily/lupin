@@ -50,9 +50,6 @@ monopoly. It needs no server at all.
 
 from __future__ import annotations
 
-import functools
-import http.server
-import threading
 from collections import Counter
 
 import pytest
@@ -62,36 +59,12 @@ from tests.e2e_ui.parity_oracle import (
     ACCORDION_ROOT_SEL,
     ACCORDION_SKELETON_JS,
     load_accordion_scenario,
-    repo_root,
 )
 
 # The contract's chevron glyphs — named in LAYOUT-CONTRACT.md, identical in both
 # clients, and the reason a walker may read this one piece of text.
 GLYPH_EXPANDED  = "▾"
 GLYPH_COLLAPSED = "▸"
-
-
-@pytest.fixture( scope="module" )
-def static_origin():
-    """Serve THIS repo's `src/lupin_app/` over loopback so `/static/...` resolves
-    to the tree under test rather than to whatever the dev container mounts.
-
-    Ensures:
-        - yields an origin string like "http://127.0.0.1:38271"
-        - the server is bound to 127.0.0.1 on an ephemeral port and shut down
-          on teardown
-    """
-    directory = str( repo_root() / "src" / "lupin_app" )
-    handler   = functools.partial( http.server.SimpleHTTPRequestHandler, directory=directory )
-    server    = http.server.ThreadingHTTPServer( ( "127.0.0.1", 0 ), handler )
-    thread    = threading.Thread( target=server.serve_forever, daemon=True )
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[ 1 ]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join( timeout=5 )
 
 
 @pytest.fixture( scope="function" )

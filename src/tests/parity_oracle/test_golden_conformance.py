@@ -37,6 +37,8 @@ from tests.e2e_ui.parity_oracle import (
     shared_sheet_path,
 )
 
+pytestmark = pytest.mark.usefixtures( "live_bundle_fresh" )
+
 BASE_URL    = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:7999" )
 HARNESS_URL = f"{BASE_URL}{HARNESS_URL_PATH}"
 GOLDEN_PATH = repo_root() / "src" / "tests" / "e2e_ui" / "fixtures" / "golden" / "notifications-legacy.golden.json"
