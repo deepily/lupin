@@ -788,3 +788,253 @@ def test_format_report_shows_a_dormant_row_with_its_reason_and_no_rebuild_remedy
     lines = mod.format_report( "/t", [ row ], "abc123" )
     assert any( "DORMANT" in l for l in lines ) and any( "nothing loads it" in l for l in lines )
     assert not any( "WOULD change" in l for l in lines )
+
+
+# ── harness bundles: a driver that writes no manifest (row 2da35ac6) ─────────────
+#
+# `build-parity-harness.sh` writes parity-harness.js and accordion-harness.js and no manifest.json, so the manifest
+# loop never saw them: a stale parity-harness.js passed the freshness check that the LUPIN_TEST_BASE_URL tests rely on.
+# The fixture driver below has the same shape as the real one: two entry/outfile pairs, and a plain unminified build.
+
+HARNESS_SCRIPT = '''#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
+cd "$PROJECT_ROOT"
+
+ENTRY="src/lupin_app/static/js/probe/boot.ts"
+SECOND_ENTRY="src/lupin_app/static/js/probe/second.ts"
+OUTDIR="src/lupin_app/static/dist/probe"
+OUTFILE="$OUTDIR/parity-harness.js"
+SECOND_OUTFILE="$OUTDIR/accordion-harness.js"
+
+ESBUILD="$PROJECT_ROOT/node_modules/.bin/esbuild"
+
+build_one() {
+  "$ESBUILD" \\
+    "$1" \\
+    --bundle \\
+    --format=esm \\
+    --target=es2022 \\
+    --platform=browser \\
+    --sourcemap \\
+    --outfile="$2" \\
+    --log-level=warning
+}
+
+build_one "$ENTRY"        "$OUTFILE"
+build_one "$SECOND_ENTRY" "$SECOND_OUTFILE"
+'''
+
+SECOND_TS = '''export const second = "second-emitted-string";
+document.title = second;
+'''
+
+
+def _make_harness_tree( tmp_path ):
+    """A fixture tree whose only driver writes no manifest."""
+    tree = _make_tree( tmp_path )
+    ( tree / "src" / "scripts" / "build-probe.sh" ).unlink()
+    ( tree / "src" / "scripts" / "build-probe-harness.sh" ).write_text( HARNESS_SCRIPT, encoding="utf-8" )
+    ( _source( tree, "second.ts" ) ).write_text( SECOND_TS, encoding="utf-8" )
+    return tree
+
+
+def _build_harness( tree ):
+    """Run the fixture harness driver so the shipped files exist."""
+    ( tree / "src" / "lupin_app" / "static" / "dist" / "probe" ).mkdir( parents=True, exist_ok=True )
+    completed = subprocess.run( [ "bash", str( tree / "src" / "scripts" / "build-probe-harness.sh" ) ],
+                                capture_output=True, text=True, check=False )
+    assert completed.returncode == 0, f"fixture harness build failed: {completed.stderr}"
+
+
+def _shipped( tree, name ):
+    return tree / "src" / "lupin_app" / "static" / "dist" / "probe" / name
+
+
+@needs_esbuild
+def test_a_fresh_parity_harness_is_reported_fresh_and_both_files_are_judged( tmp_path ):
+    """A fresh harness bundle is fresh, and both outputs are judged.
+
+    This is the positive half. The count shows that neither output is skipped.
+    """
+    tree = _make_harness_tree( tmp_path )
+    _build_harness( tree )
+
+    code, out = _run( tree )
+
+    assert code == mod.EXIT_FRESH, out
+    assert "parity-harness" in out and "accordion-harness" in out
+    assert out.count( "FRESH" ) >= 2 and "STALE" not in out
+
+
+@needs_esbuild
+def test_a_stale_parity_harness_js_is_refused( tmp_path ):
+    """A stale parity-harness.js is refused.
+
+    A source change reaches parity-harness.js and the shipped file stays behind.
+    Before the fix this tree answered exit 2, because no driver wrote a manifest.
+    """
+    tree = _make_harness_tree( tmp_path )
+    _build_harness( tree )
+    _mutate_emitted_string( tree )
+
+    code, out = _run( tree )
+
+    assert code == mod.EXIT_STALE, out
+    assert "parity-harness" in out
+    assert "Run: bash src/scripts/build-probe-harness.sh" in out, "the remedy names the harness driver, not build-parity-harness-less"
+
+
+@needs_esbuild
+def test_the_second_harness_bundle_alone_going_stale_is_refused( tmp_path ):
+    """A stale second bundle alone is refused.
+
+    A stale accordion-harness.js beside a fresh parity-harness.js is still stale, and only it is named.
+    """
+    tree = _make_harness_tree( tmp_path )
+    _build_harness( tree )
+    second = _source( tree, "second.ts" )
+    second.write_text( second.read_text( encoding="utf-8" ).replace( "second-emitted-string", "second-MUTATED-string" ), encoding="utf-8" )
+
+    results = { r[ "name" ]: r for r in ( mod.check_harness_bundle( tree, b, str( ESBUILD ) ) for b in mod.discover_harness_bundles( tree ) ) }
+
+    assert results[ "parity-harness" ][ "status" ] == mod.FRESH
+    assert results[ "accordion-harness" ][ "status" ] == mod.STALE
+
+
+@needs_esbuild
+def test_the_harness_stale_arm_perturbs_something_that_is_actually_emitted( tmp_path ):
+    """The stale arm changes something that is really emitted.
+
+    The mutation reaches the rebuilt bytes, so the arm above cannot pass by tree-shaking.
+    """
+    tree = _make_harness_tree( tmp_path )
+    _build_harness( tree )
+    _mutate_emitted_string( tree )
+    shipped_before = _shipped( tree, "parity-harness.js" ).read_bytes()
+    _build_harness( tree )
+
+    assert b"probe-MUTATED-class" in _shipped( tree, "parity-harness.js" ).read_bytes()
+    assert b"probe-MUTATED-class" not in shipped_before
+
+
+@needs_esbuild
+def test_a_harness_bundle_with_a_comment_only_change_is_fresh( tmp_path ):
+    """A comment-only change leaves a harness bundle fresh.
+
+    The delivered bytes did not move, as for a manifest bundle. No timestamp is consulted.
+    """
+    tree = _make_harness_tree( tmp_path )
+    _build_harness( tree )
+    path = _source( tree, "label.ts" )
+    path.write_text( "// a comment\n" + path.read_text( encoding="utf-8" ), encoding="utf-8" )
+    os.utime( path, ( 0, 0 ) )
+
+    assert mod.check_harness_bundle( tree, mod.discover_harness_bundles( tree )[ 0 ], str( ESBUILD ) )[ "status" ] == mod.FRESH
+
+
+@needs_esbuild
+def test_a_drifted_harness_bundle_nothing_loads_is_dormant_not_stale( tmp_path, monkeypatch ):
+    """A drifted harness bundle that nothing loads is dormant, not stale.
+
+    Nobody serves the old bytes, so it does not block, as for a manifest bundle.
+    """
+    tree = _make_harness_tree( tmp_path )
+    _build_harness( tree )
+    _mutate_emitted_string( tree )
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: [] )
+
+    result = mod.check_harness_bundle( tree, mod.discover_harness_bundles( tree )[ 0 ], str( ESBUILD ) )
+
+    assert result[ "status" ] == mod.DORMANT
+    assert "no tracked file loads it" in result[ "reason" ]
+
+
+def test_a_never_built_harness_bundle_is_a_live_404_nothing_loads_is_not_built_and_git_silence_refuses( tmp_path, monkeypatch ):
+    """A never-built harness bundle has three answers, one variable each.
+
+    A loader exists, nobody loads it, or git cannot say.
+    """
+    tree   = _make_harness_tree( tmp_path )
+    bundle = mod.discover_harness_bundles( tree )[ 0 ]
+
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: [ "src/lupin_app/static/html/parity-harness.html" ] )
+    loaded = mod.check_harness_bundle( tree, bundle, str( ESBUILD ) )
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: [] )
+    quiet  = mod.check_harness_bundle( tree, bundle, str( ESBUILD ) )
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: None )
+    silent = mod.check_harness_bundle( tree, bundle, str( ESBUILD ) )
+
+    assert ( loaded[ "status" ], "live 404" in loaded[ "reason" ], "parity-harness.html" in loaded[ "reason" ] ) == ( mod.REFUSED, True, True )
+    assert quiet[ "status" ] == mod.NOT_BUILT and "dormant driver" in quiet[ "reason" ]
+    assert silent[ "status" ] == mod.REFUSED and "git could not be asked" in silent[ "reason" ]
+
+
+def test_harness_discovery_reads_both_pairs_and_skips_scripts_that_are_not_bundle_drivers( tmp_path ):
+    """Discovery reads both pairs and skips what is not a bundle driver.
+
+    The two outputs are named from the output-file lines.
+    A script with no entry line is not a driver (build-local-venv.sh is one), and a manifest driver is left to the other loop.
+    """
+    tree = _make_harness_tree( tmp_path )
+    ( tree / "src" / "scripts" / "build-not-a-bundle.sh" ).write_text( "#!/usr/bin/env bash\necho hi\n", encoding="utf-8" )
+    ( tree / "src" / "scripts" / "build-probe.sh" ).write_text( BUILD_SCRIPT, encoding="utf-8" )
+
+    found = mod.discover_harness_bundles( tree )
+
+    assert [ b[ "name" ] for b in found ] == [ "parity-harness", "accordion-harness" ]
+    assert [ b[ "outfile" ] for b in found ] == [ "src/lupin_app/static/dist/probe/parity-harness.js", "src/lupin_app/static/dist/probe/accordion-harness.js" ]
+    assert all( b[ "driver" ] == "probe-harness" and b[ "error" ] is None and "--bundle" in b[ "flags" ] for b in found )
+
+
+def test_a_harness_driver_that_cannot_be_read_is_refused_not_skipped( tmp_path ):
+    """A harness driver that cannot be read is refused, not skipped.
+
+    One case has an entry line and no output folder. The other has an entry with no output file.
+    """
+    tree = _make_harness_tree( tmp_path )
+    broken = ( tree / "src" / "scripts" / "build-probe-harness.sh" )
+    broken.write_text( 'ENTRY="src/lupin_app/static/js/probe/boot.ts"\n', encoding="utf-8" )
+    unreadable = mod.discover_harness_bundles( tree )
+    broken.write_text( HARNESS_SCRIPT.replace( 'SECOND_OUTFILE="$OUTDIR/accordion-harness.js"\n', "" ), encoding="utf-8" )
+    half = mod.discover_harness_bundles( tree )
+
+    assert len( unreadable ) == 1 and "unparseable build script" in unreadable[ 0 ][ "error" ]
+    assert [ b[ "error" ] is None for b in half ] == [ True, False ] and "SECOND_OUTFILE" in half[ 1 ][ "error" ]
+    assert half[ 1 ][ "name" ] == "second"
+    assert [ mod.check_harness_bundle( tree, b, str( ESBUILD ) )[ "status" ] for b in half[ 1: ] ] == [ mod.REFUSED ]
+    assert mod.check_harness_bundle( tree, unreadable[ 0 ], str( ESBUILD ) )[ "status" ] == mod.REFUSED
+
+
+def test_a_harness_bundle_that_cannot_be_judged_is_refused( tmp_path ):
+    """A harness bundle that cannot be judged is refused.
+
+    No esbuild, a missing entry and a failing build each answer refused with a reason, never fresh.
+    """
+    tree   = _make_harness_tree( tmp_path )
+    bundle = mod.discover_harness_bundles( tree )[ 0 ]
+    no_esbuild = mod.check_harness_bundle( tree, bundle, None )
+
+    _source( tree, "boot.ts" ).unlink()
+    no_entry = mod.check_harness_bundle( tree, bundle, str( ESBUILD ) )
+
+    _source( tree, "boot.ts" ).write_text( "import { nope } from './missing';\nnope();\n", encoding="utf-8" )
+    _shipped( tree, "parity-harness.js" ).parent.mkdir( parents=True, exist_ok=True )
+    _shipped( tree, "parity-harness.js" ).write_text( "shipped", encoding="utf-8" )
+    failing = mod.check_harness_bundle( tree, bundle, str( ESBUILD ) )
+
+    assert no_esbuild[ "status" ] == mod.REFUSED and "esbuild binary not found" in no_esbuild[ "reason" ]
+    assert no_entry[ "status" ] == mod.REFUSED and "entry not found" in no_entry[ "reason" ]
+    assert failing[ "status" ] == mod.REFUSED and "dry-run build failed" in failing[ "reason" ]
+
+
+def test_remedy_names_the_driver_stem_when_it_differs_from_the_bundle_name( tmp_path ):
+    """Remedy names the driver stem when it differs from the bundle name.
+
+    The bundle accordion-harness is built by build-parity-harness.sh, so the line must name that driver.
+    """
+    ( tmp_path / "package.json" ).write_text( json.dumps( { "scripts": { "build": "bash src/scripts/build-parity-harness.sh" } } ), encoding="utf-8" )
+
+    assert mod.remedy( tmp_path, "accordion-harness", "parity-harness" ) == "Run: npm run build (or bash src/scripts/build-parity-harness.sh)"
+    assert mod.remedy( tmp_path, "accordion-harness" ) == "Run: bash src/scripts/build-accordion-harness.sh (`npm run build` does not build it)"
