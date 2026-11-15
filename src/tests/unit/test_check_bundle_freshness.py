@@ -320,6 +320,7 @@ def test_an_all_not_built_tree_still_refuses_because_nothing_was_measured( tmp_p
     HAPPENED.
     """
     monkeypatch.setattr( mod, "discover_bundles", lambda root: [ "driver" ] )
+    monkeypatch.setattr( mod, "discover_harness_bundles", lambda root: [] )   # main must not read the real harness driver
     monkeypatch.setattr( mod, "check_bundle",
                          lambda root, script, esbuild: { "name": "probe", "status": mod.NOT_BUILT,
                                                          "reason": "dormant", "shipped_hash": None,
@@ -695,6 +696,7 @@ def test_a_stale_bundle_is_never_hidden_by_one_that_could_not_be_checked( status
     rows = [ _row( status ) for status in statuses ]
     monkeypatch.setattr( mod, "PROJECT_ROOT", tmp_path )
     monkeypatch.setattr( mod, "discover_bundles", lambda root: [ f"build-{i}.sh" for i in range( len( rows ) ) ] )
+    monkeypatch.setattr( mod, "discover_harness_bundles", lambda root: [] )   # main must not read the real harness driver
     queue = iter( rows )
     monkeypatch.setattr( mod, "check_bundle", lambda root, script, esbuild: next( queue ) )
     monkeypatch.setattr( mod, "current_sha", lambda root: "abc123" )
@@ -705,6 +707,7 @@ def test_a_crash_exits_three_with_a_traceback_and_never_reads_as_stale( tmp_path
     monkeypatch.setattr( mod, "PROJECT_ROOT", tmp_path )
     def boom( root ): raise RuntimeError( "scanner exploded" )
     monkeypatch.setattr( mod, "discover_bundles", boom )
+    monkeypatch.setattr( mod, "discover_harness_bundles", lambda root: [] )   # main must not read the real harness driver
     code = mod.main( [] )
     err  = capsys.readouterr().err
     assert code == mod.EXIT_CRASHED == 3 and code not in ( mod.EXIT_STALE, mod.EXIT_REFUSED, mod.EXIT_FRESH )
@@ -752,6 +755,7 @@ def test_a_drifted_bundle_that_no_page_loads_is_dormant_and_exits_clean( tmp_pat
     assert "no tracked file loads it" in result[ "reason" ]
     other = { "name": "live", "status": mod.FRESH, "sources": 1, "shipped_hash": "a", "rebuilt_hash": "a", "reason": None }
     monkeypatch.setattr( mod, "discover_bundles", lambda root: [ "one", "two" ] )
+    monkeypatch.setattr( mod, "discover_harness_bundles", lambda root: [] )   # main must not read the real harness driver
     monkeypatch.setattr( mod, "check_bundle", lambda root, script, esbuild: result if script == "one" else other )
     monkeypatch.setattr( mod, "current_sha", lambda root: "deadbeef" )
     assert mod.main( [] ) == mod.EXIT_FRESH
@@ -778,6 +782,7 @@ def test_a_matching_bundle_never_asks_who_loads_it( tmp_path, monkeypatch ):
 def test_an_all_dormant_tree_still_refuses_because_nothing_was_judged_fresh( monkeypatch ):
     row = { "name": "probe", "status": mod.DORMANT, "sources": 2, "shipped_hash": "a", "rebuilt_hash": "b", "reason": "dormant: nothing loads it" }
     monkeypatch.setattr( mod, "discover_bundles", lambda root: [ "driver" ] )
+    monkeypatch.setattr( mod, "discover_harness_bundles", lambda root: [] )   # main must not read the real harness driver
     monkeypatch.setattr( mod, "check_bundle", lambda root, script, esbuild: row )
     monkeypatch.setattr( mod, "current_sha", lambda root: "deadbeef" )
     assert mod.main( [] ) == mod.EXIT_REFUSED
