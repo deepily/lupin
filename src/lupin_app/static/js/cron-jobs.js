@@ -180,11 +180,23 @@
         }
     }
 
+    // The rows the last load or event left in hand.
+    function jobRows() { return current.jobs; }
+
+    // Whether the server said the caller is an administrator.
+    function callerCanFlip() { return current.caller_is_admin; }
+
+    // Register what to call when a row changed: the list's repaint.
+    function setChangeListener( fn ) { listener = fn; }
+
+    // Forget a turn-off that was waiting for its confirming click.
+    function resetPendingConfirm() { pendingConfirm = null; }
+
     window.cronJobs = {
         load, switchCells, applyEvent, flip, requestFlip, stateText, readsText, insideText, changedText, flipFailureText, flipPath,
-        rows         : () => current.jobs,
-        canFlip      : () => current.caller_is_admin,
-        onChange     : ( fn ) => { listener = fn; },
-        resetConfirm : () => { pendingConfirm = null; },
+        rows         : jobRows,
+        canFlip      : callerCanFlip,
+        onChange     : setChangeListener,
+        resetConfirm : resetPendingConfirm,
     };
 } )();
