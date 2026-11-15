@@ -398,7 +398,7 @@ def _candidate_stage( top ):
         - the stage's arm is the INI key `reuse candidate shortlist arm` or its override variable, and the concat-vector default arm when neither is set
         - the server address and key are the ones the embeddings client resolves, pinned to the FastAPI server
         - the stage refreshes a vector set that is behind the index before a lookup, through candidate_build.run under its build lock
-        - the stage expands each need first only when the INI key `reuse candidate need expansion enabled` or its override variable reads true; the shipped key is false and the stage is then built as it always was
+        - the stage expands each need first only when the INI key `reuse candidate need expansion enabled` or its override variable reads true; the shipped key is true; with it false the stage is built as it always was
         - the key `reuse candidate need expansion protected head` is read only when the switch is on; with the switch off it is never read
 
     Raises:

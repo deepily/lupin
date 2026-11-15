@@ -122,10 +122,10 @@ def test_the_switch_reads_os_environ_and_builds_the_config_when_none_is_given( m
     assert sp.need_expansion_enabled() is True
 
 
-def test_the_shipped_ini_has_the_switch_and_it_is_false():
+def test_the_shipped_ini_has_the_switch_and_it_is_true():
     import pathlib, re
     ini = pathlib.Path( rt.__file__ ).resolve().parents[ 1 ] / "conf" / "lupin-app.ini"
-    assert re.findall( r"^reuse candidate need expansion enabled\s*=\s*(\S+)\s*$", ini.read_text( encoding="utf-8" ), re.M ) == [ "false" ]
+    assert re.findall( r"^reuse candidate need expansion enabled\s*=\s*(\S+)\s*$", ini.read_text( encoding="utf-8" ), re.M ) == [ "true" ]
     splainer = ini.with_name( "lupin-app-splainer.ini" ).read_text( encoding="utf-8" )
     assert re.search( r"^reuse candidate need expansion enabled\s*= Whether", splainer, re.M )
 
