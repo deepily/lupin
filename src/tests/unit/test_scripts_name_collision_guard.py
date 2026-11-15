@@ -194,6 +194,7 @@ def _collisions( names ):
 
 # ── the guard ────────────────────────────────────────────────────────────────────
 
+@pytest.mark.census
 def test_no_script_module_shadows_an_importable_top_level_name():
     """
     The dangerous case: a real module shadowing a real module. Currently zero, and this is
@@ -208,6 +209,7 @@ def test_no_script_module_shadows_an_importable_top_level_name():
     )
 
 
+@pytest.mark.census
 def test_no_undeclared_script_directory_shadows_an_importable_top_level_name():
     """
     Subdirectories shadow too: with no __init__.py they are still importable as namespace
@@ -223,6 +225,7 @@ def test_no_undeclared_script_directory_shadows_an_importable_top_level_name():
     )
 
 
+@pytest.mark.census
 def test_no_declared_collision_has_gone_stale():
     """
     A declaration that no longer describes anything is folklore. If `conf` is renamed or
@@ -233,6 +236,7 @@ def test_no_declared_collision_has_gone_stale():
     assert stale == set(), f"declared collisions that no longer exist: {sorted( stale )}"
 
 
+@pytest.mark.census
 def test_the_declared_conf_collision_is_still_unreachable():
     """
     The declaration says `conf` is harmless BECAUSE nothing imports it. That reason is

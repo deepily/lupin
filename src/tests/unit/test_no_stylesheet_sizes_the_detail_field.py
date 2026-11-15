@@ -18,6 +18,7 @@ the 📄 tests in test_multiplexer_task_list.py (multiplexer).
 Venue: :7999 (unit tier). Reads files only.
 """
 
+import pytest
 import glob
 import re
 
@@ -55,6 +56,7 @@ def test_the_scan_sees_both_task_list_sheets_and_the_detail_selector():
     assert detail_rules, "no rule names task-col-detail anywhere — the selector below would match nothing"
 
 
+@pytest.mark.census
 def test_no_rule_that_names_the_detail_field_declares_a_width():
     offenders = [
         f"{ path[ len( CSS_ROOT ): ] }: { sel }"

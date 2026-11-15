@@ -112,6 +112,7 @@ def test_the_corpus_is_found_and_is_not_empty():
     assert any( p.name == "SubmitJobsStore.ts" for p in files )
 
 
+@pytest.mark.census
 @pytest.mark.parametrize( "door", sorted( RETIRED_DOORS ), ids=sorted( RETIRED_DOORS ) )
 def test_no_client_file_calls_the_retired_door( door ):
     offenders = { str( p.relative_to( STATIC ) ): h for p in _client_files() if ( h := _hits( p.read_text( errors="replace" ), door ) ) }

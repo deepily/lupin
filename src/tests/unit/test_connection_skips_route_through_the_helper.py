@@ -20,6 +20,7 @@ with its reason. A login that skips on a 401 cannot come back as a quiet green.
 The population is every tracked .py file under the two test roots, counted before the check.
 """
 
+import pytest
 import ast
 import os
 import subprocess
@@ -186,6 +187,7 @@ def test_a_tuple_handler_that_skips_is_still_seen():
     assert census( [ "e.py" ], lambda path: source ) == ( [ "e.py" ], [ "e.py" ] )
 
 
+@pytest.mark.census
 def test_the_broad_skip_files_are_exactly_the_named_list():
     found = _broad_skip_files( _population(), _read )
     assert found, "the census found no broad skipping file, so nothing was compared"
@@ -206,6 +208,7 @@ def test_the_broad_census_names_a_fourth_skip_and_a_bare_one():
     assert _broad_skip_files( sorted( sources ), lambda path: sources[ path ] ) == [ "a.py", "b.py" ]
 
 
+@pytest.mark.census
 def test_the_status_skip_files_are_exactly_the_named_list():
     found = _status_skip_files( _population(), _read )
     assert found, "the census found no status-code skipping file, so nothing was compared"

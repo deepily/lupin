@@ -185,6 +185,7 @@ def test_each_internal_call_site_reaches_the_flow_by_its_shape( rel, shape, targ
     )
 
 
+@pytest.mark.census
 def test_no_internal_caller_still_reaches_the_queue_directly():
     """POPULATION CHECK — the guard a hand-list of six cannot give you.
 

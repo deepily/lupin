@@ -136,6 +136,7 @@ class TestTheMultiplexerSpellsItTheSameWay:
     def test_the_multiplexer_constant_matches_the_repositorys( self ):
         assert _typescript_constant() == NotificationRepository.BROADCAST_ACK_TYPE
 
+    @pytest.mark.census
     def test_the_multiplexer_does_not_inline_the_literal_anywhere_else( self ):
         """
         The constant is only a single source if nothing else spells it out. Any other

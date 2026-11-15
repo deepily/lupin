@@ -201,6 +201,7 @@ def test_js_import_token_vouches_for_current_content( source_rel, static_url, to
     assert found == expected, f"{source_rel} imports {static_url} {_remedy( found, expected )}"
 
 
+@pytest.mark.census
 def test_the_live_tree_has_no_token_drift_at_all():
     """The whole-tree verdict, so a reference `_DRIFT` keys differently from the cases still reddens."""
     assert at.verify( ROOT ) == [], f"token drift: {at.verify( ROOT )}"
@@ -460,6 +461,7 @@ def test_the_guarded_corpus_is_enumerated_and_nonempty():
             f"{source_rel} carries a versioned import but is OUTSIDE the enumerated JS corpus"
 
 
+@pytest.mark.census
 def test_exactly_the_expected_pages_carry_cache_bust_tokens():
     """
     Across the WHOLE tracked HTML corpus, exactly the expected pages carry `?v=`
@@ -577,6 +579,7 @@ def test_the_unfollowable_reference_regexes_can_find_a_positive():
             f"{name} regex matches an ordinary literal ?v= link; it would report every page as unfollowable"
 
 
+@pytest.mark.census
 def test_no_authored_client_file_versions_an_asset_in_an_unfollowable_way():
     """
     No client file we author may reference a versioned asset in a form the guards

@@ -74,6 +74,7 @@ def test_the_scan_leaves_a_throwaway_database_a_comment_and_a_truncate_alone( li
     assert drops_found( line ) == [], f"{line!r} was flagged"
 
 
+@pytest.mark.census
 def test_no_integration_or_e2e_test_drops_a_table_a_schema_or_the_test_database():
     offenders = []
     for name in _tracked_python_files():

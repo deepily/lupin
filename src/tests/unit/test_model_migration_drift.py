@@ -377,6 +377,7 @@ def _format_drift( drift ):
 
 # ─────────────────────────── the guard ───────────────────────────
 
+@pytest.mark.census
 def test_no_mapped_column_is_missing_from_the_migration_chain():
     """Every mapped column outside the metadata-driven tables is created by some migration op."""
     drift = find_drift( _mapped_columns(), _collect_migration_columns( MIGRATIONS_DIR ), _metadata_driven_tables() )

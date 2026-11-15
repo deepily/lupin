@@ -70,6 +70,7 @@ def test_login_hint_matches_only_the_401_marker():
     assert ser.login_hint( "API Error: 500 overloaded" ) == "API Error: 500 overloaded"
 
 
+@pytest.mark.census
 def test_only_the_dispatcher_and_the_in_process_writer_call_error_result_text_directly():
     root     = os.path.join( cu.get_project_root(), "src/cosa" )
     direct   = set()

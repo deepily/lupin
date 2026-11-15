@@ -478,6 +478,7 @@ def test_the_UNTYPED_client_layer_does_not_opt_in_EITHER():
           f"absence this arm relied on is gone either way." )
 
 
+@pytest.mark.census
 def test_the_transition_surface_is_still_SEVEN_FILES():
     """
     SIX since parity A-2 #0 (2026-09-16): `taskRowController.ts` took the row verbs out of

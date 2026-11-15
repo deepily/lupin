@@ -591,6 +591,7 @@ def test_main_leaves_a_job_summary_for_a_switched_off_run_a_finished_run_and_a_c
     assert last[ "outcome" ] == "failed" and last[ "failure" ] == "OSError: disk" and last[ "stage" ] == "refresh"
 
 
+@pytest.mark.census
 def test_no_script_calls_the_retired_install_verb_and_lupin_vm_sh_runs_cron_generate_for_this_job_instead():
     import subprocess
     root  = pathlib.Path( __file__ ).resolve().parents[ 3 ]

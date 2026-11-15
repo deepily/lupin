@@ -147,6 +147,7 @@ def _resolve( src ):
 # 1. Exactly one definition
 # ---------------------------------------------------------------------------
 
+@pytest.mark.census
 def test_exactly_one_served_definition_of_the_formatter():
     """
     The whole point of the consolidation: one copy, not two.

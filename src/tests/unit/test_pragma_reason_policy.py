@@ -117,6 +117,7 @@ def _citing_pragmas():
     return offenders, unreadable
 
 
+@pytest.mark.census
 def test_no_pragma_reason_claims_coverage_lives_elsewhere():
     """
     Ensures:

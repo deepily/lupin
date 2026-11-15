@@ -852,6 +852,7 @@ def test_there_is_no_approved_status_to_grandfather_rows_to():
     assert pre_existing.isdisjoint( set( rules.BOARD_INVISIBLE_STATUSES ) )
 
 
+@pytest.mark.census
 def test_the_holding_default_can_only_reach_a_create_never_an_existing_row():
     """
     `default_mint_status()` is the whole of the flip. It is called from exactly one

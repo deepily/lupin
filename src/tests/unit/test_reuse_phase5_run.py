@@ -268,6 +268,7 @@ def grep_tracked( root, needle ):
     return sorted( out.stdout.split() )
 
 
+@pytest.mark.census
 def test_only_this_driver_names_the_reserved_file_and_only_the_reader_and_this_test_hold_its_hash():
     root  = Path( subprocess.run( [ "git", "rev-parse", "--show-toplevel" ], capture_output=True, text=True, check=True, cwd=Path( __file__ ).parent ).stdout.strip() )
     files = subprocess.run( [ "git", "ls-files" ], capture_output=True, text=True, check=True, cwd=root ).stdout.split()
