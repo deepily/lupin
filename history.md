@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.14 - Session a1bb58be (Mr. Radio 🦉, manager; crew Krishna, Pocholo, Rachel, Maya, Clayton, Rio, Tiberius) | All 24 job switches honoured live; the second accordion step, quiet workers and daily promotion merged; night shift running
+
+**Resume here**: memento `.claude-memento-mr-radio-a1bb58be.md` (amended 23:00). Rick, 23:05: merging reviewed, tested work is the manager's own call; land with a bare `git merge --ff-only <sha>`.
+1. **Landed**: babadf6bc (24 switches c38a49bd, the second accordion step 063fc1a8, drift fix 93b1cfc4, daily promotion 586e23b0, quiet workers 92076977). The live check at 21:47 showed all 25 jobs honoured.
+2. **Landed tonight**: a00b29219 (Rio's podcast tone, row 66f2e4a5) and fbf5560b3 with baseline 88774b68d (row a37e3086 closed). Also 0ccc55b7f (row b92d123b, 8 of 10 e2e_a reds); ts-51ead6c0 passed both halves.
+3. **Waiting to land**: 2dfbc15c3 in my worktree (Maya's 26901b0e2, Krishna's 3562f0459), full unit tier running. John's d3f0f11c4 (the other 2 reds) is with Sam.
+4. **Night shift**: Rio on c80ef763 (P0, merged jobs list; plan approved by Tiberius), Clayton (cc-author-mr-radio-4) on ba82a443 and 2da35ac6, Krishna on b92d123b, Tiberius reviewing.
+5. **Owed**: the post-game (waived five times today); rows 063fc1a8, 93b1cfc4, 61070c08 and 63b1a75a close after full e2e halves.
+
+### Checkpoint | 2026.11.14 23:31 | Rick's 📷: night-shift state recorded; code already committed as merges
+
 ## 2026.11.13 - Session 3c1ff1fb (Cheech 🌿, manager; crew Rio, Tiberius, Chloé, Sam, John) | Merge queue landed, Gate A closed (Opus after rescue), pushed and backed up
 
 **Resume here**: memento `.claude-memento-cheech-3c1ff1fb.md` (amended 22:45). Branch pushed to origin at 4004d2924.
