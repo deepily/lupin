@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
-import { firstPlayHereLink, playHereTitle } from "../../../lupin_app/static/js/multiplexer/shared/podcastAutoplayLink";
+import { firstPlayHereLink, playHereKey, playHereTitle } from "../../../lupin_app/static/js/multiplexer/shared/podcastAutoplayLink";
 import { PodcastAutoplay, wirePodcastAutoplay, PLAYER_MESSAGE_SOURCE } from "../../../lupin_app/static/js/multiplexer/wirePodcastAutoplay";
 import type { PodcastAutoplayWindow } from "../../../lupin_app/static/js/multiplexer/wirePodcastAutoplay";
 import type { StorePodcastAutoplayIntentPayload } from "../../../lupin_app/static/js/multiplexer/shared/types";
@@ -41,6 +41,13 @@ test("playHereTitle: the url's clean title, else Podcast for a missing or blank 
   assert.equal( playHereTitle( "/app/audio" ), "Podcast" );
 });
 
+test("playHereKey: the audio path, however it is encoded; a URL with no path is its own key", () => {
+  assert.equal( playHereKey( "/app/audio?path=podcasts%2Fa%40b.com%2Fx.mp3&title=One&embed=1" ), "podcasts/a@b.com/x.mp3" );
+  assert.equal( playHereKey( "/app/audio?path=podcasts/a@b.com/x.mp3&embed=1" ), "podcasts/a@b.com/x.mp3" );
+  assert.equal( playHereKey( "/app/audio?embed=1" ), "/app/audio?embed=1" );
+  assert.equal( playHereKey( "u1" ), "u1" );
+});
+
 // ── the queue rules ──────────────────────────────────────────────────────────────────────────────────────
 function rig( enabled = true ) {
   const shown: Array<[ string, string ]> = [];
@@ -61,6 +68,25 @@ test("with the setting off nothing starts and nothing queues", () => {
   r.auto.offer( "u1", "One" );
   assert.deepEqual( r.shown, [] );
   assert.equal( r.auto.queued(), 0 );
+});
+
+test("one podcast offered twice (two notifications, one link) plays once: no second play after it ends (row ba82a443)", () => {
+  const r = rig();
+  r.auto.offer( "/app/audio?path=podcasts%2Fa%40b.com%2Fx.mp3&title=One&embed=1", "One" );
+  r.auto.offer( "/app/audio?path=podcasts/a@b.com/x.mp3&embed=1", "Podcast" );
+  assert.equal( r.auto.queued(), 0, "the duplicate does not queue" );
+  r.auto.onEnded();
+  assert.equal( r.shown.length, 1, "the play count is 1" );
+});
+
+test("with the setting off an offer is not remembered, so enabling it later still plays that podcast", () => {
+  let on = false;
+  const shown: string[] = [];
+  const auto = new PodcastAutoplay( { show: u => { shown.push( u ); }, isOpen: () => false }, () => on );
+  auto.offer( "u1", "One" );
+  on = true;
+  auto.offer( "u1", "One" );
+  assert.deepEqual( shown, [ "u1" ] );
 });
 
 test("a second podcast finishing while the first plays waits, and never cuts the first off", () => {

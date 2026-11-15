@@ -21556,6 +21556,11 @@ class NotificationsUI {
             if ( state.seen.has( id ) ) return;
             state.seen.add( id );
         }
+        // One finished podcast arrives as two notifications (the job's own and the queue's "Podcast complete!"), with
+        // different ids and the same audio path; the second would queue and play again after the first (row ba82a443).
+        const key = new URLSearchParams( url.split( "?" )[ 1 ] || "" ).get( "path" ) || url;
+        if ( state.seen.has( "path:" + key ) ) return;
+        state.seen.add( "path:" + key );
         const title = this._podcastUrlTitle( url ) || "Podcast";
         const busy  = document.getElementById( "podcast-overlay" ) !== null && !state.ended;
         if ( busy ) { state.waiting.push( { url, title } ); return; }

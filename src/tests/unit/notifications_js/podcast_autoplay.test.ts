@@ -102,6 +102,24 @@ test("the same notification arriving twice starts it once", async () => {
   assert.equal( overlayFrameSrc(), PLAY_A + "&autoplay=1", "the replay of n1 did not replace the player" );
 });
 
+test("two notifications with different ids and one audio path play once, not again after it ends (row ba82a443)", async () => {
+  await deliver( arrival( "n1", PLAY_A ) );
+  await deliver( arrival( "n2", "/app/audio?path=/io/a.mp3&embed=1" ) );
+  assert.equal( overlayFrameSrc(), PLAY_A + "&autoplay=1" );
+  fromPlayer( "ended" );
+  assert.equal( overlayFrameSrc(), PLAY_A + "&autoplay=1", "nothing was queued behind it, so the same podcast is not started again" );
+});
+
+test("two links with no path are each their own key: the same URL once, a different one still plays", async () => {
+  await deliver( arrival( "n3", "/app/audio?embed=1" ) );
+  fromPlayer( "ended" );
+  await deliver( arrival( "n4", "/app/audio?embed=1" ) );
+  assert.equal( overlayFrameSrc(), "/app/audio?embed=1&autoplay=1", "the same no-path URL is not started again" );
+  document.body.replaceChildren();
+  await deliver( arrival( "n5", "/app/audio?title=x&embed=1" ) );
+  assert.equal( overlayFrameSrc(), "/app/audio?title=x&embed=1&autoplay=1", "a different URL is a different podcast" );
+});
+
 test("a podcast finishing while another plays waits, never cutting it off, then starts when the audio ends", async () => {
   await deliver( arrival( "n1", PLAY_A ) );
   await deliver( arrival( "n2", PLAY_B ) );

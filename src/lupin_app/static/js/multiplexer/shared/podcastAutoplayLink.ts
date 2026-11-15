@@ -32,3 +32,17 @@ export function firstPlayHereLink( abstract: string | null | undefined ): string
 export function playHereTitle( url: string ): string {
   return podcastUrlTitle( url ) ?? "Podcast";
 }
+
+/**
+ * The identity of the podcast a Play Here URL plays: its `path=` value, else the whole URL.
+ *
+ * One finished podcast reaches the page as two notifications (the job's own and the queue's "Podcast complete!"), with different ids
+ * and the same link. The `path` is what they share, and URL-encoding it differently (`%40` against `@`) does not change it.
+ *
+ * Requires: url is the URL firstPlayHereLink returned.
+ * Ensures: two URLs for one audio file give the same key; a URL with no `path=` is its own key.
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line (same as playHereTitle above).
+export function playHereKey( url: string ): string {
+  return new URLSearchParams( url.split( "?" )[ 1 ] ?? "" ).get( "path" ) ?? url;
+}
