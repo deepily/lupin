@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 import pytest
 import requests
@@ -25,12 +27,20 @@ import requests
 BASE_URL        = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 MULTIPLEXER_URL = f"{BASE_URL}/app/multiplexer"
 
+APP_ZONE = ZoneInfo( "America/New_York" )
+
+
+def _frozen_at( hour, minute, second=0 ):
+    """The moment to freeze the page clock: today in the app zone, at this time of day."""
+    return datetime.combine( datetime.now( APP_ZONE ).date(), time( hour, minute, second ), tzinfo=APP_ZONE )
+
+
 SENDER_A = "mv-keep-a"
 SENDER_B = "mv-keep-b"
 
 # Emit one task message through the test-hook EventBus. `age_ms` back-dates it from the
-# browser's clock, so every row lands in today's (open) date accordion and the newest
-# arrival is the newest card.
+# browser's clock, which each test freezes, so every row lands in today's (open) date accordion
+# on any run and the newest arrival is the newest card.
 _EMIT_MESSAGE_JS = """
 ( args ) => {
     const hook = window.__multiplexerTestHook;
@@ -70,8 +80,20 @@ def _get_credentials() -> tuple[ str, str ]:
     return email, password
 
 
-def _open( page, keep_place, no_move_before=False ):
-    """Seed auth on the managed page fixture, navigate, wait for the test hook."""
+_DATE_ACCORDIONS_JS = """
+( sel ) => document.querySelectorAll( sel + ' .date-accordion-messages' ).length
+"""
+
+
+def _assert_one_date_accordion( page, card_a, when ):
+    """Guard: the card has one date accordion, so the measured pane holds the whole history."""
+    count = page.evaluate( _DATE_ACCORDIONS_JS, card_a )
+    assert count == 1, f"{when}: the card has {count} date accordions, so the seeded and the new messages fell on different days"
+
+
+def _open( page, keep_place, no_move_before=False, frozen=None ):
+    """Seed auth, freeze the page clock, open the page, wait for the test hook."""
+    page.clock.set_fixed_time( frozen or _frozen_at( 13, 0 ) )
     email, password = _get_credentials()
     resp = requests.post( f"{BASE_URL}/auth/login", json={ "email": email, "password": password }, timeout=10 )
     assert resp.status_code == 200, f"login failed: { resp.status_code } { resp.text }"
@@ -100,9 +122,9 @@ def _emit( page, sender_id: str, n: int, age_ms: int, group=None ):
     } )
 
 
-def _scrolled_history( page, keep_place, no_move_before=False ):
+def _scrolled_history( page, keep_place, no_move_before=False, frozen=None ):
     """Seed card A below card B, scrolled; return its selector."""
-    _open( page, keep_place, no_move_before )
+    _open( page, keep_place, no_move_before, frozen )
     for n in range( 20 ):
         _emit( page, SENDER_A, n, age_ms=120_000 - n * 1_000 )
     _emit( page, SENDER_B, 0, age_ms=30_000 )
@@ -120,6 +142,7 @@ def _scrolled_history( page, keep_place, no_move_before=False ):
     )
     assert before[ "scrollHeight" ] - before[ "clientHeight" ] > 150, f"precondition: A's history must scroll: { before }"
     assert before[ "scrollTop" ] == 100, f"precondition: the list took the scroll: { before }"
+    _assert_one_date_accordion( page, card_a, "after seeding" )
     return card_a
 
 
@@ -127,6 +150,7 @@ def _stream_progress_group( page, card_a ):
     for n in range( 3 ):
         _emit( page, SENDER_A, 100 + n, age_ms=0, group="pg-keep-place" )
         page.wait_for_timeout( 300 )
+    _assert_one_date_accordion( page, card_a, "after the stream" )
     return page.evaluate(
         """( sel ) => {
             const scroller = document.querySelector( sel + ' .date-accordion-messages' );
@@ -172,6 +196,7 @@ def _plain_message_raises_the_card( page, keep_place ):
         arg=SENDER_A, timeout=5_000,
     )
     page.wait_for_function( "( sel ) => document.querySelector( sel + ' [data-id-hash=\"mv-keep-a-200\"]' ) !== null", arg=card_a, timeout=5_000 )
+    _assert_one_date_accordion( page, card_a, "after the arrival" )
     return page.evaluate( "( sel ) => document.querySelector( sel + ' .date-accordion-messages' ).scrollTop", card_a )
 
 
@@ -196,3 +221,16 @@ def test_control_unpinned_history_is_scrolled_to_the_top_when_a_plain_message_ra
     """
     top = _plain_message_raises_the_card( page, keep_place=False )
     assert top == 0, f"with Keep place off the history should be at the top, got { top }"
+
+
+def test_pinned_history_holds_with_the_page_clock_at_one_minute_to_midnight( page ):
+    """
+    Pinned history survives the stream with the page clock frozen at 23:59:50.
+
+    Ensures:
+        - the seeded rows and the streamed ones fall on one date however long the run takes
+        - the history is still scrolled afterwards
+    """
+    card_a = _scrolled_history( page, keep_place=True, frozen=_frozen_at( 23, 59, 50 ) )
+    after  = _stream_progress_group( page, card_a )
+    assert after[ "scrollTop" ] >= 100, f"the pinned history went back to the top: 100 -> { after[ 'scrollTop' ] }"
