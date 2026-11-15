@@ -34,6 +34,10 @@ NEW_PREFIX       = "proof-new"
 LEDGER_NAME      = "judge-ledger.jsonl"
 DEFAULT_PARALLEL = 4
 
+# The one-line refusal of a run folder planted under another config. The shas are the first 12 characters; a model-only difference still changes the sha, so it is refused too.
+REFUSED_FOREIGN_RUN = ( "REFUSED: the run {run_dir} was planted under config {run_sha} ({run_model}); the current config is {live_sha} ({live_model}). "
+                        "A run is only checked under the config it was planted under, so plant a proof under the current config and run this again." )
+
 
 def load_run( run_dir ):
     """
@@ -499,7 +503,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
 
     Ensures:
         - stdout holds the JSON record alone: banners and other prints go to stderr, so a caller can json.loads the whole of stdout
-        - verifies the frozen configuration first and refuses a run folder planted under another config_sha
+        - verifies the frozen configuration first and, for a run folder planted under another config_sha, prints one refusal line naming both shas and both models to stderr and returns 2, before any parts are built
         - with --export-third <reviewer>: needs two --labels files; writes that reviewer's blind packet of the disputed items beside the others,
           prints its path and size as JSON and returns 0; makes no model call
         - with --trial: takes exactly one --labels file and runs proof_run trially, with its own judge ledger in the trial folder;
@@ -511,7 +515,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
 
     Raises:
         - DuplicateCheckError CONFIG_DRIFT if the live configuration is not the frozen one
-        - ValueError if the run folder was planted under another configuration, from build_spec, from read_supplement, or for --trial with --rulings or --third-labels
+        - ValueError from build_spec, from read_supplement, or for --trial with --rulings or --third-labels
     """
     return json_stdout( lambda out: _main( argv, make_parts, run_proof, out ) )
 
@@ -536,7 +540,10 @@ def _main( argv, make_parts, run_proof, out ):
     cfg     = cfg_mod.verify_frozen( frozen.frozen_path(), frozen.live_config() )
     run_dir = pathlib.Path( args.run_dir )
     key_sha = load_run( run_dir )[ "config_sha" ]
-    if key_sha != cfg[ "config_sha" ]: raise ValueError( f"the run was planted under config {key_sha}, the frozen one is {cfg[ 'config_sha' ]}" )
+    if key_sha != cfg[ "config_sha" ]:
+        models = { d[ "config_sha" ]: d[ "model_id" ] for d in ( json.loads( f.read_text( encoding="utf-8" ) ) for f in pathlib.Path( frozen.frozen_path() ).parent.glob( frozen.FROZEN_GLOB ) ) }
+        print( REFUSED_FOREIGN_RUN.format( run_dir=run_dir, run_sha=key_sha[ :12 ], run_model=models.get( key_sha, "no frozen file for it" ), live_sha=cfg[ "config_sha" ][ :12 ], live_model=cfg[ "model_id" ] ), file=sys.stderr )
+        return 2
     if args.export_third is not None:
         if len( args.labels ) != 2: raise ValueError( "--export-third needs both reviewers' --labels files" )
         items = label_load.disputed_items( *args.labels )
