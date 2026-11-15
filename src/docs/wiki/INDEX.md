@@ -444,7 +444,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[worktree-venv-and-drift-disclosure]] — worktree venv provisioning verdicts, the drift sentence, and artifact-outcome parsing. `cosa.utils` (worktree_venv, seat_worktree, worktree_artifacts)
 - [[db-grants-matrix-and-startup-check]] — the role and privilege matrix for the dev and test databases, the read-only grants check and the boot-time alarm. `cosa.utils` (db_grants)
 - [[db-provisioning-secret-files-and-dotenv-login]] — the `db_roles` provisioning command, the compose secret files, and how host processes get a database login from `.env` or a password file. `cosa.utils` (db_roles, db_secret_files, dotenv_password)
-- [[credential-drift-and-scrubbing]] — API key file against Secret Manager drift check, in-place scrubbing of credential values from files, and the container OAuth token restart decision. `cosa.utils` (secret_drift, credential_file_scrubber, credential_watch)
+- [[credential-drift-and-scrubbing]] — API key file against Secret Manager drift check, in-place scrubbing of credential values from files, and nothing else. `cosa.utils` (secret_drift, credential_file_scrubber)
 - [[util-file-readers-and-writers]] — whole-file, line, json and dictionary readers, writers, source listings and key file lookup. `cosa.utils` (util)
 - [[util-console-args-and-xml-helpers]] — banner and list printing, name=value arguments, small string helpers and the deprecated xml tag readers. `cosa.utils` (util, util_xml)
 - [[bounded-retry-policy]] — RetryPolicy rules, backoff step and the async retry call. `cosa.utils` (bounded_retry)

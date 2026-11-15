@@ -96,7 +96,7 @@ test( "on load it fetches /api/jobs/summary with the bearer token, draws 23 jobs
   assert.deepEqual( net.urls, [ "/api/jobs/summary" ] );
   assert.equal( byId( "background-jobs-container" ).querySelectorAll( ":scope > [data-testid=jobs-item]" ).length, 23 );
   assert.equal( byId( "background-jobs-count" ).textContent, "23" );
-  assert.match( byId( "background-jobs-summary" ).textContent as string, /^23 jobs: 9 healthy, 3 failing, 2 silent, 9 unknown$/ );
+  assert.match( byId( "background-jobs-summary" ).textContent as string, /^23 jobs: 10 healthy, 3 failing, 1 silent, 9 unknown$/ );
   assert.equal( byId( "background-jobs-error" ).hidden, true );
   assert.equal( timers.length, 1 );
   timers[ 0 ]!(); await flush();

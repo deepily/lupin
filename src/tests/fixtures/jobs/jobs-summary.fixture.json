@@ -1582,18 +1582,12 @@
       "target": null,
       "audience": [],
       "notify_interval_seconds": 86400,
-      "state": "silent",
+      "state": "healthy",
       "running": false,
       "unscheduled": false,
       "schedule_unverified": false,
       "machine_was_off": false,
-      "reasons": [
-        {
-          "state": "silent",
-          "rule": "liveness",
-          "text": "lupin-credential-watcher is down."
-        }
-      ],
+      "reasons": [],
       "applies": {
         "scan_debt": false,
         "fix_debt": false
@@ -1689,43 +1683,6 @@
           "targets": [],
           "job": "side-services",
           "title": "CC memory watch",
-          "owner": "cheech"
-        },
-        {
-          "target": "credential-watcher",
-          "audience": [],
-          "notify_interval_seconds": 86400,
-          "state": "unknown",
-          "running": false,
-          "unscheduled": false,
-          "schedule_unverified": false,
-          "machine_was_off": false,
-          "reasons": [],
-          "applies": {
-            "scan_debt": false,
-            "fix_debt": false
-          },
-          "last_attempt": null,
-          "last_finished": null,
-          "consecutive_failures": 0,
-          "work_found_last_run": null,
-          "strip": [],
-          "scan_debt": null,
-          "fix_debt": null,
-          "schedule": null,
-          "liveness": {
-            "kind": "systemd",
-            "unit": "lupin-credential-watcher.service",
-            "up": null
-          },
-          "evidence": [],
-          "rows": [],
-          "detail_link": null,
-          "runnable": false,
-          "unknown_reason": "Not loaded: no systemd unit by this name.",
-          "targets": [],
-          "job": "side-services",
-          "title": "Credential watcher",
           "owner": "cheech"
         }
       ],
