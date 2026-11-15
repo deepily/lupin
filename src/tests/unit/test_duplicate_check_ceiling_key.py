@@ -31,8 +31,9 @@ def seen_by_adaptive_run( repo, tmp_path, monkeypatch, argv, config ):
     return code, seen
 
 
-def test_with_no_ceiling_flag_and_the_key_at_800_the_adaptive_run_receives_800( repo, tmp_path, monkeypatch, live_config ):
-    assert seen_by_adaptive_run( repo, tmp_path, monkeypatch, [], live_config ) == ( 0, [ 800 ] )
+def test_with_no_ceiling_flag_the_adaptive_run_receives_the_value_the_key_holds( repo, tmp_path, monkeypatch, live_config ):
+    live_config.set_config( KEY, "1234" )
+    assert seen_by_adaptive_run( repo, tmp_path, monkeypatch, [], live_config ) == ( 0, [ 1234 ] )
 
 
 def test_a_hand_run_ceiling_wins_over_the_key( repo, tmp_path, monkeypatch, live_config ):
@@ -54,7 +55,8 @@ def test_a_cap_alone_leaves_the_ceiling_unset_and_adaptive_still_refuses( capsys
 
 
 def test_resolve_ceiling_reads_the_live_manager_when_no_config_is_given( live_config ):
-    assert dd.resolve_ceiling( None, None ) == 800
+    live_config.set_config( KEY, "1234" )
+    assert dd.resolve_ceiling( None, None ) == 1234
 
 
 def test_the_cron_lines_carry_the_ceiling_the_key_gave( tmp_path, cron ):

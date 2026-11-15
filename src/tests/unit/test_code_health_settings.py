@@ -34,7 +34,9 @@ def test_the_real_ini_yields_lupins_values( config ):
     """Field by field against the table's defaults."""
     assert chs.repo_settings( config, "lupin" ) == { "index_languages": [], "index_source_dirs": [], "index_test_dirs": [], "index_exclude": [],
                                                       "wiki_dir": None, "filed_title_prefix": "[LUPIN]" }
-    assert chs.duplicate_check_ceiling( config, "lupin" ) == 800
+    # Rick tunes the ceiling, so the test sets the value it reads back.
+    put( config, chs.CEILING_KIND, "1234", name="lupin" )
+    assert chs.duplicate_check_ceiling( config, "lupin" ) == 1234
     assert chs.jev_token_limit( config, "lupin" ) == 1428571428
     assert chs.data_subdir( config ) == "code-health"
 
@@ -257,8 +259,9 @@ def test_a_listed_model_has_its_daily_call_budget( config ):
     assert ( chs.daily_call_budget( config, "claude-opus-5-5" ), chs.daily_call_budget( config, "claude-sonnet-5-5" ) ) == ( 2400, 100 )
 
 
-def test_the_real_ini_budgets_opus_and_lists_no_fable( config ):
-    assert chs.daily_call_budget( config, "claude-opus-5-5" ) == 2400
+def test_a_budget_the_test_sets_for_opus_is_read_and_fable_has_none( config ):
+    config.set_config( BUDGET, "claude-opus-5-5=3333" )
+    assert chs.daily_call_budget( config, "claude-opus-5-5" ) == 3333
     with pytest.raises( chs.CodeHealthSettingError, match = "no daily budget is listed for 'claude-fable-5-1'" ): chs.daily_call_budget( config, "claude-fable-5-1" )
 
 
