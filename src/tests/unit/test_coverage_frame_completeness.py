@@ -98,6 +98,7 @@ def test_source_dirs_raises_when_the_frame_is_absent( text ):
 
 # ── unreachable_subdirs: the static guard ────────────────────────────────────────
 
+@pytest.mark.census
 def test_the_live_frame_has_no_unreachable_subdirectories():
     """
     THE STANDING GUARD. Fails the moment somebody adds a non-package subdirectory
@@ -352,6 +353,7 @@ def test_a_declaration_the_census_never_reached_is_reported():
     assert cf.unreachable_declarations( [ ],          declared={ "a/b.py" } ) == [ "a/b.py" ]
 
 
+@pytest.mark.census
 def test_the_live_declarations_are_all_doing_work():
     """
     The regression that would have caught this on 2026-08-30: KNOWN_UNSEEABLE named a file

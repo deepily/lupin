@@ -17,6 +17,7 @@ the stripe is hidden before the refusal and shown after it.
 Venue: :7999 (unit tier). Reads files only.
 """
 
+import pytest
 import glob
 import re
 
@@ -64,6 +65,7 @@ def test_the_row_subject_pattern_tells_the_row_from_its_cell():
     assert not _ROW_SUBJECT.search( ".task-row-error-stripe-extra" )
 
 
+@pytest.mark.census
 def test_no_rule_on_the_stripe_row_declares_a_display():
     offenders = [
         f"{ path[ len( CSS_ROOT ): ] }: { sel }"

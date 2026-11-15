@@ -141,6 +141,7 @@ def test_every_scanned_module_parsed():
         + "\n  ".join( UNPARSEABLE ) )
 
 
+@pytest.mark.census
 def test_no_test_module_names_a_tier_artifact_under_the_live_root():
     """
     A test that hardcodes the live artifact root is one edit away from writing it.

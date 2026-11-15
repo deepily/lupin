@@ -90,6 +90,7 @@ def _production_sources():
             yield os.path.relpath( full, root ), full
 
 
+@pytest.mark.census
 def test_no_production_module_calls_push_job():
     """
     THE SWITCH, ENFORCED. The voice path runs through AskFlow; `push_job` is what it

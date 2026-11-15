@@ -8,6 +8,7 @@ This guard reads the files, so a reverted site fails here in any mode.
 The population is every tracked .py file under the two test roots, counted before the check.
 """
 
+import pytest
 import os
 import re
 import subprocess
@@ -52,6 +53,7 @@ def test_every_allowed_file_exists_and_still_needs_its_allowance():
         assert PATTERN.search( _read( path ) ), f"{path} no longer makes a database itself, so drop it from the allow-list"
 
 
+@pytest.mark.census
 def test_no_other_test_file_makes_its_own_database():
     assert _offenders( _population(), _read ) == [ ]
 

@@ -104,6 +104,7 @@ def test_the_sweep_finds_an_offer_of_unit_when_one_is_there():
     assert not _OFFERS_UNIT.search( 'test_types: ["e2e_a"]' )
 
 
+@pytest.mark.census
 def test_no_tracked_command_doc_or_example_offers_unit_through_the_scheduled_door():
     files = _swept_files()
     assert len( files ) > 100, f"sweep reached only {len( files )} files"

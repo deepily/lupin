@@ -482,6 +482,7 @@ _NOT_A_COVERAGE_CHILD = {
 _ROUTES_THROUGH_WRAPPER = re.compile( r'run_pytest_with_diagnosis|pytest-with-diagnosis' )
 
 
+@pytest.mark.census
 def test_a_test_that_spawns_a_coverage_child_engages_the_escape_hatch():
     """
     ⚠️ THE GUARD'S OWN FAILURE MODE, AND IT NEARLY SHIPPED. A test whose child asks for --cov

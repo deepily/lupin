@@ -156,6 +156,7 @@ def test_this_guard_does_not_contain_the_string_it_bans():
         "marker. It cannot rot into a permanent excuse."
     )
 )
+@pytest.mark.census
 def test_no_password_literal_in_tracked_python():
     """
     The banned literal appears in no tracked Python file.

@@ -123,6 +123,7 @@ def test_the_deleted_files_are_actually_gone( relative_path ):
     )
 
 
+@pytest.mark.census
 def test_no_module_imports_the_deleted_backend():
     """
     THE SWEEP. Nothing in the tree imports either deleted module, or names either deleted

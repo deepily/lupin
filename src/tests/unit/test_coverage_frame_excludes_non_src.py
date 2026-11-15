@@ -162,6 +162,7 @@ def _test_files():
                 yield os.path.relpath( os.path.join( directory, name ), PROJECT_ROOT )
 
 
+@pytest.mark.census
 def test_any_test_that_spawns_a_coverage_child_isolates_its_data_file():
     """
     ⚠️ THE PROPERTY, NOT THE ONE FILE. Fixing test_runner_coverage_blindness.py protects against

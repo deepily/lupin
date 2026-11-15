@@ -91,6 +91,7 @@ class TestArbiterMapConsistency:
 
 class TestZeroProductionLiteralSurvivors:
 
+    @pytest.mark.census
     def test_grep_zero_quoted_poke_in_production_surfaces( self ):
         """§5 acceptance: no quoted bare-'poke' literal on any production
         surface (consumers reference OUTCOME_POKE, so future renames ride

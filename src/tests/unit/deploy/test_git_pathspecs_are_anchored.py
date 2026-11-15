@@ -90,6 +90,7 @@ def _offending_lines( text ):
             yield i, line, bare
 
 
+@pytest.mark.census
 @pytest.mark.parametrize( "path", _shell_files(), ids=lambda p: p.name )
 def test_shell_git_pathspecs_are_anchored_to_the_repo_root( path ):
     """

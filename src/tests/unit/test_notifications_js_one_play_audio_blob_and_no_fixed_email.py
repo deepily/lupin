@@ -4,6 +4,7 @@ Pins two removals from the legacy page script: a dead playAudioBlob and a fixed 
 The class once defined playAudioBlob twice, so the first, which assigned a Blob to audio.src,
 never ran. It also held getCurrentUserEmail, which answered one literal address and had no caller.
 """
+import pytest
 import pathlib
 import re
 
@@ -54,6 +55,7 @@ def test_the_page_script_holds_no_fixed_email_and_no_get_current_user_email():
     assert "getCurrentUserEmail" not in text
 
 
+@pytest.mark.census
 def test_nothing_else_in_the_static_tree_calls_a_legacy_get_current_user_email():
     # the multiplexer's AuthManager has a method of the same name that reads the token; it is
     # not the legacy page's, so that folder is outside this check
