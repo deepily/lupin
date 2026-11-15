@@ -237,7 +237,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[duplicate-check-daily-window]] — the daily check's commit window, the definitions new in it, the pool without their earlier versions, and how far a run advanced. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-daily-run]] — one daily run: prerequisites, result file, filing, cron lines and the live parts. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-run-history]] — one JSON line per daily run in runs.jsonl, the backfill, the rising-backlog test and the table reader. `lupin_mcp` (duplicate_check_history)
-- [[duplicate-check-test-code]] — the daily check leaves test code out of the owed definitions and the comparison pool. `lupin_mcp` (duplicate_check_daily)
+- [[duplicate-check-test-code]] — the daily check leaves test code out of the backlog and the comparison pool. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-daily-slots]] — the daily check's hourly slots, rate-limit back-off, alerts, store row count, run lock and exit code. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-daily-budget]] — the daily check's call budget per model: read from the INI, counted from the run history, refuses a spent day. `lupin_mcp` (duplicate_check_daily, duplicate_check_history), `cosa.repo` (code_health_settings)
 - [[duplicate-check-daily-ledger]] — the daily check's judge ledger, kept across a Claude Code update, with each ruling stamped by the version that wrote it. `cosa.repo.duplicate_check.proof` (proof_cli)

@@ -18,8 +18,8 @@ pins:
 The first half of `lupin_mcp.duplicate_check_status`. Every function works only from the run-history lines ([[duplicate-check-run-history]]) and the clock. So the status page, the note after a run and the slip alert read the same numbers. A number the history cannot give is None, never a made-up zero. The page and the summary are in [[duplicate-check-status-snapshot]].
 
 ## Backlog and rates
-- `measured_daily( lines )` keeps the daily-mode lines whose carried count is a measurement, oldest first. `baseline_remaining` is the newest measured baseline carried count, or None.
-- `inflow_per_day( lines, now )` estimates new definitions a day. An arrival is a measured daily run's owed count less the carried count of the daily run before it, never below 0. It averages the days that have one within the last 7 days. A run with no owed count gives none.
+- `measured_daily( lines )` keeps the daily-mode lines whose left-to-judge count is a measurement, oldest first. `baseline_remaining` is the newest measured baseline left-to-judge count, or None.
+- `inflow_per_day( lines, now )` estimates new definitions a day. An arrival is a measured daily run's `backlog_total` less the `left_to_judge` of the daily run before it, never below 0. It averages the days that have one within the last 7 days. A run with no `backlog_total` gives none.
 - `judged_per_day( lines, now )` sums `judged` over every run of each calendar day in the last 3 days. It averages over the days that have a run.
 - `projected_zero( backlog, drain, inflow, today )` is today when the backlog is 0. It is None when the backlog or the clearing rate is unknown, or when clearing less inflow is not above 0. Otherwise it is the date that many whole days ahead.
 - `slipped( before, after )` is False with no earlier date. It is True when the later date is None or more than a day after the earlier one. The slip alert uses it ([[duplicate-check-daily-slots]]).

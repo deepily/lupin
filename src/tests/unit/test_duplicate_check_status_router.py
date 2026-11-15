@@ -26,7 +26,7 @@ def client( tmp_path, monkeypatch ):
 
 def test_the_status_endpoint_answers_the_snapshot( client ):
     body = client.get( "/api/duplicate-check/status" ).json()
-    assert body[ "backlog" ][ "carried" ] == 3 and body[ "runs" ][ 0 ][ "branch" ] == "wip-x" and body[ "as_of" ] == NOW.isoformat()
+    assert body[ "backlog" ][ "left_to_judge" ] == 3 and body[ "runs" ][ 0 ][ "branch" ] == "wip-x" and body[ "as_of" ] == NOW.isoformat()
 
 
 def test_the_job_summary_endpoint_answers_the_v1_record( client ):

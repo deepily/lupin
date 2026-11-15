@@ -17,7 +17,7 @@ The daily check neither judges test code nor offers it as a match. The window an
 - `without_test_code( defs )` returns the definitions that are not test code, and how many it left out.
 
 ## Where it applies
-- `new_definitions` drops test code from the owed set and returns the count as `test_dropped`.
+- `new_definitions` drops test code from the backlog and returns the count as `test_dropped`.
 - `baseline_definitions` does the same for a baseline run.
 - `pool_without_earlier_versions` drops it from the comparison pool, so a definition is never paired with a test fake.
-- `run` records `test_code_dropped` with `owed` and `pool` in the run record.
+- `run` records `test_code_dropped` with `backlog` and `pool` in the run record.

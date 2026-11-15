@@ -1,5 +1,6 @@
 """The duplicate check status: backlog by kind, rates, projected zero, health and the page."""
 import datetime
+import pathlib
 
 import pytest
 
@@ -16,9 +17,9 @@ DAILY  = [ "0 10 * * *" ]
 def at( day, hour, minute=0 ): return datetime.datetime( 2026, 11, day, hour, minute, tzinfo=TZ ).isoformat()
 
 
-def row( day, hour, mode="daily", status="ok", carried=0, owed=None, judged=0, calls=0, secs=60.0, trigger="cron", usage=None, **more ):
+def row( day, hour, mode="daily", status="ok", left=0, backlog=None, judged=0, calls=0, secs=60.0, trigger="cron", usage=None, **more ):
     """Ensures: returns the history line of a run with the given measures."""
-    doc = { "status": status, "trigger": trigger, "mode": mode, "started_at": at( day, hour ), "carried": [ 0 ] * carried if carried is not None else None, "owed": owed,
+    doc = { "status": status, "trigger": trigger, "mode": mode, "started_at": at( day, hour ), "left_to_judge": [ 0 ] * left if left is not None else None, "backlog_total": backlog,
             "judged": judged, "judge_calls": calls, "elapsed_seconds": secs, "branch": "wip-x", "usage": usage, **more }
     return hist.line_of( doc, f"{day}-{hour}.json" )
 
@@ -28,23 +29,23 @@ def folder_with( tmp_path, *lines ):
     return tmp_path
 
 
-def test_the_baseline_remaining_is_the_newest_measured_baseline_carried_count_or_none():
+def test_the_baseline_remaining_is_the_newest_measured_baseline_left_to_judge_count_or_none():
     assert st.baseline_remaining( [] ) is None and st.baseline_remaining( [ row( 7, 10 ) ] ) is None
-    assert st.baseline_remaining( [ row( 7, 10, mode="baseline", carried=900 ), row( 7, 11, mode="baseline", carried=700 ), row( 7, 12, mode="baseline", status="failed", carried=None ) ] ) == 700
+    assert st.baseline_remaining( [ row( 7, 10, mode="baseline", left=900 ), row( 7, 11, mode="baseline", left=700 ), row( 7, 12, mode="baseline", status="failed", left=None ) ] ) == 700
 
 
-def test_the_inflow_is_what_a_run_owed_beyond_the_carried_count_before_it_averaged_over_the_days_with_one():
-    lines = [ row( 6, 10, carried=100, owed=100 ), row( 6, 11, carried=50, owed=100 ), row( 6, 12, carried=40, owed=250 ),       # arrivals 0 then 200
-             row( 7, 10, carried=0, owed=40 ), row( 7, 11, carried=0, owed=0 ),                                                    # arrivals 0 then 0
-             row( 7, 12, status="failed", carried=None ), row( 7, 13, carried=0, owed=30 ) ]                                       # a failed run is not a measurement; 30
+def test_the_inflow_is_what_a_run_was_given_beyond_the_left_to_judge_count_before_it_averaged_over_the_days_with_one():
+    lines = [ row( 6, 10, left=100, backlog=100 ), row( 6, 11, left=50, backlog=100 ), row( 6, 12, left=40, backlog=250 ),       # arrivals 0 then 200
+             row( 7, 10, left=0, backlog=40 ), row( 7, 11, left=0, backlog=0 ),                                                    # arrivals 0 then 0
+             row( 7, 12, status="failed", left=None ), row( 7, 13, left=0, backlog=30 ) ]                                       # a failed run is not a measurement; 30
     assert st.inflow_per_day( lines, NOW ) == 115, "day 6: 200, day 7: 30"
-    assert st.inflow_per_day( [ row( 6, 10, carried=5 ), row( 6, 11, carried=5 ) ], NOW ) is None, "no owed count"
-    assert st.inflow_per_day( [ row( 1, 10, carried=0, owed=0 ), row( 1, 11, carried=0, owed=9 ) ], NOW, days=2 ) is None, "older than the window"
-    assert st.inflow_per_day( [ row( 7, 10, carried=10, owed=10 ), row( 7, 11, carried=0, owed=3 ) ], NOW ) == 0, "never below 0"
+    assert st.inflow_per_day( [ row( 6, 10, left=5 ), row( 6, 11, left=5 ) ], NOW ) is None, "no backlog_total"
+    assert st.inflow_per_day( [ row( 1, 10, left=0, backlog=0 ), row( 1, 11, left=0, backlog=9 ) ], NOW, days=2 ) is None, "older than the window"
+    assert st.inflow_per_day( [ row( 7, 10, left=10, backlog=10 ), row( 7, 11, left=0, backlog=3 ) ], NOW ) == 0, "never below 0"
 
 
 def test_the_clearing_rate_averages_the_judged_counts_of_both_modes_over_the_recent_days_with_a_run():
-    lines = [ row( 1, 10, judged=999 ), row( 6, 10, judged=300 ), row( 6, 11, mode="baseline", judged=200 ), row( 7, 10, judged=100 ), row( 7, 11, status="failed", carried=None, judged=None ) ]
+    lines = [ row( 1, 10, judged=999 ), row( 6, 10, judged=300 ), row( 6, 11, mode="baseline", judged=200 ), row( 7, 10, judged=100 ), row( 7, 11, status="failed", left=None, judged=None ) ]
     assert st.judged_per_day( lines, NOW ) == 300, "day 6: 500, day 7: 100; day 1 is too old"
     assert st.judged_per_day( [], NOW ) is None
 
@@ -96,7 +97,7 @@ def test_the_health_is_silent_failing_falling_behind_or_healthy_in_that_order():
     ok = row( 8, 11 )
     assert st.health_of( [], 0, None, None, NOW, HOURLY ) == st.SILENT
     assert st.health_of( [ row( 8, 9 ) ], 0, None, None, NOW, HOURLY ) == st.SILENT, "the 10:00 slot was due by 10:30"
-    assert st.health_of( [ row( 8, 11, status="failed", carried=None ) ], 5, 1, 9, NOW, HOURLY ) == st.FAILING
+    assert st.health_of( [ row( 8, 11, status="failed", left=None ) ], 5, 1, 9, NOW, HOURLY ) == st.FAILING
     assert st.health_of( [ ok ], 5, 100, 100, NOW, HOURLY ) == st.FALLING_BEHIND and st.health_of( [ ok ], 5, 100, None, NOW, HOURLY ) == st.HEALTHY
     assert st.health_of( [ ok ], 0, 0, 5, NOW, HOURLY ) == st.HEALTHY and st.health_of( [ ok ], 5, None, None, NOW, HOURLY ) == st.HEALTHY
 
@@ -116,21 +117,21 @@ def test_with_no_known_schedule_a_late_run_is_not_called_silent_and_the_snapshot
 
 
 def test_the_median_seconds_a_call_takes_uses_the_latest_sizeable_runs_that_did_not_fail():
-    lines = [ row( 6, 10, calls=100, secs=300.0 ), row( 6, 11, calls=10, secs=999.0 ), row( 6, 12, status="failed", carried=None, calls=100, secs=9999.0 ), row( 6, 13, calls=100, secs=500.0 ),
+    lines = [ row( 6, 10, calls=100, secs=300.0 ), row( 6, 11, calls=10, secs=999.0 ), row( 6, 12, status="failed", left=None, calls=100, secs=9999.0 ), row( 6, 13, calls=100, secs=500.0 ),
               row( 6, 14, calls=100, secs=None ) ]
     assert st.median_seconds_per_call( lines ) == 4.0, "3 and 5 seconds a call"
     assert st.median_seconds_per_call( [ row( 6, 10, calls=1, secs=1.0 ) ] ) is None
 
 
 def snapshot_of( tmp_path ):
-    lines = [ row( 7, 10, carried=800, owed=800, judged=0, calls=0 ), row( 7, 11, carried=300, owed=800, judged=500, calls=500, secs=1750.0, usage={ "input_tokens": 1500, "output_tokens": 900, "cache_creation_input_tokens": 90, "cache_read_input_tokens": 80, "cost_usd": 2.5 } ),
-             row( 7, 12, mode="baseline", carried=1000, owed=1500, judged=500, calls=500, secs=1750.0, trigger="reboot" ), row( 8, 10, carried=0, owed=450, judged=300, calls=300, secs=1050.0 ), row( 8, 11, mode="baseline", carried=700, owed=1000, judged=300, calls=300, secs=1000.0 ) ]
+    lines = [ row( 7, 10, left=800, backlog=800, judged=0, calls=0 ), row( 7, 11, left=300, backlog=800, judged=500, calls=500, secs=1750.0, usage={ "input_tokens": 1500, "output_tokens": 900, "cache_creation_input_tokens": 90, "cache_read_input_tokens": 80, "cost_usd": 2.5 } ),
+             row( 7, 12, mode="baseline", left=1000, backlog=1500, judged=500, calls=500, secs=1750.0, trigger="reboot" ), row( 8, 10, left=0, backlog=450, judged=300, calls=300, secs=1050.0 ), row( 8, 11, mode="baseline", left=700, backlog=1000, judged=300, calls=300, secs=1000.0 ) ]
     return st.snapshot( folder_with( tmp_path, *lines ), NOW )
 
 
 def test_the_snapshot_reports_the_backlog_by_kind_the_rates_the_projection_and_the_runs_newest_first( tmp_path ):
     snap = snapshot_of( tmp_path )
-    assert snap[ "backlog" ] == { "carried": 0, "baseline_remaining": 700, "total": 700, "inflow_per_day": 75 }
+    assert snap[ "backlog" ] == { "left_to_judge": 0, "baseline_remaining": 700, "total": 700, "inflow_per_day": 75 }
     assert snap[ "drain" ][ "judged_per_day" ] == 800 and snap[ "projected_zero" ] == "2026-11-09" and snap[ "health" ] == st.HEALTHY
     assert [ r[ "started_at" ][ 5:13 ] for r in snap[ "runs" ] ][ 0 ] == "11-08T11" and snap[ "runs" ][ 3 ][ "input_tokens" ] == 1500 and snap[ "runs" ][ 4 ][ "calls_per_hour" ] is None
     assert snap[ "days" ][ -1 ][ "day" ] == "2026-11-08" and snap[ "unreadable_lines" ] == []
@@ -150,9 +151,9 @@ def test_the_summary_is_the_fleets_v1_record_with_a_null_for_what_the_ledger_can
 
 
 def test_a_failure_after_a_finished_run_names_its_stage_its_cause_and_the_count_of_failures_since():
-    first = row( 8, 9, carried=5, owed=5, findings=[ {}, {} ], filing={ "filed": [ "a", "b", "c" ], "queued_for_retry": [ "d" ] } )
-    guard = row( 8, 10, trigger="reboot", status="failed", carried=None, stage="branch_guard", refusal="stale_branch" )
-    plain = row( 8, 11, status="failed", carried=None )
+    first = row( 8, 9, left=5, backlog=5, findings=[ {}, {} ], filing={ "filed": [ "a", "b", "c" ], "queued_for_retry": [ "d" ] } )
+    guard = row( 8, 10, trigger="reboot", status="failed", left=None, stage="branch_guard", refusal="stale_branch" )
+    plain = row( 8, 11, status="failed", left=None )
     s     = st.job_summary( [ first, guard, plain ], NOW )
     assert s[ "consecutive_failures" ] == 2 and s[ "last_attempt" ][ "stage" ] == "unknown" and s[ "last_attempt" ][ "failure" ] is None and s[ "last_attempt" ][ "outcome" ] == "failed"
     assert s[ "last_finished" ][ "evidence" ].endswith( ":1" ) and s[ "work_found_last_run" ] == 2 and s[ "fix_debt" ][ "unfiled" ] == 1 and s[ "fix_debt" ][ "opened_in_run" ] == 3
@@ -167,7 +168,7 @@ def test_a_run_with_no_recorded_time_has_no_finish_and_the_as_of_falls_back_to_i
 
 def test_the_summary_is_written_whole_beside_the_ledger_and_leaves_no_temporary_file( tmp_path ):
     import json
-    hist.append_line( tmp_path, row( 8, 11, carried=3, owed=3 ) )
+    hist.append_line( tmp_path, row( 8, 11, left=3, backlog=3 ) )
     path = st.write_job_summary( tmp_path, NOW )
     assert path == tmp_path / "job-summary.json" and json.loads( path.read_text() )[ "scan_debt" ][ "count" ] == 3
     assert sorted( p.name for p in tmp_path.iterdir() ) == [ "job-summary.json", "runs.jsonl" ]
@@ -182,12 +183,12 @@ def test_an_empty_history_gives_a_snapshot_of_nothing_known( tmp_path ):
 def test_the_note_says_what_a_run_did_and_is_none_for_a_quiet_one( tmp_path ):
     snap = snapshot_of( tmp_path )
     busy = row( 8, 11, calls=300, judged=290 )
-    assert st.note_of( busy, snap ) == "Duplicate check daily run: 290 judged in 300 calls; 700 left; zero by 2026-11-09."
+    assert st.note_of( busy, snap ) == "Duplicate check daily run: 290 judged in 300 calls; 700 left to judge; zero by 2026-11-09."
     assert st.note_of( row( 8, 12 ), { **snap, "backlog": { **snap[ "backlog" ], "total": 0 } } ) is None, "no calls and nothing left"
     quiet_but_owing = st.note_of( row( 8, 12 ), snap )
     assert quiet_but_owing is not None and "0 judged in 0 calls" in quiet_but_owing
-    unknown = st.note_of( row( 8, 12, status="failed", carried=None ), { **snap, "backlog": { **snap[ "backlog" ], "total": None }, "projected_zero": None } )
-    assert "unknown left; zero by not at the present rates" in unknown
+    unknown = st.note_of( row( 8, 12, status="failed", left=None ), { **snap, "backlog": { **snap[ "backlog" ], "total": None }, "projected_zero": None } )
+    assert "unknown left to judge; zero by not at the present rates" in unknown
 
 
 def test_the_page_shows_the_backlog_by_kind_the_runs_and_the_days_and_escapes_what_the_history_says( tmp_path ):
@@ -208,7 +209,7 @@ def test_the_folder_of_a_root_is_the_runs_folder_under_the_code_health_data_fold
 
 
 def test_the_store_count_sits_beside_the_filed_total_and_the_gap_is_their_difference():
-    lines = [ row( 8, 9, carried=5, owed=5, filing={ "filed": [ "a", "b", "c" ] } ), row( 8, 10, carried=5, owed=5, filing={ "filed": [ "d" ] } ) ]
+    lines = [ row( 8, 9, left=5, backlog=5, filing={ "filed": [ "a", "b", "c" ] } ), row( 8, 10, left=5, backlog=5, filing={ "filed": [ "d" ] } ) ]
     fix = st.job_summary( lines, NOW, { "found": 3, "open": 1 } )[ "fix_debt" ]
     assert ( fix[ "filed_in_ledger" ], fix[ "found_by_mark" ], fix[ "open_by_mark" ], fix[ "gap" ] ) == ( 4, 3, 1, 1 )
     assert st.job_summary( lines, NOW, { "found": 4, "open": 0 } )[ "fix_debt" ][ "gap" ] == 0
@@ -216,19 +217,19 @@ def test_the_store_count_sits_beside_the_filed_total_and_the_gap_is_their_differ
 
 
 def test_the_scan_points_keep_the_newest_fourteen_runs():
-    lines = [ row( 1 + n // 12, 10 + n % 12, carried=n, owed=n, judged=n ) for n in range( 20 ) ]
+    lines = [ row( 1 + n // 12, 10 + n % 12, left=n, backlog=n, judged=n ) for n in range( 20 ) ]
     points = st.job_summary( lines, NOW )[ "scan_debt" ][ "points" ]
     assert len( points ) == 14 and [ p[ "count" ] for p in points ] == list( range( 6, 20 ) ) and points[ 0 ][ "drained" ] == 6
 
 
 @pytest.mark.parametrize( "status,trigger,mode", [ ( "ok", "cron", "daily" ), ( "carried", "reboot", "baseline" ), ( "failed", "hand", "daily" ), ( "skipped", "cron", "daily" ) ] )
 def test_every_attempt_carries_every_key_the_fleet_reader_needs_with_values_it_accepts( status, trigger, mode ):
-    attempt = st.job_summary( [ row( 8, 9, status=status, trigger=trigger, mode=mode, carried=None if status in ( "failed", "skipped" ) else 1 ) ], NOW )[ "last_attempt" ]
+    attempt = st.job_summary( [ row( 8, 9, status=status, trigger=trigger, mode=mode, left=None if status in ( "failed", "skipped" ) else 1 ) ], NOW )[ "last_attempt" ]
     assert tuple( attempt ) == js.ATTEMPT_KEYS and js.check_attempt( attempt ) == attempt and attempt[ "mode" ] == mode        # the shared writer's own check, not a copy of its lists
 
 
 def test_recent_holds_the_last_seven_attempts_oldest_first_with_their_modes():
-    lines = [ row( 7, h, mode="baseline" if h % 2 else "daily", status="failed" if h == 12 else "ok", carried=None if h == 12 else 1 ) for h in range( 5, 14 ) ]
+    lines = [ row( 7, h, mode="baseline" if h % 2 else "daily", status="failed" if h == 12 else "ok", left=None if h == 12 else 1 ) for h in range( 5, 14 ) ]
     recent = st.job_summary( lines, NOW )[ "recent" ]
     assert [ r[ "at" ] for r in recent ] == [ at( 7, h ) for h in range( 7, 14 ) ]
     assert recent[ 5 ] == { "at": at( 7, 12 ), "outcome": "failed", "mode": "daily" } and recent[ 0 ][ "mode" ] == "baseline" and recent[ 1 ][ "outcome" ] == "clean"
@@ -248,3 +249,23 @@ def test_the_pages_schedule_agrees_with_the_cron_lines_the_installer_writes_for_
         lines = dd.cron_lines( *common, ceiling=1500, **kwargs )
         assert st.installed_crons( "\n".join( lines ) + "\n" ) == want, f"the installer's {kwargs or 'daily'} lines and the page's reading differ"
     assert dd.CRON_TAG == f"# {st.CRON_JOB_TAG}", "the page looks for the tag the installer writes"
+
+
+def test_the_page_leads_each_run_with_what_is_left_to_judge_labels_the_total_as_the_backlog_total_and_explains_the_carried_status( tmp_path ):
+    page = st.render_html( st.snapshot( folder_with( tmp_path, row( 7, 10, left=2, backlog=9, judged=7 ), row( 8, 10, status="carried", left=3, backlog=5, judged=2 ) ), NOW ) )
+    head = page[ page.index( "<h2>Recent runs</h2>" ): ]
+    assert head.index( "<th>left to judge</th>" ) < head.index( "<th>backlog total</th>" ) < head.index( "<th>judged</th>" )
+    assert "<th>left to judge (daily)</th>" in page and "<th>total left to judge</th>" in page
+    assert "<th>owed</th>" not in page and "<th>carried</th>" not in page and "owed" not in page.lower()
+    assert "carried (left to judge)" in page, "the status word is shown with what it means"
+
+
+def test_real_schema_2_history_lines_give_the_snapshot_and_the_summary_their_counts( tmp_path ):
+    real = ( pathlib.Path( __file__ ).parent.parent / "fixtures" / "duplicate-check" / "runs-schema-2.jsonl" ).read_text( encoding="utf-8" )
+    ( tmp_path / hist.RUNS_FILE ).write_text( real, encoding="utf-8" )
+    now  = datetime.datetime( 2026, 11, 14, 21, 0, tzinfo=TZ )
+    snap = st.snapshot( tmp_path, now )
+    assert snap[ "backlog" ][ "left_to_judge" ] == 0 and snap[ "backlog" ][ "baseline_remaining" ] == 6935 and snap[ "backlog" ][ "total" ] == 6935
+    assert [ r[ "backlog_total" ] for r in snap[ "runs" ] ] == [ 283, 12347, 487 ]
+    assert "left to judge" in st.note_of( hist.read_lines( tmp_path )[ -1 ], snap )
+    assert snap[ "summary" ][ "scan_debt" ][ "count" ] == 0 and snap[ "summary" ][ "scan_debt" ][ "never_checked" ] == 6935
