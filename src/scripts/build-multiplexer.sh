@@ -21,6 +21,10 @@ cd "$PROJECT_ROOT"
 
 ENTRY="src/lupin_app/static/js/multiplexer/boot.ts"
 OUTDIR="src/lupin_app/static/dist/multiplexer"
+# LUPIN_DIST_OUTDIR (optional, absolute path) sends every output somewhere other than dist/, so a
+# test run cannot change what a live server serves. The literal OUTDIR= line above stays first
+# and unquoted-variable-free because check_bundle_freshness.py reads it with a regex.
+OUTDIR="${LUPIN_DIST_OUTDIR:-$OUTDIR}"
 OUTFILE="$OUTDIR/boot.js"
 
 ESBUILD="$PROJECT_ROOT/node_modules/.bin/esbuild"
