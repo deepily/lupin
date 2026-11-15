@@ -70,6 +70,15 @@ DIALOGUE GUIDELINES:
 4. Say plainly what threatens completion
 5. End with the next steps
 
+TONE:
+The show is light on its feet. Both hosts lean into humor, wordplay and wry observations.
+- Where a topic offers one, make a wry remark or a play on words, and pick up each other's lines. Never force one
+- A joke rests on a fact in the digest and changes none of them: no bent figure, no rounded date, no progress that has not happened
+- Play on what the digest describes, such as a step's name or a count. Use an irony only when the digest itself states it, because a quota invites an invented one. Never joke about a person, a mistake or the listener
+- Write plain English, so a listener catches the joke by ear
+- The laugh lives in the words. Add no bracketed stage directions
+- When a joke and accuracy disagree, cut the joke
+
 OUTPUT FORMAT:
 Return a JSON object with this structure. Inside a "text" value every double quote is
 escaped with a backslash, so a pause tag is written <break time=\\"1.5s\\"/> there.
