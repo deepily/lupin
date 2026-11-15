@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from playwright.sync_api import expect
 
 from cosa.rest import cron_job_switches as switches
 from lupin_mcp import fleet_cap_ini_io as ini_io
@@ -102,13 +103,13 @@ def test_an_admin_sees_an_enabled_toggle_and_a_click_flips_the_ini_value( admin_
     assert _on_disk( scratch_ini ) == "true"
 
     toggle.click()
-    admin_page.wait_for_function( "( el ) => el.textContent === 'OFF'", arg=state.element_handle(), timeout=PAINT_MS )
+    expect( state ).to_have_text( "OFF", timeout=PAINT_MS )
     assert _on_disk( scratch_ini ) == "false", "the page said OFF but the file did not change"
     assert toggle.inner_text() == "Turn on"
     assert row.get_by_test_id( "cron-changed" ).inner_text() != "not reported", "a flip must record who and when"
 
     toggle.click()
-    admin_page.wait_for_function( "( el ) => el.textContent === 'ON'", arg=state.element_handle(), timeout=PAINT_MS )
+    expect( state ).to_have_text( "ON", timeout=PAINT_MS )
     assert _on_disk( scratch_ini ) == "true"
 
 
@@ -138,7 +139,7 @@ def test_a_user_who_is_not_an_admin_sees_the_switches_read_only( logged_in_page,
 def test_on_a_drift_row_the_toggle_stays_on_the_job_title_line( admin_page, scratch_ini, client ):
     row = _open( admin_page, client )
     row.get_by_test_id( "cron-flip" ).click()
-    admin_page.wait_for_function( "( el ) => el.textContent === 'OFF'", arg=row.get_by_test_id( "cron-state" ).element_handle(), timeout=PAINT_MS )
+    expect( row.get_by_test_id( "cron-state" ) ).to_have_text( "OFF", timeout=PAINT_MS )
     ini_io.write_bool_to_disk( scratch_ini, KEY, True )      # a hand edit the endpoint never recorded: the row now drifts
     row = _open( admin_page, client )
     drift = row.get_by_test_id( "cron-drift" )
@@ -159,5 +160,5 @@ def test_turning_off_an_alarm_job_takes_a_confirming_click( admin_page, scratch_
     assert "silences what would report it" in row.get_by_test_id( "cron-error" ).inner_text()
     assert ini_io.read_value_from_disk( scratch_ini, ALARM_KEY ).strip().lower() == "true", "the first click must not write the file"
     toggle.click()
-    admin_page.wait_for_function( "( el ) => el.textContent === 'OFF'", arg=row.get_by_test_id( "cron-state" ).element_handle(), timeout=PAINT_MS )
+    expect( row.get_by_test_id( "cron-state" ) ).to_have_text( "OFF", timeout=PAINT_MS )
     assert ini_io.read_value_from_disk( scratch_ini, ALARM_KEY ).strip().lower() == "false"
