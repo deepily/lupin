@@ -166,3 +166,32 @@ def test_concurrent_check_and_record_one_wins():
     allowed_count = sum( 1 for r in results if r is True )
     assert allowed_count == 1, f"expected exactly 1 winner, got {allowed_count}"
     assert len( results ) == 10
+
+
+# ---------- Shared core with the notify limiter ----------
+
+
+def test_the_window_edge_allows_again_and_a_denied_call_is_not_recorded( monkeypatch ):
+    """One window later the user may post again; a denial leaves no record."""
+    fake_now = [ 1000.0 ]
+    monkeypatch.setattr( "cosa.rest.commons_rate_limiter.time.monotonic", lambda: fake_now[ 0 ] )
+
+    rl = CommonsBroadcastRateLimiter( window_seconds=30 )
+    assert rl.check_and_record( "userA" ) == ( True, None )
+    fake_now[ 0 ] += 10
+    allowed, retry = rl.check_and_record( "userA" )
+    assert allowed is False
+    assert retry == 20.0
+    assert rl._peek( "userA" ) == 1000.0       # the denied call at 1010 was not recorded
+    fake_now[ 0 ] += 20                        # now 1030, exactly one window after 1000
+    assert rl.check_and_record( "userA" ) == ( True, None )
+
+
+def test_the_state_lives_in_a_notify_rate_limiter_with_a_limit_of_one():
+    """The window state lives in a NotifyRateLimiter core."""
+    from cosa.rest.notify_rate_limiter import NotifyRateLimiter
+
+    rl = CommonsBroadcastRateLimiter( window_seconds=30 )
+    assert isinstance( rl._core, NotifyRateLimiter )
+    rl.check_and_record( "userA" )
+    assert len( rl._core._hits[ "userA" ] ) == 1
