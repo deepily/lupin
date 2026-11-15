@@ -106,6 +106,29 @@ class TestPodcastAutoPlayHere:
         _player_says( page, "ended" )
         page.wait_for_function( "( u ) => document.querySelector( '[data-testid=podcast-overlay-frame]' ).getAttribute( 'src' ) === u", arg=_PLAY_B + "&autoplay=1", timeout=5000 )
 
+    def test_one_podcast_arriving_as_two_notifications_plays_once( self, logged_in_page, client ):
+        """
+        One podcast, two notifications: the play count is 1.
+
+        The job's notification and the queue's "Podcast complete!" one have different ids and one audio path.
+        The second used to queue behind the first and play it again when the first ended.
+        """
+        page = logged_in_page
+        _open( page, client )
+        page.evaluate(
+            "() => { window.__plays = 0; new MutationObserver( ( ms ) => { for ( const m of ms ) m.addedNodes.forEach( ( n ) => {"
+            " if ( n.id === 'podcast-overlay' ) window.__plays++; } ); } ).observe( document.body, { childList: true } ); }" )
+
+        _finish_podcast( page, client, "e2e-dup-1", _PLAY_A )
+        page.locator( _PLAYER ).wait_for( state="visible", timeout=5000 )
+        _finish_podcast( page, client, "e2e-dup-2", "/app/audio?path=podcast/e2e-a.mp3&embed=1" )
+        page.wait_for_timeout( 300 )
+        _player_says( page, "ended" )
+        page.wait_for_timeout( 500 )
+
+        assert page.evaluate( "() => window.__plays" ) == 1, "the podcast was shown once, not again after it ended"
+        assert page.locator( _FRAME ).get_attribute( "src" ) == _PLAY_A + "&autoplay=1"
+
     def test_the_setting_off_leaves_the_play_here_link_alone( self, logged_in_page, client ):
         page = logged_in_page
         _open( page, client, config_overrides={ "podcast_auto_play_here_on_finish": False } )

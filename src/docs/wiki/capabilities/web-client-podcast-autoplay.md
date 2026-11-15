@@ -24,7 +24,10 @@ A finished podcast starts in the Play Here player by itself, in the multiplexer 
 - The INI key `podcast auto play here on finish` (default true) reaches both pages as `podcast_auto_play_here_on_finish` in `/api/config/client`. Until that answer lands the feature is off.
 - `NotificationStore` emits `store_podcast_autoplay_intent` for a live arrival whose abstract has a Play Here link. `firstPlayHereLink( abstract )` returns the first `/app/audio?path=` link that carries `embed=1`, else null.
 - `playHereTitle( url )` returns the link's `title=` value, else "Podcast".
+- `playHereKey( url )` returns the link's `path=` value (else the whole URL): the identity of the audio file.
 - `PodcastAutoplay.offer( embedUrl, title )` shows the podcast at once, or queues it while audio plays. `queued()` counts the waiting ones.
+- `offer` ignores a podcast whose `playHereKey` it has seen. The legacy `_maybeAutoPlayPodcast` keeps the same key in `seen`.
+- One finished podcast arrives as two notifications: the job's own and the "Podcast complete!" one from `FifoQueue._notify`. Without the key the second plays it again.
 - `onPlaying()` marks the player busy. `onEnded()` and `onClosed()` free it and start the next waiting podcast.
 - `wirePodcastAutoplay( bus, autoplay, win )` offers each intent and passes on the player page's same-origin `playing` and `ended` messages. It returns a function that stops both listeners.
 - `onPodcastOverlayClosed( listener )` tells a listener when the overlay is dismissed, not when a new Play Here replaces it. `isPodcastOverlayOpen()` says whether the overlay is on the page, and `removePodcastOverlay()` removes it silently.
@@ -33,4 +36,5 @@ A finished podcast starts in the Play Here player by itself, in the multiplexer 
 
 ## Don't
 - Don't start a podcast while audio plays. Queue it, and never cut the audio off.
+- Don't strip the abstract from the queue's completion notification. The task card needs it.
 - Don't offer a history reload to the auto-play. Only the live path does.

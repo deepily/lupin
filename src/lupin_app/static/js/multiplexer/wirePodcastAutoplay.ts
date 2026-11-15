@@ -9,10 +9,12 @@
 //   - the setting `podcast auto play here on finish` (read through /api/config/client) turns it off;
 //   - audio that is already playing is never cut off: a podcast that finishes meanwhile waits in a queue;
 //   - two podcasts finishing together play one after the other, never over each other;
+//   - one podcast offered twice (the job's notification and the queue's completion one carry the same link) plays once;
 //   - a browser's autoplay block is answered inside the player page with a visible Play button (audio-player.html).
 
 import type { EventBus } from "./shared/EventBus";
 import type { StorePodcastAutoplayIntentPayload } from "./shared/types";
+import { playHereKey } from "./shared/podcastAutoplayLink";
 
 /** The `source` the player page puts on every message it posts to the page that holds it. */
 export const PLAYER_MESSAGE_SOURCE = "lupin-audio-player";
@@ -36,6 +38,7 @@ interface WaitingPodcast {
  */
 export class PodcastAutoplay {
   private readonly waiting : WaitingPodcast[] = [];
+  private readonly seen = new Set<string>();
   private ended = false;
 
   constructor( private readonly player: PodcastPlayerPort, private readonly enabled: () => boolean ) {}
@@ -43,10 +46,15 @@ export class PodcastAutoplay {
   /**
    * Offer a finished podcast.
    *
-   * Ensures: nothing happens while the setting is off; the podcast starts now when no audio is playing, else it queues behind it.
+   * Ensures: nothing happens while the setting is off.
+   * A podcast already offered once (same audio path) is ignored.
+   * The podcast starts now when no audio is playing, else it queues behind it.
    */
   offer( embedUrl: string, title: string ): void {
     if ( !this.enabled() ) return;
+    const key = playHereKey( embedUrl );
+    if ( this.seen.has( key ) ) return;
+    this.seen.add( key );
     if ( this.player.isOpen() && !this.ended ) { this.waiting.push( { embedUrl, title } ); return; }
     this.start( { embedUrl, title } );
   }
