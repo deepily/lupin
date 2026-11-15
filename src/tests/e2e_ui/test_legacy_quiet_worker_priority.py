@@ -45,9 +45,12 @@ SEND_JS = """
 
 
 def _send( page, sender, priority, quiet ):
-    result = page.evaluate( SEND_JS, { "id": f"q-{sender[-3:]}-{priority}-{int( quiet )}", "sender": sender, "priority": priority, "quiet": quiet } )
+    page.evaluate( SEND_JS, { "id": f"q-{sender[-3:]}-{priority}-{int( quiet )}", "sender": sender, "priority": priority, "quiet": quiet } )
     page.wait_for_timeout( 450 )  # the speech queue is fed after a 300 ms settle for the ding
-    return page.evaluate( "() => ( { dings: window.__dings.slice(), spoken: window.__spoken.slice() } )" ) if result is None else result
+    # Read the recorders AFTER the wait. The value SEND_JS returns is taken when the handler's promise
+    # settles, before the 300 ms timer fires, so returning it made every `spoken` list empty and reddened
+    # the two tests that expect speech (14 Nov 2026, e2e_a ts-ceeaed2e and ts-d7c7bcbb).
+    return page.evaluate( "() => ( { dings: window.__dings.slice(), spoken: window.__spoken.slice() } )" )
 
 
 @pytest.fixture
