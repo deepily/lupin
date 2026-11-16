@@ -1919,9 +1919,12 @@ def test_the_settle_script_filters_to_animations_that_can_finish():
     assert "document.getAnimations().map" not in js, "every animation is awaited again, endless ones included"
 
 
-def test_the_settle_script_returns_on_a_page_with_endless_animations_in_a_real_browser():
+def test_the_settle_script_returns_on_a_page_with_endless_animations_in_a_real_browser( browser ):
     """
     Run the settle script in Chromium on a page with two endless spinners and a transition.
+
+    Requires:
+        - browser is pytest-playwright's browser fixture, so the session's running loop is shared
 
     Ensures:
         - the endless animations are really present (so the old script would have hung)
@@ -1929,59 +1932,56 @@ def test_the_settle_script_returns_on_a_page_with_endless_animations_in_a_real_b
         - the finite animation and the transition have finished by then
     """
     import time
-    from playwright.sync_api import sync_playwright
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        try:
-            page = browser.new_page()
-            page.set_content( _ENDLESS_PAGE )
-            page.evaluate( "() => { document.querySelector( '.fade' ).classList.add( 'out' ); }" )
-            counts = page.evaluate( "() => ( { total: document.getAnimations().length,"
-                                    " endless: document.getAnimations().filter( a => !Number.isFinite( a.effect.getComputedTiming().iterations ) ).length } )" )
-            assert counts[ "endless" ] == 2, counts
-            running = page.evaluate( "() => document.getAnimations().filter( a => a instanceof CSSTransition && a.playState === 'running' ).length" )
-            assert running == 1, "the 700 ms hover transition must still be running when the script starts, or this test cannot fail"
+    page = browser.new_page()
+    try:
+        page.set_content( _ENDLESS_PAGE )
+        page.evaluate( "() => { document.querySelector( '.fade' ).classList.add( 'out' ); }" )
+        counts = page.evaluate( "() => ( { total: document.getAnimations().length,"
+                                " endless: document.getAnimations().filter( a => !Number.isFinite( a.effect.getComputedTiming().iterations ) ).length } )" )
+        assert counts[ "endless" ] == 2, counts
+        running = page.evaluate( "() => document.getAnimations().filter( a => a instanceof CSSTransition && a.playState === 'running' ).length" )
+        assert running == 1, "the 700 ms hover transition must still be running when the script starts, or this test cannot fail"
 
-            started = time.monotonic()
-            page.evaluate( _SETTLE_TRANSITIONS_JS )
-            elapsed = time.monotonic() - started
+        started = time.monotonic()
+        page.evaluate( _SETTLE_TRANSITIONS_JS )
+        elapsed = time.monotonic() - started
 
-            assert elapsed < CAPTURE_SETTLE_TIMEOUT_MS / 1000 * 0.8, f"waited {elapsed:.2f}s: it sat on the endless animations"
-            assert elapsed > 0.4, f"returned in {elapsed:.2f}s: it did not wait for the 700 ms transition"
-            assert page.evaluate( "() => getComputedStyle( document.querySelector( '.fade' ) ).opacity" ) == "0.2", "the transition had not finished when the script returned"
-            states = page.evaluate( "() => document.getAnimations().filter( a => Number.isFinite( a.effect.getComputedTiming().iterations ) ).map( a => a.playState )" )
-            assert states == [] or set( states ) == { "finished" }, states
-        finally:
-            browser.close()
+        assert elapsed < CAPTURE_SETTLE_TIMEOUT_MS / 1000 * 0.8, f"waited {elapsed:.2f}s: it sat on the endless animations"
+        assert elapsed > 0.4, f"returned in {elapsed:.2f}s: it did not wait for the 700 ms transition"
+        assert page.evaluate( "() => getComputedStyle( document.querySelector( '.fade' ) ).opacity" ) == "0.2", "the transition had not finished when the script returned"
+        states = page.evaluate( "() => document.getAnimations().filter( a => Number.isFinite( a.effect.getComputedTiming().iterations ) ).map( a => a.playState )" )
+        assert states == [] or set( states ) == { "finished" }, states
+    finally:
+        page.close()
 
 
-def test_the_settle_script_stops_waiting_at_the_timeout_on_a_finite_animation_that_outlasts_it():
+def test_the_settle_script_stops_waiting_at_the_timeout_on_a_finite_animation_that_outlasts_it( browser ):
     """
     Run the settle script in Chromium on a page whose only finishable animation lasts 30 s.
+
+    Requires:
+        - browser is pytest-playwright's browser fixture, so the session's running loop is shared
 
     Ensures:
         - the animation is still running when the script starts
         - the script returns at the timeout, no sooner and not much later
     """
     import time
-    from playwright.sync_api import sync_playwright
 
-    cap = CAPTURE_SETTLE_TIMEOUT_MS / 1000
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        try:
-            page = browser.new_page()
-            page.set_content( _ENDLESS_PAGE.replace( 'class="once"', 'class="long"' ) )
-            assert page.evaluate( "() => document.querySelector( '.long' ).getAnimations()[ 0 ].playState" ) == "running"
+    cap  = CAPTURE_SETTLE_TIMEOUT_MS / 1000
+    page = browser.new_page()
+    try:
+        page.set_content( _ENDLESS_PAGE.replace( 'class="once"', 'class="long"' ) )
+        assert page.evaluate( "() => document.querySelector( '.long' ).getAnimations()[ 0 ].playState" ) == "running"
 
-            started = time.monotonic()
-            page.evaluate( _SETTLE_TRANSITIONS_JS )
-            elapsed = time.monotonic() - started
+        started = time.monotonic()
+        page.evaluate( _SETTLE_TRANSITIONS_JS )
+        elapsed = time.monotonic() - started
 
-            assert cap * 0.9 <= elapsed < cap * 1.8, f"returned after {elapsed:.2f}s, the cap is {cap:.1f}s"
-        finally:
-            browser.close()
+        assert cap * 0.9 <= elapsed < cap * 1.8, f"returned after {elapsed:.2f}s, the cap is {cap:.1f}s"
+    finally:
+        page.close()
 
 
 def test_the_visual_test_captures_straight_after_prepare_page_for_capture():
