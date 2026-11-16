@@ -47,7 +47,7 @@ const find  = ( name: string ): JobEntry => clone( FIXTURE.jobs.find( ( j ) => j
 const mkActions = ( over: Partial<JobsActions> = {} ): JobsActions =>
   ( { canRun : true, runNow : async () => "ok", canFlip : true, cronRows : [], requestFlip : () => {}, open : new Set<string>(), ...over } );
 const cronRow = ( job: string, over: Partial<CronJobRow> = {} ): CronJobRow => ( {
-  job, title : `Title of ${ job }`, schedule : "*/5 * * * *", key : `key-of-${ job }`,
+  job, title : `Title of ${ job }`, description : `What ${ job } does. It runs for a reason.`, schedule : "*/5 * * * *", key : `key-of-${ job }`,
   enabled : true, honoured : true, drift : false, last_changed_by : null, last_changed_at : null, ...over,
 } );
 
@@ -1151,4 +1151,43 @@ test( "row d514a7e9: the 📋 on a switch job's line carries the Switch section,
   const entry = withSwitch();
   const item  = renderJob( document, entry, TODAY, mkActions( { cronRows : [ entry.cron! ] } ) );
   assert.match( ( item.querySelector( "[data-testid=jobs-abstract]" ) as HTMLElement ).getAttribute( "data-abstract" ) as string, /## Switch\n\n- State: ON/ );
+} );
+
+// ── row 98df60ff: the abstract opens with the job's plain description ───────────────────────────────
+
+const afterTitle = ( md: string ) => md.split( "\n" ).slice( 1 ).join( "\n" ).replace( /^\n+/, "" );
+
+test( "row 98df60ff: a job's abstract opens with its description, straight after the title and before every heading", () => {
+  const job = find( "duplicate-check" );
+  assert.ok( job.description.length > 40, "the fixture job carries its registry text" );
+  const md = abstractMarkdown( job, TODAY );
+  assert.ok( md.startsWith( `# Duplicate check\n\n${ job.description }\n` ), md.slice( 0, 200 ) );
+  assert.ok( md.indexOf( job.description ) < md.indexOf( "## Reasons" ) );
+} );
+
+test( "row 98df60ff: a job with targets shows its description once, ahead of the first Target block", () => {
+  const job = find( "worktree-janitor" );
+  const md  = abstractMarkdown( job, TODAY );
+  assert.equal( md.split( job.description ).length - 1, 1 );
+  assert.ok( afterTitle( md ).startsWith( job.description ) );
+  assert.ok( md.indexOf( job.description ) < md.indexOf( "## Target:" ) );
+} );
+
+test( "row 98df60ff: a switch-only entry shows its description between the title and the Switch section", () => {
+  const entry = cronOnlyEntry( cronRow( "reporting-off", { description : "Sweeps a folder. It keeps it short." } ) );
+  const md    = abstractMarkdown( entry, TODAY, [ entry.cron! ] );
+  assert.ok( afterTitle( md ).startsWith( "Sweeps a folder. It keeps it short.\n" ), md );
+  assert.ok( md.indexOf( "Sweeps a folder" ) < md.indexOf( "## Switch" ) );
+} );
+
+test( "row 98df60ff: an entry with no text of its own shows its switch row's text, and one with neither shows no paragraph", () => {
+  const job  = { ...find( "duplicate-check" ), description : "", cron : cronRow( "duplicate-check", { description : "From the switch row." } ) };
+  assert.ok( afterTitle( abstractMarkdown( job, TODAY, [ job.cron! ] ) ).startsWith( "From the switch row.\n" ) );
+  const none = { ...find( "duplicate-check" ), description : "" };
+  assert.ok( afterTitle( abstractMarkdown( none, TODAY ) ).startsWith( "## Reasons" ) );
+} );
+
+test( "row 98df60ff: a description is escaped like any other writer text", () => {
+  const job = { ...find( "duplicate-check" ), description : "<img src=x onerror=alert(1)> done." };
+  assert.equal( /(^|[^\\])<img/.test( abstractMarkdown( job, TODAY ) ), false );
 } );

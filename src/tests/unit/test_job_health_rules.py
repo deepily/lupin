@@ -19,7 +19,7 @@ def at( d, h=0, m=0 ):
 
 def entry( **over ):
     """Ensures: returns an effective registry entry for a daily 10:00 job."""
-    base = { "job": "j", "title": "J", "owner": "cheech", "schedule": [ { "cron": "0 10 * * *", "mode": "daily" } ], "grace_minutes": 30, "notify_interval_minutes": 30 }
+    base = { "job": "j", "title": "J", "description": "Does a small thing. It runs on a timer.", "owner": "cheech", "schedule": [ { "cron": "0 10 * * *", "mode": "daily" } ], "grace_minutes": 30, "notify_interval_minutes": 30 }
     return { **base, **over }
 
 

@@ -46,7 +46,7 @@ def test_a_failing_or_unstartable_command_is_failed_and_keeps_its_exit_code(tmp_
 def test_main_finds_the_job_in_the_registry_and_refuses_an_unknown_job_or_an_empty_command(tmp_path, monkeypatch, capsys):
     reg = tmp_path / jr.REGISTRY_FILE
     reg.parent.mkdir( parents=True )
-    reg.write_text( json.dumps( { "schema": "job-registry/1", "defaults": {}, "jobs": [ { "job": "j", "enabled_key": "cron job j enabled", "title": "J", "owner": "cheech", "summary_path": "{root}/out/j.json" } ] } ) )
+    reg.write_text( json.dumps( { "schema": "job-registry/1", "defaults": {}, "jobs": [ { "job": "j", "enabled_key": "cron job j enabled", "title": "J", "description": "Does a small thing.", "owner": "cheech", "summary_path": "{root}/out/j.json" } ] } ) )
     import cosa.repo.symindex.paths as paths
     monkeypatch.setattr( paths, "data_dir", lambda root: tmp_path / "data" )
     env = { "LUPIN_ROOT": str( tmp_path ) }
@@ -70,7 +70,7 @@ def switch_tree( tmp_path, monkeypatch, own_summary=False ):
     """Ensures: returns the env of a root whose registry holds the job j with a switch."""
     reg = tmp_path / jr.REGISTRY_FILE
     reg.parent.mkdir( parents=True )
-    entry = { "job": "j", "enabled_key": "cron job j enabled", "title": "J", "owner": "cheech", "summary_path": "{root}/out/j.json", "run": { "argv": [ "echo", "hi" ], "env": {} } }
+    entry = { "job": "j", "enabled_key": "cron job j enabled", "title": "J", "description": "Does a small thing.", "owner": "cheech", "summary_path": "{root}/out/j.json", "run": { "argv": [ "echo", "hi" ], "env": {} } }
     reg.write_text( json.dumps( { "schema": "job-registry/1", "defaults": { "run_env": {} }, "jobs": [ entry ] } ) )
     import cosa.repo.symindex.paths as paths
     monkeypatch.setattr( paths, "data_dir", lambda root: tmp_path / "data" )

@@ -140,6 +140,8 @@ export interface JobEntry {
   job                       : string;
   target                    : string | null;
   title                     : string;
+  /** What the service does, in 2 or 3 plain sentences. The abstract shows it first. */
+  description               : string;
   owner                     : string;
   audience                  : string[];
   notify_interval_seconds   : number | null;

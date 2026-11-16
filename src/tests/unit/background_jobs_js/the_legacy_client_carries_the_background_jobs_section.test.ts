@@ -554,3 +554,27 @@ test( "row d514a7e9: the legacy abstract of a parent carries one Target block pe
   assert.match( only, /No run reports for this job: reporting is switched off\.\n$/ );
   for ( const gone of [ "No rule is true", "Owner", "Not reported", "Evidence" ] ) assert.equal( only.includes( gone ), false, gone );
 } );
+
+// ── row 98df60ff: the abstract opens with the job's plain description ───────────────────────────────
+
+const lead = ( md: string ) => md.split( "\n" ).slice( 1 ).join( "\n" ).replace( /^\n+/, "" );
+
+test( "row 98df60ff: the legacy abstract opens with the job's description, ahead of every heading, and matches the multiplexer's", async () => {
+  const api = await load();
+  for ( const name of [ "duplicate-check", "worktree-janitor", "side-services" ] ) {
+    const job = jobOf( name );
+    assert.ok( job.description.length > 40, name );
+    const md = both( api, job );
+    assert.ok( lead( md ).startsWith( job.description + "\n" ), name + ": " + md.slice( 0, 160 ) );
+    assert.equal( md.split( job.description ).length - 1, 1, name + ": shown once" );
+  }
+} );
+
+test( "row 98df60ff: a switch-only entry opens with its switch row's description, and an entry with none shows no paragraph", async () => {
+  const api = await load();
+  const row   = sw( { job : "reporting-off", description : "Sweeps a folder. It keeps it short." } );
+  const entry = { ...jobOf( "duplicate-check" ), job : "reporting-off", description : "", cron : row, cron_only : true };
+  const md    = both( api, entry, [ row ] );
+  assert.ok( lead( md ).startsWith( "Sweeps a folder. It keeps it short.\n" ), md );
+  assert.ok( lead( both( api, { ...jobOf( "duplicate-check" ), description : "" } ) ).startsWith( "## Reasons" ) );
+} );

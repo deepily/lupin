@@ -169,6 +169,7 @@
       "targets": [],
       "job": "duplicate-check",
       "title": "Duplicate check",
+      "description": "Several times a day this looks at the new functions and classes added to the code and asks a model whether the same thing already exists elsewhere. It keeps a count of how many are still waiting to be judged and files a task when it finds a real duplicate.",
       "owner": "cheech"
     },
     {
@@ -276,6 +277,7 @@
       "targets": [],
       "job": "wiki-librarian",
       "title": "Wiki librarian",
+      "description": "Each morning this checks the documentation pages against the code and flags pages that have fallen out of step. It turns what it finds into tasks and saves a list of searches that found nothing.",
       "owner": "krishna"
     },
     {
@@ -332,6 +334,7 @@
       "targets": [],
       "job": "reuse-behaviour",
       "title": "Reuse-behaviour",
+      "description": "Each week this builds a page that counts how the fleet used the reuse checks: lookups made, outcome lines refused and audits run. It covers the last full Monday-to-Sunday week, skips a week whose page is already saved, and only reads records and writes the page.",
       "owner": "rachel"
     },
     {
@@ -413,6 +416,7 @@
       "targets": [],
       "job": "vector-refresh",
       "title": "Vector refresh",
+      "description": "Each day this keeps the code search up to date: it refreshes the list of functions and classes, writes a plain-English purpose line for any that lacks one, and rebuilds the search data when something changed. Without it, the \"does this already exist?\" search goes stale.",
       "owner": "krishna"
     },
     {
@@ -489,6 +493,7 @@
       "targets": [],
       "job": "shadow-audit",
       "title": "Shadow audit",
+      "description": "Each day this takes the audits that are waiting and re-runs those past reuse lookups through the full search, to check the quick answer was right. It stops at a limit per run, a weekly limit and a lifetime limit on how much it may spend, and does nothing while switched off.",
       "owner": "tiffany"
     },
     {
@@ -718,6 +723,7 @@
       ],
       "job": "worktree-census",
       "title": "Worktree census",
+      "description": "Each week this lists the temporary working copies and branches that have been left behind: stale ones, ones git says are gone, and ones already merged. It only reports; a person decides what to delete.",
       "owner": "cheech"
     },
     {
@@ -781,6 +787,7 @@
       "targets": [],
       "job": "disk-report",
       "title": "Disk report",
+      "description": "Each week this counts what the fleet leaves behind on disk, such as logs and temporary files. It prints numbers, not a verdict, so growth is noticed before the disk fills.",
       "owner": "cheech"
     },
     {
@@ -856,6 +863,7 @@
       "targets": [],
       "job": "hook-log-sweep",
       "title": "Hook-log sweep",
+      "description": "Each week this deletes old per-event log files written by the session hooks and rotates the two logs that only grow. Without it the log folder reached three quarters of a million files.",
       "owner": "cheech"
     },
     {
@@ -932,6 +940,7 @@
       "targets": [],
       "job": "io-tmp-sweep",
       "title": "io/tmp sweep",
+      "description": "Each day this deletes one-off reports from the temporary folder once they are seven days old. That is what lets people drop a throwaway report there without having to clean it up.",
       "owner": "cheech"
     },
     {
@@ -1009,6 +1018,7 @@
       "targets": [],
       "job": "context-tick",
       "title": "Context tick",
+      "description": "Every ten minutes this checks how full each working session's memory is. When one is past its limit, it tells that session, its manager and Rick, so the session can be restarted before it gets confused.",
       "owner": "cheech"
     },
     {
@@ -1050,6 +1060,7 @@
       "targets": [],
       "job": "doc-parity-tick",
       "title": "Doc-parity tick",
+      "description": "Each morning this checks that paragraphs which should say the same thing in two documents still do. It prints nothing when they match and speaks up only when one copy has drifted.",
       "owner": "john"
     },
     {
@@ -1091,6 +1102,7 @@
       "targets": [],
       "job": "hook-link-tick",
       "title": "Hook-link tick",
+      "description": "Every ten minutes this checks that the commit and push safety hooks are still linked to the scripts this project ships. It stays silent when they are, and warns when something has swapped them out, which would turn a safety check off for everyone.",
       "owner": "john"
     },
     {
@@ -1135,6 +1147,7 @@
       "targets": [],
       "job": "yearly-reminders",
       "title": "Yearly reminders",
+      "description": "Once a year, on 17 August, this sends Rick two reminders: to change the passwords and to review the AI models he has trained. It has no other work, so it shows as idle the rest of the year.",
       "owner": "rick"
     },
     {
@@ -1180,6 +1193,7 @@
       "targets": [],
       "job": "fleet-arbiter",
       "title": "Fleet arbiter",
+      "description": "This service runs all the time on its own port and watches the working sessions. It wakes sessions that have gone quiet, checks that managers answer when tapped, and warns Rick when the whole fleet stalls.",
       "owner": "cheech"
     },
     {
@@ -1321,6 +1335,7 @@
       ],
       "job": "worktree-janitor",
       "title": "Worktree janitor",
+      "description": "Every minute the fleet arbiter looks for idle temporary working copies that nobody is using. It saves anything worth keeping, removes the copy, and keeps archived work for 14 days. It runs once for each of the repositories listed as targets.",
       "owner": "cheech"
     },
     {
@@ -1366,6 +1381,7 @@
       "targets": [],
       "job": "context-pressure-writer",
       "title": "Context-pressure writer",
+      "description": "Inside the fleet arbiter, this keeps a current figure for how full each session's memory is. The ten-minute context check reads that figure; this job only writes it and takes no action itself.",
       "owner": "cheech"
     },
     {
@@ -1411,6 +1427,7 @@
       "targets": [],
       "job": "health-watcher",
       "title": "Health watcher",
+      "description": "This service checks the development and test server containers and tells people when one becomes unhealthy or keeps flipping between healthy and not. It only reports; it does not restart anything.",
       "owner": "cheech"
     },
     {
@@ -1452,6 +1469,7 @@
       "targets": [],
       "job": "notification-expiry",
       "title": "Notification expiry",
+      "description": "Every five minutes this closes notifications that asked for an answer when nobody is left to give one. Without it they would show as waiting forever.",
       "owner": "cheech"
     },
     {
@@ -1493,6 +1511,7 @@
       "targets": [],
       "job": "commons-archival",
       "title": "Commons archival",
+      "description": "Every hour this moves messages older than a day out of the shared message folders into dated archive folders. That keeps the live folders short without losing the history.",
       "owner": "cheech"
     },
     {
@@ -1534,6 +1553,7 @@
       "targets": [],
       "job": "notify-outbox",
       "title": "Notify outbox",
+      "description": "When a notification cannot be delivered, it is saved to disk. Every 30 seconds this tries again until it goes through or gets too old.",
       "owner": "cheech"
     },
     {
@@ -1576,6 +1596,7 @@
       "targets": [],
       "job": "socket-housekeeping",
       "title": "Socket heartbeat, cleanup, transcript tailer",
+      "description": "Every 30 seconds this checks that browser connections to the server are still alive and removes dead ones. Once an hour it also clears out old sessions that have been idle for more than a day.",
       "owner": "cheech"
     },
     {
@@ -1688,6 +1709,7 @@
       ],
       "job": "side-services",
       "title": "Side services",
+      "description": "Two small helper services run beside the main server. One serves the dev-server restart button, and one measures memory use of running Claude sessions so a runaway process can be named when the system kills it.",
       "owner": "cheech"
     },
     {
@@ -1721,6 +1743,7 @@
       "targets": [],
       "job": "pokes",
       "title": "Pokes",
+      "description": "When started, this wakes chosen sessions at a fixed interval to keep work moving, and stops on a clear signal or a hard time limit. It runs only on request, so it is usually idle.",
       "owner": "cheech"
     }
   ]

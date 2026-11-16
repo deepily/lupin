@@ -122,10 +122,10 @@ def test_a_job_is_honoured_by_job_run_or_by_a_named_reader_and_its_key():
 
 def test_a_row_says_how_its_job_reads_the_switch_and_whether_it_is_an_alarm_job( monkeypatch ):
     monkeypatch.setattr( sw, "read_enabled", lambda job: True )
-    cron = sw.build_row( { "job": "a", "title": "A", "cron_managed": True }, {} )
-    loop = sw.build_row( { "job": "b", "title": "B", "enabled_key": "cron job b enabled", "switch_reader": "m:f", "alarm": True }, {} )
-    none = sw.build_row( { "job": "c", "title": "C", "alarm": "yes", "inside": 7 }, {} )
-    kid  = sw.build_row( { "job": "d", "title": "D", "enabled_key": "cron job d enabled", "switch_reader": "m:f", "inside": "b" }, {} )
+    cron = sw.build_row( { "job": "a", "title": "A", "description": "Does a small thing.", "cron_managed": True }, {} )
+    loop = sw.build_row( { "job": "b", "title": "B", "description": "Does a small thing.", "enabled_key": "cron job b enabled", "switch_reader": "m:f", "alarm": True }, {} )
+    none = sw.build_row( { "job": "c", "title": "C", "description": "Does a small thing.", "alarm": "yes", "inside": 7 }, {} )
+    kid  = sw.build_row( { "job": "d", "title": "D", "description": "Does a small thing.", "enabled_key": "cron job d enabled", "switch_reader": "m:f", "inside": "b" }, {} )
     assert ( cron[ "reads" ], cron[ "alarm" ], cron[ "inside" ] ) == ( "run", False, None )
     assert ( loop[ "reads" ], loop[ "alarm" ], loop[ "inside" ] ) == ( "tick", True, None )
     assert ( none[ "reads" ], none[ "alarm" ], none[ "inside" ] ) == ( None, False, None )

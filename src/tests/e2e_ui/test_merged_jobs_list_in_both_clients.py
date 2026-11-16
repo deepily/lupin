@@ -157,6 +157,10 @@ def test_the_clipboard_emoji_opens_the_abstract_and_the_long_text_is_not_in_the_
     for expected in ( "Duplicate check", "Reasons", "Last attempts", "Scan debt", "Fix debt", "Schedule", "People", "Not reported" ):
         assert expected in text, f"{expected!r} missing from the abstract: {text[ :300 ]!r}"
     assert "Open the detail page" in text, "the detail link is carried by the abstract"
+    description = next( j for j in FIXTURE[ "jobs" ] if j[ "job" ] == "duplicate-check" )[ "description" ]
+    flat        = " ".join( text.split() )
+    assert description in flat, f"the plain description is missing from the abstract (row 98df60ff): {text[ :300 ]!r}"
+    assert flat.index( description ) < flat.index( "Reasons" ), "the description comes before every section (row 98df60ff)"
     for expected in ( "Switch", "State: ON", "Cron schedule: cron 0 10-22", "Last changed: not reported", "Trend (scan debt): 1030, 1500, 1820, 2124", "Trend (rows opened): 28, 40, 55, 73" ):
         assert expected in text, f"{expected!r}: the old Scheduled Jobs fold and sparkline detail is back in the abstract (row d514a7e9): {text[ :300 ]!r}"
 

@@ -22,7 +22,7 @@ ON = types.SimpleNamespace( get_required=lambda key, return_type="string": "true
 
 def job( name, schedule, **extra ):
     """Ensures: returns a managed registry job with the keys load_registry demands."""
-    return { "job": name, "enabled_key": f"cron job {name} enabled", "title": name, "owner": "cheech", "schedule": schedule, "summary_path": "{root}/io/jobs/" + name + "/job-summary.json",
+    return { "job": name, "enabled_key": f"cron job {name} enabled", "title": name, "description": "Does a small thing.", "owner": "cheech", "schedule": schedule, "summary_path": "{root}/io/jobs/" + name + "/job-summary.json",
              "run": { "argv": [ "{python}", "-m", "x", "--trigger", "hand" ], "env": { "JOB_VAR": "{root}/j" } }, "cron_managed": True, "cron_tag": name + "-tag", **extra }
 
 
@@ -308,7 +308,7 @@ def test_cron_job_sh_under_env_i_gets_past_environment_loading_and_runs_the_job(
     for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ): ( tree / "src" / "conf" / name ).symlink_to( real / "src" / "conf" / name )
     ( tree / ".venv" ).symlink_to( sys.prefix )
     shipped = jr.load_registry( REAL_ROOT )
-    probe   = { "job": "probe", "enabled_key": "cron job wiki-librarian enabled", "title": "probe", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
+    probe   = { "job": "probe", "enabled_key": "cron job wiki-librarian enabled", "title": "probe", "description": "Does a small thing.", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
                 "run": { "argv": [ "{python}", "-c", "import os; print( 'ran', os.environ[ 'COSA_VOICE_MANAGERS__LUPIN' ] )" ], "env": {} } }
     ( tree / "src" / "conf" / "job-registry.json" ).write_text( json.dumps( { "schema": "job-registry/1", "defaults": shipped[ "defaults" ], "jobs": [ probe ] } ) )
     done = subprocess.run( [ "env", "-i", f"HOME={tmp_path}", f"DEEPILY_DATA_DIR={tmp_path / 'data'}", f"LUPIN_ROOT={tree}", str( real / "src/scripts/cron-job.sh" ), "probe", "cron" ],

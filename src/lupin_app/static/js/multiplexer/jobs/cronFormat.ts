@@ -25,6 +25,8 @@ export const CRON_READS_TEXT: Readonly<Record<string, string>> = { run : "reads 
 export interface CronJobRow {
   job             : string;
   title           : string;
+  /** The job's plain-English description, the same text the registry gives the summary entry. */
+  description     : string;
   schedule        : string;
   key             : string;
   enabled         : boolean | null;

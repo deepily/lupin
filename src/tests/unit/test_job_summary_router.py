@@ -34,7 +34,7 @@ def registry( root, jobs ):
 
 @pytest.fixture
 def client( tmp_path, monkeypatch ):
-    registry( tmp_path, [ { "job": "r", "title": "R", "owner": "cheech", "schedule": [], "summary_path": "{root}/s.json", "run": { "argv": [ "true" ] } } ] )
+    registry( tmp_path, [ { "job": "r", "title": "R", "description": "Does a small thing.", "owner": "cheech", "schedule": [], "summary_path": "{root}/s.json", "run": { "argv": [ "true" ] } } ] )
     monkeypatch.setattr( router, "live_deps", lambda: ( tmp_path, tmp_path / "data", Deps() ) )
     monkeypatch.setattr( router, "clock", lambda: NOW )
     monkeypatch.setattr( svc.subprocess, "Popen", lambda argv, **kw: type( "P", (), { "pid": 7 } )() )

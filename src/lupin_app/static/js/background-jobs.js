@@ -214,7 +214,7 @@
     // The entry for a switch the summary does not report on (a job with reporting switched off).
     function cronOnlyEntry( row ) {
         return {
-            job : row.job, target : null, title : row.title, owner : "", audience : [], notify_interval_seconds : null,
+            job : row.job, target : null, title : row.title, description : row.description, owner : "", audience : [], notify_interval_seconds : null,
             state : "unknown", running : false, unscheduled : false, schedule_unverified : false, machine_was_off : false,
             reasons : [], applies : { scan_debt : false, fix_debt : false }, last_attempt : null, last_finished : null,
             consecutive_failures : null, work_found_last_run : null, strip : [], scan_debt : null, fix_debt : null,
@@ -351,8 +351,10 @@
         const title = "# " + mdText( job.title ) + ( job.target === null ? "" : " (" + mdText( job.target ) + ")" ) + "\n";
         const row   = job.cron ?? null;
         const own   = row === null ? null : mdSection( "Switch", switchLines( row, cronRows ) );
-        if ( job.cron_only === true && own !== null ) return [ title, own, "No run reports for this job: reporting is switched off.\n" ].join( "\n" );
-        const parts = [ title, ...jobSections( job, todayIso, 2, own ) ];
+        const said  = job.description || ( row === null ? "" : row.description ) || "";   // the job's own text, else its switch row's
+        const about = said === "" ? [] : [ mdText( said ) + "\n" ];
+        if ( job.cron_only === true && own !== null ) return [ title, ...about, own, "No run reports for this job: reporting is switched off.\n" ].join( "\n" );
+        const parts = [ title, ...about, ...jobSections( job, todayIso, 2, own ) ];
         for ( const target of job.targets ) {
             parts.push( "## Target: " + mdText( target.title ) + ( target.target === null ? "" : " (" + mdText( target.target ) + ")" ) + "\n" );
             parts.push( ...jobSections( target, todayIso, 3, null ) );

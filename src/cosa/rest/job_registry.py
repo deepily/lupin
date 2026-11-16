@@ -10,6 +10,7 @@ import json
 import pathlib
 import re
 
+from cosa.agents.dm_tutor.sentences import count_sentences
 from cosa.repo import code_health_settings as chs
 from cosa.utils.atomic_json import load_json_dict
 
@@ -19,6 +20,7 @@ OVERRIDES_FILE   = "io/jobs/registry-overrides.json"
 TUNABLE          = ( "grace_minutes", "notify_interval_minutes" )
 SCHEDULE_KEYS    = ( "cron", "after_boot_seconds", "every_seconds" )
 PERSONA_OWNER    = re.compile( r"^[a-z][a-z0-9-]*$" )                  # a seat name or "rick", never a role label such as "manager on duty"
+MAX_SENTENCES    = 3
 
 
 def load_registry( root ):
@@ -30,6 +32,7 @@ def load_registry( root ):
     Ensures:
         - returns { "defaults": {...}, "jobs": [...] }
         - every owner is a lowercase seat name (a role label is refused: its rows are invisible)
+        - every job has a plain-English description of at most 3 sentences, which the 📋 abstract shows first
         - every job has a unique job id (with its target when it has one), a title, an owner, and schedule entries that each hold exactly one of cron, after_boot_seconds, every_seconds
         - a job's reporting field, when present, is "on" or "off", and "off" comes with a non-blank reporting_off_reason
     Raises:
@@ -43,6 +46,8 @@ def load_registry( root ):
         for key in ( "job", "title", "owner" ):
             if not job.get( key ): raise ValueError( f"registry job {job.get( 'job' )!r} lacks {key}" )
         if job[ "job" ] in seen: raise ValueError( f"registry lists job {job[ 'job' ]!r} twice" )
+        if not isinstance( job.get( "description" ), str ) or not job[ "description" ].strip(): raise ValueError( f"registry job {job[ 'job' ]!r} lacks a description" )
+        if count_sentences( job[ "description" ] ) > MAX_SENTENCES: raise ValueError( f"job {job[ 'job' ]}: description runs over {MAX_SENTENCES} sentences" )
         if not PERSONA_OWNER.match( job[ "owner" ] ): raise ValueError( f"job {job[ 'job' ]}: owner {job[ 'owner' ]!r} is not a seat name" )
         seen.add( job[ "job" ] )
         if job.get( "reporting", "on" ) not in ( "on", "off" ): raise ValueError( f"job {job[ 'job' ]}: reporting must be \"on\" or \"off\", not {job[ 'reporting' ]!r}" )

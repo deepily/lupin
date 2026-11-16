@@ -268,7 +268,7 @@ def assess( entry, summary, now, boot_time, tune, store=None, lock_age=None, uni
         - returns the JobEntry dict that src/lupin_app/static/js/multiplexer/jobs/types.ts describes, with targets empty
         - state is computed here and nowhere else; a liveness-only job is healthy when up, silent when down and unknown when its unit is not loaded
     """
-    base = { "job": entry[ "job" ], "target": target, "title": entry[ "title" ], "owner": entry[ "owner" ], "audience": entry.get( "audience", [] ),
+    base = { "job": entry[ "job" ], "target": target, "title": entry[ "title" ], "description": entry[ "description" ], "owner": entry[ "owner" ], "audience": entry.get( "audience", [] ),
              "notify_interval_seconds": int( entry[ "notify_interval_minutes" ] * 60 ), "running": False, "unscheduled": not entry.get( "schedule" ) and not entry.get( "liveness" ),
              "machine_was_off": False, "reasons": [], "applies": { "scan_debt": bool( entry.get( "scan_debt" ) ), "fix_debt": bool( entry.get( "fix_debt" ) ) },
              "last_attempt": None, "last_finished": None, "consecutive_failures": None, "work_found_last_run": None, "strip": [], "scan_debt": None, "fix_debt": None,

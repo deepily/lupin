@@ -42,6 +42,18 @@ function titleLine( job: JobEntry ): string {
   return `# ${ nameOf( job ) }\n`;
 }
 
+/**
+ * The job's description as a paragraph, drawn right after the title.
+ *
+ * Ensures:
+ *   - the entry's own text is used, and the switch row's text when the entry has none
+ *   - no text at all gives no paragraph
+ */
+function descriptionBlock( job: JobEntry ): string[] {
+  const text = job.description || ( job.cron?.description ?? "" );
+  return text === "" ? [] : [ `${ mdText( text ) }\n` ];
+}
+
 function reasonLines( job: JobEntry ): string[] {
   if ( job.reasons.length === 0 && job.unknown_reason === null ) return [ "No rule is true: nothing to report." ];
   const lines = job.reasons.map( ( r ) => `- ${ mdText( r.text ) }` );
@@ -162,8 +174,8 @@ function jobSections( job: JobEntry, todayIso: string, level: number, switchPart
 export function abstractMarkdown( job: JobEntry, todayIso: string, cronRows: readonly CronJobRow[] = [] ): string {
   const row = job.cron ?? null;
   const own = row === null ? null : section( "Switch", switchLines( row, cronRows ) );
-  if ( job.cron_only === true && own !== null ) return [ titleLine( job ), own, "No run reports for this job: reporting is switched off.\n" ].join( "\n" );
-  const parts = [ titleLine( job ), ...jobSections( job, todayIso, 2, own ) ];
+  if ( job.cron_only === true && own !== null ) return [ titleLine( job ), ...descriptionBlock( job ), own, "No run reports for this job: reporting is switched off.\n" ].join( "\n" );
+  const parts = [ titleLine( job ), ...descriptionBlock( job ), ...jobSections( job, todayIso, 2, own ) ];
   for ( const target of job.targets ) {
     parts.push( section( `Target: ${ nameOf( target ) }`, [] ).trimEnd() + "\n" );
     parts.push( ...jobSections( target, todayIso, 3, null ) );

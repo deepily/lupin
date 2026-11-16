@@ -29,7 +29,7 @@ def write_registry( root, jobs, defaults=None ):
 
 def job( name="j", **over ):
     """Ensures: returns a registry job."""
-    return { "job": name, "title": name.upper(), "owner": "cheech", "schedule": [ { "cron": "0 10 * * *" } ], "summary_path": f"{{root}}/s/{name}.json", **over }
+    return { "job": name, "title": name.upper(), "description": "Does a small thing. It runs on a timer.", "owner": "cheech", "schedule": [ { "cron": "0 10 * * *" } ], "summary_path": f"{{root}}/s/{name}.json", **over }
 
 
 class Deps:

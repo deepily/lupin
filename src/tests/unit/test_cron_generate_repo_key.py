@@ -45,7 +45,7 @@ def test_lupins_generated_lines_are_the_ones_captured_before_the_repo_key_existe
 def second_repo_tree( tmp_path, monkeypatch, **extra ):
     """Write a registry with one Lupin job and one job of repo `other`; return the Lupin root."""
     monkeypatch.setattr( paths, "data_dir", lambda root: pathlib.Path( root ) / "data" )
-    lupin  = { "job": "dup", "title": "dup", "owner": "cheech", "schedule": [ { "cron": "0 10 * * *" } ], "summary_path": "{root}/s.json", "cron_managed": True, "cron_tag": "dup-tag" }
+    lupin  = { "job": "dup", "title": "dup", "description": "Does a small thing.", "owner": "cheech", "schedule": [ { "cron": "0 10 * * *" } ], "summary_path": "{root}/s.json", "cron_managed": True, "cron_tag": "dup-tag" }
     other  = { **lupin, "job": "dup-other", "cron_tag": "dup-other-tag", "schedule": [ { "cron": "5 * * * *" }, { "after_boot_seconds": 60 } ], "repo": "other",
                "repo_root": "/work/other", "cron_log": "{root}/code-health/dup/daily.log", **extra }
     doc    = { "schema": "job-registry/1", "defaults": { "run_env": { CONFIG: "config_path=/lupin.ini" } }, "jobs": [ lupin, other ] }
@@ -134,7 +134,7 @@ def entry_script_run( tmp_path, *extra ):
     for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ): ( root / "src" / "conf" / name ).symlink_to( real / "src" / "conf" / name )
     ( root / ".venv" ).symlink_to( sys.prefix )
     shipped = jr.load_registry( REAL_ROOT )
-    probe   = { "job": "probe", "enabled_key": "cron job wiki-librarian enabled", "title": "probe", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
+    probe   = { "job": "probe", "enabled_key": "cron job wiki-librarian enabled", "title": "probe", "description": "Does a small thing.", "owner": "cheech", "schedule": [], "summary_path": "{root}/io/jobs/probe/job-summary.json",
                 "run": { "argv": [ "{python}", "-c", "import os, sys; print( 'argv', sys.argv[ 1: ], 'root', os.environ[ 'LUPIN_ROOT' ] )", "--trigger", "hand" ], "env": {} } }
     ( root / "src" / "conf" / "job-registry.json" ).write_text( json.dumps( { "schema": "job-registry/1", "defaults": shipped[ "defaults" ], "jobs": [ probe ] } ) )
     done = subprocess.run( [ "env", "-i", f"HOME={tmp_path}", f"DEEPILY_DATA_DIR={tmp_path / 'data'}", f"LUPIN_ROOT={root}", str( real / "src/scripts/cron-job.sh" ), "probe", "cron", *extra ],

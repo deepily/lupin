@@ -167,7 +167,7 @@ def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[
         - attribution is what `read_attribution` returned
 
     Ensures:
-        - returns { job, title, schedule, key, enabled, honoured, drift, last_changed_by, last_changed_at,
+        - returns { job, title, description, schedule, key, enabled, honoured, drift, last_changed_by, last_changed_at,
           reads, alarm, inside }
         - reads is "run" for a job job_run starts (cron_managed, or naming JOB_RUN_READER), "tick" for a
           loop that checks a TickSwitch, and None
@@ -191,7 +191,8 @@ def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[
     return {
         "job"             : job,
         "title"           : entry[ "title" ],
-        "schedule"        : "; ".join( entry_label( e ) for e in entry.get( "schedule", [] ) ) or "not scheduled",
+        "description"     : entry[ "description" ],
+        "schedule"      : "; ".join( entry_label( e ) for e in entry.get( "schedule", [] ) ) or "not scheduled",
         "key"             : switch_key( job ),
         "enabled"         : enabled,
         "honoured"        : is_honoured( entry ),

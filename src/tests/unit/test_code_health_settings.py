@@ -138,7 +138,7 @@ def test_name_matches_the_checkout_directory_for_lupin_and_a_mismatch_is_caught(
 def scratch_registry( tmp_path, repo ):
     """Copy the real registry, add a row naming `repo`, and load it with the real reader."""
     doc = json.loads( ( pathlib.Path( cu.get_project_root() ) / REGISTRY_FILE ).read_text() )
-    doc[ "jobs" ].append( { "job": "scratch-negative-control", "title": "Scratch row", "owner": "clayton", "repo": repo } )
+    doc[ "jobs" ].append( { "job": "scratch-negative-control", "title": "Scratch row", "description": "Does a small thing.", "owner": "clayton", "repo": repo } )
     ( tmp_path / REGISTRY_FILE ).parent.mkdir( parents=True )
     ( tmp_path / REGISTRY_FILE ).write_text( json.dumps( doc ) )
     return load_registry( tmp_path )
@@ -174,8 +174,8 @@ def test_a_row_for_a_repo_with_no_path_key_fails_naming_it( config, tmp_path ):
 
 def test_every_failing_repo_is_named_in_order( config, tmp_path ):
     registry = scratch_registry( tmp_path, "par-pacific" )
-    registry[ "jobs" ].append( { "job": "second", "title": "t", "owner": "clayton", "repo": "claude-plans" } )
-    registry[ "jobs" ].append( { "job": "third", "title": "t", "owner": "clayton", "repo": "none-such" } )
+    registry[ "jobs" ].append( { "job": "second", "title": "t", "description": "Does a small thing.", "owner": "clayton", "repo": "claude-plans" } )
+    registry[ "jobs" ].append( { "job": "third", "title": "t", "description": "Does a small thing.", "owner": "clayton", "repo": "none-such" } )
     with pytest.raises( chs.CodeHealthSettingError, match="failing: claude-plans, none-such, par-pacific$" ):
         chs.check_registry_names( registry, config )
 

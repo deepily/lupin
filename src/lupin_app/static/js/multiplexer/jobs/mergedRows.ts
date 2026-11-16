@@ -18,7 +18,7 @@ import type { JobEntry } from "./types";
  */
 export function cronOnlyEntry( row: CronJobRow ): JobEntry {
   return {
-    job : row.job, target : null, title : row.title, owner : "", audience : [], notify_interval_seconds : null,
+    job : row.job, target : null, title : row.title, description : row.description, owner : "", audience : [], notify_interval_seconds : null,
     state : "unknown", running : false, unscheduled : false, schedule_unverified : false, machine_was_off : false,
     reasons : [], applies : { scan_debt : false, fix_debt : false }, last_attempt : null, last_finished : null,
     consecutive_failures : null, work_found_last_run : null, strip : [], scan_debt : null, fix_debt : null,
