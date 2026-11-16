@@ -38,18 +38,18 @@ def test_the_three_bundle_lists_are_the_ones_the_build_script_writes():
 
 
 def test_dist_status_is_ok_only_when_every_required_bundle_is_present():
-    done = lib( 'pfv_dist_status "multiplexer console doc-podcast" "doc-podcast console multiplexer"; echo " rc=$?"' )
+    done = lib( 'pfv_dist_status "multiplexer console doc-podcast" "doc-podcast console multiplexer" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; echo " rc=$?"' )
     assert done.stdout.split() == [ "OK", "rc=0" ]
 
 
 def test_dist_status_names_every_absent_bundle_in_the_required_order():
-    done = lib( 'pfv_dist_status "multiplexer console doc-podcast" "multiplexer"; echo " rc=$?"' )
+    done = lib( 'pfv_dist_status "multiplexer console doc-podcast" "multiplexer" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; echo " rc=$?"' )
     assert done.stdout.split() == [ "MISSING:", "console", "doc-podcast", "rc=1" ]
-    assert lib( 'pfv_dist_status "multiplexer console" ""' ).stdout.strip() == "MISSING: multiplexer console"
+    assert lib( 'pfv_dist_status "multiplexer console" "" ' ).stdout.strip() == "MISSING: multiplexer console"
 
 
 def test_dist_status_does_not_match_a_name_that_only_contains_a_required_one():
-    assert lib( 'pfv_dist_status "console" "console-old"' ).stdout.strip() == "MISSING: console"
+    assert lib( 'pfv_dist_status "console" "console-old" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ).stdout.strip() == "MISSING: console"
 
 
 def test_the_preflight_blocks_after_a_deploy_and_only_warns_before_one():
@@ -61,13 +61,16 @@ def test_the_preflight_blocks_after_a_deploy_and_only_warns_before_one():
 def test_the_preflight_reports_the_check_after_the_deployed_ref_check_and_names_the_fix():
     text = PREFLIGHT.read_text()
     assert text.index( "# B7 — the built" ) > text.index( "# B6 — the `.deployed-ref`" )
-    assert 'pfv_dist_status "$DIST_REQUIRED" "$dist_present"' in text and "lupin-vm.sh push-dist" in text
+    assert 'pfv_dist_status "$DIST_REQUIRED" "$dist_present" "$dist_stamp" "$ref_head"' in text and "lupin-vm.sh push-dist" in text
 
 
 def scratch_checkout( tmp_path, built ):
     """A copy of lupin-vm.sh in a tree whose dist holds the named bundles."""
     ( tmp_path / "src" / "scripts" ).mkdir( parents=True )
     ( tmp_path / "src" / "scripts" / "lupin-vm.sh" ).write_text( VM_SCRIPT.read_text() )
+    # A stub verdict: exit code from $STUB_FRESH_RC (default 0), but 0 once the stub npm has run a build.
+    ( tmp_path / "src" / "scripts" / "check_bundle_freshness.py" ).write_text(
+        "import os, sys\nsys.exit( 0 if os.path.exists( os.environ.get( 'STUB_BUILT', '/nonexistent' ) ) else int( os.environ.get( 'STUB_FRESH_RC', '0' ) ) )\n" )
     for name in built:
         d = tmp_path / "src" / "lupin_app" / "static" / "dist" / name
         d.mkdir( parents=True )
@@ -75,8 +78,13 @@ def scratch_checkout( tmp_path, built ):
     return tmp_path / "src" / "scripts" / "lupin-vm.sh"
 
 
-def push_dist( script, *flags ):
-    env = { "PATH": os.environ[ "PATH" ], "HOME": "/nonexistent", "LUPIN_GCP_PROJECT_ID": "proj-x" }
+def push_dist( script, *flags, rc=0, npm_rc=0 ):
+    bindir = script.parent.parent.parent / "bin"
+    bindir.mkdir( exist_ok=True )
+    ( bindir / "npm" ).write_text( f'#!/bin/bash\necho "$*" >> "$STUB_NPM_LOG"\n[ {npm_rc} -eq 0 ] && touch "$STUB_BUILT"\nexit {npm_rc}\n' )
+    ( bindir / "npm" ).chmod( 0o755 )
+    env = { "PATH": f"{bindir}:{os.environ[ 'PATH' ]}", "HOME": "/nonexistent", "LUPIN_GCP_PROJECT_ID": "proj-x",
+            "STUB_FRESH_RC": str( rc ), "STUB_BUILT": str( bindir / "built" ), "STUB_NPM_LOG": str( bindir / "npm.log" ) }
     return subprocess.run( [ "bash", str( script ), *flags, "push-dist" ], capture_output=True, text=True, env=env )
 
 
@@ -168,3 +176,48 @@ def test_push_dist_with_no_source_files_says_unknown_and_does_not_warn( tmp_path
     done = push_dist( scratch_checkout( tmp_path, declared_bundles() ), "--dry-run" )
     text = done.stdout + done.stderr
     assert "newest source unknown" in text and "WARN" not in text and "built unknown" in text
+
+
+def test_dist_status_calls_a_complete_set_stale_when_the_stamp_is_missing_or_names_another_commit():
+    old = lib( 'pfv_dist_status "console" "console" "" ' + "a" * 40 + '; echo " rc=$?"' )
+    assert old.stdout.startswith( "STALE: no .dist-stamp" ) and old.stdout.strip().endswith( "rc=1" )
+    moved = lib( 'pfv_dist_status "console" "console" ' + "b" * 40 + " " + "a" * 40 + '; echo " rc=$?"' )
+    assert "STALE: bundles were judged fresh at bbbbbbbb but the checkout is at aaaaaaaa" in moved.stdout
+    assert lib( 'pfv_dist_status "console" "console" ' + "a" * 40 + ' ""' ).stdout.startswith( "STALE: HEAD unreadable" )
+
+
+def test_dist_status_reports_missing_ahead_of_stale():
+    assert lib( 'pfv_dist_status "console" "" "" ""' ).stdout.strip() == "MISSING: console"
+
+
+def test_the_preflight_reads_the_stamp_and_reports_stale_with_the_fix():
+    text = PREFLIGHT.read_text()
+    assert 'dist_stamp="$( head -n 1 "$REPO_ROOT/src/lupin_app/static/dist/.dist-stamp"' in text
+    assert text.index( 'ref_head="$(' ) < text.index( "dist_stamp=" )
+    assert "STALE:*)" in text and "lupin-vm.sh push-dist" in text
+
+
+def test_push_dist_with_stale_bundles_runs_the_build_then_ships( tmp_path ):
+    script = scratch_checkout( tmp_path, declared_bundles() )
+    done = push_dist( script, rc=1 )
+    assert "bundles are STALE" in done.stdout + done.stderr
+    assert ( tmp_path / "bin" / "npm.log" ).read_text().strip() == "run build"
+
+
+def test_push_dist_refuses_when_the_freshness_check_cannot_answer_or_the_build_fails( tmp_path ):
+    refused = push_dist( scratch_checkout( tmp_path / "a", declared_bundles() ), rc=2 )
+    assert refused.returncode == 1 and "not FRESH" in refused.stderr and "Nothing was sent" in refused.stderr
+    failed = push_dist( scratch_checkout( tmp_path / "b", declared_bundles() ), rc=1, npm_rc=1 )
+    assert failed.returncode == 1 and "npm run build failed" in failed.stderr
+
+
+def test_a_dry_run_of_stale_bundles_says_it_would_build_and_builds_nothing( tmp_path ):
+    script = scratch_checkout( tmp_path, declared_bundles() )
+    done = push_dist( script, "--dry-run", rc=1 )
+    assert done.returncode == 0 and "would run: npm run build" in done.stdout + done.stderr
+    assert not ( tmp_path / "bin" / "npm.log" ).exists()
+
+
+def test_a_real_push_dist_puts_the_stamp_in_the_archive( tmp_path ):
+    script = scratch_checkout( tmp_path, declared_bundles() )
+    assert "tar -czf \"$PD_TAR\" -C \"$PD_LOCAL\" $DIST_BUNDLES .dist-stamp" in script.read_text()

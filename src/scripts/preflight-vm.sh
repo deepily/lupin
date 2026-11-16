@@ -651,10 +651,13 @@ fi
 DIST_REQUIRED="multiplexer console doc-podcast"
 dist_tier="BLOCK"; [ "$PHASE" = "pre" ] && dist_tier="WARN"
 dist_present="$( pfv_dist_present "$REPO_ROOT/src/lupin_app/static/dist" "$DIST_REQUIRED" )"
-dist_status="$( pfv_dist_status "$DIST_REQUIRED" "$dist_present" )"
+dist_stamp="$( head -n 1 "$REPO_ROOT/src/lupin_app/static/dist/.dist-stamp" 2>/dev/null || printf '' )"
+dist_status="$( pfv_dist_status "$DIST_REQUIRED" "$dist_present" "$dist_stamp" "$ref_head" )"
 case "$dist_status" in
     OK)
         report pass "$dist_tier" "built bundles present on the checkout: $DIST_REQUIRED" ;;
+    STALE:*)
+        report fail "$dist_tier" "built bundles are not known to match the source (${dist_status#STALE: }), so the pages serve old code"                       "lupin-vm.sh push-dist   # rebuilds when stale, then ships and stamps" ;;
     *)
         report fail "$dist_tier" "built bundles absent from $REPO_ROOT/src/lupin_app/static/dist (${dist_status#MISSING:}), so the pages that load them lose that feature"                       "lupin-vm.sh push-dist   # from a checkout where npm run build has run" ;;
 esac

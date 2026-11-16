@@ -1048,16 +1048,26 @@ pfv_dist_present() {
 #   - $1 = space-separated bundle names that are required
 #   - $2 = space-separated names of the bundle folders on the checkout that hold a manifest.json ("" for none)
 # Ensures:
-#   - echoes OK and returns 0 when every required name is present
+#   - echoes OK and returns 0 when every required name is present and the stamp agrees with HEAD
 #   - otherwise echoes MISSING: followed by the absent names, in the order required, and returns 1
-#   - pure: both facts are passed in, so the classification is tested without a VM
+#   - when nothing is missing but the bundles are not known to match the source, echoes STALE: with the reason and returns 1
+#   - pure: all facts are passed in, so the classification is tested without a VM
+#
+# Present is not fresh (row 8d67e474, 16 Nov 2026): the VM held a bundle built before d819f7446 while its source had
+# that commit, every file was present, and a test failed 3 of 3. push-dist writes dist/.dist-stamp holding the commit
+# the bundles were judged FRESH at (check_bundle_freshness.py, which needs esbuild and so cannot run on the VM host).
+#   - $3 = the first line of dist/.dist-stamp ("" when the file is absent)
+#   - $4 = the checkout's HEAD sha ("" when unreadable)
 pfv_dist_status() {
-    local required="$1" present=" $2 " name missing=""
+    local required="$1" present=" $2 " stamp="$3" head="$4" name missing=""
     for name in $required; do
         case "$present" in *" $name "*) ;; *) missing="$missing $name" ;; esac
     done
-    [ -z "$missing" ] && { echo "OK"; return 0; }
-    echo "MISSING:${missing}"; return 1
+    [ -n "$missing" ] && { echo "MISSING:${missing}"; return 1; }
+    [ -z "$stamp" ] && { echo "STALE: no .dist-stamp, so nothing says the bundles match the source"; return 1; }
+    [ -z "$head" ] && { echo "STALE: HEAD unreadable, so the stamp cannot be compared"; return 1; }
+    [ "$stamp" != "$head" ] && { echo "STALE: bundles were judged fresh at ${stamp:0:8} but the checkout is at ${head:0:8}"; return 1; }
+    echo "OK"; return 0
 }
 
 # ── pfv_environ_lookup ───────────────────────────────────────────────────────

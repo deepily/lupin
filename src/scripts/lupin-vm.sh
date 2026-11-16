@@ -1634,13 +1634,35 @@ $RCMD_TM"
             [ -n "$PD_BUILT" ] && [ "$PD_SRC_TIME" != unknown ] && [[ "$PD_BUILT" < "$PD_SRC_TIME" ]] && PD_NOTE="  WARN: older than the newest source; run npm run build"
             log "bundle $PD_B: built ${PD_BUILT:-unknown}, newest source $PD_SRC_TIME$PD_NOTE"
         done
+        # Judge the bundles by bytes, not by file times (row 8d67e474): check_bundle_freshness.py rebuilds into a temp
+        # directory and compares. STALE (exit 1) -> npm run build, then judge again. Anything but FRESH after that
+        # refuses, because a stale bundle shipped to the VM serves old code over new source (measured 16 Nov 2026).
+        PD_ROOT="$( dirname "$PD_LOCAL" )/../../.."
+        PD_ROOT="$( cd "$PD_ROOT" && pwd )"
+        PD_FRESH=( python3 "$PD_ROOT/src/scripts/check_bundle_freshness.py" --quiet )
+        PD_RC=0; "${PD_FRESH[@]}" || PD_RC=$?
+        if [ "$PD_RC" -eq 1 ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log "(dry-run) bundles are STALE; would run: npm run build, then judge them again"
+            else
+                log "bundles are STALE against the source; running npm run build"
+                ( cd "$PD_ROOT" && npm run build ) || die "push-dist: npm run build failed. Nothing was sent."
+                PD_RC=0; "${PD_FRESH[@]}" || PD_RC=$?
+            fi
+        fi
+        if [ "$DRY_RUN" -ne 1 ] || [ "$PD_RC" -ne 1 ]; then
+            [ "$PD_RC" -eq 0 ] || die "push-dist: the bundles are not FRESH against the source (check_bundle_freshness.py exit $PD_RC). Nothing was sent."
+        fi
+        # The stamp says which commit the bundles were judged FRESH at; the VM preflight compares it to the VM's HEAD.
+        PD_STAMP_SHA="$( git -C "$PD_ROOT" rev-parse HEAD 2>/dev/null || true )"
         PD_DEST="$VM_ROOT/src/lupin_app/static/dist"
         if [ "$DRY_RUN" -eq 1 ]; then
-            log "(dry-run) would: tar -czf dist.tar.gz $DIST_BUNDLES; gcloud compute scp -> VM:/tmp; sudo mkdir -p $PD_DEST; sudo tar -xzf -C $PD_DEST; chown 1001"
+            log "(dry-run) would: tar -czf dist.tar.gz $DIST_BUNDLES .dist-stamp; gcloud compute scp -> VM:/tmp; sudo mkdir -p $PD_DEST; sudo tar -xzf -C $PD_DEST; chown 1001"
         else
             PD_TAR="$( mktemp -t "lupin-dist-XXXXXX.tar.gz" )"
             # shellcheck disable=SC2086
-            tar -czf "$PD_TAR" -C "$PD_LOCAL" $DIST_BUNDLES || die "push-dist: tar failed"
+            printf '%s\n' "$PD_STAMP_SHA" > "$PD_LOCAL/.dist-stamp"
+            tar -czf "$PD_TAR" -C "$PD_LOCAL" $DIST_BUNDLES .dist-stamp || die "push-dist: tar failed"
             gcloud compute scp "$PD_TAR" "$VM_NAME:/tmp/lupin-dist.tar.gz" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
             rm -f "$PD_TAR"
