@@ -219,6 +219,7 @@ def parse_args( argv ):
         - the source tree, this run's folder, the earlier run's folder, the planted file, the seed and the source commit are required
         - live is false unless --live is given, and without it nothing but files is read
         - the stage budget is ex.BUDGET and the run's cap equal to it unless named
+        - fusion_depth is None unless --fusion-depth names it; _run then fuses to that depth in place of the stage's
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     for name in ( "root", "run_dir", "from_run", "planted", "seed", "source_commit" ): ap.add_argument( "--" + name.replace( "_", "-" ), required=True, type=int if name == "seed" else str )
@@ -228,6 +229,7 @@ def parse_args( argv ):
     ap.add_argument( "--server", default="max-plan" )
     ap.add_argument( "--probe-model", default=None, help="a model id; the `reuse need second model` INI key when left out" )
     ap.add_argument( "--live", action="store_true" )
+    ap.add_argument( "--fusion-depth", type=int, default=None, help="fuse each list to this many places; the stage's own depth when left out" )
     return smoke.resolve_second_models( ap.parse_args( argv ), ( "probe_model", ) )
 
 
@@ -319,6 +321,7 @@ def _run( args, root, ctx, deps, close ):
         prepared = rt.prepare( ctx )
         search   = lists_for( stage, prepared[ 1 ], prepared[ 2 ], ctx.pages )
     fusion = ( stage.fusion if stage.fusion else { "k": rf.FUSION_K, "depth": rf.FUSION_DEPTH, "head": rf.FUSION_HEAD } )
+    if args.fusion_depth is not None: fusion = { **fusion, "depth": args.fusion_depth, "head": min( fusion[ "head" ], args.fusion_depth ) }
     ask    = deps[ "ask" ] if "ask" in deps else draft.drafter_call( model )
     report = run_live( args.run_dir, rows, ask, ledger, search, fusion, args.limit, args.budget, model )
     try:

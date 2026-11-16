@@ -317,3 +317,18 @@ def test_the_context_gets_a_refusing_transport_in_a_plan_and_in_a_live_run_so_no
         ctx = types.SimpleNamespace()
         xr.main( argv( tmp_path, "--cli-path", old_run, *extra ), deps_for( tmp_path, context=lambda root: ctx, ask=counted_ask(), stage=lambda c: ( FakeStage(), search_fn ) ) )
         assert isinstance( ctx.transport, NoCallTransport )
+
+
+def test_fusion_depth_changes_the_replayed_ranks_and_is_ignored_only_when_not_given( tmp_path, old_run ):
+    # A known answer 10 places down a list is outside depth 5 and inside depth 512; no flag keeps the stage depth.
+    deep = [ f"d{n}" for n in range( 9 ) ] + [ "k1", "k2", "k3" ]
+    def search( query ): return { "code": deep }
+    class Deep:
+        fusion = { "k": 60, "depth": 512, "head": 0 }
+    def after( *flags ):
+        out = xr.main( argv( tmp_path, "--cli-path", old_run, "--live", *flags ), deps_for( tmp_path, ask=counted_ask(), stage=lambda ctx: ( Deep(), search ), close_run=lambda ctx: "r" ) )
+        return [ r[ "after" ] for r in out[ "report" ][ "results" ] ]
+    default, shallow, deeper = after(), after( "--fusion-depth", "5" ), after( "--fusion-depth", "512" )
+    assert default == deeper and all( rank is not None for rank in default )
+    assert shallow == [ None, None, None ] and shallow != default
+    assert xr.parse_args( argv( tmp_path ) ).fusion_depth is None
