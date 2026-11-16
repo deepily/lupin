@@ -5,14 +5,16 @@ pins:
   - lupin_mcp.duplicate_check_history.failure_of@43157d9e67
   - lupin_mcp.duplicate_check_history.counts_of@7147132f71
   - lupin_mcp.duplicate_check_history.started_from_name@a7bba8bc4c
-  - lupin_mcp.duplicate_check_history.line_of@9d0df456c0
+  - lupin_mcp.duplicate_check_history.line_of@b451e259d0
   - lupin_mcp.duplicate_check_history.append_line@deba898e1d
   - lupin_mcp.duplicate_check_history.read_lines@bd01db055b
   - lupin_mcp.duplicate_check_history.backfill@0454cced16
-  - lupin_mcp.duplicate_check_history.rising_run@d0c7dbcf68
+  - lupin_mcp.duplicate_check_history.rising_run@96e35c9a4a
   - lupin_mcp.duplicate_check_history.table@adf6469d04
   - lupin_mcp.duplicate_check_history.main@1fccc8cd6c
-  - lupin_mcp.duplicate_check_history.read_history@e721b5069d
+  - lupin_mcp.duplicate_check_history.read_history@db2d71a345
+  - lupin_mcp.duplicate_check_history.either@86afab3e55
+  - lupin_mcp.duplicate_check_history.upgraded@413467640d
 ---
 # Duplicate check run history
 `lupin_mcp.duplicate_check_history` keeps `runs.jsonl` in the check's record folder (`duplicate-check-daily` under the code-health data folder, `<projects-data>/<repo>/code-health`): one JSON line per run, failed runs included. The run itself is in [[duplicate-check-daily-run]].

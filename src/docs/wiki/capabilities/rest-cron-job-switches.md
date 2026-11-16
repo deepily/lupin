@@ -6,7 +6,7 @@ pins:
   - cosa.rest.cron_job_switches.read_enabled@9bb5246673
   - cosa.rest.cron_job_switches.read_attribution@4a8668291c
   - cosa.rest.cron_job_switches.is_honoured@b6664817f8
-  - cosa.rest.cron_job_switches.build_row@ffc17b21ef
+  - cosa.rest.cron_job_switches.build_row@0531a6c328
   - cosa.rest.cron_job_switches.build_rows@15e2e9c925
   - cosa.rest.cron_job_switches.ini_path@0692c2e155
   - cosa.rest.cron_job_switches.state_path@c716314db9
@@ -25,7 +25,7 @@ Each job in `src/conf/job-registry.json` has one on/off key in `src/conf/lupin-a
 - `LUPIN_CRON_SWITCH_INI` points the module at another file, and the record then sits beside it. Tests use it so the live file is never touched.
 
 ## The endpoint
-- `GET /api/cron-jobs` lists one row per registry job: `enabled`, `honoured`, `drift`, `last_changed_by`, `last_changed_at`. `honoured` is false for a job that does not read its switch. `is_honoured` is true for a `cron_managed` job and for a job whose registry entry names an `enabled_key` and a `switch_reader`. `reads` says which: `run` for a job `job_run` starts, `tick` for a loop that checks a `TickSwitch`, none otherwise. `alarm` is true for one of the alarm jobs, and `inside` names the job whose tick this one runs inside. `drift` is true when the file disagrees with the record, meaning a hand edit. `caller_is_admin` is true only for an administrator login.
+- `GET /api/cron-jobs` lists one row per registry job: `title`, `description`, `enabled`, `honoured`, `drift`, `last_changed_by`, `last_changed_at`. `honoured` is false for a job that does not read its switch. `is_honoured` is true for a `cron_managed` job and for a job whose registry entry names an `enabled_key` and a `switch_reader`. `reads` says which: `run` for a job `job_run` starts, `tick` for a loop that checks a `TickSwitch`, none otherwise. `alarm` is true for one of the alarm jobs, and `inside` names the job whose tick this one runs inside. `drift` is true when the file disagrees with the record, meaning a hand edit. `caller_is_admin` is true only for an administrator login.
 - `PUT /api/cron-jobs/{job}/enabled` takes `{ on: bool }` and needs an administrator login. An API key or a non-admin gets 403, an unknown job 404, and a bad body 422. A job that does not read its switch gets 409, and so does a key the file lacks or defines twice.
 - A flip emits the `cron_job_switch_changed` WebSocket event to every client. A failed announcement does not fail the flip.
 

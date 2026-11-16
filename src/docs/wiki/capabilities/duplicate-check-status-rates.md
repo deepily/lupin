@@ -2,9 +2,9 @@
 capability: duplicate-check-status-rates
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.duplicate_check_status.measured_daily@72c9e84974
-  - lupin_mcp.duplicate_check_status.baseline_remaining@b22bd8d786
-  - lupin_mcp.duplicate_check_status.inflow_per_day@8b631961b3
+  - lupin_mcp.duplicate_check_status.measured_daily@54fafb996e
+  - lupin_mcp.duplicate_check_status.baseline_remaining@f0d3e2cdb9
+  - lupin_mcp.duplicate_check_status.inflow_per_day@745c3c7153
   - lupin_mcp.duplicate_check_status.judged_per_day@88cfcf61ea
   - lupin_mcp.duplicate_check_status.projected_zero@65e3d3b0ae
   - lupin_mcp.duplicate_check_status.slipped@009bbbe098

@@ -9,10 +9,6 @@ pins:
   - cosa.agents.test_fix_expediter.prompts.fix.build_fix_prompt@9109cdd587
   - cosa.agents.test_fix_expediter.prompts.fix.build_verification_prompt@bee7820df0
   - cosa.agents.test_fix_expediter.prompts.fix.build_redelegation_prompt@b5d0a1bf7b
-  - cosa.agents.test_fix_expediter.cosa_interface.notify_progress@c527c06baa
-  - cosa.agents.test_fix_expediter.cosa_interface.ask_confirmation@b015a79b37
-  - cosa.agents.test_fix_expediter.cosa_interface.get_feedback@dc91fb4cf6
-  - cosa.agents.test_fix_expediter.cosa_interface.present_choices@ded6f26cca
 ---
 # Test fix expediter prompts and voice
 

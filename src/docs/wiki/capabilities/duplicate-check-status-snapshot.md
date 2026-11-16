@@ -2,12 +2,12 @@
 capability: duplicate-check-status-snapshot
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.duplicate_check_status.snapshot@d6bb53e02b
-  - lupin_mcp.duplicate_check_status.job_summary@1053d7d438
+  - lupin_mcp.duplicate_check_status.snapshot@fd0df99ce2
+  - lupin_mcp.duplicate_check_status.job_summary@efcb70bb10
   - lupin_mcp.duplicate_check_status.write_job_summary@100e2842c2
-  - lupin_mcp.duplicate_check_status.note_of@e229d27d85
+  - lupin_mcp.duplicate_check_status.note_of@d64275c6ec
   - lupin_mcp.duplicate_check_status.number@0044f93728
-  - lupin_mcp.duplicate_check_status.render_html@809b5d47ac
+  - lupin_mcp.duplicate_check_status.render_html@97cb26c9e6
   - lupin_mcp.duplicate_check_status.folder_of@75dee1c79a
   - lupin_mcp.duplicate_check_status.subdir_of@9c74e74620
 ---

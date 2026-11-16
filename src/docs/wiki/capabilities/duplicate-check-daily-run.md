@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.Counting@f2ca3e39f1
   - lupin_mcp.duplicate_check_daily.findings_of@cfdb1b0bd4
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@63584b8a94
-  - lupin_mcp.duplicate_check_daily.run@ff71f51824
+  - lupin_mcp.duplicate_check_daily.run@bba5df5315
   - lupin_mcp.duplicate_check_daily.finding_judges@f452cbad1e
   - lupin_mcp.duplicate_check_daily.cron_lines@5d30783eec
   - lupin_mcp.duplicate_check_daily.install_mode@8a07fed64c
@@ -16,7 +16,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.resolve_ceiling@8514765a03
   - lupin_mcp.duplicate_check_daily.append_manifest@fe7667a045
   - lupin_mcp.duplicate_check_daily.record@0c6e420b03
-  - lupin_mcp.duplicate_check_daily.rising_guard@9bf675aa57
+  - lupin_mcp.duplicate_check_daily.rising_guard@8efa9a7c5c
   - lupin_mcp.duplicate_check_daily.limit_flag@4dc500630b
 ---
 # Duplicate check daily: run, cron and live parts

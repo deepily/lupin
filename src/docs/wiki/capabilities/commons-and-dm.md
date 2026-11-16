@@ -7,7 +7,7 @@ pins:
   - cosa.rest.routers.dm.get_dm_tutor_config@2742482adc
   - cosa.rest.dm_experiment.is_suspended@8c79f0a3f4
   - cosa.rest.routers.commons.execute_broadcast@0dc3cdefd1
-  - cosa.rest.commons_rate_limiter.CommonsBroadcastRateLimiter.check_and_record@a165857116
+  - cosa.rest.commons_rate_limiter.CommonsBroadcastRateLimiter.check_and_record@7dbe099550
   - cosa.rest.commons_ack_watcher.CommonsAckWatcher.register_broadcast@5bc5f28af0
   - cosa.rest.commons_topic_watcher.CommonsTopicWatcher@47427345f1
 ---

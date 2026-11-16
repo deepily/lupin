@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.db.auto_migrate.build_alembic_config@341eae8102
   - cosa.rest.db.auto_migrate.resolve_database_url@fe83ed0205
-  - cosa.rest.db.auto_migrate.wait_for_database@fd695c3efb
+  - cosa.rest.db.auto_migrate.wait_for_database@03e4fa6f5b
   - cosa.rest.db.database.announce_empty_db_password_once@366b20cb2c
   - cosa.rest.db.database.get_pool_config@f9210c8dae
   - cosa.rest.db.database.is_cloud_backed@7a61b3aa8a

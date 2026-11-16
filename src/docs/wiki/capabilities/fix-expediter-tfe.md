@@ -2,7 +2,7 @@
 capability: fix-expediter-tfe
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.test_fix_expediter.job.TestFixExpediterJob@0bc042ff35
+  - cosa.agents.test_fix_expediter.job.TestFixExpediterJob@f4f1e9429f
   - cosa.agents.test_fix_expediter.job.TestFixExpediterJob.do_all@14c1dab6f0
   - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator@1dc6f3aa92
   - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase2_propose@a9dcce6363
