@@ -528,8 +528,8 @@ CAPTURE_SETTLE_TIMEOUT_MS = 2000
 
 _SETTLE_TRANSITIONS_JS = (
     "() => {"
-    " const finishable = document.getAnimations().filter( a => a instanceof CSSTransition"
-    " || ( a.effect !== null && Number.isFinite( a.effect.getComputedTiming().iterations ) ) );"
+    " const finishable = document.getAnimations().filter( a => a.effect !== null"
+    " && Number.isFinite( a.effect.getComputedTiming().iterations ) );"
     " const settled = Promise.allSettled( finishable.map( a => a.finished ) );"
     f" const timeout = new Promise( resolve => setTimeout( resolve, {CAPTURE_SETTLE_TIMEOUT_MS} ) );"
     " return Promise.race( [ settled, timeout ] ).then( () => undefined );"
@@ -1897,8 +1897,9 @@ _ENDLESS_PAGE = """<style>
   @keyframes spin { to { transform: rotate( 360deg ); } }
   .spin  { animation: spin 1s linear infinite; }
   .once  { animation: spin 100ms linear 1; }
-  .fade  { transition: opacity 100ms; opacity: 1; }
+  .fade  { transition: opacity 700ms linear; opacity: 1; }
   .fade.out { opacity: 0.2; }
+  .long  { animation: spin 30s linear 1; }
 </style>
 <div class="spin">a</div><div class="spin">b</div><div class="once">c</div><div class="fade">d</div>"""
 
@@ -1909,11 +1910,10 @@ def test_the_settle_script_filters_to_animations_that_can_finish():
 
     Ensures:
         - it no longer maps `.finished` over every animation
-        - it names CSSTransition and a finite-iterations check
+        - it keeps animations by a finite-iterations check, which also covers transitions
         - it carries a timeout
     """
     js = _SETTLE_TRANSITIONS_JS
-    assert "CSSTransition" in js
     assert "Number.isFinite" in js and "iterations" in js
     assert "Promise.race" in js and str( CAPTURE_SETTLE_TIMEOUT_MS ) in js
     assert "document.getAnimations().map" not in js, "every animation is awaited again, endless ones included"
@@ -1940,14 +1940,46 @@ def test_the_settle_script_returns_on_a_page_with_endless_animations_in_a_real_b
             counts = page.evaluate( "() => ( { total: document.getAnimations().length,"
                                     " endless: document.getAnimations().filter( a => !Number.isFinite( a.effect.getComputedTiming().iterations ) ).length } )" )
             assert counts[ "endless" ] == 2, counts
+            running = page.evaluate( "() => document.getAnimations().filter( a => a instanceof CSSTransition && a.playState === 'running' ).length" )
+            assert running == 1, "the 700 ms hover transition must still be running when the script starts, or this test cannot fail"
 
             started = time.monotonic()
             page.evaluate( _SETTLE_TRANSITIONS_JS )
             elapsed = time.monotonic() - started
 
             assert elapsed < CAPTURE_SETTLE_TIMEOUT_MS / 1000 * 0.8, f"waited {elapsed:.2f}s: it sat on the endless animations"
+            assert elapsed > 0.4, f"returned in {elapsed:.2f}s: it did not wait for the 700 ms transition"
+            assert page.evaluate( "() => getComputedStyle( document.querySelector( '.fade' ) ).opacity" ) == "0.2", "the transition had not finished when the script returned"
             states = page.evaluate( "() => document.getAnimations().filter( a => Number.isFinite( a.effect.getComputedTiming().iterations ) ).map( a => a.playState )" )
             assert states == [] or set( states ) == { "finished" }, states
+        finally:
+            browser.close()
+
+
+def test_the_settle_script_stops_waiting_at_the_timeout_on_a_finite_animation_that_outlasts_it():
+    """
+    Run the settle script in Chromium on a page whose only finishable animation lasts 30 s.
+
+    Ensures:
+        - the animation is still running when the script starts
+        - the script returns at the timeout, no sooner and not much later
+    """
+    import time
+    from playwright.sync_api import sync_playwright
+
+    cap = CAPTURE_SETTLE_TIMEOUT_MS / 1000
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        try:
+            page = browser.new_page()
+            page.set_content( _ENDLESS_PAGE.replace( 'class="once"', 'class="long"' ) )
+            assert page.evaluate( "() => document.querySelector( '.long' ).getAnimations()[ 0 ].playState" ) == "running"
+
+            started = time.monotonic()
+            page.evaluate( _SETTLE_TRANSITIONS_JS )
+            elapsed = time.monotonic() - started
+
+            assert cap * 0.9 <= elapsed < cap * 1.8, f"returned after {elapsed:.2f}s, the cap is {cap:.1f}s"
         finally:
             browser.close()
 
