@@ -6,7 +6,7 @@
 // The legacy client carries its own independent copy (static/js/cron-jobs.js); the two share no
 // runtime code, by Rick's no-shared-code ruling (row 87812328).
 
-import { ApiError } from "../api/ApiClient";
+import { ApiError, apiErrorDetail } from "../api/ApiClient";
 
 /** The list door, and the root of each job's flip door. */
 export const CRON_JOBS_PATH   = "/api/cron-jobs";
@@ -81,12 +81,7 @@ export function cronChangedText( row: CronJobRow ): string {
 
 /** The `detail` sentence of a refusal body, or null. */
 export function refusalDetail( err: ApiError ): string | null {
-  const start = err.message.indexOf( "{" );
-  if ( start < 0 ) return null;
-  try {
-    const body = JSON.parse( err.message.slice( start ) ) as { detail?: unknown };
-    return typeof body.detail === "string" && body.detail !== "" ? body.detail : null;
-  } catch { return null; }
+  return apiErrorDetail( err.message.slice( Math.max( err.message.indexOf( "{" ), 0 ) ), null );
 }
 
 /**

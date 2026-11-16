@@ -17,6 +17,7 @@
 // `store_fleet_size_cap_changed`, so a save never rebuilds the table.
 
 import type { EventBus } from "../shared/EventBus";
+import { apiErrorDetail } from "../api/ApiClient";
 import { resolveRuntimeDefaults } from "./polling";
 import type { StoreFleetSizeCapChangedPayload, StoreFleetStatusChangedPayload } from "../shared/types";
 import type { FleetComposite } from "../render/fleetModel";
@@ -355,14 +356,7 @@ class FleetStatusStoreImpl implements FleetStatusStore {
  */
 function serverDetail( err: unknown, status: number ): string {
   const message = ( err as { message?: string } ).message ?? "";
-  const text    = message.slice( message.indexOf( ": " ) + 2 );
-  try {
-    const body = JSON.parse( text ) as { detail?: unknown };
-    if ( typeof body.detail === "string" ) return body.detail;
-  } catch {
-    /* a non-JSON error body keeps the status line */
-  }
-  return `HTTP ${status}`;
+  return apiErrorDetail( message.slice( message.indexOf( ": " ) + 2 ), `HTTP ${status}` );
 }
 
 /** Build the store. It fetches nothing when it is built. */

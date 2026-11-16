@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   createApiClient,
   ApiError,
+  apiErrorDetail,
 } from "../../../lupin_app/static/js/multiplexer/api/ApiClient";
 import type { AuthManager } from "../../../lupin_app/static/js/multiplexer/auth/AuthManager";
 import type { Token } from "../../../lupin_app/static/js/multiplexer/shared/types";
@@ -498,3 +499,14 @@ test("B-2 J14: omitting headers leaves the request exactly as it was", async () 
     ["Authorization", "Content-Type"],
   );
 });
+
+test( "apiErrorDetail returns a non-empty string detail and the caller's fallback otherwise", () => {
+  assert.equal( apiErrorDetail( '{"detail":"too big"}', null ), "too big" );
+  assert.equal( apiErrorDetail( '{"detail":""}', "fb" ), "fb", "an empty detail is no detail" );
+  assert.equal( apiErrorDetail( '{"other":1}', "fb" ), "fb", "no detail key" );
+  assert.equal( apiErrorDetail( "null", "fb" ), "fb", "a JSON null body" );
+  assert.equal( apiErrorDetail( "<html>", 7 ), 7, "not JSON; the fallback keeps its own type" );
+  assert.equal( apiErrorDetail( '{"detail":[1]}', "fb" ), "fb", "a non-string detail is dropped by default" );
+  assert.equal( apiErrorDetail( '{"detail":[1]}', "fb", true ), "[1]", "or stringified on request" );
+  assert.equal( apiErrorDetail( '{"other":1}', "fb", true ), "fb", "stringify never invents a detail" );
+} );

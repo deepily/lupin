@@ -25,6 +25,7 @@
 // refreshes ONCE, after every row has been attempted.
 
 import type { EventBus } from "../shared/EventBus";
+import { apiErrorDetail } from "../api/ApiClient";
 import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "../render/taskListModel";
@@ -121,15 +122,7 @@ export function holdingRefusalMessage( err: unknown ): string {
   const prefix = `HTTP ${ e.status } ${ typeof e.url === "string" ? e.url : "" }: `;
   const body   = text.startsWith( prefix ) ? text.slice( prefix.length ) : text;
 
-  try {
-    const parsed = JSON.parse( body ) as { detail?: unknown };
-    const detail = parsed?.detail;
-    if ( typeof detail === "string" ) return detail;
-    if ( detail !== undefined )       return JSON.stringify( detail );
-  } catch {
-    /* non-JSON error body — the status alone is the message, as in the legacy card */
-  }
-  return String( e.status );
+  return apiErrorDetail( body, String( e.status ), true );
 }
 
 /** The server path that lists the tasks in the holding area. */
