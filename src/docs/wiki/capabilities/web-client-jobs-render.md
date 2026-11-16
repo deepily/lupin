@@ -5,12 +5,12 @@ pins:
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.el@b8269a10a4
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.runNowBlock@3c0553f301
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.itemId@e66f8d44b3
-  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.abstractIndicator@86a94fe1dc
+  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.abstractIndicator@92ff3bb3fd
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.switchCells@c92d6c920c
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.lineTwo@21ea9c9387
-  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.targetLine@293182098a
+  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.targetLine@d37c501af9
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.lineThree@723a69985f
-  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.renderJob@d24a637d07
+  - src.lupin_app.static.js.multiplexer.jobs.jobsRender.renderJob@43957ed8e6
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.arrow@cd1868139e
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.headerRow@4a4e543a3f
   - src.lupin_app.static.js.multiplexer.jobs.jobsRender.renderAccordion@0d959d4ea1
