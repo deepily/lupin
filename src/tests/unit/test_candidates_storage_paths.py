@@ -287,3 +287,25 @@ def test_main_checkout_of_a_worktree_is_its_parent_checkout():
     main = sp.main_checkout( root )
     assert ( main / ".git" ).exists()
     assert main == sp.main_checkout( main )
+
+
+def test_shortlist_size_reads_the_ini_value():
+    assert sp.shortlist_size( FakeConfig( { "reuse candidate shortlist size": " 96 " } ) ) == 96
+    assert sp.shortlist_size( FakeConfig( { "reuse candidate shortlist size": 7 } ) ) == 7
+
+
+@pytest.mark.parametrize( "values", [ {}, { "reuse candidate shortlist size": "" }, { "reuse candidate shortlist size": "  " } ] )
+def test_shortlist_size_fails_loudly_when_the_key_is_missing( values ):
+    with pytest.raises( CandidateError ) as e: sp.shortlist_size( FakeConfig( values ) )
+    assert e.value.code == STORAGE_KEY_MISSING
+
+
+@pytest.mark.parametrize( "text", [ "0", "-3", "12.5", "many" ] )
+def test_shortlist_size_refuses_a_value_that_is_not_a_whole_number_of_one_or_more( text ):
+    with pytest.raises( CandidateError ) as e: sp.shortlist_size( FakeConfig( { "reuse candidate shortlist size": text } ) )
+    assert e.value.code == sp.SHORTLIST_SIZE_INVALID
+
+
+def test_shortlist_size_builds_the_manager_when_none_is_given( monkeypatch ):
+    monkeypatch.setattr( sp, "build_config", lambda: FakeConfig( { "reuse candidate shortlist size": "128" } ) )
+    assert sp.shortlist_size() == 128

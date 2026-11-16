@@ -414,6 +414,7 @@ def _candidate_stage( top ):
         cache    = storage_paths.candidate_dir( "query_cache", data )
         purposes = storage_paths.candidate_dir( "purpose", data ) / "purpose.jsonl"
         arm      = storage_paths.shortlist_arm( reuse_candidates.DEFAULT_ARM )
+        size     = storage_paths.shortlist_size()
         expand   = storage_paths.need_expansion_enabled()
         head     = storage_paths.need_expansion_protected_head() if expand else None
     except CandidateError as e:
@@ -421,7 +422,7 @@ def _candidate_stage( top ):
     base_url, api_key, _prefix = EmbeddingProvider._resolve_http_target( True )
 
     expander = reuse_expansion.make_expander() if expand else None
-    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, arm=arm,
+    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, K=size, arm=arm,
                                             refresher=make_refresher( top, vector_build.EndpointClient(), os.environ ), expander=expander, protected_head=head )
 
 

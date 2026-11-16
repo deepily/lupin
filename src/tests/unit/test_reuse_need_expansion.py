@@ -134,6 +134,7 @@ def test_the_environment_builds_a_stage_with_no_expander_unless_the_switch_is_on
     monkeypatch.setattr( rt, "data_dir", lambda top: tmp_path )
     monkeypatch.setattr( sp, "candidate_dir", lambda name, data, config=None, environ=None: tmp_path / name )
     monkeypatch.setattr( sp, "shortlist_arm", lambda default, config=None, environ=None: default )
+    monkeypatch.setattr( sp, "shortlist_size", lambda config=None: 96 )
     from cosa.memory.embedding_provider import EmbeddingProvider
     monkeypatch.setattr( EmbeddingProvider, "_resolve_http_target", staticmethod( lambda secure: ( "http://lupin:7999", "k", "" ) ) )
     def never_read( config=None, environ=None ): raise AssertionError( "the protected head is read only when the switch is on" )
@@ -141,6 +142,7 @@ def test_the_environment_builds_a_stage_with_no_expander_unless_the_switch_is_on
     monkeypatch.setattr( sp, "need_expansion_enabled", lambda config=None, environ=None: False )
     off = rt._candidate_stage( tmp_path )
     assert off._expander is None and off._protected_head is None
+    assert off.K == 96, "K comes from the INI reader, not the constructor default of 128"
     monkeypatch.setattr( sp, "need_expansion_enabled", lambda config=None, environ=None: True )
     monkeypatch.setattr( sp, "need_expansion_protected_head", lambda config=None, environ=None: 64 )
     on = rt._candidate_stage( tmp_path )
@@ -151,9 +153,25 @@ def test_a_bad_protected_head_with_the_switch_on_is_a_named_unconfigured_error( 
     monkeypatch.setattr( rt, "data_dir", lambda top: tmp_path )
     monkeypatch.setattr( sp, "candidate_dir", lambda name, data, config=None, environ=None: tmp_path / name )
     monkeypatch.setattr( sp, "shortlist_arm", lambda default, config=None, environ=None: default )
+    monkeypatch.setattr( sp, "shortlist_size", lambda config=None: 96 )
     monkeypatch.setattr( sp, "need_expansion_enabled", lambda config=None, environ=None: True )
     monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_NEED_EXPANSION_PROTECTED_HEAD", "many" )
     with pytest.raises( rt.ReuseError, match="CANDIDATE_STAGE_UNCONFIGURED" ): rt._candidate_stage( tmp_path )
+
+
+def test_a_missing_shortlist_size_stops_the_stage_with_a_named_unconfigured_error( monkeypatch, tmp_path ):
+    monkeypatch.setattr( rt, "data_dir", lambda top: tmp_path )
+    monkeypatch.setattr( sp, "candidate_dir", lambda name, data, config=None, environ=None: tmp_path / name )
+    monkeypatch.setattr( sp, "shortlist_arm", lambda default, config=None, environ=None: default )
+    monkeypatch.setattr( sp, "build_config", lambda: FakeConfig( {} ) )
+    with pytest.raises( rt.ReuseError, match="CANDIDATE_STAGE_UNCONFIGURED.*shortlist size" ): rt._candidate_stage( tmp_path )
+
+
+def test_the_shipped_ini_holds_the_shortlist_size_at_128_and_explains_it():
+    import pathlib, re
+    ini = pathlib.Path( rt.__file__ ).resolve().parents[ 1 ] / "conf" / "lupin-app.ini"
+    assert re.findall( r"^reuse candidate shortlist size\s*=\s*(\S+)\s*$", ini.read_text( encoding="utf-8" ), re.M ) == [ "128" ]
+    assert re.search( r"^reuse candidate shortlist size\s*= How many", ini.with_name( "lupin-app-splainer.ini" ).read_text( encoding="utf-8" ), re.M )
 
 
 # --- the expander -------------------------------------------------------------------------------------------------------------------------

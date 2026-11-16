@@ -28,6 +28,8 @@ TRUE_WORDS               = ( "true", "1", "yes", "on" )
 PROTECTED_HEAD_KEY       = ( "reuse candidate need expansion protected head", "LUPIN_REUSE_CANDIDATE_NEED_EXPANSION_PROTECTED_HEAD" )      # not in the key table: blank or absent means the default
 PROTECTED_HEAD_DEFAULT   = 64
 PROTECTED_HEAD_INVALID   = "PROTECTED_HEAD_INVALID"
+SHORTLIST_SIZE_KEY       = "reuse candidate shortlist size"      # not in the key table: it has no override variable and no default
+SHORTLIST_SIZE_INVALID   = "SHORTLIST_SIZE_INVALID"
 
 
 def build_config():
@@ -267,4 +269,25 @@ def need_expansion_protected_head( config=None, environ=None ):
         text    = "" if value is None else str( value ).strip()
     if not text: return PROTECTED_HEAD_DEFAULT
     if not text.isdigit(): raise CandidateError( PROTECTED_HEAD_INVALID, f"{PROTECTED_HEAD_KEY[ 0 ]} is {text!r}, not a whole number of 0 or more" )
+    return int( text )
+
+
+def shortlist_size( config=None ):
+    """
+    Return K, how many candidates the shortlist search keeps.
+
+    Ensures:
+        - returns the INI key `reuse candidate shortlist size` as an int of 1 or more
+        - there is no override variable and no default: the number is set in one place, the INI file
+
+    Raises:
+        - CandidateError STORAGE_KEY_MISSING when the key is missing or blank
+        - CandidateError SHORTLIST_SIZE_INVALID when the value is not a whole number of 1 or more
+        - CandidateError DEPENDENCY_MISSING when no manager can be built
+    """
+    manager = config if config is not None else build_config()
+    value   = manager.get( SHORTLIST_SIZE_KEY, silent=True )
+    text    = "" if value is None else str( value ).strip()
+    if not text: raise CandidateError( STORAGE_KEY_MISSING, f"the INI key '{SHORTLIST_SIZE_KEY}' is missing or empty" )
+    if not text.isdigit() or int( text ) < 1: raise CandidateError( SHORTLIST_SIZE_INVALID, f"{SHORTLIST_SIZE_KEY} is {text!r}, not a whole number of 1 or more" )
     return int( text )
