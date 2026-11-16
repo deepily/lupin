@@ -333,6 +333,17 @@ if [ -n "$HALF" ]; then
         echo -e "${RED}[ERROR] Partition manifest lists no tests: $PARTITION_FILE${NC}"
         exit 2
     fi
+    # A test path in the caller's args narrows the half to those files, or is refused
+    # (exit 2, path named). It used to be appended to the half's list and ran the whole half.
+    source "$PROJECT_ROOT/src/scripts/lib/narrow-half-selection.sh"
+    set +e
+    NARROW_MSG=$( narrow_half_selection "$PROJECT_ROOT" 2>&1 )
+    NARROW_RC=$?
+    if [ "$NARROW_RC" -ne 0 ]; then
+        echo -e "${RED}${NARROW_MSG}${NC}"
+        exit 2
+    fi
+    narrow_half_selection "$PROJECT_ROOT"
     echo "Half $HALF: ${#SELECTED_TESTS[@]} test files from $PARTITION_FILE"
     echo ""
 else
