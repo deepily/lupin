@@ -4,7 +4,7 @@ status: built; used by check_exists on the packed live path
 plan: src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.14-reuse-lookup-candidate-stage-plan.md
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.repo.symindex.candidates.storage_paths.shortlist_size@870dc22378
+  - cosa.repo.symindex.candidates.storage_paths.shortlist_size@4587ee8530
 ---
 # Candidate stage
 

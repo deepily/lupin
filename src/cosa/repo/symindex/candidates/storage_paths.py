@@ -7,6 +7,7 @@ No path is written in code, and a missing key is a named error, never a default.
 import os
 import pathlib
 
+from cosa.repo import code_health_settings as chs
 from cosa.repo.symindex.candidates.errors import CandidateError, STORAGE_KEY_MISSING, DEPENDENCY_MISSING
 
 CONFIG_ENV_VAR = "LUPIN_CONFIG_MGR_CLI_ARGS"
@@ -286,8 +287,6 @@ def shortlist_size( config=None ):
         - CandidateError DEPENDENCY_MISSING when no manager can be built
     """
     manager = config if config is not None else build_config()
-    value   = manager.get( SHORTLIST_SIZE_KEY, silent=True )
-    text    = "" if value is None else str( value ).strip()
-    if not text: raise CandidateError( STORAGE_KEY_MISSING, f"the INI key '{SHORTLIST_SIZE_KEY}' is missing or empty" )
-    if not text.isdigit() or int( text ) < 1: raise CandidateError( SHORTLIST_SIZE_INVALID, f"{SHORTLIST_SIZE_KEY} is {text!r}, not a whole number of 1 or more" )
-    return int( text )
+    if not chs.read_text( manager, SHORTLIST_SIZE_KEY ): raise CandidateError( STORAGE_KEY_MISSING, f"the INI key '{SHORTLIST_SIZE_KEY}' is missing or empty" )
+    try: return chs.read_positive_int( manager, SHORTLIST_SIZE_KEY )
+    except chs.CodeHealthSettingError as e: raise CandidateError( SHORTLIST_SIZE_INVALID, str( e ) ) from e
