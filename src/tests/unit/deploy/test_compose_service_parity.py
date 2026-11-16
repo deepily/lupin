@@ -325,7 +325,7 @@ KNOWN_DIVERGENT_ENV = {
         "dev-dev"   : "2026-11-14 — only :8000 gets a test-only copy of the configuration file for the "
                       "scheduled-job switches; :7999 keeps the real src/conf/lupin-app.ini, which every "
                       "cron job reads at its next start (row 063fc1a8).",
-        "cloud-gpu" : "2026-11-14 — no test server on the VM.",
+        "cloud-gpu" : "2026-11-16 — the VM overlay sets it too (row 8d67e474); guarded by test_vm_test_server_overlay.py.",
     },
     "LUPIN_HEARTBEAT_POKE_MUTE_FILE": {
         "dev-dev"   : "2026-10-02 — only :8000 gets a test-only poke switch file; :7999 keeps the "

@@ -175,6 +175,8 @@ services:
       LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
       LUPIN_HEARTBEAT_POKE_MUTE_FILE: /var/lupin/flow-ratio/heartbeat-poke-mute.test.json
       LUPIN_SKELETON_CREW_INI: /var/lupin/flow-ratio/skeleton-crew.test.ini
+      # Test-only scheduled-job switch file (row 8d67e474): e2e_a's cron-jobs test refuses at setup without it.
+      LUPIN_CRON_SWITCH_INI: /var/lupin/flow-ratio/cron-switches.test.ini
       GIT_CONFIG_COUNT: "2"
       GIT_CONFIG_KEY_0: safe.directory
       GIT_CONFIG_VALUE_0: /var/external-projects/lupin

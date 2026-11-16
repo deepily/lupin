@@ -377,3 +377,34 @@ def test_seed_companions_check_only_counts_and_never_names_the_test_database( vm
 def test_seed_companions_refuses_any_other_argument( vm ):
     bad, _ = vm( SCRIPT, "test-server", "seed-companions", "--force" )
     assert bad.returncode != 0 and "takes --check or nothing" in bad.stderr
+
+
+# ---------------------------------------------------------------- row 8d67e474: dev test env vs overlay env
+
+# Keys the dev host's lupin-rest-test sets that the VM overlay deliberately leaves out, each with its reason.
+OVERLAY_ENV_EXEMPT = {
+    "LUPIN_DEV_EMAIL"                        : "2026-11-16 — a dev-host owner address; the VM test server has no dev-only settings.",
+    "LUPIN_DM_CORPUS_DIR"                    : "2026-11-16 — the dev and test servers share one corpus folder on the dev host; the VM has none.",
+    "LUPIN_MODEL_SERVER_API_KEY_FILE"        : "2026-11-16 — the overlay names the Cloud Run key through LUPIN_MODEL_SERVER_API_KEY_NAME instead.",
+    "LUPIN_REUSE_REVIEW_DATA_ROOT"           : "2026-11-16 — a dev-host path the VM does not mount.",
+    "LUPIN_SERVER_COVERAGE"                  : "2026-11-16 — optional coverage switch, empty by default; not used on the VM.",
+    "LUPIN_TEST_ADMIN_EMAIL"                 : "2026-11-16 — optional admin sign-in for smoke helpers, empty by default.",
+    "LUPIN_TEST_ADMIN_PASSWORD"              : "2026-11-16 — optional, empty by default, like the admin email above it.",
+    "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL"    : "2026-11-16 — the overlay carries the tester login by its own route (see its comment).",
+    "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" : "2026-11-16 — carried by the overlay's own route, like the tester email above it.",
+}
+
+
+def _env_key_set( env ):
+    return set( env ) if isinstance( env, dict ) else { entry.split( "=" )[ 0 ] for entry in env }
+
+
+def test_every_lupin_key_the_dev_test_service_sets_is_set_by_the_overlay_or_exempt_with_a_reason( overlay ):
+    dev     = yaml.safe_load( ( ROOT / "docker-compose.yml" ).read_text() )[ "services" ][ "lupin-rest-test" ][ "environment" ]
+    dev_set = { k for k in _env_key_set( dev ) if k.startswith( "LUPIN_" ) }
+    assert "LUPIN_CRON_SWITCH_INI" in dev_set and len( dev_set ) > 10   # the loop below has something to walk
+    vm_set  = _env_key_set( overlay[ "services" ][ "lupin-rest-test" ][ "environment" ] )
+    missing = sorted( dev_set - vm_set - set( OVERLAY_ENV_EXEMPT ) )
+    assert missing == [], f"set on the dev lupin-rest-test, absent from the VM overlay, not exempt: {missing}"
+    stale = sorted( k for k in OVERLAY_ENV_EXEMPT if k in vm_set or k not in dev_set )
+    assert stale == [], f"exempt but now set by the overlay, or no longer on the dev service: {stale}"
