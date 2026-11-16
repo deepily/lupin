@@ -163,12 +163,13 @@ def lists_for( stage, entries, index_sha, pages ):
 
     Ensures:
         - the returned function takes a text and returns { source: ranked ids } with every list whole
+        - the lists come from stage.last_answer, which holds every id; the answer the stage's shortlist returns is cut to twenty by planted_pool, which would hide any rank past twenty from the fusion depth
         - the query vector comes from the stage's cache folder or from its embedding client, and a miss embeds it
     """
     def lists( query ):
         """Ensures: returns the whole ranked list of each source for the query."""
-        got = stage.shortlist( query, entries, index_sha, pages, K=ex.SHORTLIST )
-        return { name: v[ "head" ] for name, v in got[ "lists" ].items() }
+        stage.shortlist( query, entries, index_sha, pages, K=ex.SHORTLIST )
+        return { name: list( ids ) for name, ids in stage.last_answer[ "lists" ].items() }
     return lists
 
 

@@ -112,12 +112,15 @@ def test_full_stage_holds_a_full_resident_over_the_base_vectors( tmp_path ):
 
 
 def test_lists_for_returns_the_whole_ranked_list_of_each_source():
+    whole = [ f"id{n:02d}" for n in range( 30 ) ]
     class Stage:
         def shortlist( self, query, entries, index_sha, pages, K=None ):
             self.args = ( query, entries, index_sha, pages, K )
-            return { "lists": { "code": { "size": 3, "head": [ "a", "b", "c" ] }, "vector_concat": { "size": 2, "head": [ "c", "a" ] } } }
+            self.last_answer = { "lists": { "code": whole, "vector_concat": [ "c", "a" ] } }
+            return { "lists": { "code": { "size": 30, "head": whole[ :resident.LIST_HEAD ] }, "vector_concat": { "size": 2, "head": [ "c", "a" ] } } }
     stage = Stage()
-    assert xr.lists_for( stage, "E", "sha", "P" )( "a query" ) == { "code": [ "a", "b", "c" ], "vector_concat": [ "c", "a" ] }
+    got   = xr.lists_for( stage, "E", "sha", "P" )( "a query" )
+    assert got == { "code": whole, "vector_concat": [ "c", "a" ] } and len( got[ "code" ] ) == 30 > resident.LIST_HEAD
     assert stage.args == ( "a query", "E", "sha", "P", ex.SHORTLIST )
 
 
