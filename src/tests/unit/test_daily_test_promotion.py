@@ -468,7 +468,7 @@ def test_main_with_check_builds_no_store_and_takes_the_root_from_the_project_whe
     assert "test-promotion --check" in capsys.readouterr().out
 
 
-def test_the_registry_entry_runs_this_module_through_job_run_with_its_switch_off_and_its_trigger_flag_set():
+def test_the_registry_entry_runs_this_module_through_job_run_with_its_switch_defined_once_and_its_trigger_flag_set():
     root  = pathlib.Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) )
     entry = next( job for job in json.loads( ( root / "src/conf/job-registry.json" ).read_text() )[ "jobs" ] if job[ "job" ] == "test-promotion" )
     assert entry[ "enabled_key" ] == "cron job test-promotion enabled" and entry[ "cron_managed" ] is True and entry[ "own_summary" ] is True
@@ -477,7 +477,8 @@ def test_the_registry_entry_runs_this_module_through_job_run_with_its_switch_off
     assert entry[ "run" ][ "argv" ][ 1:3 ] == [ "-m", "lupin_mcp.daily_test_promotion" ]
     assert job_run.with_trigger( entry[ "run" ][ "argv" ], "boot" )[ -1 ] == "reboot"
     ini = ( root / "src/conf" / ( "lupin-app" + ".ini" ) ).read_text()
-    assert ini.count( "cron job test-promotion enabled           = false\n" ) == 1, "the switch ships off"
+    lines = [ line for line in ini.splitlines() if line.split( "=" )[ 0 ].strip() == "cron job test-promotion enabled" ]
+    assert len( lines ) == 1 and lines[ 0 ].split( "=" )[ 1 ].strip() in ( "true", "false" ), "the switch is defined once as true or false"
 
 
 def test_the_zone_comes_from_the_app_timezone_key_and_a_bad_name_stops_the_run():

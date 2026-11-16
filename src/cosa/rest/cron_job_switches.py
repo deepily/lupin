@@ -192,7 +192,7 @@ def build_row( entry: Dict[ str, Any ], attribution: Dict[ str, Any ] ) -> Dict[
         "job"             : job,
         "title"           : entry[ "title" ],
         "description"     : entry[ "description" ],
-        "schedule"      : "; ".join( entry_label( e ) for e in entry.get( "schedule", [] ) ) or "not scheduled",
+        "schedule"        : "; ".join( entry_label( e ) for e in entry.get( "schedule", [] ) ) or "not scheduled",
         "key"             : switch_key( job ),
         "enabled"         : enabled,
         "honoured"        : is_honoured( entry ),
