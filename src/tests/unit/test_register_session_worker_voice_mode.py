@@ -16,7 +16,7 @@ import pytest
 HOOK_MODULE = "lupin_cli.claude_code.hooks.register_session"
 
 
-def _drive( monkeypatch, tmp_path, *, persona, chain, role, voice_word, chorus ):
+def _drive( monkeypatch, tmp_path, *, persona, chain, role, voice_word, chorus, flip_to=None ):
     home = tmp_path / "home"
     seam = tmp_path / "seam"
     ( home / ".claude" / "sessions" ).mkdir( parents=True )
@@ -50,11 +50,22 @@ def _drive( monkeypatch, tmp_path, *, persona, chain, role, voice_word, chorus )
     monkeypatch.setattr( module, "_spawn_listener", lambda *a, **k: None )
     monkeypatch.setattr( module, "_allocate_voice_persona_via_http",
                          lambda *a, **k: ( { "name": persona }, None ) )
-    with redirect_stderr( io.StringIO() ):
-        try: module.main()
-        except SystemExit: pass
+    def _run():
+        with redirect_stderr( io.StringIO() ):
+            try: module.main()
+            except SystemExit: pass
+    _run()
     bridges = list( seam.glob( "cc-*.json" ) )
     assert len( bridges ) == 1
+    if flip_to is not None:
+        # Row 4d811743: Rick flips the voice mode mid-session, then the context resets (a second
+        # SessionStart for the same session reads the flipped bridge as old_data).
+        flipped = json.loads( bridges[ 0 ].read_text() )
+        flipped[ "speakerphone_on" ] = flip_to
+        bridges[ 0 ].write_text( json.dumps( flipped ) )
+        _run()
+        bridges = list( seam.glob( "cc-*.json" ) )
+        assert len( bridges ) == 1
     return json.loads( bridges[ 0 ].read_text() )
 
 
@@ -98,3 +109,18 @@ def test_the_real_spawn_env_feeds_the_real_hook( monkeypatch, tmp_path, role, pe
     data = _drive( monkeypatch, tmp_path, persona=persona, chain="Cheech,maria,*", role=env[ "COSA_VOICE_ROLE" ],
                    voice_word=env[ "COSA_VOICE_WORKER_VOICE_MODE" ], chorus=True )
     assert data[ "speakerphone_on" ] is expected
+
+
+@pytest.mark.parametrize( "word,flip", [ ( "quiet", True ), ( "speakerphone", False ) ] )
+def test_a_worker_flip_survives_a_context_reset( monkeypatch, tmp_path, word, flip ):
+    """A flip made after the start mode wins over the word at the next SessionStart."""
+    data = _drive( monkeypatch, tmp_path, persona="Tiffany", chain="Cheech,maria,*",
+                   role="author", voice_word=word, chorus=True, flip_to=flip )
+    assert data[ "speakerphone_on" ] is flip
+
+
+@pytest.mark.parametrize( "chorus,flip", [ ( True, False ), ( False, True ) ] )
+def test_a_spawned_manager_flip_survives_a_context_reset( monkeypatch, tmp_path, chorus, flip ):
+    data = _drive( monkeypatch, tmp_path, persona="maria", chain="Cheech,maria,*",
+                   role="manager", voice_word="inherit", chorus=chorus, flip_to=flip )
+    assert data[ "speakerphone_on" ] is flip

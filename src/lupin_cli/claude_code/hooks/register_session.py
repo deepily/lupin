@@ -2116,7 +2116,8 @@ def main():
         # one is just enable_speakerphone on its session_id. Fully env-gated:
         # zero effect on normal interactive sessions (the block only runs when
         # COSA_VOICE_SPAWNED_BY is present).
-        _spawned_by = os.environ.get( "COSA_VOICE_SPAWNED_BY" )
+        _spawned_by            = os.environ.get( "COSA_VOICE_SPAWNED_BY" )
+        _speakerphone_carried  = False
         if _spawned_by:
             session_data[ "spawned_by" ]      = _spawned_by
             session_data[ "headless" ]        = os.environ.get( "COSA_VOICE_HEADLESS", "" ) == "1"
@@ -2128,6 +2129,11 @@ def main():
             from lupin_cli.claude_code.hooks.lib.session_bridge import _get_default_speakerphone
             session_data[ "speakerphone_on" ] = _wvm.speakerphone_for_mode(
                 os.environ.get( _wvm.ENV_VAR ), _get_default_speakerphone )
+            # Row 4d811743: a flip made mid-session survives /clear. The default above is only the
+            # starting mode; a prior bridge carrying a real bool is the session's current mode.
+            if old_data and isinstance( old_data.get( "speakerphone_on" ), bool ):
+                session_data[ "speakerphone_on" ] = old_data[ "speakerphone_on" ]
+                _speakerphone_carried             = True
             # Owner-lineage drift fix (2026-06-22): freeze the manager's persona-at-
             # spawn onto this worker's bridge so the arbiter resolves the TRUE
             # spawning manager for a finished/dead worker WITHOUT re-deriving the
@@ -2400,7 +2406,7 @@ def main():
             # Amendment 2 (Tiberius, row 92076977): a spawned session whose allocated persona is a
             # standing manager is a manager whatever role it was spawned with (Cheech was measured
             # as role "author"), so it gets the mode-aware default, not the worker's quiet start.
-            if _mf_implicit and session_data.get( "spawned_by" ):
+            if _mf_implicit and session_data.get( "spawned_by" ) and not _speakerphone_carried:
                 from lupin_cli.claude_code.hooks.lib.session_bridge import (
                     _get_default_speakerphone as _inherit_fn, set_speakerphone )
                 _mf_on = bool( _inherit_fn() )
