@@ -84,6 +84,12 @@ MISSING_BRANCH    = "missing_branch"
 BRANCH_CHANGED    = "branch_changed"      # the recorded progress belongs to another branch than the one chosen now
 COMMIT_NOT_ON_BRANCH = "commit_not_on_branch"
 CONTINUITY        = ( BRANCH_CHANGED, COMMIT_NOT_ON_BRANCH )
+CARRY_NO_RECORD   = "no_record"                  # a carry found neither last-success.json nor baseline.json to move
+CARRY_UNKNOWN     = "unknown_recorded_commit"    # the recorded commit is not in this checkout, so its tree cannot be compared
+CARRY_TREE        = "tree_differs"               # the recorded commit's tree is not the target commit's tree
+CARRY_LINEAGE     = "baseline_off_lineage"       # the baseline's end commit is not an ancestor of the commit last judged
+CARRY_TARGET      = "target_not_on_branch"       # the target commit is not an ancestor of the branch tip, so the next run's continuity guard would refuse it
+CARRY_RUNNING     = "run_in_flight"              # another run holds the run lock
 STAGE_GUARD       = "branch_guard"
 STAGE_BASELINE    = "baseline"        # the stage named in a result file when the baseline part of an hourly slot raised after the daily part had finished
 STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
@@ -591,6 +597,72 @@ def continuity_guard( root, branch, previous, commit ):
     return None
 
 
+def carry_refusal( reason, **detail ):
+    """Ensures: returns { carried: False, refusal: reason } with the detail keys beside it."""
+    return { "carried": False, "refusal": reason, **detail }
+
+
+def carry_progress( root, folder, branch, commit, now, allow_tree_change=False ):
+    """
+    Move the recorded progress to another branch and commit, as after a squash merge.
+
+    Requires:
+        - branch names a branch of the checkout at root, and commit a commit on it
+        - now is a timezone-aware datetime
+        - the caller holds the run lock, so no run is writing the two files
+
+    Ensures:
+        - returns { carried: False, refusal } and writes nothing when there is no last-success.json and no baseline.json (no_record)
+        - the same when the target commit is not an ancestor of the branch tip (target_not_on_branch), or the commit last judged, or the baseline's end commit when there is no last judgment, is not in this checkout (unknown_recorded_commit): no flag overrides these three
+        - the same when that recorded commit's tree differs from the target commit's tree (tree_differs), unless allow_tree_change; a squash merge leaves the tree as it was, so equal trees mean nothing has gone unjudged
+        - the same when both files exist and the baseline's end commit is not an ancestor of, or equal to, the commit last judged (baseline_off_lineage), unless allow_tree_change; the baseline's coverage then does not lie under the daily frontier
+        - otherwise last-success.json holds { commit: the target's full sha, at, branch, carried_from }, baseline.json keeps its status, end and left_to_judge and takes the new branch and carried_from, and the result is { carried: True, branch, commit, carried_from, overridden }
+        - carried_from is { branch, commit } of the record that was moved, so the move can be read afterwards
+        - a refusal changes neither file
+    """
+    last, held = read_last_success( folder ), read_baseline( folder )
+    if last is None and held is None: return carry_refusal( CARRY_NO_RECORD )
+    try: target = git( root, "rev-parse", f"{commit}^{{commit}}" )
+    except RuntimeError: return carry_refusal( CARRY_TARGET, commit=commit, branch=branch )
+    try: git( root, "merge-base", "--is-ancestor", target, branch )
+    except RuntimeError: return carry_refusal( CARRY_TARGET, commit=target, branch=branch )
+    frontier = last[ "commit" ] if last is not None else held[ "end" ]
+    try: seen = git( root, "rev-parse", f"{frontier}^{{tree}}" )
+    except RuntimeError: return carry_refusal( CARRY_UNKNOWN, commit=frontier )
+    wanted     = git( root, "rev-parse", f"{target}^{{tree}}" )
+    overridden = []
+    if seen != wanted:
+        if not allow_tree_change: return carry_refusal( CARRY_TREE, recorded=frontier, target=target )
+        overridden.append( CARRY_TREE )
+    if last is not None and held is not None:
+        try: git( root, "merge-base", "--is-ancestor", held[ "end" ], last[ "commit" ] )
+        except RuntimeError:
+            if not allow_tree_change: return carry_refusal( CARRY_LINEAGE, baseline_end=held[ "end" ], judged=last[ "commit" ] )
+            overridden.append( CARRY_LINEAGE )
+    origin = { "branch": ( last or held ).get( "branch" ), "commit": frontier }
+    if last is not None: write_json( pathlib.Path( folder ) / LAST_SUCCESS, { "commit": target, "at": now.isoformat(), "branch": branch, "carried_from": origin } )
+    if held is not None: write_json( pathlib.Path( folder ) / BASELINE, { **held, "branch": branch, "carried_from": origin } )
+    return { "carried": True, "branch": branch, "commit": target, "carried_from": origin, "overridden": overridden }
+
+
+def carry_mode( root, parts, branch, commit, now, allow_tree_change, out ):
+    """
+    Run the carry command: take the run lock, move the progress, print the answer.
+
+    Requires:
+        - parts is the run's parts, holding data_dir
+
+    Ensures:
+        - prints the answer as JSON, and returns 0 when the progress moved, else REFUSED_EXIT
+        - answers { carried: False, refusal: run_in_flight } and writes nothing when another run holds the run lock
+    """
+    folder = pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER )
+    with run_lock( parts[ "data_dir" ] ) as held:
+        doc = carry_progress( root, folder, branch, commit, now, allow_tree_change ) if held else carry_refusal( CARRY_RUNNING )
+    out( json.dumps( doc, indent=2, sort_keys=True ) )
+    return 0 if doc[ "carried" ] else REFUSED_EXIT
+
+
 def limit_flag( cap, ceiling ):
     """Ensures: returns --ceiling and its number when a ceiling is given, else --cap and the cap."""
     return f"--ceiling {ceiling}" if ceiling is not None else f"--cap {cap}"
@@ -640,7 +712,7 @@ def refusal_message( refusal, command ):
     if refusal[ "refusal" ] in CONTINUITY:
         what = f"it last judged `{refusal['previous']}` and now chooses `{name}`" if refusal[ "refusal" ] == BRANCH_CHANGED else f"its last judged commit is not on `{name}`"
         return ( f"The duplicate check refused to run: {what.replace('`', '')}.",
-                 f"Progress is recorded per branch, and {what}.\n\nTo keep going on the old branch, set `--branch {refusal['previous']}` on the duplicate-check entry in src/conf/job-registry.json. To start `{name}` fresh, delete last-success.json and baseline.json in the check's folder." )
+                 f"Progress is recorded per branch, and {what}.\n\nTo keep going on the old branch, set `--branch {refusal['previous']}` on the duplicate-check entry in src/conf/job-registry.json. To carry the recorded progress to `{name}` when the content is unchanged, as after a squash merge, run `python -m lupin_mcp.duplicate_check_daily --carry-progress --branch {name} --to-commit <commit>`; it refuses unless that commit's tree equals the last judged commit's tree. To start `{name}` fresh instead, delete last-success.json and baseline.json in the check's folder." )
     if refusal[ "refusal" ] == STALE_BRANCH: spoken, why = f"The daily duplicate check refused to run: its branch {name} has been idle {refusal[ 'idle_days' ]} days.", f"Pinned branch `{name}` has not moved in {refusal[ 'idle_days' ]} days and `{refusal[ 'newest' ]}` has a newer commit ({refusal[ 'newest_at' ]})."
     else:                                      spoken, why = f"The daily duplicate check refused to run: its branch {name} no longer exists.", f"Pinned branch `{name}` does not resolve to a commit."
     fix = f"Move the check to the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
@@ -1128,7 +1200,9 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
         - --branch auto judges the newest local wip-* branch
         - argv also holds --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch, --parallel, --baseline ( judge every definition of the tree ), --rise-limit ( default RISE_LIMIT ) and, with the cron modes, --with-baseline ( add the baseline line )
         - one of --print-install, --install, --uninstall or --status, with --python, works on the cron lines instead of running
+        - --carry-progress with --branch and --to-commit ( and optionally --allow-tree-change ) moves the recorded progress to that branch and commit instead of running; it takes no limit and no Claude Code binary
     Ensures:
+        - with --carry-progress prints carry_progress's answer as JSON and returns 0 when the progress moved, else REFUSED_EXIT; it makes no model call
         - prints the result document as JSON (a list of them, daily first, with --adaptive) and returns 0, REFUSED_EXIT (3) when the branch guard refused, or 1 when anything else failed
         - the cron modes never run the check
         - after a run the job summary is rewritten beside the ledger, with the count of store rows that carry the job's mark
@@ -1148,17 +1222,25 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     ap.add_argument( "--branch", default=BRANCH )
     ap.add_argument( "--parallel", type=int, default=proof_cli.DEFAULT_PARALLEL )
     ap.add_argument( "--python", default=sys.executable )
+    ap.add_argument( "--carry-progress", action="store_true" )
+    ap.add_argument( "--to-commit", default=None )
+    ap.add_argument( "--allow-tree-change", action="store_true" )
     mode = ap.add_mutually_exclusive_group()
     for flag in ( "--install", "--uninstall", "--status", "--print-install" ): mode.add_argument( flag, action="store_true" )
     args = ap.parse_args( argv )
     cron = args.install or args.uninstall or args.status or args.print_install
-    if not ( args.uninstall or args.status ):
+    if args.carry_progress and ( cron or args.adaptive or args.baseline or args.to_commit is None ): ap.error( "--carry-progress needs --to-commit and cannot be combined with a cron mode, --adaptive or --baseline" )
+    if ( args.to_commit is not None or args.allow_tree_change ) and not args.carry_progress: ap.error( "--to-commit and --allow-tree-change belong to --carry-progress" )
+    if not ( args.uninstall or args.status or args.carry_progress ):
         try: args.ceiling = resolve_ceiling( args.ceiling, args.cap, config )
         except chs.CodeHealthSettingError as error: ap.error( str( error ) )
     if args.adaptive and ( args.ceiling is None or args.baseline ) and not ( args.uninstall or args.status ): ap.error( "--adaptive needs --ceiling and cannot be combined with --baseline: the slot drains the baseline itself" )
     if cron: return install_mode( args, os.environ if environ is None else environ, now or datetime.datetime.now(), out, err or ( lambda line: print( line, file=sys.stderr ) ), crontab_cmd )
-    model_transport.configure( args.claude_cli_path )
     root = args.root or git( ".", "rev-parse", "--show-toplevel" )
+    if args.carry_progress:
+        with contextlib.redirect_stdout( sys.stderr ): parts = parts or live_parts()
+        return carry_mode( root, parts, resolve_branch( root, args.branch ), args.to_commit, now or datetime.datetime.now().astimezone(), args.allow_tree_change, out )
+    model_transport.configure( args.claude_cli_path )
     with contextlib.redirect_stdout( sys.stderr ):
         parts = parts or live_parts()
         with run_lock( parts[ "data_dir" ] ) as held:
