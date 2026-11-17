@@ -128,7 +128,8 @@ def seat_memento_slot( repo_root, persona_name ):
           completeness bytes nor — reliably — a line-1 header).
         - the slug is accent/punctuation/case-proof via persona_slug
     """
-    return Path( repo_root ) / "io" / "mementos" / f"{persona_slug( persona_name )}.md"
+    from lupin_mcp.memento_slot import SLOT_IO, slot_pointer_path    # local: memento_slot imports this module at load time
+    return slot_pointer_path( repo_root, persona_name, SLOT_IO )
 
 
 def seat_memento_root_record( repo_root, persona_name, seat_sid8 ):
@@ -829,7 +830,7 @@ def recheck_losing_seats(
 
 
 # ── Identity helpers ──────────────────────────────────────────────────────────
-def _identity_bits( ident ):
+def identity_bits( ident ):
     """
     Ensures:
         - returns ( persona_name, session_id ) from a `_capture_reap_identity` dict
@@ -1005,7 +1006,7 @@ def coordinate_mementos(
     now     = now_fn()
     pending : Dict[ str, Dict[ str, Any ] ] = {}
     for name, ident in identities.items():
-        persona_name, session_id = _identity_bits( ident )
+        persona_name, session_id = identity_bits( ident )
         if not persona_name or not session_id:
             outcomes[ name ] = { "status": "skipped",
                                  "reason": "no persona/session in bridge identity — cannot derive memento slot",

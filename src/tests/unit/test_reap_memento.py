@@ -267,22 +267,22 @@ def test_verify_true_case_folds_session_id():
     assert ok is True and "verified" in reason
 
 
-# ── _identity_bits ────────────────────────────────────────────────────────────
+# ── identity_bits ────────────────────────────────────────────────────────────
 def test_identity_bits_none():
-    assert reap_memento._identity_bits( None ) == ( None, None )
+    assert reap_memento.identity_bits( None ) == ( None, None )
 
 
 def test_identity_bits_persona_dict():
-    assert reap_memento._identity_bits( { "persona": { "name": "Rio" }, "session_id": "s1" } ) == ( "Rio", "s1" )
+    assert reap_memento.identity_bits( { "persona": { "name": "Rio" }, "session_id": "s1" } ) == ( "Rio", "s1" )
 
 
 def test_identity_bits_persona_bare_string():
-    assert reap_memento._identity_bits( { "persona": "Rio", "session_id": "s1" } ) == ( "Rio", "s1" )
+    assert reap_memento.identity_bits( { "persona": "Rio", "session_id": "s1" } ) == ( "Rio", "s1" )
 
 
 def test_identity_bits_persona_wrong_type_or_missing():
-    assert reap_memento._identity_bits( { "persona": 123, "session_id": "s1" } ) == ( None, "s1" )
-    assert reap_memento._identity_bits( { "session_id": "s1" } )                  == ( None, "s1" )
+    assert reap_memento.identity_bits( { "persona": 123, "session_id": "s1" } ) == ( None, "s1" )
+    assert reap_memento.identity_bits( { "session_id": "s1" } )                  == ( None, "s1" )
 
 
 # ── _default_read_text (the live file seam) ───────────────────────────────────
