@@ -8,7 +8,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.stores.EpicStoriesStore.EpicStoriesStoreImpl@467c93d4c6
   - src.lupin_app.static.js.multiplexer.stores.EpicStoriesStore.createEpicStoriesStore@2b0e5c47d8
   - src.lupin_app.static.js.multiplexer.stores.FleetStatusStore.FleetStatusStoreImpl@db8122026e
-  - src.lupin_app.static.js.multiplexer.stores.FleetStatusStore.serverDetail@f18b0dc420
+  - src.lupin_app.static.js.multiplexer.stores.FleetStatusStore.serverDetail@73fe596db2
   - src.lupin_app.static.js.multiplexer.stores.FleetStatusStore.createFleetStatusStore@8832254f92
   - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.statusOf@7bef36254f
   - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.refusalText@14d4588c8e
@@ -27,6 +27,6 @@ The stores for fleet status, the flow ratio, submitted jobs, commons entries and
 ## What it does
 - `CommonsStore.ts`. `defaultFilter`: Returns the default commons filter with no direction or persona and all kinds. `CommonsStoreImpl`: Holds cached commons entries with their filter, window, and disabled flag. `createCommonsStore`: Build the store.
 - `EpicStoriesStore.ts`. `EpicStoriesStoreImpl`: Caches the map of epic stories fetched from the server, loading it at most once. `createEpicStoriesStore`: Build the store. It fetches nothing until `load()` is called, and then only once.
-- `FleetStatusStore.ts`. `FleetStatusStoreImpl`: Holds fleet status, size cap and skeleton-crew state for the fleet pane. `serverDetail`: The server's own reason for a refusal, or the status when it gave none. `createFleetStatusStore`: Build the store. It fetches nothing when it is built.
+- `FleetStatusStore.ts`. `FleetStatusStoreImpl`: Holds fleet status, size cap and skeleton-crew state for the fleet pane. `serverDetail`: The server's own reason for a refusal, or the status when it gave none. It cuts the body out of the error message and reads it with `apiErrorDetail` ([[web-client-auth-and-api]]). `createFleetStatusStore`: Build the store. It fetches nothing when it is built.
 - `FlowRatioStore.ts`. `statusOf`: The HTTP status of a rejection, or null for one that never reached the server. `refusalText`: "<verb> — admin only", "<verb> (HTTP n)", or "<verb> (network)". `FlowRatioStoreImpl`: Holds the flow ratio reading, its settings and the manager pull state for the page. `createFlowRatioStore`: Build the store. It fetches nothing when it is built.
 - `SubmitJobsStore.ts`. `SubmitJobsStoreImpl`: Holds status, in-flight flags and candidates for the Submit Agentic Jobs cards, and adds the podcast choices to a research submit. `scheduledAtOf`: `scheduled_at`, or null when the pair is incomplete. `schedulingParams`: The top-level scheduling directives for a v2 body. `errorText`: The message a caller should show for a thrown value of unknown shape. `createSubmitJobsStore`: Build the store.

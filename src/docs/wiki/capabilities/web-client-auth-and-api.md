@@ -3,6 +3,7 @@ capability: web-client-auth-and-api
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.api.ApiClient.ApiError@6437b0ad51
+  - src.lupin_app.static.js.multiplexer.api.ApiClient.apiErrorDetail@cd870ed256
   - src.lupin_app.static.js.multiplexer.api.ApiClient.ApiClientImpl@11b9397a58
   - src.lupin_app.static.js.multiplexer.api.ApiClient.createApiClient@4f1f7bc1d9
   - src.lupin_app.static.js.multiplexer.auth.AuthManager.NavigatorLockManager@bd5768cc4b
@@ -24,7 +25,7 @@ pins:
 Token handling, the sign-in guard and the API client of the multiplexer page. [[web-client-transport-and-auth]] describes how they work together. `ApiClient.ts` imports `AuthManager.ts`. `AuthManager.ts` imports `jwt.ts`. `authGuard.ts` imports `AuthManager.ts`.
 
 ## What it does
-- `ApiClient.ts`. `ApiError`: The error thrown when the server answers with a non-2xx status. `ApiClientImpl`: Sends authenticated JSON requests to the server's API with a timeout. `createApiClient`: Build the API client for one base URL and auth manager.
+- `ApiClient.ts`. `ApiError`: The error thrown when the server answers with a non-2xx status. `apiErrorDetail`: The `detail` of a JSON error body, or the caller's fallback when the body has none. A `detail` that is not text gives the fallback, or its JSON text when asked, because FastAPI sends validation errors as a list. It never throws. The cron jobs pane, the fleet store and the holding area store each find the body in an `ApiError` message their own way. Each then passes it in. `ApiClientImpl`: Sends authenticated JSON requests to the server's API with a timeout. `createApiClient`: Build the API client for one base URL and auth manager.
 - `AuthManager.ts`. `NavigatorLockManager`: Lock manager backed by the browser's navigator.locks, shared across tabs. `ChainMutexLockManager`: A lock manager for places without `navigator.locks`, such as tests. `AuthManagerImpl`: The `AuthManager` behind `createAuthManager`. `createAuthManager`: Build an auth manager.
 - `authGuard.ts`. `redirectToLoginIfUnauthenticated`: Send a visitor with no stored access token to the login page, then report whether it did. `logout`: Clear the stored tokens and go to the login page, with no `?redirect=`.
 - `jwt.ts`. `decodeSegment`: Decodes one base64url segment to a UTF-8 string. `decodeJwtClaims`: Read the claims object from a JWT's payload segment, or return null if it is malformed. `jwtExpiryMs`: The token's `exp` claim in milliseconds since the epoch. `jwtEmail`: The token's `email` claim, or null when it is missing, empty or the token is malformed. `jwtRoles`: The string entries of the token's `roles` claim. `jwtSub`: The token's `sub` claim, which holds the user id. `stringClaim`: A non-empty string claim, `email` or `sub`, or null when it is missing, empty or not a string.

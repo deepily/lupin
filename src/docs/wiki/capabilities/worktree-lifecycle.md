@@ -4,10 +4,11 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.seat_worktree.provision_seat_worktree@eed42d08b9
   - cosa.utils.worktree_artifacts.provision_worktree_artifacts@fd62ae8430
-  - cosa.agents.shared.worktree_context.WorktreeContext@f26451f4ff
+  - cosa.agents.shared.worktree_context.WorktreeContext@d36aaaf402
+  - cosa.agents.shared.worktree_context.has_dangling_git_link@e5e3ce902c
   - cosa.agents.shared.seat_teardown.retire_seat_worktree@dd06d0a3d6
   - cosa.agents.shared.worktree_reaper.drain_then_remove@3d4638ca10
-  - cosa.agents.shared.worktree_reaper.reconcile_worktrees@d7ff867a1c
+  - cosa.agents.shared.worktree_reaper.reconcile_worktrees@8dd1668d4b
   - cosa.agents.shared.worktree_reaper.sweep_merged_branches@02e1d8c83d
   - cosa.agents.shared.worktree_refusal_ledger.report_refusals@08e4b0b1dd
   - cosa.agents.shared.worktree_straggler_tickets.sync_straggler_tickets@197e32f45b
@@ -21,7 +22,7 @@ Git worktrees are made for each spawned seat and for each BFE or TFE job. They a
 - It reuses a registered tree but answers `occupied` when a process has its working directory inside, or the tree is dirty with no newer memento. `spawn_sessions` then tries the next index.
 - If provisioning fails, the seat runs in the spawn's own work directory.
 - `provision_worktree_artifacts` symlinks `node_modules`, `src/scripts/cloud-run.env` and the Terraform providers cache from the main checkout. Nothing else is linked, and a missing source is reported but does not fail the script.
-- `WorktreeContext` is an async context manager that BFE and TFE use. It adds `<sandbox root>/<job id>` from the base ref, raises `WorktreeCollisionError` if that path exists, and then links the venv and artifacts.
+- `WorktreeContext` is an async context manager that BFE and TFE use. It adds `<sandbox root>/<job id>` from the base ref, raises `WorktreeCollisionError` if that path exists, and then links the venv and artifacts. When `auto cleanup` is on and the reaper refuses the folder as `broken_or_not_a_worktree`, `has_dangling_git_link` decides what happens next. Only a folder whose `.git` file points at a missing git record is deleted. Any other folder is left in place. While the job runs, it locks the sandbox's git record with the reason `lupin-job:<job id>`. A host `git worktree prune` skips a locked record, and a tree made in the container would otherwise read as missing. A failed lock only logs a warning, and exit unlocks the record first.
 - The INI ships `cosa worktree enabled` true and `auto cleanup` false. So these job trees stay after exit, and the exit never swallows the caller's exception.
 
 ## Retiring a seat's tree
@@ -33,7 +34,7 @@ Git worktrees are made for each spawned seat and for each BFE or TFE job. They a
 
 ## Reaper and janitor
 - `drain_then_remove` puts a detached HEAD on a `wt-rescue/` branch and commits a dirty tree as a WIP commit. Before removal it stamps the branch with its manager when one can be found. The archive row then routes to that manager. It then runs `git worktree remove`, and refuses on ignored files unless given an evacuation root. The same three classes (artifacts, run output, mirrored mementos) are exempt there.
-- `reconcile_worktrees` supplies that root, `io/worktree-evacuated`. It skips the main tree, trees outside the sandbox, non-seat locks, live seats, trees a live process has as its cwd, and recently active trees.
+- `reconcile_worktrees` supplies that root, `io/worktree-evacuated`. It skips the main tree, trees outside the sandbox, live seats, trees a live process has as its cwd, and recently active trees. It also skips a lock that is neither a seat's nor a job's `lupin-job:` lock. A job lock counts as stale once its tree has been idle past the age threshold, because no liveness probe exists. The janitor unlocks that tree, drains it, and locks it again if it was not removed.
 - An unmerged branch is archived under `refs/archive/<date>/`. Archive refs and evacuation folders older than 14 days are deleted.
 - The janitor ships on, with a 6 hour age threshold and the repos `lupin`, `lupin-mobile` and `planning-is-prompting`. It runs each poll.
 - `report_refusals` records refused trees in `io/worktree-janitor/refused.json`. `sync_straggler_tickets` opens a P3 task after 24 hours of refusal.
