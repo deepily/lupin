@@ -1135,13 +1135,17 @@ class CCNotificationListener( BaseWebSocketListener ):
         except Exception as e:
             self._log( f"{self.LOG_PREFIX} ERROR buffering message: {e}" )
 
-    def _stamp_user_id_on_bridge( self ):
+    def _stamp_user_id_on_bridge( self, label="user_id", email=None, password=None, setter=None ):
         """
         Resolve the authenticated user_id and stamp it on this session's bridge file.
 
         This lets the inter-session-commons broadcast surface same-user-scope active sessions correctly.
         It posts the credentials to /auth/login and reads `user.id` from the response. Then it calls `session_bridge.set_user_id`, which accepts the 8-char prefix.
         Any failure is logged and swallowed; the graceful-degradation filter `filter_and_project_sessions` in `routers/commons.py` covers the gap. It fires once at run() startup, not on each reconnect.
+
+        Requires:
+            - label prefixes every log line; email, password and setter default to the service account's
+            - the owner stamp reuses this flow with its own credentials, setter and label
 
         Ensures:
             - Never raises publicly. All errors caught + logged.
@@ -1152,8 +1156,13 @@ class CCNotificationListener( BaseWebSocketListener ):
             import urllib.error
             from lupin_cli.claude_code.hooks.lib.session_bridge import set_user_id
 
+            if setter is None:
+                setter = set_user_id
+            if email is None:
+                email, password = self.email, self.password
+
             url = f"http://{self.host}:{self.port}/auth/login"
-            body = json.dumps( { "email": self.email, "password": self.password } ).encode( "utf-8" )
+            body = json.dumps( { "email": email, "password": password } ).encode( "utf-8" )
             req  = urllib.request.Request(
                 url,
                 data    = body,
@@ -1164,25 +1173,25 @@ class CCNotificationListener( BaseWebSocketListener ):
                 payload = json.loads( resp.read().decode( "utf-8" ) )
             user_id = payload.get( "user", { } ).get( "id" )
             if not user_id:
-                self._log( f"{self.LOG_PREFIX} user_id stamp skipped — no user.id in /auth/login response" )
+                self._log( f"{self.LOG_PREFIX} {label} stamp skipped — no user.id in /auth/login response" )
                 return
-            ok = set_user_id( self.session_id_hash, user_id )
+            ok = setter( self.session_id_hash, user_id )
             if ok:
-                self._log( f"{self.LOG_PREFIX} user_id stamped on bridge: {user_id}" )
+                self._log( f"{self.LOG_PREFIX} {label} stamped on bridge: {user_id}" )
             else:
-                self._log( f"{self.LOG_PREFIX} user_id stamp skipped — bridge not found for session {self.session_id_hash}" )
+                self._log( f"{self.LOG_PREFIX} {label} stamp skipped — bridge not found for session {self.session_id_hash}" )
         except ( urllib.error.URLError, json.JSONDecodeError, OSError, KeyError, ValueError ) as e:
-            self._log( f"{self.LOG_PREFIX} user_id stamp failed (silent fallback): {e!r}" )
+            self._log( f"{self.LOG_PREFIX} {label} stamp failed (silent fallback): {e!r}" )
         except Exception as e:
             # Defense-in-depth: never let stamping kill the listener startup
-            self._log( f"{self.LOG_PREFIX} user_id stamp unexpected error (silent fallback): {e!r}" )
+            self._log( f"{self.LOG_PREFIX} {label} stamp unexpected error (silent fallback): {e!r}" )
 
     def _stamp_owner_user_id_on_bridge( self ):
         """
         Resolve the human owner's user_id and stamp it on this session's bridge file.
 
-        It logs in via /auth/login with owner credentials from ~/.lupin/config[owner], then calls session_bridge.set_owner_user_id.
-        Unlike `_stamp_user_id_on_bridge`, which stamps the service account, this stamps the human owner that the broadcast UI's same-user filter compares against.
+        It takes owner credentials from ~/.lupin/config[owner] and runs `_stamp_user_id_on_bridge` with `set_owner_user_id`.
+        Unlike the service-account stamp, this stamps the human owner that the broadcast UI's same-user filter compares against.
         See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
 
         Ensures:
@@ -1190,8 +1199,6 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Bridge file is mutated only on full success.
         """
         try:
-            import urllib.request
-            import urllib.error
             from lupin_cli.claude_code.hooks.lib.hook_credentials import get_owner_credentials
             from lupin_cli.claude_code.hooks.lib.session_bridge import set_owner_user_id
 
@@ -1201,27 +1208,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — no owner credentials: {e}" )
                 return
 
-            url  = f"http://{self.host}:{self.port}/auth/login"
-            body = json.dumps( { "email": owner_email, "password": owner_password } ).encode( "utf-8" )
-            req  = urllib.request.Request(
-                url,
-                data    = body,
-                headers = { "Content-Type": "application/json" },
-                method  = "POST",
-            )
-            with urllib.request.urlopen( req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
-                payload = json.loads( resp.read().decode( "utf-8" ) )
-            owner_user_id = payload.get( "user", { } ).get( "id" )
-            if not owner_user_id:
-                self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — no user.id in /auth/login response" )
-                return
-            ok = set_owner_user_id( self.session_id_hash, owner_user_id )
-            if ok:
-                self._log( f"{self.LOG_PREFIX} owner_user_id stamped on bridge: {owner_user_id}" )
-            else:
-                self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — bridge not found for session {self.session_id_hash}" )
-        except ( urllib.error.URLError, json.JSONDecodeError, OSError, KeyError, ValueError ) as e:
-            self._log( f"{self.LOG_PREFIX} owner_user_id stamp failed (silent fallback): {e!r}" )
+            self._stamp_user_id_on_bridge( "owner_user_id", owner_email, owner_password, set_owner_user_id )
         except Exception as e:
             # Defense-in-depth: never let stamping kill the listener startup
             self._log( f"{self.LOG_PREFIX} owner_user_id stamp unexpected error (silent fallback): {e!r}" )
