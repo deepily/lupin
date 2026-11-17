@@ -965,24 +965,27 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // keyed re-renders + reloads.
   // -------------------------------------------------------------------------
 
-  private toggleDateAccordion(header: Element): void {
-    const accordion = header.closest(".date-accordion") as HTMLElement | null;
-    /* c8 ignore next */ // defensive: a .date-accordion-header is always inside a .date-accordion by template.
-    if (accordion === null) return;
-    const next = accordion.getAttribute("data-collapsed") !== "true";
-    this.applyCollapsed(accordion, next, ".date-toggle");
-    const id = this.dateAccordionId(accordion);
+  // One toggle for both accordions: the header's closest `containerSelector` flips, its
+  // chevron (`toggleSelector`) follows, and `idOf` names the persisted state (null: not saved).
+  private toggleAccordion(header: Element, containerSelector: string, toggleSelector: string, idOf: (el: HTMLElement) => string | null): void {
+    const el = header.closest(containerSelector) as HTMLElement | null;
+    /* c8 ignore next */ // defensive: an accordion header is always inside its container by template.
+    if (el === null) return;
+    const next = el.getAttribute("data-collapsed") !== "true";
+    this.applyCollapsed(el, next, toggleSelector);
+    const id = idOf(el);
     if (id !== null) this.viewState?.setAccordionCollapsed(id, next);
   }
 
+  private toggleDateAccordion(header: Element): void {
+    this.toggleAccordion(header, ".date-accordion", ".date-toggle", (el) => this.dateAccordionId(el));
+  }
+
   private toggleSenderCard(header: Element): void {
-    const card = header.closest(".sender-card") as HTMLElement | null;
-    /* c8 ignore next */ // defensive: a .sender-card-header is always inside a .sender-card by template.
-    if (card === null) return;
-    const next = card.getAttribute("data-collapsed") !== "true";
-    this.applyCollapsed(card, next, ".sender-toggle");
-    const senderId = card.dataset["senderId"];
-    if (senderId !== undefined) this.viewState?.setAccordionCollapsed(`sender::${senderId}`, next);
+    this.toggleAccordion(header, ".sender-card", ".sender-toggle", (el) => {
+      const senderId = el.dataset["senderId"];
+      return senderId === undefined ? null : `sender::${senderId}`;
+    });
   }
 
   // Apply a collapsed flag to an accordion element + flip its toggle glyph

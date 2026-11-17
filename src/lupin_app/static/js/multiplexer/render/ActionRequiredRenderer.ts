@@ -550,75 +550,42 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     return widget;
   }
 
-  private buildSubmittingWidget(item: ActionRequiredItem): HTMLElement {
+  // The four closed states (submitting, responded, expired, cancelled) differ only in their
+  // state name, the message's class suffix and the message text.
+  private buildStateWidget(item: ActionRequiredItem, state: string, msgClass: string, text: string): HTMLElement {
     const widget = document.createElement("div");
-    widget.className = "action-required-widget action-required-widget-submitting";
+    widget.className = `action-required-widget action-required-widget-${state}`;
     widget.setAttribute("data-id-hash", item.id_hash);
-    widget.setAttribute("data-state", "submitting");
+    widget.setAttribute("data-state", state);
     widget.setAttribute("data-testid", "multiplexer-action-required");
     const prompt = document.createElement("div");
     prompt.className = "action-required-prompt";
     prompt.textContent = item.prompt;
     widget.appendChild(prompt);
     const msg = document.createElement("div");
-    msg.className = "action-required-submitting-msg";
-    msg.textContent = "Submitting...";
+    msg.className = `action-required-${msgClass}-msg`;
+    msg.textContent = text;
     widget.appendChild(msg);
     return widget;
+  }
+
+  private buildSubmittingWidget(item: ActionRequiredItem): HTMLElement {
+    return this.buildStateWidget(item, "submitting", "submitting", "Submitting...");
   }
 
   private buildRespondedWidget(item: ActionRequiredItem): HTMLElement {
-    const widget = document.createElement("div");
-    widget.className = "action-required-widget action-required-widget-responded";
-    widget.setAttribute("data-id-hash", item.id_hash);
-    widget.setAttribute("data-state", "responded");
-    widget.setAttribute("data-testid", "multiplexer-action-required");
-    const prompt = document.createElement("div");
-    prompt.className = "action-required-prompt";
-    prompt.textContent = item.prompt;
-    widget.appendChild(prompt);
-    const msg = document.createElement("div");
-    msg.className = "action-required-responded-msg";
-    msg.textContent = `Responded: ${formatResponse(item.response)}`;
-    widget.appendChild(msg);
-    return widget;
+    return this.buildStateWidget(item, "responded", "responded", `Responded: ${formatResponse(item.response)}`);
   }
 
   private buildExpiredWidget(item: ActionRequiredItem): HTMLElement {
-    const widget = document.createElement("div");
-    widget.className = "action-required-widget action-required-widget-expired";
-    widget.setAttribute("data-id-hash", item.id_hash);
-    widget.setAttribute("data-state", "expired");
-    widget.setAttribute("data-testid", "multiplexer-action-required");
-    const prompt = document.createElement("div");
-    prompt.className = "action-required-prompt";
-    prompt.textContent = item.prompt;
-    widget.appendChild(prompt);
-    const msg = document.createElement("div");
-    msg.className = "action-required-expired-msg";
-    msg.textContent = "Expired — default applied";
-    widget.appendChild(msg);
-    return widget;
+    return this.buildStateWidget(item, "expired", "expired", "Expired — default applied");
   }
 
+  // 360de81b: answered in another session — shown for the store's 1.5 s grace period, then the
+  // store removes the item (legacy handleNotificationResponded :24519-24560). Legacy appends the
+  // other session's answer; this card does not (named in the parity doc).
   private buildCancelledWidget(item: ActionRequiredItem): HTMLElement {
-    // 360de81b: answered in another session — shown for the store's 1.5 s grace period, then the
-    // store removes the item (legacy handleNotificationResponded :24519-24560). Legacy appends the
-    // other session's answer; this card does not (named in the parity doc).
-    const widget = document.createElement("div");
-    widget.className = "action-required-widget action-required-widget-cancelled";
-    widget.setAttribute("data-id-hash", item.id_hash);
-    widget.setAttribute("data-state", "cancelled");
-    widget.setAttribute("data-testid", "multiplexer-action-required");
-    const prompt = document.createElement("div");
-    prompt.className = "action-required-prompt";
-    prompt.textContent = item.prompt;
-    widget.appendChild(prompt);
-    const msg = document.createElement("div");
-    msg.className = "action-required-cancelled-msg";
-    msg.textContent = "✓ Responded in another session";
-    widget.appendChild(msg);
-    return widget;
+    return this.buildStateWidget(item, "cancelled", "cancelled", "✓ Responded in another session");
   }
 
   // `asOf` is now for a running card and the pause instant for a paused one, whose time is frozen.

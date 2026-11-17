@@ -37,6 +37,7 @@ import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PRE
 import { handleApproveLinkClick, handleApprovePriorityLinkClick, handleBatchApproveLinkClick, handleBatchViewLinkClick, handleViewLinkClick, observeApproveLinks, type ApproveSender, type TaskReader } from "./approveLink";
 import { buildConsolePageHref } from "../console/consolePageUrl";
 import { bindPodcastLinks } from "./podcastLinks";
+import { scrollByDelta } from "./keepPlace";
 
 /**
  * The slice of the reading pane store the renderer drives.
@@ -800,12 +801,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     /* c8 ignore next */ // defensive: capture + restore run in the same synchronous applyState() pass, so the anchored card is always still connected at restore time.
     if (!anchor.el.isConnected) return;
     const delta    = anchor.el.getBoundingClientRect().top - anchor.top;
-    const paneOpen = this.shell.classList.contains("pane-open");
-    if (paneOpen) {
-      this.leftColumn.scrollTop += delta;
-    } else {
-      ( globalThis as unknown as { scrollBy( x: number, y: number ): void } ).scrollBy(0, delta);
-    }
+    scrollByDelta(this.shell.classList.contains("pane-open"), this.leftColumn, globalThis as unknown as { scrollY: number; scrollBy( x: number, y: number ): void }, delta);
   }
 
   // -------------------------------------------------------------------------
