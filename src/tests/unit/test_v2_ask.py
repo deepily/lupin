@@ -291,6 +291,36 @@ def test_ask_422_on_empty_question():
     assert resp.status_code == 422
 
 
+class _UnreachableEmbeddingFlow( FakeFlow ):
+    """A flow whose ask raises what the embedding provider raises once its retries are spent."""
+
+    def ask( self, **kwargs ):
+        self.ask_calls.append( kwargs )
+        raise v2_ask.EmbeddingProviderUnreachable( "EmbeddingProvider HTTP fallback unreachable after 3 attempt(s): HTTP 500" )
+
+
+def test_ask_answers_503_with_retry_after_when_the_embedding_service_is_unreachable():
+    # Row 351aa5f3: 1 of 10 concurrent asks got an unhandled 500 when the shared embedding
+    # service saturated. The caller is now told to retry, with a 503 and Retry-After.
+    flow   = _UnreachableEmbeddingFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ), raise_server_exceptions=False )
+    resp   = client.post( "/api/v2/ask", json={ "question": "weather in Boston" } )
+    assert len( flow.ask_calls ) == 1
+    assert resp.status_code == 503
+    assert resp.headers[ "Retry-After" ] == "5"
+    assert resp.json()[ "detail" ] == "The embedding service is busy. Please retry in a few seconds."
+
+
+def test_ask_does_not_turn_other_runtime_errors_into_503():
+    # The 503 is for the embedding service only: any other RuntimeError still surfaces as a 500.
+    class _OtherFailureFlow( FakeFlow ):
+        def ask( self, **kwargs ):
+            raise RuntimeError( "something else" )
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, _OtherFailureFlow() ), raise_server_exceptions=False )
+    resp   = client.post( "/api/v2/ask", json={ "question": "hi" } )
+    assert resp.status_code == 500
+
+
 def test_ask_422_on_oversized_question():
     flow = FakeFlow()
     client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )

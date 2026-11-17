@@ -31,6 +31,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from cosa.config.configuration_manager import ConfigurationManager
+from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
 from cosa.rest.auth import get_current_user, identity_or_401
 from cosa.rest.auth_middleware import is_admin
 from cosa.rest import suite_run_token
@@ -588,6 +589,9 @@ async def v2_ask(
         - returns AskResponse; never 500 for an agent/replay/router/extract
           failure — AskFlow degrades each to the receptionist.
         - user_id / user_email come from the token, never the client body.
+        - answers 503 with Retry-After when the shared embedding service is
+          unreachable after its retries: the caller may retry, and nothing
+          was asked.
     """
     user_id, user_email = identity_or_401( current_user )
 
@@ -599,19 +603,24 @@ async def v2_ask(
     # directly from this coroutine it holds the event loop for that whole span, and
     # with workers=1 that means /health times out and every other request waits. Off
     # the loop it holds a worker thread instead, which is what a slow call should hold.
-    result = await run_in_threadpool(
-        lambda: flow.ask(
-            question    = request.question,
-            user_id     = user_id,
-            user_email  = user_email,
-            session_id  = session_id,
-            websocket_id= request.websocket_id or session_id,
-            speak       = request.speak,
-            interactive = request.interactive,
-            parent_id_hash = parent_id_hash,
-            **_flow_kwargs_for_dropped_stamp( claimed, dropped ),
+    try:
+        result = await run_in_threadpool(
+            lambda: flow.ask(
+                question    = request.question,
+                user_id     = user_id,
+                user_email  = user_email,
+                session_id  = session_id,
+                websocket_id= request.websocket_id or session_id,
+                speak       = request.speak,
+                interactive = request.interactive,
+                parent_id_hash = parent_id_hash,
+                **_flow_kwargs_for_dropped_stamp( claimed, dropped ),
+            )
         )
-    )
+    except EmbeddingProviderUnreachable:
+        # The embedding service is shared and can saturate under concurrent asks. Its retries are
+        # already spent, so say so as a retryable 503 instead of an unhandled 500 (row 351aa5f3).
+        raise HTTPException( status_code=503, detail="The embedding service is busy. Please retry in a few seconds.", headers={ "Retry-After": "5" } )
     return AskResponse( **result )
 
 
