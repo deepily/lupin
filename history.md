@@ -8,6 +8,19 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.16 - Session 8b134124 (Cheech 🌿, manager; crew Maya, Chloé, Pocholo, John, Clayton, Rachel, Tiberius, Sam) | Recall question measured and closed, 356 duplicate findings ruled, all three long PR suites rehearsed green
+
+**Resume here**: memento `.claude-memento-cheech-8b134124.md` (amended at closing, 22:45). Working-branch head is 81194389d or later.
+1. **Landed**: three commits.
+   - 24442c4e6, Maya: the expansion replay reads whole lists, so fusion depth can be measured.
+   - f5ef5eb8c, Chloé: one `apiErrorDetail` helper (row ef75257b).
+   - cabaa58d9, Pocholo: the sample re-judge matched all 300 pairs; row f4ad5450 is not a defect.
+2. **Recall row eeb88bab closed** (Rick: split and close). Need expansion is live. K stays 128: re-measured on whole lists, 101 to 122 of 124 known answers. Fusion depth stays 512. The embedding and known-answer-set questions moved to a9ec6241 and 40e46c73 for Rick's in-house experts.
+3. **Fable sample re-judge**: 296 of 300 pairs agree. Fable's flag rate is 8.3% against Opus's 7.7%; Fable's estimated backlog rate is 6.9% to 9.5%, which contains Opus's 7.5%.
+4. **Duplicate-check triage**: five seats ruled all 356 findings on 8 rows from 15 and 16 Nov: 323 distinct, 14 duplicate, 19 extend. The 33 fixes are row b9cf6490 (approved), in progress on three seat branches; they land only after the PR pyramid.
+5. **PR rehearsal on :8000**: e2e_a 571 passed, 0 failed (ts-582efc2f; the tree and the bundle moved mid-run). e2e_b 597 passed, 0 failed (ts-32ae3b53, clean). Integration 489 passed, 1 failed (ts-175f6588): one of 10 concurrent submits got a 500 because the embedding server failed, bug 351aa5f3. Gates 1 to 4 green at 27e646d0e. The 33 remediation fixes are pinned at refs/cheech/remediation-b9cf6490-{tiberius,pocholo,sam}. The full pyramid runs 17 Nov morning (row d2a18b64).
+6. **Owed 17 Nov**: the Opus drain check at 11:30 (d30a1081, 976 left), then the Opus proof run a7bb7805. Also Sam's 14 Nov remediation 9cc37a94, and the post-game for the 14 to 15 Nov overnight run.
+
 ## 2026.11.14 - Session a1bb58be (Mr. Radio 🦉, manager; crew Krishna, Pocholo, Rachel, Maya, Clayton, Rio, Tiberius) | All 24 job switches honoured live; the second accordion step, quiet workers and daily promotion merged; night shift running
 
 **Resume here**: memento `.claude-memento-mr-radio-a1bb58be.md` (amended 23:00). Rick, 23:05: merging reviewed, tested work is the manager's own call; land with a bare `git merge --ff-only <sha>`.
