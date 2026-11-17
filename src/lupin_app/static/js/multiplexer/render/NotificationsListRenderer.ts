@@ -33,7 +33,7 @@ import type {
   StoreViewStateChangedPayload,
   AudioPlaybackState,
 } from "../shared/types";
-import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
+import { castPredictionVote as castVote, type PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
 import { keyedListMerge, cssEscape } from "./dom";
 import { formatDateKey } from "./time";
@@ -390,16 +390,20 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     if (appTimezone === this.appTimezone) return;
     this.appTimezone = appTimezone;
 
+    this.repaintAfterSetting("NotificationsListRenderer.setAppTimezone");
+  }
+
+  // Both late-arriving settings (timezone, TTS mode) end here: none of the three caches has the
+  // setting among its inputs, so all three are dropped, then a render is scheduled. The trigger is
+  // carried only so a throwing render names this renderer as its source.
+  private repaintAfterSetting(source: string): void {
     this.cardInputs     = new WeakMap();
     this.cardSignatures = new WeakMap();
     this.historyCache.clear();
-
-    // The trigger is only carried for error reporting if the render throws, so it
-    // names this renderer as the source rather than inventing an event type.
     this.scheduleRender({
       type    : "store_notifications_changed",
       payload : undefined,
-      source  : "NotificationsListRenderer.setAppTimezone",
+      source,
     } as LupinEvent<unknown>);
   }
 
@@ -429,17 +433,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     if (mode === this.ttsInteractionMode) return;
     this.ttsInteractionMode = mode;
 
-    this.cardInputs     = new WeakMap();
-    this.cardSignatures = new WeakMap();
-    this.historyCache.clear();
-
-    // Same shape as setAppTimezone's: the trigger is carried only so a throwing render
-    // names this renderer as its source rather than inventing an event type.
-    this.scheduleRender({
-      type    : "store_notifications_changed",
-      payload : undefined,
-      source  : "NotificationsListRenderer.setTtsInteractionMode",
-    } as LupinEvent<unknown>);
+    this.repaintAfterSetting("NotificationsListRenderer.setTtsInteractionMode");
   }
 
   /**
@@ -771,17 +765,12 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     /* c8 ignore next */ // defensive: the control is painted only for an in-list prediction_hint row.
     if (notification?.prediction_hint === undefined) return;
     const hint = notification.prediction_hint;
-    store.setContext(id, {
+    castVote(store, id, dir, {
       question        : notification.message,
       predicted_value : hint.predicted_value,
       category        : hint.category,
       response_type   : notification.response_type ?? "",
-    });
-    void store.vote(id, dir).then((ok) => {
-      if (!ok) this.rebuildAllCards();
-    }).catch(() => {
-      this.rebuildAllCards();
-    });
+    }, () => { this.rebuildAllCards(); });
   }
 
   // P0 8cb5c22e — a re-render that must UNDO an in-place change to a live card
@@ -965,24 +954,27 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // keyed re-renders + reloads.
   // -------------------------------------------------------------------------
 
-  private toggleDateAccordion(header: Element): void {
-    const accordion = header.closest(".date-accordion") as HTMLElement | null;
-    /* c8 ignore next */ // defensive: a .date-accordion-header is always inside a .date-accordion by template.
-    if (accordion === null) return;
-    const next = accordion.getAttribute("data-collapsed") !== "true";
-    this.applyCollapsed(accordion, next, ".date-toggle");
-    const id = this.dateAccordionId(accordion);
+  // One toggle for both accordions: the header's closest `containerSelector` flips, its
+  // chevron (`toggleSelector`) follows, and `idOf` names the persisted state (null: not saved).
+  private toggleAccordion(header: Element, containerSelector: string, toggleSelector: string, idOf: (el: HTMLElement) => string | null): void {
+    const el = header.closest(containerSelector) as HTMLElement | null;
+    /* c8 ignore next */ // defensive: an accordion header is always inside its container by template.
+    if (el === null) return;
+    const next = el.getAttribute("data-collapsed") !== "true";
+    this.applyCollapsed(el, next, toggleSelector);
+    const id = idOf(el);
     if (id !== null) this.viewState?.setAccordionCollapsed(id, next);
   }
 
+  private toggleDateAccordion(header: Element): void {
+    this.toggleAccordion(header, ".date-accordion", ".date-toggle", (el) => this.dateAccordionId(el));
+  }
+
   private toggleSenderCard(header: Element): void {
-    const card = header.closest(".sender-card") as HTMLElement | null;
-    /* c8 ignore next */ // defensive: a .sender-card-header is always inside a .sender-card by template.
-    if (card === null) return;
-    const next = card.getAttribute("data-collapsed") !== "true";
-    this.applyCollapsed(card, next, ".sender-toggle");
-    const senderId = card.dataset["senderId"];
-    if (senderId !== undefined) this.viewState?.setAccordionCollapsed(`sender::${senderId}`, next);
+    this.toggleAccordion(header, ".sender-card", ".sender-toggle", (el) => {
+      const senderId = el.dataset["senderId"];
+      return senderId === undefined ? null : `sender::${senderId}`;
+    });
   }
 
   // Apply a collapsed flag to an accordion element + flip its toggle glyph

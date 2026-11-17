@@ -105,8 +105,7 @@ export function operatorInputByKey( container: ParentNode, key: string ): HTMLIn
   const parts = key.split( KEY_SEP );
   if ( parts.length !== 3 ) return null;
   const [ attr, owner, which ] = parts as [ string, string, string ];
-  return Array.from( container.querySelectorAll<HTMLInputElement>( `.${ which }` ) )
-    .find( ( el ) => el.getAttribute( attr ) === owner ) ?? null;
+  return byAttr<HTMLInputElement>( container, `.${ which }`, attr, owner );
 }
 
 /** First element of `selector` whose `attr` equals `value`, pane-scoped. */

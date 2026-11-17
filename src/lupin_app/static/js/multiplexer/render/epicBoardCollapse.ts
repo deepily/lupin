@@ -23,6 +23,8 @@
 // epic being minted later — a brand-new epic takes the default rather than
 // inheriting some stale set's membership.
 
+import { slugifySenderId } from "./templates/slugify";
+
 /** localStorage key holding the JSON map of group key -> isExpanded choices. */
 export const EPIC_BOARD_STATE_KEY = "lupin.epicBoard.groupState";
 
@@ -43,7 +45,7 @@ export type EpicGroupState = Record<string, boolean>;
  *   - "epic-group-" + epicKey with non [A-Za-z0-9_-] chars → "-"
  */
 export function epicGroupIdSlug( epicKey: string ): string {
-  return "epic-group-" + String( epicKey ).replace( /[^a-zA-Z0-9_-]/g, "-" );
+  return "epic-group-" + slugifySenderId( String( epicKey ) );
 }
 
 /**

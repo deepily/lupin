@@ -64,6 +64,7 @@ import {
 
 interface SessionStripStoreLike {
   list(): ReadonlyArray<StripSession>;
+  get(senderId: string): StripSession | undefined;
 }
 // Row d04ff119 — the notification store, read to find who sent an arrival.
 interface NotificationLookupLike {
@@ -594,7 +595,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   }
 
   private sessionFor(senderId: string): StripSession | undefined {
-    return this.stores.strip.list().find(s => s.sender_id === senderId);
+    return this.stores.strip.get(senderId);
   }
 }
 

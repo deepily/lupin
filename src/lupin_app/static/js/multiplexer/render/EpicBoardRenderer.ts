@@ -38,7 +38,7 @@ import { isOpenStatus } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
 import { groupTasksByEpic, type EpicStories } from "./epicBoardModel";
 import { loadEpicGroupState, saveEpicGroupState, toggleEpicCollapsed } from "./epicBoardCollapse";
-import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
+import { readBackAfterWrite, stampFreshRead, stampReadBackFailed } from "../shared/afterWriteRead";
 import { renderEpicBoardTable } from "./templates/epicBoardTable";
 import { closeDisclosedRowsIn, renderRowError as paintRowError } from "./templates/rowDisclosure";
 import { captureOperatorState, restoreOperatorState, type OperatorState } from "./operatorState";
@@ -512,11 +512,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   }
 
   private stampUpdated(): void {
-    /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container.
-    if ( this.updatedEl === null ) return;
-    // A fresh read ENDS the staleness a failed read-back declared.
-    clearReadBackFailed( this.updatedEl );
-    this.updatedEl.textContent = `updated ${ formatFleetTimestamp( this.nowDateFn(), undefined ) }`;
+    stampFreshRead( this.updatedEl, `updated ${ formatFleetTimestamp( this.nowDateFn(), undefined ) }` );
   }
 
   /**

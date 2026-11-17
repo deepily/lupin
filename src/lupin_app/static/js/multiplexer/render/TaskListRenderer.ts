@@ -49,7 +49,7 @@ import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } f
 import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
 import { BADGE_TASK_AREA } from "../../shared/task-request.js";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
-import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
+import { readBackAfterWrite, stampFreshRead, stampReadBackFailed } from "../shared/afterWriteRead";
 import {
   renderSectionHeader,
   wireSectionCollapse,
@@ -770,12 +770,7 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 
   private stampUpdated(): void {
-    /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container. Belt-and-suspenders.
-    if ( this.updatedEl === null ) return;
-    // A fresh read ENDS the staleness a failed read-back declared, so the marking
-    // goes with the text it qualified — leaving it would outlive the fact.
-    clearReadBackFailed( this.updatedEl );
-    this.updatedEl.textContent = `updated ${formatFleetTimestamp( this.nowDateFn(), undefined )}`;
+    stampFreshRead( this.updatedEl, `updated ${formatFleetTimestamp( this.nowDateFn(), undefined )}` );
   }
 
   /**

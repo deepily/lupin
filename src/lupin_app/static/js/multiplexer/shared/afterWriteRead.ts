@@ -132,3 +132,22 @@ export function stampReadBackFailed( el: HTMLElement | null ): void {
 export function clearReadBackFailed( el: HTMLElement ): void {
   el.classList.remove( READ_BACK_FAILED_CLASS );
 }
+
+/**
+ * Stamp a pane's "updated" label after a fresh read, ending any read-back-failed marking.
+ *
+ * Shared by the holding area, the epic board and the task list.
+ *
+ * Requires:
+ *   - text is the finished label, such as `updated 10:42`
+ *
+ * Ensures:
+ *   - a null element is a no-op (the pane is unmounted)
+ *   - otherwise the read-back-failed class is gone and the element reads `text`
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
+export function stampFreshRead( el: HTMLElement | null, text: string ): void {
+  if ( el === null ) return;
+  clearReadBackFailed( el );
+  el.textContent = text;
+}

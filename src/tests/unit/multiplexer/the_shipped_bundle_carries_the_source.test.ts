@@ -165,13 +165,13 @@ test( "🔴 THE SHIPPED COMPARATOR SORTS PRIORITY BEFORE STATUS — Rick's 2026-
     "found no byUrgency comparator in the bundle at all — this check has gone blind "
     + "(minifier or wrapper changed); fix the matcher before trusting a green here" );
 
-  // Both copies — taskListModel and epicBoardModel each declare their own.
-  assert.equal( comparators.length, 2,
-    `expected 2 priority-first comparators in the bundle, found ${ comparators.length } — `
-    + `the multiplexer declares byUrgency twice (taskListModel, epicBoardModel)` );
+  // One shared comparator — taskListModel exports it and epicBoardModel imports it (row 9cc37a94 item 31).
+  assert.equal( comparators.length, 1,
+    `expected 1 priority-first comparator in the bundle, found ${ comparators.length } — `
+    + `byUrgency is declared once, in taskListModel, and epicBoardModel imports it` );
 
   assert.equal( reversed.length, 0,
     "the shipped bundle contains a STATUS-FIRST byUrgency — the source was changed to "
-    + "priority-first but this build predates it, or one of the two copies was missed. "
+    + "priority-first but this build predates it, or a second copy of the comparator crept back in. "
     + "Run `npm run build`." );
 } );

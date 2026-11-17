@@ -74,6 +74,20 @@ function paneIsOpen( doc: Document ): boolean {
 }
 
 /**
+ * Scroll by `delta`: the left column with the pane open, else the window.
+ *
+ * Requires:
+ *   - column is the left column, or null when the page has none (nothing then moves with the pane open)
+ */
+export function scrollByDelta( paneOpen: boolean, column: HTMLElement | null, win: ScrollRoot, delta: number ): void {
+  if ( paneOpen ) {
+    if ( column !== null ) column.scrollTop += delta;
+  } else {
+    win.scrollBy(0, delta);
+  }
+}
+
+/**
  * Remember which cards the reader is looking at, when they have scrolled away from the top.
  *
  * Requires:
@@ -118,12 +132,7 @@ export function restoreKeepPlace( mount: HTMLElement, candidates: PlaceCandidate
     if ( now === -1 || now < c.index ) continue;
     const delta = c.el.getBoundingClientRect().top - c.top;
     if ( delta === 0 ) return;
-    if ( paneIsOpen(doc) ) {
-      const column = doc.querySelector<HTMLElement>(".left-column");
-      if ( column !== null ) column.scrollTop += delta;
-    } else {
-      win.scrollBy(0, delta);
-    }
+    scrollByDelta(paneIsOpen(doc), doc.querySelector<HTMLElement>(".left-column"), win, delta);
     return;
   }
 }

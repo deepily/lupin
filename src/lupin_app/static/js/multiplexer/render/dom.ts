@@ -161,6 +161,18 @@ function updateAndLocate<T extends KeyedEntry>(
 }
 
 /**
+ * Set a text field's value, focus it and put the caret after the inserted text.
+ *
+ * Requires:
+ *   - caret is the index to restore, or null when the field exposed no caret (focus only then)
+ */
+export function setValueFocusCaret( el: HTMLInputElement | HTMLTextAreaElement, value: string, caret: number | null ): void {
+  el.value = value;
+  el.focus();
+  if ( caret !== null ) el.setSelectionRange( caret, caret );
+}
+
+/**
  * Escapes a string for use inside a CSS selector.
  *
  * The one copy for every renderer. It uses the built-in CSS.escape, or a regex escape without one.

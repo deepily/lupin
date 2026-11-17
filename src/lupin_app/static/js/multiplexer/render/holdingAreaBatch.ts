@@ -193,6 +193,17 @@ export function holdingBatchExtras( verb: string, reason: string ): Record<strin
 /** The class an armed button carries — the same one the per-row Submit uses. */
 export const HOLDING_BATCH_ARMED_CLASS = "task-submit-armed";
 
+/**
+ * Put an armed button back to rest: no armed mark, no armed class, the given label.
+ *
+ * Shared by the batch buttons, the plan buttons and the per-row Submit.
+ */
+export function restArmedButton( button: HTMLButtonElement, label: string ): void {
+  delete button.dataset.armed;
+  button.classList.remove( HOLDING_BATCH_ARMED_CLASS );
+  button.textContent = label;
+}
+
 /** A batch button's resting label. Pinned equal to the label the group template renders. */
 export function holdingBatchRestLabel( verb: string ): string {
   return verb === "wont_fix" ? "Won't fix all" : "Approve all";

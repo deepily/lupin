@@ -286,6 +286,22 @@ function asRows( tasks: unknown ): Array<TaskItem | null | undefined> {
 }
 
 /**
+ * Order two open tasks by urgency: priority first, then status, then title. Pure.
+ *
+ * Shared by the owner-grouped task list and the epic board (row 9cc37a94 item 31).
+ * Priority comes first by Rick's ruling of 2026-09-09: a blocked P2 must not outrank a queued P0.
+ * Terminal rows never reach it, because both renderers filter them out first, so status
+ * is safe as the second key.
+ */
+export function byUrgency( a: TaskItem, b: TaskItem ): number {
+  const pr = priorityRank( a.priority ) - priorityRank( b.priority );
+  if ( pr !== 0 ) return pr;
+  const sr = statusRank( a.status ) - statusRank( b.status );
+  if ( sr !== 0 ) return sr;
+  return taskTitleLabel( a ).localeCompare( taskTitleLabel( b ) );
+}
+
+/**
  * Build the owner-grouped model: each distinct `owner_persona` is a group
  * (persona-sorted), tasks with no owner collapse into a single trailing
  * "Unassigned" bucket. Within a group, tasks sort by status-rank (blocked
@@ -317,26 +333,6 @@ export function groupTasksByOwner( tasks: unknown ): TaskListModel {
     }
   } );
 
-  // 🔨 PRIORITY FIRST — Rick's ruling, 2026-09-09, by voice: "obviously it's going
-  // to be priority first, but I also want to make sure that this is implemented for
-  // both clients." He reported seeing a P2 above a P0 and was right: this comparator
-  // read STATUS first, so priority was consulted only between rows already sharing a
-  // status. A blocked P2 outranked a queued P0.
-  //
-  // ⚠️ TERMINAL ROWS DO NOT REACH HERE, which is why status is safe as the SECOND
-  // key rather than needing an open/terminal split. Both renderers filter first —
-  // TaskListRenderer.ts:307 and EpicBoardRenderer.ts:236 — and the degraded path is
-  // fed from the same filtered array (:308). Rick, correcting me on exactly this:
-  // "when something gets marked as done it actually literally gets removed from the
-  // task list. It is then displayed within the finished list, by order of what's
-  // finished."
-  const byUrgency = ( a: TaskItem, b: TaskItem ): number => {
-    const pr = priorityRank( a.priority ) - priorityRank( b.priority );
-    if ( pr !== 0 ) return pr;
-    const sr = statusRank( a.status ) - statusRank( b.status );
-    if ( sr !== 0 ) return sr;
-    return taskTitleLabel( a ).localeCompare( taskTitleLabel( b ) );
-  };
 
   const groups: TaskGroup[] = Array.from( byOwner.keys() )
     .sort( ( a, b ) => a.localeCompare( b ) )

@@ -27,9 +27,10 @@
 
 import { ApiError } from "../api/ApiClient";
 import { recordingManager, type RecordingManagerStartOptions } from "../audio/recordingManager";
+import { HOLDING_BATCH_ARMED_CLASS, restArmedButton } from "./holdingAreaBatch";
+import { toggleDictation } from "./dictationToggle";
 import type { TaskMutation, TaskPatchFields, TransitionOutcome } from "../stores/TaskListStore";
 import { alreadyThereMessage } from "../stores/alreadyAtTarget";
-import { insertTranscriptionText } from "./insertTranscriptionText";
 import {
   transitionExtras,
   type TransitionExtras,
@@ -323,34 +324,12 @@ export class TaskRowController {
     const input = scope?.querySelector<HTMLInputElement>( ".task-reason-input" ) ?? null;
     if ( input === null ) { this.rowError( button, id, MIC_NO_REASON_BOX ); return; }
 
-    if ( this.recorder.getActiveContextId() === contextId ) {
-      this.micProcessing.add( contextId );
-      button.classList.remove( "recording" );
-      button.classList.add( "processing" );
-      void this.recorder.stopRecording( contextId );
-      return;
-    }
-
-    const stash = { text: input.value, selStart: input.selectionStart, selEnd: input.selectionEnd };
-    const settle = (): void => {
-      this.micProcessing.delete( contextId );
-      button.classList.remove( "recording", "processing" );
-    };
-    button.classList.add( "recording" );
-    void this.recorder.startRecording( {
-      contextId,
-      authToken  : this.getAuthToken(),
-      onComplete : ( transcription ) => {
-        settle();
-        const spliced = insertTranscriptionText( stash.text, stash.selStart, stash.selEnd, transcription );
-        input.value = spliced.value;
-        if ( spliced.caret !== null ) input.setSelectionRange( spliced.caret, spliced.caret );
-      },
-      onError    : ( err ) => {
-        settle();
-        this.rowError( button, id, `Dictation failed: ${err.message}` );
-      },
-      onCancel   : settle,
+    toggleDictation( {
+      recorder   : this.recorder,
+      authToken  : this.getAuthToken,
+      contextId, button, input,
+      processing : this.micProcessing,
+      onError    : ( err ) => this.rowError( button, id, `Dictation failed: ${err.message}` ),
     } );
   }
 
@@ -482,7 +461,7 @@ export class TaskRowController {
 
     if ( needs.terminal && button.dataset.armed !== "1" ) {
       button.dataset.armed = "1";
-      button.classList.add( "task-submit-armed" );
+      button.classList.add( HOLDING_BATCH_ARMED_CLASS );
       button.textContent = `Confirm ${verbLabel( verb ).toLowerCase()}`;
       this.rowError( button, id, "" );
       return;
@@ -512,9 +491,7 @@ export class TaskRowController {
   private disarmSubmit( button: HTMLButtonElement | null ): void {
     /* c8 ignore next */ // defensive: every actions cell renders a Submit per the template invariant.
     if ( button === null ) return;
-    delete button.dataset.armed;
-    button.classList.remove( "task-submit-armed" );
-    button.textContent = "Submit";
+    restArmedButton( button, "Submit" );
   }
 
   // -------------------------------------------------------------------------

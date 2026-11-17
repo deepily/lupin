@@ -50,6 +50,7 @@ import {
   holdingBatchInFlightStatus,
   holdingBatchFinalStatus,
   holdingBatchRestLabel,
+  restArmedButton,
   holdingBatchConfirmLabel,
   holdingBatchArmedStatus,
   holdingPlanConfirmLabel,
@@ -74,7 +75,7 @@ import { BADGE_HOLDING_AREA } from "../../shared/task-request.js";
 import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
 import { createFlowRatioPanel, type FlowRatioStoreLike } from "./flowRatioPanel";
 import { renderTruncationBanner } from "./templates/truncationBanner";
-import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
+import { readBackAfterWrite, stampFreshRead, stampReadBackFailed } from "../shared/afterWriteRead";
 import { teardownScaffold, messageEl } from "./dom";
 
 /**
@@ -848,9 +849,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     if ( group === null ) return;
     for ( const b of Array.from( group.querySelectorAll<HTMLButtonElement>(
       ".holding-approve-all, .holding-wont-fix-all" ) ) ) {
-      delete b.dataset.armed;
-      b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
-      b.textContent = holdingBatchRestLabel( b.classList.contains( "holding-wont-fix-all" ) ? "wont_fix" : "approve" );
+      restArmedButton( b, holdingBatchRestLabel( b.classList.contains( "holding-wont-fix-all" ) ? "wont_fix" : "approve" ) );
     }
   }
 
@@ -898,9 +897,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private disarmPlanButton( b: HTMLButtonElement ): void {
     this.armedPlans.delete( planButtonId( b ) );
     if ( b.dataset.armed === "1" ) this.paintPlanStatus( planButtonId( b ), "" );
-    delete b.dataset.armed;
-    b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
-    b.textContent = holdingPlanApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length );
+    restArmedButton( b, holdingPlanApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length ) );
   }
 
   /** The group's batch reason box, trimmed, or "" when it is not rendered. */
@@ -972,11 +969,49 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     }
     this.disarmGroup( filer );
 
-    const extras = holdingBatchExtras( verb, reason );
-    this.batchesInFlight.add( filer );
-    this.paintGroupStatus( filer, holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );
-    this.setBatchControls( filer, true );
+    const { ok, failed, firstError } = await this.attemptRows(
+      ids, needs, holdingBatchExtras( verb, reason ),
+      ( message ) => this.paintGroupStatus( filer, message ),
+      ( running ) => {
+        if ( running ) this.batchesInFlight.add( filer ); else this.batchesInFlight.delete( filer );
+        this.setBatchControls( filer, running );
+      },
+    );
 
+    // `refresh()` here would JOIN a poll whose fetch began before these
+    // transitions landed — correct data for that poll, stale for this batch.
+    //
+    // 🔴 AND THE TALLY IS PAINTED WHETHER OR NOT THE READ WORKS (row 93ca4268,
+    // HARDENING — no read can reject today). A bare `await` here would abandon the line
+    // below it: every transition has already been attempted and counted by this point,
+    // and a rejection would throw all of that away, freezing the group on "…3 of 8" over
+    // a batch that had finished. `runBatch` is driven through `void`, so the rejection
+    // would go nowhere anyone could see either.
+    await this.readBackBoard();
+    this.paintGroupStatus( filer, holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError ) );
+  }
+
+  /**
+   * Attempt one transition per row, in order, painting the running tally; the shared engine of a batch and a plan approve.
+   *
+   * Requires:
+   *   - paint writes a status line; hold(true) locks the controls and hold(false) frees them
+   *
+   * Ensures:
+   *   - every row is attempted, whatever the ones before it returned
+   *   - hold(true) runs before the first row and hold(false) after the last, even if a write throws
+   *   - the in-flight line counts attempts, starting at none
+   *   - returns the successes, the refusals and the first refusal message
+   */
+  private async attemptRows(
+    ids   : string[],
+    needs : { status: string; pastLabel: string },
+    extras: TransitionExtras,
+    paint : ( message: string ) => void,
+    hold  : ( running: boolean ) => void,
+  ): Promise<{ ok: number; failed: number; firstError: string | null }> {
+    hold( true );
+    paint( holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );
     let ok = 0;
     let failed = 0;
     let firstError: string | null = null;
@@ -989,27 +1024,20 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
           failed += 1;
           if ( firstError === null ) firstError = result.message ?? "";
         }
-        this.paintGroupStatus( filer, holdingBatchInFlightStatus( needs.pastLabel, ok + failed, ids.length ) );
+        paint( holdingBatchInFlightStatus( needs.pastLabel, ok + failed, ids.length ) );
       }
     } finally {
-      this.setBatchControls( filer, false );
-      this.batchesInFlight.delete( filer );
+      hold( false );
     }
+    return { ok, failed, firstError };
+  }
 
-    // `refresh()` here would JOIN a poll whose fetch began before these
-    // transitions landed — correct data for that poll, stale for this batch.
-    //
-    // 🔴 AND THE TALLY IS PAINTED WHETHER OR NOT THE READ WORKS (row 93ca4268,
-    // HARDENING — no read can reject today). A bare `await` here would abandon the line
-    // below it: every transition has already been attempted and counted by this point,
-    // and a rejection would throw all of that away, freezing the group on "…3 of 8" over
-    // a batch that had finished. `runBatch` is driven through `void`, so the rejection
-    // would go nowhere anyone could see either.
-    await readBackAfterWrite(
+  /** Re-read the board after a write, stamping the board when the read fails. */
+  private readBackBoard(): Promise<void> {
+    return readBackAfterWrite(
       () => this.store.refreshAfterWrite(),
       () => this.stampReadBackFailed(),
     );
-    this.paintGroupStatus( filer, holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError ) );
   }
 
   /** One plan's status span, matched in JavaScript so a key with a quote or bracket cannot break a selector. */
@@ -1065,38 +1093,21 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.disarmPlans();
 
     const needs = holdingBatchNeeds( "approve" )!;
-    this.plansInFlight.add( id );
-    this.paintPlanStatus( id, holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );
-    button.disabled = true;
-
-    let ok = 0;
-    let failed = 0;
-    let firstError: string | null = null;
-    try {
-      for ( const rowId of ids ) {
-        const result = await this.store.transitionTask( rowId, needs.status, {} );
-        if ( result.ok ) {
-          ok += 1;
-        } else {
-          failed += 1;
-          if ( firstError === null ) firstError = result.message ?? "";
-        }
-        this.paintPlanStatus( id, holdingBatchInFlightStatus( needs.pastLabel, ok + failed, ids.length ) );
-      }
-    } finally {
-      button.disabled = false;
-      this.plansInFlight.delete( id );
-    }
+    const { ok, failed, firstError } = await this.attemptRows(
+      ids, needs, {},
+      ( message ) => this.paintPlanStatus( id, message ),
+      ( running ) => {
+        if ( running ) this.plansInFlight.add( id ); else this.plansInFlight.delete( id );
+        button.disabled = running;
+      },
+    );
 
     // The report is remembered BEFORE the read-back: the repaint that read-back causes
     // rebuilds the header, and keeps a one-row remainder on screen only if a report is held.
     const final = holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError );
     if ( failed > 0 ) this.planReports.set( id, final );
     else this.planReports.delete( id );
-    await readBackAfterWrite(
-      () => this.store.refreshAfterWrite(),
-      () => this.stampReadBackFailed(),
-    );
+    await this.readBackBoard();
     this.paintPlanStatus( id, final );
   }
 
@@ -1112,11 +1123,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   }
 
   private stampUpdated(): void {
-    /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container.
-    if ( this.updatedEl === null ) return;
-    // A fresh read ENDS the staleness a failed read-back declared.
-    clearReadBackFailed( this.updatedEl );
-    this.updatedEl.textContent = `updated ${ formatFleetTimestamp( this.nowDateFn(), undefined ) }`;
+    stampFreshRead( this.updatedEl, `updated ${ formatFleetTimestamp( this.nowDateFn(), undefined ) }` );
   }
 
   /**
