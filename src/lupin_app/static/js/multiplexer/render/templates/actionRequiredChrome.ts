@@ -83,20 +83,35 @@ export function personaBadge( persona: VoicePersona | null | undefined ): HTMLEl
   return el;
 }
 
+/** The parts of the 📋 button a caller may change. */
+export interface AbstractIndicatorOptions {
+  /** The document to build in; defaults to the page's. */
+  doc?       : Document;
+  /** Extra classes added after `abstract-indicator`. */
+  className? : string;
+  /** The hover title; null leaves it off. Defaults to "View full abstract". */
+  title?     : string | null;
+  /** Written to `data-testid` when given. */
+  testid?    : string;
+}
+
 /**
  * Build the 📋 button that opens a card's abstract, or null when the abstract is blank.
  *
  * The abstract text rides on the `data-abstract` attribute, which the reading pane reads when the button is clicked.
+ * The options let the notification list and the jobs pane build the same button with their own class, title and test id.
  */
-export function abstractIndicator( abstract: string | undefined ): HTMLElement | null {
+export function abstractIndicator( abstract: string | undefined, opts: AbstractIndicatorOptions = {} ): HTMLElement | null {
   if ( abstract === undefined || abstract.trim().length === 0 ) return null;
-  const el = document.createElement( "span" );
-  el.className = "abstract-indicator";
+  const el = ( opts.doc ?? document ).createElement( "span" );
+  el.className = opts.className === undefined ? "abstract-indicator" : `abstract-indicator ${ opts.className }`;
   el.setAttribute( "data-abstract", abstract );
   el.setAttribute( "role", "button" );
   el.setAttribute( "tabindex", "0" );
-  el.title       = "View full abstract";
+  const title = opts.title === undefined ? "View full abstract" : opts.title;
+  if ( title !== null ) el.setAttribute( "title", title );
   el.textContent = "📋";
+  if ( opts.testid !== undefined ) el.setAttribute( "data-testid", opts.testid );
   return el;
 }
 

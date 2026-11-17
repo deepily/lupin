@@ -16,6 +16,7 @@ import { html } from "../html";
 import type { Value } from "../html";
 import { renderMarkdownInline } from "../markdown";
 import { formatHM } from "../time";
+import { abstractIndicator } from "./actionRequiredChrome";
 import { renderPredictionVoteControls } from "./predictionVoteControls";
 import type { PredictionVoteIntegration } from "./predictionVoteControls";
 import type { Notification } from "../../shared/types";
@@ -87,7 +88,7 @@ export function renderNotificationItem(
     const head = html`
       <div class="progress-group-head">
         <span class="message-time">${timeText}</span>
-        <span class="message-text">${renderMarkdownInline(notification.message)}${expired ? expiredBadge() : null}${hasAbstract ? abstractIndicator(notification.abstract as string) : null}</span>
+        <span class="message-text">${renderMarkdownInline(notification.message)}${expired ? expiredBadge() : null}${hasAbstract ? abstractIndicator(notification.abstract as string, { title: null }) : null}</span>
         <span class="progress-group-toggle" aria-expanded="false" role="button" tabindex="0">▶</span>
       </div>
       <div class="progress-group-history" hidden></div>
@@ -97,7 +98,7 @@ export function renderNotificationItem(
     /* c8 ignore next 4 */ // tagged-template literal: c8 reports phantom branches on each $-interpolation; the runtime path is straight-line and exercised by every test that renders a non-progress-group notification (the inProgressGrp=true branch above is the alternate, also covered).
     const flat = html`
       <span class="message-time">${timeText}</span>
-      <span class="message-text">${renderMarkdownInline(notification.message)}${expired ? expiredBadge() : null}${hasAbstract ? abstractIndicator(notification.abstract as string) : null}</span>
+      <span class="message-text">${renderMarkdownInline(notification.message)}${expired ? expiredBadge() : null}${hasAbstract ? abstractIndicator(notification.abstract as string, { title: null }) : null}</span>
     ` as DocumentFragment;
     root.appendChild(flat);
   }
@@ -192,6 +193,7 @@ function cornerStopButton(idHash: string): HTMLButtonElement {
 /**
  * Builds the Open Ratification link for a progress group.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line: c8 put the only uncovered arm on the function name once the function above it was removed, while every line of the body runs.
 function proxyRatifyLink(groupId: string): HTMLAnchorElement {
   const link = document.createElement("a");
   link.className       = "proxy-ratify-link";
@@ -201,14 +203,3 @@ function proxyRatifyLink(groupId: string): HTMLAnchorElement {
   return link;
 }
 
-/**
- * Returns a clipboard icon that carries the notification abstract.
- */
-/* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + tagged-template literal interpolation phantom.
-function abstractIndicator(abstract: string): Value {
-  // 📋 indicator with abstract stored on data-attribute — popover handler
-  // attaches in Phase 6.
-  const el = html`<span class="abstract-indicator" data-abstract="${abstract}" role="button" tabindex="0">📋</span>` as DocumentFragment;
-  return el;
-}
-/* c8 ignore stop */

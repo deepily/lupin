@@ -16,6 +16,7 @@ import { CRON_DRIFT_TEXT, CRON_UNREADABLE_TEXT, cronChangedText, cronInsideText,
 import type { CronJobRow } from "./cronFormat";
 import type { JobEntry, JobsSummary } from "./types";
 import { renderDiscloseToggle } from "../render/templates/rowDisclosure";
+import { abstractIndicator as buildAbstractIndicator } from "../render/templates/actionRequiredChrome";
 
 /** What the page lets a rendered job do: Run now, and the switch's flip. */
 export interface JobsActions {
@@ -68,12 +69,8 @@ function itemId( job: JobEntry ): string {
 
 /** The 📋 of a job: the delegated click handler opens its abstract. */
 function abstractIndicator( doc: Document, job: JobEntry, todayIso: string, testid: string, cronRows: readonly CronJobRow[] ): HTMLElement {
-  const span = el( doc, "span", "abstract-indicator jobs-abstract", "📋", testid );
-  span.setAttribute( "data-abstract", abstractMarkdown( job, todayIso, cronRows ) );      // raw: the multiplexer reads it raw
-  span.setAttribute( "role", "button" );
-  span.setAttribute( "tabindex", "0" );
-  span.setAttribute( "title", "View details" );
-  return span;
+  // raw: the multiplexer reads the markdown raw. abstractMarkdown always opens with a title line, so it is never blank.
+  return buildAbstractIndicator( abstractMarkdown( job, todayIso, cronRows ), { doc, className: "jobs-abstract", title: "View details", testid } )!;
 }
 
 /** One job's switch: state, flip button, when it changed, whether it is read, and the notes. */
