@@ -55,6 +55,20 @@ DEF     = re.compile( r"^(\s*)def (test_\w+)\s*\(", re.MULTILINE )
 HELPER  = re.compile( r"(?:self|cls)\.(_\w+)\s*\(" )
 HELPDEF = re.compile( r"^\s*def (_\w+)\s*\(", re.MULTILINE )
 
+def _spans( src, pattern ):
+    """
+    Split a source into the stretches that start at each match of a def pattern.
+
+    Requires:
+        - src is a source string; pattern is a compiled regex that matches the start of a def line
+
+    Ensures:
+        - returns ( match, body ) for each match, in order, where body runs from the match to the next match or the end of src
+    """
+    marks = list( pattern.finditer( src ) )
+    return [ ( m, src[ m.start():( marks[ i + 1 ].start() if i + 1 < len( marks ) else len( src ) ) ] ) for i, m in enumerate( marks ) ]
+
+
 def helper_bodies( src ):
     """{ name: body } for each _private helper, so a pin inside one is visible.
 
@@ -62,19 +76,11 @@ def helper_bodies( src ):
     in one file isolate only through `self._arrange( ... )`. A sweep that reads
     test bodies alone calls all three exposed and sends someone to 'fix' code
     that was already correct."""
-    marks = list( HELPDEF.finditer( src ) )
-    out = {}
-    for i, m in enumerate( marks ):
-        end = marks[ i + 1 ].start() if i + 1 < len( marks ) else len( src )
-        out[ m.group( 1 ) ] = src[ m.start():end ]
-    return out
+    return { m.group( 1 ): body for m, body in _spans( src, HELPDEF ) }
 
 def functions( src ):
     """Yield ( name, body ) for each test function, body running to the next def."""
-    marks = list( DEF.finditer( src ) )
-    for i, m in enumerate( marks ):
-        end  = marks[ i + 1 ].start() if i + 1 < len( marks ) else len( src )
-        body = src[ m.start():end ]
+    for m, body in _spans( src, DEF ):
         # STOP at a section divider or the next class. Without this the body
         # swallows the trailing "# ── _notify_impl fallbacks ──" header and a
         # test that never calls _notify_impl gets reported as driving it.
