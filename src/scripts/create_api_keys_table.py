@@ -33,7 +33,7 @@ if src_path not in sys.path:
 
 # Now cosa is importable
 import cosa.utils.util as cu
-from cosa.utils.admin_script_helpers import run_create_script, validate_table
+from cosa.utils.admin_script_helpers import create_table_with_indexes, run_create_script, validate_table
 from cosa.rest.sqlite_database import get_auth_db_connection, get_auth_db_path
 
 
@@ -109,53 +109,30 @@ def create_api_keys_table():
     if not db_dir.exists():
         raise RuntimeError( f"Database directory does not exist: {db_dir}" )
 
-    # Connect to database using canonical auth connection
-    conn = None
-    try:
-        conn = get_auth_db_connection()
-        cursor = conn.cursor()
+    return create_table_with_indexes(
+        get_auth_db_connection, "api_keys", CREATE_API_KEYS_TABLE, CREATE_INDEXES, validate_schema,
+        precheck=_require_users_table, table_done="    ✓ Table created", index_mark="✓ "
+    )
 
-        # Verify users table exists (required for foreign key)
-        print( "  Verifying users table exists..." )
-        cursor.execute( "SELECT name FROM sqlite_master WHERE type='table' AND name='users'" )
-        if not cursor.fetchone():
-            raise RuntimeError( "Users table does not exist. Run init_auth_database() first." )
-        print( "    ✓ Users table found" )
 
-        # Create table
-        print( "  Creating api_keys table..." )
-        cursor.execute( CREATE_API_KEYS_TABLE )
-        print( "    ✓ Table created" )
+def _require_users_table( cursor ):
+    """
+    Refuse to go on unless the users table exists, which the foreign key needs.
 
-        # Create indexes
-        print( "  Creating indexes..." )
-        for idx, index_sql in enumerate( CREATE_INDEXES, 1 ):
-            cursor.execute( index_sql )
-            print( f"    ✓ Index {idx}/4 created" )
+    Requires:
+        - cursor belongs to the auth database connection
 
-        # Commit changes
-        conn.commit()
+    Ensures:
+        - prints the check and its result
 
-        # Validate schema
-        print( "  Validating schema..." )
-        validation_result = validate_schema( conn )
-
-        if validation_result["success"]:
-            print( f"  ✓ Schema validated: {validation_result['field_count']} fields, {validation_result['index_count']} indexes" )
-            return True
-        else:
-            print( f"  ✗ Schema validation failed: {validation_result['error']}", file=sys.stderr )
-            return False
-
-    except sqlite3.Error as e:
-        print( f"  ✗ SQLite error: {e}", file=sys.stderr )
-        return False
-    except Exception as e:
-        print( f"  ✗ Unexpected error: {e}", file=sys.stderr )
-        return False
-    finally:
-        if conn:
-            conn.close()
+    Raises:
+        - RuntimeError when the users table is missing
+    """
+    print( "  Verifying users table exists..." )
+    cursor.execute( "SELECT name FROM sqlite_master WHERE type='table' AND name='users'" )
+    if not cursor.fetchone():
+        raise RuntimeError( "Users table does not exist. Run init_auth_database() first." )
+    print( "    ✓ Users table found" )
 
 
 def validate_schema( conn ):

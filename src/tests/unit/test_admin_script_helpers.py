@@ -119,3 +119,70 @@ def test_an_existing_key_file_is_replaced_not_appended_to( tmp_path ):
     path = h.write_key_file( tmp_path, "ck_live_second", "dev" )
 
     assert path.read_text() == "ck_live_second\n"
+
+
+# ── create_table_with_indexes ─────────────────────────────────────────────────────────────
+
+CREATE_WIDGETS = "CREATE TABLE widgets ( id INTEGER PRIMARY KEY, name TEXT, size INTEGER )"
+WIDGET_INDEXES = [ "CREATE INDEX idx_name ON widgets ( name )", "CREATE INDEX idx_size ON widgets ( size )" ]
+
+
+class _Probe:
+    """A connection the test can ask whether it was closed."""
+
+    def __init__( self ):
+        self.conn   = sqlite3.connect( ":memory:" )
+        self.closed = False
+
+    def __call__( self ):
+        return self
+
+    def cursor( self ): return self.conn.cursor()
+    def commit( self ): self.conn.commit()
+
+    def close( self ):
+        self.closed = True
+        self.conn.close()
+
+
+def _ok( conn ):
+    return h.validate_table( conn.conn, "widgets", 3, 2 )
+
+
+def test_a_good_create_prints_each_step_with_the_marks_it_was_given_and_closes_the_connection( capsys ):
+    probe = _Probe()
+    assert h.create_table_with_indexes( probe, "widgets", CREATE_WIDGETS, WIDGET_INDEXES, _ok, table_done="    ✓ Table created", index_mark="✓ " ) is True
+    assert capsys.readouterr().out == (
+        "  Creating widgets table...\n    ✓ Table created\n  Creating indexes...\n    ✓ Index 1/2 created\n    ✓ Index 2/2 created\n"
+        "  Validating schema...\n  ✓ Schema validated: 3 fields, 2 indexes\n" )
+    assert probe.closed
+
+
+def test_without_marks_the_table_line_and_the_tick_are_left_out_and_the_precheck_runs_first( capsys ):
+    calls = []
+    assert h.create_table_with_indexes( _Probe(), "widgets", CREATE_WIDGETS, WIDGET_INDEXES, _ok, precheck=lambda cursor: calls.append( cursor ) ) is True
+    out = capsys.readouterr().out
+    assert len( calls ) == 1 and "  Creating widgets table...\n  Creating indexes...\n    Index 1/2 created\n" in out and "Table created" not in out and "✓ Index" not in out
+
+
+def test_a_failing_validation_returns_false_and_says_why_on_stderr( capsys ):
+    probe = _Probe()
+    assert h.create_table_with_indexes( probe, "widgets", CREATE_WIDGETS, WIDGET_INDEXES, lambda conn: { "success": False, "error": "planted" } ) is False
+    assert "  ✗ Schema validation failed: planted\n" == capsys.readouterr().err and probe.closed
+
+
+def test_a_sqlite_error_and_any_other_error_are_reported_as_false_and_the_connection_still_closes( capsys ):
+    probe = _Probe()
+    assert h.create_table_with_indexes( probe, "widgets", "CREATE NONSENSE", [], _ok ) is False
+    assert "✗ SQLite error:" in capsys.readouterr().err and probe.closed
+
+    probe = _Probe()
+    def refuse( cursor ): raise RuntimeError( "no users" )
+    assert h.create_table_with_indexes( probe, "widgets", CREATE_WIDGETS, [], _ok, precheck=refuse ) is False
+    assert "  ✗ Unexpected error: no users\n" == capsys.readouterr().err and probe.closed
+
+
+def test_a_connect_that_raises_is_reported_and_there_is_nothing_to_close( capsys ):
+    def no_connection(): raise RuntimeError( "no database" )
+    assert h.create_table_with_indexes( no_connection, "widgets", CREATE_WIDGETS, [], _ok ) is False
+    assert "  ✗ Unexpected error: no database\n" == capsys.readouterr().err

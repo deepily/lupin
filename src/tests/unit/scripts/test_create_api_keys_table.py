@@ -286,3 +286,13 @@ class TestTheBootstrap:
         monkeypatch.delitem( sys.modules, MODNAME, raising=False )
         importlib.import_module( MODNAME )
         assert sys.path.count( str( root / "src" ) ) == 1
+
+
+class TestTheReportKeepsItsMarks:
+
+    def test_every_step_is_ticked_and_the_users_check_is_reported_first( self, monkeypatch, capsys, tmp_path ):
+        _wire( monkeypatch, tmp_path )
+        assert mod.create_api_keys_table() is True
+        out = capsys.readouterr().out
+        assert ( "  Verifying users table exists...\n    ✓ Users table found\n  Creating api_keys table...\n    ✓ Table created\n"
+                 "  Creating indexes...\n    ✓ Index 1/4 created\n" ) in out and "    ✓ Index 4/4 created\n  Validating schema...\n" in out

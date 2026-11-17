@@ -56,6 +56,62 @@ def run_create_script( title, subtitle, success_label, create_fn ):
         return 1
 
 
+def create_table_with_indexes( connect, table, create_sql, index_sqls, validate, precheck=None, table_done=None, index_mark="" ):
+    """
+    Create one table and its indexes, validate the schema and report each step.
+
+    Requires:
+        - connect takes no arguments and returns an open sqlite3 connection
+        - create_sql creates the table and each of index_sqls one index
+        - validate takes the connection and returns { success, field_count, index_count, error }
+        - precheck is None, or takes the cursor, prints its own lines and raises when the work must not start
+        - table_done is None, or the line to print after the table is created
+        - index_mark is put before each "Index n/total created" line
+
+    Ensures:
+        - prints "Creating <table> table...", then the table line, the indexes and the validation result
+        - commits before validating
+        - returns True when validate says success
+        - returns False, after printing the cause on stderr, when validate fails, sqlite3 raises or anything else raises
+        - always closes the connection it opened
+    """
+    conn = None
+    try:
+        conn   = connect()
+        cursor = conn.cursor()
+
+        if precheck is not None: precheck( cursor )
+
+        print( f"  Creating {table} table..." )
+        cursor.execute( create_sql )
+        if table_done is not None: print( table_done )
+
+        print( "  Creating indexes..." )
+        for idx, index_sql in enumerate( index_sqls, 1 ):
+            cursor.execute( index_sql )
+            print( f"    {index_mark}Index {idx}/{len( index_sqls )} created" )
+
+        conn.commit()
+
+        print( "  Validating schema..." )
+        validation_result = validate( conn )
+
+        if validation_result[ "success" ]:
+            print( f"  ✓ Schema validated: {validation_result[ 'field_count' ]} fields, {validation_result[ 'index_count' ]} indexes" )
+            return True
+        print( f"  ✗ Schema validation failed: {validation_result[ 'error' ]}", file=sys.stderr )
+        return False
+
+    except sqlite3.Error as e:
+        print( f"  ✗ SQLite error: {e}", file=sys.stderr )
+        return False
+    except Exception as e:
+        print( f"  ✗ Unexpected error: {e}", file=sys.stderr )
+        return False
+    finally:
+        if conn: conn.close()
+
+
 def validate_table( conn, table, expected_fields, expected_indexes ):
     """
     Check that a table exists with the expected field and index counts.
