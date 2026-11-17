@@ -52,6 +52,7 @@ from lupin_cli.claude_code.hooks.lib.idle_settings import load_idle_settings
 from cosa.config.configuration_manager import ConfigurationManager
 from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
     fire_anything_else_ask, summarize_task as _shared_summarize_task,
+    get_session_context as _shared_get_session_context,
 )
 # ── Heartbeat Hook (Branch-C self-poke) — additive, gated, downstream of the
 #    stop_hook_active loop guard; voice always wins. Leaf modules are pure +
@@ -101,27 +102,8 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_task_state import (
 )
 
 
-def _summarize_task( last_assistant_message ):
-    """
-    Summarize the last assistant message using Gister (default mode).
-
-    Requires:
-        - last_assistant_message is a string or None
-
-    Ensures:
-        - Returns a concise gist string on success
-        - Returns None on any failure or empty input
-    """
-    if not last_assistant_message or not last_assistant_message.strip():
-        return None
-
-    try:
-        from cosa.memory.gister import Gister
-        gister = Gister( debug=False, verbose=False )
-        gist   = gister.get_gist( last_assistant_message, prompt_key="prompt template for stop hook gist" )
-        return gist if gist else None
-    except Exception:
-        return None
+# One gist implementation (dupcheck d-aae095e42b): the shared one, under the name the call site and its tests use.
+_summarize_task = _shared_summarize_task
 
 
 # Note: classify_qualifier() was removed because its synchronous LLM
@@ -170,42 +152,8 @@ def _should_ask_anything_else( last_assistant_message, session_id ):
     return True
 
 
-def _get_session_context( cwd ):
-    """
-    Read session topic from bridge file + git branch name.
-
-    Requires:
-        - cwd is a string path or None
-
-    Ensures:
-        - Returns (topic, branch) tuple
-        - topic is a string or None (from bridge file's session_topic)
-        - branch is a string or None (from git rev-parse)
-        - Never raises exceptions
-    """
-    topic  = None
-    branch = None
-
-    # Session topic from bridge file
-    try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
-        meta  = get_session_metadata()
-        topic = meta.get( "session_topic" )
-    except Exception:
-        pass
-
-    # Git branch
-    if cwd:
-        try:
-            import subprocess
-            branch = subprocess.check_output(
-                [ "git", "rev-parse", "--abbrev-ref", "HEAD" ],
-                cwd=cwd, text=True, timeout=5
-            ).strip()
-        except Exception:
-            pass
-
-    return topic, branch
+# One session-context reader (dupcheck d-98cbf9e195): the shared one, under the name the call site and its tests use.
+_get_session_context = _shared_get_session_context
 
 
 DEFAULT_IDLE_BEHAVIOR = "idle_announce"

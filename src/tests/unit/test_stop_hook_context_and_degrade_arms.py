@@ -44,7 +44,7 @@ class GetSessionContextTest( unittest.TestCase ):
     def _run( self, cwd, *, meta=None, meta_raises=None, branch=None, branch_raises=None ):
         bridge = mock.Mock( side_effect=meta_raises, return_value=( meta or { } ) )
         check  = mock.Mock( side_effect=branch_raises, return_value=( branch or "" ) )
-        with mock.patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_session_metadata", bridge ), \
+        with mock.patch( "lupin_cli.claude_code.hooks.lib.anything_else_ask.get_session_metadata", bridge ), \
              mock.patch( "subprocess.check_output", check ):
             return stop._get_session_context( cwd ), check
 
