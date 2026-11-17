@@ -444,20 +444,3 @@ def cron_switch_deny_reason( tool_name, tool_input ) -> Optional[ str ]:
         return None
     except Exception:
         return f"{DENY_UNJUDGED}\n{_WHY}\n{_INSTEAD}" if _touches_ini( tool_name, tool_input ) else None
-
-
-def build_cron_switch_deny_response( reason: str ) -> dict:
-    """
-    Build the PreToolUse deny envelope.
-
-    Ensures:
-        - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
-          permissionDecision: "deny", permissionDecisionReason: <reason> } }
-    """
-    return {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : reason,
-        }
-    }

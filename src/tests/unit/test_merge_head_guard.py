@@ -39,7 +39,6 @@ from lupin_cli.claude_code.hooks.lib.merge_head_guard import (
     merge_head_deny_reason,
     _squash_in_flight,
     SQUASH_MSG_ARGV,
-    build_merge_head_deny_response,
     _guard_disabled,
     _hatch_in_prefix,
     _target_directory,
@@ -539,23 +538,6 @@ class TestFailOpen:
 
         monkeypatch.setattr( subprocess, "run", lambda *a, **kw: _Done() )
         assert _live_merge_head( "/tmp" ) is None
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# THE RESPONSE ENVELOPE
-# ═════════════════════════════════════════════════════════════════════════════
-
-class TestTheResponseEnvelope:
-
-    def test_it_is_a_pre_tool_use_deny( self ):
-        envelope = build_merge_head_deny_response( "because" )
-        assert envelope == {
-            "hookSpecificOutput": {
-                "hookEventName"            : "PreToolUse",
-                "permissionDecision"       : "deny",
-                "permissionDecisionReason" : "because",
-            }
-        }
 
 
 # ═════════════════════════════════════════════════════════════════════════════

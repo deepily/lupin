@@ -225,20 +225,3 @@ def subagent_deny_reason(
         return None
     except Exception:
         return None
-
-
-def build_subagent_deny_response( reason: str ) -> dict:
-    """
-    Build the PreToolUse deny envelope (mirrors hook_common.build_voice_deny_response).
-
-    Ensures:
-        - returns a dict of the form { hookSpecificOutput: { hookEventName: "PreToolUse",
-          permissionDecision: "deny", permissionDecisionReason: <reason> } }
-    """
-    return {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : reason,
-        }
-    }

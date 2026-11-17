@@ -1666,20 +1666,3 @@ def kill_deny_reason(
         return None
     except Exception:                    # pragma: no cover - fail-open backstop; NOT decorative: a missing `import subprocess` in the probe path landed here on 2026-08-24 and turned every verdict into a silent allow, which is why the guard is replayed against real traffic rather than trusted to its unit tests
         return None
-
-
-def build_kill_deny_response( reason: str ) -> dict:
-    """
-    Build the PreToolUse deny envelope (mirrors build_stash_deny_response).
-
-    Ensures:
-        - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
-          permissionDecision: "deny", permissionDecisionReason: <reason> } }
-    """
-    return {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : reason,
-        }
-    }

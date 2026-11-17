@@ -17,7 +17,6 @@ from pathlib import Path
 
 from lupin_cli.claude_code.hooks.lib.subagent_governance import (
     subagent_deny_reason,
-    build_subagent_deny_response,
     _is_crew_manager,
     _is_manager_persona,
     _session_dir,
@@ -237,16 +236,6 @@ def test_is_manager_persona_lazy_imports_real_bridge_helpers():
     # persona → not a manager. (Deterministic coverage of the import branch,
     # independent of the ambient os.environ roster.)
     assert _is_manager_persona( "no-such-session-xyz", env=_MGR_ENV ) is False
-
-
-# ── deny envelope ────────────────────────────────────────────────────────────────
-
-def test_build_subagent_deny_response_shape():
-    env = build_subagent_deny_response( "because" )
-    out = env[ "hookSpecificOutput" ]
-    assert out[ "hookEventName" ] == "PreToolUse"
-    assert out[ "permissionDecision" ] == "deny"
-    assert out[ "permissionDecisionReason" ] == "because"
 
 
 if __name__ == "__main__":

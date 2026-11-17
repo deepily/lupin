@@ -1099,20 +1099,3 @@ def build_commit_scope_notice_response( notice: str ) -> dict:
             "additionalContext" : notice,
         }
     }
-
-
-def build_commit_scope_deny_response( reason: str ) -> dict:
-    """
-    Build the PreToolUse deny envelope (mirrors build_stash_deny_response).
-
-    Ensures:
-        - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
-          permissionDecision: "deny", permissionDecisionReason: <reason> } }
-    """
-    return {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : reason,
-        }
-    }

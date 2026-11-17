@@ -24,6 +24,7 @@ if _src_path not in sys.path:                 # pragma: no cover - bootstrap-exc
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
     format_voice_context, build_voice_deny_response, build_additional_context,
+    build_deny_response,
     _context_has_human_voice,
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -66,11 +67,11 @@ def main():
     # ungovernable). DEFAULT-OFF (LUPIN_SUBAGENT_GOVERNANCE) + FAIL-OPEN (the lib
     # returns None on any error), so this is inert + safe on the hot path.
     from lupin_cli.claude_code.hooks.lib.subagent_governance import (
-        subagent_deny_reason, build_subagent_deny_response,
+        subagent_deny_reason,
     )
     gov_reason = subagent_deny_reason( payload.get( "tool_name", "" ), session_id )
     if gov_reason:
-        emit_json( build_subagent_deny_response( gov_reason ) )
+        emit_json( build_deny_response( gov_reason ) )
         sys.exit( 0 )
 
     # Stash guard (bug 1ebc9be3): `git stash` writes to a SINGLE repo-global
@@ -81,11 +82,11 @@ def main():
     # LUPIN_ALLOW_GIT_STASH escape hatch, and FAIL-OPEN by contract (the lib
     # returns None on any error), so it cannot break a tool call.
     from lupin_cli.claude_code.hooks.lib.stash_guard import (
-        stash_deny_reason, build_stash_deny_response,
+        stash_deny_reason,
     )
     stash_reason = stash_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
     if stash_reason:
-        emit_json( build_stash_deny_response( stash_reason ) )
+        emit_json( build_deny_response( stash_reason ) )
         sys.exit( 0 )
 
     # Branch-lock guard (row 3a592920): a git reference-transaction hook refuses to
@@ -97,13 +98,13 @@ def main():
     # DEFAULT-ON; Rick's escape hatch lives only in the hook process's environment, never
     # in the command. FAIL-OPEN by contract (the lib returns None on any error).
     from lupin_cli.claude_code.hooks.lib.branch_lock_guard import (
-        branch_lock_deny_reason, build_branch_lock_deny_response,
+        branch_lock_deny_reason,
     )
     branch_lock_reason = branch_lock_deny_reason(
         payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), cwd=payload.get( "cwd" ),
     )
     if branch_lock_reason:
-        emit_json( build_branch_lock_deny_response( branch_lock_reason ) )
+        emit_json( build_deny_response( branch_lock_reason ) )
         sys.exit( 0 )
 
     # Cron-switch guard (row 063fc1a8, amendment 4): each `cron job <job> enabled` line in
@@ -113,11 +114,11 @@ def main():
     # none is allowed. DEFAULT-ON, with no escape hatch. FAIL-CLOSED for a call that touches
     # lupin-app.ini, FAIL-OPEN for every other call.
     from lupin_cli.claude_code.hooks.lib.cron_switch_guard import (
-        cron_switch_deny_reason, build_cron_switch_deny_response,
+        cron_switch_deny_reason,
     )
     cron_switch_reason = cron_switch_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
     if cron_switch_reason:
-        emit_json( build_cron_switch_deny_response( cron_switch_reason ) )
+        emit_json( build_deny_response( cron_switch_reason ) )
         sys.exit( 0 )
 
     # Worktree creator record (row 8ca4be22): a worker makes its own review tree by hand, and the
@@ -140,13 +141,13 @@ def main():
     # DEFAULT-ON with a LUPIN_ALLOW_UNSCOPED_KILL escape hatch, and FAIL-OPEN by
     # contract (the lib returns None on any error), so it cannot break a tool call.
     from lupin_cli.claude_code.hooks.lib.kill_guard import (
-        kill_deny_reason, build_kill_deny_response,
+        kill_deny_reason,
     )
     kill_reason = kill_deny_reason(
         payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), cwd=payload.get( "cwd" ),
     )
     if kill_reason:
-        emit_json( build_kill_deny_response( kill_reason ) )
+        emit_json( build_deny_response( kill_reason ) )
         sys.exit( 0 )
 
     # Merge-head guard (row f3306404, Rick's ruling 2026-08-31): a `git commit`
@@ -164,11 +165,11 @@ def main():
     # hatch for the seat that started the merge and must finish it, and FAIL-OPEN
     # by contract (the lib returns None on any error), so it cannot break a tool call.
     from lupin_cli.claude_code.hooks.lib.merge_head_guard import (
-        merge_head_deny_reason, build_merge_head_deny_response,
+        merge_head_deny_reason,
     )
     merge_reason = merge_head_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
     if merge_reason:
-        emit_json( build_merge_head_deny_response( merge_reason ) )
+        emit_json( build_deny_response( merge_reason ) )
         sys.exit( 0 )
 
     # Commit scope guard (2026-08-25): `git commit` writes the WHOLE INDEX, not
@@ -188,14 +189,14 @@ def main():
     # section), so it cannot break a tool call or wedge a seat that never adopted
     # the manifest discipline.
     from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
-        evaluate_commit_scope, build_commit_scope_deny_response,
+        evaluate_commit_scope,
         build_commit_scope_notice_response,
     )
     commit_verdict = evaluate_commit_scope(
         payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), session_id=session_id
     )
     if commit_verdict.deny_reason:
-        emit_json( build_commit_scope_deny_response( commit_verdict.deny_reason ) )
+        emit_json( build_deny_response( commit_verdict.deny_reason ) )
         sys.exit( 0 )
 
     # Drain voice buffer, acknowledge, and inject as additionalContext
