@@ -263,6 +263,7 @@ def staged_tree( tmp_path ):
     env = dict( os.environ )
     env[ "HOME" ]                 = str( fake_home )
     env[ "LUPIN_GCP_PROJECT_ID" ] = "test-project-id"
+    env[ "LUPIN_VM_DEV_EMAIL" ]   = "owner@example.test"   # the script holds no address; push-env reads this
 
     return str( tmp_path / "src/scripts/lupin-vm.sh" ), tmp_path / "src/conf/env-contract.tsv", env
 
@@ -326,6 +327,38 @@ def test_a_failing_awk_or_cut_kills_push_env_naming_the_tool( staged_tree, tmp_p
     assert r.returncode != 0
     assert f"pfv_row_field: {tool} failed (exit {status})" in r.stderr
     assert "no row in" not in r.stderr
+
+
+def test_unset_notify_address_is_fatal_and_names_the_variable( staged_tree ):
+    """An unset notify address stops push-env, naming the variable."""
+    script, _, env = staged_tree
+    env.pop( "LUPIN_VM_DEV_EMAIL" )
+    r = _push_env_dry_run( script, env )
+    assert r.returncode != 0
+    assert "LUPIN_VM_DEV_EMAIL is not set" in r.stderr
+    assert "@" not in r.stdout.replace( "~/", "" ) or "export LUPIN_DEV_EMAIL" not in r.stdout
+
+
+def test_notify_address_is_read_from_cloud_run_env_and_never_printed( staged_tree ):
+    """The address comes from cloud-run.env and a dry run masks it."""
+    script, _, env = staged_tree
+    env.pop( "LUPIN_VM_DEV_EMAIL" )
+    cloud_env = os.path.join( os.path.dirname( script ), "cloud-run.env" )
+    with open( cloud_env, "w" ) as f: f.write( 'LUPIN_VM_DEV_EMAIL="from-file@example.test"\n' )
+    r = _push_env_dry_run( script, env )
+    assert r.returncode == 0, r.stderr
+    assert "export LUPIN_DEV_EMAIL=<LUPIN_VM_DEV_EMAIL>" in r.stdout
+    assert "from-file@example.test" not in r.stdout + r.stderr
+
+
+@pytest.mark.parametrize( "bad", [ "no-at-sign", "a@b@c.test", "x y@example.test", "a'b@example.test" ] )
+def test_malformed_notify_address_is_refused( staged_tree, bad ):
+    """Anything but a plain address is refused before it reaches a remote shell line."""
+    script, _, env = staged_tree
+    env[ "LUPIN_VM_DEV_EMAIL" ] = bad
+    r = _push_env_dry_run( script, env )
+    assert r.returncode != 0
+    assert "LUPIN_VM_DEV_EMAIL" in r.stderr
 
 
 def test_contract_row_without_a_value_is_fatal( staged_tree ):

@@ -263,6 +263,8 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           Ends by printing the cron status. A person runs it, never a Claude seat.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
+     LUPIN_VM_DEV_EMAIL (push-env only, required there): the notify target address; read from the
+     git-ignored src/scripts/cloud-run.env or the shell, never from this file.
 
 Self-contained: no repo dependencies — copy this one file to any machine with gcloud + IAP access.
 EOF
@@ -1394,6 +1396,19 @@ done"
         # shellcheck source=lib/preflight-vm-lib.sh
         source "$PFV_LIB"
 
+        # The owner's address is NOT in this file (Rick, 16 Nov 2026): it comes from LUPIN_VM_DEV_EMAIL in the
+        # git-ignored src/scripts/cloud-run.env. A variable already exported wins over the file. No fallback.
+        PUSH_ENV_CLOUD_FILE="$DEV_ROOT/src/scripts/cloud-run.env"
+        if [ -z "${LUPIN_VM_DEV_EMAIL:-}" ] && [ -r "$PUSH_ENV_CLOUD_FILE" ]; then
+            LUPIN_VM_DEV_EMAIL="$( sed -n 's/^LUPIN_VM_DEV_EMAIL=//p' "$PUSH_ENV_CLOUD_FILE" | tail -1 | tr -d "\"'\r" )"
+        fi
+        [ -n "${LUPIN_VM_DEV_EMAIL:-}" ] || die "LUPIN_VM_DEV_EMAIL is not set. Add the line LUPIN_VM_DEV_EMAIL=<the notify target address> to $PUSH_ENV_CLOUD_FILE (git-ignored) or export it, then re-run push-env."
+        case "$LUPIN_VM_DEV_EMAIL" in
+            *[!A-Za-z0-9._%+@-]*|*@*@*|@*|*@) die "LUPIN_VM_DEV_EMAIL is not a plain address (letters, digits and . _ % + - around one @); it is pasted into a remote shell line, so it is refused." ;;
+            *@*) ;;
+            *)   die "LUPIN_VM_DEV_EMAIL has no @ in it." ;;
+        esac
+
         # VM-side VALUES, keyed by contract var name. Single-quoted entries stay
         # LITERAL all the way to the VM (\$HOME must expand THERE, not here).
         declare -A PUSH_ENV_VALUES=(
@@ -1402,7 +1417,7 @@ done"
             [DEEPILY_PROJECTS_DIR]="$VM_DEEPILY_PROJECTS_DIR"
             [DEEPILY_DATA_DIR]="$VM_DEEPILY_DATA_DIR"
             [LUPIN_CC_VENV]='$HOME/.venv-lupin-mcp'
-            [LUPIN_DEV_EMAIL]='ricardo.felipe.ruiz@gmail.com'
+            [LUPIN_DEV_EMAIL]="$LUPIN_VM_DEV_EMAIL"
         )
 
         CONTRACT_NAMES="$( pfv_contract_push_env_names "$CONTRACT_FILE" )" \
@@ -1437,8 +1452,8 @@ done"
             # VALUES cannot catch the failure this verb actually produces on a VM —
             # a right var carrying a dev-box path. \$HOME must appear UNEXPANDED here;
             # if it reads as /home/rruiz, it will be baked in on the VM too.
-            log "(dry-run) would append these lines to the VM ~/.bashrc (if absent):"
-            printf '%s' "$EXPORT_BLOCK" | sed 's/^/    /'
+            log "(dry-run) would append these lines to the VM ~/.bashrc (if absent); the notify address shows as <LUPIN_VM_DEV_EMAIL>:"
+            printf '%s' "${EXPORT_BLOCK//"$LUPIN_VM_DEV_EMAIL"/<LUPIN_VM_DEV_EMAIL>}" | sed 's/^/    /'
         else
             log "scp alias files -> $VM_NAME:~/"
             gcloud compute scp "$ALIASES" "$UC_GEN" "$VM_NAME:~/" \
@@ -1461,7 +1476,7 @@ default = local
 
 [local]
 api_url = http://localhost:7999
-global_notification_recipient = ricardo.felipe.ruiz@gmail.com
+global_notification_recipient = $LUPIN_VM_DEV_EMAIL
 LUPINCFG
   )
   echo '   created ~/.lupin/config'
