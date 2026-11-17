@@ -19,6 +19,7 @@ Paired design/log:
 """
 
 import argparse
+import collections
 import json
 import os
 import subprocess
@@ -32,6 +33,7 @@ _PROJECT_ROOT = Path( __file__ ).resolve().parent.parent.parent
 sys.path.insert( 0, str( _PROJECT_ROOT / "src" ) )
 
 from cosa.utils.utc_stamp import utc_compact_stamp
+from scripts.tfe_to_cc_phase1_smoke import _parse_stream as _parse_stream_events
 from cosa.agents.tfe_to_cc.prompts.bundle_phase3 import build_fix_bundle_prompt
 from cosa.agents.tfe_to_cc.prompts.output_contract import (
     parse_result_block,
@@ -393,48 +395,17 @@ def _invoke_claude_p(
 
 
 def _parse_stream( path: Path ) -> dict:
-    summary: dict = {
-        "api_key_source"  : None,
-        "model"           : None,
-        "result"          : None,
-        "assistant_text"  : "",
-        "tool_use_count"  : 0,
-        "tool_use_names"  : {},   # name → count
-        "rate_limit_info" : None,
-        "raw_event_count" : 0,
-        "parse_errors"    : 0,
-    }
-    chunks: list = []
-    with open( path ) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            summary[ "raw_event_count" ] += 1
-            try:
-                obj = json.loads( line )
-            except json.JSONDecodeError:
-                summary[ "parse_errors" ] += 1
-                continue
-            t = obj.get( "type" )
-            if t == "system" and obj.get( "subtype" ) == "init":
-                summary[ "api_key_source" ] = obj.get( "apiKeySource" )
-                summary[ "model" ] = obj.get( "model" )
-            elif t == "assistant":
-                msg = obj.get( "message" ) or {}
-                for block in msg.get( "content", [] ) or []:
-                    btype = block.get( "type" )
-                    if btype == "text":
-                        chunks.append( block.get( "text" ) or "" )
-                    elif btype == "tool_use":
-                        name = block.get( "name" ) or "?"
-                        summary[ "tool_use_count" ] += 1
-                        summary[ "tool_use_names" ][ name ] = summary[ "tool_use_names" ].get( name, 0 ) + 1
-            elif t == "rate_limit_event":
-                summary[ "rate_limit_info" ] = obj.get( "rate_limit_info" )
-            elif t == "result":
-                summary[ "result" ] = obj
-    summary[ "assistant_text" ] = "\n".join( chunks )
+    """
+    Summarise the stream-json file, with the tool names counted per name.
+
+    Requires:
+        - path is a stream-json file
+
+    Ensures:
+        - returns the summary of tfe_to_cc_phase1_smoke._parse_stream, except tool_use_names is { name: count } in first-seen order, not a list
+    """
+    summary                    = _parse_stream_events( path )
+    summary[ "tool_use_names" ] = dict( collections.Counter( summary[ "tool_use_names" ] ) )
     return summary
 
 
