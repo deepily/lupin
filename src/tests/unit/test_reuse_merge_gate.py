@@ -493,6 +493,15 @@ def test_an_empty_since_is_allowed_while_gating_is_off_and_a_set_one_is_allowed_
     assert code == 0 and "REUSE GATE PASSED" in text, "gating true with a since set runs the gate"
 
 
+def test_a_script_member_the_symbol_index_cannot_hold_is_not_a_new_definition( repo, data, tmp_path ):
+    # The duplicate extractor finds object-literal members and the index does not, so no outcome line could ever cover them.
+    commit_code( repo, "static/js/a.js", "export function top() { return 1; }\nexport const api = {\n    canFlip: () => true,\n    plain() { return 2; },\n};\n" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "MISSING repo:static.js.a.top is new in the diff" in text
+    assert "canFlip" not in text and "plain" not in text, "the index does not hold them, so nothing can be owed for them"
+    assert ( count( text, "Total Tests" ), count( text, "Failed" ) ) == ( 2, 1 )
+
+
 def test_a_function_nested_in_a_function_is_not_a_new_definition( repo, data, tmp_path ):
     commit_code( repo, "pkg/mod.py", "def outer():\n    def inner():\n        return 1\n    return inner\n\n\nclass K:\n    def m( self ):\n        def deep():\n            return 2\n        return deep\n" )
     code, text = run( repo, data, tmp_path )
