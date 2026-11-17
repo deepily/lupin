@@ -364,13 +364,8 @@
 
     // ─── DOM ───────────────────────────────────────────────────────────
 
-    function el( tag, className, text, testid ) {
-        const node = document.createElement( tag );
-        if ( className !== null ) node.className = className;
-        if ( text !== null ) node.textContent = text;
-        if ( testid !== null ) node.setAttribute( "data-testid", testid );
-        return node;
-    }
+    // el is cron-jobs.js's (row 9cc37a94 item 3): it loads first and already null-guards what this file passes.
+    const el = window.cronJobs.el;
 
     function runNowBlock( job, actions ) {
         if ( !actions.canRun || !job.runnable ) return null;
@@ -565,15 +560,8 @@
 
     // ─── Network + wiring ──────────────────────────────────────────────
 
-    // Row 399a266f: notificationsUI.authedFetch refreshes the access token before it sends; the bare
-    // localStorage read below is the fallback only, and it is loud because it brings the 401 back.
-    function authFetch( url, opts ) {
-        const ui = window.notificationsUI;
-        if ( ui && typeof ui.authedFetch === "function" ) return ui.authedFetch( url, opts || {} );
-        console.error( "[background-jobs] notificationsUI.authedFetch unavailable — sending an UNREFRESHED token; expect 401 after the access-token TTL (row 399a266f)" );
-        const headers = Object.assign( { "Authorization": "Bearer " + ( localStorage.getItem( "lupin_access_token" ) || "" ) }, ( opts && opts.headers ) || {} );
-        return fetch( url, Object.assign( {}, opts, { headers } ) );
-    }
+    // authFetch is cron-jobs.js's (row 9cc37a94 item 4): it refreshes the access token before it sends (row 399a266f).
+    const authFetch = window.cronJobs.authFetch;
 
     function runNowPath( job ) {
         const base = "/api/jobs/" + encodeURIComponent( job.job ) + "/run";

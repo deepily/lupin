@@ -193,7 +193,7 @@
     function resetPendingConfirm() { pendingConfirm = null; }
 
     window.cronJobs = {
-        load, switchCells, applyEvent, flip, requestFlip, stateText, readsText, insideText, changedText, flipFailureText, flipPath,
+        load, switchCells, el, authFetch, applyEvent, flip, requestFlip, stateText, readsText, insideText, changedText, flipFailureText, flipPath,
         rows         : jobRows,
         canFlip      : callerCanFlip,
         onChange     : setChangeListener,
