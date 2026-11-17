@@ -4,6 +4,7 @@
 //
 // resolveRuntimeDefaults names the production clock and timers once.
 // createPushPoller is the poll-plus-push loop that three stores each carried a copy of.
+// createSingleFlightRead is the one-read-at-a-time guard those stores' refresh and refreshAfterWrite share.
 
 import type { EventBus } from "../shared/EventBus";
 
@@ -88,4 +89,45 @@ export function createPushPoller( opts: PushPollerOptions ): PushPoller {
   };
 
   return { start, stop };
+}
+
+/** The two read entry points a polling store exposes. */
+export interface SingleFlightRead {
+  /** Reads now, unless a read is already in flight. */
+  refresh(): Promise<void>;
+  /** Waits out any read in flight, then returns one that began after the caller's write. */
+  refreshAfterWrite(): Promise<void>;
+}
+
+/**
+ * Wraps a store's read in a one-read-at-a-time guard.
+ *
+ * `refresh` starts a read when none is in flight.
+ * When one is, `joinInFlight` true returns that read, so the caller's await still waits.
+ * False returns at once.
+ * `refreshAfterWrite` waits out the read in flight, then joins any read that began meanwhile.
+ * That read began after this write, so skipping it would resolve too early.
+ * The run is cleared by identity after assignment.
+ * A read that rejects before its first await then cannot leave a settled rejection parked.
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
+export function createSingleFlightRead( read: () => Promise<void>, joinInFlight: boolean ): SingleFlightRead {
+  let inFlight: Promise<void> | null = null;
+
+  const refresh = (): Promise<void> => {
+    if ( inFlight !== null ) return joinInFlight ? inFlight : Promise.resolve();
+    const run: Promise<void> = ( async () => read() )().finally( () => {
+      if ( inFlight === run ) inFlight = null;
+    } );
+    inFlight = run;
+    return run;
+  };
+
+  const refreshAfterWrite = async (): Promise<void> => {
+    if ( inFlight !== null ) await inFlight;
+    if ( inFlight !== null ) return inFlight;
+    return refresh();
+  };
+
+  return { refresh, refreshAfterWrite };
 }

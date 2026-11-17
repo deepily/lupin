@@ -18,7 +18,7 @@
 
 import type { EventBus } from "../shared/EventBus";
 import { apiErrorDetail } from "../api/ApiClient";
-import { resolveRuntimeDefaults } from "./polling";
+import { createSingleFlightRead, resolveRuntimeDefaults } from "./polling";
 import type { StoreFleetSizeCapChangedPayload, StoreFleetStatusChangedPayload } from "../shared/types";
 import type { FleetComposite } from "../render/fleetModel";
 
@@ -132,7 +132,7 @@ class FleetStatusStoreImpl implements FleetStatusStore {
 
   private lastComposite : FleetComposite | null = null;
   private showOffline   = false;
-  private inFlight       = false;
+  private readonly flight = createSingleFlightRead( () => this.readFleet(), false );
   private pollHandle    : number | null = null;
   private lastSizeCap   : FleetSizeCap | null = null;
   private savingCap     : number | null = null;
@@ -169,18 +169,16 @@ class FleetStatusStoreImpl implements FleetStatusStore {
   /**
    * Fetches the fleet state and the size cap, then emits a change event.
    */
-  async refresh(): Promise<void> {
-    if ( this.inFlight ) return;   // debounce: a manual click landing on a tick can't double-fetch
-    this.inFlight = true;
-    try {
-      this.lastComposite = await this.fetchState();
-      this.emitChanged( true );
-      // The dial rides the SAME refresh as the table it sits above, so the cap on
-      // screen and the fleet on screen are read at the same moment (legacy :9414-9417).
-      await this.refreshSizeCap();
-    } finally {
-      this.inFlight = false;
-    }
+  refresh(): Promise<void> {
+    return this.flight.refresh();   // debounce: a manual click landing on a tick can't double-fetch
+  }
+
+  private async readFleet(): Promise<void> {
+    this.lastComposite = await this.fetchState();
+    this.emitChanged( true );
+    // The dial rides the SAME refresh as the table it sits above, so the cap on
+    // screen and the fleet on screen are read at the same moment (legacy :9414-9417).
+    await this.refreshSizeCap();
   }
 
   /**

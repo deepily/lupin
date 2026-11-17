@@ -15,7 +15,7 @@
 // grouping/format fns live in render/taskListModel.ts.
 
 import type { EventBus } from "../shared/EventBus";
-import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
+import { createPushPoller, createSingleFlightRead, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreTaskListChangedPayload } from "../shared/types";
 import type { TaskItem, TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor, isOpenStatus } from "../render/taskListModel";
@@ -188,8 +188,7 @@ class TaskListStoreImpl implements TaskListStore {
   private readonly actorProvider   : () => string | null;
 
   private lastComposite : TaskListComposite | null = null;
-  private inFlight      = false;
-  private inFlightRun   : Promise<void> | null = null;
+  private readonly flight = createSingleFlightRead( () => this.readTasks(), false );
 
   /**
    * Creates the store from a bus and API client, defaulting endpoint, clock, timers and actor.
@@ -227,34 +226,25 @@ class TaskListStoreImpl implements TaskListStore {
    *
    * Does nothing when a fetch is already in flight.
    */
-  async refresh(): Promise<void> {
-    if ( this.inFlight ) return;   // debounce: a manual tick landing on a poll can't double-fetch
-    this.inFlight = true;
-    const run = ( async () => {
-      try {
-        this.lastComposite = await this.fetchState();
-        this.emitChanged();
-      } finally {
-        this.inFlight    = false;
-        this.inFlightRun = null;
-      }
-    } )();
-    this.inFlightRun = run;
-    return run;
+  refresh(): Promise<void> {
+    return this.flight.refresh();   // debounce: a manual tick landing on a poll can't double-fetch
+  }
+
+  private async readTasks(): Promise<void> {
+    this.lastComposite = await this.fetchState();
+    this.emitChanged();
   }
 
   /**
    * Waits out any fetch in flight, then returns one that started after this call.
    */
-  async refreshAfterWrite(): Promise<void> {
-    if ( this.inFlightRun !== null ) await this.inFlightRun;
-    // 🔴 A RUN IN FLIGHT NOW BEGAN AFTER THIS CALL — JOIN IT, DO NOT CALL refresh(). Two
+  refreshAfterWrite(): Promise<void> {
+    // 🔴 THE SHARED GUARD JOINS A RUN IN FLIGHT AFTER THE WAIT, IT DOES NOT CALL refresh(). Two
     // writers landing on one poll both wait it out; the first starts the fresh read, and the
     // second's refresh() would SKIP that read and resolve before it ends (Mr. Radio, measured
     // at fcf2b6bc). Every run that can be in flight here started after the one this call
     // waited for, so it can see this write.
-    if ( this.inFlightRun !== null ) return this.inFlightRun;
-    return this.refresh();
+    return this.flight.refreshAfterWrite();
   }
 
   /**

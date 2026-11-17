@@ -14,7 +14,7 @@
 // refreshAfterWrite(); the poll stays as the safety net. It emits `store_finished_tasks_changed`.
 
 import type { EventBus } from "../shared/EventBus";
-import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
+import { createPushPoller, createSingleFlightRead, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreFinishedTasksChangedPayload } from "../shared/types";
 import {
   FINISHED_STATUSES,
@@ -92,8 +92,7 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
   private cache      : Record<string, ReadonlyArray<FinishedTaskEvent>> = {};
   private lastError  : string | null = null;
   private days       : number = FINISHED_WINDOW_DEFAULT_DAYS;
-  private inFlight   = false;
-  private inFlightRun : Promise<void> | null = null;
+  private readonly flight = createSingleFlightRead( () => this.fetchAll(), false );
 
   /**
    * Builds the store from a bus, an API client and optional clock and timer hooks.
@@ -151,67 +150,51 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
   /**
    * Reads finished tasks for every status and emits a change event.
    */
-  async refresh(): Promise<void> {
-    if ( this.inFlight ) return;   // a manual ⟳ landing on a tick must not double-fetch
-    this.inFlight = true;
-    // Cleared by identity AFTER assignment: fetchAll() can reject before its first await (a
-    // throwing nowFn), and clearing inside it would run before this assignment and leave the
-    // settled rejection parked here for every later refreshAfterWrite() to rethrow.
-    const run: Promise<void> = this.fetchAll().finally( () => {
-      if ( this.inFlightRun === run ) this.inFlightRun = null;
-    } );
-    this.inFlightRun = run;
-    return run;
+  refresh(): Promise<void> {
+    return this.flight.refresh();   // a manual ⟳ landing on a tick must not double-fetch
   }
 
   /**
    * Waits for any read in flight, then returns a read that began after the write.
    */
-  async refreshAfterWrite(): Promise<void> {
-    if ( this.inFlightRun !== null ) await this.inFlightRun;
-    // A run in flight now began after this call: join it rather than let refresh() skip it.
-    if ( this.inFlightRun !== null ) return this.inFlightRun;
-    return this.refresh();
+  refreshAfterWrite(): Promise<void> {
+    return this.flight.refreshAfterWrite();
   }
 
   private async fetchAll(): Promise<void> {
-    try {
-      const since = windowSinceIso( this.days, this.nowFn() );
-      // 🔴 THE RESULT IS BUILT INTO A FRESH OBJECT AND SWAPPED IN AT THE END.
-      // Mutating `this.cache` in place would let a renderer that repaints
-      // mid-loop see one status from this window and two from the last one —
-      // a pane showing two different clocks, which is the exact defect the epic
-      // board's no-second-fetch rule exists to prevent.
-      const next  : Record<string, ReadonlyArray<FinishedTaskEvent>> = {};
-      let   failed: string | null = null;
+    const since = windowSinceIso( this.days, this.nowFn() );
+    // 🔴 THE RESULT IS BUILT INTO A FRESH OBJECT AND SWAPPED IN AT THE END.
+    // Mutating `this.cache` in place would let a renderer that repaints
+    // mid-loop see one status from this window and two from the last one —
+    // a pane showing two different clocks, which is the exact defect the epic
+    // board's no-second-fetch rule exists to prevent.
+    const next  : Record<string, ReadonlyArray<FinishedTaskEvent>> = {};
+    let   failed: string | null = null;
 
-      for ( const status of FINISHED_STATUSES ) {
-        try {
-          const qs = `to_status=${ encodeURIComponent( status ) }`
-                   + `&since=${ encodeURIComponent( since ) }`
-                   + `&limit=${ FINISHED_TASKS_PAGE_LIMIT }`;
-          const body = await this.api.get<EventStreamResponse>( `${ FINISHED_TASKS_ENDPOINT }?${ qs }` );
-          // ⚠️ A NON-ARRAY BODY LEAVES THE KEY ABSENT rather than defaulting to
-          // []. `[]` is the shape that renders as "nothing finished", and a
-          // malformed response has measured nothing — reporting it as a zero is
-          // the one failure this pane must never produce.
-          if ( Array.isArray( body?.events ) ) next[ status ] = body.events;
-          else failed = failed ?? `malformed response for ${ status }`;
-        } catch ( err ) {
-          // 🔴 ONE STATUS'S FAILURE MUST NOT ABANDON THE OTHERS. The loop
-          // continues, its key stays absent, and the renderer reports a PARTIAL
-          // result — which is a different statement from either "all fine" or
-          // "nothing reachable", and the operator needs to be able to tell.
-          failed = failed ?? describeFailure( err, status );
-        }
+    for ( const status of FINISHED_STATUSES ) {
+      try {
+        const qs = `to_status=${ encodeURIComponent( status ) }`
+                 + `&since=${ encodeURIComponent( since ) }`
+                 + `&limit=${ FINISHED_TASKS_PAGE_LIMIT }`;
+        const body = await this.api.get<EventStreamResponse>( `${ FINISHED_TASKS_ENDPOINT }?${ qs }` );
+        // ⚠️ A NON-ARRAY BODY LEAVES THE KEY ABSENT rather than defaulting to
+        // []. `[]` is the shape that renders as "nothing finished", and a
+        // malformed response has measured nothing — reporting it as a zero is
+        // the one failure this pane must never produce.
+        if ( Array.isArray( body?.events ) ) next[ status ] = body.events;
+        else failed = failed ?? `malformed response for ${ status }`;
+      } catch ( err ) {
+        // 🔴 ONE STATUS'S FAILURE MUST NOT ABANDON THE OTHERS. The loop
+        // continues, its key stays absent, and the renderer reports a PARTIAL
+        // result — which is a different statement from either "all fine" or
+        // "nothing reachable", and the operator needs to be able to tell.
+        failed = failed ?? describeFailure( err, status );
       }
-
-      this.cache     = next;
-      this.lastError = failed;
-      this.emitChanged( true );
-    } finally {
-      this.inFlight = false;
     }
+
+    this.cache     = next;
+    this.lastError = failed;
+    this.emitChanged( true );
   }
 
   /**
