@@ -64,14 +64,6 @@ def parse_score( raw ):
     return _parse_object( raw, "score", lambda v: type( v ) is int and v in ( 0, 1 ) )
 
 
-async def _cached( ledger, key, make ):
-    """Return the ledger's value for key, or compute it with make(), store it and return it."""
-    if ledger is not None and ledger.get( key ) is not None: return ledger.get( key )
-    value = await make()
-    if ledger is not None: ledger.put( key, value )
-    return value
-
-
 async def score_text( text, questions, config, run, ledger=None, query_fn=None ):
     """
     Score one text on every question for one run.
@@ -104,7 +96,7 @@ async def score_text( text, questions, config, run, ledger=None, query_fn=None )
                                                   model_transport.wrap( "text", sfx, text ) + "\n" + model_transport.wrap( "question", sfx, q[ "question" ] ),
                                                   query_fn=query_fn )
             return parse_answer( raw )
-        answer = await _cached( ledger, f"read|{base}|{config.reader_model}|{run}", read )
+        answer = await harness_runner.cached( ledger, f"read|{base}|{config.reader_model}|{run}", read )
 
         async def grade():
             sfx = model_transport.new_suffix( q[ "question" ], q[ "key" ], answer )
@@ -113,7 +105,7 @@ async def score_text( text, questions, config, run, ledger=None, query_fn=None )
                                                               ( ( "question", q[ "question" ] ), ( "key", q[ "key" ] ), ( "answer", answer ) ) ),
                                                   query_fn=query_fn )
             return parse_score( raw )
-        total += await _cached( ledger, f"grade|{gbase}|{harness_runner.text_hash( q[ 'key' ] + chr( 0 ) + answer )}|{config.grader_model}", grade )
+        total += await harness_runner.cached( ledger, f"grade|{gbase}|{harness_runner.text_hash( q[ 'key' ] + chr( 0 ) + answer )}|{config.grader_model}", grade )
     return total / len( questions )
 
 

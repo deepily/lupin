@@ -23,6 +23,7 @@ import sys
 import cosa.utils.util as cu
 from cosa.repo import code_health_settings as chs
 from cosa.utils import jsonl_file
+from cosa.repo.duplicate_check import ledger_merge
 from cosa.repo.duplicate_check.judge import FLAG_VERDICTS
 from lupin_mcp import duplicate_check_status as dcs
 from lupin_mcp import reuse_behaviour as rb
@@ -37,7 +38,6 @@ TRIAGE_HEADERS  = ( "judge model", "findings", "duplicate", "extend", "distinct"
 NO_RUN_FILE     = "result files that cannot be read"
 NO_MODEL        = "no model recorded"   # the label of findings written before result files carried judge_model
 KEY_MODEL_AT    = 4                     # the model id inside a judge ledger key: stage|old|new|prompt|model|slot
-VERSION_LEDGERS = "judge-ledger.claude-*.jsonl"
 
 
 def week_of_text( stamp ):
@@ -66,14 +66,28 @@ def run_documents( folder, unreadable ):
         - a file that is not a JSON object adds its name to unreadable and is left out
     """
     docs = []
-    for path in sorted( p for p in pathlib.Path( folder ).iterdir() if rb.CHECK_NAME.match( p.name ) ):
-        try: doc = json.loads( path.read_text( encoding="utf-8" ) )
-        except ( OSError, ValueError ):
-            unreadable.append( path.name )
-            continue
-        if isinstance( doc, dict ): docs.append( ( path.name, doc ) )
-        else: unreadable.append( path.name )
+    for path, doc in rb.check_documents( folder ):
+        if doc is None: unreadable.append( path.name )
+        else: docs.append( ( path.name, doc ) )
     return docs
+
+
+def run_pairs( folder, model, unreadable ):
+    """
+    List the pair counts a model made itself in each result file.
+
+    Requires:
+        - unreadable is a list the unreadable result files are added to
+
+    Ensures:
+        - returns ( file name, document, pair ) for each readable result file with a `pairs` entry for model, in name order, with pair that entry ( { rows, flagged } )
+        - a file with no entry for the model, such as one written before the field existed, is left out
+    """
+    found = []
+    for name, doc in run_documents( folder, unreadable ):
+        pair = ( doc.get( "pairs" ) or {} ).get( model )
+        if pair is not None: found.append( ( name, doc, pair ) )
+    return found
 
 
 def weekly_flags( folder, model, unreadable ):
@@ -85,9 +99,7 @@ def weekly_flags( folder, model, unreadable ):
         - a file with no pairs entry for the model, such as one written before the field existed, adds nothing
     """
     weeks = {}
-    for _name, doc in run_documents( folder, unreadable ):
-        pair = ( doc.get( "pairs" ) or {} ).get( model )
-        if pair is None: continue
+    for _name, doc, pair in run_pairs( folder, model, unreadable ):
         week = weeks.setdefault( week_of_text( doc[ "started_at" ] ), [ 0, 0 ] )
         week[ 0 ] += pair[ "rows" ]
         week[ 1 ] += pair[ "flagged" ]
@@ -116,11 +128,10 @@ def backlog_ledgers( folder, before ):
     List the version ledgers that closed before a day.
 
     Ensures:
-        - returns the paths of judge-ledger.claude-*.jsonl in folder whose last change falls on a day earlier than before, in name order
-        - the merged judge-ledger.jsonl is never listed, because it holds rulings of every day
+        - returns ledger_merge.rotated_files( folder, closed_before=before ): the rotated version ledgers whose last change falls on a day earlier than before, oldest version first
+        - the live judge-ledger.jsonl is never listed, because it holds rulings of every day
     """
-    cut = datetime.date.fromisoformat( before )
-    return [ p for p in sorted( pathlib.Path( folder ).glob( VERSION_LEDGERS ) ) if datetime.date.fromtimestamp( p.stat().st_mtime ) < cut ]
+    return ledger_merge.rotated_files( folder, closed_before=before )
 
 
 def backlog_rate( folder, model, before ):

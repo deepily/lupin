@@ -54,6 +54,21 @@ def own_lines( folder, model ):
     return { line[ "id" ]: line for line in lines if line[ "model_id" ] == model and "reused_from_model" not in line }
 
 
+def draw( ids, size, seed ):
+    """
+    Draw a seeded sample of ids, the one draw the sampling tools share.
+
+    Requires:
+        - size is a whole number of at least 1; seed is any integer
+
+    Ensures:
+        - returns the sorted ids of up to size of ids, drawn without replacement from ids in sorted order
+        - the same ids, size and seed give the same answer
+    """
+    ids = sorted( ids )
+    return sorted( random.Random( seed ).sample( ids, min( size, len( ids ) ) ) )
+
+
 def sample_ids( folder, model, size, seed ):
     """
     Draw the definitions to judge again.
@@ -65,8 +80,7 @@ def sample_ids( folder, model, size, seed ):
         - returns the sorted ids of up to size of own_lines( folder, model ), drawn without replacement from the ids in sorted order
         - the same folder, model, size and seed give the same answer
     """
-    ids = sorted( own_lines( folder, model ) )
-    return sorted( random.Random( seed ).sample( ids, min( size, len( ids ) ) ) )
+    return draw( own_lines( folder, model ), size, seed )
 
 
 def runs_of( folder, model, ids ):

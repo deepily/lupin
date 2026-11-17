@@ -19,6 +19,7 @@ import pytest
 
 from lupin_mcp import duplicate_check_daily as daily
 from lupin_mcp import duplicate_check_sample_rejudge as sr
+from lupin_mcp import duplicate_check_self_consistency as sc
 from lupin_mcp import duplicate_check_status as dcs
 
 OPUS, FABLE = "model-a", "model-b"
@@ -61,8 +62,8 @@ def test_the_frame_holds_self_ruled_definitions_of_runs_with_pair_counts_and_the
     runs   = sr.population_pairs( folder, OPUS, [] )[ 2 ]
     frame  = sr.frame_ids( folder, OPUS, runs )
     assert frame == [ "d-1", "d-2", "d-3" ]
-    assert sr.draw( frame, 2, 7 ) == sr.draw( frame[ ::-1 ], 2, 7 ) and len( sr.draw( frame, 2, 7 ) ) == 2
-    assert sr.draw( frame, 50, 7 ) == frame
+    assert sc.draw( frame, 2, 7 ) == sc.draw( frame[ ::-1 ], 2, 7 ) and len( sc.draw( frame, 2, 7 ) ) == 2
+    assert sc.draw( frame, 50, 7 ) == frame
 
 
 def test_matched_pairs_keep_the_pairs_both_passes_ruled_and_count_the_rest():

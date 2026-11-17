@@ -18,7 +18,7 @@ pins:
   - cosa.repo.doc_lint.reader_rig.ReaderParseError@be15f19e80
   - cosa.repo.doc_lint.reader_rig.parse_answer@1194c8ef99
   - cosa.repo.doc_lint.reader_rig.parse_score@3f56c2bb36
-  - cosa.repo.doc_lint.reader_rig.score_text@c7f7f51a60
+  - cosa.repo.doc_lint.reader_rig.score_text@cd990860e6
   - cosa.repo.doc_lint.reader_rig.run_reader_test@7dbd3c1725
 ---
 # Doc-lint judges
@@ -36,5 +36,5 @@ Three model-backed checks that regular expressions cannot make: a prose judge, a
 - `JevBackend` is the back end the runner takes in place of the Claude judge. Its `key_id` names the model, both thresholds and the escalation model, so a ledger row is never reused under other settings.
 
 ## Reader test (`reader_rig`)
-- `parse_answer` and `parse_score` raise `ReaderParseError` off contract, and a score is 0 or 1. `score_text` scores one text on every question. The grader sees the question, the key and the answer, never the text.
+- `parse_answer` and `parse_score` raise `ReaderParseError` off contract, and a score is 0 or 1. `score_text` scores one text on every question, and `harness_runner.cached` stores each finished reader or grader call in the ledger. The grader sees the question, the key and the answer, never the text.
 - `run_reader_test` compares old and new on the same questions. It passes when the new total is at least the old total.

@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_needset.loss_trace.classify_members@550175a9c5
   - lupin_mcp.reuse_needset.loss_trace.trace_need@54e338c445
   - lupin_mcp.reuse_needset.loss_trace.trace_version@1fbedd0c20
-  - lupin_mcp.reuse_needset.loss_trace.trace_all@35441a6794
+  - lupin_mcp.reuse_needset.loss_trace.trace_all@ae6e42d9c3
   - lupin_mcp.reuse_needset.loss_trace.extend_key@b6e8c993a7
   - lupin_mcp.reuse_needset.loss_trace.retrace@c8454dcb15
   - lupin_mcp.reuse_needset.loss_trace.confirmation_items@91778eb0ec

@@ -157,3 +157,13 @@ def test_the_router_clock_text_before_startup_uses_the_configured_zone( monkeypa
         assert _local_now_text( "%Z" ) == "JST"
     finally:
         ConfigurationManager.reset_for_testing()
+
+
+def test_get_app_zone_wraps_the_configured_name_in_a_zoneinfo():
+    import zoneinfo
+    from unittest.mock import MagicMock
+    from cosa.config import app_timezone
+    cfg = MagicMock()
+    cfg.get_required.return_value = " America/New_York "
+    zone = app_timezone.get_app_zone( cfg )
+    assert zone == zoneinfo.ZoneInfo( "America/New_York" ) and cfg.get_required.call_args.args == ( app_timezone.APP_TIMEZONE_KEY, )

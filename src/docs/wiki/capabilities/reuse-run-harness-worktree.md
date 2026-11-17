@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.reuse_harness.worktree.Worktrees.remove@0d83c693c1
   - lupin_mcp.reuse_harness.worktree.Worktrees.client_entries@f5937877a2
   - lupin_mcp.reuse_harness.worktree.Worktrees.exists@9bb45c96b6
-  - lupin_mcp.reuse_harness.commands.run_command@79bf6d82e5
+  - lupin_mcp.reuse_harness.commands.run_command@ef7cf36d2a
 ---
 # Reuse run harness: the worktree
 
@@ -22,7 +22,7 @@ This page covers the tree each run builds in. See [[reuse-run-harness]] for the 
 ## What it keeps
 - The tree stays after the run, because the scorer reads the client the run built. `remove` is for a dry run.
 - With the client folder empty the server boots and answers `/health`. The `/app` pages and `/static` files answer 404 until a run builds them.
-- `run_command` is the shared command runner. It answers 127 for a command that cannot start or runs out of time.
+- `run_command` is the shared command runner. It answers 127 for a command that cannot start or runs out of time. With `stdout_only` it returns standard output exactly as printed, as the daily test promotion reads it.
 
 ## Don't
 - Don't link `src/conf/keys` or `.env` into a run's tree. A key a run needs is given by environment.

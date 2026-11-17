@@ -2,17 +2,18 @@
 capability: bounded-cc-client-base
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.shared.bounded_cc_client.BoundedCCClientBase@2e62ddc262
+  - cosa.agents.shared.bounded_cc_client.BoundedCCClientBase@d380d12aa3
   - cosa.agents.shared.bounded_cc_client.BoundedCCCostEstimate@8ccbf81751
   - cosa.agents.shared.bounded_cc_client.temperature_to_steer@9717f6c47b
 ---
 # Bounded Claude Code client base
 
-The shared base of the podcast, presentation and deep research clients in [[generator-sdk-clients]]. The podcast and presentation clients keep their own `_call_api`, because the two start `stop_reason` differently.
+The shared base of the podcast, presentation and deep research clients in [[generator-sdk-clients]]. The podcast and presentation clients keep a thin `_call_api` each, naming their tools, turn limit and response class. `_call_bounded` runs the call.
 
 ## What it does
 - `BoundedCCClientBase.__init__( config, debug, verbose, sdk_available )` raises `ImportError` when the SDK flag is false. Otherwise it keeps the config, or a new `CONFIG_CLASS()` when none is given, and makes the cost estimate. A `COST_ESTIMATE_CLASS` of `None` leaves `cost_estimate` as `None`.
 - With `debug` it prints two banner lines. The second is `_banner_model_line()`: by default the `BANNER_NOUN` and the model in the `BANNER_FIELD` setting, and a client can override it.
+- `_call_bounded( model, system_prompt, user_message, call_type, temperature, steer, sdk, tools, permission_mode, max_turns, response_class )` folds the steer into the system prompt and builds the options. It reads the reply with `_collect_reply` and returns `response_class`. The SDK names are arguments because each client module imports them under its own name.
 - `_call_typed` forwards one named call to the client's `_call_api` with the model, call type, prompts, token limit and temperature.
 - `call_with_json_output` calls the `JSON_MODEL_FIELD` model at temperature 0.5 with call type `json_output`. It returns the object the client's `_recover_json` finds.
 - `BoundedCCCostEstimate` holds token, call and cost totals. `add_usage` adds one call's tokens and its price estimate. `price_pair` picks the Opus or Sonnet prices by model name, and the presentation estimate overrides it to add Haiku. `add_sdk_cost` adds the SDK's per-call cost. `get_summary` returns one line of text that says the figure is covered by the Max plan.

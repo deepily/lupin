@@ -229,3 +229,23 @@ def test_a_call_that_stops_early_on_an_unreadable_tree_reports_no_drops_from_the
     shutil.rmtree( notes_env[ 0 ] / "src" / "cosa" )
     r = rt.check_exists_impl( NEED, ctx, language="py" )
     assert r[ "dropped" ] == {} and ctx.dropped == {} and "NOT_LUPIN_TREE" in receipt_of( notes_env, r )[ "flags" ]
+
+
+def test_read_rows_keeps_whole_rows_first_wins_skips_blanks_and_a_torn_last_line(tmp_path):
+    from cosa.repo.symindex.candidates import purpose_lines as pl
+    path = tmp_path / "purpose.jsonl"
+    path.write_text( '{"pin": "pa", "purpose": "one", "writer_version": "1"}\n\n{"pin": "pa", "purpose": "two"}\n{"pin": "pb", "purpose": "b"}\n{"pin": "pc", "pur', encoding="utf-8" )
+    torn = []
+    rows = pl.read_rows( path, torn )
+    assert rows == { "pa": { "pin": "pa", "purpose": "one", "writer_version": "1" }, "pb": { "pin": "pb", "purpose": "b" } } and torn == [ '{"pin": "pc", "pur' ]
+    assert pl.read_rows( path ) == rows and pl.load_lines( path ) == rows
+    path.write_text( '{"pin": "pa"\n{"pin": "pb", "purpose": "b"}\n', encoding="utf-8" )
+    with pytest.raises( ValueError ): pl.read_rows( path )
+
+
+def test_read_rows_skips_a_whitespace_only_line_mid_file_and_as_the_last_line_without_calling_it_torn(tmp_path):
+    from cosa.repo.symindex.candidates import purpose_lines as pl
+    path = tmp_path / "purpose.jsonl"
+    path.write_text( '{"pin": "pa", "purpose": "a"}\n   \n{"pin": "pb", "purpose": "b"}\n \t ', encoding="utf-8" )
+    torn = []
+    assert pl.read_rows( path, torn ) == { "pa": { "pin": "pa", "purpose": "a" }, "pb": { "pin": "pb", "purpose": "b" } } and torn == []

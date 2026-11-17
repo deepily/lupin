@@ -2,9 +2,9 @@
 capability: daily-test-promotion
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.daily_test_promotion.run_command@96aa6d4e93
+  - lupin_mcp.daily_test_promotion.run_command@a527b067c4
   - lupin_mcp.daily_test_promotion.Vm@bd2312abdf
-  - lupin_mcp.daily_test_promotion.app_zone@17d8c445ad
+  - lupin_mcp.daily_test_promotion.app_zone@e031c76b17
   - lupin_mcp.daily_test_promotion.due@3f37e475b2
   - lupin_mcp.daily_test_promotion.row_payload@6233950d78
   - lupin_mcp.daily_test_promotion.pick_sha@133bd46536

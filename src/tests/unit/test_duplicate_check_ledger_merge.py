@@ -81,3 +81,14 @@ def test_a_live_ledger_with_no_binding_refuses_the_merge( tmp_path ):
     ( tmp_path / "judge-ledger.jsonl" ).write_text( "", encoding="utf-8" )
     make( tmp_path, "judge-ledger.claude-2.1.317.jsonl", "2.1.317 (Claude Code)", { key_of( "a" ): value( "related" ) } )
     with pytest.raises( harness_runner.LedgerBindingError ): lm.merge_rotated( tmp_path )
+
+
+def test_rotated_files_can_be_limited_to_those_closed_before_a_day( tmp_path ):
+    import os
+    from cosa.repo.duplicate_check import ledger_merge as lm
+    old, new = tmp_path / "judge-ledger.claude-1.jsonl", tmp_path / "judge-ledger.claude-2.jsonl"
+    for p in ( old, new ): p.write_text( "" )
+    os.utime( old, ( 1_700_000_000, 1_700_000_000 ) )                     # 2023-11-14
+    assert lm.rotated_files( tmp_path, closed_before="2023-11-15" ) == [ old ]
+    assert lm.rotated_files( tmp_path, closed_before="2023-11-14" ) == []
+    assert set( lm.rotated_files( tmp_path ) ) == { old, new }

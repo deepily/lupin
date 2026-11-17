@@ -2,19 +2,22 @@
 capability: reuse-behaviour-duplicate-check-table
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.reuse_behaviour.read_check_run@bd18dcdd6c
-  - lupin_mcp.reuse_behaviour.read_check_runs@49ea76e6ce
+  - lupin_mcp.reuse_behaviour.read_check_run@41ee1e4bfe
+  - lupin_mcp.reuse_behaviour.read_check_runs@f7b74a6522
   - lupin_mcp.reuse_behaviour.read_verdicts@c77f258c07
   - lupin_mcp.reuse_behaviour.verdict_of@76b1955199
   - lupin_mcp.reuse_behaviour.settled_keys@18b2a24036
   - lupin_mcp.reuse_behaviour.check_counts@cac51a4e97
   - lupin_mcp.reuse_behaviour.ruled_cells@76f4abe943
   - lupin_mcp.reuse_behaviour.check_table@77c7638106
+  - lupin_mcp.reuse_behaviour.check_documents@de3e8c0649
+  - lupin_mcp.reuse_behaviour.check_run_of@955e35970e
 ---
 # Reuse behaviour: the daily duplicate check table
 `check_table` draws the `Daily duplicate check` table on the weekly page. It follows the audits. See [[reuse-behaviour-weekly-page]] and [[duplicate-check-daily-run]].
 
 ## What it does
+- `check_documents( folder )` reads the result files of a folder. `check_run_of( path, doc )` summarises one, and `read_check_runs` and the drift report's `run_documents` build on them.
 - `read_check_runs` reads `<data dir>/duplicate-check-daily/<date>-<time>-<trigger>.json`; `--check-dir` moves the folder. It skips `last-success.json` and any other name. It keeps the runs whose `date` is in the week.
 - A row is one run: date, trigger, commits judged, definitions judged, judge calls, minutes, findings, real duplicates, not duplicates, no verdict yet and precision. Commits judged is the window's commit count, 0 for a run with no window. Definitions judged is the check's `judged` count, the definitions it ruled on, so a window of 73 commits can show 100. A run that failed before judging shows 0 for definitions judged. A run with no findings is a row of zeros.
 - The last row is `total`. Its precision comes from the summed counts, not from the rows. Precision is real out of real plus not, with a Wilson interval, and `n/a` when nothing is ruled.

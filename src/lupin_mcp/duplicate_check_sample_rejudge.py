@@ -21,7 +21,6 @@ import argparse
 import datetime
 import math
 import pathlib
-import random
 import sys
 
 import cosa.utils.util as cu
@@ -52,9 +51,7 @@ def population_pairs( folder, model, unreadable ):
     """
     rows = flagged = 0
     runs = []
-    for name, doc in drift.run_documents( folder, unreadable ):
-        pair = ( doc.get( "pairs" ) or {} ).get( model )
-        if pair is None: continue
+    for name, _doc, pair in drift.run_pairs( folder, model, unreadable ):
         rows    += pair[ "rows" ]
         flagged += pair[ "flagged" ]
         runs.append( name )
@@ -69,20 +66,6 @@ def frame_ids( folder, model, runs ):
         - returns the sorted ids of the definitions the model judged itself (sc.own_lines) whose run file is in runs, so each sampled definition belongs to a run whose pair counts are in the population
     """
     return sorted( i for i, line in sc.own_lines( folder, model ).items() if line[ "run_file" ] in set( runs ) )
-
-
-def draw( ids, size, seed ):
-    """
-    Draw the sample.
-
-    Requires:
-        - size is a whole number of at least 1; seed is any integer
-
-    Ensures:
-        - returns the sorted ids of up to size of ids, drawn without replacement from ids in sorted order
-        - the same ids, size and seed give the same answer
-    """
-    return sorted( random.Random( seed ).sample( sorted( ids ), min( size, len( ids ) ) ) )
 
 
 def matched_pairs( first, second ):
@@ -201,7 +184,7 @@ def main( argv=None, out=None, parts=None, now=None, run=None ):
         folder = pathlib.Path( a.check_dir ) if a.check_dir else dcs.folder_of( root )
         seed   = a.seed if a.seed is not None else int( when.strftime( "%Y%m%d" ) )
         pop    = population_pairs( folder, a.ruled_by, [] )
-        ids    = draw( frame_ids( folder, a.ruled_by, pop[ 2 ] ), a.size, seed )
+        ids    = sc.draw( frame_ids( folder, a.ruled_by, pop[ 2 ] ), a.size, seed )
         if not ids: raise ValueError( f"no definition that {a.ruled_by} judged itself belongs to a run with pair counts" )
         groups = sc.runs_of( folder, a.ruled_by, ids )
         if not a.go: text = render( a.ruled_by, a.rejudge_with, a.size, seed, a.slot, pop, groups )

@@ -58,6 +58,23 @@ def get_app_timezone( config_mgr ) -> str:
     return get_zone_for_key( config_mgr, APP_TIMEZONE_KEY )
 
 
+def get_app_zone( config_mgr ) -> zoneinfo.ZoneInfo:
+    """
+    Read the configured user time zone as a ZoneInfo.
+
+    Requires:
+        - config_mgr is a ConfigurationManager
+
+    Ensures:
+        - Returns the ZoneInfo for the zone get_app_timezone names
+
+    Raises:
+        - MissingConfigKeyError if the key is absent or blank in the resolved block
+        - InvalidAppTimezoneError if the value is not a zone name zoneinfo knows
+    """
+    return zoneinfo.ZoneInfo( get_app_timezone( config_mgr ) )
+
+
 def process_config_mgr( started_config_mgr ):
     """
     Return the app's ConfigurationManager, loading the process configuration before startup.

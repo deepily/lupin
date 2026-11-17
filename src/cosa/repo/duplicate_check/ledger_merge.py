@@ -3,6 +3,7 @@ Merge the rotated judge ledgers into the daily ledger, so their rulings count ag
 
 A rotation renamed the daily ledger aside when the Claude Code version changed. This reads those files and copies their rulings into the live ledger.
 """
+import datetime
 import pathlib
 import re
 
@@ -38,16 +39,23 @@ def strip_version( binding ):
     return None if binding is None else proof_cli._VERSION.sub( "", binding )
 
 
-def rotated_files( folder ):
+def rotated_files( folder, closed_before=None ):
     """
     List the rotated ledgers beside the live one, oldest version first.
 
     Requires:
         - folder is the daily check's data folder
+        - closed_before is None, or an ISO date
     Ensures:
         - returns the paths of judge-ledger.<version>.jsonl files in order of the version in their binding, then by name; the live ledger is never listed
+        - with closed_before, only the files whose last change falls on a day earlier than it are listed
+    Raises:
+        - ValueError when closed_before is not an ISO date
     """
     found = [ p for p in pathlib.Path( folder ).glob( ROTATED_GLOB ) if p.name != proof_cli.LEDGER_NAME ]
+    if closed_before is not None:
+        cut   = datetime.date.fromisoformat( closed_before )
+        found = [ p for p in found if datetime.date.fromtimestamp( p.stat().st_mtime ) < cut ]
     return sorted( found, key=lambda p: ( version_of( harness_runner.Ledger( p ).recorded ), p.name ) )
 
 

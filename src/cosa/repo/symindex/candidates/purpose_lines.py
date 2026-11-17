@@ -45,6 +45,35 @@ def default_screen():
     return Screen( reuse_tools.sendable, reuse_tools.c1_hits )
 
 
+def read_rows( path, torn=None ):
+    """
+    Read the stored purpose rows, the one reader of purpose.jsonl.
+
+    Requires:
+        - path is an existing purpose.jsonl file of { pin, ... } rows
+        - torn is None, or a list the call appends to
+
+    Ensures:
+        - returns { pin: row }, the whole row, where the first row stored for a pin wins, as the writer's own reader does
+        - a last line that is not JSON, cut short because the file is being written, is skipped and appended to torn as its text
+        - a line that is not JSON and is not the last one is a damaged file and still raises
+
+    Raises:
+        - ValueError (json.JSONDecodeError) for a damaged line before the last
+    """
+    lines = [ line for line in pathlib.Path( path ).read_text( encoding="utf-8" ).splitlines() if line.strip() ]
+    rows  = {}
+    for n, line in enumerate( lines ):
+        try:
+            row = json.loads( line )
+        except ValueError:
+            if n != len( lines ) - 1: raise
+            if torn is not None: torn.append( line )
+            continue
+        rows.setdefault( row[ "pin" ], row )
+    return rows
+
+
 def load_lines( store_path ):
     """
     Read the stored purpose lines.
@@ -55,16 +84,11 @@ def load_lines( store_path ):
     Ensures:
         - returns { pin: row } where a row holds pin, purpose, prompt_hash and writer_version
         - a missing file is an empty mapping
-        - the first row stored for a pin wins
+        - the first row stored for a pin wins, and a torn last line is skipped, as read_rows does
     """
     path = pathlib.Path( store_path )
     if not path.is_file(): return {}
-    rows = {}
-    for line in path.read_text( encoding="utf-8" ).splitlines():
-        if not line.strip(): continue
-        row = json.loads( line )
-        rows.setdefault( row[ "pin" ], row )
-    return rows
+    return read_rows( path )
 
 
 def judge_purpose( purpose, hits ):

@@ -222,12 +222,8 @@ async def trace_all( needs, ctx, ledger, root, model, checker_commit, manifest, 
 
     async def one( need ):
         """Ensures: returns the stored record, or traces the need and stores the result first."""
-        key    = harness_runner.ledger_key( TRACE_STAGE, { "old": need[ "id" ], "new": "\0".join( ( need[ "source_commit" ], index_sha, checker_commit ) ) }, version, model, 0 )
-        stored = ledger.get( key )
-        if stored is not None: return stored
-        record = await trace_need( need, ctx, probe, root, model, ask, where )
-        ledger.put( key, record )
-        return record
+        key = harness_runner.ledger_key( TRACE_STAGE, { "old": need[ "id" ], "new": "\0".join( ( need[ "source_commit" ], index_sha, checker_commit ) ) }, version, model, 0 )
+        return await harness_runner.cached( ledger, key, lambda: trace_need( need, ctx, probe, root, model, ask, where ) )
 
     return await harness_runner.run_parallel( needs, one, parallel, lambda n: n[ "id" ] )
 

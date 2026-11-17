@@ -11,6 +11,7 @@ import sys
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.candidates import bm25
 from cosa.repo.symindex.candidates import candidate_stage as cs
+from cosa.repo.symindex.candidates import purpose_lines
 from cosa.repo.symindex.candidates import rank_fusion as rf
 from cosa.repo.symindex.candidates.errors import CandidateError, DEPENDENCY_MISSING, VECTOR_SET_CORRUPT, VECTOR_SET_UNAVAILABLE
 from cosa.repo.symindex.candidates.bm25 import SCORE_DIGITS
@@ -169,17 +170,7 @@ def read_purposes( path, torn=None ):
         - ValueError (json.JSONDecodeError) for a damaged line before the last
     """
     if path is None: return {}
-    lines = [ line for line in pathlib.Path( path ).read_text( encoding="utf-8" ).splitlines() if line ]
-    rows  = []
-    for n, line in enumerate( lines ):
-        try:
-            rows.append( json.loads( line ) )
-        except ValueError:
-            if n != len( lines ) - 1: raise
-            if torn is not None: torn.append( line )
-    purposes = {}
-    for row in rows: purposes.setdefault( row[ "pin" ], row[ "purpose" ] )
-    return purposes
+    return { pin: row[ "purpose" ] for pin, row in purpose_lines.read_rows( path, torn ).items() }
 
 
 def answer( request, load_vectors ):

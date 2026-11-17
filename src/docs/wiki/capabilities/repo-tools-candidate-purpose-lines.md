@@ -4,10 +4,11 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.purpose_lines.prompt_hash@b1400b5db7
   - cosa.repo.symindex.candidates.purpose_lines.default_screen@e2d75b75f7
-  - cosa.repo.symindex.candidates.purpose_lines.load_lines@0b7ddaec71
+  - cosa.repo.symindex.candidates.purpose_lines.load_lines@4f72b6cb2a
   - cosa.repo.symindex.candidates.purpose_lines.judge_purpose@3442c440e7
   - cosa.repo.symindex.candidates.purpose_lines.write_purpose_lines@49caa2c5e0
   - cosa.repo.symindex.build.attach_purposes@da4aa766c8
+  - cosa.repo.symindex.candidates.purpose_lines.read_rows@7b707ec6e3
 ---
 # Candidate purpose lines
 
@@ -15,7 +16,7 @@ A purpose line is one sentence that says what an index entry is for. The writer 
 
 ## Store
 - Rows are JSON lines in `purpose.jsonl`: `pin`, `purpose`, `prompt_hash` and `writer_version`.
-- `load_lines( store_path )` returns `{ pin: row }`. A missing file is `{}` and the first row for a pin wins.
+- `load_lines( store_path )` returns `{ pin: row }`. A missing file is `{}` and the first row for a pin wins. It reads through `read_rows( path, torn=None )`, the one reader of the file, which skips a torn last line and appends it to `torn`.
 - `prompt_hash()` is the first 16 hex characters of the sha256 of the prompt text, so a prompt change is visible in every row.
 
 ## Writing
