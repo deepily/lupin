@@ -88,7 +88,7 @@ def test_main_writes_crontab_and_the_registry_units(tmp_path, monkeypatch):
     import cosa.rest.job_registry as jr
     reg = tmp_path / jr.REGISTRY_FILE
     reg.parent.mkdir( parents=True )
-    reg.write_text( json.dumps( { "schema": "job-registry/1", "defaults": {}, "jobs": [ { "job": "j", "title": "J", "owner": "cheech", "liveness": { "kind": "systemd", "unit": "j.service" } } ] } ) )
+    reg.write_text( json.dumps( { "schema": "job-registry/1", "defaults": {}, "jobs": [ { "job": "j", "title": "J", "owner": "cheech", "description": "A test job.", "liveness": { "kind": "systemd", "unit": "j.service" } } ] } ) )
     data = tmp_path / "data"
     assert hs.main( [], { "LUPIN_ROOT": str( tmp_path ), "LUPIN_REUSE_REVIEW_DATA_ROOT": str( data ) }, NOW, runner() ) == 0
     doc = json.loads( ( data / hs.SNAPSHOT_FILE ).read_text() )

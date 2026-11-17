@@ -107,7 +107,7 @@ def test_a_sweep_log_gives_debt_left_and_drained_and_a_report_log_only_counts_wh
 def build_world( tmp_path ):
     """Ensures: returns ( root, data, home ) with a registry and a record for every source."""
     root, data, home = tmp_path / "root", tmp_path / "data", tmp_path / "home"
-    jobs = [ { "job": j, "title": j, "owner": "cheech", "summary_path": f"{{root}}/s/{j}.json" } for j in
+    jobs = [ { "job": j, "title": j, "owner": "cheech", "description": "A test job.", "summary_path": f"{{root}}/s/{j}.json" } for j in
              ( "duplicate-check", "wiki-librarian", "vector-refresh", "reuse-behaviour", "shadow-audit", "io-tmp-sweep", "hook-log-sweep", "disk-report", "worktree-census", "context-tick" ) ]
     put( root / "src/conf/job-registry.json", json.dumps( { "schema": "job-registry/1", "defaults": {}, "jobs": jobs } ) )
     put( data / "librarian/librarian.log", '{"ran": true, "findings": 1}\n', T )

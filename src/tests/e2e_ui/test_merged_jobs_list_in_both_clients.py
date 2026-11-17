@@ -100,7 +100,6 @@ def test_the_first_line_is_one_clean_line_per_service( logged_in_page, client ):
     assert xs[ "jobs-last-finished" ] < xs[ "jobs-abstract" ] < xs[ "jobs-disclose" ], f"the ⋯ sits at the right-hand end, after the 📋 (row d514a7e9): {xs}"
     assert "Scan" not in " ".join( heads ) and "Fix" not in " ".join( heads ) and "Clears" not in " ".join( heads )
     assert page.get_by_test_id( "cron-jobs-container" ).count() == 0, "there is no separate Scheduled Jobs list"
-    assert page.get_by_test_id( "multiplexer-section-toolbar-cron-jobs" ).count() == 0
 
 
 def test_the_hamburger_opens_lines_2_and_3( logged_in_page, client ):

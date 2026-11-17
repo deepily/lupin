@@ -174,7 +174,9 @@ def test_the_door_argument_reaches_the_text():
 
 # ── 4. the shipped file ──────────────────────────────────────────────────────
 
-def test_the_shipped_ini_defines_the_key_once_in_baseline_and_ships_off():
+def test_the_shipped_ini_defines_the_key_once_in_baseline_as_a_boolean():
+    # The value is Rick's operator switch, flipped from the UI and always committed
+    # (CLAUDE.md, lupin-app.ini rule), so the test checks its shape, never which way it is set.
     root = os.environ.get( "LUPIN_ROOT", os.getcwd() )
     path = os.path.join( root, "src", "conf", "lupin-app.ini" )
     with open( path, encoding="utf-8" ) as handle:
@@ -182,7 +184,7 @@ def test_the_shipped_ini_defines_the_key_once_in_baseline_and_ships_off():
     found = io.find_definitions( lines, sc.SKELETON_CREW_KEY )
     assert len( found ) == 1
     assert found[ 0 ].section == "Lupin: Baseline"
-    assert io.read_value_from_disk( path, sc.SKELETON_CREW_KEY ) == "false"
+    assert io.read_value_from_disk( path, sc.SKELETON_CREW_KEY ) in ( "true", "false" )
 
 
 def test_the_splainer_explains_the_key():
