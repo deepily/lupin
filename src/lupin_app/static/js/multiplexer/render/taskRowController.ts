@@ -27,6 +27,7 @@
 
 import { ApiError } from "../api/ApiClient";
 import { recordingManager, type RecordingManagerStartOptions } from "../audio/recordingManager";
+import { HOLDING_BATCH_ARMED_CLASS, restArmedButton } from "./holdingAreaBatch";
 import { toggleDictation } from "./dictationToggle";
 import type { TaskMutation, TaskPatchFields, TransitionOutcome } from "../stores/TaskListStore";
 import { alreadyThereMessage } from "../stores/alreadyAtTarget";
@@ -460,7 +461,7 @@ export class TaskRowController {
 
     if ( needs.terminal && button.dataset.armed !== "1" ) {
       button.dataset.armed = "1";
-      button.classList.add( "task-submit-armed" );
+      button.classList.add( HOLDING_BATCH_ARMED_CLASS );
       button.textContent = `Confirm ${verbLabel( verb ).toLowerCase()}`;
       this.rowError( button, id, "" );
       return;
@@ -490,9 +491,7 @@ export class TaskRowController {
   private disarmSubmit( button: HTMLButtonElement | null ): void {
     /* c8 ignore next */ // defensive: every actions cell renders a Submit per the template invariant.
     if ( button === null ) return;
-    delete button.dataset.armed;
-    button.classList.remove( "task-submit-armed" );
-    button.textContent = "Submit";
+    restArmedButton( button, "Submit" );
   }
 
   // -------------------------------------------------------------------------

@@ -50,6 +50,7 @@ import {
   holdingBatchInFlightStatus,
   holdingBatchFinalStatus,
   holdingBatchRestLabel,
+  restArmedButton,
   holdingBatchConfirmLabel,
   holdingBatchArmedStatus,
   holdingPlanConfirmLabel,
@@ -848,9 +849,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     if ( group === null ) return;
     for ( const b of Array.from( group.querySelectorAll<HTMLButtonElement>(
       ".holding-approve-all, .holding-wont-fix-all" ) ) ) {
-      delete b.dataset.armed;
-      b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
-      b.textContent = holdingBatchRestLabel( b.classList.contains( "holding-wont-fix-all" ) ? "wont_fix" : "approve" );
+      restArmedButton( b, holdingBatchRestLabel( b.classList.contains( "holding-wont-fix-all" ) ? "wont_fix" : "approve" ) );
     }
   }
 
@@ -898,9 +897,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private disarmPlanButton( b: HTMLButtonElement ): void {
     this.armedPlans.delete( planButtonId( b ) );
     if ( b.dataset.armed === "1" ) this.paintPlanStatus( planButtonId( b ), "" );
-    delete b.dataset.armed;
-    b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
-    b.textContent = holdingPlanApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length );
+    restArmedButton( b, holdingPlanApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length ) );
   }
 
   /** The group's batch reason box, trimmed, or "" when it is not rendered. */
