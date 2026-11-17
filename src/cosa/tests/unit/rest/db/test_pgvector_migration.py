@@ -18,6 +18,8 @@ import re
 import glob
 import importlib.util
 import unittest
+
+import pytest
 from unittest.mock import MagicMock, patch
 
 import cosa.utils.util as cu
@@ -54,6 +56,7 @@ class TestRevisionChain( unittest.TestCase ):
         matches = glob.glob( os.path.join( _versions_dir(), f"{_HEAD_BEFORE_THIS}_*.py" ) )
         self.assertTrue( matches, f"prior head {_HEAD_BEFORE_THIS} file missing" )
 
+    @pytest.mark.census
     def test_known_successors_only( self ):
         # This revision is no longer the chain head: e1f2a3b4c5d6 (drop the
         # input_and_output HNSW index — exact-scan ruling, Rick 2026-07-07)

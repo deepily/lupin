@@ -9,7 +9,7 @@
 #
 # The selection is from git, so a new guard is picked up the day it is added, two ways:
 #   a file named test_every_*, *census*, *_pin*, *pins* or *pinned* is run whole;
-#   in any other tracked unit file, each test_every_* function, and each test or class marked @pytest.mark.census, is run by node id (bugs a197b338 and 7e51f330).
+#   in any other tracked file under src/tests/unit/ or src/cosa/tests/, each test_every_* function, and each test or class marked @pytest.mark.census, is run by node id (bugs a197b338 and 7e51f330).
 # A guard named otherwise is not in this set. Name new ones to match.
 # The rule lives in src/tests/helpers/census_selection.py; "--list" prints the selection and runs nothing.
 #
@@ -29,7 +29,7 @@ resolve_venv_pytest || exit $?
 
 PYBIN="$( dirname "$PYTEST" )/python3"
 if [ ! -x "$PYBIN" ]; then PYBIN="$( dirname "$PYTEST" )/python"; fi
-FILES="$( git ls-files 'src/tests/unit/*' | "$PYBIN" -m tests.helpers.census_selection )" || {
+FILES="$( git ls-files 'src/tests/unit/*' 'src/cosa/tests/*' | "$PYBIN" -m tests.helpers.census_selection )" || {
     echo "run-census-guards: the selection could not read a file; refusing to run a smaller census" >&2
     exit 2
 }

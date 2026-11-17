@@ -57,3 +57,10 @@ def test_a_file_picked_by_name_is_still_run_whole():
 def test_a_census_marked_class_is_selected_whatever_its_file_is_called():
     # Bug 7e51f330: TestTheRatchet counts DOM-assert violations across the whole tree, in a file the name rule skips.
     assert "src/tests/unit/test_dom_assert_lint.py::TestTheRatchet" in listing()
+
+
+def test_a_census_marked_test_under_src_cosa_tests_is_selected():
+    # Row 62bbe9c4: the runner once read src/tests/unit/ only, so a mark under src/cosa/tests selected nothing.
+    lines = listing()
+    assert "src/cosa/tests/unit/rest/db/test_drop_hnsw_migration.py::TestRevisionChain::test_no_two_migrations_share_a_down_revision" in lines
+    assert "src/cosa/tests/unit/rest/db/test_pgvector_migration.py::TestRevisionChain::test_known_successors_only" in lines
