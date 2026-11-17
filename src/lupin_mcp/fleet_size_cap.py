@@ -503,11 +503,16 @@ def refusal_for_spawn( requested: int, counts: Dict[ str, int ], cap: int ) -> O
         "alone (Rick's ruling), so the fleet drains as sessions finish."
     )
     return " ".join( lines )
-def main_checkout_ini_path() -> str:
+def main_checkout_ini_path( override_env=None ) -> str:
     """
     The configuration file of the main checkout, whatever tree the process is pinned to.
 
+    Requires:
+        - override_env is None or the name of an environment variable
+
     Ensures:
+        - returns that variable's value when override_env is named and the variable is set and not empty,
+          so tests never touch the live file
         - returns `<main checkout>/src/conf/lupin-app.ini`, where a worktree resolves to the
           checkout that owns it (git's common directory), so a seat's tracked copy is never read
         - a directory that is no repository resolves to its own root, as before; the server
@@ -515,6 +520,9 @@ def main_checkout_ini_path() -> str:
         - resolves at call time and never raises
         - is the one resolution the fleet cap and the skeleton crew switch share
     """
+    override = os.environ.get( override_env ) if override_env else None
+    if override:
+        return override
     import cosa.utils.util as cu
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _main_repo_path
     main = _main_repo_path( cu.get_project_root() )

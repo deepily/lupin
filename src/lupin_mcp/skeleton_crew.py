@@ -28,6 +28,7 @@ import sys
 
 from typing import Any, Callable, Dict, Optional
 
+from cosa.utils import atomic_json
 from lupin_mcp import config_write_lock, fleet_cap_ini_io, fleet_size_cap
 
 
@@ -53,10 +54,7 @@ def ini_path() -> str:
         - otherwise returns the configuration file of the main checkout. A seat in a
           worktree reads the main checkout's file and not its own tracked copy
     """
-    override = os.environ.get( INI_OVERRIDE_ENV )
-    if override:
-        return override
-    return fleet_size_cap.main_checkout_ini_path()
+    return fleet_size_cap.main_checkout_ini_path( INI_OVERRIDE_ENV )
 
 
 def _say( detail: str ) -> None:
@@ -223,14 +221,7 @@ def write_state_file( on: bool, set_by: str, now: Optional[ datetime.datetime ] 
     """
     moment = now if now is not None else datetime.datetime.now( datetime.timezone.utc )
     record = { "on": bool( on ), "since": moment.astimezone().isoformat(), "set_by": set_by }
-    path   = state_path()
-    os.makedirs( os.path.dirname( path ), exist_ok=True )
-    partial = path + ".partial"
-    with open( partial, "w", encoding="utf-8" ) as handle:
-        json.dump( record, handle )
-        handle.flush()
-        os.fsync( handle.fileno() )
-    os.replace( partial, path )
+    atomic_json.write_json_atomic( state_path(), record, fsync=True )
 
 
 def read_state_file() -> Optional[ Dict[ str, Any ] ]:
