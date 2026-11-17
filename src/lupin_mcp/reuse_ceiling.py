@@ -137,17 +137,21 @@ class TokenBudget( jt.CallBudget ):
         """Ensures: closes the run in the ledger, so it counts at what it spent."""
         if self.ledger is not None: self.ledger.end_run( self.run )
 
-    def close_request( self, usage ):
+    def close_request( self, usage, failed=False ):
         """
-        Settle the open request that was answered.
+        Settle the open request that was answered, or that failed.
 
         Requires:
             - usage is ( input_tokens, output_tokens ), or None when the response reported none
+            - failed is True to charge the request's last attempt at its input reserve and ignore usage
+
+        Ensures:
+            - releases the held reserve, adds the charge to spent_tokens and records it in the ledger
         """
         o, charged = self._open, 0
         with self._token_lock:
             if o.held:
-                charged               = sum( usage ) if usage is not None else o.held
+                charged               = o.input_estimate if failed else sum( usage ) if usage is not None else o.held
                 self.reserved_tokens -= o.held
                 self.spent_tokens    += charged
         o.input_estimate, o.output_reserve, o.held = None, 0, 0
@@ -155,11 +159,4 @@ class TokenBudget( jt.CallBudget ):
 
     def fail_request( self ):
         """Ensures: charges the open request's last attempt at its input reserve; releases the rest."""
-        o, charged = self._open, 0
-        with self._token_lock:
-            if o.held:
-                charged               = o.input_estimate
-                self.reserved_tokens -= o.held
-                self.spent_tokens    += charged
-        o.input_estimate, o.output_reserve, o.held = None, 0, 0
-        self._record( charged )
+        self.close_request( None, failed=True )

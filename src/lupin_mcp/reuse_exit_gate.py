@@ -152,15 +152,19 @@ def parse_rulings( text ):
     return out
 
 
-def unparsed_ruling_lines( text ):
+def unparsed_ruling_lines( text, lead=RULING_LEAD_RE, accepted=( RULING_RE, ) ):
     """
     Find the lines that open as a ruling and do not read as one.
 
+    Requires:
+        - lead is the compiled pattern a line must open with; accepted is a tuple of compiled patterns, any of which makes a line read as well formed
+
     Ensures:
-        - returns the stripped text of every line that opens with the ruling keyword and that RULING_RE does not match, in document order
-        - a line that does not open with that keyword is never returned
+        - returns the stripped text of every line that opens with the lead and that none of the accepted patterns match, in document order
+        - a line that does not open with the lead is never returned
+        - the defaults are the ruling keyword and RULING_RE; reuse_outcome and unparsed_searched_lines pass their own
     """
-    return [ line.strip() for line in text.splitlines() if RULING_LEAD_RE.match( line ) and not RULING_RE.match( line ) ]
+    return [ line.strip() for line in text.splitlines() if lead.match( line ) and not any( a.match( line ) for a in accepted ) ]
 
 
 def parse_searched( text ):
@@ -190,7 +194,7 @@ def unparsed_searched_lines( text ):
     Ensures:
         - returns the stripped text of every line that opens with the `SEARCHED` keyword and that SEARCHED_RE does not match, in document order
     """
-    return [ line.strip() for line in text.splitlines() if SEARCHED_LEAD_RE.match( line ) and not SEARCHED_RE.match( line ) ]
+    return unparsed_ruling_lines( text, SEARCHED_LEAD_RE, ( SEARCHED_RE, ) )
 
 
 def _receipt_symbol( data, receipt_id ):
@@ -226,15 +230,17 @@ def _usable_search( data, r ):
     return sid, doc, [ c[ "id" ] for c in doc[ "candidates" ] if isinstance( c, dict ) and "id" in c ]
 
 
-def searches_by_symbol( records, data_dir ):
+def searches_by_symbol( records, data_dir, by_receipt=False ):
     """
     Collect the recorded searches each symbol was searched under.
 
     Requires:
         - records is what merge_call_logs returns; data_dir holds the receipts and search-records folders
+        - by_receipt is True to key by the record's own receipt id instead, which is what searches_by_receipt asks for
 
     Ensures:
-        - returns { symbol id: { search id: [ candidate ids ] } }
+        - returns { symbol id: { search id: [ candidate ids ] } }, or { receipt id: { search id: [ candidate ids ] } } when by_receipt
+        - by_receipt keeps only a record whose receipt id is 16 hex characters
         - only `record_search` calls that logged no error and a well-formed search id count
         - the symbol is the record's `entry`, else the query of the fetch_similar receipt the record names
         - the call log only says that a search ran, because its args field is cut at 300 characters and can hide the entry
@@ -246,7 +252,10 @@ def searches_by_symbol( records, data_dir ):
         found = _usable_search( data, r )
         if found is None: continue
         sid, doc, candidates = found
-        symbol = doc.get( "entry" ) or _receipt_symbol( data, doc.get( "receipt_id" ) )
+        if by_receipt:
+            symbol = doc.get( "receipt_id" )
+            if not isinstance( symbol, str ) or not RECEIPT_ID_RE.fullmatch( symbol ): continue
+        else: symbol = doc.get( "entry" ) or _receipt_symbol( data, doc.get( "receipt_id" ) )
         if not symbol: continue
         out.setdefault( symbol, {} )[ sid ] = candidates
     return out
@@ -286,15 +295,7 @@ def searches_by_receipt( records, data_dir ):
         - a record with no receipt id, or one that is not 16 hex characters, yields no search here
         - the id comes from the record file, not the call log, whose args field can be cut
     """
-    data, out = pathlib.Path( data_dir ), {}
-    for r in records:
-        found = _usable_search( data, r )
-        if found is None: continue
-        sid, doc, candidates = found
-        rid = doc.get( "receipt_id" )
-        if not isinstance( rid, str ) or not RECEIPT_ID_RE.fullmatch( rid ): continue
-        out.setdefault( rid, {} )[ sid ] = candidates
-    return out
+    return searches_by_symbol( records, data_dir, by_receipt=True )
 
 
 def _search_status( sid, ruling, searches, searched ):
