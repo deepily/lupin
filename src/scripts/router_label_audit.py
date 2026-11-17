@@ -241,6 +241,32 @@ def classify_bucket( line ):
     return "2-symbolic"
 
 
+def _calculator_reason( text ):
+    """
+    Name the calculator operation an utterance asks for, or None.
+
+    Requires:
+        - text is an utterance string
+
+    Ensures:
+        - returns "maps to calc op: mortgage" or "maps to calc op: compare_prices" on that pattern
+        - returns "explicit calculator routing phrase" on a routing phrase
+        - returns "maps to calc op: convert (<sorted units>)" on two or more units of one category with a convert verb
+        - returns None otherwise, never a default
+    """
+    if _MORTGAGE_RE.search( text ): return "maps to calc op: mortgage"
+    if _PRICE_RE.search( text ):    return "maps to calc op: compare_prices"
+    if _ROUTING_RE.search( text ):  return "explicit calculator routing phrase"
+
+    units = unit_tokens( text )
+    cats  = unit_categories( units )
+    # convert() only works within one category -- km-to-liters is not a conversion,
+    # it is a rate problem, and belongs to the math agent.
+    if len( units ) >= 2 and len( cats ) == 1 and _CONVERT_VERB_RE.search( text ):
+        return f"maps to calc op: convert ({sorted( units )})"
+    return None
+
+
 def destination_capability( line ):
     """
     Destination under the `capability` rule.
@@ -251,19 +277,8 @@ def destination_capability( line ):
     Ensures:
         - returns (label, reason) where label is the calculator or math routing command
     """
-    text = line.strip()
-
-    if _MORTGAGE_RE.search( text ): return CALC_LABEL, "maps to calc op: mortgage"
-    if _PRICE_RE.search( text ):    return CALC_LABEL, "maps to calc op: compare_prices"
-    if _ROUTING_RE.search( text ):  return CALC_LABEL, "explicit calculator routing phrase"
-
-    units = unit_tokens( text )
-    cats  = unit_categories( units )
-    # convert() only works within one category -- km-to-liters is not a conversion,
-    # it is a rate problem, and belongs to the math agent.
-    if len( units ) >= 2 and len( cats ) == 1 and _CONVERT_VERB_RE.search( text ):
-        return CALC_LABEL, f"maps to calc op: convert ({sorted( units )})"
-
+    reason = _calculator_reason( line.strip() )
+    if reason is not None: return CALC_LABEL, reason
     return MATH_LABEL, "no CalcIntent operation covers it"
 
 
@@ -318,13 +333,7 @@ def is_calculator_shaped( line ):
     Ensures:
         - returns True only on a positive match; never falls through to a default
     """
-    if _MORTGAGE_RE.search( line ): return True
-    if _PRICE_RE.search( line ):    return True
-    if _ROUTING_RE.search( line ):  return True
-
-    units = unit_tokens( line )
-    cats  = unit_categories( units )
-    return len( units ) >= 2 and len( cats ) == 1 and bool( _CONVERT_VERB_RE.search( line ) )
+    return _calculator_reason( line ) is not None
 
 
 def is_math_shaped( line ):
