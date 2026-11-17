@@ -444,12 +444,19 @@ class TestJobQueueProgressiveDisclosure:
         results = []
         lock = threading.Lock()
 
+        retried = []
+
         def submit_job_thread( idx ):
-            response = self._submit_job(
-                token,
-                f"Concurrent question {idx}: What is {idx * 10}?",
-                f"concurrent_session_{idx}"
-            )
+            question = f"Concurrent question {idx}: What is {idx * 10}?"
+            session  = f"concurrent_session_{idx}"
+            response = self._submit_job( token, question, session )
+            # A busy shared embedding service answers 503 with Retry-After (row 351aa5f3). A client
+            # that honours it waits and resubmits once; the job must still end at 200. A 503 without
+            # Retry-After, or a second 503, is not retried and fails the count below.
+            if response.status_code == 503 and "Retry-After" in response.headers:
+                time.sleep( int( response.headers[ "Retry-After" ] ) )
+                with lock: retried.append( idx )
+                response = self._submit_job( token, question, session )
             with lock:
                 results.append( ( idx, response.status_code, response.json() if response.ok else None ) )
 
@@ -466,9 +473,9 @@ class TestJobQueueProgressiveDisclosure:
 
         # Verify all submissions succeeded
         success_count = sum( 1 for _, status, _ in results if status == 200 )
-        print( f"Concurrent submissions: {success_count}/10 succeeded" )
+        print( f"Concurrent submissions: {success_count}/10 succeeded, {len( retried )} resubmitted after a 503" )
 
-        assert success_count == 10, f"Expected 10 successful submissions, got {success_count}"
+        assert success_count == 10, f"Expected 10 successful submissions, got {success_count}: {sorted( ( i, s ) for i, s, _ in results if s != 200 )}"
 
         # Verify queue has jobs
         counts = self._get_all_queue_counts( token )
