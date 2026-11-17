@@ -2,7 +2,7 @@
 What the podcast and presentation bounded-CC clients share.
 
 Both run text synthesis through the in-process Claude Agent SDK.
-Each client keeps its own _call_api, which builds its options and its APIResponse.
+Each client keeps a thin _call_api that names its tools, turn limit and APIResponse; `_call_bounded` runs the call.
 The loop that reads the reply stream and records cost is `_collect_reply` here.
 Both clients leave stop_reason as None until a result reports one, so a missing signal is not read as a clean finish.
 """
@@ -227,6 +227,62 @@ class BoundedCCClientBase:
         self.cost_estimate.add_sdk_cost( sdk_cost_usd )
 
         return "".join( collected ).strip(), input_tokens, output_tokens, sdk_cost_usd, stop_reason
+
+    async def _call_bounded( self, model, system_prompt, user_message, call_type, temperature,
+                             steer, sdk, tools, permission_mode, max_turns, response_class ):
+        """
+        Run one text-synthesis call through the in-process `sdk_query` and wrap the reply.
+
+        The SDK names, the steer rule and the response class are arguments.
+        Each client module imports them under its own name, and its tests replace them there.
+
+        Requires:
+            - steer is the client's temperature-to-steer function, taking a float and returning a string
+            - sdk is ( ClaudeAgentOptions, sdk_query, AssistantMessage, TextBlock, ResultMessage ), or stand-ins
+            - response_class takes content, model, input_tokens, output_tokens, stop_reason, sdk_cost_usd, raw_response
+
+        Ensures:
+            - folds the steer for temperature into the system prompt
+            - builds the options with the given tools, permission mode and turn limit
+            - returns response_class with the reply, the usage, the stop reason and the SDK cost
+            - with debug, prints the call and the usage, each led by the class label
+
+        Raises:
+            - RuntimeError when the result message is an error, as _collect_reply does
+        """
+        options_class, sdk_query, assistant_message, text_block, result_message = sdk
+
+        effective_system = system_prompt or ""
+        steer_text       = steer( temperature )
+        if steer_text:
+            effective_system = ( effective_system + "\n\n" + steer_text ).strip()
+
+        options = options_class(
+            model           = model,
+            system_prompt   = effective_system or None,
+            tools           = tools,
+            permission_mode = permission_mode,
+            max_turns       = max_turns,
+        )
+
+        if self.debug: print( f"[{self.LABEL}] sdk_query {model} for {call_type} (max_turns={max_turns})" )
+
+        content, input_tokens, output_tokens, sdk_cost_usd, stop_reason = await self._collect_reply(
+            sdk_query( prompt=user_message, options=options ), model, call_type,
+            assistant_message, text_block, result_message,
+        )
+
+        if self.debug: print( f"[{self.LABEL}] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f}" )
+
+        return response_class(
+            content       = content,
+            model         = model,
+            input_tokens  = input_tokens,
+            output_tokens = output_tokens,
+            stop_reason   = stop_reason,
+            sdk_cost_usd  = sdk_cost_usd,
+            raw_response  = None,
+        )
 
     async def call_with_json_output( self, system_prompt: str, user_message: str, max_tokens: int = 4096 ) -> dict:
         """

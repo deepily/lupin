@@ -265,9 +265,8 @@ class PresentationAPIClient( BoundedCCClientBase ):
             - SDK_AVAILABLE is True
 
         Ensures:
-            - Builds tools=[] / read-only options (pure synthesis)
+            - Runs BoundedCCClientBase._call_bounded with this module's tools=[] options (pure synthesis)
             - Folds temperature into the system-prompt creativity steer
-            - Concatenates all assistant TextBlocks into the response content
             - Records token usage + SDK cost telemetry
 
         Args:
@@ -281,34 +280,11 @@ class PresentationAPIClient( BoundedCCClientBase ):
         Returns:
             APIResponse: Structured response
         """
-        steer            = _temperature_to_steer( temperature )
-        effective_system = system_prompt or ""
-        if steer:
-            effective_system = ( effective_system + "\n\n" + steer ).strip()
-
-        options = ClaudeAgentOptions(
-            model           = model,
-            system_prompt   = effective_system or None,
-            tools           = PRESENTATION_CONTENT_TOOLS,
-            permission_mode = PRESENTATION_PERMISSION_MODE,
-            max_turns       = self.config.content_max_turns,
-        )
-
-        if self.debug:
-            print( f"[PresentationAPIClient] sdk_query {model} for {call_type} (max_turns={self.config.content_max_turns})" )
-
-        content, input_tokens, output_tokens, sdk_cost_usd, stop_reason = await self._collect_reply(
-            sdk_query( prompt=user_message, options=options ), model, call_type,
-            AssistantMessage, TextBlock, ResultMessage,
-        )
-
-        if self.debug:
-            print( f"[PresentationAPIClient] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f}" )
-
-        return APIResponse(
-            content=content, model=model, input_tokens=input_tokens,
-            output_tokens=output_tokens, stop_reason=stop_reason,
-            sdk_cost_usd=sdk_cost_usd, raw_response=None,
+        return await self._call_bounded(
+            model, system_prompt, user_message, call_type, temperature,
+            _temperature_to_steer,
+            ( ClaudeAgentOptions, sdk_query, AssistantMessage, TextBlock, ResultMessage ),
+            PRESENTATION_CONTENT_TOOLS, PRESENTATION_PERMISSION_MODE, self.config.content_max_turns, APIResponse,
         )
 
     # =========================================================================
