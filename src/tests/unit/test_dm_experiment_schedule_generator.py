@@ -472,3 +472,49 @@ def test_main_write_produces_the_file( tmp_path, monkeypatch, capsys ):
     assert GEN.main( [] ) == 0
     assert target.read_text( encoding="utf-8" ) == GEN.serialize( GEN.build_schedule() )
     assert "wrote" in capsys.readouterr().out
+
+
+def _paired_block():
+    """A block that passes every check: both arms at every clock hour of one date."""
+    hours = list( range( GEN.WINDOW_START_HOUR, GEN.WINDOW_END_HOUR ) )
+    slots = [ { "date": "2026-08-06", "local_hour": h, "arm": arm } for h in hours for arm in ( GEN.BLIND, GEN.REJECTING ) ]
+    return slots, { "2026-08-06": set( hours ) }, len( slots )
+
+
+def test_block_invariants_pass_a_paired_block_and_name_the_block_in_each_count_message():
+    slots, expected, total = _paired_block()
+    assert GEN._assert_block_invariants( slots, total, expected, "demo", "the demo" ) is None
+    with pytest.raises( AssertionError, match=f"expected {total} demo slots, got {total - 1}" ):
+        GEN._assert_block_invariants( slots[ :-1 ], total, expected, "demo", "the demo" )
+    skewed = [ dict( s, arm=GEN.BLIND ) if i == 1 else s for i, s in enumerate( slots ) ]
+    with pytest.raises( AssertionError, match=f"demo blind {total // 2 + 1}, expected {total // 2}" ):
+        GEN._assert_block_invariants( skewed, total, expected, "demo", "the demo" )
+    skewed = [ dict( s, arm=GEN.REJECTING ) if i == 0 else s for i, s in enumerate( slots ) ]
+    with pytest.raises( AssertionError, match=f"demo blind {total // 2 - 1}, expected {total // 2}" ):
+        GEN._assert_block_invariants( skewed, total, expected, "demo", "the demo" )
+
+
+def test_block_invariants_name_the_hour_and_the_block_when_an_hour_has_one_arm():
+    slots, expected, total = _paired_block()
+    one_armed = [ dict( s, arm=GEN.BLIND ) if s[ "local_hour" ] == 10 else dict( s, arm=GEN.REJECTING ) if s[ "local_hour" ] == 11 else s for s in slots ]
+    with pytest.raises( AssertionError, match="hour 10 lacks both arms in week 2$" ):
+        GEN._assert_block_invariants( one_armed, total, expected, "week-2", "week 2" )
+    with pytest.raises( AssertionError, match="hour 10 lacks both arms in the extension$" ):
+        GEN._assert_block_invariants( one_armed, total, expected, "extension", "the extension" )
+
+
+def test_block_invariants_refuse_wrong_hours_and_long_runs_by_date():
+    slots, expected, total = _paired_block()
+    with pytest.raises( AssertionError, match="2026-08-06: unexpected hour coverage" ):
+        GEN._assert_block_invariants( slots, total, { "2026-08-06": set( expected[ "2026-08-06" ] ) | { 3 } }, "demo", "the demo" )
+    long_run = [ dict( s, arm=GEN.BLIND if s[ "local_hour" ] < 16 else GEN.REJECTING ) for s in slots ]
+    with pytest.raises( AssertionError, match=f"2026-08-06: run longer than {GEN.MAX_RUN}" ):
+        GEN._assert_block_invariants( long_run, total, expected, "demo", "the demo" )
+
+
+def test_week2_invariants_keep_their_own_opening_time_check():
+    slots = GEN.build_week2_slots()
+    GEN._assert_week2_invariants( slots )
+    early = [ dict( s, start_utc="2020-01-01T00:00" ) for s in slots ]
+    with pytest.raises( AssertionError, match="week 2 opens at 2020-01-01T00:00, expected Tue 15:00 EDT" ):
+        GEN._assert_week2_invariants( early )

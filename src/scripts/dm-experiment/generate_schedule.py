@@ -330,6 +330,43 @@ def build_extension_slots( seed=EXT_SEED ):
     return slots
 
 
+def _assert_block_invariants( slots, total, expected_hours, label, where ):
+    """
+    Fail loudly unless a block of slots honours the constraints both blocks share.
+
+    Requires:
+        - slots is a block's slot list; total is its slot count, half of it per arm
+        - expected_hours maps each ISO date to the set of local hours that day must cover
+        - label names the block in the count messages and where names it in the clock-hour message
+
+    Ensures:
+        - returns None when there are total slots, total / 2 per arm, the expected hours on each date,
+          no within-day run longer than MAX_RUN and both arms at every clock hour of the window
+
+    Raises:
+        - AssertionError naming the first violated constraint
+    """
+    assert len( slots ) == total, f"expected {total} {label} slots, got {len( slots )}"
+
+    half  = total // 2
+    count = collections.Counter( s[ "arm" ] for s in slots )
+    assert count[ BLIND ]     == half, f"{label} blind {count[ BLIND ]}, expected {half}"
+    assert count[ REJECTING ] == half, f"{label} rejecting {count[ REJECTING ]}, expected {half}"
+
+    for date_str, hours in expected_hours.items():
+        day = [ s for s in slots if s[ "date" ] == date_str ]
+        assert { s[ "local_hour" ] for s in day } == hours, f"{date_str}: unexpected hour coverage"
+        ordered = [ s[ "arm" ] for s in sorted( day, key=lambda s: s[ "local_hour" ] ) ]
+        assert _max_run_length( ordered ) <= MAX_RUN, f"{date_str}: run longer than {MAX_RUN}"
+
+    # Both arms at every clock hour — the property the analyzer's pairing needs.
+    by_hour = collections.defaultdict( set )
+    for s in slots:
+        by_hour[ s[ "local_hour" ] ].add( s[ "arm" ] )
+    for hour in range( WINDOW_START_HOUR, WINDOW_END_HOUR ):
+        assert by_hour[ hour ] == { BLIND, REJECTING }, f"hour {hour} lacks both arms in {where}"
+
+
 def _assert_extension_invariants( slots ):
     """
     Fail loudly unless the extension block honours its design constraints.
@@ -345,29 +382,12 @@ def _assert_extension_invariants( slots ):
     Raises:
         - AssertionError naming the first violated constraint
     """
-    assert len( slots ) == 28, f"expected 28 extension slots, got {len( slots )}"
-
-    total = collections.Counter( s[ "arm" ] for s in slots )
-    assert total[ BLIND ]     == 14, f"extension blind {total[ BLIND ]}, expected 14"
-    assert total[ REJECTING ] == 14, f"extension rejecting {total[ REJECTING ]}, expected 14"
-
     expected_hours = {
         THURSDAY_DATE.isoformat() : set( EXT_LATE_HOURS ),
         FRIDAY_DATE.isoformat()   : set( EXT_EARLY_HOURS + EXT_LATE_HOURS ),
         SATURDAY_DATE.isoformat() : set( EXT_EARLY_HOURS ),
     }
-    for date_str, hours in expected_hours.items():
-        day = [ s for s in slots if s[ "date" ] == date_str ]
-        assert { s[ "local_hour" ] for s in day } == hours, f"{date_str}: unexpected hour coverage"
-        ordered = [ s[ "arm" ] for s in sorted( day, key=lambda s: s[ "local_hour" ] ) ]
-        assert _max_run_length( ordered ) <= MAX_RUN, f"{date_str}: run longer than {MAX_RUN}"
-
-    # Both arms at every clock hour — the property the analyzer's pairing needs.
-    by_hour = collections.defaultdict( set )
-    for s in slots:
-        by_hour[ s[ "local_hour" ] ].add( s[ "arm" ] )
-    for hour in range( WINDOW_START_HOUR, WINDOW_END_HOUR ):
-        assert by_hour[ hour ] == { BLIND, REJECTING }, f"hour {hour} lacks both arms in the extension"
+    _assert_block_invariants( slots, 28, expected_hours, "extension", "the extension" )
 
 
 def _week2_day_arms( rng ):
@@ -464,12 +484,6 @@ def _assert_week2_invariants( slots ):
     Raises:
         - AssertionError naming the first violated constraint
     """
-    assert len( slots ) == 56, f"expected 56 week-2 slots, got {len( slots )}"
-
-    total = collections.Counter( s[ "arm" ] for s in slots )
-    assert total[ BLIND ]     == 28, f"week-2 blind {total[ BLIND ]}, expected 28"
-    assert total[ REJECTING ] == 28, f"week-2 rejecting {total[ REJECTING ]}, expected 28"
-
     full_day       = set( WK2_EARLY_HOURS + WK2_LATE_HOURS )
     expected_hours = {
         WK2_TUESDAY_DATE.isoformat()   : set( WK2_LATE_HOURS ),
@@ -478,18 +492,7 @@ def _assert_week2_invariants( slots ):
         WK2_FRIDAY_DATE.isoformat()    : full_day,
         WK2_SATURDAY_DATE.isoformat()  : set( WK2_EARLY_HOURS ),
     }
-    for date_str, hours in expected_hours.items():
-        day = [ s for s in slots if s[ "date" ] == date_str ]
-        assert { s[ "local_hour" ] for s in day } == hours, f"{date_str}: unexpected hour coverage"
-        ordered = [ s[ "arm" ] for s in sorted( day, key=lambda s: s[ "local_hour" ] ) ]
-        assert _max_run_length( ordered ) <= MAX_RUN, f"{date_str}: run longer than {MAX_RUN}"
-
-    # Both arms at every clock hour — the property the analyzer's pairing needs.
-    by_hour = collections.defaultdict( set )
-    for s in slots:
-        by_hour[ s[ "local_hour" ] ].add( s[ "arm" ] )
-    for hour in range( WINDOW_START_HOUR, WINDOW_END_HOUR ):
-        assert by_hour[ hour ] == { BLIND, REJECTING }, f"hour {hour} lacks both arms in week 2"
+    _assert_block_invariants( slots, 56, expected_hours, "week-2", "week 2" )
 
     # No slot may open in the past relative to the declared start. This is the
     # check that would have caught an already-elapsed Tuesday hour being armed.
