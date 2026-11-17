@@ -6,7 +6,7 @@ pins:
   - scripts.create_service_account.get_or_create_service_account@06355e93ab
   - scripts.create_service_account.store_api_key@c5840056ec
   - scripts.create_service_account.write_key_to_file@e31a425027
-  - scripts.create_service_account.main@8dd25f3a98
+  - scripts.create_service_account.main@fc793b38d9
 ---
 # Service account creator
 
@@ -17,4 +17,4 @@ Creates a service account user in the authentication database and generates a se
 - `get_or_create_service_account` returns the user id of the service account for an email, creating it with the `service_account` role if it does not exist. It raises `RuntimeError` if the user exists but is not a service account.
 - `store_api_key` stores a bcrypt hash of the key, never the plaintext, sets the created time and enables the key. It returns the new record id.
 - `write_key_to_file` writes the plaintext key to `notification-api-claude-code-<env>` under `src/conf/keys/`, creating the folder if needed. The file mode is 600, owner read and write only. `LUPIN_ROOT` must be set.
-- `main` runs the whole flow and returns 0 on success and 1 on error.
+- `main` runs the whole flow and returns 0 on success and 1 on error. It reads its options and prints its report through `parse_service_account_args` and `print_key_report`.

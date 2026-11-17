@@ -33,7 +33,7 @@ if src_path not in sys.path:
 
 # Now cosa is importable
 import cosa.utils.util as cu
-from cosa.utils.admin_script_helpers import run_create_script, validate_table
+from cosa.utils.admin_script_helpers import create_table_with_indexes, run_create_script, validate_table
 
 
 # SQL schema from design doc (Area 1 Q1.3 + Q1.4)
@@ -122,45 +122,9 @@ def create_notifications_table():
     if not os.path.exists( db_dir ):
         raise RuntimeError( f"Database directory does not exist: {db_dir}" )
 
-    # Connect to database (will create file if doesn't exist)
-    conn = None
-    try:
-        conn = sqlite3.connect( db_path )
-        cursor = conn.cursor()
-
-        # Create table
-        print( "  Creating notifications table..." )
-        cursor.execute( CREATE_NOTIFICATIONS_TABLE )
-
-        # Create indexes
-        print( "  Creating indexes..." )
-        for idx, index_sql in enumerate( CREATE_INDEXES, 1 ):
-            cursor.execute( index_sql )
-            print( f"    Index {idx}/3 created" )
-
-        # Commit changes
-        conn.commit()
-
-        # Validate schema
-        print( "  Validating schema..." )
-        validation_result = validate_schema( conn )
-
-        if validation_result["success"]:
-            print( f"  ✓ Schema validated: {validation_result['field_count']} fields, {validation_result['index_count']} indexes" )
-            return True
-        else:
-            print( f"  ✗ Schema validation failed: {validation_result['error']}", file=sys.stderr )
-            return False
-
-    except sqlite3.Error as e:
-        print( f"  ✗ SQLite error: {e}", file=sys.stderr )
-        return False
-    except Exception as e:
-        print( f"  ✗ Unexpected error: {e}", file=sys.stderr )
-        return False
-    finally:
-        if conn:
-            conn.close()
+    return create_table_with_indexes(
+        lambda: sqlite3.connect( db_path ), "notifications", CREATE_NOTIFICATIONS_TABLE, CREATE_INDEXES, validate_schema
+    )
 
 
 def validate_schema( conn ):

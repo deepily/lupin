@@ -276,7 +276,7 @@ class TestMigrateFile:
         assert ENTRY_SEPARATOR in new_content
 
 
-# ─── _migrate_file_no_backup tests ────────────────────────────────────────
+# ─── _migrate_file without a backup root tests ──────────────────────────
 
 
 class TestMigrateFileNoBackup:
@@ -288,11 +288,12 @@ class TestMigrateFileNoBackup:
         ]
         _legacy_topic_file( path, "topic-g", entries )
 
-        n_repl, mutated = migrate_module._migrate_file_no_backup( path, dry_run=False )
+        n_repl, mutated = migrate_module._migrate_file( path, dry_run=False )
         assert n_repl == 1
         assert mutated is True
         new_content = path.read_text( encoding="utf-8" )
         assert ENTRY_SEPARATOR in new_content
+        assert sorted( p.name for p in tmp_path.iterdir() ) == [ "topic-g.md" ], "a None backup root must write no backup anywhere"
 
     def test_no_backup_no_op_on_migrated_file( self, tmp_path ):
         path = tmp_path / "topic-h.md"
@@ -301,7 +302,7 @@ class TestMigrateFileNoBackup:
         ]
         _migrated_topic_file( path, "topic-h", entries )
 
-        n_repl, mutated = migrate_module._migrate_file_no_backup( path, dry_run=False )
+        n_repl, mutated = migrate_module._migrate_file( path, dry_run=False )
         assert n_repl == 0
         assert mutated is False
 
@@ -313,13 +314,13 @@ class TestMigrateFileNoBackup:
         _legacy_topic_file( path, "topic-i", entries )
         original = path.read_text( encoding="utf-8" )
 
-        n_repl, mutated = migrate_module._migrate_file_no_backup( path, dry_run=True )
+        n_repl, mutated = migrate_module._migrate_file( path, dry_run=True )
         assert n_repl == 1
         assert mutated is False
         assert path.read_text( encoding="utf-8" ) == original
 
     def test_no_backup_no_frontmatter_at_all( self, tmp_path ):
-        """Coverage for the no-frontmatter branch in _migrate_file_no_backup."""
+        """Coverage for the no-frontmatter branch of _migrate_file without a backup root."""
         path = tmp_path / "topic-k.md"
         content = (
             "Preamble with no frontmatter\n"
@@ -330,7 +331,7 @@ class TestMigrateFileNoBackup:
         )
         path.write_text( content, encoding="utf-8" )
 
-        n_repl, mutated = migrate_module._migrate_file_no_backup( path, dry_run=False )
+        n_repl, mutated = migrate_module._migrate_file( path, dry_run=False )
         assert n_repl == 1
         assert mutated is True
 
@@ -408,6 +409,19 @@ class TestMigrateDirectory:
         assert summary[ "files_scanned" ] == 2
         assert summary[ "files_mutated" ] == 1
         assert summary[ "total_replaced" ] == 1
+
+    def test_the_backup_dir_in_the_summary_holds_the_pre_migration_text( self, tmp_path ):
+        commons = tmp_path / "commons"
+        commons.mkdir()
+        entries = [ _entry( "2026-05-18T00:00:01.000000+00:00", "Tiberius", "🌑", "s1", "Body" ) ]
+        _legacy_topic_file( commons / "legacy.md", "legacy", entries )
+        before = ( commons / "legacy.md" ).read_text( encoding="utf-8" )
+
+        summary = migrate_module.migrate_directory( commons, dry_run=False, with_backup=True )
+
+        saved = summary[ "backup_dir" ] / "legacy.md"
+        assert saved.read_text( encoding="utf-8" ) == before
+        assert ( commons / "legacy.md" ).read_text( encoding="utf-8" ) != before
 
     def test_idempotent_re_run( self, tmp_path ):
         commons = tmp_path / "commons"

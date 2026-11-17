@@ -6,6 +6,7 @@ runner, the same table-shape check and the same key-file writer. Each script kee
 function names and passes its own table name, banner text or project root.
 """
 
+import argparse
 import sqlite3
 import sys
 import traceback
@@ -54,6 +55,62 @@ def run_create_script( title, subtitle, success_label, create_fn ):
         print( f"\n✗ FATAL ERROR: {e}", file=sys.stderr )
         traceback.print_exc()
         return 1
+
+
+def create_table_with_indexes( connect, table, create_sql, index_sqls, validate, precheck=None, table_done=None, index_mark="" ):
+    """
+    Create one table and its indexes, validate the schema and report each step.
+
+    Requires:
+        - connect takes no arguments and returns an open sqlite3 connection
+        - create_sql creates the table and each of index_sqls one index
+        - validate takes the connection and returns { success, field_count, index_count, error }
+        - precheck is None, or takes the cursor, prints its own lines and raises when the work must not start
+        - table_done is None, or the line to print after the table is created
+        - index_mark is put before each "Index n/total created" line
+
+    Ensures:
+        - prints "Creating <table> table...", then the table line, the indexes and the validation result
+        - commits before validating
+        - returns True when validate says success
+        - returns False, after printing the cause on stderr, when validate fails, sqlite3 raises or anything else raises
+        - always closes the connection it opened
+    """
+    conn = None
+    try:
+        conn   = connect()
+        cursor = conn.cursor()
+
+        if precheck is not None: precheck( cursor )
+
+        print( f"  Creating {table} table..." )
+        cursor.execute( create_sql )
+        if table_done is not None: print( table_done )
+
+        print( "  Creating indexes..." )
+        for idx, index_sql in enumerate( index_sqls, 1 ):
+            cursor.execute( index_sql )
+            print( f"    {index_mark}Index {idx}/{len( index_sqls )} created" )
+
+        conn.commit()
+
+        print( "  Validating schema..." )
+        validation_result = validate( conn )
+
+        if validation_result[ "success" ]:
+            print( f"  ✓ Schema validated: {validation_result[ 'field_count' ]} fields, {validation_result[ 'index_count' ]} indexes" )
+            return True
+        print( f"  ✗ Schema validation failed: {validation_result[ 'error' ]}", file=sys.stderr )
+        return False
+
+    except sqlite3.Error as e:
+        print( f"  ✗ SQLite error: {e}", file=sys.stderr )
+        return False
+    except Exception as e:
+        print( f"  ✗ Unexpected error: {e}", file=sys.stderr )
+        return False
+    finally:
+        if conn: conn.close()
 
 
 def validate_table( conn, table, expected_fields, expected_indexes ):
@@ -120,6 +177,58 @@ def validate_table( conn, table, expected_fields, expected_indexes ):
             "success": False,
             "error": f"Validation query failed: {e}"
         }
+
+
+def parse_service_account_args( description, epilog ):
+    """
+    Read the command line the two service-account scripts share.
+
+    Requires:
+        - description and epilog are the script's own help text; the epilog is printed as written
+
+    Ensures:
+        - returns the parsed arguments, with email (default claude.code@deepily.ai), description (default empty) and env (dev, staging or prod; default dev)
+        - --help prints the description, the options and the epilog as written, then exits 0
+    """
+    parser = argparse.ArgumentParser( description=description, formatter_class=argparse.RawDescriptionHelpFormatter, epilog=epilog )
+    parser.add_argument( "--email", default="claude.code@deepily.ai", help="Service account email (default: claude.code@deepily.ai)" )
+    parser.add_argument( "--description", default="", help="Key description (optional)" )
+    parser.add_argument( "--env", default="dev", choices=[ "dev", "staging", "prod" ],
+                         help="Environment (dev, staging, prod) - determines key file name (default: dev)" )
+    return parser.parse_args()
+
+
+def print_key_report( title, width, key_rule, account_lines, api_key, key_file, next_steps, notes ):
+    """
+    Print the success report of a service-account script, with the key shown once.
+
+    Requires:
+        - title is the success line, width the banner width and key_rule the character that frames the key
+        - account_lines, next_steps and notes are lists of lines; an empty line in next_steps prints a blank line
+
+    Ensures:
+        - prints the banner, the account lines, the key framed by key_rule, where it was saved, the next steps and the notes
+        - the order and the blank lines are the order the two scripts printed before they shared this
+    """
+    print( "=" * width )
+    print( f"  {title}" )
+    print( "=" * width )
+    print()
+    for line in account_lines: print( line )
+    print()
+    print( "🔑 API Key (save this - shown only once):" )
+    print( key_rule * width )
+    print( api_key )
+    print( key_rule * width )
+    print()
+    print( f"Key saved to: {key_file}" )
+    print()
+    print( "Next steps:" )
+    for line in next_steps: print( line )
+    print()
+    print( "⚠️  IMPORTANT:" )
+    for line in notes: print( line )
+    print()
 
 
 def write_key_file( project_root, api_key, env ):

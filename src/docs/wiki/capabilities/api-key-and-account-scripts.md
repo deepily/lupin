@@ -7,7 +7,7 @@ pins:
   - scripts.create_service_account_postgres.get_or_create_service_account@90bdda1bfc
   - scripts.create_service_account_postgres.store_api_key@6f914d69d9
   - scripts.create_service_account_postgres.write_key_to_file@e31a425027
-  - scripts.create_service_account_postgres.main@069ce25eb5
+  - scripts.create_service_account_postgres.main@cfee43fdd5
   - scripts.mint-model-server-api-key.generate_model_server_key@0ca34068df
   - scripts.mint-model-server-api-key.key_fingerprint@3696f73f22
   - scripts.mint-model-server-api-key.key_file_path@a4121a23b9

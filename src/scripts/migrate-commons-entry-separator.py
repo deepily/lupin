@@ -33,7 +33,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 # Bootstrap LUPIN_ROOT so we can import lupin_mcp.commons_store
@@ -103,13 +103,13 @@ def _reconstruct_content( original: str, body: str, new_body: str ) -> str:
     return frontmatter_section + new_body
 
 
-def _migrate_file( path: Path, dry_run: bool, backup_root: Path ) -> Tuple[ int, bool ]:
+def _migrate_file( path: Path, dry_run: bool, backup_root: Optional[ Path ] = None ) -> Tuple[ int, bool ]:
     """
     Migrate a single topic file in-place.
 
     Requires:
         - path exists and is a `.md` file under `io/commons/` or its archive
-        - backup_root is a writable directory (irrelevant in dry-run mode)
+        - backup_root is a writable directory (irrelevant in dry-run mode), or None for no backup
 
     Ensures:
         - returns (n_replaced, mutated)
@@ -117,7 +117,7 @@ def _migrate_file( path: Path, dry_run: bool, backup_root: Path ) -> Tuple[ int,
           replaced with the new separator
         - mutated is True only if dry_run is False and n_replaced > 0
         - Backup is written to `backup_root/<file-name>` before any
-          destructive write
+          destructive write, unless backup_root is None
         - Files without legacy entry boundaries are no-ops (mtime preserved)
     """
     content        = path.read_text( encoding="utf-8" )
@@ -130,9 +130,9 @@ def _migrate_file( path: Path, dry_run: bool, backup_root: Path ) -> Tuple[ int,
         return ( n_replaced, False )
 
     # Backup before mutating
-    backup_root.mkdir( parents=True, exist_ok=True )
-    backup_path = backup_root / path.name
-    shutil.copy2( path, backup_path )
+    if backup_root is not None:
+        backup_root.mkdir( parents=True, exist_ok=True )
+        shutil.copy2( path, backup_root / path.name )
 
     new_content = _reconstruct_content( content, body, new_body )
     path.write_text( new_content, encoding="utf-8" )
@@ -191,10 +191,7 @@ def migrate_directory(
     n_mutated    = 0
 
     for path in files:
-        if backup_dir is None:
-            n_repl, mutated = _migrate_file_no_backup( path, dry_run )
-        else:
-            n_repl, mutated = _migrate_file( path, dry_run, backup_dir )
+        n_repl, mutated = _migrate_file( path, dry_run, backup_dir )
         per_file.append( {
             "path"       : path,
             "n_replaced" : n_repl,
@@ -213,22 +210,6 @@ def migrate_directory(
         "dry_run"          : dry_run,
         "per_file"         : per_file,
     }
-
-
-def _migrate_file_no_backup( path: Path, dry_run: bool ) -> Tuple[ int, bool ]:
-    """
-    Migrate without writing a backup. Used when `--no-backup` is passed.
-    """
-    content        = path.read_text( encoding="utf-8" )
-    _, body        = _split_frontmatter( content )
-    new_body, n_replaced = _migrate_body( body )
-    if n_replaced == 0:
-        return ( 0, False )
-    if dry_run:
-        return ( n_replaced, False )
-    new_content = _reconstruct_content( content, body, new_body )
-    path.write_text( new_content, encoding="utf-8" )
-    return ( n_replaced, True )
 
 
 def _format_summary( summary: dict ) -> str:

@@ -309,3 +309,31 @@ class TestMain:
         out = capsys.readouterr().out
         assert "DUP-CROSS"    in out
         assert "DUP-INTERNAL" in out
+
+
+class TestCalculatorReasonIsTheOneMatcher:
+
+    @pytest.mark.parametrize( "utterance, reason", [
+        ( "what is the monthly mortgage payment on 300000 at 6 percent", "maps to calc op: mortgage" ),
+        ( "compare prices of 3 for $4 and 5 for $7", "maps to calc op: compare_prices" ),
+        ( "use the calculator for this", "explicit calculator routing phrase" ),
+        ( "convert 5 km to miles", "maps to calc op: convert (['km', 'mile'])" ),
+        ( "convert 5 km to liters", None ),
+        ( "solve x squared equals 4", None ),
+    ] )
+    def test_it_names_the_operation_or_returns_none( self, utterance, reason ):
+        assert rla._calculator_reason( utterance ) == reason
+
+    def test_a_padded_calculator_line_goes_to_the_calculator_and_a_double_match_gives_the_mortgage_reason( self ):
+        padded = "\t  use the calculator for this \n  "
+        assert rla.destination_capability( padded ) == ( rla.CALC_LABEL, "explicit calculator routing phrase" )
+        both = "which is cheaper, the mortgage at 6 percent or the loan at 5 percent"
+        assert rla._MORTGAGE_RE.search( both ) and rla._PRICE_RE.search( both )
+        assert rla._calculator_reason( both ) == "maps to calc op: mortgage"
+
+    def test_the_destination_and_the_shape_test_agree_with_it_and_only_the_destination_strips( self ):
+        spaced = "   convert 5 km to miles   "
+        assert rla.destination_capability( spaced )[ 0 ] == rla.CALC_LABEL and rla.destination_capability( spaced )[ 1 ].startswith( "maps to calc op: convert" )
+        assert rla.is_calculator_shaped( spaced ) is ( rla._calculator_reason( spaced ) is not None )
+        assert rla.destination_capability( "solve for x" ) == ( rla.MATH_LABEL, "no CalcIntent operation covers it" )
+        assert rla.is_calculator_shaped( "solve for x" ) is False

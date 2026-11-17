@@ -300,3 +300,13 @@ class TestTheBootstrap:
         monkeypatch.delitem( sys.modules, MODNAME, raising=False )
         importlib.import_module( MODNAME )
         assert sys.path.count( str( root / "src" ) ) == 1
+
+
+class TestTheReportKeepsItsPlainLines:
+
+    def test_the_table_line_and_the_ticks_stay_off_the_notifications_report( self, monkeypatch, capsys, tmp_path ):
+        _wire( monkeypatch, tmp_path )
+        assert mod.create_notifications_table() is True
+        out = capsys.readouterr().out
+        assert "  Creating notifications table...\n  Creating indexes...\n    Index 1/3 created\n" in out and "    Index 3/3 created\n  Validating schema...\n" in out
+        assert "Table created" not in out and "✓ Index" not in out

@@ -55,6 +55,15 @@ PINNED = (
 )
 
 
+# ── _spans ───────────────────────────────────────────────────────────────────
+
+def test_spans_run_each_match_to_the_next_one_and_the_last_to_the_end_and_an_empty_source_has_none():
+    src = "x = 1\ndef test_a():\n    pass\ndef test_b():\n    pass\n"
+    spans = bps._spans( src, bps.DEF )
+    assert [ ( m.group( 2 ), body ) for m, body in spans ] == [ ( "test_a", "def test_a():\n    pass\n" ), ( "test_b", "def test_b():\n    pass\n" ) ]
+    assert bps._spans( "no defs here", bps.DEF ) == [] and bps._spans( "", bps.HELPDEF ) == []
+
+
 # ── helper_bodies ────────────────────────────────────────────────────────────
 
 def test_helper_bodies_splits_each_helper_and_runs_the_last_to_end_of_file():

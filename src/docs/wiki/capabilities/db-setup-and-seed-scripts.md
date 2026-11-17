@@ -6,7 +6,7 @@ pins:
   - scripts.auth_migration.migrate_mock_users.migrate_users@02f45540fc
   - scripts.auth_migration.migrate_mock_users.quick_smoke_test@7a022f3624
   - scripts.auth_migration.validate_migration.validate_migration@b6f3aed733
-  - scripts.create_notifications_table.create_notifications_table@7ec64c9794
+  - scripts.create_notifications_table.create_notifications_table@b48095be02
   - scripts.create_notifications_table.validate_schema@70dea9ab3f
   - scripts.create_notifications_table.main@a820090cac
   - scripts.embedding_regen_probe.build_statements@2c22e93720
@@ -31,7 +31,7 @@ pins:
 One-off setup scripts under `src/scripts/`. Most are idempotent or have a dry run.
 - `SolutionSnapshotMigrator` adds the default user id to existing snapshot files. Its `main` takes `--dry-run` and `--backup`.
 - `migrate_users` and `generate_secure_password` migrate the three mock users into the JWT database with random passwords. `validate_migration` checks that all exist and verify.
-- `create_notifications_table` creates the SQLite notifications table with its indexes. `validate_schema` checks every field and index.
+- `create_notifications_table` creates the SQLite notifications table with its indexes, through `create_table_with_indexes`. `validate_schema` checks every field and index.
 - `seed_if_missing` copies the companion users and API keys from the dev database to the test database. It skips the copy when `LUPIN_TEST_SEED_FROM_DEV` is `0`, as on the VM test server.
 - `export_test_companions` runs inside the :7999 container and prints the same companions as one SQL script, so the VM test server needs no dev database. `fetch_rows` reads them. `placeholder_rows` describes a disabled stand-in for each missing companion except the primary admin. `build_sql` writes the transaction, `sql_literal` quotes the JSON payload, and `main --check` prints counts only. Run it through `lupin-vm.sh test-server seed-companions`.
 - `seed_decisions` inserts 50 proxy decision scenarios into Postgres and the pgvector store. `ratify_suggested`, `verify` and `clean_seed_data` ratify, check and remove them.
