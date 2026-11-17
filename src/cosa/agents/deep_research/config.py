@@ -9,8 +9,10 @@ Design decisions:
 - Configurable limits to prevent runaway execution
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Literal, Optional
+
+from cosa.agents.shared.config_loader import load_kwargs_from_ini, model_field
 
 
 @dataclass
@@ -27,8 +29,8 @@ class ResearchConfig:
     """
 
     # === Model Selection ===
-    lead_model     : str = "claude-opus-4-6"
-    subagent_model : str = "claude-sonnet-4-6"
+    lead_model     : str = model_field( "deep research lead model" )
+    subagent_model : str = model_field( "deep research subagent model" )
 
     # === Scaling Heuristics ===
     max_subagents_simple   : int = 1
@@ -156,32 +158,12 @@ class ResearchConfig:
             "cancel_when_no_topics_ticked": "deep research cancel when no topics ticked",
         }
 
-        # Build kwargs from INI, falling back to dataclass defaults
-        kwargs       = {}
-        dc_fields    = { f.name: f for f in fields( cls ) }
+        # The shared loop reads each key, coerces by field type and falls back to the dataclass default.
+        # silent keeps the manager from printing a banner for every key the INI lacks.
+        kwargs = load_kwargs_from_ini( cls, config_mgr, key_map, silent=True )
 
-        for field_name, ini_key in key_map.items():
-            dc_field = dc_fields[ field_name ]
-            default  = dc_field.default
-
-            # Determine return_type based on field type
-            field_type = dc_field.type
-            if field_type == "bool" or field_type is bool:
-                return_type = "boolean"
-            elif field_type == "int" or field_type is int:
-                return_type = "int"
-            elif field_type == "float" or field_type is float:  # pragma: no cover - no float-typed ResearchConfig field + fixed key_map of the 23 real fields; this defensive coercion arm is unreachable
-                return_type = "float"
-            else:
-                return_type = "string"
-
-            value = config_mgr.get( ini_key, default=str( default ) if default is not None else "", silent=True, return_type=return_type )
-
-            # Handle empty string for Optional[str] fields
-            if field_name == "audience_context" and ( value == "" or value is None ):
-                value = None
-
-            kwargs[ field_name ] = value
+        # A blank audience_context means none was given
+        if kwargs[ "audience_context" ] == "": kwargs[ "audience_context" ] = None
 
         if debug: print( f"[ResearchConfig.from_config] Loaded {len( kwargs )} fields from INI" )
 
@@ -198,8 +180,8 @@ def quick_smoke_test():
         # Test 1: Default instantiation
         print( "Testing default config..." )
         config = ResearchConfig()
-        assert config.lead_model == "claude-opus-4-6"
-        assert config.subagent_model == "claude-sonnet-4-6"
+        assert config.lead_model.startswith( "claude-" )
+        assert config.subagent_model.startswith( "claude-" )
         print( "✓ Default config created" )
 
         # Test 2: get_max_subagents
@@ -240,7 +222,7 @@ def quick_smoke_test():
             from cosa.config.configuration_manager import ConfigurationManager
             cfg_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             config_from_ini = ResearchConfig.from_config( cfg_mgr, debug=True )
-            assert config_from_ini.lead_model == "claude-opus-4-6"
+            assert config_from_ini.lead_model.startswith( "claude-" )
             assert config_from_ini.max_subagents_simple == 1
             assert config_from_ini.feedback_timeout_seconds == 300
             assert isinstance( config_from_ini.stream_thoughts_to_voice, bool )

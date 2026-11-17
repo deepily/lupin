@@ -379,3 +379,32 @@ def test_script_clones_asks_dups_only_for_definitions_of_the_given_node_minimum(
     assert min( d[ "nodes" ] for d in defs ) < 25
     assert st.script_clones( spec, [ path ], defs, 25 ) == []
     assert len( st.script_clones( spec, [ path ], defs, 5 ) ) == 1
+
+
+# ---- left-out repeats keep their dups slot (4 Nov daily check, row 212d4058) ---------------------------------------
+
+def test_script_keys_gives_a_left_out_repeat_the_slot_dups_numbered_and_the_id_of_the_copy_kept():
+    defs     = [ { "file": "a.ts", "name": "owners", "line": 45, "id": "d-first" }, { "file": "a.ts", "name": "owners", "line": 60, "id": "d-third" } ]
+    repeated = [ { "file": "a.ts", "name": "owners", "line": 53, "id": "d-first" } ]
+    assert st._script_keys( defs, repeated ) == { "a.ts#owners": "d-first", "a.ts#owners~2": "d-first", "a.ts#owners~3": "d-third" }
+
+
+def test_script_keys_without_repeats_numbers_in_extraction_order_as_before():
+    defs = [ { "file": "a.ts", "name": "f", "line": 9, "id": "d-1" }, { "file": "a.ts", "name": "f", "line": 2, "id": "d-2" } ]
+    assert st._script_keys( defs ) == { "a.ts#f": "d-1", "a.ts#f~2": "d-2" }
+
+
+def test_dups_keys_gives_a_left_out_python_repeat_its_slot_and_ignores_one_of_a_file_not_given(tmp_path):
+    root = tmp_path / "r"
+    root.mkdir()
+    ( root / "m.py" ).write_text( "", encoding="utf-8" )
+    spec = sp.spec_for( root )
+    defs = [ { "file": "m.py", "name": "f", "line": 1, "id": "d-1" } ]
+    rep  = [ { "file": "m.py", "name": "f", "line": 5, "id": "d-1" }, { "file": "other.py", "name": "f", "line": 5, "id": "d-9" } ]
+    keys = st._dups_keys( spec, [ root / "m.py" ], defs, rep )
+    assert sorted( keys.values() ) == [ "d-1", "d-1" ] and len( keys ) == 2
+
+
+def test_map_pairs_gives_no_pair_for_two_dups_ids_that_map_to_one_definition():
+    found = { "exact": [ [ "x#f", "x#f~2" ] ], "near": [] }
+    assert st._map_pairs( found, { "x#f": "d-1", "x#f~2": "d-1" }, [ { "id": "d-1", "nodes": 30 } ], "dups" ) == []

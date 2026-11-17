@@ -78,12 +78,12 @@ import requests
 from websockets.sync.client import connect as ws_connect
 
 # The credential and admin fixtures come from src/tests/integration/conftest.py; its
-# helper is imported by package path, matching test_job_history_api.py:18 — a bare
+# helper is imported by package path, matching test_job_history_api.py — a bare
 # `from conftest import ...` resolves to src/conftest.py, which is a different module.
 from tests.integration.conftest import get_auth_header
 
 # Defaults to the dedicated test container. Declared here rather than imported for the
-# same reason its peers declare it (test_job_history_api.py:22, test_admin_users.py:91).
+# same reason its peers declare it (test_job_history_api.py, test_admin_users.py).
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 

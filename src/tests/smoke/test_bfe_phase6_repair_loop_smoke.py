@@ -353,7 +353,7 @@ def run_dr_loop_happy_scenario( headers, user_email ):
         failures.append( f"routing_command: expected 'agent router go to deep research', got {row_routing_command!r}" )
     if row_original_args.get( "query" ) != submit_payload[ "query" ]:
         failures.append( f"original_args.query: expected {submit_payload[ 'query' ]!r}, got {row_original_args.get( 'query' )!r}" )
-    # budget comes through as a string because the REST endpoint stringifies it (deep_research.py:144)
+    # budget comes through as a string because the REST endpoint stringifies it (the deep_research router)
     if str( row_original_args.get( "budget" ) ) != str( submit_payload[ "budget" ] ):
         failures.append( f"original_args.budget: expected '0.01', got {row_original_args.get( 'budget' )!r}" )
     if row_original_args.get( "audience" ) != "expert":

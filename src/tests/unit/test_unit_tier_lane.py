@@ -37,11 +37,11 @@ _HOG_SRC = (
 )
 
 
-def _run_lane( args, mem_max, tmp_path ):
-    """Source the lane and run unit_scope_exec on `args` under `mem_max`."""
+def _run_lane( args, mem_max, tmp_path, runtime_max="60" ):
+    """Source the lane and run unit_scope_exec on `args` under `mem_max` and `runtime_max`."""
     script = 'source "%s"\nunit_scope_exec %s' % ( LIB, " ".join( args ) )
     env    = dict( os.environ )
-    env.update( { "UNIT_MEM_MAX": mem_max, "UNIT_RUNTIME_MAX": "60", "UNIT_SLICE": "unittier.slice" } )
+    env.update( { "UNIT_MEM_MAX": mem_max, "UNIT_RUNTIME_MAX": runtime_max, "UNIT_SLICE": "unittier.slice" } )
     return subprocess.run( [ "bash", "-c", script ], capture_output=True, text=True, env=env, timeout=90 )
 
 
@@ -86,7 +86,33 @@ class TestOomIsReportedAsOom:
         assert "unittier.slice" in r.stdout, "stdout=%s\nstderr=%s" % ( r.stdout, r.stderr )
 
 
+@pytest.mark.skipif( not HAS_SYSTEMD_RUN, reason="systemd-run absent" )
+class TestTheRuntimeCapIsNamed:
+
+    def test_a_run_ended_at_the_cap_prints_the_cap_line( self, tmp_path ):
+        r = _run_lane( [ "sleep", "40" ], "256M", tmp_path, runtime_max="6" )
+        assert "killed at the RuntimeMaxSec cap" in r.stderr, "rc=%r\nstderr=%s" % ( r.returncode, r.stderr )
+        assert "RuntimeMaxSec=6" in r.stderr
+        assert "OUT OF MEMORY" not in r.stderr
+        assert r.returncode != 0
+
+    def test_control_a_sigterm_early_in_the_run_is_not_called_a_cap_kill( self, tmp_path ):
+        r = _run_lane( [ "bash", "-c", "'kill -TERM $PPID; sleep 1'" ], "256M", tmp_path, runtime_max="60" )
+        assert "killed at the RuntimeMaxSec cap" not in r.stderr, "stderr=%s" % r.stderr
+
+    def test_control_a_run_that_finishes_inside_the_cap_prints_no_cap_line( self, tmp_path ):
+        r = _run_lane( [ "true" ], "256M", tmp_path, runtime_max="60" )
+        assert r.returncode == 0
+        assert "killed at the RuntimeMaxSec cap" not in r.stderr
+
+
 class TestTheLaneSettings:
+
+    def test_the_default_runtime_cap_is_7200_seconds( self ):
+        text = LIB.read_text( encoding="utf-8" )
+        assert 'UNIT_RUNTIME_MAX="${UNIT_RUNTIME_MAX:-7200}"' in text
+        r = subprocess.run( [ "bash", "-c", 'unset UNIT_RUNTIME_MAX; source "%s"; echo $UNIT_RUNTIME_MAX' % LIB ], capture_output=True, text=True )
+        assert r.stdout.strip() == "7200"
 
     def test_the_default_ceiling_is_16G_and_never_a_MemoryHigh( self ):
         text = LIB.read_text( encoding="utf-8" )

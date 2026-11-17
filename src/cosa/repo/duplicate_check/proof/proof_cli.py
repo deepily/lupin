@@ -8,6 +8,7 @@ import contextlib
 import functools
 import json
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -17,6 +18,7 @@ import cosa.utils.util as cu
 from cosa.repo.doc_lint import harness_runner, model_transport
 from cosa.repo.labelling import packets as lb_packets
 from cosa.repo.duplicate_check import blind, extract, frozen, judge, structural
+from cosa.repo import code_health_settings as chs
 from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check.proof import label_load, label_prep, proof_run
 from cosa.repo.symindex import spec as sp
@@ -29,9 +31,12 @@ REWRITES_DIR     = "rewrites"
 VECTORS_DIR      = "vectors"
 TREE_PREFIX      = "tree"
 NEW_PREFIX       = "proof-new"
-DATA_RELATIVE    = "/io"
 LEDGER_NAME      = "judge-ledger.jsonl"
 DEFAULT_PARALLEL = 4
+
+# The one-line refusal of a run folder planted under another config. The shas are the first 12 characters; a model-only difference still changes the sha, so it is refused too.
+REFUSED_FOREIGN_RUN = ( "REFUSED: the run {run_dir} was planted under config {run_sha} ({run_model}); the current config is {live_sha} ({live_model}). "
+                        "A run is only checked under the config it was planted under, so plant a proof under the current config and run this again." )
 
 
 def load_run( run_dir ):
@@ -219,7 +224,8 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
         base   = pathlib.Path( tmp.name )
         files  = sorted( { rel for rel, _, _ in where } )
         paths  = [ base / f for f in files ]
-        every  = extract.extract_tree( tmp.name, paths, "server" )[ "definitions" ]
+        report = extract.extract_tree( tmp.name, paths, "server" )
+        every  = report[ "definitions" ]
         staged = [ d for d in every if d[ "nodes" ] >= cfg[ "min_nodes" ] ]
         found  = { ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) for d in staged }
         check_found( where, found, defs, cfg[ "min_nodes" ] )
@@ -230,8 +236,8 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
         py_at  = [ p for p in paths if p.name.endswith( ".py" ) ]
         js_at  = [ p for p in paths if p.name.endswith( extract.SCRIPT_SUFFIXES ) ]
         merged = structural.clone_pairs( structural.parse_jscpd( jscpd( tmp.name, [ TREE_PREFIX, NEW_PREFIX ], cfg ), js, cfg[ "clone_cover" ] ),
-                                         structural.python_clones( spec, py_at, py, cfg[ "min_nodes" ] ),
-                                         structural.script_clones( spec, js_at, js_all, cfg[ "min_nodes" ] ) )
+                                         structural.python_clones( spec, py_at, py, cfg[ "min_nodes" ], repeated=report[ "repeated_ids" ] ),
+                                         structural.script_clones( spec, js_at, js_all, cfg[ "min_nodes" ], repeated=report[ "repeated_ids" ] ) )
     to_pool = { d[ "id" ]: where.get( ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) ) for d in every }
     out     = []
     for p in merged:
@@ -351,12 +357,12 @@ def base_wiring( cache_dir, structural_pairs, parallel, client ):
 
     Ensures:
         - returns { client, cache_dir, scrub, structural_pairs, backend, parallel, frozen_path, live, data_dir, clock }
-        - the backend is the Claude Code one, the scrub list is the frozen arm labels' own, and the data root is the project's io folder
+        - the backend is the Claude Code one, the scrub list is the frozen arm labels' own, and the data root is the code-health data folder under the fleet data root
         - writes nothing
     """
     return { "client": client, "cache_dir": pathlib.Path( cache_dir ), "scrub": blind.scrub_tokens( frozen.ARM_LABELS ), "structural_pairs": structural_pairs,
              "backend": judge.MaxPlanBackend(), "parallel": parallel, "frozen_path": frozen.frozen_path(), "live": frozen.live_config(),
-             "data_dir": cu.get_project_root() + DATA_RELATIVE, "clock": lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }
+             "data_dir": str( chs.data_dir( cu.get_project_root() ) ), "clock": lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }
 
 
 def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring, monolith=label_prep.monolith_definitions, jscpd=structural.run_jscpd ):
@@ -380,6 +386,79 @@ def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring
     return { "run": run, "mono_defs": mono, "distractors": [ *prep[ "server_defs" ], *prep[ "client_defs" ] ], "wiring": wiring }
 
 
+_VERSION = re.compile( r"\|version=[^|]*" )     # the version part of a binding, so two bindings can be compared without it
+
+
+def _ledger_binding( cli_path, backend ):
+    """Return the binding a ledger made now for cli_path and backend carries."""
+    return judge.ledger_binding( f"claude_cli={cli_path}|version={model_transport.cli_version( cli_path )}", backend )
+
+
+class StampedLedger( harness_runner.Ledger ):
+    """A judge ledger that survives a Claude Code update and stamps each ruling with its version."""
+
+    def __init__( self, path, stamp ):
+        """
+        Load the ledger at path without settling its binding.
+
+        Requires:
+            - stamp is the Claude Code version string written on each ruling
+        """
+        self.stamp = stamp
+        super().__init__( path )
+
+    def _append( self, record ):
+        """Ensures: a ruling record carries the writing version as "cli"; a binding record does not."""
+        super()._append( { **record, "cli": self.stamp } if "key" in record else record )
+
+    def settle( self, binding ):
+        """
+        Bind the ledger, accepting a recorded binding that differs only in the version.
+
+        Requires:
+            - binding names the binary path, backend and server, with no version
+
+        Ensures:
+            - a ledger with no binding gets binding written; a ledger bound to binding is left as it is
+            - a ledger bound with a version in it gets binding appended as its newest binding, and keeps every ruling
+
+        Raises:
+            - LedgerBindingError when the recorded binding differs in more than the version, or the file holds rulings and no binding
+        """
+        held = self.recorded
+        if held == binding: return
+        if held is None and not self.entries:
+            self._append( { "binding": binding } )
+        elif held is not None and _VERSION.sub( "", held ) == binding:
+            self._append( { "binding": binding } )
+        else:
+            raise harness_runner.LedgerBindingError( f"ledger {self.path} was written under {held!r} and this run is {binding!r}: use a new ledger" )
+        self.recorded = binding
+
+
+def daily_ledger( data_dir, cli_path, backend, folder ):
+    """
+    Make the daily check's judge ledger, which survives a Claude Code update.
+
+    Requires:
+        - data_dir, cli_path, backend and folder are as proof_ledger takes them
+
+    Ensures:
+        - creates the folder if it is missing; returns the ledger at <folder>/judge-ledger.jsonl
+        - the ledger is bound to the binary path, backend and server, not to the version, so an update keeps every earlier ruling
+        - each ruling written from now on records the Claude Code version that wrote it as "cli"
+        - a ledger bound with a version is rebound by appending a binding record, and nothing is renamed or rewritten
+
+    Raises:
+        - LedgerBindingError when the binary path, backend or server differs from the ledger's
+    """
+    folder = pathlib.Path( data_dir ).joinpath( *folder )
+    folder.mkdir( parents=True, exist_ok=True )
+    ledger = StampedLedger( folder / LEDGER_NAME, model_transport.cli_version( cli_path ) )
+    ledger.settle( judge.ledger_binding( f"claude_cli={cli_path}", backend ) )
+    return ledger
+
+
 def proof_ledger( data_dir, cli_path, backend, folder=proof_run.PROOF_FOLDER ):
     """
     Make the proof's judge ledger, bound to the Claude Code binary.
@@ -394,7 +473,7 @@ def proof_ledger( data_dir, cli_path, backend, folder=proof_run.PROOF_FOLDER ):
     """
     folder = pathlib.Path( data_dir ).joinpath( *folder )
     folder.mkdir( parents=True, exist_ok=True )
-    return harness_runner.Ledger( folder / LEDGER_NAME, binding=judge.ledger_binding( f"claude_cli={cli_path}|version={model_transport.cli_version( cli_path )}", backend ) )
+    return harness_runner.Ledger( folder / LEDGER_NAME, binding=_ledger_binding( cli_path, backend ) )
 
 
 def json_stdout( body ):
@@ -424,7 +503,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
 
     Ensures:
         - stdout holds the JSON record alone: banners and other prints go to stderr, so a caller can json.loads the whole of stdout
-        - verifies the frozen configuration first and refuses a run folder planted under another config_sha
+        - verifies the frozen configuration first and, for a run folder planted under another config_sha, prints one refusal line naming both shas and both models to stderr and returns 2, before any parts are built
         - with --export-third <reviewer>: needs two --labels files; writes that reviewer's blind packet of the disputed items beside the others,
           prints its path and size as JSON and returns 0; makes no model call
         - with --trial: takes exactly one --labels file and runs proof_run trially, with its own judge ledger in the trial folder;
@@ -436,7 +515,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
 
     Raises:
         - DuplicateCheckError CONFIG_DRIFT if the live configuration is not the frozen one
-        - ValueError if the run folder was planted under another configuration, from build_spec, from read_supplement, or for --trial with --rulings or --third-labels
+        - ValueError from build_spec, from read_supplement, or for --trial with --rulings or --third-labels
     """
     return json_stdout( lambda out: _main( argv, make_parts, run_proof, out ) )
 
@@ -461,7 +540,10 @@ def _main( argv, make_parts, run_proof, out ):
     cfg     = cfg_mod.verify_frozen( frozen.frozen_path(), frozen.live_config() )
     run_dir = pathlib.Path( args.run_dir )
     key_sha = load_run( run_dir )[ "config_sha" ]
-    if key_sha != cfg[ "config_sha" ]: raise ValueError( f"the run was planted under config {key_sha}, the frozen one is {cfg[ 'config_sha' ]}" )
+    if key_sha != cfg[ "config_sha" ]:
+        models = { d[ "config_sha" ]: d[ "model_id" ] for d in ( json.loads( f.read_text( encoding="utf-8" ) ) for f in pathlib.Path( frozen.frozen_path() ).parent.glob( frozen.FROZEN_GLOB ) ) }
+        print( REFUSED_FOREIGN_RUN.format( run_dir=run_dir, run_sha=key_sha[ :12 ], run_model=models.get( key_sha, "no frozen file for it" ), live_sha=cfg[ "config_sha" ][ :12 ], live_model=cfg[ "model_id" ] ), file=sys.stderr )
+        return 2
     if args.export_third is not None:
         if len( args.labels ) != 2: raise ValueError( "--export-third needs both reviewers' --labels files" )
         items = label_load.disputed_items( *args.labels )

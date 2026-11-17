@@ -76,9 +76,32 @@ Trust is tracked **per-user, per-domain, per-category**. The SWE domain has 6 ca
 |-------|------|----------|------------------------|
 | **Level 1** | Shadow | Observe only — logs what the proxy *would* decide but takes no action. The original notification still reaches you. | No (not_required) |
 | **Level 2** | Provisional | Suggests a decision and queues it for ratification. Does not act autonomously. | Yes (pending) |
-| **Level 3** | Trusted | Acts on decisions with high confidence (>80%). Lower confidence decisions are queued. | Depends on confidence |
-| **Level 4** | Autonomous | Acts on most decisions. Only queues low-confidence or destructive-category decisions. | Rarely |
+| **Level 3** | Trusted | Acts when its classification confidence is at least 80% (`l3_act_confidence`). Below that it queues the decision as a suggestion. | Only below 80% |
+| **Level 4** | Autonomous | Acts, but queues **destructive** decisions, decisions under 50% confidence (`l4_min_confidence`) and a random 10% audit sample (`l4_audit_rate`). | The queued cases |
 | **Level 5** | Full Trust | Acts on all decisions in this category. Ratification available but not required. | No (not_required) |
+
+These levels apply in `ACTIVE` mode. The three numbers are `EngineeringStrategy` arguments
+(`swe_team/proxy/engineering_strategy.py`) with these defaults. No `lupin-app.ini` key sets them.
+The 10% Level 4 audit draw is `l4_audit_rate` (default 0.10).
+The key `swe team trust proxy l4 audit sample rate` is read into `config.py` as `l4_audit_sample_rate`.
+It is never passed to the strategy, so changing the key has no effect today (a held task records the gap).
+`SUGGEST` mode only suggests from Level 2 up. `SHADOW` mode always shadows.
+
+**Where the level comes from.** Each strategy supplies its own level for a category.
+The SWE strategy reads it from the trust tracker, which answers Level 1 for a category it does not know.
+No base default of Level 1 sits behind it.
+
+**Category caps.** A category never rises above its cap, whatever it earns.
+Shipped caps are 3 for deployment, destructive and architecture, and 5 for testing, dependencies and general.
+The `lupin-app.ini` keys `swe engineering proxy deployment cap level`, and the same with `destructive` or `architecture` in place of `deployment`, set the first three.
+They now take effect when a SWE job starts.
+A value outside 1 to 5 is refused with an error when the job builds its proxy.
+
+**How a category earns its level.** The default count model counts **approved** decisions. Each is weighted
+down with age (half-life 14 days, window 30 days). The levels start at 50, 200, 500 and 1000 weighted successes
+for Levels 2 to 5. Rejections earn nothing and subtract nothing; the circuit breaker below uses them.
+Your ratification adds to the counters and sets no level. A SWE job rebuilds its tracker from the counters at start, and the level follows.
+The dashboard shows the level the SWE team orchestrator stores after each answered confirmation and each breaker trip.
 
 ### The 6 SWE Categories
 
@@ -105,13 +128,14 @@ The proxy operates in one of four modes, set globally from the Trust Dashboard:
 ### Circuit Breaker
 
 Each category has an independent circuit breaker that protects against automation failures.
-If too many decisions in a category are rejected during ratification, the circuit breaker **trips**.
-It then demotes that category to a lower trust level until the admin manually resets it.
+It trips on a rejection rate above 15% or on collapsed confidence, demotes the category 2 levels and defers its decisions to you.
+The category stays capped until new approvals earn the levels back.
+The settings and the demotion rules are in [part 4](04-trust-feedback-loop.md#how-circuit-breakers-protect-against-failures).
 
 | State | Indicator | Meaning |
 |-------|-----------|---------|
 | **OK** (Closed) | Green dot | Operating normally |
-| **`TRIPPED`** (Open) | Red dot | Too many rejections — proxy stopped acting in this category |
+| **`TRIPPED`** (Open) | Red dot | Too many rejections or collapsed confidence — the gate defers in this category |
 | **COOLDOWN** | Yellow dot | Recovery period after a trip |
 
 ### Active Hours and Deferral

@@ -643,7 +643,7 @@ class TestGroupDIdleEdgeTrigger:
         tp_owed = roots.task_transcript( _OWED )
 
         stop._run_heartbeat( sid, tp_idle )                    # idle #1
-        stop._run_heartbeat( sid, tp_owed )                    # poke (supersedes)
+        stop._run_heartbeat( sid, tp_owed )                    # pokes, and supersedes the earlier hold
         stop._run_heartbeat( sid, tp_idle )                    # idle #2 (fresh transition)
 
         outcomes = [ r[ "outcome" ] for r in roots.events( sid ) ]

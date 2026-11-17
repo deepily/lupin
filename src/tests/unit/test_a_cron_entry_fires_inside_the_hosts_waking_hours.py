@@ -129,3 +129,20 @@ def test_every_entry_redirects_both_streams_to_a_log():
     """
     for sched, cmd in _entries():
         assert ">>" in cmd and "2>&1" in cmd, f"{sched!r} entry does not capture both streams: {cmd!r}"
+
+
+def test_the_header_comment_names_the_same_sunday_times_as_the_sunday_lines():
+    """
+    Hold the comment to the schedule it describes.
+
+    The installed crontab once carried the pre-move comment ( 03:00 and 03:30 ) above lines
+    that run at 19:00 and 19:30. Both sides are read from this file: the times the header
+    states, and the hour and minute fields of the two `* * 0` entries.
+    """
+    with open( CRONTAB ) as f: text = f.read()
+    stated = re.search( r"^# Weekly report Sundays (\d\d:\d\d); weekly sweep Sundays (\d\d:\d\d)", text, re.MULTILINE )
+    assert stated is not None, "the header line naming the Sunday times is missing or reworded"
+    sundays = sorted( sched for sched, _ in _entries() if sched.endswith( " * * 0" ) )
+    assert len( sundays ) == 2, f"expected exactly two Sunday entries, found {sundays}"
+    ran = sorted( f"{int( hour ):02d}:{int( minute ):02d}" for minute, hour, *_ in ( s.split() for s in sundays ) )
+    assert sorted( stated.groups() ) == ran, f"header says {stated.groups()}, the lines run at {ran}"

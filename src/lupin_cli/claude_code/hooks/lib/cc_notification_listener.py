@@ -64,14 +64,14 @@ SUBSCRIBED_EVENTS = [ "notification_queue_update" ]
 # and the caller hangs rather than getting a fast ConnectionRefused. The prior
 # 10.0s was the closest of the cohort but still under the 18.76s max.
 #
-# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+# The derivation document is no longer in the tree; it is in git history.
 #
 # 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
 # inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
-# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+# (Cited by symbol, not by line: this used to cite a line range in notify_user_async.py and a
 #  seven-line fix above it silently repointed every copy at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
@@ -97,7 +97,7 @@ _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 #      cost **267s** of wall clock, not 30s, on a listener callback. 6 rides out
 #      the same 18.76s window in 28s. Full table in `hook_common.py`.
 #   2. THE FIELD IS BOUNDED. `AsyncNotificationRequest.timeout` is
-#      `Field( ge=1, le=30 )` (`notification_models.py:620-625`). Wiring the
+#      `Field( ge=1, le=30 )` (in `notification_models.py`). Wiring the
 #      cohort constant in here armed a tripwire: a future re-measure raising it
 #      to, say, 45 would make the two `urlopen` sites take it correctly while
 #      THIS site threw ValidationError inside `except Exception: self._log(…)` —
@@ -1368,7 +1368,6 @@ class CCNotificationListener( BaseWebSocketListener ):
         # active-sessions endpoint can same-user-scope correctly. Best-effort;
         # silent fallback on failure since Option 1's graceful filter covers
         # the gap. Fires once at startup, not on every reconnect cycle.
-        # Per src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md.
         self._stamp_user_id_on_bridge()
 
         # Writer-side follow-up — stamp the HUMAN OWNER's user_id on the

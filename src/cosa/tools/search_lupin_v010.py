@@ -87,7 +87,6 @@ class LupinSearch:
         
 if __name__ == '__main__':
     
-    # query   = "What's the temperature in Washington DC?"
     query    = "is there such thing as a daily cognitive or attention budget?"
     search  = GibSearch( query=query )
     search.search_and_summarize_the_web()

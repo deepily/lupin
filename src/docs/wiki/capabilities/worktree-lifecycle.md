@@ -1,12 +1,12 @@
 ---
 capability: worktree-lifecycle
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.seat_worktree.provision_seat_worktree@eed42d08b9
   - cosa.utils.worktree_artifacts.provision_worktree_artifacts@fd62ae8430
   - cosa.agents.shared.worktree_context.WorktreeContext@f26451f4ff
   - cosa.agents.shared.seat_teardown.retire_seat_worktree@dd06d0a3d6
-  - cosa.agents.shared.worktree_reaper.drain_then_remove@5c58cfdd7d
+  - cosa.agents.shared.worktree_reaper.drain_then_remove@3d4638ca10
   - cosa.agents.shared.worktree_reaper.reconcile_worktrees@d7ff867a1c
   - cosa.agents.shared.worktree_reaper.sweep_merged_branches@02e1d8c83d
   - cosa.agents.shared.worktree_refusal_ledger.report_refusals@08e4b0b1dd

@@ -8,15 +8,17 @@ operations. All fields are strings (LLM I/O convention).
 Pattern follows CRUDIntent in cosa.crud_for_dataframes.xml_models.
 """
 
-import json
 from typing import ClassVar, List
 
 from pydantic import Field, field_validator
+from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.json_fields import json_or_empty
+from cosa.agents.io_models.utils.number_fields import ConfidenceFloatMixin, float_or_zero, int_or_zero
 
 
-class CalcIntent( BaseXMLModel ):
+class CalcIntent( ConfidenceFloatMixin, BaseXMLModel ):
     """
     Calculator intent extracted from natural language by LLM.
 
@@ -79,9 +81,7 @@ class CalcIntent( BaseXMLModel ):
         xmltodict returns None for empty XML tags like <value_2></value_2>.
         Pydantic str fields reject None, so we convert at the boundary.
         """
-        if v is None and info.field_name != "operation":
-            return ""
-        return v
+        return none_to_empty( v, info.field_name, keep_none=( "operation", ) )
 
     # Valid operations (ClassVar to avoid Pydantic treating as fields)
     VALID_OPERATIONS: ClassVar[ List[ str ] ] = [
@@ -92,22 +92,6 @@ class CalcIntent( BaseXMLModel ):
     VALID_OPERATORS: ClassVar[ List[ str ] ] = [
         "add", "subtract", "multiply", "divide", "modulo", "power"
     ]
-
-    def get_confidence_float( self ):
-        """
-        Parse confidence string to float.
-
-        Requires:
-            - self.confidence is a numeric string
-
-        Ensures:
-            - Returns float between 0.0 and 1.0
-            - Returns 0.0 if parsing fails
-        """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
 
     def get_value_float( self ):
         """
@@ -120,10 +104,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float value
             - Returns 0.0 if parsing fails
         """
-        try:
-            return float( self.value )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return float_or_zero( self.value )
 
     def get_items_list( self ):
         """
@@ -136,13 +117,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns list of {name, price, quantity, unit} dicts
             - Returns empty list if parsing fails or empty
         """
-        if not self.items or not self.items.strip() or self.items.strip() == "[]":
-            return []
-        try:
-            parsed = json.loads( self.items )
-            return parsed if isinstance( parsed, list ) else []
-        except ( json.JSONDecodeError, TypeError ):
-            return []
+        return json_or_empty( self.items, list )
 
     def get_operands_list( self ):
         """
@@ -156,16 +131,8 @@ class CalcIntent( BaseXMLModel ):
             - Returns empty list if parsing fails, is empty, or the array
               holds anything that is not a number
         """
-        if not self.operands or not self.operands.strip() or self.operands.strip() == "[]":
-            return []
         try:
-            parsed = json.loads( self.operands )
-        except ( json.JSONDecodeError, TypeError ):
-            return []
-        if not isinstance( parsed, list ):
-            return []
-        try:
-            return [ float( operand ) for operand in parsed ]
+            return [ float( operand ) for operand in json_or_empty( self.operands, list ) ]
         except ( ValueError, TypeError ):
             return []
 
@@ -180,10 +147,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float value
             - Returns 0.0 if parsing fails
         """
-        try:
-            return float( self.principal )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return float_or_zero( self.principal )
 
     def get_annual_rate_float( self ):
         """
@@ -196,10 +160,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float value (as percentage, e.g. 6.5)
             - Returns 0.0 if parsing fails
         """
-        try:
-            return float( self.annual_rate )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return float_or_zero( self.annual_rate )
 
     def get_term_years_int( self ):
         """
@@ -212,11 +173,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns positive integer
             - Returns 0 if parsing fails
         """
-        try:
-            val = int( float( self.term_years ) )
-            return val if val > 0 else 0
-        except ( ValueError, TypeError ):
-            return 0
+        return max( 0, int_or_zero( self.term_years ) )
 
     def get_down_payment_float( self ):
         """
@@ -229,12 +186,7 @@ class CalcIntent( BaseXMLModel ):
             - Returns float value
             - Returns 0.0 if parsing fails or empty
         """
-        if not self.down_payment or not self.down_payment.strip():
-            return 0.0
-        try:
-            return float( self.down_payment )
-        except ( ValueError, TypeError ):
-            return 0.0
+        return float_or_zero( self.down_payment )
 
     def to_xml( self, root_tag="calc_intent", pretty=True ):
         """

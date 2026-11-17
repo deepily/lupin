@@ -74,7 +74,7 @@ def test_pgvector_dot_matches_numpy_dot_oracle( db_session ):
         pg_scores  = [ pct for pct, _ in pg_hits ]
 
         # --- numpy oracle (true dot product) ---
-        dots        = corpus @ q                       # shape (N,)
+        dots        = corpus @ q                       # one dot product per corpus row
         oracle_top  = np.argsort( -dots )[ :_TOP_K ]
         oracle_ids  = [ f"doc_{idx}" for idx in oracle_top ]
         oracle_pcts = [ float( dots[ idx ] ) * 100.0 for idx in oracle_top ]

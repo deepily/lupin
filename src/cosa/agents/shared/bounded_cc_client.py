@@ -1,25 +1,64 @@
 """
 What the podcast and presentation bounded-CC clients share.
 
-Both run text synthesis through the in-process Claude Agent SDK. Each client keeps its own
-_call_api, because the two differ. The presentation client leaves stop_reason as None until a
-result reports one, so a missing signal is not read as a clean finish. The podcast client starts
-it at "end_turn".
+Both run text synthesis through the in-process Claude Agent SDK.
+Each client keeps its own _call_api, which builds its options and its APIResponse.
+The loop that reads the reply stream and records cost is `_collect_reply` here.
+Both clients leave stop_reason as None until a result reports one, so a missing signal is not read as a clean finish.
 """
 
 import logging
 from dataclasses import dataclass
 
+from cosa.agents.shared.sdk_error_result import raise_error_result
+
 
 @dataclass
 class BoundedCCCostEstimate:
-    """Token and SDK-cost tallies for one client; subclasses add the price table and add_usage."""
+    """Token and SDK-cost tallies for one client; override price_pair to add a price tier."""
 
     total_input_tokens  : int   = 0
     total_output_tokens : int   = 0
     total_api_calls     : int   = 0
     estimated_cost_usd  : float = 0.0
     total_sdk_cost_usd  : float = 0.0
+
+    # Pricing per million tokens (approximate)
+    OPUS_INPUT_PRICE    : float = 15.0
+    OPUS_OUTPUT_PRICE   : float = 75.0
+    SONNET_INPUT_PRICE  : float = 3.0
+    SONNET_OUTPUT_PRICE : float = 15.0
+
+    def price_pair( self, model: str ):
+        """
+        Pick the per-million-token prices for a model name.
+
+        Requires:
+            - model is a string
+
+        Ensures:
+            - returns ( input price, output price ): Opus when the name holds "opus", Sonnet for any other name
+        """
+        if "opus" in model.lower(): return self.OPUS_INPUT_PRICE, self.OPUS_OUTPUT_PRICE
+        return self.SONNET_INPUT_PRICE, self.SONNET_OUTPUT_PRICE
+
+    def add_usage( self, model: str, input_tokens: int, output_tokens: int ):
+        """
+        Add token usage from an LLM call (token-based price estimate).
+
+        Requires:
+            - input_tokens and output_tokens are whole numbers of tokens
+
+        Ensures:
+            - adds both token counts and one call to the totals
+            - adds the cost at the prices price_pair gives for the model to estimated_cost_usd
+        """
+        self.total_input_tokens  += input_tokens
+        self.total_output_tokens += output_tokens
+        self.total_api_calls     += 1
+        in_price, out_price       = self.price_pair( model )
+        self.estimated_cost_usd  += ( input_tokens * in_price / 1_000_000 +
+                                      output_tokens * out_price / 1_000_000 )
 
     def add_sdk_cost( self, cost_usd: float ):
         """
@@ -41,12 +80,36 @@ class BoundedCCCostEstimate:
         )
 
 
+def temperature_to_steer( temperature: float, high: float, low: float, high_steer: str, low_steer: str ) -> str:
+    """
+    Turn a legacy sampling temperature into a system-prompt creativity steer.
+
+    `ClaudeAgentOptions` exposes no per-call temperature, so each bounded-CC client folds the old
+    per-call value into its system prompt as a sentence. The clients differ in where the cut-offs
+    sit and in the wording, so both are arguments.
+
+    Requires:
+        - temperature, high and low are floats, with low below high
+        - high_steer and low_steer are the sentences to use
+
+    Ensures:
+        - returns high_steer when temperature >= high
+        - returns low_steer when temperature <= low
+        - returns "" for a mid-range temperature, where no steer is needed
+    """
+    if temperature >= high: return high_steer
+    if temperature <= low: return low_steer
+    return ""
+
+
 class BoundedCCClientBase:
     """
     Construction, typed calls and strict JSON output for a bounded-CC client.
 
     A subclass sets CONFIG_CLASS, COST_ESTIMATE_CLASS, BANNER_NOUN, BANNER_FIELD,
-    JSON_MODEL_FIELD, the label and _logger, and defines _call_api and _recover_json.
+    JSON_MODEL_FIELD, the label and _logger. It defines _call_api and _recover_json when it uses
+    _call_typed or call_with_json_output. A client that tracks cost elsewhere leaves
+    COST_ESTIMATE_CLASS as None, and one with its own banner overrides _banner_model_line.
     """
 
     CONFIG_CLASS        = None
@@ -68,7 +131,8 @@ class BoundedCCClientBase:
         Ensures:
             - self.config is `config`, or CONFIG_CLASS() when None
             - self.debug, self.verbose and self.cost_estimate are set
-            - with debug, prints two banner lines naming the class label and the banner-field model
+            - self.cost_estimate is COST_ESTIMATE_CLASS(), or None when that class is None
+            - with debug, prints a banner line, then the line _banner_model_line returns, each led by the class label
 
         Raises:
             - ImportError if the Claude Agent SDK is not installed
@@ -84,11 +148,20 @@ class BoundedCCClientBase:
         self.verbose = verbose
 
         # Cost tracking
-        self.cost_estimate = self.COST_ESTIMATE_CLASS()
+        self.cost_estimate = self.COST_ESTIMATE_CLASS() if self.COST_ESTIMATE_CLASS is not None else None
 
         if self.debug:
             print( f"[{self.LABEL}] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
-            print( f"[{self.LABEL}] {self.BANNER_NOUN} model: {getattr( self.config, self.BANNER_FIELD )}" )
+            print( f"[{self.LABEL}] {self._banner_model_line()}" )
+
+    def _banner_model_line( self ) -> str:
+        """
+        Name the model for the debug banner.
+
+        Ensures:
+            - returns "<BANNER_NOUN> model: <the BANNER_FIELD model>"; a subclass overrides this to say more
+        """
+        return f"{self.BANNER_NOUN} model: {getattr( self.config, self.BANNER_FIELD )}"
 
     async def _call_typed( self, model, call_type, system_prompt, user_message, max_tokens, temperature ):
         """
@@ -108,6 +181,52 @@ class BoundedCCClientBase:
             temperature   = temperature,
             call_type     = call_type,
         )
+
+    async def _collect_reply( self, stream, model, call_type, assistant_message, text_block, result_message ):
+        """
+        Read one `sdk_query` stream to its end and record the usage and cost.
+
+        The message classes are arguments because each client module imports them under its own
+        name, and its tests replace them there.
+
+        Requires:
+            - stream is the async iterator sdk_query returned
+            - assistant_message, text_block and result_message are the SDK's classes, or stand-ins
+
+        Ensures:
+            - returns ( content, input_tokens, output_tokens, sdk_cost_usd, stop_reason )
+            - content is every assistant text block joined and stripped
+            - stop_reason is None until a result message reports one; it is never seeded as "end_turn", so a missing signal reads as truncated downstream
+            - self.cost_estimate holds the usage and the SDK cost telemetry
+
+        Raises:
+            - RuntimeError when a result message is an error, with the failure text and any login hint
+        """
+        collected     = []
+        input_tokens  = 0
+        output_tokens = 0
+        sdk_cost_usd  = 0.0
+        stop_reason   = None
+
+        async for message in stream:
+            if isinstance( message, assistant_message ):
+                for block in message.content:
+                    if isinstance( block, text_block ):
+                        collected.append( block.text )
+            elif isinstance( message, text_block ):
+                collected.append( message.text )
+            elif isinstance( message, result_message ):
+                if message.is_error: raise_error_result( message, f"{self.LABEL} {call_type}", self._logger )
+                usage         = message.usage or {}
+                input_tokens  = usage.get( "input_tokens", 0 )
+                output_tokens = usage.get( "output_tokens", 0 )
+                sdk_cost_usd  = message.total_cost_usd or 0.0
+                stop_reason   = message.stop_reason
+
+        self.cost_estimate.add_usage( model=model, input_tokens=input_tokens, output_tokens=output_tokens )
+        self.cost_estimate.add_sdk_cost( sdk_cost_usd )
+
+        return "".join( collected ).strip(), input_tokens, output_tokens, sdk_cost_usd, stop_reason
 
     async def call_with_json_output( self, system_prompt: str, user_message: str, max_tokens: int = 4096 ) -> dict:
         """

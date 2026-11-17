@@ -1,6 +1,6 @@
 ---
 capability: dm-experiment-schedule
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.dm-experiment.generate_schedule.randomize_with_max_run@9eced06842
   - scripts.dm-experiment.generate_schedule.mirror_arm@6bb50b9ce8

@@ -1,6 +1,6 @@
 ---
 capability: rejoin-done-blocked-rows
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.rejoin-done-blocked-rows.fetch_board@c6db60b232
   - scripts.rejoin-done-blocked-rows.examine@499b997fe5

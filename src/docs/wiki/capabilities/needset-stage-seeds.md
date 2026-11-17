@@ -1,6 +1,6 @@
 ---
 capability: needset-stage-seeds
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.stage_seeds.planted_ids@003815a1c4
   - lupin_mcp.reuse_needset.stage_seeds.interleave@435270e0af

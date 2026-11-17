@@ -10,6 +10,8 @@ Dependency Rule:
     This module never imports from notification_proxy.
 """
 
+from cosa.utils.csv_text import split_csv
+
 # ============================================================================
 # SWE Team Sender Patterns
 # ============================================================================
@@ -67,7 +69,7 @@ def swe_proxy_config_from_config_mgr( config_mgr ):
         "swe engineering proxy accepted senders",
         default=",".join( DEFAULT_ACCEPTED_SENDERS ),
     )
-    accepted_senders = [ s.strip() for s in raw_senders.split( "," ) if s.strip() ]
+    accepted_senders = split_csv( raw_senders )
 
     return {
         "accepted_senders"       : accepted_senders,

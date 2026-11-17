@@ -287,7 +287,7 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
     assert ext is not None and cc is not None
     assert "[E2E-CARDGAP] stubbed arbiter stall warning" in ext[ "text" ]
     assert ext[ "has_badge" ]   is False, "persona-less external card must NOT render a persona badge"
-    # A-2 #4 — legacy writes "N new" (notifications.js:19924); the multiplexer used to
+    # A-2 #4 — legacy writes "N new" (the legacy count badge in notifications.js); the multiplexer used to
     # render a bare number. The badge still seeds from the snapshot; only the wording moved.
     assert ext[ "unread_text" ] == "2 new", "unread badge must seed from the snapshot's new_count"
     assert ext[ "message_count" ] >= 1
@@ -306,7 +306,7 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
 # (src/tests/unit/test_multiplexer_api_contract.py) attacks at the API layer —
 # here at the live-boot layer. The historical JobStore bug
 # (`/api/queue/job-history` → 404) slipped EVERY tier because:
-#   GAP 1  JobsPaneRenderer.ts:169 `hydrateHistory(api).catch()` SWALLOWS the
+#   GAP 1  JobsPaneRenderer.ts `hydrateHistory(api).catch()` SWALLOWS the
 #          rejection — the page boots, "page-loads" e2e stays green.
 #   GAP 2  the boot e2e registered ONLY page.on("response") for 4xx — a JS
 #          error that emits NO 4xx (a TypeError in a renderer, an uncaught

@@ -23,6 +23,7 @@ import json
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from cosa.research.phi4_flash_lite_study import freeze_corpus as FZ
 
 
@@ -186,14 +187,14 @@ def test_sha256_of_rows_matches_the_bytes_written( tmp_path ):
     out  = tmp_path / "snap.jsonl"
     FZ.write_snapshot( rows, str( out ) )
 
-    assert FZ.sha256_of_file( str( out ) ) == FZ.sha256_of_rows( rows )
+    assert file_sha256( str( out ) ) == FZ.sha256_of_rows( rows )
 
 
 def test_sha256_of_file_changes_when_a_byte_changes( tmp_path ):
     """A checksum that cannot go red is not a checksum."""
     one = tmp_path / "a.txt"; one.write_text( "alpha" )
     two = tmp_path / "b.txt"; two.write_text( "alphb" )
-    assert FZ.sha256_of_file( str( one ) ) != FZ.sha256_of_file( str( two ) )
+    assert file_sha256( str( one ) ) != file_sha256( str( two ) )
 
 
 def test_read_corpus_rows_counts_unparseable_lines_and_ignores_blanks( tmp_path ):
@@ -226,7 +227,7 @@ def test_freeze_writes_snapshot_and_manifest_with_full_provenance( tmp_path ):
     assert manifest[ "source_path" ]        == str( live )
     assert manifest[ "frozen_at_utc" ]      == "2026-08-17T18:00:00+00:00"
     assert manifest[ "source_row_count" ]   == 3
-    assert manifest[ "source_sha256" ]      == FZ.sha256_of_file( str( live ) )
+    assert manifest[ "source_sha256" ]      == file_sha256( str( live ) )
     assert manifest[ "snapshot_row_count" ] == 2                    # only the two over-trigger bodies
     assert manifest[ "manifest_version" ]   == FZ.MANIFEST_VERSION
     assert manifest[ "selection" ][ "trigger_claims" ] == 4
@@ -234,7 +235,7 @@ def test_freeze_writes_snapshot_and_manifest_with_full_provenance( tmp_path ):
     snap = out_dir / "dm_replay_frozen.jsonl"
     assert snap.exists()
     assert ( out_dir / "manifest.json" ).exists()
-    assert FZ.sha256_of_file( str( snap ) ) == manifest[ "snapshot_sha256" ]
+    assert file_sha256( str( snap ) ) == manifest[ "snapshot_sha256" ]
 
 
 def test_freeze_all_rows_keeps_the_under_trigger_bodies( tmp_path ):

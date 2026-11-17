@@ -15,7 +15,6 @@ which returns inline code blocks.
 """
 
 import os
-import re
 import shutil
 import asyncio
 import logging
@@ -23,6 +22,7 @@ import subprocess
 from typing import ClassVar, List, Optional
 
 from .visual_registry import VisualRenderer
+from cosa.agents.presentation_generator.renderers.fenced_block import extract_fenced_block
 
 logger = logging.getLogger( __name__ )
 
@@ -226,9 +226,8 @@ class D2Renderer( VisualRenderer ):
             return None
 
         # Try fenced block first (with or without "d2" label)
-        match = re.search( r"```(?:d2)?\s*\n(.*?)```", response_content, re.DOTALL )
-        if match:
-            return match.group( 1 ).strip()
+        fenced = extract_fenced_block( response_content, "d2" )
+        if fenced is not None: return fenced
 
         # Try bare D2 — look for arrow patterns or container syntax
         if "->" in response_content or "<->" in response_content:

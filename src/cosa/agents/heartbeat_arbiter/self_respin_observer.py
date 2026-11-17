@@ -31,6 +31,7 @@ import threading
 from dataclasses import dataclass
 from enum        import Enum
 
+from cosa.utils.fleet_base_dir import fleet_base_dir
 from cosa.utils.stoppable_daemon import StoppableDaemonMixin
 
 
@@ -214,7 +215,7 @@ def _parse_iso( value ):
 # in this path can provide.
 #
 # WHY A SENT STAMP DOES NOT BREACH THE NO-RECEIPT RULE — Mr Radio's ruling,
-# 2026-08-17, permitting the injector-side write at self_respin_core.py:231-236.
+# permitting the injector-side write at the keys_sent_path stamp in self_respin_core.py.
 # The argument is not "sent is all we can prove." It is that ANCHORING ON ARRIVAL
 # WOULD BE CIRCULAR: DEAD_NO_RETURN exists precisely to fire when no proof of
 # arrival ever shows up, so a clock started at arrival could never start in the one
@@ -673,10 +674,7 @@ def _resolve_base_dir( base_dir ):
         - returns base_dir when provided (tests + explicit callers win)
         - returns fleet_data_root() (lazily imported to keep this leaf pure) when None
     """
-    if base_dir is not None:
-        return base_dir
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root   # lazy: keep the leaf pure
-    return str( fleet_data_root() )
+    return fleet_base_dir( base_dir )
 
 
 def wake_proof_path( base, session_id ):

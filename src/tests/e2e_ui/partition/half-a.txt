@@ -43,6 +43,9 @@ src/tests/e2e_ui/test_multiplexer_commons_activity_toggle.py
 src/tests/e2e_ui/test_multiplexer_fleet_status.py
 src/tests/e2e_ui/test_multiplexer_horizontal_pane_open_parity.py
 src/tests/e2e_ui/test_multiplexer_jobs_pane_legacy_words.py
+src/tests/e2e_ui/test_background_jobs_section_in_both_clients.py
+src/tests/e2e_ui/test_cron_jobs_section_in_both_clients.py
+src/tests/e2e_ui/test_merged_jobs_list_in_both_clients.py
 src/tests/e2e_ui/test_multiplexer_layout_mode_toolbar_centering.py
 src/tests/e2e_ui/test_multiplexer_missed_badge.py
 src/tests/e2e_ui/test_multiplexer_phase5_visual.py
@@ -79,7 +82,9 @@ src/tests/e2e_ui/test_doc_viewer_folder_roots_upload.py
 src/tests/e2e_ui/test_poke_mute_switch.py
 src/tests/e2e_ui/test_multiplexer_podcast_play_here_and_download.py
 src/tests/e2e_ui/test_multiplexer_podcast_card_filed_before_load.py
+src/tests/e2e_ui/test_podcast_auto_play_here.py
 src/tests/e2e_ui/test_legacy_keep_place_holds_the_view_on_arrival.py
 src/tests/e2e_ui/test_legacy_keep_place_holds_the_history_pane.py
 src/tests/e2e_ui/test_legacy_focus_bar_toggles_row.py
 src/tests/e2e_ui/test_legacy_keep_place_toggle_style.py
+src/tests/e2e_ui/test_legacy_quiet_worker_priority.py

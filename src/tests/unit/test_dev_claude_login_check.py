@@ -156,7 +156,7 @@ def _bounce( tmp_path, expires="", fail=False, skip=False ):
     ( fakebin / "curl" ).write_text( "#!/bin/sh\nexit 0\n" )
     ( fakebin / "curl" ).chmod( 0o755 )
     env = _env( tmp_path, expires=expires, fail=fail )
-    env.update( LUPIN_ROOT=str( tree ), UNWARNED_PAUSE_SECS="0", LUPIN_DB_GRANTS_CHECK="skip" )
+    env.update( LUPIN_ROOT=str( tree ), UNWARNED_PAUSE_SECS="0", LUPIN_DB_GRANTS_CHECK="skip", LUPIN_BUNDLE_FRESHNESS_CHECK="skip" )
     if skip: env[ "LUPIN_CLAUDE_LOGIN_CHECK" ] = "skip"
     return subprocess.run( [ "bash", BOUNCE, "--quiet" ], capture_output=True, text=True, env=env, timeout=60 )
 

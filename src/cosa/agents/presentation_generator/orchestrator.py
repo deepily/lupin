@@ -37,6 +37,7 @@ from .state import (
 )
 from . import cosa_interface
 from . import voice_io
+from cosa.agents.utils.voice_io import read_gate_answer, VoiceGateNoDefaultError
 
 logger = logging.getLogger( __name__ )
 
@@ -1197,7 +1198,7 @@ class PresentationOrchestratorAgent:
         # One PINNED progress bubble for the whole batch sequence: every update
         # carries the same progress_group_id, so the UI updates one element in
         # place instead of appending a message per batch (same pattern podcast
-        # uses per-language, podcast_generator/orchestrator.py:666-726).
+        # uses per-language, the per-language audio progress group in podcast_generator/orchestrator.py).
         #
         # This exists because batched elaboration is SILENT for a long time: a
         # 32-slide deck spent 10m25s between "Phase 4" and "Phase 5" with no
@@ -1756,11 +1757,10 @@ class PresentationOrchestratorAgent:
     @staticmethod
     def _read_gate_answer( result: dict, header: str, gate_name: str ) -> str:
         """
-        Read a gate answer, refusing to invent one.
+        Read a gate answer through the shared reader, refusing to invent one.
 
-        A payload missing the header must never become "Approve", or a deck could
-        approve itself with no human present. An explicitly declared
-        `response_default` is honoured, since the caller chose that value.
+        The shared reader holds the rule and the warning for a declared default.
+        This wrapper only renames its refusal, so the gates keep raising the presentation error.
 
         Requires:
             - result is the dict returned by voice_io.present_choices
@@ -1768,29 +1768,19 @@ class PresentationOrchestratorAgent:
 
         Ensures:
             - returns the answer the gate actually received
-            - logs loudly when that answer came from a declared default
-              rather than a human, naming which path produced it
 
         Raises:
             - VoiceGateNotAnsweredError if the header is absent, because a
               missing answer is not consent
         """
-        answers = result.get( "answers", {} ) if isinstance( result, dict ) else {}
-
-        if header not in answers:
+        try:
+            return read_gate_answer( result, header, gate_name )
+        except VoiceGateNoDefaultError as e:
             raise VoiceGateNotAnsweredError(
                 f"{gate_name}: voice gate returned no answer for '{header}' "
                 f"(payload keys: {sorted( result.keys() ) if isinstance( result, dict ) else type( result ).__name__}). "
                 f"A missing answer is not an approval — refusing to proceed."
-            )
-
-        if result.get( "default_used", False ):
-            logger.warning(
-                f"{gate_name}: '{header}' answered by a DECLARED DEFAULT, not a human "
-                f"(source={result.get( 'default_source' )}, value={answers[ header ]!r})."
-            )
-
-        return answers[ header ]
+            ) from e
 
     async def _present_fail_open_gate(
         self,
@@ -1941,7 +1931,7 @@ class PresentationOrchestratorAgent:
                 return True
 
             else:
-                # Approve (default)
+                # Default: approve
                 return True
 
         except Exception as e:
@@ -2057,7 +2047,7 @@ class PresentationOrchestratorAgent:
                 return True
 
             else:
-                # Approve (default)
+                # Default: approve
                 # Clear human_feedback so it doesn't carry into elaboration
                 self._presentation_state[ "human_feedback" ] = None
                 return True
@@ -2204,7 +2194,7 @@ class PresentationOrchestratorAgent:
                 return True
 
             else:
-                # Approve (default)
+                # Default: approve
                 self._presentation_state[ "human_feedback" ] = None
                 return True
 

@@ -29,6 +29,9 @@ def _mk_strategy( **overrides ):
     cb.check.return_value = True            # closed breaker by default
     kwargs = dict( trust_tracker=tt, circuit_breaker=cb, debug=False )
     kwargs.update( overrides )
+    # The L4 audit draw is random by design; pin it off unless a test asks for the real source,
+    # so no test's outcome depends on a 10 percent draw. Pass audit_random=None for the default.
+    if "audit_random" not in overrides: kwargs[ "audit_random" ] = lambda: 0.99
     strat = EngineeringStrategy( **kwargs )
     return strat, tt, cb
 
@@ -89,6 +92,25 @@ class TestClassify( unittest.TestCase ):
         cb.record_confidence.assert_called_once_with( "testing", 0.8 )
 
 
+class TestGetTrustLevel( unittest.TestCase ):
+
+    def test_delegates_to_the_tracker( self ):
+        strat, tt, _ = _mk_strategy()
+        tt.get_level.return_value = 4
+        self.assertEqual( strat.get_trust_level( "testing" ), 4 )
+        tt.get_level.assert_called_once_with( "testing" )
+
+    def test_evaluate_reads_the_level_through_it( self ):
+        strat, tt, _ = _mk_strategy( trust_mode="active" )
+        strat.classifier = MagicMock()
+        strat.classifier.classify.return_value = ( "testing", 0.9 )
+        strat._get_cbr_prediction = MagicMock( return_value=None )
+        with patch.object( strat, "get_trust_level", return_value=2 ) as m:
+            result = strat.evaluate( "hello" )
+        m.assert_called_once_with( "testing" )
+        self.assertEqual( result.trust_level, 2 )
+
+
 class TestGate( unittest.TestCase ):
 
     def test_circuit_breaker_tripped_defers( self ):
@@ -109,10 +131,49 @@ class TestGate( unittest.TestCase ):
         self.assertEqual( strat.gate( "testing", 1, 0.9 ), "shadow" )
 
     def test_active_mode_gating_levels( self ):
-        strat, _, _ = _mk_strategy( trust_mode="active" )
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=lambda: 0.99 )   # no audit draw
         self.assertEqual( strat.gate( "testing", 1, 0.9 ), "shadow" )
         self.assertEqual( strat.gate( "testing", 2, 0.9 ), "suggest" )
+        self.assertEqual( strat.gate( "testing", 3, 0.9 ), "act" )
         self.assertEqual( strat.gate( "testing", 4, 0.9 ), "act" )
+        self.assertEqual( strat.gate( "testing", 5, 0.9 ), "act" )
+
+    # --- graded autonomy (row d595321e, D7) ----------------------------------
+
+    def test_l3_acts_only_at_high_confidence( self ):
+        strat, _, _ = _mk_strategy( trust_mode="active" )
+        self.assertEqual( strat.gate( "testing", 3, 0.80 ), "act" )          # boundary is inclusive
+        self.assertEqual( strat.gate( "testing", 3, 0.79 ), "suggest" )
+
+    def test_l4_queues_low_confidence_and_the_destructive_category( self ):
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=lambda: 0.99 )
+        self.assertEqual( strat.gate( "testing", 4, 0.50 ), "act" )          # boundary is inclusive
+        self.assertEqual( strat.gate( "testing", 4, 0.49 ), "suggest" )
+        self.assertEqual( strat.gate( "destructive", 4, 0.99 ), "suggest" )
+
+    def test_l4_audit_draw_sends_a_share_of_acts_to_the_human( self ):
+        draws = iter( [ 0.05, 0.10, 0.50 ] )
+        strat, _, _ = _mk_strategy( trust_mode="active", l4_audit_rate=0.10, audit_random=lambda: next( draws ) )
+        self.assertEqual( strat.gate( "testing", 4, 0.9 ), "suggest" )       # 0.05 < 0.10: audited
+        self.assertEqual( strat.gate( "testing", 4, 0.9 ), "act" )           # 0.10 is not below the rate
+        self.assertEqual( strat.gate( "testing", 4, 0.9 ), "act" )
+
+    def test_l4_does_not_draw_when_it_would_queue_anyway( self ):
+        def boom(): raise AssertionError( "no audit draw for an outcome that is already a suggestion" )
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=boom )
+        self.assertEqual( strat.gate( "testing", 4, 0.1 ), "suggest" )
+        self.assertEqual( strat.gate( "destructive", 4, 0.9 ), "suggest" )
+
+    def test_l5_always_acts_and_never_draws( self ):
+        def boom(): raise AssertionError( "L5 has no audit draw" )
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=boom )
+        self.assertEqual( strat.gate( "destructive", 5, 0.0 ), "act" )
+
+    def test_the_default_audit_draw_is_a_real_random_source_at_ten_percent( self ):
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=None )
+        self.assertEqual( strat.l4_audit_rate, 0.10 )
+        outcomes = { strat.gate( "testing", 4, 0.9 ) for _ in range( 400 ) }
+        self.assertEqual( outcomes, { "act", "suggest" }, "with the default draw both outcomes occur" )
 
     def test_thompson_delegation( self ):
         strat, _, _ = _mk_strategy( trust_mode="active", thompson_enabled=True )
@@ -161,7 +222,7 @@ class TestGate( unittest.TestCase ):
             self.assertEqual( strat.gate( "testing", 4, 0.9 ), "act" )
 
     def test_conformal_should_not_defer_falls_through( self ):
-        strat, tt, _ = _mk_strategy( trust_mode="active", conformal_enabled=True )
+        strat, tt, _ = _mk_strategy( trust_mode="active", conformal_enabled=True, audit_random=lambda: 0.99 )
         tt.categories = { "testing": self._cat_with_blr( prob=0.95 ) }
         wrapper = MagicMock( is_calibrated=True )
         wrapper.should_defer.return_value = False
@@ -308,32 +369,23 @@ class TestConformalWrapper( unittest.TestCase ):
 
     def test_calibrate_conformal_collects_blr_points( self ):
         strat, tt, _ = _mk_strategy()
-        blr = MagicMock()
-        blr._feature_count = 2
-        blr._feature_sum   = 4.0
-        blr.predict.return_value = ( 0.7, None )
-        cat_with = SimpleNamespace( _blr_model=blr, total_decisions=3, total_successes=2 )
-        cat_skip = SimpleNamespace( _blr_model=None )
-        cat_zero = SimpleNamespace( _blr_model=MagicMock( _feature_count=0 ) )
-        tt.categories = { "a": cat_with, "b": cat_skip, "c": cat_zero }
+        with_pairs = SimpleNamespace( _blr_model=SimpleNamespace( calibration_pairs=[ ( 0.7, 1 ), ( 0.6, 1 ), ( 0.2, 0 ) ] ) )
+        other      = SimpleNamespace( _blr_model=SimpleNamespace( calibration_pairs=[ ( 0.9, 1 ) ] ) )
+        no_model   = SimpleNamespace( _blr_model=None )
+        tt.categories = { "a": with_pairs, "b": no_model, "c": other }
         wrapper = MagicMock()
         wrapper.get_status.return_value = { "calibrated": True }
         with patch.object( strat, "_get_conformal_wrapper", return_value=wrapper ):
             out = strat.calibrate_conformal()
         self.assertEqual( out, { "calibrated": True } )
-        # 2 success + 1 fail = 3 calibration points.
+        # The points are the logged ( prediction, outcome ) pairs of every trained model, in order.
         probs, labels = wrapper.calibrate.call_args.args
-        self.assertEqual( len( probs ), 3 )
-        self.assertEqual( labels.count( 1 ), 2 )
-        self.assertEqual( labels.count( 0 ), 1 )
+        self.assertEqual( probs, [ 0.7, 0.6, 0.2, 0.9 ] )
+        self.assertEqual( labels, [ 1, 1, 0, 1 ] )
 
-    def test_calibrate_conformal_no_decisions_skips_points( self ):
+    def test_calibrate_conformal_model_without_pairs_adds_no_points( self ):
         strat, tt, _ = _mk_strategy()
-        blr = MagicMock()
-        blr._feature_count = 2
-        blr._feature_sum   = 4.0
-        blr.predict.return_value = ( 0.7, None )
-        tt.categories = { "a": SimpleNamespace( _blr_model=blr, total_decisions=0, total_successes=0 ) }
+        tt.categories = { "a": SimpleNamespace( _blr_model=SimpleNamespace( calibration_pairs=[], total_decisions=9 ) ) }
         wrapper = MagicMock()
         with patch.object( strat, "_get_conformal_wrapper", return_value=wrapper ):
             strat.calibrate_conformal()
@@ -406,7 +458,7 @@ class TestEvaluate( unittest.TestCase ):
         self.assertEqual( result.trust_level, 4 )
         self.assertIn( "CBR:", result.reason )
 
-    def test_evaluate_shadow_no_value_no_cbr( self ):
+    def test_evaluate_shadow_predicts_a_value_but_no_cbr( self ):
         strat, tt, cb = _mk_strategy( trust_mode="shadow" )
         strat.classifier = MagicMock()
         strat.classifier.classify.return_value = ( "general", 0.3 )
@@ -414,7 +466,7 @@ class TestEvaluate( unittest.TestCase ):
         strat._get_cbr_prediction = MagicMock( return_value=None )
         result = strat.evaluate( "hello" )
         self.assertEqual( result.action, "shadow" )
-        self.assertIsNone( result.value )
+        self.assertEqual( result.value, "approved" )
         self.assertNotIn( "CBR:", result.reason )
 
 

@@ -1,6 +1,6 @@
 ---
 capability: delivery-latency-measure
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.delivery_latency.parse_boot_intervals@cc06a15837
   - scripts.delivery_latency.up_hours@8c951de3b6

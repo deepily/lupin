@@ -21,6 +21,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 import cosa.utils.util as cu
+from tests.helpers.typed_config import TypedConfigFake
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 from cosa.crud_for_dataframes.xml_models import CRUDIntent
 from cosa.crud_for_dataframes.storage import DataFrameStorage
@@ -102,8 +103,7 @@ class TestRoutingSwapPipeline:
         from cosa.rest.todo_fifo_queue import TodoFifoQueue
 
         queue            = TodoFifoQueue.__new__( TodoFifoQueue )
-        queue.config_mgr = MagicMock()
-        queue.config_mgr.get.return_value = "true"
+        queue.config_mgr = TypedConfigFake( every_key="true" )
 
         assert queue._crud_agents_enabled() is True
 
@@ -112,8 +112,7 @@ class TestRoutingSwapPipeline:
         from cosa.rest.todo_fifo_queue import TodoFifoQueue
 
         queue            = TodoFifoQueue.__new__( TodoFifoQueue )
-        queue.config_mgr = MagicMock()
-        queue.config_mgr.get.return_value = "false"
+        queue.config_mgr = TypedConfigFake( every_key="false" )
 
         assert queue._crud_agents_enabled() is False
 
@@ -122,8 +121,7 @@ class TestRoutingSwapPipeline:
         from cosa.rest.todo_fifo_queue import TodoFifoQueue
 
         queue            = TodoFifoQueue.__new__( TodoFifoQueue )
-        queue.config_mgr = MagicMock()
-        queue.config_mgr.get.return_value = "true"
+        queue.config_mgr = TypedConfigFake( every_key="true" )
 
         assert queue._crud_agents_enabled() is True
 
@@ -240,7 +238,7 @@ class TestCacheBypassPipeline:
         agent = _create_mock_agent()
         assert isinstance( agent, CrudForDataFramesAgent )
 
-        # Simulate the cache decision from running_fifo_queue.py:160-164
+        # Simulate the cache decision from the `CrudForDataFramesAgent` check in running_fifo_queue.py
         should_skip_cache = isinstance( agent, CrudForDataFramesAgent )
         assert should_skip_cache is True
 

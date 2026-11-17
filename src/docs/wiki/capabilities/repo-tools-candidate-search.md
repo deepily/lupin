@@ -1,13 +1,16 @@
 ---
 capability: repo-tools-candidate-search
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.search.is_count@56a9ad94d3
-  - cosa.repo.symindex.candidates.search.validate_request@8cdfd5284e
+  - cosa.repo.symindex.candidates.search.validate_request@27ce565a38
   - cosa.repo.symindex.candidates.search.cosine_ranked@1ddfdf614f
   - cosa.repo.symindex.candidates.search.read_purposes@91e8d918f1
   - cosa.repo.symindex.candidates.search.answer@3cd6eaba33
-  - cosa.repo.symindex.candidates.search.answer_for_stage@726c8a568b
+  - cosa.repo.symindex.candidates.search.answer_for_stage@6438df3228
+  - cosa.repo.symindex.candidates.search.cosine_lists@d4dcf25894
+  - cosa.repo.symindex.candidates.search.validate_query_vectors@a1cb5f1c91
+  - cosa.repo.symindex.candidates.search.validate_extra_queries@98280a9447
   - cosa.repo.symindex.candidates.search.default_loader@40bb70e85e
   - cosa.repo.symindex.candidates.search.main@abd00c678c
 ---
@@ -26,3 +29,8 @@ pins:
 - `read_purposes( path )` returns `{ pin: purpose }`, the first row for a pin winning, or `{}` for None. A last line that is not JSON, cut short by a write in progress, is skipped and appended to the optional `torn` list. A damaged earlier line still raises.
 - `default_loader( vectors_dir )` calls `vector_store.load_vectors`.
 - `main( stdin, stdout, load_vectors )` writes the answer and returns 0, or writes `{ error, detail }` and returns 2 for a `CandidateError`. Input that is not a JSON object also returns 2.
+
+## Extra queries (need expansion)
+- A request may carry `extra_queries`, a list of `{ need, query_vectors }`. Each adds its own BM25 code and prose lists and its own cosine lists. They are named `x<n>_code`, `x<n>_prose` and `x<n>_vector_<matrix>`. All of them are fused with the need's lists. An absent or empty list changes nothing. A non-empty list needs `vectors_dir`.
+- `cosine_lists` ranks the index by each stored matrix for one set of query vectors; `validate_query_vectors` and `validate_extra_queries` are the request checks.
+- `protect_head`, with a non-empty `extra_queries`, keeps the first `protect_head` ids of the fusion of the plain need's lists. The rest of K is filled from the fusion of all lists. Without extra queries, or at 0, it changes nothing.

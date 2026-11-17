@@ -31,11 +31,11 @@ malformed result is a real defect, not cosmetic drift.
 import logging
 from typing import Optional, Any
 from dataclasses import dataclass
+from functools import partial
 
 from .config import PresentationConfig
-from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate
+from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate, temperature_to_steer
 from .prompts.json_recovery import recover_json_object
-from cosa.agents.shared.sdk_error_result import raise_error_result
 
 # Claude Agent SDK — graceful fallback (mirrors the BFE/TFE/Podcast import guard)
 try:
@@ -72,26 +72,10 @@ PRESENTATION_CONTENT_TOOLS = []
 PRESENTATION_PERMISSION_MODE = "default"
 
 
-def _temperature_to_steer( temperature: float ) -> str:
-    """
-    Map a legacy per-call temperature into a system-prompt creativity steer.
-
-    `ClaudeAgentOptions` exposes no per-call temperature, so the creativity
-    intent is expressed in the prompt. Higher temperature meant more creative
-    prose; lower meant more deterministic output such as diagram code.
-
-    Requires:
-        - temperature is a float
-
-    Ensures:
-        - returns a non-empty steer for high (>= 0.75) or low (<= 0.55)
-          temperatures; "" for mid-range
-    """
-    if temperature >= 0.75:
-        return "Write with creative, natural, varied phrasing."
-    if temperature <= 0.55:
-        return "Write with precise, focused, deterministic output."
-    return ""
+# The cut-offs and wording are this client's own; the rule is the shared one.
+_temperature_to_steer = partial( temperature_to_steer, high=0.75, low=0.55,
+                                 high_steer="Write with creative, natural, varied phrasing.",
+                                 low_steer="Write with precise, focused, deterministic output." )
 
 
 @dataclass
@@ -120,39 +104,24 @@ class CostEstimate( BoundedCCCostEstimate ):
     and the SDK-reported telemetry (`total_sdk_cost_usd`). Under bounded Claude
     Code the SDK telemetry is covered by the fixed Max plan, not billed per token.
     """
-    # Pricing per million tokens (as of 2026-04)
-    OPUS_INPUT_PRICE    : float = 15.0
-    OPUS_OUTPUT_PRICE   : float = 75.0
-    SONNET_INPUT_PRICE  : float = 3.0
-    SONNET_OUTPUT_PRICE : float = 15.0
+    # Pricing per million tokens (as of 2026-04); Opus and Sonnet are in the base class
     HAIKU_INPUT_PRICE   : float = 0.80
     HAIKU_OUTPUT_PRICE  : float = 4.0
 
-    def add_usage( self, model: str, input_tokens: int, output_tokens: int ):
+    def price_pair( self, model: str ):
         """
-        Add token usage from an LLM call (token-based price estimate).
+        Pick the per-million-token prices for a model name, with a Haiku tier.
 
-        Args:
-            model: Model name used
-            input_tokens: Input tokens consumed
-            output_tokens: Output tokens generated
+        Requires:
+            - model is a string
+
+        Ensures:
+            - returns the Haiku prices for a name holding "haiku" and not "opus"
+            - returns the base class's prices for any other name
         """
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_api_calls += 1
-
-        model_lower = model.lower()
-        if "opus" in model_lower:
-            cost = ( input_tokens * self.OPUS_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.OPUS_OUTPUT_PRICE / 1_000_000 )
-        elif "haiku" in model_lower:
-            cost = ( input_tokens * self.HAIKU_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.HAIKU_OUTPUT_PRICE / 1_000_000 )
-        else:  # Sonnet or other
-            cost = ( input_tokens * self.SONNET_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.SONNET_OUTPUT_PRICE / 1_000_000 )
-
-        self.estimated_cost_usd += cost
+        lower = model.lower()
+        if "opus" not in lower and "haiku" in lower: return self.HAIKU_INPUT_PRICE, self.HAIKU_OUTPUT_PRICE
+        return super().price_pair( model )
 
 
 class PresentationAPIClient( BoundedCCClientBase ):
@@ -328,38 +297,10 @@ class PresentationAPIClient( BoundedCCClientBase ):
         if self.debug:
             print( f"[PresentationAPIClient] sdk_query {model} for {call_type} (max_turns={self.config.content_max_turns})" )
 
-        collected     = []
-        input_tokens  = 0
-        output_tokens = 0
-        sdk_cost_usd  = 0.0
-        # UNKNOWN until a ResultMessage reports it. Do NOT seed "end_turn": that
-        # coerces "no completion signal arrived" into "completed cleanly", and
-        # orchestrator._elaborate_async (is_truncated = stop_reason != "end_turn")
-        # would then skip the chunked fallback exactly when it is needed (bug
-        # 98d937c2, fail-open). None reads as truncated downstream — the safe way.
-        stop_reason   = None
-
-        async for message in sdk_query( prompt=user_message, options=options ):
-            if isinstance( message, AssistantMessage ):
-                for block in message.content:
-                    if isinstance( block, TextBlock ):
-                        collected.append( block.text )
-            elif isinstance( message, TextBlock ):
-                collected.append( message.text )
-            elif isinstance( message, ResultMessage ):
-                if message.is_error: raise_error_result( message, f"PresentationAPIClient {call_type}", logger )
-                usage         = message.usage or {}
-                input_tokens  = usage.get( "input_tokens", 0 )
-                output_tokens = usage.get( "output_tokens", 0 )
-                sdk_cost_usd  = message.total_cost_usd or 0.0
-                stop_reason   = message.stop_reason   # keep None as UNKNOWN — never coerce to "end_turn"
-
-        content = "".join( collected ).strip()
-
-        self.cost_estimate.add_usage(
-            model=model, input_tokens=input_tokens, output_tokens=output_tokens,
+        content, input_tokens, output_tokens, sdk_cost_usd, stop_reason = await self._collect_reply(
+            sdk_query( prompt=user_message, options=options ), model, call_type,
+            AssistantMessage, TextBlock, ResultMessage,
         )
-        self.cost_estimate.add_sdk_cost( sdk_cost_usd )
 
         if self.debug:
             print( f"[PresentationAPIClient] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f}" )

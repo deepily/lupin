@@ -84,6 +84,7 @@ from lupin_cli.claude_code.hooks.lib.bookmark_janitor import sweep_and_reclaim_b
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions as _find_active_voice_persona_sessions
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions as _find_active_sessions
 from lupin_mcp.persona_normalization import canonical_persona_key
+from lupin_mcp import cron_switch_read
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
 
@@ -612,6 +613,7 @@ def make_worktree_janitor_fn(
     repo_roots     : Optional[ list ]     = None,
     straggler_fn   : Optional[ Callable[ [ dict ], dict ] ] = None,
     branch_sweep_fn : Optional[ Callable ] = None,
+    switch         : Optional[ Any ]      = None,
 ) -> Callable[ [ ], dict ]:
     """
     Build the per-poll janitor the :8001 job calls, covering every fleet repo.
@@ -636,6 +638,8 @@ def make_worktree_janitor_fn(
           `branches_deleted` / `branches_kept` (so the existing
           `worktree_janitor_branches` log reports them) and its error lands in
           `errors`. None means inert
+        - switch, when given, is checked first on every poll: a poll where switch.allowed() is
+          False sweeps nothing and returns {}. None means always on
         - never raises past the job's own swallow-safe seam (which also guards it)
     """
     if reconcile_fn is None:
@@ -645,6 +649,7 @@ def make_worktree_janitor_fn(
     roots = list( repo_roots ) if repo_roots else [ None ]
 
     def janitor() -> dict:
+        if switch is not None and not switch.allowed(): return { }
         result = { "swept": [ ], "skipped": [ ], "errors": [ ], "branches_deleted": [ ],
                    "branches_kept": [ ], "repos": [ ] }
         for root in roots:
@@ -800,7 +805,7 @@ def make_follow_through_watcher_factory(
         # job every cycle (run() -> self._job_factory()), so a live config flip is
         # picked up on the next tick without a service restart — the behavior the
         # watcher's own per-sweep flag read already provided.
-        # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+        # The write-up of this fault was removed by commit 8420e8b0a; see git history.
         if not config_mgr.get( "follow through escalation enabled", default=False, return_type="boolean" ):
             log_fn( "follow_through_watcher_inert", reason="follow through escalation enabled = false (no DB import)" )
             return None
@@ -980,7 +985,9 @@ def build_fleet_arbiter_job_factory(
             straggler_fn = make_straggler_fn( ledger_path=ledger_path,
                                               janitor_idle_hours=worktree_janitor_age_hours, log_fn=log_fn ),
             branch_sweep_fn = _default_branch_sweep_fn,
+            switch          = cron_switch_read.for_job( "worktree-janitor", lambda line: log_fn( "job_switch", message=line ) ),
         )
+    arbiter_switch = cron_switch_read.for_job( "fleet-arbiter", lambda line: log_fn( "job_switch", message=line ) )      # one switch for every job the factory builds, so its last state survives a rebuild
 
     def factory() -> ArbiterConsumerJob:
         job_start     = clock.now()
@@ -1045,6 +1052,7 @@ def build_fleet_arbiter_job_factory(
             render_sink                = lambda line: log_fn( "fleet_arbiter_render", line=line ),
             notify_fn                  = warmup_notify,
             log_fn                     = log_fn,                                   # post-game F1: outreach + gate events → journal
+            switch                     = arbiter_switch,                           # row c38a49bd: `cron job fleet-arbiter enabled`, checked before every poll
             user_id                    = "system",
             user_email                 = "system@lupin.deepily.ai",
             session_id                 = "lupin-arbiter-app-8001",
@@ -1161,7 +1169,7 @@ class FleetArbiterLoop:
             # reported. Retrying keeps a transient/self-healing fault self-healing,
             # and makes a persistent one LOUD (one log line per cycle) instead of
             # silent-once-at-boot.
-            # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+            # The write-up of this fault was removed by commit 8420e8b0a; see git history.
             try:
                 job = self._job_factory()
             except Exception as e:

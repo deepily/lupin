@@ -12,6 +12,7 @@ import types
 import numpy as np
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex.candidates import arm_report
 from cosa.repo.symindex.candidates import arm_run
 from cosa.repo.symindex.candidates import arms
@@ -125,6 +126,14 @@ class TestRunAllArms:
         assert out[ "reference" ] == { "needs": 1, "items": 1, "per_need": { "n1": 1 } }       # n1 has one high answer, n2 has none
         for arm in arms.ARMS: assert set( out[ "reference" ][ "per_need" ] ) == set( out[ "measured" ][ arm ][ "t1_first" ][ 128 ][ "per_need" ] )
 
+    def test_the_run_records_the_sha256_of_the_needs_and_the_twin_manifest( self, tmp_path ):
+        import hashlib
+        w   = world( tmp_path )
+        out = self.run( tmp_path )
+        assert out[ "meta" ][ "needs_sha" ] == hashlib.sha256( open( w[ "needs" ], "rb" ).read() ).hexdigest()
+        assert out[ "twin_manifest_sha" ] == hashlib.sha256( open( w[ "manifest" ], "rb" ).read() ).hexdigest()
+        assert out[ "meta" ][ "needs_sha" ] != out[ "twin_manifest_sha" ]
+
     def test_the_vector_count_is_what_the_set_holds_of_the_snapshot( self, tmp_path ):
         out = self.run( tmp_path, vset=vset( IDS[ :4 ] + [ "not-in-the-index" ] ) )
         assert out[ "vector_entries" ] == 4
@@ -147,7 +156,7 @@ class TestRunAllArms:
     def test_the_reserved_needs_file_is_refused( self, tmp_path ):
         w = world( tmp_path )
         with pytest.raises( CandidateError ) as caught:
-            arm_run.run_all_arms( w[ "env" ], w[ "snaps" ], w[ "needs" ], arm_run.sha256_of( w[ "needs" ] ), w[ "manifest" ], vset(), PURPOSE, w[ "pages" ],
+            arm_run.run_all_arms( w[ "env" ], w[ "snaps" ], w[ "needs" ], file_sha256( w[ "needs" ] ), w[ "manifest" ], vset(), PURPOSE, w[ "pages" ],
                                   query, lambda text: text, "abc123" )
         assert caught.value.code == arms.FRESH_NEEDS_REFUSED
 

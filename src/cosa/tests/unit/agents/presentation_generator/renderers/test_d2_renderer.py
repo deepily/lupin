@@ -108,7 +108,7 @@ class TestRenderD2:
 
 
 # ---------------------------------------------------------------------------
-# render (full)
+# render, full path
 # ---------------------------------------------------------------------------
 class TestRender:
     def test_cli_unavailable_returns_none( self ):

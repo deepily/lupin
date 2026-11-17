@@ -12,9 +12,10 @@ Never raises on errors — returns a failure result instead.
 
 import asyncio
 import logging
-import re
 import time
 from dataclasses import dataclass
+
+from cosa.utils.review_verdict import last_summary_counts
 
 logger = logging.getLogger( __name__ )
 
@@ -55,8 +56,8 @@ def _parse_pytest_summary( output: str ) -> dict:
         - Returns zeros if summary line cannot be parsed
 
     Notes:
-        - Handles common pytest summary formats: "5 passed", "3 passed, 2 failed",
-          "1 passed, 1 failed, 1 error" and "no tests ran".
+        - Reads only the last whole summary line, the way review_verdict.parse_census does,
+          so a test named "5 passed" in the body does not count.
 
     Args:
         output: Raw pytest stdout/stderr output
@@ -64,25 +65,14 @@ def _parse_pytest_summary( output: str ) -> dict:
     Returns:
         dict: Parsed test counts
     """
-    result = {
-        "passed_count" : 0,
-        "failed_count" : 0,
-        "error_count"  : 0,
+    counts = last_summary_counts( output )
+    if counts is None: return { "passed_count": 0, "failed_count": 0, "error_count": 0 }
+
+    return {
+        "passed_count" : counts[ "passed" ],
+        "failed_count" : counts[ "failed" ],
+        "error_count"  : counts[ "errors" ],
     }
-
-    # Match patterns like "5 passed", "3 failed", "1 error"
-    passed_match = re.search( r"(\d+)\s+passed", output )
-    failed_match = re.search( r"(\d+)\s+failed", output )
-    error_match  = re.search( r"(\d+)\s+error", output )
-
-    if passed_match:
-        result[ "passed_count" ] = int( passed_match.group( 1 ) )
-    if failed_match:
-        result[ "failed_count" ] = int( failed_match.group( 1 ) )
-    if error_match:
-        result[ "error_count" ] = int( error_match.group( 1 ) )
-
-    return result
 
 
 async def run_pytest(

@@ -67,7 +67,7 @@ class TestDeadJobContext( unittest.TestCase ):
         self.assertIsNone( ctx.stack_trace )
         self.assertIsNone( ctx.routing_command )
         self.assertIsNone( ctx.duration_seconds )
-        self.assertEqual( ctx.metadata_json, {} )        # default_factory=dict
+        self.assertEqual( ctx.metadata_json, {} )        # the default is an empty dict
         self.assertIsNone( ctx.created_at )
 
     def test_missing_required_field_raises( self ):

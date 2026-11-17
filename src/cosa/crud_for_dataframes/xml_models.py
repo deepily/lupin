@@ -10,15 +10,17 @@ Pattern follows ExpeditorResponse in
 src/cosa/agents/runtime_argument_expeditor/xml_models.py.
 """
 
-import json
 from typing import ClassVar, List, Optional
 
 from pydantic import Field, field_validator
+from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.json_fields import json_or_empty
+from cosa.agents.io_models.utils.number_fields import ConfidenceFloatMixin
 
 
-class CRUDIntent( BaseXMLModel ):
+class CRUDIntent( ConfidenceFloatMixin, BaseXMLModel ):
     """
     CRUD intent extracted from natural language by LLM.
 
@@ -78,9 +80,7 @@ class CRUDIntent( BaseXMLModel ):
         xmltodict returns None for empty XML tags like <item_id></item_id>.
         Pydantic str fields reject None, so we convert at the boundary.
         """
-        if v is None and info.field_name != "operation":
-            return ""
-        return v
+        return none_to_empty( v, info.field_name, keep_none=( "operation", ) )
 
     # Valid operations (ClassVar to avoid Pydantic treating as fields)
     VALID_OPERATIONS: ClassVar[ List[ str ] ] = [
@@ -90,22 +90,6 @@ class CRUDIntent( BaseXMLModel ):
 
     # Operations that modify or destroy data
     DESTRUCTIVE_OPERATIONS: ClassVar[ List[ str ] ] = [ "delete", "delete_list", "update" ]
-
-    def get_confidence_float( self ):
-        """
-        Parse confidence string to float.
-
-        Requires:
-            - self.confidence is a numeric string
-
-        Ensures:
-            - Returns float between 0.0 and 1.0
-            - Returns 0.0 if parsing fails
-        """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
 
     def is_destructive( self ):
         """
@@ -204,13 +188,7 @@ class CRUDIntent( BaseXMLModel ):
             - Returns parsed dict if valid JSON object
             - Returns empty dict if empty, None, or invalid
         """
-        if not value or not value.strip() or value.strip() == "{}":
-            return {}
-        try:
-            parsed = json.loads( value )
-            return parsed if isinstance( parsed, dict ) else {}
-        except ( json.JSONDecodeError, TypeError ):
-            return {}
+        return json_or_empty( value, dict )
 
     def to_xml( self, root_tag="intent", pretty=True ):
         """

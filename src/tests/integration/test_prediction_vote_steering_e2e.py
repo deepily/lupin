@@ -282,12 +282,46 @@ class TestPredictionVoteSteeringE2E:
 
     def test_thumbs_down_steers_prediction_away_from_rejected_answer( self ):
         """
-        Contest: 2 ordinary 'yes' cases + 1 ordinary 'no' case + 1 👎-rejected 'yes' case.
-        Raw majority says 'yes' (3 vs 1); the rejected case votes -2.0 against 'yes'
-        (2 - 2 = 0 vs 1) so the engine steers to 'no'.
+        A thumbs-down flips a 'yes' to 'no' when 'no' leads by more than the margin.
+
+        Contest: 2 ordinary 'yes', 2 ordinary 'no' and 1 rejected 'yes' (vote -2.0).
+        The 'yes' tally is 2 - 2 = 0 and the 'no' tally is 2, so 'no' leads by 2.0.
+        That clears the margin set by the INI key "prediction engine yes no no margin"
+        (1.35), so the engine answers 'no'. The old fixture had one 'no', a lead of
+        1.0, and the margin correctly overturned it. The next test pins that case.
         """
         # 'push' + 'branch' double-key the workflow category in every message —
         # beats the single 'should i' permission hit, deterministically 'workflow'.
+        self._seed_decision( "Should I force-push the rebased branch?", "workflow", "yes" )
+        self._seed_decision( "Should I force push the rebased branch?", "workflow", "yes" )
+        self._seed_decision( "Force-push the rebased branch to origin?", "workflow", "no" )
+        self._seed_decision( "Is it fine to force-push the rebased branch?", "workflow", "no" )
+
+        self._vote( "down", "Should we force-push rebased branches?", "yes", "workflow" )
+
+        notification_id = self._send_and_respond(
+            message        = "Should I force-push the rebased feature branch?",
+            response_type  = "yes_no",
+            response_value = "no",
+            response_default = "no",
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None, "No prediction_log entry found"
+        assert log.prediction_strategy == "cbr_majority_vote", \
+            f"expected warm CBR prediction, got {log.prediction_strategy} (similarity retrieval failed?)"
+        assert log.predicted_value[ "value" ] == "no", \
+            f"👎 on 'yes' (-2.0) with a 'no' lead of 2.0 should flip to 'no'; got {log.predicted_value}"
+
+    def test_thumbs_down_with_a_single_no_stays_yes_by_the_d14_prior( self ):
+        """
+        A lead for 'no' under the margin stays 'yes'.
+
+        Contest: 2 ordinary 'yes', 1 ordinary 'no' and 1 rejected 'yes' (vote -2.0).
+        The 'yes' tally is 0 and the 'no' tally is 1, a lead of 1.0.
+        That is below the margin of 1.35, so the prior overturns 'no' and the engine
+        stays 'yes'. This pins the prior-weighted vote.
+        """
         self._seed_decision( "Should I force-push the rebased branch?", "workflow", "yes" )
         self._seed_decision( "Should I force push the rebased branch?", "workflow", "yes" )
         self._seed_decision( "Force-push the rebased branch to origin?", "workflow", "no" )
@@ -305,8 +339,8 @@ class TestPredictionVoteSteeringE2E:
         assert log is not None, "No prediction_log entry found"
         assert log.prediction_strategy == "cbr_majority_vote", \
             f"expected warm CBR prediction, got {log.prediction_strategy} (similarity retrieval failed?)"
-        assert log.predicted_value[ "value" ] == "no", \
-            f"👎 on 'yes' (-2.0) should flip the raw 'yes' majority to 'no'; got {log.predicted_value}"
+        assert log.predicted_value[ "value" ] == "yes", \
+            f"a 'no' lead of 1.0 is under the D14 margin 1.35, so it must stay 'yes'; got {log.predicted_value}"
 
     def test_revote_flips_case_in_place_and_changes_steering( self ):
         """

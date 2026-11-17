@@ -1,33 +1,40 @@
 ---
 capability: duplicate-check-daily-run
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.duplicate_check_daily.Counting@006524b7c4
-  - lupin_mcp.duplicate_check_daily.findings_of@25bb8dd399
-  - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
-  - lupin_mcp.duplicate_check_daily.run@eb6385c87c
-  - lupin_mcp.duplicate_check_daily.cron_lines@832050592a
-  - lupin_mcp.duplicate_check_daily.install_mode@920cbf8687
-  - lupin_mcp.duplicate_check_daily.live_parts@2818695534
-  - lupin_mcp.duplicate_check_daily.live_filer@832dcfdc1a
-  - lupin_mcp.duplicate_check_daily.live_auditor@46c2ce1135
-  - lupin_mcp.duplicate_check_daily.main@aec1af8919
+  - lupin_mcp.duplicate_check_daily.Counting@f2ca3e39f1
+  - lupin_mcp.duplicate_check_daily.findings_of@cfdb1b0bd4
+  - lupin_mcp.duplicate_check_daily.failed_prerequisite@63584b8a94
+  - lupin_mcp.duplicate_check_daily.run@bba5df5315
+  - lupin_mcp.duplicate_check_daily.finding_judges@f452cbad1e
+  - lupin_mcp.duplicate_check_daily.cron_lines@5d30783eec
+  - lupin_mcp.duplicate_check_daily.install_mode@8a07fed64c
+  - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
+  - lupin_mcp.duplicate_check_daily.live_filer@ae7b324cde
+  - lupin_mcp.duplicate_check_daily.live_auditor@4cc714910e
+  - lupin_mcp.duplicate_check_daily.main@183e409cd2
+  - lupin_mcp.duplicate_check_daily.resolve_ceiling@8514765a03
+  - lupin_mcp.duplicate_check_daily.append_manifest@fe7667a045
+  - lupin_mcp.duplicate_check_daily.record@0c6e420b03
+  - lupin_mcp.duplicate_check_daily.rising_guard@8efa9a7c5c
+  - lupin_mcp.duplicate_check_daily.limit_flag@4dc500630b
 ---
 # Duplicate check daily: run, cron and live parts
-The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplicate-check-daily-window]]; rows are in [[duplicate-check-filing]].
+The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplicate-check-daily-window]]; rows are in [[duplicate-check-filing]]; the hourly slots, back-off and lock are in [[duplicate-check-daily-slots]].
 
 ## What it does
-- `failed_prerequisite` checks, in order, that the embedding endpoint answers, the Claude binary reports a version and the frozen configuration matches the live one. It returns None or `{ prerequisite, detail }` for the first that fails.
-- `Counting` wraps the judge backend and counts the calls made through it.
-- `findings_of` makes one finding per new definition that sits in a cluster. `others` is the rest of the cluster. Without `session_of` the session is None.
-- `run( root, now, trigger, cap, cli_path, parts, ... )` first runs the branch guard of [[duplicate-check-branch-guard]]. Then it writes `<date>-<time>-<trigger>.json` under `duplicate-check-daily` in the data folder. A trigger other than `cron`, `reboot` or `hand` raises `ValueError`.
-- A failed prerequisite writes that file with status `failed` and changes nothing else.
-- An error while building the pool, embedding or judging writes status `failed`, stage `judging`. `last-success.json` does not move.
-- Otherwise status is `ok`, or `carried` when the cap left definitions. `last-success.json` advances to the last commit fully judged.
-- A filer or auditor that raises is caught and recorded as `filing` or `audit` with an `error`. The run still advances.
-- The findings are kept in the file on every run, filer or not. The weekly page counts them and [[duplicate-check-refile]] can file them again.
-- The detached worktrees are removed whether the run ends or fails.
-- `cron_lines` returns a daily line at 12:07 and a reboot line 300 seconds after boot. A branch other than `main` is added to both as `--branch`, shell-quoted; the default adds nothing. `install_mode` prints, installs, removes or reports them through the librarian's locked crontab editor.
-- `live_parts` builds the real parts and makes no call. `live_filer` files rows over HTTP. `live_auditor` queues known-miss audits (see [[duplicate-check-audit]]), with no model call.
-- `main` needs `--cap`, which has no default, unless it only removes or reports the cron lines. It exits 3 when the branch guard refused, 1 when anything else failed, else 0. (argparse's usage errors are 2.)
-- A night's findings are ruled on with verdict lines; the writer is described in [[duplicate-check-verdict-lines]].
+- `failed_prerequisite` checks, in order, that the embedding endpoint answers, the Claude binary reports a version and the frozen configuration matches the live one. A judge model with no frozen file fails the third. It returns None or `{ prerequisite, detail }` for the first that fails.
+- `Counting` wraps the judge backend and counts the calls. After a rate or usage limit refusal it counts that in `limited` and refuses every later call of the run at once. Any failed call, a limited one included, is counted in `failed`.
+- `findings_of` makes one finding per cluster that holds a new definition: the new definition with the lowest id, with `others` the rest. A cluster is left out when any of its new definitions already has a verdict line, so a verdict on either side settles the pair. Without `session_of` the session is None. `finding_judges` names the models behind a finding from its verdict rows, and marks a reused ruling with `reused_from_model`.
+- `run( root, now, trigger, cap, cli_path, parts, ... )` first runs the guards of [[duplicate-check-branch-guard]]. It then writes `<date>-<time>-<trigger>.json` under `duplicate-check-daily`. A trigger other than `cron`, `reboot` or `hand` raises `ValueError`.
+- A run whose every new call failed, with no limit to explain it, is recorded `failed`. Rulings replayed from the ledger do not hide it. A limited run stays `carried`. A complete baseline judges nothing. A run inside a rate-limit back-off is recorded `skipped` and judges nothing. A failed prerequisite writes status `failed` and changes nothing else.
+- The judge ledger survives a Claude Code update; see [[duplicate-check-daily-ledger]]. No ledger is renamed aside.
+- An error while reading the configuration, choosing the window or making the worktree writes status `failed`, stage `setup`. An error while building the pool, embedding or judging writes stage `judging`. `last-success.json` does not move. Worktrees are removed either way. The result holds `backlog_total`, the new definitions the run was given. It holds `left_to_judge`, the ids it did not reach. It also holds `test_code_dropped` with `backlog` and `pool`: the test-code definitions left out of the backlog and of the comparison pool. Result files before schema 3 called the first two `owed` and `carried`.
+- Otherwise status is `ok`, or `carried` when the cap left definitions to judge. `last-success.json` advances to the last commit fully judged and records the branch. `append_manifest` writes one line per judged definition to `interim-judge-manifest.jsonl` through `append_line` of [[duplicate-check-run-history]]. A line holds the id, file, run file, model id, config sha and time, and each finding carries `judge_model`.
+- A filer or auditor that raises is caught and recorded with an `error`; the run still advances. Findings stay in the result file, and [[duplicate-check-refile]] can file them again.
+- With `ceiling` (`--ceiling N`) the cap is the number of definitions to judge, up to N. `limit_flag` gives `--ceiling N` when a ceiling is set, else `--cap N`, for the cron lines. With `baseline` (`--baseline`) the definitions are every one in the tree, drained over runs; `baseline.json` says `in_progress` or `complete`.
+- `rising_guard` alerts through the notifier when the count left to judge rose on the last `--rise-limit` (3) measured daily runs. It alerts on the first crossing only; later runs hold `rising` with `repeat`. `record` adds `schema_version`, `started_at` and `None` for each measure the run never reached, writes the file, then appends the run's line to `runs.jsonl` ([[duplicate-check-run-history]]).
+- `cron_lines` returns a 10:00 daily line and a reboot line 300 seconds after boot, which catches up from the last successful run. `--with-baseline` adds an 11:07 line. With `adaptive` it returns an hourly line (10:00 to 22:00) and the reboot line, both with `--adaptive`. A branch other than `main` is added as `--branch`.
+- `install_mode` handles `--print-install`, `--uninstall` and `--status` through the librarian's locked crontab editor. `--install` is retired: it prints where the installer went on stderr and returns 1, because `cron_generate` writes every cron line now. The cron work is done by `manage_cron` of [[repo-tools-symindex-librarian-tick-run]].
+- `live_parts` builds the real parts without a call. `live_filer` files the run's one triage row over HTTP, with the configured `duplicate check triage owner` and the project's manager roster. It raises `NoTriageOwner` when there are findings and the owner is unset or not on the roster. The findings stay in the result file for a refile, and `run` records that as the filer's error. `live_auditor` queues known-miss audits ([[duplicate-check-audit]]) with no model call. It names each finding by its id in the symbol index the sweep reads. That is not the checker's own `d-` id, so the sweep knows every queued item.
+- `main` takes at most one of `--cap` and `--ceiling`. With neither, `resolve_ceiling` reads the lupin ceiling key; a blank or invalid key refuses the run naming it. A flag wins over the key. `--adaptive` needs a ceiling. Verdict lines are in [[duplicate-check-verdict-lines]].

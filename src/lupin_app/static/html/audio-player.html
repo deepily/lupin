@@ -314,6 +314,15 @@
                 return;
             }
 
+            // Tell the page that holds this frame when the audio plays, ends or is blocked, so a finished
+            // podcast can queue behind it and never cut it off (row 802c94d3). Same-origin only.
+            const tellParent = ( event ) => {
+                if ( window.parent === window ) return;
+                window.parent.postMessage( { source: 'lupin-audio-player', event: event }, window.location.origin );
+            };
+            audioEl.addEventListener( 'playing', () => tellParent( 'playing' ) );
+            audioEl.addEventListener( 'ended',   () => tellParent( 'ended' ) );
+
             // autoplay=1 — REAL auto-start on open: a user click (the "Play Here"
             //   link) opened this frame, so the browser permits play() — the safe
             //   half of the autoplay policy. No UI; controls stay for pause/dismiss.
@@ -337,16 +346,31 @@
                         console.log( '[AUTOPLAY-PROBE] ' + tag + ' ' + detail );
                     };
                 }
+                // A browser that blocks the start (no user click led here, as when a finished podcast opens
+                // this frame by itself) must never leave silence: show a visible Play button, tell the page.
+                const showPlayPrompt = () => {
+                    if ( document.getElementById( 'autoplay-blocked-prompt' ) ) return;
+                    const prompt = document.createElement( 'button' );
+                    prompt.id          = 'autoplay-blocked-prompt';
+                    prompt.type        = 'button';
+                    prompt.textContent = '\u25B6 Play';
+                    prompt.setAttribute( 'data-testid', 'autoplay-blocked-prompt' );
+                    prompt.style.cssText = 'display:block;margin:12px 0;padding:10px 18px;font-size:16px;cursor:pointer;';
+                    prompt.addEventListener( 'click', () => { audioEl.play(); prompt.remove(); } );
+                    audioEl.insertAdjacentElement( 'beforebegin', prompt );
+                    tellParent( 'blocked' );
+                };
                 try {
                     const p = audioEl.play();
                     if ( p !== undefined ) {
                         p.then( () => mark( true, 'play() resolved; paused=' + audioEl.paused ) )
-                         .catch( ( err ) => mark( false, err.name + ': ' + err.message ) );
+                         .catch( ( err ) => { mark( false, err.name + ': ' + err.message ); showPlayPrompt(); } );
                     } else {
                         mark( true, 'play() returned undefined (legacy); paused=' + audioEl.paused );
                     }
                 } catch ( err ) {
                     mark( false, 'sync throw: ' + err.name + ': ' + err.message );
+                    showPlayPrompt();
                 }
             }
         } )();

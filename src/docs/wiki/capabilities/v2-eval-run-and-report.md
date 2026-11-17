@@ -1,6 +1,6 @@
 ---
 capability: v2-eval-run-and-report
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.v2_eval.HttpAskClient@52109eafeb
   - scripts.v2_eval.resolve_base_url@3923ec76af

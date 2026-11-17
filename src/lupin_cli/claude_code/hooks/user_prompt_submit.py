@@ -118,7 +118,7 @@ def main():
     # inject/PreToolUse-deny paths stay UNTOUCHED — this is purely additive.
     # extra_surfaced_ids = the ai_to_ai ids drained THIS turn (above), so a DM
     # delivered by BOTH paths in one turn is not shown twice. Fail-open — never
-    # raises. See: src/rnd/v0.1.9/2026.07.02-dm-loss-surfacing-leg-triage.md
+    # raises.
     drained_dm_ids = [ m.get( "notification_id" ) for m in messages
                        if m.get( "direction" ) == "ai_to_ai" ]
     dm_ctx = surface_dm_inbox( session_id, extra_surfaced_ids=drained_dm_ids )

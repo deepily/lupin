@@ -113,7 +113,7 @@ class DmTutorAgent( AgentBase ):
         # DM bodies carry literal braces of their own — code fences, dict
         # literals, f-strings, [[Lnn]]-style markers. `str.format` reads every
         # brace as a field and raises KeyError on the first one it cannot
-        # resolve. The compression arm hit exactly this (compressor.py:110).
+        # resolve. The compression arm hit exactly this (see dm_compression/compressor.py).
         self.prompt = template.replace( "{dm}", dm_body )
 
         self.xml_response_tag_names = list( DmTutorResponse.TAG_FOR_FIELD.values() )
@@ -165,21 +165,6 @@ class DmTutorAgent( AgentBase ):
             self.error = f"{type( e ).__name__}: {e}"
             if self.debug: print( f"[dm-tutor] rewrite failed — {self.error}" )
             return None
-
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Not implemented — this agent holds no state worth restoring.
-
-        Requires:
-            - file_path points to a JSON file
-
-        Ensures:
-            - raises NotImplementedError
-
-        Raises:
-            - NotImplementedError always
-        """
-        raise NotImplementedError( "DmTutorAgent.restore_from_serialized_state() not implemented" )
 
 
 def rewrite_dm( dm_body: str, include_stop_sentinel: bool=True,
@@ -236,7 +221,7 @@ def quick_smoke_test():
 
     # Every check here guards a failure that is SILENT without it. An
     # unprocessed template does not raise: AgentBase swallows the processor's
-    # exception (agent_base.py:161) and ships the template as-is.
+    # exception (the except around process_template in AgentBase.__init__) and ships the template as-is.
     checks = [
         ( "body substituted",         "queue.py:412" in prompt ),
         ( "no unresolved {dm}",       "{dm}" not in prompt ),

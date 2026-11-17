@@ -253,7 +253,7 @@ def test_multiplexer_phase6b_action_required_visual(
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so any NotoColorEmoji glyphs are loaded before
     # capture. networkidle does NOT gate fonts. See
-    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    # `test_task_editing_controls_visual` in test_multiplexer_task_editing.py. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     section = page.locator( '#action-required-section' )
@@ -295,14 +295,14 @@ def test_multiplexer_phase6b_tts_chrome_visual(
     # Wait for the tts-chrome to render its IDLE panel (sanity check before
     # snapshot). Straggler bug a90cc63e: the prior gate waited for
     # `#tts-pane .tts-controls`, but `.tts-controls` is emitted ONLY by the
-    # PLAYING/paused branch of renderTtsChrome (templates/ttsChrome.ts:135). This
+    # PLAYING/paused branch of renderTtsChrome (templates/ttsChrome.ts). This
     # test captures the IDLE state (no audio flowing), where the STATE-driven
     # empty panel renders `.tts-chrome-empty` + `.tts-queue-empty-state` and NO
-    # `.tts-controls` (renderTtsEmpty, ttsChrome.ts:86-92; locked by unit test
-    # templates_tts_chrome.test.ts:48). The old selector could therefore NEVER
+    # `.tts-controls` (renderTtsEmpty, in ttsChrome.ts; locked by unit test
+    # templates_tts_chrome.test.ts). The old selector could therefore NEVER
     # resolve idle → a guaranteed 2000ms timeout, not a contention flake. Wait
     # instead for the idle observability handle the template DOES emit for every
-    # state (data-testid + data-state, ttsChrome.test.ts:223), with a generous
+    # state (data-testid + data-state, ttsChrome.test.ts), with a generous
     # timeout matching the test-hook wait above.
     page.wait_for_selector(
         '#tts-pane [data-testid="multiplexer-tts-chrome"][data-state="idle"]',
@@ -318,7 +318,7 @@ def test_multiplexer_phase6b_tts_chrome_visual(
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the 🔇/persona NotoColorEmoji glyphs are
     # loaded before capture. networkidle does NOT gate fonts. See
-    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    # `test_task_editing_controls_visual` in test_multiplexer_task_editing.py. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     pane = page.locator( '#tts-pane' )
@@ -444,7 +444,7 @@ def test_multiplexer_phase6b_tts_chrome_focus_visual(
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the 🔇/persona NotoColorEmoji glyphs are
     # loaded before capture. networkidle does NOT gate fonts. See
-    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    # `test_task_editing_controls_visual` in test_multiplexer_task_editing.py. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
 

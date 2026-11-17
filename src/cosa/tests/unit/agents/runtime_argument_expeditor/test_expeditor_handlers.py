@@ -36,6 +36,49 @@ _FAKED_SUBMODULES = (
 )
 
 
+_ABSENT = object()
+
+
+def _snapshot_faked_submodules():
+    """
+    Record, for each faked submodule, the sys.modules entry and the parent-package attribute.
+
+    Ensures:
+        - returns { dotted: ( entry, attribute ) } with _ABSENT where nothing was there
+    """
+    saved = {}
+    for dotted in _FAKED_SUBMODULES:
+        parent_name, _, child = dotted.rpartition( "." )
+        parent = sys.modules.get( parent_name )
+        saved[ dotted ] = ( sys.modules.get( dotted, _ABSENT ),
+                            getattr( parent, child, _ABSENT ) if parent is not None else _ABSENT )
+    return saved
+
+
+def _restore_faked_submodules( saved ):
+    """
+    Put every faked submodule back as it was before the test.
+
+    A real module that was loaded stays the same object. One that was not loaded is removed.
+
+    Requires:
+        - saved comes from _snapshot_faked_submodules()
+
+    Ensures:
+        - sys.modules and the parent attribute hold the recorded objects, or nothing where
+          _ABSENT was recorded
+    """
+    for dotted, ( entry, attribute ) in saved.items():
+        parent_name, _, child = dotted.rpartition( "." )
+        parent = sys.modules.get( parent_name )
+        if entry is _ABSENT: sys.modules.pop( dotted, None )
+        else: sys.modules[ dotted ] = entry
+        if parent is None: continue
+        if attribute is _ABSENT:
+            if hasattr( parent, child ): delattr( parent, child )
+        else: setattr( parent, child, attribute )
+
+
 @pytest.fixture( autouse=True )
 def _evict_faked_submodules_after_test():
     """
@@ -45,17 +88,15 @@ def _evict_faked_submodules_after_test():
         - this module fakes the modules in _FAKED_SUBMODULES via patch.dict( sys.modules )
 
     Ensures:
-        - after EVERY test, each faked submodule is evicted from sys.modules AND removed
-          as a parent-package attribute, so a later `from <parent> import <child>` in any
-          subsequently-collected test re-imports the REAL module instead of the stale fake
+        - after each test, each faked submodule is back to what it was before the test, so a
+          fake never shadows a later test's real import
+        - a real module that was already loaded is not evicted: evicting it made the next import
+          build a second class, and `pytest.raises( MissingConfigKeyError )` in another file then
+          caught a different class from the one raised
     """
+    saved = _snapshot_faked_submodules()
     yield
-    for dotted in _FAKED_SUBMODULES:
-        sys.modules.pop( dotted, None )
-        parent_name, _, child = dotted.rpartition( "." )
-        parent = sys.modules.get( parent_name )
-        if parent is not None and hasattr( parent, child ):
-            delattr( parent, child )
+    _restore_faked_submodules( saved )
 
 
 def _mk_expeditor( debug=False ):
@@ -543,6 +584,40 @@ class TestTfeCheckpointMatch( unittest.TestCase ):
              patch.object( o, "_ask_for_arg", return_value="tfe-fallback" ):
             out = o._handle_tfe_checkpoint_match( "u@x", user_description="x" )
         self.assertEqual( out, "tfe-fallback" )
+
+
+class TestFakedSubmoduleRestore:
+    """The cleanup restores what was there; it never evicts a real loaded module."""
+
+    def test_a_real_module_keeps_its_identity_after_being_faked( self ):
+        import cosa.config as pkg
+        import cosa.config.configuration_manager as real
+        saved = _snapshot_faked_submodules()
+        fake  = types.ModuleType( "cosa.config.configuration_manager" )
+        sys.modules[ "cosa.config.configuration_manager" ] = fake
+        pkg.configuration_manager = fake
+        _restore_faked_submodules( saved )
+        assert sys.modules[ "cosa.config.configuration_manager" ] is real
+        assert pkg.configuration_manager is real
+
+    def test_a_module_that_was_absent_is_removed_with_its_parent_attribute( self ):
+        import cosa.agents.test_fix_expediter as pkg
+        dotted = "cosa.agents.test_fix_expediter.resume_resolver"
+        saved  = { dotted: ( _ABSENT, _ABSENT ) }
+        fake   = types.ModuleType( dotted )
+        with patch.dict( sys.modules, { dotted: fake } ):
+            pkg.resume_resolver = fake
+            _restore_faked_submodules( saved )
+            assert dotted not in sys.modules
+            assert not hasattr( pkg, "resume_resolver" )
+
+    def test_a_missing_parent_package_is_skipped( self ):
+        dotted = "cosa.config.configuration_manager"
+        with patch.dict( sys.modules, { "cosa.config": None } ):
+            del sys.modules[ "cosa.config" ]
+            snap = _snapshot_faked_submodules()
+            assert snap[ dotted ][ 1 ] is _ABSENT
+            _restore_faked_submodules( snap )
 
 
 if __name__ == "__main__":

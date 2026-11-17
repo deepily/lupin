@@ -1,6 +1,6 @@
 ---
 capability: cj-flow-queue
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.running_fifo_queue.RunningFifoQueue@993473a3bb
   - cosa.rest.running_fifo_queue.RunningFifoQueue.get_pool_status@3a08a734df
@@ -10,7 +10,7 @@ pins:
   - cosa.rest.job_state.validate_transition@e52a308c3e
   - cosa.rest.job_persistence.persist_job_completed_from_metadata@70e1cb34aa
   - cosa.rest.job_persistence.mark_interrupted_jobs@dbe7ae3549
-  - cosa.rest.dead_queue_watchdog.DeadQueueWatchdog@58bfca263c
+  - cosa.rest.dead_queue_watchdog.DeadQueueWatchdog@a69150d13a
 ---
 # CJ Flow queue
 

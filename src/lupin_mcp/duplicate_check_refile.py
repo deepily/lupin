@@ -4,12 +4,12 @@ File again the findings a saved result file of the daily check holds.
 A filing error leaves the day's findings in the result file and no rows in the store.
 The error may be a store that is down, a missing key file or a broken client.
 This command reads the file and files the findings.
-The store key of a finding is the definition id and its text, with no date.
-So a finding whose row exists is not filed again, and a finding already in the spool is not spooled twice.
-It asks the store before every create, as the daily check does.
+The run's one triage row lists the findings; its store key is made of the findings' keys, with no date.
+So a finding already on a triage row is not listed again, and a finding already in the spool is not spooled twice.
+It asks the store before the create, as the daily check does.
 Each run adds a record of its answer to the result file under "refilings".
 
-Exit 0 means every finding is filed or was already. Exit 1 means some are still queued or were refused.
+Exit 0 means every finding is filed or was already. Exit 1 means some are still queued or were refused, or a retired-shape or oversize row is left in the spool.
 Exit 3 means it could not finish. The file cannot be read, it holds no findings, or the filing raised.
 It also means the rows were filed and the record could not be written; the answer is printed first.
 """
@@ -21,9 +21,10 @@ import sys
 
 from lupin_mcp import duplicate_check_daily as daily
 from lupin_mcp import duplicate_check_filing as filing
+from lupin_mcp import reuse_behaviour as behaviour
 
 REFILINGS  = "refilings"
-NEEDED     = ( "id", "name", "file", "line", "session_id", "others", "window", "correlation_key" )     # what row_payload reads of a finding that has no text
+NEEDED     = ( "id", "name", "file", "line", "others", "window", "correlation_key" )     # what triage_payload reads of a finding that has no text
 EXIT_LEFT  = 1
 EXIT_NONE  = 3
 
@@ -65,6 +66,29 @@ def read_result( path ):
     return doc
 
 
+def regroup( findings, clusters, settled ):
+    """
+    Keep one finding per cluster, and none for a cluster that already has a verdict.
+
+    Requires:
+        - findings are the result file's findings, each with id and correlation_key
+        - clusters is the file's list of id lists, or None for a file that kept none
+        - settled is the set of correlation keys that have a verdict line
+    Ensures:
+        - with clusters, returns for each cluster that holds a finding the one with the lowest id, in the order of the clusters
+        - a cluster is left out when any of its findings has a settled key, so a verdict on either side of a pair settles the pair
+        - a finding in no cluster is dropped only when its own key is settled
+        - without clusters, returns the findings whose key is not settled, in their order
+    """
+    if clusters is None: return [ f for f in findings if f[ "correlation_key" ] not in settled ]
+    placed = { m for g in clusters for m in g }
+    out    = []
+    for g in clusters:
+        mine = [ f for f in findings if f[ "id" ] in g ]
+        if mine and not any( f[ "correlation_key" ] in settled for f in mine ): out.append( min( mine, key=lambda f: f[ "id" ] ) )
+    return [ *out, *[ f for f in findings if f[ "id" ] not in placed and f[ "correlation_key" ] not in settled ] ]
+
+
 def refile( path, filer=None, now=None ):
     """
     File the findings of a result file and record the answer in it.
@@ -74,18 +98,23 @@ def refile( path, filer=None, now=None ):
         - now is a timezone-aware time, or None for the present
     Ensures:
         - the filer is given the file's findings and the folder the file lives in, which is where the spool is
+        - the findings are regrouped first: one per cluster, the lowest id, and none for a cluster with a verdict line, as the daily check files them now; a file written before that is refiled the same way
+        - each finding carries day, the date of the run that made the file, so the row's title names that day and not the day of the refile
+        - each finding carries run_file, the file's name, so a row that lists only part of them says where the rest are
         - the file gains one entry in "refilings", { at, answer }, written only after the filer has returned
         - returns the filer's answer
     Raises:
-        - what read_result raises
+        - what read_result raises, and ValueError from settled_keys for a damaged verdicts file, before anything is filed
         - FilingFailed when the filer raises, naming what it raised; the file is left as it was
         - RecordNotWritten when the filing returned and the file could not be rewritten; it carries the answer
     """
     doc = read_result( path )
-    try: answer = ( filer if filer is not None else daily.live_filer )( doc[ "findings" ], pathlib.Path( path ).parent )
+    kept  = regroup( doc[ "findings" ], doc.get( "clusters" ), behaviour.settled_keys( pathlib.Path( path ).parent ) )
+    dated = [ { **f, "day": f[ "day" ] if "day" in f else doc[ "date" ], "run_file": f[ "run_file" ] if "run_file" in f else pathlib.Path( path ).name } for f in kept ]
+    try: answer = ( filer if filer is not None else daily.live_filer )( dated, pathlib.Path( path ).parent )
     except Exception as e:                  # a store client or config that raises: the daily check records the same and goes on
         raise FilingFailed( f"the filing raised {type( e ).__name__}: {e}. The file is unchanged." ) from e
-    doc.setdefault( REFILINGS, [] ).append( { "at": ( now if now is not None else datetime.datetime.now().astimezone() ).isoformat(), "answer": answer } )
+    doc.setdefault( REFILINGS, [] ).append( { "at": ( now if now is not None else datetime.datetime.now().astimezone() ).isoformat(), "findings_in_file": len( doc[ "findings" ] ), "findings_filed": len( kept ), "answer": answer } )
     try: daily.write_json( path, doc )
     except OSError as e: raise RecordNotWritten( f"the rows were filed, and the record could not be written: {type( e ).__name__}: {e}", answer ) from e
     return answer
@@ -97,7 +126,7 @@ def main( argv=None, out=None, filer=None, now=None ):
 
     Ensures:
         - prints the filing's answer as JSON
-        - returns 0 when nothing is left queued or refused, 1 when something is, 3 with the reason printed when nothing could be done
+        - returns 0 when nothing is left queued, refused, retired-shape or oversize, 1 when something is, 3 with the reason printed when nothing could be done
     """
     ap = argparse.ArgumentParser( description="File again the findings of a saved daily-check result file." )
     ap.add_argument( "result", help="a result file under <data dir>/duplicate-check-daily/" )
@@ -115,7 +144,7 @@ def main( argv=None, out=None, filer=None, now=None ):
         print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was filed.", file=out )
         return EXIT_NONE
     print( json.dumps( answer, indent=2, sort_keys=True ), file=out )
-    return EXIT_LEFT if answer[ filing.QUEUED ] or answer[ filing.REFUSED ] else 0
+    return EXIT_LEFT if any( answer[ k ] for k in ( filing.QUEUED, filing.REFUSED, filing.RETIRED, filing.OVERSIZE ) ) else 0
 
 
 if __name__ == "__main__":  # pragma: no cover - the entry only calls main

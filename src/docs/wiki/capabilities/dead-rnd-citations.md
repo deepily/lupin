@@ -1,6 +1,6 @@
 ---
 capability: dead-rnd-citations
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.dead_rnd_citations.tracked_files@9304f9f537
   - scripts.dead_rnd_citations.is_archive@9746e7b076

@@ -28,7 +28,7 @@ def _slide( **kw ):
 
 
 # ---------------------------------------------------------------------------
-# render (top-level)
+# render, top level
 # ---------------------------------------------------------------------------
 class TestRenderTop:
     def test_full_three_slides( self ):

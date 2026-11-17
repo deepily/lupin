@@ -73,6 +73,23 @@ def test_list_bridges_filters_sidecars( tmp_path ):
     assert names == [ "cc-123.json" ]
 
 
+def test_list_bridges_keeps_every_bridge_and_only_bridges( tmp_path ):
+    for name in ( "cc-1.json", "cc-22.json", "cc-buffer-1.json", "cc-listener-9.json", "cc-3.jsonl", "cc-4.log" ):
+        ( tmp_path / name ).write_text( "{}" )
+    assert sorted( p.name for p in _default_list_bridges( tmp_path ) ) == [ "cc-1.json", "cc-22.json" ]
+    assert isinstance( _default_list_bridges( tmp_path ), list ), "the sweep indexes and re-reads the listing"
+
+
+def test_every_bridge_listing_in_the_reaper_goes_through_iter_bridge_paths():
+    """Census: the reaper holds no glob or skip-token copy of the bridge listing."""
+    import inspect
+    from cosa.agents.shared import orphan_bridge_reaper
+    source = inspect.getsource( orphan_bridge_reaper )
+    assert "iter_bridge_paths" in inspect.getsource( _default_list_bridges )
+    assert ".glob(" not in source, "a bridge glob in the reaper is a copy of the shared listing"
+    assert '"listener"' not in source and '"buffer"' not in source
+
+
 # ── _default_read_bridge ──────────────────────────────────────────────────────
 
 def test_read_bridge_parses_json( tmp_path ):

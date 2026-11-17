@@ -350,7 +350,8 @@ for d in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
     # does NOT break the supported path — it only bites a bare `sudo git` typed by
     # hand. Reporting it as BLOCK was this check's first-run defect: it failed a VM
     # whose supported workflow was entirely healthy.
-    if sudo -n git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$d"; then
+    root_safe_dirs="$( sudo -n git config --global --get-all safe.directory 2>/dev/null )"
+    if grep -qxF "$d" <<< "$root_safe_dirs"; then
         report pass WARN "safe.directory registered for $d in root's gitconfig"
     else
         report fail WARN "no root-side safe.directory for $d — a bare 'sudo git -C $d' will refuse (the tooling passes it inline, so this is not blocking)" \
@@ -536,6 +537,22 @@ for hook_row in "pre-commit:pre-commit-chain.sh" "pre-push:pre-push-chain.sh"; d
     esac
 done
 
+# B9 — ~/.lupin holds secrets: the directory is at most 750, the config and the notification key at most 640
+# (Rick, 9 Nov 2026, row 1dcecdb9). push-env creates them that way; this is the witness a rebuilt VM
+# does not come back looser. LUPIN_HOME_CONFIG_DIR names another directory, for tests.
+LUPIN_CFG_DIR="${LUPIN_HOME_CONFIG_DIR:-$HOME/.lupin}"
+for mode_row in "$LUPIN_CFG_DIR:750" "$LUPIN_CFG_DIR/config:640" "$LUPIN_CFG_DIR/notification-api.key:640"; do
+    mode_path="${mode_row%:*}"; mode_max="${mode_row##*:}"
+    mode_seen="$( stat -c '%a' "$mode_path" 2>/dev/null || printf '' )"
+    pfv_mode_within "$mode_seen" "$mode_max"; mode_rc=$?
+    case $mode_rc in
+        0) report pass BLOCK "$mode_path is $mode_seen, no looser than $mode_max" ;;
+        1) report fail BLOCK "$mode_path is $mode_seen, looser than $mode_max" \
+                        "chmod $mode_max $mode_path   # or re-run, from the dev box: lupin-vm.sh push-env" ;;
+        *) report unknown BLOCK "could not read the mode of $mode_path" "ls -ld $mode_path" ;;
+    esac
+done
+
 # B8 — the test role's password reaches the VM (row 80513825). Plain mode is a legal state, so this
 # is a WARN: tests that create databases then run as DB_USER. The env file is the only witness here;
 # whether the Secret Manager secret lupin-db-test-password exists is not checked from the VM.
@@ -634,10 +651,13 @@ fi
 DIST_REQUIRED="multiplexer console doc-podcast"
 dist_tier="BLOCK"; [ "$PHASE" = "pre" ] && dist_tier="WARN"
 dist_present="$( pfv_dist_present "$REPO_ROOT/src/lupin_app/static/dist" "$DIST_REQUIRED" )"
-dist_status="$( pfv_dist_status "$DIST_REQUIRED" "$dist_present" )"
+dist_stamp="$( head -n 1 "$REPO_ROOT/src/lupin_app/static/dist/.dist-stamp" 2>/dev/null || printf '' )"
+dist_status="$( pfv_dist_status "$DIST_REQUIRED" "$dist_present" "$dist_stamp" "$ref_head" )"
 case "$dist_status" in
     OK)
         report pass "$dist_tier" "built bundles present on the checkout: $DIST_REQUIRED" ;;
+    STALE:*)
+        report fail "$dist_tier" "built bundles are not known to match the source (${dist_status#STALE: }), so the pages serve old code"                       "lupin-vm.sh push-dist   # rebuilds when stale, then ships and stamps" ;;
     *)
         report fail "$dist_tier" "built bundles absent from $REPO_ROOT/src/lupin_app/static/dist (${dist_status#MISSING:}), so the pages that load them lose that feature"                       "lupin-vm.sh push-dist   # from a checkout where npm run build has run" ;;
 esac
@@ -649,6 +669,65 @@ if sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" ls-files --error-u
 else
     report pass WARN ".mcp.json is not tracked"
 fi
+
+# B10 — the vector-refresh cron is installed for THIS user (row c22e5ec1). `install-refresh-cron vm` is a separate
+# step that nothing reported on. WARN: a missing cron stops no deploy. Assert-only: the remedy is a line a person runs.
+cron_text="$( crontab -l 2>/dev/null || printf '' )"
+if pfv_cron_status "$cron_text" >/dev/null; then
+    report pass WARN "the reuse-vector-refresh cron line is in this user's crontab"
+else
+    report fail WARN "the reuse-vector-refresh cron line is NOT in this user's crontab, so the vector index is never refreshed" \
+                  "from the dev box: src/scripts/lupin-vm.sh install-refresh-cron vm"
+fi
+
+# B11 — the overlay test server (lupin-rest-test on :8000), only when its container exists (row c22e5ec1).
+# Absent is a legal state (a VM without the overlay), so it prints a skip line and counts nothing.
+# Present, it must answer /health, sit at the tree's head schema, hold its database roles and a tester login.
+OVERLAY_APP="${PREFLIGHT_VM_OVERLAY_APP:-lupin-rest-test}"
+OVERLAY_DB="${PREFLIGHT_VM_OVERLAY_DB:-lupin-pgvector-test}"
+OVERLAY_PORT="${PREFLIGHT_VM_OVERLAY_PORT:-8000}"
+OVERLAY_SECRETS="${PREFLIGHT_VM_OVERLAY_SECRETS:-/etc/lupin/secrets}"
+if pfv_overlay_present "$( docker ps -a --format '{{.Names}}' 2>/dev/null || printf '' )" "$OVERLAY_APP"; then
+    overlay_up="lupin-vm.sh test-server up   # from the dev box; first-time bring-up: see src/docs/vm-test-server.md"
+    ov_code="$( curl -s -o /dev/null -w '%{http_code}' --max-time 20 "http://localhost:$OVERLAY_PORT/health" 2>/dev/null )"
+    if [ "$ov_code" = "200" ]; then report pass BLOCK "overlay $OVERLAY_APP /health 200 on :$OVERLAY_PORT"
+    else report fail BLOCK "overlay $OVERLAY_APP /health returned '$ov_code' on :$OVERLAY_PORT" "$overlay_up   # then: lupin-vm.sh test-server logs"; fi
+
+    ov_out="$( docker exec "$OVERLAY_APP" python /var/lupin/src/scripts/check_schema_at_head.py 2>&1 )"; ov_rc=$?
+    ov_detail="$( printf '%s\n' "$ov_out" | grep -m1 '^DETAIL=' | cut -d= -f2- )"
+    case $ov_rc in
+        0) report pass BLOCK "overlay DB schema is at the tree's head revision" ;;
+        1) report fail BLOCK "overlay SCHEMA DRIFT — ${ov_detail:-see the probe}" "lupin-vm.sh test-server recreate   # main.py migrates to head at startup" ;;
+        *) report unknown BLOCK "cannot determine the overlay schema revision — ${ov_detail:-$( printf '%s' "$ov_out" | tr '\n' ' ' | cut -c1-160 )}" \
+                         "docker exec $OVERLAY_APP python /var/lupin/src/scripts/check_schema_at_head.py" ;;
+    esac
+
+    # --database lupin_db_test: lupin_db_dev is empty on the VM, so an unlimited --check exits 1 on a healthy overlay.
+    if ( cd "$REPO_ROOT" && sudo -n env LUPIN_ROOT="$REPO_ROOT" PYTHONPATH=src python3 -m cosa.utils.db_roles \
+            --app-pw-file "$OVERLAY_SECRETS/db_app_password" --host-pw-file "$OVERLAY_SECRETS/db_host_password" \
+            --test-pw-file "$OVERLAY_SECRETS/db_test_password" \
+            --psql "docker exec -i $OVERLAY_DB psql -U lupin_dev -d lupin_db_dev" --check --database lupin_db_test >/dev/null 2>&1 ); then
+        report pass BLOCK "overlay database roles and grants read back clean"
+    else
+        report fail BLOCK "overlay database roles or grants are not clean (db_roles --check)" \
+                      "lupin-vm.sh test-server roles --apply, then: lupin-vm.sh test-server roles --grants-only"
+    fi
+
+    ov_email="$( pfv_test_login_email "$OVERLAY_SECRETS/test_env.sh" )"
+    if [ -z "$ov_email" ]; then
+        report unknown WARN "the overlay's tester address could not be read from $OVERLAY_SECRETS/test_env.sh" "lupin-vm.sh push-test-server-secrets"
+    else
+        ov_count="$( docker exec -i "$OVERLAY_DB" psql -U lupin_dev -d lupin_db_test -tAc "select count(*) from users where email = '$ov_email'" 2>/dev/null || printf '' )"
+        case "$( pfv_count_status "$ov_count" )" in
+            PRESENT) report pass WARN "the overlay's lupin_db_test holds the tester login (address not shown)" ;;
+            ABSENT)  report fail WARN "the overlay's lupin_db_test has no tester login, so submit-test-suite.py cannot log in" \
+                                   "create the tester user in lupin_db_test (known gap in src/docs/vm-test-server.md)" ;;
+            *)       report unknown WARN "could not query lupin_db_test for the tester login" "docker exec -i $OVERLAY_DB psql -U lupin_dev -d lupin_db_test -c 'select count(*) from users'" ;;
+        esac
+    fi
+else
+    printf "[SKIP]  overlay test server %s is not on this host; its checks did not run\n" "$OVERLAY_APP"
+fi
 else note_skip B; fi
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -659,7 +738,7 @@ say_head "C. Compose / container"
 
 if ! command -v docker >/dev/null 2>&1; then
     report unknown BLOCK "docker not reachable" "check the docker daemon"
-elif ! docker ps --filter "name=^${CONTAINER}$" --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
+elif running_names="$( docker ps --filter "name=^${CONTAINER}$" --format '{{.Names}}' 2>/dev/null )"; ! grep -qx "$CONTAINER" <<< "$running_names"; then
     report fail BLOCK "container '$CONTAINER' is not running" \
                   "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps $SERVICE"
 else
@@ -714,8 +793,8 @@ PY
     # C3 — the claude-creds VOLUME mounts over the whole .claude dir and SHADOWS the
     #      host's sessions bind unless both are present. That shadowing was persona-404.
     has_creds=false; has_sessions=false
-    printf '%s\n' "$running_mounts" | grep -qx "/home/rruiz/.claude"          && has_creds=true
-    printf '%s\n' "$running_mounts" | grep -qx "/home/rruiz/.claude/sessions" && has_sessions=true
+    grep -qx "/home/rruiz/.claude" <<< "$running_mounts"          && has_creds=true
+    grep -qx "/home/rruiz/.claude/sessions" <<< "$running_mounts" && has_sessions=true
     if [ "$has_creds" = true ] && [ "$has_sessions" = true ]; then
         report pass BLOCK "both CC mounts present (creds volume + sessions bind)"
     else
@@ -729,7 +808,8 @@ PY
         && report pass BLOCK "container runs as uid 1001" \
         || report unknown BLOCK "container uid is '$cuid', expected 1001" "check the image's USER directive"
     if [ -n "${LUPIN_BRIDGE_GID:-}" ]; then
-        docker exec "$CONTAINER" id -G 2>/dev/null | tr ' ' '\n' | grep -qx "$LUPIN_BRIDGE_GID" \
+        container_gids="$( docker exec "$CONTAINER" id -G 2>/dev/null | tr ' ' '\n' )"
+        grep -qx "$LUPIN_BRIDGE_GID" <<< "$container_gids" \
             && report pass BLOCK "container joined bridge gid $LUPIN_BRIDGE_GID" \
             || report fail BLOCK "container is NOT in bridge gid $LUPIN_BRIDGE_GID — it cannot read host-written bridges" \
                           "add group_add: [\"\${LUPIN_BRIDGE_GID}\"] to the compose service, then --force-recreate"
@@ -1184,7 +1264,7 @@ c="$( http_code "$ARBITER_URL/health" 10 )"
 #       dead for two days while this exact check returned a clean 200 every run — the
 #       process was healthy, only its worker was gone. /health now reports per-thread
 #       liveness, so assert on THAT, and name which loop is down.
-#       Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+#       Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by 8420e8b0a (2026-09-30); recover: git show 8420e8b0a^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 if [ "$c" = "200" ]; then
     dead="$( curl -s --max-time 10 "$ARBITER_URL/health" 2>/dev/null \
              | python3 -c "
@@ -1280,7 +1360,7 @@ if [ "${CLAUDE_CODE_USE_VERTEX:-}" = "1" ]; then
 else
     report pass WARN "Vertex not enabled in the host shell (CLAUDE_CODE_USE_VERTEX != 1) — skipping host region checks"
 fi
-if env | grep -q '^VERTEX_REGION_CLAUDE_5_OPUS='; then
+if printenv VERTEX_REGION_CLAUDE_5_OPUS >/dev/null 2>&1; then
     report fail WARN "VERTEX_REGION_CLAUDE_5_OPUS is set in the host shell — a per-model override routes ONE model elsewhere, silently" \
                   "unset VERTEX_REGION_CLAUDE_5_OPUS   # unless this is deliberate"
 else

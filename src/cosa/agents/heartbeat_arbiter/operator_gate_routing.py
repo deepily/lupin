@@ -27,6 +27,8 @@ takes no dependency on the rest layer.
 
 import datetime
 
+from cosa.utils.iso_timestamp import parse_iso
+
 
 # Urgency tiers (mirror task_store_rules.VALID_URGENCIES; "normal" is the default).
 URGENCY_INTERRUPT = "urgent"
@@ -41,25 +43,7 @@ URGENCY_QUEUE     = "low"
 DEFAULT_DIGEST_CADENCE_SECONDS = 1800
 
 
-def _parse_iso( value ):
-    """
-    Parse an ISO-8601 timestamp string -> aware datetime, or None. Never raises.
-
-    Mirrors fleet_data_model._parse_iso (a trailing 'Z' normalized to +00:00, a
-    naive datetime assumed UTC) so the routing clock agrees with the arbiter's.
-    """
-    if not value or not isinstance( value, str ):
-        return None
-    text = value.strip()
-    if text.endswith( "Z" ):
-        text = text[ :-1 ] + "+00:00"
-    try:
-        parsed = datetime.datetime.fromisoformat( text )
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace( tzinfo=datetime.timezone.utc )
-    return parsed
+_parse_iso = parse_iso
 
 
 def _urgency_of( gate ):

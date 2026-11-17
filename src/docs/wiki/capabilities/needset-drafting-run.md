@@ -1,6 +1,6 @@
 ---
 capability: needset-drafting-run
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.run.Env@d04eb9bd2c
   - lupin_mcp.reuse_needset.run.cell_name@4346c0b38c

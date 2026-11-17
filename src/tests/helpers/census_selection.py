@@ -1,9 +1,9 @@
 """
-Choose the census selection: guard files by name, and test_every_* functions elsewhere.
+Choose the census selection: guard files by name, and guard tests elsewhere.
 
 src/tests/run-census-guards.sh feeds it the tracked unit test files on stdin and runs what it prints.
 A file whose name matches NAME_RULE is run whole.
-In any other file each test_every_* function is run by node id.
+In any other file each test_every_* function, and each test or class marked @pytest.mark.census, is run by node id.
 So a guard written in an ordinarily named file is not missed.
 
     git ls-files 'src/tests/unit/*' | PYTHONPATH=src python -m tests.helpers.census_selection
@@ -16,6 +16,7 @@ import warnings
 
 NAME_RULE    = re.compile( r"/test_(every_|[^/]*(census|_pin|pins|pinned))[^/]*\.py$" )
 GUARD_PREFIX = "test_every_"
+GUARD_MARK   = "pytest.mark.census"
 
 
 def picked_by_name( path ):
@@ -31,13 +32,28 @@ def picked_by_name( path ):
     return NAME_RULE.search( path ) is not None
 
 
+def _marked( node ):
+    """
+    Say whether a function or class carries @pytest.mark.census.
+
+    The mark is for a test that counts something across the whole tree.
+    """
+    return any( ast.unparse( decorator ) == GUARD_MARK for decorator in node.decorator_list )
+
+
 def _defs( body, owners ):
-    """Yield the owner chain of each test_every_* function in a body, through classes and blocks."""
+    """
+    Yield the owner chain of each guard in a body, through classes and blocks.
+
+    A guard is a test_every_* function, or a function or class marked @pytest.mark.census.
+    A marked class is yielded whole and not searched, so no id is listed twice.
+    """
     for node in body:
         if isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ):
-            if node.name.startswith( GUARD_PREFIX ): yield owners + [ node.name ]
+            if node.name.startswith( GUARD_PREFIX ) or _marked( node ): yield owners + [ node.name ]
         elif isinstance( node, ast.ClassDef ):
-            yield from _defs( node.body, owners + [ node.name ] )
+            if _marked( node ): yield owners + [ node.name ]
+            else: yield from _defs( node.body, owners + [ node.name ] )
         elif isinstance( node, ( ast.If, ast.Try, ast.With, ast.For, ast.While ) ):
             yield from _defs( node.body, owners )
             for handler in getattr( node, "handlers", [] ):
@@ -48,7 +64,9 @@ def _defs( body, owners ):
 
 def guard_ids( path, source ):
     """
-    List the node ids of the test_every_* functions of one file.
+    List the node ids of the guards of one file.
+
+    A guard is a test_every_* function, or a test or class marked census.
 
     Requires:
         - source is the text of the Python file at path
@@ -75,7 +93,7 @@ def select( paths, read ):
         - paths are posix repo-relative paths of .py files; read is a callable path -> source text
 
     Ensures:
-        - returns the paths picked by name, whole, and the guard node ids of every other file, in path order
+        - returns the paths picked by name, whole, and the guard node ids (test_every_* or marked census) of every other file, in path order
         - a file picked by name never also contributes node ids
 
     Raises:

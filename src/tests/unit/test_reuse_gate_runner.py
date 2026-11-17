@@ -57,12 +57,12 @@ def env( tmp_path, repo ):
     ( data / "search-records" / f"{SID}.json" ).write_text( REAL_RECORD.read_text( encoding="utf-8" ), encoding="utf-8" )
     ini = tmp_path / "lupin-app.ini"
     since = subprocess.run( [ "git", "-C", str( repo ), "rev-parse", "main" ], capture_output=True, text=True, check=True ).stdout.strip()
-    ini.write_text( f"[x]\nreuse review gating = true\nreuse merge gate since = {since}\n", encoding="utf-8" )
+    ini.write_text( f"[x]\nreuse review gating = true\nreuse merge gate since = {since}\nreuse searched since = {since}\n", encoding="utf-8" )
     return dict( os.environ, LUPIN_REUSE_DATA_DIR=str( data ), LUPIN_REUSE_REVIEW_INI=str( ini ) )
 
 
 def _commit_doc( repo, *lines ):
-    ( repo / "review.md" ).write_text( "# review\n\n" + RULINGS + "\n\n" + "\n".join( lines ) + "\n", encoding="utf-8" )
+    ( repo / "review.md" ).write_text( "# review\n\n" + RULINGS + "\n" + "\n".join( f"SEARCHED {sym} :: {SID} :: none :: nothing near it" for sym in ( "lupin_mcp.new_helper", "m.q" ) ) + "\n\n" + "\n".join( lines ) + "\n", encoding="utf-8" )
     _git( repo, "add", "review.md" )
     _git( repo, "commit", "-qm", "review" )
 
@@ -124,3 +124,44 @@ def test_gating_on_with_an_empty_since_exits_three_and_prints_no_summary( repo, 
     ( tmp_path / "lupin-app.ini" ).write_text( "[x]\nreuse review gating = true\nreuse merge gate since =\n", encoding="utf-8" )
     code, text = _run( repo, env )
     assert code == 3 and "is true and `reuse merge gate since` is empty" in text and "Total Tests" not in text
+
+
+def _start_merge( repo ):
+    """Ensures: the tree is mid-merge, a side file staged and no merge commit written."""
+    _git( repo, "checkout", "-q", "-b", "side", "main" )
+    ( repo / "side.txt" ).write_text( "side\n", encoding="utf-8" )
+    _git( repo, "add", "side.txt" )
+    _git( repo, "commit", "-qm", "side" )
+    _git( repo, "checkout", "-q", "feat" )
+    _git( repo, "merge", "-q", "--no-commit", "--no-ff", "side" )
+
+
+def test_a_tree_mid_merge_exits_three_names_the_merge_and_prints_no_summary( repo, env ):
+    _commit_doc( repo, GOOD )
+    _start_merge( repo )
+    code, text = _run( repo, env )
+    assert code == 3 and "uncommitted merge" in text and "Nothing was checked" in text and "Total Tests:" not in text
+
+
+def test_the_same_tree_passes_again_once_the_merge_is_aborted( repo, env ):
+    _commit_doc( repo, GOOD )
+    _start_merge( repo )
+    _git( repo, "merge", "--abort" )
+    code, text = _run( repo, env )
+    assert code == 0 and "Passed: 2" in text
+
+
+def test_a_linked_worktree_mid_merge_is_refused_too( repo, env, tmp_path ):
+    _commit_doc( repo, GOOD )
+    _git( repo, "checkout", "-q", "-b", "side", "main" )
+    ( repo / "side.txt" ).write_text( "side\n", encoding="utf-8" )
+    _git( repo, "add", "side.txt" )
+    _git( repo, "commit", "-qm", "side" )
+    _git( repo, "checkout", "-q", "feat" )
+    linked = tmp_path / "linked"
+    _git( repo, "worktree", "add", "-q", "-b", "lane", str( linked ), "feat" )
+    shutil.copytree( repo / "src", linked / "src", symlinks=True, dirs_exist_ok=True )
+    if os.path.isdir( VENV ): os.symlink( VENV, linked / ".venv" )
+    _git( linked, "merge", "-q", "--no-commit", "--no-ff", "side" )
+    code, text = _run( linked, env )
+    assert code == 3 and "uncommitted merge" in text

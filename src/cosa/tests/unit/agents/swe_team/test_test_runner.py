@@ -35,6 +35,14 @@ class TestParsePytestSummary( unittest.TestCase ):
     def test_no_results_all_zero( self ):
         c = tr._parse_pytest_summary( "no tests ran" )
         self.assertEqual( c, { "passed_count": 0, "failed_count": 0, "error_count": 0 } )
+    def test_test_named_like_a_count_does_not_fool_it( self ):
+        out = "test_x.py::test_5 passed FAILED\n9 passed in 2.0s\n===== 1 failed, 2 passed in 1.5s ====="
+        c = tr._parse_pytest_summary( out )
+        self.assertEqual( c, { "passed_count": 2, "failed_count": 1, "error_count": 0 } )
+
+    def test_name_alone_is_not_a_summary( self ):
+        c = tr._parse_pytest_summary( "test_a.py::test_7 passed FAILED\n3 failed" )
+        self.assertEqual( c, { "passed_count": 0, "failed_count": 0, "error_count": 0 } )
 
 
 def _fake_proc( stdout_bytes ):
@@ -73,7 +81,7 @@ class TestRunPytest( unittest.TestCase ):
         self.assertEqual( result.total_tests, 0 )
 
     def test_output_truncation( self ):
-        big = b"x" * 5000 + b"\n10 passed"
+        big = b"x" * 5000 + b"\n10 passed in 0.5s"
         proc = _fake_proc( big )
         with patch.object( tr.asyncio, "create_subprocess_exec", AsyncMock( return_value=proc ) ):
             result = _run( tr.run_pytest( "tests/", max_output=100 ) )

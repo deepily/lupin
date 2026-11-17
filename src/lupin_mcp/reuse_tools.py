@@ -366,8 +366,27 @@ def _packed_settings( top ):
         raise ReuseError( "BAD_SPEND_LIMIT", f"a packed live run needs {CEILING_VARIABLE} (a positive whole number of tokens)" )
     run  = os.environ.get( RUN_NAME_VARIABLE ) or reuse_ledger.make_run_name( LOOKUP_RUN_PREFIX )
     path = os.environ.get( LEDGER_VARIABLE ) or reuse_ledger.ledger_path( top )
+    _refuse_drifted_ledger( path )
     return { "pack_size": size, "sweeper": reuse_pack.packed_sweeper( size, shape=reuse_pack.SHAPE_WHOLE ), "request_shape": reuse_pack.SHAPE_WHOLE, "token_ceiling": ceiling,
              "run_name": run, "ledger": reuse_ledger.AccountLedger( path ), "single_use": True, "candidate_stage": _candidate_stage( top ) }
+
+
+def _refuse_drifted_ledger( path ):
+    """
+    Refuse a run whose ledger limit differs from the INI key.
+
+    Ensures:
+        - returns None when the key and the ledger agree; runs before the run asks the ledger to admit it, so nothing is spent
+        - returns None for a ledger that does not exist, so begin_run refuses it with LedgerUnreadable as before
+    Raises:
+        - ReuseError LEDGER_DRIFT naming the key and both numbers when they differ
+    """
+    if not os.path.exists( path ): return
+    from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.repo import code_health_settings as chs
+    from lupin_mcp import reuse_ledger_sync
+    try: reuse_ledger_sync.check_repo( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ), chs.DEFAULT_REPO, path )
+    except reuse_ledger_sync.LedgerDrift as e: raise ReuseError( "LEDGER_DRIFT", str( e ) ) from e
 
 
 def _candidate_stage( top ):
@@ -379,6 +398,8 @@ def _candidate_stage( top ):
         - the stage's arm is the INI key `reuse candidate shortlist arm` or its override variable, and the concat-vector default arm when neither is set
         - the server address and key are the ones the embeddings client resolves, pinned to the FastAPI server
         - the stage refreshes a vector set that is behind the index before a lookup, through candidate_build.run under its build lock
+        - the stage expands each need first only when the INI key `reuse candidate need expansion enabled` or its override variable reads true; the shipped key is true; with it false the stage is built as it always was
+        - the key `reuse candidate need expansion protected head` is read only when the switch is on; with the switch off it is never read
 
     Raises:
         - ReuseError CANDIDATE_STAGE_UNCONFIGURED naming the storage error when a key is missing
@@ -386,19 +407,23 @@ def _candidate_stage( top ):
     from cosa.memory.embedding_provider import EmbeddingProvider
     from cosa.repo.symindex.candidates import storage_paths, vector_build
     from cosa.repo.symindex.candidates.errors import CandidateError
-    from lupin_mcp import reuse_candidates
+    from lupin_mcp import reuse_candidates, reuse_expansion
     try:
         data     = data_dir( top )
         vectors  = storage_paths.candidate_dir( "vectors", data )
         cache    = storage_paths.candidate_dir( "query_cache", data )
         purposes = storage_paths.candidate_dir( "purpose", data ) / "purpose.jsonl"
         arm      = storage_paths.shortlist_arm( reuse_candidates.DEFAULT_ARM )
+        size     = storage_paths.shortlist_size()
+        expand   = storage_paths.need_expansion_enabled()
+        head     = storage_paths.need_expansion_protected_head() if expand else None
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_UNCONFIGURED", str( e ) ) from e
     base_url, api_key, _prefix = EmbeddingProvider._resolve_http_target( True )
 
-    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, arm=arm,
-                                            refresher=make_refresher( top, vector_build.EndpointClient(), os.environ ) )
+    expander = reuse_expansion.make_expander() if expand else None
+    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, K=size, arm=arm,
+                                            refresher=make_refresher( top, vector_build.EndpointClient(), os.environ ), expander=expander, protected_head=head )
 
 
 def make_refresher( top, client, environ, **run_kwargs ):
@@ -1446,13 +1471,24 @@ def _stage_in_language( stage, every, language ):
     return kept
 
 
+def _expansion_of( block ):
+    """
+    Name the expansion and protected head a block recorded, as keywords.
+
+    Ensures:
+        - returns the block's expansion and protected_head under those names, for each the block holds, and {} for a block with neither
+        - so a lookup that was not expanded calls the client with the arguments it always had
+    """
+    return { name: block[ name ] for name in ( "expansion", "protected_head" ) if name in block }
+
+
 def _widen( ctx, client, stage, routed, need, entries, every, whole, flags, policy, ranking_text, index_sha, exclude_id, language ):
     """
     Widen a lookup whose first sweep sat near a cut-off.
 
     Ensures:
         - returns ( routed, stage, error )
-        - asks the stage for WIDE_K with the first call's wiki list, so the first set is the head of the wider one
+        - asks the stage for WIDE_K with the first call's wiki list and expansion, so the first set is the head of the wider one and the expander is not asked twice
         - gives the stage the whole list of every language, as the first call did, so one index has one stage whatever the language asked
         - drops the wider set's ids of another language, as the first set's were dropped
         - a stage that fails answers the first sweep's decision with CALL_FAILED added, and error names the failure
@@ -1460,7 +1496,7 @@ def _widen( ctx, client, stage, routed, need, entries, every, whole, flags, poli
         - otherwise the stage dict gains K, widened and widened_ids, and routed holds both sweeps
     """
     try:
-        wide = client.shortlist( ranking_text, whole, index_sha, ctx.pages, exclude_id=exclude_id, K=WIDE_K, wiki_ids=stage[ "wiki_ids" ] )
+        wide = client.shortlist( ranking_text, whole, index_sha, ctx.pages, exclude_id=exclude_id, K=WIDE_K, wiki_ids=stage[ "wiki_ids" ], **_expansion_of( stage ) )
     except CandidateError as x:
         d = vd.decide( routed[ "sw" ][ "answers" ], [ e[ "id" ] for e in routed[ "deciding" ] ], routed[ "sw" ][ "failed" ], flags | { "CALL_FAILED" }, policy )
         return { **routed, "d": d }, stage, { "code": x.code, "detail": x.detail }
@@ -1483,6 +1519,7 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
         - an error block names it and holds no manifest hash, so a failed stage never claims a vector set
         - ranking_text and wiki_ids are the two inputs a replay cannot rebuild from the snapshot
         - a widened run records K as the wide size, the extra ids as widened_ids, and a failed widening as widen_error
+        - a lookup that was expanded records the expansion and the protected head, the other inputs a replay cannot rebuild; a lookup without one adds no key
         - a lookup that refreshed the vector set, or answered from a stale one, records freshness: the state, and for a stale set the
           error, the count of lost ids and the note "answered from a stale set, N ids lost"; a fresh set adds no key
     """
@@ -1494,6 +1531,8 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
             "ids": stage[ "ids" ], "widened_ids": stage[ "widened_ids" ] if "widened_ids" in stage else [], "ranking_hash": stage[ "ranking_hash" ],
             "stage_key": stage[ "stage_key" ], "wiki": stage[ "wiki" ], "wiki_ids": stage[ "wiki_ids" ] }
     if widen_error is not None: out[ "widen_error" ] = widen_error
+    if "expansion" in stage: out[ "expansion" ] = stage[ "expansion" ]
+    if "protected_head" in stage: out[ "protected_head" ] = stage[ "protected_head" ]
     if "freshness" in stage and stage[ "freshness" ][ "state" ] in ( "refreshed", "stale" ): out[ "freshness" ] = stage[ "freshness" ]
     return out
 
@@ -1514,7 +1553,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
         - `prepared` is the result of prepare(), when the caller already has it
         - with sweep_only the receipt records sweep_only and exclude_id, and both are part of its id
         - with write=False nothing is stored (used by replay at HEAD)
-        - a check_exists question on a context with a candidate stage asks the shortlist's entries only (route "candidates"), and the
+        - a check_exists or fetch_similar question on a context with a candidate stage asks the shortlist's entries only (route "candidates"), and the
           receipt's candidate_stage says how many entries were asked, how many were not and why
         - a failed candidate stage answers UNCERTAIN_READ_SOURCE with cause CALL_FAILED and no sweep; the receipt's candidate_stage.error names it
         - question "provides" asks the Noul and Score pair on the packed path: one sweep of every entry, no candidate stage,
@@ -1539,7 +1578,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if tool == "check_exists" and query == need: query = sent
     elif tool == "check_exists": query = reuse_redact.redact_need( query, routes )[ 0 ]
     need = sent
-    staged = ctx.candidate_stage if tool == "check_exists" and not sweep_only and not pair else None     # fetch_similar lists neighbours, so it sweeps every entry
+    staged = ctx.candidate_stage if tool in ( "check_exists", "fetch_similar" ) and not sweep_only and not pair else None     # a full sweep of the index is 200 packs and spends the lookup ceiling after 3 (row 4e6d795d)
     need_text = need if tool == "fetch_similar" and need != query and not any( e[ "id" ] == query for e in entries ) else None     # a private definition: the snapshot cannot give its text back
     whole   = entries                                                            # the stage holds the whole index of every language, and its key is built from this list
     entries = in_language( entries, language )                                    # after need_text: that test looks the query up among every language
@@ -1838,7 +1877,7 @@ def _frozen_candidate_ids( ctx, stored, entries, left_out, language ):
     try:
         if client.manifest()[ "manifest_hash" ] != cs[ "manifest_hash" ]:
             raise ReuseError( "VECTOR_SET_REPLACED", f"the vector set on disk is not {cs[ 'manifest_hash' ][ :12 ]}" )
-        fresh = client.shortlist( cs[ "ranking_text" ], entries, stored[ "index_sha" ], [], exclude_id=left_out, cache_only=True, wiki_ids=cs[ "wiki_ids" ] )
+        fresh = client.shortlist( cs[ "ranking_text" ], entries, stored[ "index_sha" ], [], exclude_id=left_out, cache_only=True, wiki_ids=cs[ "wiki_ids" ], **_expansion_of( cs ) )
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_FAILED", str( e ) ) from e
     wide = cs[ "widened_ids" ] if "widened_ids" in cs else []

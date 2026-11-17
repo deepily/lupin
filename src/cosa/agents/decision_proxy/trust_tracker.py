@@ -19,9 +19,11 @@ Dependency Rule:
 """
 
 import math
+from datetime import datetime, timezone
 import time
 from typing import Dict, List, Optional, Tuple
 
+from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
 from cosa.agents.decision_proxy.config import (
     DEFAULT_BETA_L2_RATE_THRESHOLD,
     DEFAULT_BETA_L3_RATE_THRESHOLD,
@@ -32,6 +34,9 @@ from cosa.agents.decision_proxy.config import (
     DEFAULT_BETA_L4_MIN_SAMPLES,
     DEFAULT_BETA_L5_MIN_SAMPLES,
 )
+
+
+BLR_MIN_OBSERVATIONS = 30   # decisions, and observations of the BLR model itself, before its posterior sets the level
 
 
 class CategoryTrust:
@@ -106,6 +111,11 @@ class CategoryTrust:
         # BLR state (lazy-initialized on first record_decision_with_features call)
         self._blr_model = None
 
+        # A recorded circuit-breaker trip: the demoted level and the success total when it happened.
+        # None means no trip; while one is active the level cannot exceed trip_level (see trip_active).
+        self.trip_level     = None
+        self.trip_successes = None
+
     @property
     def level( self ):
         """
@@ -117,13 +127,46 @@ class CategoryTrust:
         Ensures:
             - Returns 1 if below level 2 threshold
             - Returns highest level where threshold is met
-            - Capped at cap_level
+            - Capped at cap_level, and at trip_level while a recorded trip is active
         """
         if self.trust_model == "blr":
-            return self._level_blr()
-        if self.trust_model == "beta":
-            return self._level_beta()
-        return self._level_count_based()
+            computed = self._level_blr()
+        elif self.trust_model == "beta":
+            computed = self._level_beta()
+        else:
+            computed = self._level_count_based()
+        return min( computed, self.trip_level ) if self.trip_active() else computed
+
+    def trip_active( self ):
+        """
+        Say whether a recorded circuit-breaker trip still caps the level.
+
+        Ensures:
+            - returns False when no trip is recorded or the demoted level is already the top level
+            - returns True until total_successes has grown past the trip total by the gap
+            - the gap is the next level's threshold minus the demoted level's own
+            - successes before the trip do not count
+
+        Notes:
+            The demotion pruned the history down to the demoted level's threshold,
+            so the category earns the cap back with new successes.
+        """
+        if self.trip_level is None or self.trip_level >= 5: return False
+
+        gap = self.thresholds[ self.trip_level + 1 ] - self.thresholds.get( self.trip_level, 0 )
+        return ( self.total_successes - self.trip_successes ) < gap
+
+    def trip_state( self ):
+        """
+        Return the trip as a plain dict for storage, or None when none is active.
+
+        Ensures:
+            - returns {"status": "tripped", "tripped_level", "successes_at_trip"} while the trip is active
+            - the status key is what the admin dashboard reads; without it a stored trip shows as closed
+            - returns None otherwise, which clears a stored trip
+        """
+        if not self.trip_active(): return None
+        return { "status": "tripped", "tripped_level": self.trip_level, "successes_at_trip": self.trip_successes }
 
     def _level_count_based( self ):
         """
@@ -139,6 +182,31 @@ class CategoryTrust:
 
         for lvl in ( 2, 3, 4, 5 ):
             if effective_count >= self.thresholds[ lvl ]:
+                computed_level = lvl
+            else:
+                break
+
+        return min( computed_level, self.cap_level )
+
+    def _level_from_rate( self, rate, n ):
+        """
+        Pick the trust level a success rate and an observation count earn.
+
+        A level needs both its rate threshold and its minimum sample count, and the climb stops at the first level that misses either.
+
+        Requires:
+            - rate is the number the caller judges: the Beta lower bound or the BLR posterior mean
+            - n is the number of observations behind it
+
+        Ensures:
+            - returns the highest level from 2 to 5 whose rate_thresholds and min_samples both hold, else 1
+            - never returns more than cap_level
+        """
+        computed_level = 1
+        for lvl in ( 2, 3, 4, 5 ):
+            rate_ok    = rate >= self.rate_thresholds[ lvl ]
+            samples_ok = n >= self.min_samples[ lvl ]
+            if rate_ok and samples_ok:
                 computed_level = lvl
             else:
                 break
@@ -167,24 +235,14 @@ class CategoryTrust:
         # 95% credible interval lower bound
         lower_bound = beta_dist.ppf( 0.05, alpha, beta )
 
-        computed_level = 1
-        for lvl in ( 2, 3, 4, 5 ):
-            rate_ok    = lower_bound >= self.rate_thresholds[ lvl ]
-            samples_ok = n >= self.min_samples[ lvl ]
-            if rate_ok and samples_ok:
-                computed_level = lvl
-            else:
-                break
-
-        return min( computed_level, self.cap_level )
+        return self._level_from_rate( lower_bound, n )
 
     def _level_blr( self ):
         """
-        BLR trust level computation.
+        BLR trust level from the posterior mean rate.
 
-        Uses BayesianLogisticRegression.posterior_mean_rate() as a
-        conservative rate estimate. Falls back to Beta-Bernoulli if
-        fewer than 30 observations or BLR model not yet initialized.
+        Falls back to Beta-Bernoulli when there are fewer than BLR_MIN_OBSERVATIONS decisions or no model.
+        It also falls back when the model has fewer observations of its own, as after a demotion.
 
         Returns:
             int: Trust level 1-5
@@ -192,29 +250,21 @@ class CategoryTrust:
         n = self.total_decisions
 
         # Fall back to Beta if insufficient data or no BLR model
-        if n < 30 or self._blr_model is None:
+        if n < BLR_MIN_OBSERVATIONS or self._blr_model is None or self._blr_model.n_observations < BLR_MIN_OBSERVATIONS:
             return self._level_beta()
 
         rate = self._blr_model.posterior_mean_rate()
 
-        computed_level = 1
-        for lvl in ( 2, 3, 4, 5 ):
-            rate_ok    = rate >= self.rate_thresholds[ lvl ]
-            samples_ok = n >= self.min_samples[ lvl ]
-            if rate_ok and samples_ok:
-                computed_level = lvl
-            else:
-                break
-
-        return min( computed_level, self.cap_level )
+        return self._level_from_rate( rate, n )
 
     @staticmethod
-    def build_feature_vector( question, category_index, hour_of_day=None ):
+    def build_feature_vector( question, category_index, hour_of_day=None, recent_error_rate=0.0 ):
         """
         Build a 4-dimensional feature vector for BLR.
 
         Features, all in [0, 1]: 0 category_index / 6.0, 1 min( word_count / 50, 1.0 ),
-        2 hour_of_day / 24.0. Feature 3 is recent_error_rate, a 0.0 placeholder the caller fills.
+        2 hour_of_day / 24.0, 3 recent_error_rate from CategoryTrust.recent_error_rate().
+        Feature 0 is constant inside one CategoryTrust and acts as a second bias term.
 
         Requires:
             - question is a string
@@ -224,6 +274,7 @@ class CategoryTrust:
             question: Question text for word count
             category_index: Ordinal category index (0-5)
             hour_of_day: Hour of day (0-23), defaults to current hour
+            recent_error_rate: Share of recent decisions rejected, in [0, 1] (default 0.0)
 
         Returns:
             numpy array of shape (4,)
@@ -240,8 +291,24 @@ class CategoryTrust:
             category_index / 6.0,
             min( word_count / 50.0, 1.0 ),
             hour_of_day / 24.0,
-            0.0,  # Placeholder — caller should set error_rate
+            recent_error_rate,
         ] )
+
+    def recent_error_rate( self, window=20 ):
+        """
+        Share of the most recent decisions that were rejected.
+
+        Requires:
+            - window is a positive integer
+
+        Ensures:
+            - returns a float in [0, 1]
+            - looks at the latest window entries of the rolling history, by timestamp
+            - returns 0.0 when the history is empty
+        """
+        recent = sorted( self.decisions, key=lambda d: d[ 0 ] )[ -window: ]
+        if not recent: return 0.0
+        return sum( 1 for _, ok in recent if not ok ) / len( recent )
 
     def record_decision_with_features( self, success, feature_vector, timestamp=None ):
         """
@@ -333,8 +400,7 @@ class CategoryTrust:
 
     def _prune_rolling_window( self ):
         """Remove decisions older than the rolling window."""
-        cutoff = time.time() - ( self.rolling_window_days * 86400 )
-        self.decisions = [ ( t, s ) for t, s in self.decisions if t >= cutoff ]
+        self.decisions = prune_window( self.decisions, time.time(), self.rolling_window_days * 86400, stamp=lambda decision: decision[ 0 ] )
 
     def _effective_decision_count( self ):
         """
@@ -364,12 +430,14 @@ class CategoryTrust:
         """
         Demote trust level by removing oldest decisions.
 
-        This effectively drops the effective count below a lower threshold.
+        The "beta" and "blr" models read counters, so those are lowered too (_shed_totals_to).
 
         Args:
             levels: Number of levels to demote (default: 1)
         """
         target_level = max( 1, self.level - levels )
+
+        if self.trust_model != "count": self._shed_totals_to( target_level )
 
         if target_level <= 1:
             # Drop to L1: clear all history
@@ -393,6 +461,33 @@ class CategoryTrust:
                 successes_kept += 1
 
         self.decisions = pruned
+
+    def _shed_totals_to( self, target_level ):
+        """
+        Lower the success counter until the Beta level is no higher than target_level.
+
+        Requires:
+            - trust_model is "beta" or "blr"
+            - target_level is 1-5
+
+        Ensures:
+            - total_successes becomes the largest value whose Beta level is at most target_level
+            - total_rejections is unchanged, and total_decisions is kept equal to the two counters' sum
+            - the BLR model is dropped, because its posterior cannot be un-updated; the level then
+              falls back to the Beta level until the BLR model is rebuilt by new decisions
+            - the level is computed without the trip cap, which the caller applies
+        """
+        self._blr_model = None
+
+        low, high = 0, self.total_successes
+        while low < high:
+            mid = ( low + high + 1 ) // 2
+            self.total_successes = mid
+            if self._level_beta() <= target_level: low = mid
+            else: high = mid - 1
+
+        self.total_successes = low
+        self.total_decisions = low + self.total_rejections
 
     def to_dict( self ):
         """Serialize state for persistence."""
@@ -496,6 +591,87 @@ class TrustTracker:
 
         if self.debug: print( f"[TrustTracker] Registered category: {category_name} (cap L{cap_level}, model={self.trust_model})" )
 
+    def restore_category( self, category_name, successes, rejections, as_of, trip=None, history=None, blr_state=None ):
+        """
+        Restore a category's counters and rolling history from stored totals.
+
+        A row written before the history column existed has no per-day history. Every restored
+        decision is then stamped with the row's last-update time and decays from there. With
+        history, each day's decisions are stamped with that day, so old ones decay and age out.
+
+        Requires:
+            - successes and rejections are non-negative ints
+            - as_of is an epoch timestamp in seconds
+            - trip is the stored trip dict ("tripped_level", "successes_at_trip"), or None for no trip
+            - history is the stored {"YYYY-MM-DD": [approved, rejected]} dict (UTC days), or None
+            - blr_state is a stored BayesianLogisticRegression.to_dict() dict, or None
+
+        Ensures:
+            - returns True and sets the totals when the category is registered and empty
+            - a stored trip caps the restored level until it is earned back (see trip_active), so a
+              demotion, which changes the stored level but not the counters, survives the reload
+            - with no stored trip the level is whatever the counters earn, so a category can climb
+            - the rolling history gains one entry per restored decision, stamped as_of, or, when
+              history is given, one entry per decision in it, stamped with its UTC day; totals older
+              than the history are counted but not in the rolling history
+            - the BLR model is rebuilt from blr_state only when the tracker's trust model is "blr";
+              the "count" and "beta" models ignore it
+            - returns False and changes nothing when the category is unknown or already has decisions
+        """
+        cat = self.categories.get( category_name )
+        if cat is None or cat.total_decisions: return False
+
+        cat.total_successes  = successes
+        cat.total_rejections = rejections
+        cat.total_decisions  = successes + rejections
+        if history is None:
+            cat.decisions = [ ( as_of, True ) ] * successes + [ ( as_of, False ) ] * rejections
+        else:
+            cat.decisions = []
+            for day, ( approved, rejected ) in sorted( history.items() ):
+                stamp = datetime.strptime( day, "%Y-%m-%d" ).replace( tzinfo=timezone.utc ).timestamp()
+                cat.decisions += [ ( stamp, True ) ] * approved + [ ( stamp, False ) ] * rejected
+        if trip is not None:
+            cat.trip_level     = trip[ "tripped_level" ]
+            cat.trip_successes = trip[ "successes_at_trip" ]
+        if blr_state is not None and self.trust_model == "blr":
+            from cosa.agents.decision_proxy.bayesian_trust import BayesianLogisticRegression
+            cat._blr_model = BayesianLogisticRegression.from_dict( blr_state )
+        cat._prune_rolling_window()
+        return True
+
+    def blr_state_for( self, category_name ):
+        """
+        Serialize a category's BLR model for storage.
+
+        Requires:
+            - category_name is a string
+
+        Ensures:
+            - returns the model's to_dict() when the trust model is "blr" and the category has a model
+            - returns None for the "count" and "beta" models, an unknown category, or a category with no model yet
+        """
+        cat = self.categories.get( category_name )
+        if self.trust_model != "blr" or cat is None or cat._blr_model is None: return None
+        return cat._blr_model.to_dict()
+
+    def record_trip( self, category_name ):
+        """
+        Record that a circuit-breaker trip just demoted a category.
+
+        Requires:
+            - the demotion has already been applied
+
+        Ensures:
+            - the category remembers its demoted level and success total, so the cap can outlive this tracker
+            - an unknown category changes nothing
+        """
+        cat = self.categories.get( category_name )
+        if cat is None: return
+
+        cat.trip_level     = cat.level
+        cat.trip_successes = cat.total_successes
+
     def get_level( self, category_name ):
         """
         Get current trust level for a category.
@@ -552,6 +728,41 @@ class TrustTracker:
             print( f"[TrustTracker] {category_name}: {direction} L{old_level} -> L{new_level}" )
 
         return new_level
+
+    def record_decision_with_features( self, category_name, success, question, timestamp=None ):
+        """
+        Record a decision outcome and feed the category's BLR model.
+
+        Requires:
+            - category_name is a registered category
+            - success is a bool
+            - question is a string
+
+        Ensures:
+            - Builds the 4-feature vector from the question, the category's registration
+              position, and the category's recent error rate before this decision
+            - Updates the category's history and its BLR model
+            - Returns 1 for an unknown category, and records nothing
+
+        Args:
+            category_name: Category name
+            success: True if ratified, False if rejected
+            question: Question text the feature vector is built from
+            timestamp: Optional epoch timestamp
+
+        Returns:
+            int: New trust level after recording
+        """
+        cat = self.categories.get( category_name )
+        if cat is None:
+            if self.debug: print( f"[TrustTracker] Unknown category: {category_name}" )
+            return 1
+
+        features = CategoryTrust.build_feature_vector(
+            question, list( self.categories ).index( category_name ), recent_error_rate=cat.recent_error_rate()
+        )
+        cat.record_decision_with_features( success, features, timestamp )
+        return cat.level
 
     def demote_category( self, category_name, levels=1 ):
         """

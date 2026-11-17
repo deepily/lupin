@@ -6,7 +6,7 @@ import asyncio
 import concurrent.futures
 
 import cosa.utils.util as du
-from cosa.agents.base_llm_client import LlmClientInterface
+from cosa.agents.base_llm_client import LlmClientInterface, collect_stream_text
 from cosa.agents.llm_completion import LlmCompletion
 from cosa.agents.token_counter import TokenCounter
 
@@ -121,22 +121,9 @@ class CompletionClient( LlmClientInterface ):
         Returns:
             - Complete response string from the LLM
         """
-        output = [ ]
-        
         # Note: LlmCompletion may not have the same streaming interface as Agent
         # This would need to be adapted based on the actual LlmCompletion implementation
-        async with self.model.run_stream( prompt, timeout=timeout, **generation_args ) as result:
-            counter = 0
-            async for chunk in result.stream_text( delta=True ):
-                if self.debug and self.verbose:
-                    print( chunk, end="", flush=True )
-                else:
-                    counter += 1
-                    if counter % 128 == 0: print()
-                    print( ".", end="", flush=True )
-                output.append( chunk )
-            print()
-        return "".join( output )
+        return await collect_stream_text( self.model.run_stream( prompt, timeout=timeout, **generation_args ), self.debug, self.verbose, newline_after=True )
     
     async def run_async( self, prompt: str, stream: bool = False, timeout: Optional[ float ] = None, **kwargs: Any ) -> str:
         """

@@ -41,7 +41,7 @@ def _ctx( failures, **over ):
 
 
 # ============================================================================
-# prompts.cluster (stub)
+# prompts.cluster, a stub
 # ============================================================================
 class TestClusterStub:
     def test_system_prompt_stub_present( self ):

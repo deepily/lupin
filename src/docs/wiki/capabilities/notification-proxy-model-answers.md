@@ -1,15 +1,18 @@
 ---
 capability: notification-proxy-model-answers
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.notification_proxy.xml_models.BatchScriptMatcherResponse@6b34503626
-  - cosa.agents.notification_proxy.xml_models.ScriptMatcherResponse@655ee3d7ce
-  - cosa.agents.notification_proxy.xml_models.VerificationResponse@caf9c04e2a
-  - cosa.agents.notification_proxy.verification.LlmAnswerVerifier@dd138e349b
+  - cosa.agents.notification_proxy.xml_models.BatchScriptMatcherResponse@a132c19cc4
+  - cosa.agents.notification_proxy.xml_models.ScriptMatcherResponse@a3d3d4b496
+  - cosa.agents.notification_proxy.xml_models.VerificationResponse@0f500a6a82
+  - cosa.agents.notification_proxy.verification.LlmAnswerVerifier@829b30f0e2
   - cosa.agents.notification_proxy.verification.NoReplyVerification@0406d731f6
-  - cosa.agents.notification_proxy.strategies.llm_fallback.LLMFallbackStrategy@863d4c0152
+  - cosa.agents.notification_proxy.strategies.llm_fallback.LLMFallbackStrategy@c7e47f3910
   - cosa.agents.notification_proxy.strategies.llm_script_matcher.resolve_script_path@8d143f4375
   - cosa.agents.notification_proxy.strategies.llm_script_matcher.strip_surrounding_quotes@2f2b54575d
+  - cosa.agents.io_models.utils.number_fields.float_or_zero@94843d2cd3
+  - cosa.agents.io_models.utils.number_fields.clamp_unit@0373d177ff
+  - cosa.agents.llm_client_init.init_llm_client@a8ac2aa59f
 ---
 # Notification proxy model answers
 

@@ -1,6 +1,6 @@
 ---
 capability: auth-page-helpers
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.js.auth.showError@4fa3f660ea
   - src.lupin_app.static.html.auth.js.auth.hideError@a529e64e19

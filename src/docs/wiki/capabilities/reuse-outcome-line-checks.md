@@ -1,6 +1,6 @@
 ---
 capability: reuse-outcome-line-checks
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_outcome.parse_outcomes@9acf747324
   - lupin_mcp.reuse_outcome.unparsed_outcome_lines@119d9a2b7d
@@ -9,6 +9,7 @@ pins:
   - lupin_mcp.reuse_outcome.log_refusals@e0a61bbd82
   - lupin_mcp.reuse_outcome.pairing_refusals@fddd31904e
   - lupin_mcp.reuse_outcome.missing_outcome_refusals@a6d7d69b8a
+  - lupin_mcp.reuse_outcome.missing_searched_refusals@a500b6b684
 ---
 # Reuse: the REUSE-OUTCOME line and its checks
 `lupin_mcp.reuse_outcome` reads the `REUSE-OUTCOME` lines of a review or plan document and checks them. A line ties a lookup to what the diff did with it. The gate that calls it is in [[reuse-merge-gate]]. The run over one whole document, with its record, is in [[reuse-refusals-record]]. It is handed what the log readers return and reads no log itself.
@@ -27,3 +28,4 @@ pins:
 - `log_refusals` refuses a receipt that is not a clean `check_exists` or `fetch_similar` call in the log. It also refuses a search that is not a `record_search` on that receipt. The reason says "not in the log". It warns that a failed log write looks the same.
 - `pairing_refusals` requires the outcome kind to pair with a ruling on the same receipt: `DUPLICATE` with `REUSED`, `EXTEND` with `EXTENDED`, `DISTINCT` with `WROTE_NEW`. A receipt no ruling cites is refused.
 - `missing_outcome_refusals( added, outcomes, rulings )` returns `{ symbol, reason }` for each new definition with no outcome line. A definition counts as covered through a ruling that cites a receipt an outcome line cites. An `excluded` line covers the symbol it names.
+- `missing_searched_refusals( rulings, searched )` returns `{ symbol, reason }` for each ruled definition that has no `SEARCHED` line (a `none` line counts). `searched` is `reuse_exit_gate.parse_searched` over the same added documents.

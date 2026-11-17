@@ -7,8 +7,9 @@ document linked_doc, and its key holds the seeded span as text. The harness want
 the gate split or a gate key, so an implementer's run cannot open them by accident.
 """
 
-import json
 import os
+
+from cosa.utils.jsonl_file import read_jsonl as _read_jsonl
 
 
 def refuse_gate_path( path ):
@@ -29,12 +30,6 @@ def refuse_gate_path( path ):
         for part in candidate.split( os.sep ):
             if part == "gate" or part.startswith( "gate-" ):
                 raise ValueError( f"{path} names the gate split; only the dev split may be opened here" )
-
-
-def _read_jsonl( path ):
-    """Return the records of a JSON Lines file, skipping blank lines."""
-    with open( path, encoding="utf-8" ) as f:
-        return [ json.loads( line ) for line in f if line.strip() ]
 
 
 def load_pairs( pairs_path, keys_path, gate=False ):

@@ -53,6 +53,7 @@ if src_path not in sys.path:
 from lupin_app.bootstrap_helpers import ( assert_lupin_root_valid, reload_enabled as _reload_enabled,
                                           register_sigusr1_faulthandler, reload_kwargs as _reload_kwargs )
 from cosa.rest.error_envelope import make_unhandled_exception_handler
+from lupin_mcp import cron_switch_read
 from lupin_app.lifespan_steps import ( record_clean_shutdown, cancel_background_task, shutdown_fcm_wake, drain_agentic_pool,
                                        stop_consumer_thread, cancel_peer_watchers, stop_commons_watcher,
                                        print_migration_banner, build_snapshot_manager_config, recover_interrupted_jobs,
@@ -88,7 +89,7 @@ from cosa.rest import task_store_change_notifier
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_drive, podcast_generator, podcast_proxy, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask, cc_transcript, heartbeat, reuse_candidates, pair_labelling
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_drive, podcast_generator, podcast_proxy, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask, cc_transcript, heartbeat, reuse_candidates, pair_labelling, duplicate_check_status, job_summary, cron_jobs
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs, record_server_available
 
@@ -147,113 +148,6 @@ consumer_thread = None
 websocket_heartbeat_task = None
 websocket_cleanup_task = None
 notification_sweep_task = None
-
-# ============================================================================
-# DEPRECATED: Legacy emit_speech infrastructure (Session 97)
-# Queue classes now use notification service directly via _notify() method
-# Keeping commented for reference during migration verification
-# TODO: Remove after migration verified stable (target: Session 100+)
-# ============================================================================
-# async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ) -> None:
-#     """
-#     [DEPRECATED] Generate TTS speech and emit via WebSocket to specific user or broadcast.
-#
-#     Replaced by: Notification service with _notify() method in queue classes
-#     Reason: Migration to notification service for job_id routing, blocking queries, and suppress_ding
-#
-#     Requires:
-#         - websocket_manager must be initialized and running
-#         - msg must be a non-empty string
-#         - user_id or websocket_id must be valid if provided
-#
-#     Ensures:
-#         - TTS job request is emitted via WebSocket to target recipient
-#         - No exceptions are propagated to caller (errors are logged)
-#         - Speech data includes text and timestamp
-#
-#     Args:
-#         msg: The text message to be converted to speech
-#         user_id: User ID for user-specific routing (preferred method)
-#         websocket_id: Optional websocket identifier for backwards compatibility
-#
-#     Returns:
-#         None
-#
-#     Raises:
-#         No exceptions raised - all errors are caught and logged
-#     """
-#     print( f"[SPEECH] emit_speech called:" )
-#     print( f"  - Message: '{msg}'" )
-#     print( f"  - User ID: {user_id if user_id else 'none'}" )
-#     print( f"  - WebSocket ID: {websocket_id if websocket_id else 'none'}" )
-#
-#     try:
-#         # Emit speech_update event to trigger TTS in browser
-#         speech_data = {
-#             "text": msg,
-#             "timestamp": datetime.now().isoformat()
-#         }
-#
-#         if user_id and user_id != "ricardo_felipe_ruiz_6bdc":
-#             # Emit to specific user (preferred method)
-#             await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
-#             print( f"[SPEECH] Emitted tts_job_request to user {user_id}" )
-#         elif user_id == "ricardo_felipe_ruiz_6bdc":
-#             # Default user - still use user-based routing
-#             await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
-#             print( f"[SPEECH] Emitted tts_job_request to default user {user_id}" )
-#         elif websocket_id:
-#             # Backwards compatibility: Emit to specific session
-#             await websocket_manager.emit_to_session( websocket_id, "tts_job_request", speech_data )
-#             print( f"[SPEECH] Emitted tts_job_request to session {websocket_id} (backwards compatibility)" )
-#         else:
-#             # Fallback: Broadcast to all connected clients
-#             await websocket_manager.async_emit( "tts_job_request", speech_data )
-#             print( f"[SPEECH] Broadcasted tts_job_request to all connections (fallback)" )
-#
-#     except Exception as e:
-#         print( f"[SPEECH] Error emitting speech: {e}" )
-#         # Don't raise - this shouldn't break the calling flow
-#
-#
-# def create_emit_speech_callback():
-#     """
-#     [DEPRECATED] Creates a sync wrapper for the async emit_speech function with user-based routing.
-#
-#     Replaced by: Notification service - queue classes use _notify() directly
-#
-#     Requires:
-#         - No preconditions
-#
-#     Ensures:
-#         - Returns a callable synchronous wrapper function
-#         - Wrapper function runs emit_speech in isolated thread with own event loop
-#         - Thread execution is non-blocking and daemon-enabled
-#
-#     Args:
-#         None
-#
-#     Returns:
-#         function: Synchronous wrapper function that accepts (msg, user_id, websocket_id) parameters
-#
-#     Raises:
-#         No exceptions raised - wrapper function handles all errors internally
-#     """
-#     def sync_emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ):
-#         import threading
-#
-#         def run_in_thread():
-#             try:
-#                 # Run async function in isolated thread with its own event loop
-#                 asyncio.run( emit_speech( msg, user_id=user_id, websocket_id=websocket_id ) )
-#             except Exception as e:
-#                 print( f"[SPEECH] Error in speech thread: {e}" )
-#
-#         # Always run in separate thread to avoid event loop conflicts
-#         thread = threading.Thread( target=run_in_thread, daemon=True )
-#         thread.start()
-#         print( f"[SPEECH] Started speech emission thread for: '{msg}' (user: {user_id})" )
-#     return sync_emit_speech
 
 
 def _invalidate_snapshot_mgr():
@@ -358,6 +252,7 @@ async def websocket_heartbeat_loop():
         
     Ensures:
         - Performs heartbeat checks at configured intervals (default 30s)
+        - Checks the `cron job socket-housekeeping enabled` switch fresh from disk each tick; false skips the work, still sleeps
         - Removes dead connections automatically
         - Continues until cancelled or exception occurs
         
@@ -377,11 +272,12 @@ async def websocket_heartbeat_loop():
     )
     
     print( f"[WS-HEARTBEAT] Starting heartbeat loop with {interval}s interval" )
+    switch = cron_switch_read.for_job( "socket-housekeeping", print )
     
     while True:
         try:
-            # Run heartbeat check
-            dead_count = await websocket_manager.heartbeat_check()
+            # Run heartbeat check, unless the socket-housekeeping switch is off
+            dead_count = await websocket_manager.heartbeat_check() if switch.allowed() else 0
             
             if app_debug and app_verbose and dead_count > 0:
                 print( f"[WS-HEARTBEAT] Heartbeat removed {dead_count} dead connection(s)" )
@@ -409,6 +305,7 @@ async def websocket_cleanup_loop():
         
     Ensures:
         - Performs cleanup at configured intervals (default 1 hour)
+        - Checks the `cron job socket-housekeeping enabled` switch fresh from disk each tick; false skips the work, still sleeps
         - Removes stale sessions exceeding maximum age
         - Continues until cancelled or exception occurs
         
@@ -429,11 +326,12 @@ async def websocket_cleanup_loop():
     interval_seconds = interval_hours * 3600
     
     print( f"[WS-CLEANUP] Starting cleanup loop with {interval_hours} hour interval" )
+    switch = cron_switch_read.for_job( "socket-housekeeping", print )
     
     while True:
         try:
-            # Run cleanup
-            cleaned = await websocket_manager.auto_cleanup()
+            # Run cleanup, unless the socket-housekeeping switch is off
+            cleaned = await websocket_manager.auto_cleanup() if switch.allowed() else 0
             
             if app_debug and app_verbose and cleaned > 0:
                 print( f"[WS-CLEANUP] Cleaned {cleaned} stale session(s)" )
@@ -463,6 +361,8 @@ async def notification_expiry_sweep_loop():
         - a reachable notifications database
 
     Ensures:
+        - checks the `cron job notification-expiry enabled` switch fresh from disk before every
+          pass; a false or unreadable switch skips the pass, still sleeps, and keeps the loop alive
         - waits `notification grace period seconds` past expires_at before
           marking anything, so it never shortens the window in which a late
           human keypress is still honoured by /respond
@@ -492,9 +392,13 @@ async def notification_expiry_sweep_loop():
 
     print( f"[NOTIFY-SWEEP] Starting orphan sweep loop — every {interval_seconds}s, "
            f"grace {grace_seconds}s, batch {batch_limit}" )
+    switch = cron_switch_read.for_job( "notification-expiry", print )
 
     while True:
         try:
+            if not switch.allowed():
+                await asyncio.sleep( interval_seconds )
+                continue
             result = await asyncio.to_thread(
                 sweep_once, get_db, grace_seconds, batch_limit
             )
@@ -521,8 +425,7 @@ async def notification_expiry_sweep_loop():
 
 
 # ─── Managed-bounce broadcasts (R4 warning + R5 all-clear) ──────────────────
-# Design of record: src/rnd/v0.1.9/2026.08.01-managed-bounce-review-tiffany.md +
-# 2026.08.01-managed-bounce-for-7999.md Rev 2. Pure/injectable logic lives in
+# Pure/injectable logic lives in
 # cosa.rest.managed_bounce_broadcast; these thin wrappers bind it to the live
 # commons singletons (module globals set during startup).
 
@@ -1190,7 +1093,10 @@ app.include_router(dm.router)   # /api/dm/* — notification-native AI↔AI DM (
 app.include_router(v2_ask.router)   # /api/v2/ask — CJ Flow v2 unified ask endpoint (unit D)
 app.include_router(cc_transcript.router)   # /api/cc-transcript/* — the console-tee read-only stream (row 27760534)
 app.include_router(reuse_candidates.router)   # /api/reuse-candidates/* — the resident search of the reuse-lookup candidate stage (row d3f71441)
+app.include_router(duplicate_check_status.router)   # /api/duplicate-check/* and /app/duplicate-check — backlog, tokens and projected zero of the daily duplicate check (row 0d23e394)
 app.include_router(pair_labelling.router)   # /api/pair-labelling/* — a reviewer labels a blind duplicate-check pair packet in the browser (row ea45cf15)
+app.include_router(job_summary.router)   # /api/jobs/* — one endpoint for every background job: health summary and Run now (row efe188bf)
+app.include_router(cron_jobs.router)   # /api/cron-jobs — each scheduled job's INI on/off switch, flipped by an administrator (row 063fc1a8)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -1259,7 +1165,7 @@ if __name__ == "__main__":
     # Why not `reload_excludes`? Because it is INERT here. Verbatim from
     # uvicorn/supervisors/statreload.py:
     #
-    #     if config.reload_excludes or config.reload_includes:
+    #     if config.reload_excludes or config.reload_includes:  # doc-lint: waive commented-out-code -- verbatim quote of uvicorn's source, not our code
     #         logger.warning("--reload-include and --reload-exclude have no effect
     #                         unless watchfiles is installed.")
     #

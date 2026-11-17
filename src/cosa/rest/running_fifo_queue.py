@@ -1,4 +1,3 @@
-# from cosa.agents.math_refactoring_agent import MathRefactoringAgent
 from cosa.agents.receptionist_agent import ReceptionistAgent
 from cosa.agents.weather_agent import WeatherAgent
 from cosa.crud_for_dataframes.agent import CrudForDataFramesAgent
@@ -223,7 +222,6 @@ class RunningFifoQueue( FifoQueue ):
                     running_job = self._handle_solution_snapshot( running_job, truncated_question, run_timer )
             
             else:
-                # print( "No jobs to pop from todo Q " )
                 time.sleep( 1 )
     
     def _process_job( self, job: Any ) -> None:

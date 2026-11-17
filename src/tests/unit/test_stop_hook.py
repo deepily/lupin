@@ -202,41 +202,8 @@ class TestShouldAskAnythingElse:
 # TestClassifyQualifier — COMMENTED OUT
 # classify_qualifier() is commented out in stop.py because its synchronous
 # LLM call to phi4 exceeds Claude Code's stop hook subprocess timeout (~5-10s).
-# Preserved for future use in non-time-critical contexts.
+# The tests for it were deleted; recover them from the git history of this file.
 # ═════════════════════════════════════════════════════════════════════════════
-
-# class TestClassifyQualifier:
-#     """Tests for classify_qualifier() LLM intent classification."""
-#
-#     @patch( "cosa.agents.llm_client_factory.LlmClientFactory" )
-#     @patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor" )
-#     @patch( "cosa.utils.util.get_file_as_string", return_value="template {utterance}" )
-#     @patch( "cosa.utils.util.get_project_root", return_value="/mock/root" )
-#     @patch( "cosa.config.configuration_manager.ConfigurationManager" )
-#     def test_returns_question_classification( self, MockConfig, mock_root, mock_file,
-#                                                MockProcessor, MockFactory ):
-#         ...
-#
-#     @patch( "cosa.agents.llm_client_factory.LlmClientFactory" )
-#     @patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor" )
-#     @patch( "cosa.utils.util.get_file_as_string", return_value="template {utterance}" )
-#     @patch( "cosa.utils.util.get_project_root", return_value="/mock/root" )
-#     @patch( "cosa.config.configuration_manager.ConfigurationManager" )
-#     def test_returns_instruction_classification( self, MockConfig, mock_root, mock_file,
-#                                                   MockProcessor, MockFactory ):
-#         ...
-#
-#     def test_llm_failure_returns_none( self ):
-#         ...
-#
-#     @patch( "cosa.agents.llm_client_factory.LlmClientFactory" )
-#     @patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor" )
-#     @patch( "cosa.utils.util.get_file_as_string", return_value="template {utterance}" )
-#     @patch( "cosa.utils.util.get_project_root", return_value="/mock/root" )
-#     @patch( "cosa.config.configuration_manager.ConfigurationManager" )
-#     def test_xml_parse_error_returns_none( self, MockConfig, mock_root, mock_file,
-#                                             MockProcessor, MockFactory ):
-#         ...
 
 
 # ═════════════════════════════════════════════════════════════════════════════

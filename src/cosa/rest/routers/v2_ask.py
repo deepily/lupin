@@ -233,7 +233,7 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
     # The SAME key and the SAME default the v1 queue reads (todo_fifo_queue._crud_agents_enabled):
     # missing means enabled. resolve() applies the CRUD fork for every caller now, so the
     # flow has to know, and reading it anywhere else would let the two surfaces disagree.
-    crud_enabled      = config_mgr.get( "crud for dataframes agents enabled", default="true", return_type="string" ).strip().lower() == "true"
+    crud_enabled      = config_mgr.get( "crud for dataframes agents enabled", default="true", return_type="boolean" )
     # The same two keys the queue reads (todo_fifo_queue.__init__), so an agent built
     # by the flow gets the debug flags it would have got via push_job.
     auto_debug        = config_mgr.get( "debug auto",        default=False, return_type="boolean" )

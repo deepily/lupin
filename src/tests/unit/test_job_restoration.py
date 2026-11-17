@@ -188,7 +188,7 @@ class TestMarkInterruptedJobsLogic:
         future = "2026-04-08T03:00:00+00:00"  # 5 hours ahead
         past   = "2026-04-07T18:00:00+00:00"  # 4 hours ago
 
-        assert _is_future_scheduled( future, now ) is True    # preserve (future)
+        assert _is_future_scheduled( future, now ) is True    # preserved because it is in the future
         assert _is_future_scheduled( past, now ) is False     # interrupt (past, before downtime)
         assert _is_future_scheduled( None, now ) is False     # None → preserved by the immediate branch, not this helper
         assert _is_future_scheduled( "", now ) is False       # empty string → same as None

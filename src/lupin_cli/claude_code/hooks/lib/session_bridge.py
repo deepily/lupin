@@ -44,7 +44,7 @@ import uuid
 from pathlib import Path
 from typing import Optional, Tuple
 from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
-from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir, iter_bridge_paths
 
 # The module a spawned idle waiter runs as (`python -m ...`), so it is on its command line.
 _IDLE_WAITER_MODULE = "lupin_cli.claude_code.hooks.lib.idle_waiter"
@@ -112,7 +112,7 @@ def atomic_write_json( path, data ):
             # already landed, and mkstemp's hardcoded 0600 masks any dir ACL to
             # ---). Group-rw lets a cross-uid reader (container uid 1001 ⇄ host
             # OS-Login uid, sharing the sessions dir's setgid group) read+rewrite
-            # the bridge. See src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md.
+            # the bridge.
             os.fchmod( f.fileno(), 0o660 )
         os.replace( tmp, path )
         return True
@@ -326,7 +326,7 @@ def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
         # Find the LAST ")" to skip past comm field safely
         comm_end = stat_line.rindex( ")" )
         fields_after_comm = stat_line[comm_end + 2:].split()
-        # fields_after_comm[0] = state, fields_after_comm[1] = ppid
+        # the first field after the name is the state, the second is the parent pid
         gppid = int( fields_after_comm[1] )
         grandparent = SESSION_DIR / f"cc-{gppid}.json"
         if grandparent.exists():
@@ -805,7 +805,7 @@ def find_session_by_id( session_id, exact=False, check_pid=True ):
         - Returns None if no match or session_id is empty
         - exact=True: matches only on full-id equality (no prefix fallback)
         - exact=False (default): full-id or 8-char-prefix equality (legacy)
-        - Skips bridge files whose PID is dead, unless check_pid is False
+        - Skips bridge files whose PID is dead, unless check_pid is False or host pids cannot be trusted (inside a container); the live scan is `iter_live_bridges`, shared with `find_session_path_by_id`
         - Never raises exceptions
 
     Args:
@@ -819,21 +819,12 @@ def find_session_by_id( session_id, exact=False, check_pid=True ):
     if not session_id or not SESSION_DIR.exists():
         return None
 
-    paths = SESSION_DIR.glob( "cc-*.json" )
-    if not check_pid:
-        # Newest first, so the first match is the most recently written bridge.
-        paths = sorted( paths, key=_mtime_or_zero, reverse=True )
+    if check_pid:
+        hit = find_in_bridge_index( iter_live_bridges(), session_id, exact=exact )
+        return hit[ 1 ] if hit else None
 
-    for path in paths:
-        # Skip non-bridge files (buffers, listeners, etc.)
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
-        # PID liveness check
-        file_pid = _extract_pid_from_filename( path.name )
-        if check_pid and file_pid is not None and not _is_pid_alive( file_pid ):
-            continue
-
+    # No liveness check: newest first, so the first match is the most recently written bridge.
+    for path in sorted( iter_bridge_paths( SESSION_DIR ), key=_mtime_or_zero, reverse=True ):
         try:
             data = _load_bridge_object( path )
 
@@ -920,10 +911,7 @@ def iter_live_bridges():
     """
     trust_host_pids = _can_trust_host_pids()
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         if trust_host_pids:
             file_pid = _extract_pid_from_filename( path.name )
             if file_pid is not None and not _is_pid_alive( file_pid ):
@@ -1031,9 +1019,7 @@ def find_dead_sessions( candidate_ids ):
         return set()
 
     dead = set()
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
+    for path in iter_bridge_paths( SESSION_DIR ):
         try:
             data = _load_bridge_object( path )
         except ( json.JSONDecodeError, OSError ):
@@ -1186,7 +1172,7 @@ BRIDGE_FORMAT_VERSION = 2
 # is_manager_figure — "is this session's allocated persona one of the repo's
 # NAMED standing personas (COSA_VOICE_PREFERRED_PERSONA__<PROJECT>)?" — can ONLY
 # be answered where the caller's real environment lives: the SessionStart hook.
-# The server (tasks.py:652 G1 guard, and any future v2 experiment stratum
+# The server (the manager-only blocked-mint guard in tasks.py, and any future v2 experiment stratum
 # classifier) runs in the lupin-rest-dev container, whose env carries ZERO
 # COSA_VOICE_PREFERRED_PERSONA__* vars and LUPIN_ROOT=/var/lupin — so a
 # server-side compute resolved every caller to project "lupin" with an empty
@@ -1214,6 +1200,31 @@ def _get_default_speakerphone():
         return cu.get_tts_interaction_mode() == "chorus"
     except Exception:
         return False  # solo default if anything blows up
+
+
+def is_quiet_worker( session_id ):
+    """
+    Return whether a session is a quiet worker.
+
+    `notify_user` stamps `worker_quiet` on a quiet worker's events. A quiet worker is a spawned,
+    non-manager session whose speakerphone is off. `worker_voice_mode.is_quiet_worker_bridge` decides,
+    and a standing manager spawned with any role is never quieted.
+
+    Requires:
+        - session_id is a full session id or its 8-character prefix
+
+    Ensures:
+        - returns True only for a bridge `is_quiet_worker_bridge` accepts
+        - returns False for a missing or unreadable bridge
+        - never raises
+    """
+    try:
+        path = find_session_path_by_id( session_id )
+        if not path: return False
+        from lupin_mcp.worker_voice_mode import is_quiet_worker_bridge
+        return is_quiet_worker_bridge( _load_bridge_object( path ), MANAGER_FIGURE_BRIDGE_FIELD )
+    except ( json.JSONDecodeError, OSError, ImportError ):
+        return False
 
 
 def find_active_speakerphone_sessions( exclude_session_id=None ):
@@ -1253,10 +1264,7 @@ def find_active_speakerphone_sessions( exclude_session_id=None ):
     trust_host_pids = _can_trust_host_pids()
     results = []
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         if trust_host_pids:
             file_pid = _extract_pid_from_filename( path.name )
             if file_pid is not None and not _is_pid_alive( file_pid ):
@@ -1835,10 +1843,7 @@ def prune_dead_persona_bridges():
         return 0
 
     pruned = 0
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         file_pid = _extract_pid_from_filename( path.name )
         if file_pid is None or _is_pid_alive( file_pid ):
             continue
@@ -1938,10 +1943,7 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
     now             = time.time()
     results         = []
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         pid_is_alive = False
         if trust_host_pids:
             file_pid = _extract_pid_from_filename( path.name )
@@ -2047,10 +2049,7 @@ def find_session_by_tmux( tmux_session ):
     if not tmux_session or not SESSION_DIR.exists():
         return None
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
-        if "buffer" in path.name or "listener" in path.name:
-            continue
-
+    for path in iter_bridge_paths( SESSION_DIR ):
         file_pid = _extract_pid_from_filename( path.name )
         if file_pid is not None and not _is_pid_alive( file_pid ):
             continue

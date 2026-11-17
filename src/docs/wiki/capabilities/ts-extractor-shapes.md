@@ -1,6 +1,6 @@
 ---
 capability: ts-extractor-shapes
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.cosa.repo.symindex.ts_extract.isPrivate@fb7c77287a
   - src.cosa.repo.symindex.ts_extract.isHiddenFn@0d75c6063c

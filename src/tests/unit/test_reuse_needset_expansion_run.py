@@ -69,7 +69,8 @@ def pair( n ):
 
 def fake_draft( monkeypatch, outcome ):
     """Replace the drafting of a control need with a table of outcomes by rewrite id."""
-    def draft_need( job, ask, ledger, max_tries=None ):
+    def draft_need( job, ask, ledger, model_id, max_tries=None ):
+        assert model_id == "claude-sonnet-5-5"      # control_rows reads the drafter key once and passes it
         what = outcome[ job[ "keys" ][ 0 ][ "id" ] ]
         if what == "missing": raise SavedAnswerMissing( "no answer" )
         return what
@@ -111,12 +112,15 @@ def test_full_stage_holds_a_full_resident_over_the_base_vectors( tmp_path ):
 
 
 def test_lists_for_returns_the_whole_ranked_list_of_each_source():
+    whole = [ f"id{n:02d}" for n in range( 30 ) ]
     class Stage:
         def shortlist( self, query, entries, index_sha, pages, K=None ):
             self.args = ( query, entries, index_sha, pages, K )
-            return { "lists": { "code": { "size": 3, "head": [ "a", "b", "c" ] }, "vector_concat": { "size": 2, "head": [ "c", "a" ] } } }
+            self.last_answer = { "lists": { "code": whole, "vector_concat": [ "c", "a" ] } }
+            return { "lists": { "code": { "size": 30, "head": whole[ :resident.LIST_HEAD ] }, "vector_concat": { "size": 2, "head": [ "c", "a" ] } } }
     stage = Stage()
-    assert xr.lists_for( stage, "E", "sha", "P" )( "a query" ) == { "code": [ "a", "b", "c" ], "vector_concat": [ "c", "a" ] }
+    got   = xr.lists_for( stage, "E", "sha", "P" )( "a query" )
+    assert got == { "code": whole, "vector_concat": [ "c", "a" ] } and len( got[ "code" ] ) == 30 > resident.LIST_HEAD
     assert stage.args == ( "a query", "E", "sha", "P", ex.SHORTLIST )
 
 
@@ -134,7 +138,7 @@ def test_plan_of_counts_the_rows_by_group_and_the_calls_a_live_run_still_needs()
 
 def counted_ask( reply=GOOD ):
     """An ask that makes one counted call each time, as the real transport does."""
-    def ask( system, prompt ): model_transport.CHARGE_HOOK( "claude-fable-5-1" ); return reply
+    def ask( system, prompt ): model_transport.CHARGE_HOOK( "claude-sonnet-5-5" ); return reply
     return ask
 
 
@@ -270,7 +274,7 @@ def test_without_deps_main_builds_the_real_stage_rows_ask_and_closer( tmp_path, 
     monkeypatch.setattr( xr.vs, "load_vectors", lambda folder: seen.setdefault( "vectors", folder ) )
     monkeypatch.setattr( xr, "FullStage", lambda *a, **k: seen.setdefault( "stage", FakeStage() ) )
     monkeypatch.setattr( xr, "lists_for", lambda stage, entries, sha, pages: seen.setdefault( "search_args", ( entries, sha, pages ) ) and search_fn )
-    monkeypatch.setattr( xr.draft, "drafter_call", lambda: counted_ask() )
+    monkeypatch.setattr( xr.draft, "drafter_call", lambda model: counted_ask() if model == "claude-opus-5-5" else None )
     out = xr.main( argv( tmp_path, "--cli-path", old_run, "--live" ), None )
     assert out[ "closed_run" ] == "run-z" and seen[ "unlocked" ] == str( tmp_path ) and seen[ "vectors" ] == "/v" and seen[ "search_args" ] == ( [ "E" ], "sha", "pages" )
     assert out[ "report" ][ "used" ] == 1
@@ -316,3 +320,18 @@ def test_the_context_gets_a_refusing_transport_in_a_plan_and_in_a_live_run_so_no
         ctx = types.SimpleNamespace()
         xr.main( argv( tmp_path, "--cli-path", old_run, *extra ), deps_for( tmp_path, context=lambda root: ctx, ask=counted_ask(), stage=lambda c: ( FakeStage(), search_fn ) ) )
         assert isinstance( ctx.transport, NoCallTransport )
+
+
+def test_fusion_depth_changes_the_replayed_ranks_and_is_ignored_only_when_not_given( tmp_path, old_run ):
+    # A known answer 10 places down a list is outside depth 5 and inside depth 512; no flag keeps the stage depth.
+    deep = [ f"d{n}" for n in range( 9 ) ] + [ "k1", "k2", "k3" ]
+    def search( query ): return { "code": deep }
+    class Deep:
+        fusion = { "k": 60, "depth": 512, "head": 0 }
+    def after( *flags ):
+        out = xr.main( argv( tmp_path, "--cli-path", old_run, "--live", *flags ), deps_for( tmp_path, ask=counted_ask(), stage=lambda ctx: ( Deep(), search ), close_run=lambda ctx: "r" ) )
+        return [ r[ "after" ] for r in out[ "report" ][ "results" ] ]
+    default, shallow, deeper = after(), after( "--fusion-depth", "5" ), after( "--fusion-depth", "512" )
+    assert default == deeper and all( rank is not None for rank in default )
+    assert shallow == [ None, None, None ] and shallow != default
+    assert xr.parse_args( argv( tmp_path ) ).fusion_depth is None

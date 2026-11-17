@@ -8,7 +8,7 @@
 #
 # Usage:  reuse-vector-refresh.sh [--force] [--install | --uninstall | --status | --print-install]
 #   --print-install  print the two cron lines and change nothing
-#   --install        write the lines through the shared crontab lock; refused without that lock
+#   --install        retired: prints the cron_generate command and exits 1 (the VM runs it with --only vector-refresh)
 #   --uninstall      remove only the lines this tool wrote
 #   --status         say whether the lines are present
 #

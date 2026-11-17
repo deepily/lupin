@@ -9,7 +9,7 @@ Dependency Rule:
 """
 
 from typing import Optional, List, Dict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import uuid
 
 from sqlalchemy.orm import Session
@@ -17,6 +17,13 @@ from sqlalchemy import func, desc
 
 from cosa.rest.postgres_models import ProxyDecision, TrustState
 from cosa.rest.db.repositories.base import BaseRepository
+
+# How many UTC days of per-day decision counts a trust row keeps; older days are dropped on the next write.
+# It must be at least the tracker's rolling window (30 days by default), which prunes on restore anyway.
+DECISION_HISTORY_RETENTION_DAYS = 90
+
+# update_after_ratification default: leave blr_state as stored. None is a real value (clear it).
+KEEP_BLR_STATE = object()
 
 
 class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
@@ -457,7 +464,7 @@ class TrustStateRepository( BaseRepository[TrustState] ):
             rejected_decisions   = 0
         )
 
-    def update_after_ratification( self, user_email, domain, category, approved ):
+    def update_after_ratification( self, user_email, domain, category, approved, blr_state=KEEP_BLR_STATE ):
         """
         Increment a category's trust counters after a ratification event.
 
@@ -466,9 +473,16 @@ class TrustStateRepository( BaseRepository[TrustState] ):
             - domain: Domain identifier
             - category: Decision category
             - approved: True if ratified (success), False if rejected
+            - blr_state: KEEP_BLR_STATE (default), None, or a BayesianLogisticRegression.to_dict() dict
 
         Ensures:
             - Trust state counters updated
+            - blr_state is stored as given, None clearing it; the default leaves the stored value alone
+              (the ratify endpoint has no tracker and must not wipe it)
+            - decision_history gains this decision under today's UTC date, and days older than
+              DECISION_HISTORY_RETENTION_DAYS are dropped
+            - a row with no history yet (written before the column) first has its old totals
+              filed under its updated_at date, the date restore used to stamp them with
             - updated_at timestamp refreshed
             - Returns updated TrustState
 
@@ -483,16 +497,51 @@ class TrustStateRepository( BaseRepository[TrustState] ):
         """
         state = self.get_or_create( user_email, domain, category )
 
+        now     = datetime.now( timezone.utc )
+        history = self._decision_history_with( state, now, approved )
+
         state.total_decisions += 1
         if approved:
             state.successful_decisions += 1
         else:
             state.rejected_decisions += 1
 
-        state.updated_at = datetime.now( timezone.utc )
+        state.decision_history = history
+        state.updated_at       = now
+        if blr_state is not KEEP_BLR_STATE: state.blr_state = blr_state
 
         self.session.flush()
         return state
+
+    def _decision_history_with( self, state, now, approved ):
+        """
+        Build the row's per-day decision counts including one new decision.
+
+        Requires:
+            - state is a TrustState whose counters have not yet been incremented for this decision
+            - now is a timezone-aware datetime
+
+        Ensures:
+            - returns a new dict {"YYYY-MM-DD": [approved, rejected]}; the stored dict is never mutated,
+              so the JSONB column registers the change
+            - a state with no history and earlier decisions is seeded with its old totals under its
+              updated_at date
+            - days older than DECISION_HISTORY_RETENTION_DAYS are left out
+        """
+        if state.decision_history is None:
+            history = {}
+            if state.total_decisions:
+                history[ state.updated_at.strftime( "%Y-%m-%d" ) ] = [ state.successful_decisions, state.rejected_decisions ]
+        else:
+            history = dict( state.decision_history )
+
+        cutoff  = ( now - timedelta( days=DECISION_HISTORY_RETENTION_DAYS ) ).strftime( "%Y-%m-%d" )
+        history = { day : counts for day, counts in history.items() if day >= cutoff }
+
+        today            = now.strftime( "%Y-%m-%d" )
+        ok, bad          = history.get( today, [ 0, 0 ] )
+        history[ today ] = [ ok + 1, bad ] if approved else [ ok, bad + 1 ]
+        return history
 
     def get_all_for_user( self, user_email, domain=None ):
         """

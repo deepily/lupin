@@ -131,9 +131,9 @@ def quick_smoke_test():
         "s1": { "session_id": "s1", "persona": "Ann", "last_outcome": EVENT_IDLE,
                 "alive": True, "last_activity_ts": quiet },                 # declared
         "s2": { "session_id": "s2", "persona": "Bob", "last_outcome": OUTCOME_POKE,
-                "alive": True, "last_activity_ts": quiet },                 # inferred (alive+quiet)
+                "alive": True, "last_activity_ts": quiet },                 # inferred, alive and quiet
         "s3": { "session_id": "s3", "persona": "Cal", "last_outcome": OUTCOME_POKE,
-                "alive": True, "last_activity_ts": active },                # working (not quiet)
+                "alive": True, "last_activity_ts": active },                # working, not quiet
         "s4": { "session_id": "s4", "persona": "Dan", "last_outcome": OUTCOME_HONORED,
                 "alive": False, "last_activity_ts": quiet },                # dead → excluded
         "s5": "not-a-dict",

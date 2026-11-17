@@ -41,12 +41,14 @@ import type {
   BroadcastAckPayload,
   StoreNotificationsChangedPayload,
   StoreNotificationTtsIntentPayload,
+  StorePodcastAutoplayIntentPayload,
   VoicePersona,
 } from "../shared/types";
 // VALUE import, not type-only: the ONE TypeScript spelling of the ack type, pinned
 // against the server's by test_broadcast_ack_type_spellings_agree.py. Never inline it.
 import { COMMONS_BROADCAST_ACK_TYPE } from "../shared/types";
 import { parseResponseQuestions } from "./responseQuestions";
+import { firstPlayHereLink, playHereTitle } from "../shared/podcastAutoplayLink";
 // Cold-load hydration (2026-06-11): type-only import of the ONE canonical
 // senders-visible row shape (SessionStripStore owns the definition — WP9
 // introduced it; SenderStore + this store consume the SAME records from the
@@ -345,6 +347,9 @@ interface ServerNotificationFields {
   priority            ?: string;
   suppress_ding       ?: boolean;
   tts_raw             ?: boolean;
+  // Row 92076977: the server stamps this on a quiet worker's notifications. It lowers `high` to
+  // `medium` for the speech gate. `urgent` still speaks.
+  worker_quiet        ?: boolean;
 }
 
 interface ResponsePayload {
@@ -907,7 +912,9 @@ class NotificationStoreImpl implements NotificationStore {
     //     suppress_ding condition.
     //   • ttsText = tts_raw === true ? message : formatTtsMessage(...) — the
     //     fire-and-forget default-contextualized derivation (legacy :5987-5989).
-    if ( raw.priority === "high" || raw.priority === "urgent" ) {
+    // A quiet worker's `high` is spoken as `medium`, which is not spoken. Its `urgent` is untouched.
+    // The multiplexer plays no ding of its own, so the legacy client's kept ding has no counterpart here.
+    if ( ( raw.priority === "high" && raw.worker_quiet !== true ) || raw.priority === "urgent" ) {
       // normalize() above guarantees norm.message is a NON-EMPTY string — a
       // message-less frame returns null at `if (!norm) return` before reaching
       // here — so reading norm.message needs no nullish guard and stays typed
@@ -938,6 +945,18 @@ class NotificationStoreImpl implements NotificationStore {
         source  : "notification-store",
         ts      : this.nowFn(),
       });
+    }
+
+    // A finished podcast's abstract carries a Play Here link: let the page start it (row 802c94d3). Same live-only
+    // path as the TTS intent above, so a history reload never starts a podcast and a re-arrival never starts it twice.
+    const playHere = firstPlayHereLink( norm.abstract );
+    if ( playHere !== null ) {
+      this.bus.emit<StorePodcastAutoplayIntentPayload>( {
+        type    : "store_podcast_autoplay_intent",
+        payload : { id_hash: norm.id_hash, embedUrl: playHere, title: playHereTitle( playHere ) },
+        source  : "notification-store",
+        ts      : this.nowFn(),
+      } );
     }
   }
 

@@ -36,6 +36,7 @@ from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 from cosa.rest.pytest_args_policy import validate_pytest_args, validate_timeout_against_suite_budget
 import cosa.utils.util as cu
+from cosa.utils.container_env import running_in_container
 
 
 # Valid suite types and their script paths (relative to project root)
@@ -105,14 +106,14 @@ SUITES_SUPPORTING_JUNIT_XML = frozenset( {
 SUITE_TIMEOUTS_SECONDS = {
     "typescript"   : 1500,   # 25 min. ⚠️ CORRECTED 2026-08-24: this used to read "8m19s ... WITHOUT c8;
                              # c8 adds overhead, so ~2.5x margin over the uninstrumented run". That run WAS under
-                             # c8 — run-typescript-tests.sh:62 reports its coverage percentages, which only a c8
+                             # c8 — run-typescript-tests.sh reports its coverage percentages, which only a c8
                              # run produces. The two files described the same 07-21 run in contradictory terms and
                              # the margin arithmetic here rested on the wrong half.
                              # MEASURED 2026-08-24 (row 92e94cb7): c8 costs ~60% wall clock — 117 files ran 18s
                              # bare vs 29s under c8. The budget still holds comfortably, but note WHY it is not
                              # 29s for the suite: ONE file, audio_transport.test.ts, PASSES in 452s and owns
                              # essentially the entire wall clock. Fix that file and this budget could drop by an
-                             # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
+                             # order of magnitude. Provenance: the typescript-suite-memory-measured doc, removed by 8420e8b0a; recover it from 8420e8b0a^
     "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
     "typecheck"    : 300,    #  5 min. MEASURED 3.00s wall for all three projects (2026-09-09, row 7bc67019) — a 100x margin, and deliberately not the 600s default: a static gate that has run for five minutes has hung, not slowed down, and the budget is the only thing that says so.
     "stylelint"    : 300,    #  5 min. MEASURED 1.5s wall for 32 files (2026-09-18, row d3d4a18c) — the typecheck gate's reasoning: a static gate that has run for five minutes has hung, and the budget is the only thing that says so.
@@ -161,8 +162,13 @@ SUITE_TIMEOUTS_SECONDS = {
                              # guard's observed figure were both last set 2026-06-12, exactly 91 days before this run.
                              # SINCE 2026-09-14 (row 2818dad7) "e2e" is no longer a merge-pyramid component: the
                              # gate runs "e2e_a" + "e2e_b" below. This budget covers a deliberate whole-suite run.
-    "e2e_a"        : 2500,   # 42 min. Half A (row 2818dad7). The halves were balanced on per-file JUnit time from the
-    "e2e_b"        : 2500,   # 42 min. Half B.  2026-09-12 full run: 1492.9s / 1492.5s of testcase time, before per-run
+    "e2e_a"        : 3300,   # 55 min, up from 2500 (Maya, approved by Mr. Radio, 11 November). The login-wait fix
+                             # makes every fixture login wait out the 1000 ms redirect in login.html's success handler.
+                             # Counted with pytest --setup-plan: half A has 436 fixture logins (371 logged_in_page + 65
+                             # admin_page), half B 378 (352 + 26). Projected 2395 + 436 = 2831 s (A) and 2395 + 378 =
+                             # 2773 s (B), at most 1.0 s per login, not timed on the VM. ts-7b0d15e8 was killed at 2500 s
+                             # with 87% done. Half A (row 2818dad7): the halves were balanced on per-file JUnit time from the
+    "e2e_b"        : 3300,   # 55 min, raised with half A (see above). Half B.  The 12 September full run: 1492.9s / 1492.5s of testcase time, before per-run
                              # overhead. Until each half is measured on :8000, observed uses the slower half of the
                              # 09-11 hand split (ts-6979205f, 1549.0s). 2500 is 1.61x that today. Scaling the 12-10
                              # projection above (3523.2s) by half gives 1761.6s, and 1.4x of that is 2466.2s,
@@ -253,18 +259,6 @@ HOST_COMMANDS    = {
     "docker_smoke" : "`src/tests/run-docker-smoke-gate.sh`",
 }
 NOT_RUN_HERE     = "not run here, host tier"
-
-
-def running_in_container() -> bool:
-    """
-    Say whether this server process runs inside a container.
-
-    Ensures:
-        - returns True when LUPIN_IN_CONTAINER is 1, true or yes (any case), or when /.dockerenv exists
-        - returns False otherwise; a falsy sentinel does not hide the file check, it simply adds nothing
-    """
-    if os.environ.get( "LUPIN_IN_CONTAINER", "" ).strip().lower() in ( "1", "true", "yes" ): return True
-    return os.path.exists( "/.dockerenv" )
 
 
 def container_refusal( test_types: List[ str ] ) -> Optional[ str ]:
@@ -472,7 +466,7 @@ class TestSuiteJob( AgenticJobBase ):
         # THE AUTHORITATIVE ALLOWLIST GATE (row 60f04102). It sits HERE, in the
         # constructor, rather than only in the submit router, because EVERY path
         # into execution runs through this constructor — HTTP submits, jobs
-        # rehydrated from persistence (job_persistence.py:765), and side channels
+        # rehydrated from persistence (restore_pending_jobs in job_persistence.py), and side channels
         # such as capture-bounce-resubmit.py. A router-only check would leave all
         # of those unguarded. The router calls the same function so a bad request
         # is refused at the door with a clear 400, but that is usability; this is
@@ -841,8 +835,7 @@ class TestSuiteJob( AgenticJobBase ):
             return await self._execute_dry_run( voice_io, cosa_interface )
 
         # Set sender_id and target_user for notifications
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
+        self._set_chain_identity( cosa_interface )
 
         # Set job_id for auto-injection into all notify() calls
         voice_io.set_job_id( self.id_hash )
@@ -1029,8 +1022,8 @@ class TestSuiteJob( AgenticJobBase ):
             #
             # ⚠️ NOT a false green today, and the scope is deliberately narrow because
             # of that: every machine consumer reads cost_summary["all_passed"], which
-            # is already correct (test_suite_completion_watchdog.py:150,
-            # test_fix_expediter/snapshot_loader.py:161). Grepped for a caller gating
+            # is already correct (the all_passed check in test_suite_completion_watchdog.py,
+            # test_fix_expediter/snapshot_loader.py). Grepped for a caller gating
             # on JobState.COMPLETED / status == "completed" — every hit is queue
             # plumbing, none is a pass/fail gate. This closes the gap before some
             # future caller reaches for the more obvious field.
@@ -1240,8 +1233,7 @@ class TestSuiteJob( AgenticJobBase ):
             str: Mock conversational summary
         """
         # Set sender_id and target_user
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
+        self._set_chain_identity( cosa_interface )
 
         voice_io.set_job_id( self.id_hash )
 
@@ -1647,7 +1639,7 @@ class TestSuiteJob( AgenticJobBase ):
         # `src/tests/smoke/conftest.py` registers --auto-proxy / --cost-cap-usd
         # / --no-confirm / --group / --scenario-id so pytest accepts the flags
         # without erroring; the actual flag values are consumed by each test's
-        # own argparse (see live_pipeline_base.py:619).
+        # own argparse (see the argparse setup in live_pipeline_base.py).
         try:
             from cosa.config.configuration_manager import ConfigurationManager
             extra_args_cfg = ConfigurationManager(
@@ -1728,9 +1720,8 @@ class TestSuiteJob( AgenticJobBase ):
                     # override; this is a FACT about who ran the suite, and a run that can
                     # relabel itself provides no provenance at all.
                     #
-                    # WHY IT EXISTS: test_v2_paired_live.py:359 reads
-                    #     written_by = os.environ.get( "LUPIN_TEST_SUITE_JOB_ID" ) or "unknown-caller"
-                    # and stamps it into the paired-run artifact. Krishna measured that NOTHING
+                    # Why it exists: the paired-run test (no longer in the tree) read this variable, defaulting to
+                    # the string "unknown-caller", and stamped it into the paired-run artifact. Krishna measured that nothing
                     # in the tree ever set that variable — no runner, no script, no compose file
                     # — so `written_by` had been "unknown-caller" on every artifact ever written.
                     # The dump function's own docstring calls that value the tell that nothing
@@ -1946,11 +1937,7 @@ class TestSuiteJob( AgenticJobBase ):
 
             # Parse structured junit-xml report (falls back to zeros if file missing)
             parsed = self._parse_junit_xml( junit_xml_path )
-            # TODO: Re-enable after debugging empty failures array
-            # try:
-            #     os.unlink( junit_xml_path )
-            # except OSError:
-            #     pass
+            # The junit-xml file is left on disk: removing it was switched off while an empty failures array was debugged, and has not been re-enabled.
 
             # WG-7 (2026-04-28): For non-pytest suites (websocket today), the
             # junit-xml path is None, so _parse_junit_xml returned zero counts.
@@ -2127,7 +2114,7 @@ class TestSuiteJob( AgenticJobBase ):
             - returns None for an unknown suite (callers treat that as a no-op)
         """
         basename = cls._LOG_BASENAMES.get( suite_type )
-        return os.path.join( cls._artifact_dir(), basename ) if basename else None
+        return cls._artifact_path( basename ) if basename else None
 
     @classmethod
     def _artifact_dir( cls ) -> str:

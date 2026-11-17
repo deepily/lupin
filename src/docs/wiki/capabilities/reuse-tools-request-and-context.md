@@ -1,6 +1,6 @@
 ---
 capability: reuse-tools-request-and-context
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_tools.canonical@667fb38877
   - lupin_mcp.reuse_tools.sha@4706b44864

@@ -1,6 +1,6 @@
 ---
 capability: submit-test-suite
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.submit-test-suite.parse_args@3a1e01e012
   - scripts.submit-test-suite.parse_env@46b7c5749c

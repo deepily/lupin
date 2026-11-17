@@ -402,7 +402,7 @@ def test_the_helper_entered_directly_says_no_by_default():
 # pulled it and why." Via María 🌸, 2026-09-07 ~22:07 EDT, row 1ec67228.
 #
 # THE "WHO" HALF NEEDED NOTHING BUILT, recorded rather than re-decided: the transition
-# door already writes `recorded_actor( payload.actor, account_email )` (tasks.py:1395),
+# door already writes `recorded_actor( payload.actor, account_email )` (in tasks.py),
 # which puts the server-known identity FIRST and the caller's claim in parentheses.
 # María asked whether the receipt should carry the caller-supplied actor or only
 # row-derived facts; the tree had already answered BOTH, labelled. Row-derived-only

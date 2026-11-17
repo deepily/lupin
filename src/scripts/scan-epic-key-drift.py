@@ -54,7 +54,7 @@ from lupin_cli.claude_code.hooks.lib.task_store_client import fetch_board as _sh
 
 from cosa.rest.task_store_epic_keys import audit_rows, reach_disclosure
 
-# The router caps `limit` at 500 (tasks.py:1131, `le=500`) but DEFAULTS to 100. So 500 is a
+# The router caps `limit` at 500 (`le=500` on the GET /api/tasks `limit` query in tasks.py) but defaults to 100. So 500 is a
 # CEILING, not a forced value, and this IS tunable anywhere in 0..500 — the old comment said
 # "not a tunable", which was simply wrong (Tiberius, reviewing 2026-08-30). Kept at the
 # ceiling to minimise round-trips; lower it freely, raise it above 500 and the router 422s.

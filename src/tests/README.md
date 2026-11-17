@@ -2,6 +2,10 @@
 
 Comprehensive six-tier testing approach to ensure code quality, reliability, and security.
 
+## ⛔ No test touches a GPU
+
+GPU-hosted models are a shared service. A test reaches them only through their services, and a saturated service is a fact to handle (fail fast or degrade), never something to free. Rule: planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU".
+
 ## 🔴 BEFORE ANY `--cov` RUN — export COVERAGE_FILE
 
 ```bash

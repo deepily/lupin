@@ -325,7 +325,7 @@ def test_an_e2e_helper_outside_unit_is_enforced_even_when_it_imports_the_guard()
     "page.wait_for_selector( '{sel}' )",
     "SEL = '{sel}'",
     # 🔴 ESCAPE-HIDDEN, the third escape from this extractor. Mr. Radio's review, 18:32 EDT.
-    # `test_multiplexer_task_list.py:228` drives a polling predicate exactly this way, and it
+    # `test_multiplexer_task_list.py` drives a polling predicate exactly this way, and it
     # was invisible: the backslashes stop the attribute pattern matching, and unescaping alone
     # does not help because pairing quotes on unescaped text straddles the selector.
     'page.click( "{sel}" )',                                   # escaped, double-in-double

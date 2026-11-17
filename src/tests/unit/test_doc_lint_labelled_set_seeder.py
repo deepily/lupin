@@ -14,6 +14,7 @@ import random
 import pytest
 from claude_agent_sdk import AssistantMessage, TextBlock
 
+from cosa.utils.file_hash import file_sha256
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import claim_extractor, labelled_pairs, labelled_set_seeder as s
 from cosa.repo.doc_lint import model_transport as mt
@@ -86,7 +87,7 @@ def test_jsonl_and_json_round_trip_with_sorted_keys( tmp_path ):
     s.write_jsonl( str( tmp_path / "a" / "x.jsonl" ), [ { "b": 1, "a": 2 } ] )
     assert open( tmp_path / "a" / "x.jsonl" ).read() == '{"a": 2, "b": 1}\n'
     s.write_json( str( tmp_path / "b" / "y.json" ), { "z": 1 } )
-    assert s.sha256_file( str( tmp_path / "b" / "y.json" ) ) == hashlib.sha256( b'{\n  "z": 1\n}\n' ).hexdigest()
+    assert file_sha256( str( tmp_path / "b" / "y.json" ) ) == hashlib.sha256( b'{\n  "z": 1\n}\n' ).hexdigest()
     ( tmp_path / "blank.jsonl" ).write_text( '\n{"k": 1}\n\n' )
     assert s.read_jsonl( str( tmp_path / "blank.jsonl" ) ) == [ { "k": 1 } ]
 
@@ -712,6 +713,20 @@ def test_assemble_joins_everything_and_the_set_loads_through_the_loader( written
     assert sum( v for k, v in info[ "counts" ][ "bands" ].items() ) == SMALL[ "delete" ] + SMALL[ "weaken" ]
 
 
+def test_assemble_records_the_sha256_of_the_pairs_and_keys_files_it_wrote( written ):
+    import hashlib
+    base = written / "out"
+    _, rows = verification_rows( base )
+    s.write_jsonl( str( written / "ver.jsonl" ), rows )
+    assert assemble( base, written / "ver.jsonl", written / "final" ) == 0
+    info  = json.loads( ( written / "final" / "dev-info.json" ).read_text() )
+    pairs = ( written / "final" / "dev" / "pairs.jsonl" ).read_bytes()
+    keys  = ( written / "final" / "keys" / "dev-keys.jsonl" ).read_bytes()
+    assert info[ "pairs_sha256" ] == hashlib.sha256( pairs ).hexdigest()
+    assert info[ "keys_sha256" ] == hashlib.sha256( keys ).hexdigest()
+    assert info[ "pairs_sha256" ] != info[ "keys_sha256" ]
+
+
 def test_assemble_refuses_on_a_missing_or_false_verification_row( written, capsys ):
     base = written / "out"
     plan, rows = verification_rows( base )
@@ -794,7 +809,7 @@ def test_manifest_holds_the_dev_facts_and_the_gate_hashes_and_none_of_the_secret
     m = json.loads( text )
     assert m[ "gate_pairs_sha256" ] == "a" * 64 and m[ "harness_commit" ] == "e" * 40 and m[ "writer" ] == FABLE
     assert m[ "floors" ] == { "min_quote_words": claim_extractor.MIN_QUOTE_WORDS, "min_quote_chars": claim_extractor.MIN_QUOTE_CHARS }
-    assert m[ "stoplist" ][ "sha256" ] == s.sha256_file( s.DEFAULT_STOPLIST ) and m[ "human_arm" ] == "no human arm"
+    assert m[ "stoplist" ][ "sha256" ] == file_sha256( s.DEFAULT_STOPLIST ) and m[ "human_arm" ] == "no human arm"
     for forbidden in ( "gate_seed", "split_seed", "gate-store", "gate/", "gate-reserve", "gate_counts" ): assert forbidden not in text
     plan_gate = json.loads( ( tmp_path / "gate-store" / "gate" / "plan.json" ).read_text() )
     assert str( plan_gate[ "split_seed" ] ) + "," not in text.replace( "\n", "" ) or True

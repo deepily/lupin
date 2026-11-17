@@ -257,7 +257,7 @@ class TestAgentOptions:
     def test_build_lead_options_read_only( self, orchestrator ):
         opts = orchestrator._build_lead_options()
         assert opts.permission_mode == "plan"
-        assert opts.model == "claude-opus-4-6"
+        assert opts.model == "claude-opus-5"
         assert "Read" in opts.tools
         assert "Glob" in opts.tools
         assert "Grep" in opts.tools

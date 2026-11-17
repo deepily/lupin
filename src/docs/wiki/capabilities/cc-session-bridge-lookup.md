@@ -1,6 +1,6 @@
 ---
 capability: cc-session-bridge-lookup
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id@39e9635908
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id_with_source@f5070bc230
@@ -9,9 +9,9 @@ pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.clear_cached_session_id@970adedbe8
   - lupin_cli.claude_code.hooks.lib.session_bridge.resolve_stable_session_id@f6c1e48897
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_session_metadata@ff874f3620
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id@7e5848a11d
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_tmux@67fc0e9fc8
-  - lupin_cli.claude_code.hooks.lib.session_bridge.iter_live_bridges@d8f4ef313d
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id@0b84a7f618
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_tmux@2fa7a3da69
+  - lupin_cli.claude_code.hooks.lib.session_bridge.iter_live_bridges@dac8bc6cc0
   - lupin_cli.claude_code.hooks.lib.session_bridge.build_live_bridge_index@4a8bd7a59d
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_in_bridge_index@41052aef07
   - lupin_cli.claude_code.hooks.lib.session_bridge.project_from_bridge_cwd@1e59bc3d38

@@ -1,6 +1,6 @@
 ---
 capability: router-label-audit
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.router_label_audit.unit_tokens@a82bf30105
   - scripts.router_label_audit.unit_categories@c38c8274f5

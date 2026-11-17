@@ -9,7 +9,7 @@
 #
 # The selection is from git, so a new guard is picked up the day it is added, two ways:
 #   a file named test_every_*, *census*, *_pin*, *pins* or *pinned* is run whole;
-#   in any other tracked unit file, each test_every_* function is run by node id (bug a197b338).
+#   in any other tracked unit file, each test_every_* function, and each test or class marked @pytest.mark.census, is run by node id (bugs a197b338 and 7e51f330).
 # A guard named otherwise is not in this set. Name new ones to match.
 # The rule lives in src/tests/helpers/census_selection.py; "--list" prints the selection and runs nothing.
 #

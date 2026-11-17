@@ -14,12 +14,11 @@ flowchart TD
     B -->|Reject| D[Increment rejected_decisions]
     C --> E[Increment total_decisions]
     D --> E
-    E --> F[Recalculate success rate]
-    F --> G{Success rate check}
-    G -->|Rate > threshold| H[Trust level may increase]
-    G -->|Rate < threshold| I[Circuit breaker may trip]
-    H --> J[Next decisions handled with higher autonomy]
-    I --> K[Category demoted — more decisions queued]
+    E --> F[Next SWE job rebuilds its tracker from the counters]
+    F --> G[Level = weighted successes against the thresholds]
+    E --> H{Breaker check on the live tracker}
+    H -->|Rejection rate above 15%| I[Circuit breaker trips]
+    I --> J[Category demoted 2 levels and held until earned back]
 ```
 
 ### What Happens on Each Action
@@ -27,37 +26,70 @@ flowchart TD
 | Your Action | Effect on Trust State |
 |-------------|----------------------|
 | **Approve** | `total_decisions += 1`, `successful_decisions += 1`. Success rate goes up. |
-| **Reject** | `total_decisions += 1`, `rejected_decisions += 1`. Success rate goes down. If rejection rate spikes, circuit breaker may trip. |
+| **Reject** | `total_decisions += 1`, `rejected_decisions += 1`. Earns nothing toward a level. A rejection rate above 15% (with 10 or more decisions) can trip the circuit breaker. |
 
-### How Success Rates Drive Trust Progression
+Your click writes the counters only. It does not change a level directly: the level is worked out from the counters (see the table in part 1).
 
-The success rate is calculated as: `successful_decisions / total_decisions * 100`
+### How Approvals Drive Trust Progression
 
-As success rates climb, trust levels naturally progress. A category with consistently high
-approval rates earns higher autonomy. A category with frequent rejections stays at lower
-levels or gets demoted.
+Levels come from **approved** decisions, each weighted by age (half-life 14 days).
+The thresholds are 50, 200, 500 and 1000 for Levels 2 to 5.
+The dashboard shows the success rate (`successful_decisions / total_decisions * 100`).
+A high rate alone does not raise a level, because a category needs the volume.
+A category with frequent rejections is held back by the breaker, not by a lower rate threshold.
 
 ### How Circuit Breakers Protect Against Failures
 
-If a category accumulates too many rejections in a short window, the circuit breaker
-**trips**:
+A category's breaker **trips** in either of two cases. Below, `...` stands for `swe team trust proxy circuit breaker`:
 
-1. **`TRIPPED`**: Proxy stops acting autonomously for that category. All decisions are queued.
-2. **COOLDOWN**: After a cooldown period, the circuit breaker enters recovery.
-3. **Closed (OK)**: Normal operation resumes, but trust level may have been reduced.
+- the rejection rate is above **15%** (`... error rate threshold`) with at least 10 decisions recorded;
+- the average classification confidence of the last 20 decisions is below **0.30**, with at least 5 recorded (`... confidence collapse threshold`).
 
-This prevents runaway automation — if the proxy makes bad decisions, it automatically
-stops and waits for human guidance.
+1. **`TRIPPED`**: the category is demoted **2 levels** (`... auto demotion levels`) and the gate defers every decision in it to you.
+2. **COOLDOWN**: after the cooldown (`... recovery cooldown seconds`, shipped as 3600) the `defer` ends by itself, with no manual reset.
+3. **Closed (OK)**: normal operation resumes. The level stays capped at the demoted level until new approvals earn it back.
+
+**The demotion does not end with the cooldown.** The tracker remembers the demoted level and the success count at the
+trip. It holds the category at or below that level until new successes earn it back.
+The gap is the next level's threshold minus the demoted level's own. Successes before the trip count for nothing.
+The trip is stored, so a later job starts with the same cap.
+For the Beta and BLR models a demotion also lowers the success count, so `demote(k)` lands exactly k levels down.
+The BLR model is reset. The level comes from the Beta counters until it has 30 decisions of its own (`BLR_MIN_OBSERVATIONS`).
+
+This prevents runaway automation — if the proxy makes bad decisions, it stops acting and waits for human guidance.
+
+### How Free-Text Answers Are Scored
+
+A free-text prediction counts as a **match** when its cosine similarity to the actual answer is at least **0.75**.
+The cut-off is the INI key `prediction engine open ended match threshold`, in `lupin-app.ini`.
+Open-ended batch questions use the same key, applied to the average over their headers.
+It is separate from `prediction engine open ended cbr threshold` (0.85), which only controls which past answers are retrieved.
+Rick set 0.75 on 6 Nov 2026 from 133 hand-labelled pairs: precision 0.79 and recall 0.65, against recall 0.29 at the old 0.85.
+A change applies to new scores only, after a server bounce. Rows already scored are not rescored.
 
 ### Day-by-Day Example: Trust Progression
 
+The counts are illustrative; they follow the shipped thresholds (Level 2 at 50 weighted approvals, Level 3 at 200).
+
 | Day | Actions | Trust State (Testing Category) |
 |-----|---------|-------------------------------|
-| **Day 1** | Start in `SHADOW` mode. Proxy logs 8 shadow decisions overnight. | Level 1 Shadow, 0 total, no success rate |
-| **Day 2** | Switch to `SUGGEST` mode. Proxy queues 6 suggestions. You approve all 6. | Level 1 → Level 2 Provisional, 6 total, 100% rate |
-| **Day 3** | Switch to `ACTIVE` mode. Proxy acts on 4 high-confidence decisions, queues 2 lower-confidence. You approve all 2 queued. | Level 2, 8 total, 100% rate |
-| **Day 4** | Proxy acts on 5, queues 1. You approve it. | Level 2 → Level 3 Trusted, 9 total, 100% rate |
-| **Day 5** | Proxy acts autonomously on 7 testing decisions. 1 queued, you reject it (wrong test strategy). | Level 3, 10 total, 90% rate. Circuit breaker: OK |
-| **Day 7** | Continued high approval rate. | Level 3 stable, ready for Level 4 promotion |
+| **Day 1** | Start in `SHADOW` mode. Proxy logs 8 shadow decisions overnight. | Level 1 Shadow, no approvals |
+| **Day 2** | Switch to `SUGGEST` mode. Proxy queues 60 suggestions over the day. You approve all 60. | Level 1 → Level 2 Provisional, 60 approvals |
+| **Day 3** | Switch to `ACTIVE` mode. At Level 2 the proxy still only suggests. You approve 150 more. | Level 2 → Level 3 Trusted, about 210 weighted approvals (older ones count slightly less) |
+| **Day 4** | At Level 3 the proxy acts on decisions it classifies at 80% confidence or more and queues the rest. You approve the queued ones. | Level 3 |
+| **Day 5** | 1 queued decision, you reject it (wrong test strategy). | Level 3, rejection rate under 1%. Circuit breaker: OK |
+| **Day 7** | A burst of rejections takes the rate above 15%. | Breaker trips, category drops to Level 1 and defers to you for the cooldown |
 
 ---
+
+### How a Yes/No Prediction Is Made
+
+For a yes/no question the proxy looks up the most similar past questions and lets them vote. Each past answer counts 1.0. A thumbs-up answer counts more, and a thumbs-down answer counts against its value.
+
+Answers are about 79% "yes" (527 of 664 answered rows, measured 5 Nov 2026). A plain majority said "no" too often and was right only 35% of the time. The proxy now predicts "no" only when the "no" tally beats the "yes" tally by at least a margin. Otherwise it predicts "yes".
+
+| Setting (`lupin-app.ini`) | Default | Meaning |
+|---|---|---|
+| `prediction engine yes no no margin` | `1.35` | Lead the "no" tally needs over the "yes" tally. With the default 5 neighbours that is a lead of 2 or more. 1.35 is ln(527/137), the log-odds of the yes prior. `0` restores a plain majority. |
+
+When the margin overturns a "no", the stored prediction carries `no_suppressed_by_prior: true` in its metadata. A "neither" answer still counts as "no" in the vote.

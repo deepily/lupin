@@ -37,8 +37,8 @@ import cosa.utils.util as du
 SPEC_KEY = "dm_tutor/flash_lite"
 
 # The block the GCP VM actually runs under: both cloud compose files set
-# config_block_id=Lupin:+Testing-GCS (docker-compose.cloud-gpu.yml:185,
-# docker-compose.cloud-test.yml:111). The key itself is written in
+# config_block_id=Lupin:+Testing-GCS (docker-compose.cloud-gpu.yml,
+# docker-compose.cloud-test.yml). The key itself is written in
 # [Lupin: Development] and reaches the VM only by inheritance — exactly the kind
 # of thing that reads as obviously true and is worth asserting anyway.
 VM_BLOCK_ID = "Lupin:+Testing-GCS"

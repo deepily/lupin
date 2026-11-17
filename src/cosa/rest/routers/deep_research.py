@@ -84,7 +84,7 @@ def _is_within( candidate, base ):
 # NOTHING THIS DOOR DID IS LOST, and each piece is worth naming because "the new door does
 # it too" is the claim a tombstone rests on: the job is built by the same
 # `create_agentic_job` this handler called; the id is scoped through the same
-# `user_job_tracker.register_scoped_job`, in the queued executor (executor.py:197) rather
+# `user_job_tracker.register_scoped_job`, in the queued executor (v2/executor.py) rather
 # than here; the scheduling fields and the lineage stamp land on the job in the factory;
 # and the 400s for a token with no uid or email are the 401s `submit` already raises.
 #

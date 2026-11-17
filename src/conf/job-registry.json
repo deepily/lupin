@@ -1,0 +1,765 @@
+{
+  "schema": "job-registry/1",
+  "defaults": {
+    "grace_minutes": 30,
+    "notify_interval_minutes": 30,
+    "window_days": 7,
+    "growth_min_items": 5,
+    "growth_min_percent": 5,
+    "lock_stale_seconds": 10800,
+    "run_env": {
+      "LUPIN_ROOT": "{root}",
+      "PYTHONPATH": "{root}/src",
+      "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
+      "DEEPILY_DATA_DIR": "{deepily_data}",
+      "COSA_VOICE_MANAGERS__LUPIN": "Cheech, Mr. Radio"
+    },
+    "owner_note": "owner_confirmed false means the owner is cheech by default and no open row names another seat (Cheech, 2026-11-07)",
+    "schedule_note": "A job with cron_tag takes its schedule from the installed crontab lines that end with # <tag>; the schedule here is the fallback when none is installed or the crontab cannot be read; the duplicate-check fallback is the three lines installed on 2026-11-07, which any hourly run also covers; a job with cron_managed true has its lines written by lupin_mcp.cron_generate from this entry, and cron_replaces names hand-written lines its install removes"
+  },
+  "jobs": [
+    {
+      "job": "duplicate-check",
+      "enabled_key": "cron job duplicate-check enabled",
+      "catalog": "L5",
+      "title": "Duplicate check",
+      "description": "Several times a day this looks at the new functions and classes added to the code and asks a model whether the same thing already exists elsewhere. It keeps a count of how many are still waiting to be judged and files a task when it finds a real duplicate.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 10-22 * * *"
+        },
+        {
+          "after_boot_seconds": 300
+        }
+      ],
+      "summary_path": "{code_health}/duplicate-check-daily/job-summary.json",
+      "scan_debt": true,
+      "fix_debt": true,
+      "fix_debt_key": "prefix:epic:dupcheck-",
+      "detail_link": "/app/duplicate-check",
+      "lock_path": "{code_health}/duplicate-check-daily/run.lock",
+      "rows": [
+        {
+          "id": "350d43c8",
+          "title": "Duplicate check run lock",
+          "href": null
+        },
+        {
+          "id": "0d23e394",
+          "title": "Duplicate-check status page",
+          "href": null
+        }
+      ],
+      "evidence": [
+        {
+          "label": "Run ledger",
+          "path": "code-health/duplicate-check-daily/runs.jsonl",
+          "href": null
+        },
+        {
+          "label": "Daily log",
+          "path": "code-health/duplicate-check-daily/daily.log",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.duplicate_check_daily",
+          "--adaptive",
+          "--branch",
+          "auto",
+          "--claude-cli-path",
+          "{home}/.local/bin/claude",
+          "--trigger",
+          "hand"
+        ],
+        "env": {}
+      },
+      "cron_tag": "duplicate-check-daily",
+      "cron_managed": true,
+      "cron_log": "{code_health}/duplicate-check-daily/daily.log",
+      "own_summary": true
+    },
+    {
+      "job": "wiki-librarian",
+      "enabled_key": "cron job wiki-librarian enabled",
+      "catalog": "L1",
+      "title": "Wiki librarian",
+      "description": "Each morning this checks the documentation pages against the code and flags pages that have fallen out of step. It turns what it finds into tasks and saves a list of searches that found nothing.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "17 10 * * *"
+        },
+        {
+          "after_boot_seconds": 120
+        }
+      ],
+      "summary_path": "{data}/librarian/job-summary.json",
+      "scan_debt": true,
+      "fix_debt": true,
+      "rows": [
+        {
+          "id": "791bf720",
+          "title": "Wiki librarian export fix",
+          "href": null
+        }
+      ],
+      "evidence": [
+        {
+          "label": "Log",
+          "path": "librarian/librarian.log",
+          "href": null
+        },
+        {
+          "label": "Tick state",
+          "path": "librarian/tick-state.json",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "cosa.repo.symindex.librarian_tick"
+        ],
+        "env": {}
+      },
+      "cron_tag": "wiki-librarian-tick",
+      "cron_managed": true,
+      "cron_log": "{data}/librarian/librarian.log",
+      "own_summary": true
+    },
+    {
+      "job": "reuse-behaviour",
+      "enabled_key": "cron job reuse-behaviour enabled",
+      "catalog": "L4",
+      "title": "Reuse-behaviour page",
+      "description": "Each week this builds a page that counts how the fleet used the reuse checks: lookups made, outcome lines refused and audits run. It covers the last full Monday-to-Sunday week, skips a week whose page is already saved, and only reads records and writes the page.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 18 * * *"
+        },
+        {
+          "after_boot_seconds": 360
+        }
+      ],
+      "summary_path": "{root}/io/jobs/reuse-behaviour/job-summary.json",
+      "rows": [
+        {
+          "id": "804838d4",
+          "title": "Reuse-behaviour cron fix",
+          "href": null
+        }
+      ],
+      "evidence": [
+        {
+          "label": "Log",
+          "path": "behaviour/weekly.log",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.reuse_behaviour",
+          "--write",
+          "--skip-if-saved"
+        ],
+        "env": {}
+      },
+      "cron_tag": "reuse-behaviour-weekly",
+      "cron_managed": true,
+      "cron_log": "{data}/behaviour/weekly.log",
+      "own_summary": true
+    },
+    {
+      "job": "vector-refresh",
+      "enabled_key": "cron job vector-refresh enabled",
+      "catalog": "L2",
+      "title": "Vector refresh (also rebuilds the symbol index)",
+      "description": "Each day this keeps the code search up to date: it refreshes the list of functions and classes, writes a plain-English purpose line for any that lacks one, and rebuilds the search data when something changed. Without it, the \"does this already exist?\" search goes stale.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "47 10 * * *"
+        },
+        {
+          "after_boot_seconds": 240
+        }
+      ],
+      "summary_path": "{data}/refresh/job-summary.json",
+      "scan_debt": true,
+      "lock_path": "{data}/vector-build.lock",
+      "evidence": [
+        {
+          "label": "Log",
+          "path": "refresh/refresh.log",
+          "href": null
+        },
+        {
+          "label": "State",
+          "path": "refresh/refresh-state.json",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{root}/src/scripts/reuse-vector-refresh.sh"
+        ],
+        "env": {
+          "REUSE_VECTOR_REFRESH_PYTHON": "{python}",
+          "REUSE_VECTOR_REFRESH_ENV": "{home}/.lupin/reuse-vector-refresh.env"
+        }
+      },
+      "owner_confirmed": false,
+      "cron_tag": "reuse-vector-refresh",
+      "cron_managed": true,
+      "cron_log": "{data}/refresh/refresh.log",
+      "own_summary": true
+    },
+    {
+      "job": "shadow-audit",
+      "enabled_key": "cron job shadow-audit enabled",
+      "catalog": "L3",
+      "title": "Shadow audit",
+      "description": "Each day this takes the audits that are waiting and re-runs those past reuse lookups through the full search, to check the quick answer was right. It stops at a limit per run, a weekly limit and a lifetime limit on how much it may spend, and does nothing while switched off.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "37 11 * * *"
+        },
+        {
+          "after_boot_seconds": 300
+        }
+      ],
+      "summary_path": "{data}/shadow-audit/job-summary.json",
+      "scan_debt": true,
+      "evidence": [
+        {
+          "label": "Log",
+          "path": "shadow-audit/shadow-audit.log",
+          "href": null
+        }
+      ],
+      "run": {
+        "argv": [
+          "{root}/src/scripts/reuse-shadow-audit.sh"
+        ],
+        "env": {
+          "LUPIN_REUSE_JEV_PACK_SIZE": "50",
+          "REUSE_SHADOW_AUDIT_PYTHON": "{python}"
+        }
+      },
+      "owner_confirmed": false,
+      "cron_tag": "reuse-shadow-audit",
+      "cron_managed": true,
+      "cron_log": "{data}/shadow-audit/shadow-audit.log"
+    },
+    {
+      "job": "context-tick",
+      "enabled_key": "cron job context-tick enabled",
+      "switch_reader": "lupin_mcp.job_run:switched_on",
+      "catalog": "P1",
+      "title": "Context-pressure tick (fleet)",
+      "description": "Every ten minutes this checks how full each working session's memory is. When one is past its limit, it tells that session, its manager and Rick, so the session can be restarted before it gets confused.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "9,19,29,39,49,59 * * * *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/context-tick/job-summary.json",
+      "audience": [
+        "managers"
+      ],
+      "owner_confirmed": false,
+      "cron_exclusion_reason": "planning-is-prompting owns this script and its fleet timer install (slot-fleet tag), so it is not a Lupin line to generate. Its installer writes the line as cron-job.sh context-tick cron -- <tick>, so job_run records each run; there is no run block, so the page offers no Run now (Rick, decision 317d5101, 2026-11-14)"
+    },
+    {
+      "job": "doc-parity-tick",
+      "enabled_key": "cron job doc-parity-tick enabled",
+      "catalog": "P3",
+      "title": "Doc-parity tick",
+      "description": "Each morning this checks that paragraphs which should say the same thing in two documents still do. It prints nothing when they match and speaks up only when one copy has drifted.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "30 7 * * *"
+        },
+        {
+          "after_boot_seconds": 180
+        }
+      ],
+      "summary_path": "{root}/io/jobs/doc-parity-tick/job-summary.json",
+      "run": {
+        "argv": [
+          "{pip}/workflow/scripts/doc-parity-tick.sh"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_tag": "doc-parity-tick",
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/doc-parity-tick.log",
+      "cron_replaces": [
+        "workflow/scripts/doc-parity-tick.sh"
+      ]
+    },
+    {
+      "job": "worktree-census",
+      "enabled_key": "cron job worktree-census enabled",
+      "catalog": "P4",
+      "title": "Worktree census",
+      "description": "Each week this lists the temporary working copies and branches that have been left behind: stale ones, ones git says are gone, and ones already merged. It only reports; a person decides what to delete.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 13 * * 1"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/worktree-census/job-summary.json",
+      "fix_debt": true,
+      "run": {
+        "argv": [
+          "{python}",
+          "{pip}/workflow/scripts/worktree_hygiene_report.py",
+          "--notify"
+        ],
+        "env": {
+          "PLANNING_IS_PROMPTING_ROOT": "{pip}"
+        }
+      },
+      "owner_confirmed": false,
+      "cron_tag": "worktree-hygiene-report",
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/worktree-hygiene-report.log",
+      "clean_exit_codes": [
+        0,
+        1
+      ]
+    },
+    {
+      "job": "disk-report",
+      "enabled_key": "cron job disk-report enabled",
+      "catalog": "L6",
+      "title": "Disk report",
+      "description": "Each week this counts what the fleet leaves behind on disk, such as logs and temporary files. It prints numbers, not a verdict, so growth is noticed before the disk fills.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 19 * * 0"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/disk-report/job-summary.json",
+      "fix_debt": true,
+      "run": {
+        "argv": [
+          "{root}/src/scripts/disk-hygiene-report.sh"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{root}/io/claude_code_hooks/logs/disk-hygiene-report.log",
+      "cron_replaces": [
+        "disk-hygiene-report.sh"
+      ],
+      "cron_tag": "disk-report"
+    },
+    {
+      "job": "hook-log-sweep",
+      "enabled_key": "cron job hook-log-sweep enabled",
+      "catalog": "L7",
+      "title": "Hook-log sweep",
+      "description": "Each week this deletes old per-event log files written by the session hooks and rotates the two logs that only grow. Without it the log folder reached three quarters of a million files.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "30 19 * * 0"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/hook-log-sweep/job-summary.json",
+      "scan_debt": true,
+      "run": {
+        "argv": [
+          "{root}/src/scripts/sweep-hook-logs.sh",
+          "--apply"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{root}/io/claude_code_hooks/logs/disk-hygiene-sweep.log",
+      "cron_replaces": [
+        "sweep-hook-logs.sh"
+      ],
+      "cron_tag": "hook-log-sweep"
+    },
+    {
+      "job": "io-tmp-sweep",
+      "enabled_key": "cron job io-tmp-sweep enabled",
+      "catalog": "L8",
+      "title": "io/tmp sweep",
+      "description": "Each day this deletes one-off reports from the temporary folder once they are seven days old. That is what lets people drop a throwaway report there without having to clean it up.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 19 * * *"
+        },
+        {
+          "after_boot_seconds": 0
+        }
+      ],
+      "summary_path": "{root}/io/jobs/io-tmp-sweep/job-summary.json",
+      "scan_debt": true,
+      "run": {
+        "argv": [
+          "{root}/src/scripts/sweep-io-tmp.sh",
+          "--apply"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{root}/io/claude_code_hooks/logs/io-tmp-sweep.log",
+      "cron_replaces": [
+        "sweep-io-tmp.sh"
+      ],
+      "cron_tag": "io-tmp-sweep"
+    },
+    {
+      "job": "host-snapshot",
+      "enabled_key": "cron job host-snapshot enabled",
+      "catalog": "L15",
+      "title": "Host snapshot (crontab and units, for the container)",
+      "description": "Every five minutes this saves a copy of the computer's scheduled-job list and service states where the server container can read it. The container cannot see them itself, and without the copy the page would show schedules as unverified.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "*/5 * * * *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/host-snapshot/job-summary.json",
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.host_snapshot"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_tag": "job-host-snapshot",
+      "cron_managed": true,
+      "cron_log": "{root}/io/jobs/host-snapshot/cron.log"
+    },
+    {
+      "job": "test-promotion",
+      "enabled_key": "cron job test-promotion enabled",
+      "catalog": "L31",
+      "title": "Daily test promotion",
+      "description": "Each day this puts the newest merged build on the cloud test machine and runs a quick health check. It rolls back and files a task if the check fails, and returns the machine to the power state it found it in.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "0 18 * * *"
+        },
+        {
+          "after_boot_seconds": 600
+        }
+      ],
+      "summary_path": "{root}/io/jobs/test-promotion/job-summary.json",
+      "fix_debt": true,
+      "fix_debt_key": "prefix:epic:daily-test-promotion-",
+      "own_summary": true,
+      "run": {
+        "argv": [
+          "{python}",
+          "-m",
+          "lupin_mcp.daily_test_promotion",
+          "--branch",
+          "auto",
+          "--trigger",
+          "hand"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/test-promotion.log",
+      "cron_tag": "test-promotion"
+    },
+    {
+      "job": "hook-link-tick",
+      "enabled_key": "cron job hook-link-tick enabled",
+      "catalog": "L9",
+      "title": "Hook-link tick",
+      "description": "Every ten minutes this checks that the commit and push safety hooks are still linked to the scripts this project ships. It stays silent when they are, and warns when something has swapped them out, which would turn a safety check off for everyone.",
+      "owner": "cheech",
+      "schedule": [
+        {
+          "cron": "2,12,22,32,42,52 * * * *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/hook-link-tick/job-summary.json",
+      "run": {
+        "argv": [
+          "{root}/src/scripts/hook-link-tick.sh"
+        ],
+        "env": {}
+      },
+      "owner_confirmed": false,
+      "cron_tag": "hook-link-tick",
+      "cron_managed": true,
+      "cron_log": "{home}/.lupin/logs/hook-link-tick.log",
+      "clean_exit_codes": [
+        0,
+        2,
+        4,
+        5
+      ]
+    },
+    {
+      "job": "yearly-reminders",
+      "enabled_key": "cron job yearly-reminders enabled",
+      "switch_reader": "lupin_mcp.job_run:switched_on",
+      "catalog": "L10",
+      "title": "Yearly reminders (password rotation, LoRA review)",
+      "description": "Once a year, on 17 August, this sends Rick two reminders: to change the passwords and to review the AI models he has trained. It has no other work, so it shows as idle the rest of the year.",
+      "owner": "rick",
+      "reporting": "off",
+      "reporting_off_reason": "runs once a year",
+      "schedule": [
+        {
+          "cron": "0 21 17 8 *"
+        },
+        {
+          "cron": "0 22 17 8 *"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/yearly-reminders/job-summary.json",
+      "audience": [
+        "rick"
+      ],
+      "cron_exclusion_reason": "one-shot personal reminders for Rick, run by their own script lines; not a Lupin background job"
+    },
+    {
+      "job": "fleet-arbiter",
+      "alarm": true,
+      "enabled_key": "cron job fleet-arbiter enabled",
+      "switch_reader": "lupin_arbiter_app.fleet_arbiter_loop:build_fleet_arbiter_job_factory",
+      "catalog": "L11",
+      "title": "Fleet arbiter (:8001)",
+      "description": "This service runs all the time on its own port and watches the working sessions. It wakes sessions that have gone quiet, checks that managers answer when tapped, and warns Rick when the whole fleet stalls.",
+      "owner": "cheech",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/fleet-arbiter/job-summary.json",
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service",
+        "health_url": "http://host.docker.internal:8001/health"
+      },
+      "owner_confirmed": false
+    },
+    {
+      "job": "context-pressure-writer",
+      "enabled_key": "cron job context-pressure-writer enabled",
+      "switch_reader": "lupin_arbiter_app.app:_build_context_pressure_loop",
+      "catalog": "L13",
+      "title": "Context-pressure writer",
+      "description": "Inside the fleet arbiter, this keeps a current figure for how full each session's memory is. The ten-minute context check reads that figure; this job only writes it and takes no action itself.",
+      "owner": "cheech",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/context-pressure-writer/job-summary.json",
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service",
+        "health_url": "http://host.docker.internal:8001/health"
+      },
+      "owner_confirmed": false
+    },
+    {
+      "job": "health-watcher",
+      "alarm": true,
+      "enabled_key": "cron job health-watcher enabled",
+      "switch_reader": "lupin_arbiter_app.app:assemble_app",
+      "catalog": "L14",
+      "title": "Health watcher",
+      "description": "This service checks the development and test server containers and tells people when one becomes unhealthy or keeps flipping between healthy and not. It only reports; it does not restart anything.",
+      "owner": "cheech",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/health-watcher/job-summary.json",
+      "liveness": {
+        "kind": "systemd",
+        "unit": "lupin-arbiter-app.service",
+        "health_url": "http://host.docker.internal:8001/health"
+      },
+      "owner_confirmed": false
+    },
+    {
+      "job": "worktree-janitor",
+      "inside": "fleet-arbiter",
+      "enabled_key": "cron job worktree-janitor enabled",
+      "switch_reader": "lupin_arbiter_app.fleet_arbiter_loop:build_fleet_arbiter_job_factory",
+      "catalog": "L12",
+      "title": "Worktree janitor",
+      "description": "Every minute the fleet arbiter looks for idle temporary working copies that nobody is using. It saves anything worth keeping, removes the copy, and keeps archived work for 14 days. It runs once for each of the repositories listed as targets.",
+      "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
+      "schedule": [
+        {
+          "every_seconds": 60
+        }
+      ],
+      "summary_path": "{root}/io/jobs/worktree-janitor/job-summary.json",
+      "grace_seconds": 120,
+      "targets": [
+        {
+          "target": "lupin"
+        },
+        {
+          "target": "planning-is-prompting"
+        },
+        {
+          "target": "cosa-voice"
+        }
+      ],
+      "owner_confirmed": false
+    },
+    {
+      "job": "notification-expiry",
+      "enabled_key": "cron job notification-expiry enabled",
+      "switch_reader": "lupin_app.main:notification_expiry_sweep_loop",
+      "catalog": "L18",
+      "title": "Notification expiry",
+      "description": "Every five minutes this closes notifications that asked for an answer when nobody is left to give one. Without it they would show as waiting forever.",
+      "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
+      "schedule": [
+        {
+          "every_seconds": 300
+        }
+      ],
+      "summary_path": "{root}/io/jobs/notification-expiry/job-summary.json",
+      "grace_seconds": 300,
+      "owner_confirmed": false
+    },
+    {
+      "job": "commons-archival",
+      "enabled_key": "cron job commons-archival enabled",
+      "switch_reader": "lupin_mcp.commons_archival:CommonsArchiver._run_loop",
+      "catalog": "L19",
+      "title": "Commons archival",
+      "description": "Every hour this moves messages older than a day out of the shared message folders into dated archive folders. That keeps the live folders short without losing the history.",
+      "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
+      "schedule": [
+        {
+          "every_seconds": 3600
+        }
+      ],
+      "summary_path": "{root}/io/jobs/commons-archival/job-summary.json",
+      "grace_seconds": 600,
+      "owner_confirmed": false
+    },
+    {
+      "job": "notify-outbox",
+      "alarm": true,
+      "enabled_key": "cron job notify-outbox enabled",
+      "switch_reader": "lupin_mcp.notify_outbox:start_flusher",
+      "catalog": "L20",
+      "title": "Notify outbox flush",
+      "description": "When a notification cannot be delivered, it is saved to disk. Every 30 seconds this tries again until it goes through or gets too old.",
+      "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
+      "schedule": [
+        {
+          "every_seconds": 30
+        }
+      ],
+      "summary_path": "{root}/io/jobs/notify-outbox/job-summary.json",
+      "grace_seconds": 60,
+      "scan_debt": true,
+      "owner_confirmed": false
+    },
+    {
+      "job": "socket-housekeeping",
+      "alarm": true,
+      "enabled_key": "cron job socket-housekeeping enabled",
+      "switch_reader": "lupin_app.main:websocket_heartbeat_loop",
+      "catalog": "L22",
+      "title": "Socket heartbeat, cleanup and transcript tailer",
+      "description": "Every 30 seconds this checks that browser connections to the server are still alive and removes dead ones. Once an hour it also clears out old sessions that have been idle for more than a day.",
+      "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no run record: runs inside a server",
+      "schedule": [
+        {
+          "every_seconds": 30,
+          "mode": "heartbeat"
+        },
+        {
+          "every_seconds": 3600,
+          "mode": "cleanup"
+        }
+      ],
+      "summary_path": "{root}/io/jobs/socket-housekeeping/job-summary.json",
+      "grace_seconds": 120,
+      "owner_confirmed": false
+    },
+    {
+      "job": "side-services",
+      "enabled_key": "cron job side-services enabled",
+      "switch_reader": "cosa.utils.cc_memory_watch:main",
+      "catalog": "L28",
+      "title": "Side services",
+      "description": "Two small helper services run beside the main server. One serves the dev-server restart button, and one measures memory use of running Claude sessions so a runaway process can be named when the system kills it.",
+      "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no schedule",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/side-services/job-summary.json",
+      "targets": [
+        {
+          "target": "lupin-bounce-watcher",
+          "liveness": {
+            "kind": "systemd",
+            "unit": "lupin-bounce-watcher.service"
+          }
+        },
+        {
+          "target": "lupin-cc-memory-watch",
+          "liveness": {
+            "kind": "systemd",
+            "unit": "lupin-cc-memory-watch.service"
+          }
+        }
+      ],
+      "owner_confirmed": false
+    },
+    {
+      "job": "pokes",
+      "enabled_key": "cron job pokes enabled",
+      "switch_reader": "cosa.agents.heartbeat_poker_job:HeartbeatPokerJob.__init__",
+      "catalog": "L30",
+      "title": "Pokes (when started)",
+      "description": "When started, this wakes chosen sessions at a fixed interval to keep work moving, and stops on a clear signal or a hard time limit. It runs only on request, so it is usually idle.",
+      "owner": "cheech",
+      "reporting": "off",
+      "reporting_off_reason": "no schedule",
+      "schedule": [],
+      "summary_path": "{root}/io/jobs/pokes/job-summary.json",
+      "owner_confirmed": false
+    }
+  ]
+}

@@ -63,7 +63,7 @@ PYTEST_INVOCATION_RE = re.compile( r"-m\s+pytest|\$\{?PYTEST\b|/pytest\b" )
 # ⚠️ THE LOOKBEHIND EXCLUDES A PATH, NOT A QUOTE. An earlier version of this pattern was
 # `(?<![\w/.\"'])` — it also refused to match after a quote character, which silently
 # exempted the single commonest spelling of the defect:
-#     PYTEST="python3 -m pytest"
+#     PYTEST="python3 -m pytest"  # doc-lint: waive commented-out-code -- a shell line the guard must catch, quoted as the example
 # That is an assignment, not a path, and it is what five of the nine runners actually had.
 # The bug was caught by mutating a fixed script back to the broken form and finding this
 # file still green — which is the only reason it is not still here.
@@ -74,7 +74,7 @@ BARE_PYTHON_PYTEST_RE = re.compile( r"(?<![\w/.])python3?\s+-m\s+pytest" )
 # interpreter to a variable, degrade THAT to a bare python3, and then run
 # `"$VENV_PYTHON" -m pytest`:
 #
-#     VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
+#     VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"  # doc-lint: waive commented-out-code -- a shell line the guard must catch, quoted as the example
 #     if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
 #
 # Identical defect, invisible to a search for the literal invocation — and one of the three

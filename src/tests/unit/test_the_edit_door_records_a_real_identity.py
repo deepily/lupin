@@ -275,7 +275,7 @@ def _patch( account_email, repo, actor ):
     item = _item()
     repo.get_by_id_for_update.return_value = item
     # `apply_patch` returns the EVENT alone — read off the call site at
-    # tasks.py:1330 rather than guessed. A tuple here made three tests fail inside
+    # tasks.py rather than guessed. A tuple here made three tests fail inside
     # the router's serializer, which looks like a defect in the door and is not.
     repo.apply_patch.return_value = TaskEvent(
         id=1, item_id=item.id, item=item, ts=NOW, actor=actor,

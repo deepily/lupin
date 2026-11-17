@@ -28,7 +28,7 @@ class TestDefaults( unittest.TestCase ):
 
     def test_default_instantiation( self ):
         c = BugFixExpediterConfig()
-        self.assertEqual( c.lead_model,               "claude-opus-4-6" )
+        self.assertEqual( c.lead_model,               "claude-opus-5" )      # read from the INI, not from code
         self.assertEqual( c.worker_model,             "claude-sonnet-4-6" )
         self.assertIsNone( c.thinking_effort )
         self.assertEqual( c.max_diagnosis_iterations, 3 )
@@ -67,18 +67,21 @@ class TestFromConfig( unittest.TestCase ):
         _echo_default_get.seen = {}
         self.cfg_mgr = Mock()
         self.cfg_mgr.get.side_effect = _echo_default_get
+        self.cfg_mgr.get_required.side_effect = lambda ini_key, **kwargs: _echo_default_get.seen.setdefault( ini_key, kwargs[ "return_type" ] ) and f"model-for[{ini_key}]"
 
     def test_from_config_dispatches_every_return_type( self ):
         c = BugFixExpediterConfig.from_config( self.cfg_mgr, debug=False )
 
         # Result mirrors defaults (mock echoed default for every key).
-        self.assertEqual( c.lead_model,  "claude-opus-4-6" )   # str  → "string"
+        self.assertEqual( c.lead_model,  "model-for[bug fix expediter lead model]" )   # str  → "string", read with get_required
         self.assertEqual( c.max_fix_attempts, 2 )              # int  → "int"
         self.assertEqual( c.min_diagnosis_confidence, 0.7 )    # float → "float"
         self.assertFalse( c.enabled )                          # bool → "boolean"
 
-        # All 15 mapped keys consulted exactly once.
-        self.assertEqual( self.cfg_mgr.get.call_count, 15 )
+        # All 15 mapped keys consulted exactly once: 13 through get, the two model ids through get_required.
+        self.assertEqual( self.cfg_mgr.get.call_count, 13 )
+        self.assertEqual( [ call.args[ 0 ] for call in self.cfg_mgr.get_required.call_args_list ],
+                          [ "bug fix expediter lead model", "bug fix expediter worker model" ] )
 
         # The computed return_type per field type — proves each branch of the
         # bool/int/float/str ladder was taken (discriminating, not just "ran").

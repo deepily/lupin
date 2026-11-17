@@ -92,7 +92,7 @@ def _db_returning( notification ):
     "nonexistent-uuid-12345",          # the id the smoke test actually sends
     "12345",
     "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
-    "notification_1757190000_ab12cd",  # notifications.js:19037's synthesized shape
+    "notification_1757190000_ab12cd",  # the shape notifications.js synthesizes
 ] )
 def test_a_malformed_notification_id_is_a_client_error_not_a_server_error( client, bad_id ):
     """

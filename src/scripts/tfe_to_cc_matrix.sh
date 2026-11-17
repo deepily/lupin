@@ -75,7 +75,8 @@ fi
 
 # ─── Pre-flight ─────────────────────────────────────────────────────────
 if (( DRY_RUN == 0 )); then
-    if ! docker ps --format '{{.Names}}' | grep -qx lupin-rest-test; then
+    running_names="$( docker ps --format '{{.Names}}' )"
+    if ! grep -qx lupin-rest-test <<< "$running_names"; then
         echo "[ERROR] lupin-rest-test container is not running." >&2
         echo "        Start it (per CLAUDE.md 'RUNNING/TESTING FASTAPI APPLICATIONS')" >&2
         echo "        and re-run this script." >&2

@@ -1,6 +1,6 @@
 ---
 capability: auth-sqlite-to-postgres-migration
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.migrate-sqlite-to-postgres.print_banner@ab1d07319c
   - scripts.migrate-sqlite-to-postgres.connect_sqlite@4382ed8134

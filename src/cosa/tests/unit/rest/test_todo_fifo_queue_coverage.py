@@ -41,6 +41,7 @@ _REGISTRY_BUILT = frozenset( {
 from cosa.rest.todo_fifo_queue import TodoFifoQueue, MODE_TO_AGENT, AGENTIC_MODE_MAP
 from cosa.agents.runtime_argument_expeditor.expeditor import BATCH_DECLINED, BATCH_UNREACHABLE
 from cosa.rest.queue_protocol import QueueableJob
+from tests.helpers.typed_config import TypedConfigFake
 
 
 # Default config values used across push_job
@@ -64,7 +65,7 @@ def _cfg( overrides=None ):
     if overrides:
         data.update( overrides )
     m = Mock()
-    m.get.side_effect = lambda key, default=None, return_type=None: data.get( key, default )
+    m.get.side_effect = TypedConfigFake( data ).get
     return m
 
 

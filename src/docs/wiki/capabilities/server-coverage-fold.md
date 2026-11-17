@@ -1,6 +1,6 @@
 ---
 capability: server-coverage-fold
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.server_coverage.blob_hash@7eb50daef6
   - cosa.utils.server_coverage.data_files@4fdc6b824b

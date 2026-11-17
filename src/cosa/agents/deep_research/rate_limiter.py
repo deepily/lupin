@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
 from collections import deque
 
+from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
+
 
 @dataclass
 class TokenRecord:
@@ -323,9 +325,7 @@ class WebSearchRateLimiter:
 
     def _cleanup_old_records( self, now: float ) -> None:
         """Remove records outside the sliding window (must hold lock)."""
-        cutoff = now - self.window_seconds
-        while self._records and self._records[ 0 ].timestamp < cutoff:
-            self._records.popleft()
+        self._records = deque( prune_window( self._records, now, self.window_seconds, stamp=lambda record: record.timestamp ) )
 
 
 def quick_smoke_test():

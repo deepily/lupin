@@ -43,10 +43,24 @@ def _typescript_lookup( monkeypatch ):
     monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
 
 
-def test_the_command_line_names_the_split_and_has_no_default_for_it():
+def test_resolve_second_models_fills_only_the_names_left_out_from_the_ini_key( monkeypatch ):
+    import types
+    asked = []
+    monkeypatch.setattr( smoke.chs, "model_id", lambda key, config=None: asked.append( key ) or "from-ini" )
+    args  = types.SimpleNamespace( second_model=None, probe_model="named", other=None )
+    assert smoke.resolve_second_models( args, ( "second_model", "probe_model" ) ) is args
+    assert ( args.second_model, args.probe_model, args.other ) == ( "from-ini", "named", None ) and asked == [ "reuse need second model" ]
+
+
+def test_the_ini_holds_the_second_model_the_code_used_to_hold():
+    assert smoke.chs.model_id( smoke.chs.SECOND_MODEL_KEY ) == "claude-opus-5-5"
+
+
+def test_the_command_line_names_the_split_and_has_no_default_for_it( monkeypatch ):
+    monkeypatch.setattr( smoke.chs, "model_id", lambda key, config=None: f"ini:{key}" )
     assert smoke.parse_args( argv( "/o" ) ).partner_floor is None and smoke.parse_args( argv( "/o", extra=[ "--partner-floor", "0.79" ] ) ).partner_floor == 0.79
     a = smoke.parse_args( [ x for x in argv( "/o" ) if x not in ( "--ts-share", "0.5" ) ] )
-    assert smoke.kind_split( a ) == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and a.parallel == 3 and a.second_model == "claude-opus-5-5" and a.server == "max-plan" and a.ts_share == 0.6
+    assert smoke.kind_split( a ) == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and a.parallel == 3 and a.second_model == "ini:reuse need second model" and a.server == "max-plan" and a.ts_share == 0.6
     for flag in ( "--near-copy", "--work-alike", "--cross-language", "--source-commit", "--seed" ):
         cut = argv( "/o" )
         i   = cut.index( flag )
@@ -165,7 +179,7 @@ def test_the_env_is_assembled_from_the_real_index_with_two_ledgers_and_a_smoke_f
     args = smoke.parse_args( argv( tmp_path / "out", extra=[ "--cli-path", "" ] ) )
     args.root = str( root )
     env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00", smoke.Timed( time.monotonic ) )
-    assert env.smoke is True and env.model_id == draft.DRAFTER_MODEL and env.source_commit == COMMIT and env.seed == 7 and env.set_at == "2026-10-24T14:00:00+00:00"
+    assert env.smoke is True and env.model_id == draft.drafter_model() and env.source_commit == COMMIT and env.seed == 7 and env.set_at == "2026-10-24T14:00:00+00:00"
     assert env.kind_split == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and env.parallel == 3 and env.none_draft_fn is not None
     assert env.extras == { "vector_coverage": { "eligible": len( env.kept ), "with_a_vector_row": len( env.kept ), "vector_set_ids": len( ids ), "stage_ids": len( by_id ) } }
     assert ( tmp_path / "out" ).is_dir()

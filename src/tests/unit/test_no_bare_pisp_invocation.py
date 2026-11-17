@@ -70,7 +70,7 @@ _RECORD_DIRS   = ( "src/rnd/", "history/" )
 # ⚠️ TESTS ARE EXCLUDED FOR A DIFFERENT REASON THAN RECORDS, so they are named
 # separately rather than folded in. A test fixture is SYNTHETIC DATA — it instructs
 # nobody, and a bare command inside one is a sample, not an order.
-# Measured while scoping this guard: `src/tests/unit/test_reap_memento.py:356` builds a
+# Measured while scoping this guard: `src/tests/unit/test_reap_memento.py` (its `_pointer` helper) builds a
 # sample pointer carrying `python3 memento_io.py regenerate-pointer`. Every one of the 17
 # REAL pointers on this box carries the QUALIFIED form, so that fixture has simply
 # drifted from what the writer emits. Worth fixing on its own merits; not this guard's
@@ -248,6 +248,7 @@ def test_the_corpus_rule_admits_instructions_and_excludes_records():
     assert not _in_scope( "src/tests/unit/test_reap_memento.py" )
 
 
+@pytest.mark.census
 def test_no_instructing_file_hands_a_seat_an_unrunnable_pisp_command( pat ):
     """
     The sweep.

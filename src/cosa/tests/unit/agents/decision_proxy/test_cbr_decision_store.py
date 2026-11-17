@@ -98,9 +98,10 @@ def test_predict_debug_prints_with_cases( capsys ):
     assert "Prediction" in capsys.readouterr().out
 
 
-def test_predict_missing_decision_value_defaults_to_empty():
+def test_predict_missing_decision_value_casts_no_vote():
+    """Cases with no decision_value are blank rows and cast no vote."""
     results = [ ( 60.0, {} ), ( 50.0, {} ) ]
     store, _ = _store( results )
     pred = store.predict( "q?", "deploy", [ 0.1 ] )
-    assert pred.verdict == ""
-    assert pred.case_count == 2
+    assert pred.verdict is None
+    assert pred.case_count == 0

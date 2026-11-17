@@ -17,6 +17,7 @@ on a named volume: compose calls it "claude-creds-dev", docker "lupin_claude-cre
 The real fixture is what reproduces that, and test_a_named_volume_is_compared_by_its_
 project_prefixed_name pins it.
 """
+import copy
 import json
 import os
 import subprocess
@@ -42,13 +43,26 @@ def _pair():
     return _load( "compose-config-lupin-rest-dev.json" ), _load( "inspect-lupin-rest-dev.json" )
 
 
-def _runner_for( rendered, inspected, calls=None, envs=None ):
-    """A runner that answers the two commands the probe issues, and records them and their env."""
+def _runner_for( rendered, inspected, calls=None, envs=None, pass_through=() ):
+    """
+    A runner that answers the commands the probe issues, and records them and their env.
+
+    pass_through names the keys the compose file takes from the shell (`${KEY:-}`).
+    A render whose env carries a marker for one of them echoes it, as real compose does.
+    A key with a literal value in compose ignores the shell.
+    """
     def runner( argv, env=None ):
         if calls is not None: calls.append( argv )
         if envs is not None: envs.append( env )
         if argv[ :2 ] == [ "docker", "inspect" ]: return inspected
-        if argv[ :2 ] == [ "docker", "compose" ]: return rendered
+        if argv[ :2 ] == [ "docker", "compose" ]:
+            if env is None or not pass_through: return rendered
+            echoed = copy.deepcopy( rendered )
+            for spec in echoed[ "services" ].values():
+                for key in pass_through:
+                    if key in ( spec.get( "environment" ) or { } ) and env.get( key, "" ).startswith( probe_module.PASS_THROUGH_MARKER ):
+                        spec[ "environment" ][ key ] = env[ key ]
+            return echoed
         raise AssertionError( f"unexpected command {argv}" )
     return runner
 
@@ -328,7 +342,7 @@ class TestComposeSecretsAndShellPassThroughs( unittest.TestCase ):
         return _load( "compose-config-lupin-rest-test.json" ), _load( "inspect-lupin-rest-test.json" )
 
     def _verdict( self, rendered, inspected ):
-        return probe_module.probe( "lupin-rest-test", runner=_runner_for( rendered, inspected ) )[ :2 ]
+        return probe_module.probe( "lupin-rest-test", runner=_runner_for( rendered, inspected, pass_through=( "GH_TOKEN", ) ) )[ :2 ]
 
     def test_the_captured_pair_has_no_drift( self ):
         rendered, inspected = self._pair()
@@ -366,6 +380,47 @@ class TestComposeSecretsAndShellPassThroughs( unittest.TestCase ):
         rendered, inspected = self._pair()
         rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "LUPIN_BLANK_AND_ABSENT" ] = ""
         self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_ENV_DRIFT, [ "env LUPIN_BLANK_AND_ABSENT" ] ) )
+
+    def test_a_value_deliberately_changed_to_empty_in_compose_is_drift( self ):
+        # Row 58040ee7: the same blank "" as GH_TOKEN, but compose declares it as a literal, not ${KEY:-}.
+        rendered, inspected = self._pair()
+        rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "LUPIN_SERVER_MODE" ] = ""
+        inspected[ 0 ][ "Config" ][ "Env" ].append( "LUPIN_SERVER_MODE=was-set-before" )
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_ENV_DRIFT, [ "env LUPIN_SERVER_MODE" ] ) )
+
+    def test_the_pass_through_and_the_literal_blank_are_told_apart_in_one_service( self ):
+        rendered, inspected = self._pair()
+        rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "LUPIN_SERVER_MODE" ] = ""
+        inspected[ 0 ][ "Config" ][ "Env" ].append( "LUPIN_SERVER_MODE=was-set-before" )
+        code, fields = self._verdict( rendered, inspected )
+        self.assertNotIn( "env GH_TOKEN", fields )
+        self.assertIn( "env LUPIN_SERVER_MODE", fields )
+
+    def test_the_second_render_marks_only_the_blank_keys_the_container_holds( self ):
+        rendered, inspected = self._pair()
+        calls, envs = [ ], [ ]
+        probe_module.probe( "lupin-rest-test", runner=_runner_for( rendered, inspected, calls, envs, ( "GH_TOKEN", ) ) )
+        compose_envs = [ e for c, e in zip( calls, envs ) if c[ :2 ] == [ "docker", "compose" ] ]
+        self.assertEqual( len( compose_envs ), 2 )
+        self.assertIsNone( compose_envs[ 0 ] )
+        marked = sorted( k for k, v in compose_envs[ 1 ].items() if v.startswith( probe_module.PASS_THROUGH_MARKER ) )
+        self.assertEqual( marked, [ "GH_TOKEN" ] )
+
+    def test_no_second_render_when_no_blank_key_needs_telling_apart( self ):
+        rendered, inspected = _pair()
+        calls = [ ]
+        probe_module.probe( SERVICE, runner=_runner_for( rendered, inspected, calls ) )
+        self.assertEqual( len( [ c for c in calls if c[ :2 ] == [ "docker", "compose" ] ] ), 1 )
+
+    def test_a_failing_second_render_is_unknown_not_a_crash( self ):
+        rendered, inspected = self._pair()
+        base = _runner_for( rendered, inspected, pass_through=( "GH_TOKEN", ) )
+        def runner( argv, env=None ):
+            if env is not None and argv[ :2 ] == [ "docker", "compose" ]: raise RuntimeError( "compose refused the marked render" )
+            return base( argv, env )
+        code, fields, recreate = probe_module.probe( "lupin-rest-test", runner=runner )
+        self.assertEqual( ( code, recreate ), ( probe_module.EXIT_UNKNOWN, [ ] ) )
+        self.assertIn( "RuntimeError", fields[ 0 ] )
 
     def test_compose_mounts_reads_a_secret_target_alias_and_skips_a_secret_with_no_host_file( self ):
         service = { "secrets": [ { "source": "a", "target": "renamed" }, { "source": "b", "target": "/abs/path" }, { "source": "from_env" } ] }

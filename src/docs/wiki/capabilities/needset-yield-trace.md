@@ -1,6 +1,6 @@
 ---
 capability: needset-yield-trace
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.yield_trace.saved_ask@04aac966fd
   - lupin_mcp.reuse_needset.yield_trace.copy_saved@5055147353
@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.reuse_needset.yield_trace.found_intervals@beba11123d
   - lupin_mcp.reuse_needset.yield_trace.trace_needs@1eb57dcd18
   - lupin_mcp.reuse_needset.yield_trace.run_traced@0152dfdbf2
-  - lupin_mcp.reuse_needset.yield_trace.parse_args@b72e09f5a6
+  - lupin_mcp.reuse_needset.yield_trace.parse_args@0da9a1ce3d
   - lupin_mcp.reuse_needset.yield_trace.live_parts@319a8bfcac
   - lupin_mcp.reuse_needset.yield_trace.main@49423bda4a
   - lupin_mcp.reuse_needset.yield_trace.exit_status@e0995b5ff4

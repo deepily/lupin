@@ -1,8 +1,8 @@
 ---
 capability: heartbeat-arbiter-plumbing
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway@6eb9cacf70
+  - cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway@0f26dfe5ba
   - cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterGateway@1a80108b53
   - cosa.agents.heartbeat_arbiter.arbiter_job.owed_class_suppresses@359d8e594d
   - cosa.agents.heartbeat_arbiter.arbiter_journal.format_ts_local@c57a944303
@@ -10,7 +10,7 @@ pins:
   - cosa.agents.heartbeat_arbiter.arbiter_state.FleetEventAccumulator@b962a7eb44
   - cosa.agents.heartbeat_arbiter.arbiter_state.PingLedger@46765982a6
   - cosa.agents.heartbeat_arbiter.events_tail.load_offsets@10d03b41c8
-  - cosa.agents.heartbeat_arbiter.events_tail.save_offsets@6570084c15
+  - cosa.agents.heartbeat_arbiter.events_tail.save_offsets@a09531a533
   - cosa.agents.heartbeat_arbiter.events_tail.tail_fleet_events@9f216552b2
   - cosa.agents.heartbeat_arbiter.events_tail.tail_session_file@d6895d3c87
   - cosa.agents.heartbeat_arbiter.lineage_carry.read_carry@d99b7e63de

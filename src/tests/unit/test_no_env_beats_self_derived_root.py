@@ -20,6 +20,7 @@ location and then discard it. A script defaulting to a hardcoded absolute path i
 a different shape -- there the variable is the only way to aim it at all, and
 removing it would break the script rather than fix it.
 """
+import pytest
 import re
 import subprocess
 from pathlib import Path
@@ -44,6 +45,7 @@ def _tracked_shell_scripts():
     return [ line for line in out.stdout.splitlines() if line.strip() ]
 
 
+@pytest.mark.census
 def test_no_script_lets_an_inherited_root_beat_its_own_location():
     offenders = set()
 

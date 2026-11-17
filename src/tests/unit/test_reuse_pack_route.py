@@ -199,6 +199,7 @@ def test_a_packed_run_name_set_is_used_exactly_and_unset_or_empty_makes_a_new_on
 
 def test_two_lookups_in_a_row_each_open_a_run_under_their_own_name_in_one_ledger( monkeypatch, env, tmp_path ):
     led = rl.AccountLedger.create( tmp_path / "ledger.jsonl", limit_tokens=100_000_000, by="t", why="fixture" )
+    monkeypatch.setattr( rt, "_refuse_drifted_ledger", lambda path: None )              # this test is about run names, not the INI key
     monkeypatch.setenv( "LUPIN_REUSE_LEDGER_PATH", str( led.path ) )
     monkeypatch.setenv( "LUPIN_REUSE_JEV_PACK_SIZE", "50" ); monkeypatch.setenv( "LUPIN_REUSE_JEV_TOKEN_CEILING", "1000" )
     monkeypatch.delenv( "LUPIN_REUSE_JEV_RUN_NAME", raising=False )

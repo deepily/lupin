@@ -31,6 +31,7 @@ import subprocess
 import sys
 
 import cosa.utils.util as cu
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.doc_lint import labelled_set_seeder
 
 # A path with one of these as a directory name is never read, tracked or not.
@@ -261,7 +262,7 @@ def write_pool( rows, facts, out, builder_sha=None ):
     """
     if builder_sha is None: builder_sha = builder_sha256()
     labelled_set_seeder.write_jsonl( out, rows )
-    labelled_set_seeder.write_json( out + ".manifest.json", dict( facts, builder_sha256=builder_sha, pool_sha256=labelled_set_seeder.sha256_file( out ) ) )
+    labelled_set_seeder.write_json( out + ".manifest.json", dict( facts, builder_sha256=builder_sha, pool_sha256=file_sha256( out ) ) )
 
 
 def build_parser():

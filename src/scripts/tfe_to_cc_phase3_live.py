@@ -24,13 +24,14 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 
 _PROJECT_ROOT = Path( __file__ ).resolve().parent.parent.parent
 sys.path.insert( 0, str( _PROJECT_ROOT / "src" ) )
 
+from cosa.utils.utc_stamp import utc_compact_stamp
 from cosa.agents.tfe_to_cc.prompts.bundle_phase3 import build_fix_bundle_prompt
 from cosa.agents.tfe_to_cc.prompts.output_contract import (
     parse_result_block,
@@ -294,10 +295,6 @@ DIAGNOSES = {
 # Helpers
 # ────────────────────────────────────────────────────────────────────────
 
-def _ts() -> str:
-    return datetime.now( timezone.utc ).strftime( "%Y%m%dT%H%M%SZ" )
-
-
 def _banner( title: str ) -> None:
     print( "", flush=True )
     print( "=" * 72, flush=True )
@@ -307,7 +304,7 @@ def _banner( title: str ) -> None:
 
 def _create_smoke_worktree() -> str:
     """Create a fresh worktree off origin/main inside the container. Returns container path."""
-    ts = _ts()
+    ts = utc_compact_stamp()
     name = f"phase3-live-{ts}"
     container_path = f"/var/lupin/.claude/worktrees/{name}"
     proc = subprocess.run(
@@ -328,7 +325,7 @@ def _create_smoke_worktree() -> str:
 
 def _write_prompt_to_container( prompt: str, host_scratch: Path ) -> tuple:
     """Write the prompt into the container and keep a host-side copy for reflection."""
-    ts = _ts()
+    ts = utc_compact_stamp()
     container_path = f"/tmp/tfe_to_cc_phase3_prompt_{ts}.md"
     host_path      = host_scratch / f"tfe_to_cc_phase3_prompt_{ts}.md"
     proc = subprocess.run(
@@ -762,7 +759,7 @@ def main() -> int:
 
     started_at  = datetime.now().astimezone()
     scratch     = Path( "/tmp" )
-    run_ts      = _ts()
+    run_ts      = utc_compact_stamp()
     stream_path = scratch / f"tfe-to-cc-phase3-stream-{run_ts}.jsonl"
     stderr_path = scratch / f"tfe-to-cc-phase3-stderr-{run_ts}.log"
 

@@ -41,17 +41,17 @@ class TestStopOnTokens( unittest.TestCase ):
 class TestQueryLlmInMemory( unittest.TestCase ):
     def test_generates_and_cleans_response( self ):
         input_ids = MagicMock( name="input_ids" )
-        input_ids.size.return_value = 2                       # input_length = 2
+        input_ids.size.return_value = 2                       # input length is 2
         inputs = { "input_ids": input_ids, "attention_mask": MagicMock() }
 
         tokenizer = MagicMock( name="tokenizer" )
-        tokenizer.return_value.to.return_value = inputs        # tokenizer(prompt,...).to(device)
+        tokenizer.return_value.to.return_value = inputs        # the tokenizer call, then .to for the device
         tokenizer.encode.return_value = [ 5 ]                  # stop_ids
         tokenizer.eos_token_id = 0
         tokenizer.decode.return_value = "</s><s>foo</response>  <bar>"
 
         model = Mock( name="model" )
-        model.generate.return_value = [ [ 10, 11, 12, 13 ] ]   # gen_output[0][2:] = [12, 13]
+        model.generate.return_value = [ [ 10, 11, 12, 13 ] ]   # the tokens after the 2-token input are 12 and 13
 
         # Boundary-mock the Stopwatch clock seam: a mocked instant run rounds
         # get_delta_ms() to 0, which would hit a div-by-zero on the (never-instant

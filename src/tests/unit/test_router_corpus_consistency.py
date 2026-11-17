@@ -332,6 +332,7 @@ class TestThereIsOnlyOneTokenizer:
         assert movers == [], f"capability rule moved {len( movers )} math-corpus line(s): {movers[ :5 ]}"
 
 
+@pytest.mark.census
 class TestDuplicateGroupsDoNotGrow:
 
     def test_no_corpus_file_gained_a_duplicate_group( self ):

@@ -645,7 +645,7 @@ def test_the_host_fallback_appends_the_same_subdirectory_the_mount_uses( compose
 # the expected subdirectory from the COMPOSE MOUNT — an independent source that a rename
 # cannot move — and that half is genuinely falsifiable. Its closing assertion then reads
 #
-#     assert host_path == os.path.join( root, mount_leaf, frs.OVERRIDE_FILENAME )
+#     assert host_path == os.path.join( root, mount_leaf, frs.OVERRIDE_FILENAME )  # doc-lint: waive commented-out-code -- the weak assertion, quoted as the example being criticised
 #
 # and `override_path()` BUILDS host_path out of `OVERRIDE_FILENAME`. Both sides move
 # together, so that clause is true for every possible filename — the same unfalsifiable

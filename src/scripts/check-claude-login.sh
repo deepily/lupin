@@ -3,7 +3,7 @@
 # check-claude-login.sh — say whether a container's Claude Code login has expired.
 #
 # A container keeps its own login, and an expired one fails every Claude Code job in it. This reads the
-# expiry field only (never a token, never a CLI call) and prints the remedy line when it is past.
+# expiry field only (never a token). A lapsed expiry gets one renewing `claude -p` call before it is called expired; the remedy line prints only if that does not move it.
 #
 # Usage:
 #   src/scripts/check-claude-login.sh                    # lupin-rest-dev, the :7999 server

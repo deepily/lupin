@@ -2,6 +2,9 @@
 capability: candidate-stage
 status: built; used by check_exists on the packed live path
 plan: src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.14-reuse-lookup-candidate-stage-plan.md
+pin_algorithm: py3.13.xaad549/ts5.9.3
+pins:
+  - cosa.repo.symindex.candidates.storage_paths.shortlist_size@4587ee8530
 ---
 # Candidate stage
 
@@ -17,8 +20,10 @@ The candidate stage ranks the symbol index so that `check_exists` asks Jev about
 ## How the lookup uses it
 - `lupin_mcp.reuse_tools` builds a `CandidateStage` client (`lupin_mcp.reuse_candidates`) only on the packed path, when `LUPIN_REUSE_JEV_PACK_SIZE` is set. Without it every `check_exists` sweeps all entries.
 - The client reads the live vector set from the INI storage folders. It asks the Lupin server's resident search for the shortlist, because the cosa-voice process cannot import numpy.
-- It defaults to the concat-vector arm (Rick's ruling) and K 128. The INI key `reuse candidate shortlist arm`, or the variable `LUPIN_REUSE_CANDIDATE_ARM`, names another arm; `B2w` is the one that takes the wiki list. A policy with a band asks again at K 512 when the first sweep sits near a cut-off, and sweeps the extra entries. The shipped policy has no band, so it never does. Rick ruled the band off. The 0.076 fit stays in the policy header comment of `verdict.py`.
-- `check_exists` sweeps only the shortlist, route `candidates`. `fetch_similar` always sweeps every entry, route `full`.
+- K, the shortlist size, is the INI key `reuse candidate shortlist size`, 128 as shipped, read by `shortlist_size`. It has no default, and a missing key fails the lookup.
+- It defaults to the concat-vector arm (Rick's ruling). The INI key `reuse candidate shortlist arm`, or the variable `LUPIN_REUSE_CANDIDATE_ARM`, names another arm; `B2w` is the one that takes the wiki list. A policy with a band asks again at K 512 when the first sweep sits near a cut-off, and sweeps the extra entries. The shipped policy has no band, so it never does. Rick ruled the band off. The 0.076 fit stays in the policy header comment of `verdict.py`.
+- **Need expansion (on by default).** The INI key `reuse candidate need expansion enabled` turns it on, and the variable `LUPIN_REUSE_CANDIDATE_NEED_EXPANSION` overrides it. Each lookup then makes one text-only model call (`lupin_mcp.reuse_expansion`, tools off, the need sentence only). It returns three paraphrases and five identifier words. The client embeds them and sends them as `extra_queries`. The resident search fuses their lists with the need's own into the same shortlist of K, so the judge packs stay the same. The expansion is recorded in the receipt's `candidate_stage` block. A replay and a widening reuse it and ask no model. A failed or unreadable reply searches without expansion. See [[reuse-need-expansion]]. The INI key `reuse candidate need expansion protected head` defaults to 64 and is read only when the switch is on. It keeps the plain need's own first 64 ids in the shortlist, so the expansion cannot push them out. With the switch false nothing changes. Offline on the 70 real answers, 60 reached the shortlist before and 69 after, with none of the 60 hits lost.
+- `check_exists` and `fetch_similar` sweep only the shortlist, route `candidates`. A sweep-only call, an `include_tests` call and the `provides` question sweep every entry, route `full`.
 - A stage that fails on its first call answers `UNCERTAIN_READ_SOURCE` with `CALL_FAILED` in its causes, and nothing is swept. If only the widening call fails, the first sweep's decision stands with `CALL_FAILED` added. The receipt's `candidate_stage` block names the error.
 - `lupin_mcp.reuse_redact` blanks emails, URLs, IP addresses, absolute paths and credential-shaped tokens in the need before anything is asked. Known lupin routes are kept.
 - `page_candidates` in `reuse_tools` lists the wiki pages that feed the wiki list of arm `B2w`.

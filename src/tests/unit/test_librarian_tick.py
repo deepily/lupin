@@ -128,9 +128,9 @@ def row( n ): return { "id": f"id-{n}", "title": f"t{n}", "body": "" }
 def test_the_live_store_stamps_the_actor_and_maps_create_and_amend_to_the_client():
     client = Client()
     store  = lt.LiveStore( { "api_base_url": "x" }, "key", client )
-    store.create( { "title": "t" } )
+    store.create( { "title": "t", "accountable_manager": "cheech" } )
     store.amend( "id-1", "note" )
-    assert client.calls[ 0 ][ 1 ] == { "title": "t", "created_by": lt.ACTOR, "authority": "standing" }
+    assert client.calls[ 0 ][ 1 ] == { "title": "t", "accountable_manager": "cheech", "created_by": "cheech (wiki-librarian tick)", "authority": "standing" }
     assert client.calls[ 1 ] == ( "amend", "id-1", { "note": "note", "actor": lt.ACTOR, "authority": "standing" } )
     assert not hasattr( store, "close" )
 
@@ -162,12 +162,17 @@ def test_query_all_asks_for_terminal_rows_so_a_closed_miss_is_still_exported():
     assert client.calls[ 0 ][ 1 ][ "include_terminal" ] == "true"
 
 
-def test_a_failed_page_a_truncated_page_and_an_empty_page_with_has_more_each_end_the_read_safely():
+def test_a_byte_budget_truncated_page_is_followed_to_the_next_offset_not_treated_as_a_failure():
+    page1  = ( True, 200, { "tasks": [ row( n ) for n in range( 3 ) ], "has_more": True, "truncated": True } )
+    page2  = ( True, 200, { "tasks": [ row( 3 ) ], "has_more": False, "truncated": False } )
+    client = Client( { ( None, "true", 0 ): page1, ( None, "true", 3 ): page2 } )
+    ok, status, body = lt.LiveStore( {}, "k", client ).query_all( "k" )
+    assert ok is True and status == 200 and len( body[ "tasks" ] ) == 4
+
+
+def test_a_failed_page_and_an_empty_page_with_has_more_each_end_the_read_safely():
     failing = Client( { ( None, None, 0 ): ( False, 500, { "error": "down" } ) } )
     assert lt.LiveStore( {}, "k", failing ).query( "k" ) == ( False, 500, { "error": "down" } )
-    cut = Client( { ( None, None, 0 ): ( True, 200, { "tasks": [ row( 1 ) ], "has_more": True, "truncated": True } ) } )
-    ok, _, body = lt.LiveStore( {}, "k", cut ).query( "k" )
-    assert ok is False and "truncated" in body[ "error" ]
     loop = Client( { ( None, None, 0 ): ( True, 200, { "tasks": [], "has_more": True } ) } )
     assert lt.LiveStore( {}, "k", loop ).query( "k" )[ 0 ] is True
 
@@ -358,18 +363,23 @@ def test_main_print_install_prints_the_lines_and_touches_no_crontab( cron, tmp_p
     assert not cron[ "file" ].exists() and not cron[ "log" ].exists()
 
 
-def test_main_install_status_and_uninstall_walk_through_the_fake_crontab( cron, tmp_path, monkeypatch ):
+def test_main_install_is_retired_and_writes_nothing( cron, tmp_path, monkeypatch ):
+    code, out, err = run_main( [ "--install" ], cron, tmp_path, monkeypatch )
+    assert code == 1 and "lupin_mcp.cron_generate --install" in err and not cron[ "file" ].exists()
+
+
+def test_main_status_and_uninstall_walk_through_the_fake_crontab( cron, tmp_path, monkeypatch ):
     assert run_main( [ "--status" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "not installed"
-    assert run_main( [ "--install" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "installed: 2 lines"
+    cron[ "file" ].write_text( f"0 10 * * * a {lt.CRON_TAG}\n@reboot b {lt.CRON_TAG}\n" )
     assert run_main( [ "--status" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "installed: 2 lines"
     assert run_main( [ "--uninstall" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "uninstalled"
     assert run_main( [ "--status" ], cron, tmp_path, monkeypatch )[ 1 ].strip() == "not installed"
 
 
-def test_main_install_without_the_lock_prints_one_line_and_returns_one( cron, tmp_path, monkeypatch ):
+def test_main_uninstall_without_the_lock_prints_one_line_and_returns_one( cron, tmp_path, monkeypatch ):
     monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
     out, err = io.StringIO(), io.StringIO()
-    code = lt.main( [ "--install", "--root", str( tmp_path ) ], environ={}, now=NOON, out=out, err=err, crontab_cmd=cron[ "cmd" ] )
+    code = lt.main( [ "--uninstall", "--root", str( tmp_path ) ], environ={}, now=NOON, out=out, err=err, crontab_cmd=cron[ "cmd" ] )
     assert code == 1 and "shared crontab lock" in err.getvalue() and not cron[ "file" ].exists()
 
 
@@ -808,3 +818,55 @@ def test_main_runs_the_sibling_lupin_mobile_when_the_root_key_is_blank( cron, tm
                     enabled_fn=lambda: True,
                     make_mobile_librarian=lambda corpus, env, p, log: seen.append( corpus[ "root" ] ) or FakeLibrarian() )
     assert code == 0 and seen == [ str( tmp_path / "lupin-mobile" ) ] and "lupin_mobile" in json.loads( out.getvalue() )
+
+
+def test_status_text_takes_the_number_or_numbers_of_lines_that_count_as_a_full_install():
+    three = "\n".join( f"{n} {lt.CRON_TAG}" for n in range( 3 ) )
+    assert lt.status_text( three, lt.CRON_TAG, 3 ) == "installed: 3 lines" and lt.status_text( three ) == "partly installed: 3 lines"
+    assert lt.status_text( three, lt.CRON_TAG, ( 3, 4 ) ) == "installed: 3 lines" and lt.status_text( three, lt.CRON_TAG, ( 4, 5 ) ) == "partly installed: 3 lines"
+
+
+def _summaries( tmp_path ):
+    """Ensures: returns every job-summary.json the run left under the test data folder, parsed."""
+    return [ json.loads( p.read_text() ) for p in ( tmp_path / "data" ).rglob( "job-summary.json" ) ]
+
+
+def test_main_leaves_a_job_summary_of_a_finished_tick_and_of_a_switched_off_one( cron, tmp_path, monkeypatch, pipeline ):
+    run_main( [], cron, tmp_path, monkeypatch, make_librarian=lambda env, pending, log: FakeLibrarian(), export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
+    got = _summaries( tmp_path )[ 0 ]
+    assert got[ "job" ] == "wiki-librarian" and got[ "last_attempt" ][ "outcome" ] == "clean" and got[ "scan_debt" ][ "unit" ] == "findings"
+    run_main( [], cron, tmp_path, monkeypatch, enabled_fn=lambda: False )
+    assert _summaries( tmp_path )[ 0 ][ "last_attempt" ][ "outcome" ] == "skipped" and _summaries( tmp_path )[ 0 ][ "last_attempt" ][ "failure" ] == "switched off"
+
+
+def test_main_records_a_crashed_tick_as_failed_and_still_raises( cron, tmp_path, monkeypatch ):
+    def crash( *a, **k ): raise RuntimeError( "boom" )
+    monkeypatch.setattr( lt, "run_tick", crash )
+    with pytest.raises( RuntimeError, match="boom" ):
+        run_main( [], cron, tmp_path, monkeypatch, make_librarian=lambda env, pending, log: FakeLibrarian(), export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
+    last = _summaries( tmp_path )[ 0 ][ "last_attempt" ]
+    assert last[ "outcome" ] == "failed" and last[ "failure" ] == "RuntimeError: boom" and last[ "stage" ] == "tick"
+
+
+def test_the_retired_install_text_is_pinned_to_a_literal():
+    assert lt.install_moved_text( "/m" ) == (
+        "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:\n"
+        "  cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install" )
+
+
+def test_manage_cron_runs_the_four_verbs_for_any_job( monkeypatch ):
+    import types
+    said, edits = [], []
+    def verbs( **kw ): return types.SimpleNamespace( **{ "install": False, "status": False, "uninstall": False, **kw } )
+    def run( args, cmd, text=None ):
+        return lt.manage_cron( args, "/r", {}, "now", said.append, said.append, cmd, "/b", "# t", "own", 2, "job-x", lambda: text )
+    shell = [ sys.executable, "-c", "print('a # t'); print('b # t')", "--" ]
+    assert run( verbs( install=True ), None ) == 1 and "cron_generate --install" in said[ -1 ]
+    assert run( verbs( status=True ), shell[ :3 ] ) == 0 and said[ -1 ] == "installed: 2 lines"
+    assert run( verbs( status=True ), [ sys.executable, "-c", "import sys; sys.exit(1)" ] ) == 0 and said[ -1 ] == "not installed"
+    monkeypatch.setattr( lt, "edit_crontab", lambda lines, env, cmd, backup, now, tag, owner: edits.append( ( lines, backup, tag, owner ) ) )
+    assert run( verbs( uninstall=True ), shell ) == 0 and edits == [ ( [], "/b", "# t", "own" ) ] and said[ -1 ] == "uninstalled"
+    assert run( verbs(), shell, "the lines" ) == 0 and said[ -1 ] == "the lines"
+    def refuse( *a, **k ): raise lt.InstallRefused( "no lock" )
+    monkeypatch.setattr( lt, "edit_crontab", refuse )
+    assert run( verbs( uninstall=True ), shell ) == 1 and said[ -1 ] == "job-x: no lock"

@@ -8,6 +8,7 @@ This guard reads the files, so a reverted site fails here in any mode.
 The population is every tracked .py file under the two test roots, counted before the check.
 """
 
+import pytest
 import os
 import re
 import subprocess
@@ -22,6 +23,8 @@ ALLOWED   = (
     "src/tests/smoke/test_scratch_database_terminate_real_postgres.py",
     "src/tests/smoke/test_template_database_vector_real_postgres.py",
     "src/tests/unit/deploy/test_db_roles_drop_template.py",
+    # 2026-11-13: reads the VM init SQL and asserts it names the test database; it creates nothing (row d2a18b64).
+    "src/tests/unit/deploy/test_vm_test_server_overlay.py",
     "src/tests/unit/test_template_database_helper.py",
 )
 
@@ -50,6 +53,7 @@ def test_every_allowed_file_exists_and_still_needs_its_allowance():
         assert PATTERN.search( _read( path ) ), f"{path} no longer makes a database itself, so drop it from the allow-list"
 
 
+@pytest.mark.census
 def test_no_other_test_file_makes_its_own_database():
     assert _offenders( _population(), _read ) == [ ]
 

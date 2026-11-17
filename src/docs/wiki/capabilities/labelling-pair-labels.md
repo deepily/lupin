@@ -1,6 +1,6 @@
 ---
 capability: labelling-pair-labels
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.labelling.pair_labels.build_label@9ca7866a8e
   - cosa.repo.labelling.pair_labels.is_unsure@927c41f6a4

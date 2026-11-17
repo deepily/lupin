@@ -1,0 +1,173 @@
+/* Rows efe188bf and d540113f — the background-jobs accordion inside the multiplexer's
+   #background-jobs-pane. State is colour AND text (the badge), so colour alone never carries it. */
+
+.jobs-error {
+    padding    : 0.5rem 0.75rem;
+    border     : 1px solid #842029;
+    background : #f8d7da;
+    color      : #842029;
+}
+
+.jobs-item {
+    border-bottom : 1px solid #dee2e6;
+}
+
+.jobs-heading {
+    margin      : 0;
+    font-size   : 1rem;
+    font-weight : 400;   /* an h4 is bold by default, and the line button inherits it: the all-bold rows (row 4b807ffd) */
+}
+
+.jobs-line,
+.jobs-line-grid {
+    display               : grid;
+    grid-template-columns : 1.25rem minmax(0, 1.4fr) 8rem minmax(0, 1.7fr) minmax(0, 1.2fr) 1.75rem 1.75rem;   /* fits the container: the text columns shrink and wrap, so no column runs off the right edge */
+    align-items           : baseline;
+    gap                   : 0.5rem;
+    width                 : 100%;
+    padding               : 0.5rem 0.25rem;
+    border                : 0;
+    background            : transparent;
+    font                  : inherit;
+    font-weight           : 400;
+    text-align            : left;
+    cursor                : pointer;
+    overflow-wrap         : anywhere;
+}
+
+/* Header row of the collapsed lines (row 4b807ffd): same grid as .jobs-line, so the names sit over their columns.
+   Only the headings are bold. The Service and Status headings are buttons that sort. */
+.jobs-line-grid.jobs-header {
+    padding       : 0.375rem 0.25rem;
+    border-bottom : 2px solid #adb5bd;
+    cursor        : default;
+    font-size     : 0.875rem;
+    font-weight   : 600;
+    color         : #343a40;
+}
+
+.jobs-sort-button {
+    padding     : 0;
+    border      : 0;
+    background  : transparent;
+    font        : inherit;
+    color       : inherit;
+    text-align  : left;
+    cursor      : pointer;
+}
+
+.jobs-sort-button:hover,
+.jobs-sort-button:focus-visible {
+    text-decoration : underline;
+}
+
+.jobs-line:hover {
+    background : #f8f9fa;
+}
+
+.jobs-last-finished {
+    color : #495057;
+}
+
+.jobs-dot {
+    font-size : 1.1rem;
+}
+
+.jobs-state-unknown { color : #6c757d; }
+.jobs-state-silent  { color : #6f42c1; }
+.jobs-state-failing { color : #dc3545; }
+.jobs-state-behind  { color : #fd7e14; }
+.jobs-state-healthy { color : #198754; }
+
+.jobs-panel {
+    padding : 0 0.25rem 0.5rem 2rem;
+}
+
+/* Row c80ef763: the ⋯ button that opens lines 2 and 3, and the 📋 that opens the abstract. */
+.jobs-disclose {
+    padding : 0 0.25rem;
+    cursor  : pointer;
+}
+
+.jobs-abstract {
+    cursor : pointer;
+}
+
+/* Line 2 (the figures and the job's switch) and line 3 (Run now and the targets). */
+.jobs-line2,
+.jobs-line3 {
+    display     : flex;
+    flex-wrap   : wrap;
+    align-items : baseline;
+    gap         : 0.25rem 1rem;
+    padding     : 0.25rem 0;
+}
+
+.jobs-fig {
+    color : #495057;
+}
+
+.jobs-target {
+    display     : flex;
+    align-items : baseline;
+    gap         : 0.75rem;
+    width       : 100%;
+}
+
+/* The job's on/off switch (rows 063fc1a8, c38a49bd), drawn on line 2. State is colour AND text (ON / OFF / UNKNOWN). */
+.cron-note {
+    margin : 0.25rem 0.25rem 0.5rem;
+    color  : #495057;
+}
+
+.cron-item {
+    display     : flex;
+    flex-wrap   : wrap;
+    align-items : baseline;
+    gap         : 0.25rem 1rem;
+}
+
+.cron-state {
+    font-weight : 600;
+}
+
+.cron-state-on      { color : #146c43; }
+.cron-state-off     { color : #842029; }
+.cron-state-unknown { color : #6c757d; }
+
+.cron-flip:disabled {
+    cursor  : not-allowed;
+    opacity : 0.5;
+}
+
+.cron-error {
+    flex-basis : 100%;
+    color      : #842029;
+}
+
+.cron-drift {
+    color       : #664d03;
+    font-weight : 600;
+}
+
+/* A switch the server could not read: the job skips its ticks, so the row says so in red (row c38a49bd). */
+.cron-unreadable {
+    background-color : #f8d7da;
+}
+
+.cron-unreadable-note {
+    color       : #842029;
+    font-weight : 600;
+}
+
+.cron-inside {
+    color : #6c757d;
+}
+
+.jobs-actions {
+    margin-top : 0.75rem;
+}
+
+.jobs-run-status {
+    margin-left : 0.75rem;
+}

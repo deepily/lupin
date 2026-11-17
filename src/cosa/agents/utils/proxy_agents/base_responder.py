@@ -45,6 +45,27 @@ def print_stats_table( title: str, stats: Dict[ str, Any ] ) -> None:
     print( f"{'=' * 50}" )
 
 
+def print_job_state_transition( event_data: Dict[ str, Any ], prefix: str, arrow: str="->" ) -> None:
+    """
+    Print one line for a job_state_transition event, as the proxy responders log it.
+
+    The event carries `from_state` and `to_state`, the keys `emit_job_state_transition()` in
+    `cosa/rest/queue_util.py` sends. It has never carried `from_queue` or `to_queue`.
+
+    Requires:
+        - event_data is a dict
+        - prefix is the responder's log tag, such as "[Responder]"
+
+    Ensures:
+        - Prints "<prefix> Job state: <job_id> <from_state> <arrow> <to_state>"
+        - Prints "?" for each of job_id, from_state and to_state that the event lacks
+    """
+    job_id     = event_data.get( "job_id", "?" )
+    from_state = event_data.get( "from_state", "?" )
+    to_state   = event_data.get( "to_state", "?" )
+    print( f"{prefix} Job state: {job_id} {from_state} {arrow} {to_state}" )
+
+
 class BaseResponder( ABC ):
     """
     Abstract base for proxy agent responders.

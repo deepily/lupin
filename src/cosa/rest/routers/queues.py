@@ -26,6 +26,7 @@ from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 from cosa.rest.job_persistence import persist_job_cancelled, CANCELLABLE_QUEUES
 from cosa.rest.queue_util import emit_job_state_transition
+from cosa.utils.csv_text import split_csv
 
 router = APIRouter(prefix="/api", tags=["queues"])
 
@@ -432,7 +433,6 @@ async def get_queue(
     # job computed before dying. Previously fell through to the generic
     # todo/run branch which only returned basic fields; dead TFE/BFE jobs
     # that wrote a Phase 2 plan had no way to surface it to the UI.
-    # See: src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md (Fix 8b)
     if queue_name == "dead":
         # Same bulk-count pattern as done bucket — accurate has_interactions
         notif_counts = _count_interactions_for_jobs( [ j.id_hash for j in jobs ] )
@@ -1335,7 +1335,7 @@ async def get_job_history(
             user_id = authorized_filter
 
     # Parse comma-separated exclude_ids into a list
-    exclude_list = [ eid.strip() for eid in exclude_ids.split( "," ) if eid.strip() ] if exclude_ids else None
+    exclude_list = split_csv( exclude_ids ) if exclude_ids else None
 
     result = query_job_history(
         user_id         = user_id,

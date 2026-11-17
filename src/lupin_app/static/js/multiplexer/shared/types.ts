@@ -86,6 +86,8 @@ export type LupinEventType =
   // Row 8796333b slice 1 — server invalidation push: a commit appended task-store events. No delta;
   // TaskListStore re-reads on it. The 60s poll stays as the safety net.
   | "task_store_changed"
+  // Row 063fc1a8 — an administrator flipped a scheduled job's switch; the payload is the job's row.
+  | "cron_job_switch_changed"
   // R5 (2026-07-01) — session-name/topic control event. NotificationStore
   // intercepts a `session_topic` notification (raw notification_type), skips
   // carding it (legacy notifications.js:5862 "skip history card"), and re-emits
@@ -242,6 +244,9 @@ export type LupinEventType =
   // fire-and-forget default-contextualized derivation (legacy :5987-5989 +
   // formatter :4176-4187). Payload: StoreNotificationTtsIntentPayload.
   | "store_notification_tts_intent"
+  // A finished podcast job's notification arrived live and its abstract carries a Play Here link: the page may start it
+  // in the Play Here player (row 802c94d3). Payload: StorePodcastAutoplayIntentPayload.
+  | "store_podcast_autoplay_intent"
   // store_audio_ended — 00c (Phase-6 playback engine) emits this signal-OUT-only
   // on NATURAL utterance completion. F0's TtsQueueStore SUBSCRIBES and self-
   // advances (COND-2 ownership boundary: P6 never calls advance() / touches the
@@ -763,6 +768,10 @@ export interface SenderRecord {
   // header's `.sender-session-name` span. Client-persisted (localStorage
   // mirror in SenderStore) since the cold-load hydration does NOT carry it.
   session_name?            : string;
+  // True while the server stamps `worker_quiet` on this sender's notifications: a spawned, non-manager
+  // session whose speakerphone is off. It drives the quiet chip on the sender card. A speakerphone_changed
+  // that turns the speakerphone on clears it. It is not `conversation_mode_active`, the pinned-conversation flag.
+  worker_quiet?            : boolean;
 }
 
 // R5 (2026-07-01) — payload of the `session_topic` bus event (NotificationStore
@@ -1312,6 +1321,13 @@ export interface StoreTtsModeChangedPayload {
 /** Payload of `store_submit_jobs_changed`, which carries nothing. The pane reads the store. */
 export type StoreSubmitJobsChangedPayload = Record<string, never>;
 
+/** A finished podcast to play: the notification id, its Play Here URL and the title to show. */
+export interface StorePodcastAutoplayIntentPayload {
+  id_hash  : string;
+  embedUrl : string;
+  title    : string;
+}
+
 // store_notification_tts_intent payload (F0-d producer seam). Emitted by
 // NotificationStore on every SPOKEN new-arrival (high/urgent). `id_hash` is the
 // canonical notification key (equals Notification.id_hash / TtsQueueItem.id_hash
@@ -1415,6 +1431,7 @@ export interface BootCompletePayload {
     // Adding a renderer means editing THREE places, and only two of them redden.
     holdingAreaRenderer?         : string;
     epicBoardRenderer?           : string;
+    backgroundJobsRenderer?      : string;
     // Row 470b7509 — Finished Tasks, and it walked into the trap the comment
     // above predicts: the mount + the payload literal were both edited, both
     // guards stayed green, and `tsc` is what named this file. That is still

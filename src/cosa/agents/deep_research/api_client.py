@@ -28,10 +28,12 @@ import json
 import logging
 from typing import Optional, Any
 from dataclasses import dataclass, field
+from functools import partial
 
 from .config import ResearchConfig
 from .cost_tracker import CostTracker, BudgetExceededError
 from .rate_limiter import WebSearchRateLimiter
+from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, temperature_to_steer
 from cosa.agents.shared.sdk_error_result import raise_error_result
 
 # Claude Agent SDK — graceful fallback (mirrors the BFE/TFE/Podcast import guard)
@@ -97,33 +99,10 @@ RESEARCH_PERMISSION_MODE_WITH_TOOLS = "plan"
 RESEARCH_PERMISSION_MODE_NO_TOOLS   = "default"
 
 
-def _temperature_to_steer( temperature: float ) -> str:
-    """
-    Translate a legacy sampling temperature into a system-prompt steer.
-
-    `ClaudeAgentOptions` exposes no per-call temperature, so the historical
-    per-call value is folded into the system prompt as a qualitative creativity
-    instruction.
-
-    Requires:
-        - temperature is a float
-
-    Ensures:
-        - returns a non-empty steer string for clearly-creative (>= 0.9) or
-          clearly-precise (<= 0.5) temperatures
-        - returns "" for mid-range temperatures (no steer needed)
-
-    Args:
-        temperature: The legacy sampling temperature (typically 0.0–1.0)
-
-    Returns:
-        str: A creativity-steer sentence, or "" when no steer is warranted
-    """
-    if temperature >= 0.9:
-        return "Be expansive and creative in your reasoning; explore multiple angles."
-    if temperature <= 0.5:
-        return "Be precise, literal, and deterministic; avoid speculation."
-    return ""
+# The cut-offs and wording are this client's own; the rule is the shared one.
+_temperature_to_steer = partial( temperature_to_steer, high=0.9, low=0.5,
+                                 high_steer="Be expansive and creative in your reasoning; explore multiple angles.",
+                                 low_steer="Be precise, literal, and deterministic; avoid speculation." )
 
 
 def extract_json_object( text: str ) -> dict:
@@ -210,7 +189,7 @@ class APIResponse:
     raw_response   : Any   = None
 
 
-class ResearchAPIClient:
+class ResearchAPIClient( BoundedCCClientBase ):
     """
     In-process bounded-CC research client (Claude Agent SDK / Max-plan OAuth).
 
@@ -225,7 +204,18 @@ class ResearchAPIClient:
 
     No API key is required. `sdk_query` authenticates through the Claude Code
     Max-subscription OAuth session, not a firewalled API key.
+
+    Cost goes to the CostTracker, so the base's cost_estimate stays None. The client keeps its own
+    call_with_json_output, which takes a model and a call type, and its own _call_sdk.
     """
+
+    CONFIG_CLASS        = ResearchConfig
+    COST_ESTIMATE_CLASS = None
+    LABEL               = "ResearchAPIClient"
+    BANNER_NOUN         = "Lead"
+    BANNER_FIELD        = "lead_model"
+    JSON_MODEL_FIELD    = "lead_model"
+    _logger             = logger
 
     def __init__(
         self,
@@ -256,16 +246,8 @@ class ResearchAPIClient:
         Raises:
             ImportError: if claude_agent_sdk is not installed
         """
-        if not SDK_AVAILABLE:
-            raise ImportError(
-                "claude_agent_sdk not installed. "
-                "Install with: pip install claude-agent-sdk"
-            )
-
-        self.config       = config or ResearchConfig()
+        super().__init__( config, debug, verbose, SDK_AVAILABLE )
         self.cost_tracker = cost_tracker
-        self.debug        = debug
-        self.verbose      = verbose
 
         # Rate limiter retained for CLI progress/time-estimate UX (estimate_total_time).
         # NOT in the LLM call path under bounded CC — web search rides CC WebSearch,
@@ -299,9 +281,9 @@ class ResearchAPIClient:
             debug             = debug,
         )
 
-        if self.debug:
-            print( f"[ResearchAPIClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
-            print( f"[ResearchAPIClient] Models: lead={self.config.lead_model}, subagent={self.config.subagent_model}" )
+    def _banner_model_line( self ) -> str:
+        """Name both models for the debug banner: "Models: lead=<lead>, subagent=<subagent>"."""
+        return f"Models: lead={self.config.lead_model}, subagent={self.config.subagent_model}"
 
     async def _rate_limit_notify( self, message: str, priority: str ) -> None:
         """

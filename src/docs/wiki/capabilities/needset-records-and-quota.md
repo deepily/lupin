@@ -1,6 +1,6 @@
 ---
 capability: needset-records-and-quota
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.errors.NeedsetError@86f8e53032
   - lupin_mcp.reuse_needset.schema.need_id@9851f0d4bf

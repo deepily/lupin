@@ -16,12 +16,50 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-14 (Cheech 🌿 `8b134124`, crew John, Sam, Maya, Pocholo, working overnight; times Eastern)
+
+- **Full pyramid is for the PR only** (Rick by voice, about 22:40): e2e and integration run only before a PR to main. A merge to the working branch needs green unit and census checks plus review. Why: Cheech froze merges from about 21:00 to 22:40 behind all 15 rows (row d2a18b64). It could not finish before 23:00, and Rick called it "an absolute productivity killer". Row e986fbbc (Maya) audits the workflow wording and goes to Rick before it lands.
+- **Working-branch merges are a manager's own call** (Rick, about 23:05, relayed by Mr. Radio and María): managers land reviewed, tested merges without asking. Push stays his word. Open gap: the auto-mode classifier refused `git merge` from both manager seats tonight. So Rick ran two merges in Cheech's pane. A narrower allow rule was proposed to him: `LUPIN_ALLOW_MERGE_COMMIT=1 git merge --no-ff:*`. Not yet added.
+- **Overnight run** (about 23:15): the host stays on and the crew works through the night. The Opus backlog drain (row d30a1081) waits for the morning cron.
+- **Need expansion goes on Opus** (row 88469dd4, raised to P0 by Rick): the expander shared `reuse need drafter model`. That key must differ from the Opus need checker, so expansion ran on Sonnet by accident. It gets its own key and a re-measure on Opus. The switch flip is Rick's.
+- **Judge AUC does not hold the abstraction build** (about 22:30, relayed by María). It is recorded as dated paragraphs in the 9 Nov plan (3d6bef661, row 85044d24).
+
+## 📚 Decisions log 2026-11-11 (Mr. Radio 🦉 `f55fd006`, post-game for the 10 Nov crew of session `24d257d2`; times Eastern)
+
+Source: `src/docs/post-games/v0.2.3/2026.11.10-mr-radio-crew-vm-and-backfill-post-game.md` (row a47dbb5d). Rick approved the self-report about 10:02.
+
+- **R1**: before a seat hands Rick a VM line, it runs the verb's read-only twin there as the same user. It also test-writes every path the real run writes. Why: the cron install failed at Rick's console twice, on 10 and 11 Nov. Each failure was a VM problem no unit test could see.
+- **R2**: a row for a verb that runs on the VM closes only after one live run on the VM, not on unit tests alone. Why: c22e5ec1 closed with "nothing run against the VM" and its bring-up bugs reached the console.
+- **R3**: after moving a gate's start point, sweep every merge since the new start for the gate's findings before queueing a push. Why: the 10 Nov push stalled on six missing outcome lines from other crews.
+- **R4**: every author brief carries the deposit duty (1–3 sentences to `post-game` at a self-correction, surprise or gate, with how it was learned). Why: six seats left no deposits, so no rule from the run can be checked against its source.
+- **Rick's question, answered** (11 Nov about 09:54): port 8000's firewall rule is not part of a new-host install today. Row b01999e0 (held) declares, ensures and checks the port list.
+- **Manager vote, with Cheech** (broadcast c744d04d, about 10:03): the 7 held duplicate-check rows filed under "tiberius" on 10 Nov were misrouted by the filer. Moved to Cheech, the INI triage owner; both managers vote approve all 7.
+
+## 📚 Decisions log 2026-11-05 (Mr. Radio 🦉 `7d6c85af`, crew Chloé, Tiberius, Rachel, John, all reaped; times Eastern)
+
+- **Rick's ruling** (broadcast `c874731e`, morning): he is away until evening. Run the list down, push nothing, leave held rows for him, and send one summary card tonight. Followed. The card is `io/tmp/2026.11.05-evening-summary-mr-radio.md`.
+- **Rick's ruling** (broadcast `246629be`, 23:20): full session-end ritual with a push and a backup.
+- **Not ruled, waiting on Rick**:
+  - Approve the 9 held rows (14170bef, 85f6848f, d2d6a192, 5d0eb55b, 6d7f809b, c5cfca7c, fc9fb290, da64aaab, fe2e8c8f). Approving 14170bef lets the parked secret-rescan fix merge and turns the unit tier fully green.
+  - Row cfc7dd01 (the Beta and BLR trust models are never used): build it, or drop it for v0.2.3. Recommendation: drop. Next chase 10:30 on 6 Nov.
+
+## 📚 Decisions log 2026-11-05 (Cheech 🌿 `e801716f`, crew Krishna, Maya, Rio, Pocholo, all reaped; times Eastern)
+
+- **Manager calls Rick may overrule**: conformal calibration uses the BLR's predictions made before each update (row 50d8d3a1); BLR feature 0 stays constant.
+- **Not ruled, waiting on Rick**:
+  - Row a60aa733, the always-yes vote: Cheech recommends keeping the 79% always-yes rate as the v0.2.3 bar; Krishna's amendment recommends changing the vote. Next chase 10:30 on 6 Nov.
+  - Re-park Dart row f25c661d (recommended until 17 Nov); only his login can move it.
+  - Held rows 4e6d795d, 3570497d, b3ba8f11 and 3905b9d9; deleting the 43 leaked test rows (row 5ac3d5d7); switching on reuse need expansion.
+- **TODO.md is 856 lines.** The archive ask at 23:24 timed out to "next session", so archiving it is backlog.
+
 ## 📚 Decisions log 2026-11-04 (Cheech 🌿 `ebd974b4`, crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped; times Eastern)
 
 - **Wiki clean-up before the PR.** Rick released the 13 held PR-readiness and wiki rows by voice and said to staff up and dispatch them. The wiki lint went from 204 findings to 0.
 - **Park anything that needs a full test rerun** (broadcast `87304695`). It resumes on the new branch, once everyone agrees the PR work is finished. Parked: María's duplicate-check fixes (`refs/parked/v0.2.3-maria-dupcheck-fixes`), rows 10691b4f and 77718bf0, and Rio's two P3 rows.
 - **The session-end ritual, with a push and a backup, comes before the PR** (Rick, 16:45, comment on the push ask).
-- **Pending, for Rick**: whether to free GPU 0 for María's duplicate-check rerun, since vLLM holds 17 GB. Also, the slug for wip-v0.2.3.
+- **Squash-merge, done by Cheech's script** (Rick's card, about 17:00). PR #23 is d0180365c. Rick asked for the zipped release artifact, and release v0.2.2 carries the source zip.
+- **Next branch**: `wip-v0.2.3-2026.11.04-online-preference-learning` (Rick's comment on the PR ask).
+- **Pending, for Rick**: whether to free GPU 0 for María's duplicate-check rerun, since vLLM holds 17 GB. Also, whether to delete the remote wip-v0.2.2 branch; it is kept for now.
 
 ## 📚 Decisions log 2026-11-03 (Cheech 🌿 `d5ed7a66`, crew Sam; times Eastern)
 
@@ -599,6 +637,18 @@ last -x reboot | head -20      # then read the morning boot times yourself
 - 2026-10-31 — **Set B total size once work-alikes drop to 60 to 80?** → **Keep 310 to 330** (Rick, about 23:50 EDT, card). The 150 near-copies and 100 nothing-exists stay unchanged.
 - 2026-10-31 — **A second instrument to confirm work-alike partners?** → **Decide after the yield** (Rick, about 23:50 EDT, card). Until then the report states the judge's blind spot.
 - 2026-10-31 — **The 10:00 to 13:00 Eastern live judge-call window in `reuse_needset/smoke.py`?** → **Delete the rule** (Rick, about 22:00 EDT, card). His words: "I have no idea why that exists. Delete it."
+- 2026-11-06 — **The yes/no predictor (row `a60aa733`) scores below always-yes (74.7% against 79.0%). Fix how?** → **A prior-weighted vote** (Rick, about 11:55 Eastern, card). The predictor says "no" only when the no votes beat the yes votes by a margin set in the INI. Why: it is the smallest change that stops the 60 bad "no" calls.
+- 2026-11-06 — **`fetch_similar` has returned nothing usable since 20 Oct. Fix how (row `4e6d795d`)?** → **Use the candidate stage, and report the true cause** (Rick, about 11:59 Eastern, card). It shortlists through the candidate stage as `check_exists` does. A sweep stopped by the budget gets its own cause instead of `CALL_FAILED`. Why: it fits the 64,000-token ceiling; raising the ceiling would cost about 3.2 million tokens a call.
+- 2026-11-06 — **Rescore the old proxy rows left unscored before `6c41a7346` (row `b3ba8f11`)?** → **The multiple-choice rows only** (Rick, about 12:02 Eastern, card). That is about 2,436 rows, rescored by a one-off script with a dry run first. The 60 batch rows stay unscored. Why: batch rows could only be scored by exact match, so their figures would not be comparable.
+- 2026-11-06 — **The 0.85 threshold and 132 bad old similarities (row `3570497d`)?** → **Measure; exclude old rows** (Rick, about 12:03 Eastern, card). Check that 0.85 still separates matches from misses. The similarity is now a true cosine. The 132 old rows are left out of accuracy figures, and no database rows are written.
+- 2026-11-06 — **29 multiple-choice answers stored as a bare label (row `3905b9d9`)?** → **Fix the sending client** (Rick, about 12:04 Eastern, card). No mapping is added at record time. A sender in a nested repo gets its bug filed in that repo.
+- 2026-11-06 — **Five wiki-librarian lint rollups?** → **Approve all five, fixed in one pass** (Rick, about 12:05 Eastern, card). Why: this follows his earlier wiki-librarian ruling, "Lint only, fix on contact".
+- 2026-11-06 — **The Dart candidate stage for lupin-mobile is due again (row `f25c661d`)?** → **Re-park it to 13 Nov** (Rick, about 12:17 Eastern, card). Why: he ruled that Dart follows a proven lupin implementation, and `fetch_similar` on lupin is only being fixed today.
+- 2026-11-06 — **The 0.85 match threshold admits only near-copies (row `35a79890`)?** → **Label the 133 pairs, then fit the cut** (Rick, about 16:25 Eastern, card). Why: the true-cosine median is 0.488 and paraphrases sit at 0.65–0.80, so any other number would be a guess.
+- 2026-11-06 — **The rescore `--write` (row `b3ba8f11`)?** → **Hold until `fa884f81` is fixed.** Rick ruled at about 16:25 Eastern, by card. Why: the dry run would write 2,316 misses. Most of them come from that bug. Cheech corrected the premise at 17:13 Eastern. The fix changes only new predictions. The rescore reads the stored ones. So it would still record 75 matches and 2,316 misses. The ruling goes back to Rick. The re-ask timed out; the chase is 7 Nov at 10:00 Eastern.
+- 2026-11-06 — **The rescore, asked again (row `b3ba8f11`)?** → **Write the true scores.** Rick answered the card at about 17:55 Eastern. Why: the old predictions really did answer other questions. The script dumps a before-image first.
+- 2026-11-06 — **The free-text match threshold (row `35a79890`)?** → **Set it to 0.75.** Rick answered the card at about 17:55 Eastern. Why: precision is 0.79 and recall 0.65 on the 133 labelled pairs. At 0.85 recall was 0.29.
+- 2026-11-06 — **The mobile composer bug (row `d10ef810`)?** → **Keep it as a ticket.** Rick will approve it in a lupin-mobile session. Its chase is 13 Nov.
 
 → entries dated 2026-08-26 to 2026-10-09 archived to `todo-history/2026-08-26-to-2026-10-10-todo.md`.
 

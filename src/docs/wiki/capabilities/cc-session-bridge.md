@@ -1,12 +1,12 @@
 ---
 capability: cc-session-bridge
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.sessions_dir.sessions_dir@40d97ca400
   - lupin_cli.claude_code.hooks.lib.session_bridge.atomic_write_json@304ee933db
   - lupin_cli.claude_code.hooks.lib.session_bridge.canonical_persona_key@1f4c521dcb
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_path_by_id@2eb138d772
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_sessions@f16e8f60e0
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_sessions@004fcc2be6
   - lupin_cli.claude_code.hooks.lib.session_bridge.touch_bridge_mtime@6b55fa5d1b
 ---
 # Claude Code session bridge

@@ -58,6 +58,13 @@
             "agents"           : [ "podcast", "research_to_podcast" ]
         },
         {
+            "question_pattern" : "Should I stop for your review of the podcast script?",
+            "answer"           : "one_shot",
+            "arg_name"         : "review",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "podcast" ]
+        },
+        {
             "question_pattern" : "Would you like to proceed with these settings?",
             "answer"           : "yes",
             "arg_name"         : "confirmation",

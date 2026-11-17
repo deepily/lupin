@@ -14,8 +14,10 @@ References:
 import json
 import xmltodict
 from pydantic import Field, field_validator, model_validator
+from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.number_fields import ConfidenceFloatMixin
 
 
 def _says_no_entry( matched_entry ):
@@ -32,7 +34,7 @@ def _says_no_entry( matched_entry ):
     return isinstance( matched_entry, str ) and matched_entry.strip().lower() == "none"
 
 
-class ScriptMatcherResponse( BaseXMLModel ):
+class ScriptMatcherResponse( ConfidenceFloatMixin, BaseXMLModel ):
     """
     XML response from Phi-4 for Q&A script matching.
 
@@ -93,22 +95,6 @@ class ScriptMatcherResponse( BaseXMLModel ):
             confidence    = "[confidence score between 0.0 and 1.0]",
             reasoning     = "[brief explanation of why this entry matches]"
         )
-
-    def get_confidence_float( self ):
-        """
-        Parse confidence string to float, clamped to [0.0, 1.0].
-
-        Requires:
-            - self.confidence is a string
-
-        Ensures:
-            - Returns float in [0.0, 1.0]
-            - Returns 0.0 on parse failure
-        """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
 
     def is_match( self ):
         """
@@ -236,7 +222,7 @@ class ScriptMatcherResponse( BaseXMLModel ):
             return False
 
 
-class BatchScriptMatcherResponse( BaseXMLModel ):
+class BatchScriptMatcherResponse( ConfidenceFloatMixin, BaseXMLModel ):
     """
     XML response from Phi-4 for batch Q&A script matching (OPEN_ENDED_BATCH).
 
@@ -333,9 +319,7 @@ class BatchScriptMatcherResponse( BaseXMLModel ):
             - Returns "" for None values
             - Passes through non-None values unchanged
         """
-        if v is None:
-            return ""
-        return v
+        return none_to_empty( v )
 
     def get_answers_dict( self ):
         """
@@ -355,22 +339,6 @@ class BatchScriptMatcherResponse( BaseXMLModel ):
             if header:
                 result[ header ] = answer if answer is not None else ""
         return result
-
-    def get_confidence_float( self ):
-        """
-        Parse confidence string to float, clamped to [0.0, 1.0].
-
-        Requires:
-            - self.confidence is a string
-
-        Ensures:
-            - Returns float in [0.0, 1.0]
-            - Returns 0.0 on parse failure
-        """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
 
     def is_match( self ):
         """
@@ -529,7 +497,7 @@ class BatchScriptMatcherResponse( BaseXMLModel ):
             return False
 
 
-class VerificationResponse( BaseXMLModel ):
+class VerificationResponse( ConfidenceFloatMixin, BaseXMLModel ):
     """
     XML response from Phi-4 for answer verification scoring.
 
@@ -562,9 +530,7 @@ class VerificationResponse( BaseXMLModel ):
             - Returns "" for None values on optional fields (confidence, reasoning)
             - Passes through non-None values and required fields unchanged
         """
-        if v is None and info.field_name != "match":
-            return ""
-        return v
+        return none_to_empty( v, info.field_name, keep_none=( "match", ) )
 
     @classmethod
     def get_example_for_template( cls ):
@@ -595,22 +561,6 @@ class VerificationResponse( BaseXMLModel ):
             - Returns False otherwise
         """
         return self.match.strip().lower() == "true"
-
-    def get_confidence_float( self ):
-        """
-        Parse confidence string to float, clamped to [0.0, 1.0].
-
-        Requires:
-            - self.confidence is a string
-
-        Ensures:
-            - Returns float in [0.0, 1.0]
-            - Returns 0.0 on parse failure
-        """
-        try:
-            return max( 0.0, min( 1.0, float( self.confidence ) ) )
-        except ( ValueError, TypeError ):
-            return 0.0
 
     @classmethod
     def quick_smoke_test( cls, debug=False ):

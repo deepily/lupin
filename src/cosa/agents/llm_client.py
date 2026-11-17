@@ -4,13 +4,12 @@ from typing import Optional, Any
 
 import cosa.utils.util as du
 from cosa.agents.llm_completion import LlmCompletion
+from cosa.agents.base_llm_client import collect_stream_text, print_request_summary
 
 from cosa.agents.token_counter import TokenCounter
 
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
-# from pydantic_ai.models.openai import OpenAIModel
-# from pydantic_ai.providers.openai import OpenAIProvider
 
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -52,8 +51,6 @@ class LlmClient:
     OPENAI_GPT_01_MINI                = "openai:o1-mini-2024-09-12"
     GOOGLE_GEMINI_1_5_FLASH           = "google-gla:gemini-1.5-flash"
     ANTHROPIC_CLAUDE_SONNET_3_5       = "anthropic:claude-3-5-sonnet-latest"
-    
-    # QWEN_2_5_32B = "kaitchup/Qwen2.5-Coder-32B-Instruct-AutoRound-GPTQ-4bit"
     
     @staticmethod
     def get_model( mnt_point: str, prefix: str=DEEPILY_PREFIX ) -> str:
@@ -125,7 +122,6 @@ class LlmClient:
             self.model = LlmCompletion( base_url=base_url, model_name=model_name, api_key=api_key, **generation_args )
         else:
             # For normal chat mode, use the Agent class
-            # if self.debug: print( f"Using Agent with model: 'openai:{model_name}'" )
             du.print_banner( f"TODO: fetch and set system prompt HERE! for model 'openai:{model_name}'", prepend_nl=True, expletive=True )
             # Wrap generation parameters in ModelSettings for pydantic_ai API
             model_settings = ModelSettings( **generation_args )
@@ -153,40 +149,9 @@ class LlmClient:
         Returns:
             - Complete response string from the LLM
         """
-        output = [ ]
-        
-        if self.completion_mode:
-            # Use run_stream for LlmCompletion
-            # Wrap generation parameters in ModelSettings for pydantic_ai API
-            runtime_settings = ModelSettings( **generation_args )
-            async with self.model.run_stream( prompt, model_settings=runtime_settings ) as result:
-                # Stream text as deltas
-                counter = 0
-                async for chunk in result.stream_text( delta=True ):
-                    if self.debug and self.verbose:
-                        print( chunk, end="", flush=True )
-                    else:
-                        counter += 1
-                        if counter % 128 == 0: print()
-                        print( ".", end="", flush=True )
-                    output.append( chunk )
-        else:
-            # Use run_stream for Agent (Chat)
-            # Wrap generation parameters in ModelSettings for pydantic_ai API
-            runtime_settings = ModelSettings( **generation_args )
-            async with self.model.run_stream( prompt, model_settings=runtime_settings ) as result:
-                # Stream text as deltas
-                counter = 0
-                async for chunk in result.stream_text( delta=True ):
-                    if self.debug and self.verbose:
-                        print( chunk, end="", flush=True )
-                    else:
-                        counter += 1
-                        if counter % 128 == 0: print()
-                        print( ".", end="", flush=True )
-                    output.append( chunk )
-        
-        return "".join( output )
+        # Both LlmCompletion and Agent answer run_stream the same way; wrap generation parameters in ModelSettings for pydantic_ai API
+        runtime_settings = ModelSettings( **generation_args )
+        return await collect_stream_text( self.model.run_stream( prompt, model_settings=runtime_settings ), self.debug, self.verbose )
     
     async def run_async( self, prompt: str, stream: bool=False, **kwargs: Any ) -> str:
         """
@@ -325,21 +290,6 @@ class LlmClient:
             # Can run directly with a new event loop
             return run_in_new_loop()
     
-    def _format_duration( self, seconds: float ) -> str:
-        """
-        Format a duration in seconds to a readable string.
-
-        Requires:
-            - seconds: A float representing seconds
-
-        Ensures:
-            - Returns a formatted string in milliseconds
-
-        Returns:
-            - String in the format "XXXms"
-        """
-        return f"{int( seconds * 1000 )}ms"
-
     def _print_metadata( self, prompt_tokens: int, completion_tokens: int, duration: Optional[ float ] ):
         """
         Print performance metadata about an LLM request.
@@ -357,18 +307,7 @@ class LlmClient:
             - Formats duration appropriately
             - Displays a formatted summary of metrics
         """
-        total_tokens = prompt_tokens + completion_tokens
-        tps          = completion_tokens / duration if ( duration and duration > 0 ) else float( 'inf' )
-        duration_str = self._format_duration( duration ) if duration is not None else "N/A"
-
-        du.print_banner( "📊 Stream Summary", prepend_nl=True )
-        print( f"🧠 Model              : {self.model_name}" )
-        print( f"⏱️ Duration           : {duration_str}" )
-        print( f"🔢 Prompt tokens      : {prompt_tokens}" )
-        print( f"💬 Completion tokens  : {completion_tokens}" )
-        print( f"🧮 Total tokens       : {total_tokens}" )
-        print( f"⚡ Tokens/sec          : {tps:.2f}" )
-        print( "=" * 40 )
+        print_request_summary( self.model_name, prompt_tokens, completion_tokens, duration, "📊 Stream Summary" )
 
 
 def quick_smoke_test():
@@ -405,9 +344,7 @@ def quick_smoke_test():
             print( f"✓ LlmClient created successfully for {test_case['name']}" )
             
             # For smoke test, we'll just validate client creation to avoid API costs
-            # In a full test, you could uncomment the line below:
-            # response = client.run( test_prompt, stream=False, max_tokens=50 )
-            # print( f"✓ Response received: {response[:50]}..." )
+            # In a full test, the client could be run against a real prompt here
             print( f"✓ Client is ready for LLM requests" )
             
         except Exception as e:

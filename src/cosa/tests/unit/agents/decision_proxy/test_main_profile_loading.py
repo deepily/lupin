@@ -64,3 +64,20 @@ def test_profile_load_non_import_error_is_caught_not_propagated():
     assert loaded is False
     assert r.accepted_senders == []
     assert r.domain_strategy is None
+
+
+def test_profile_strategy_carries_the_ini_caps_and_audit_rate():
+    # Row a9643589: the entry point built EngineeringStrategy with only senders, mode and debug,
+    # so the INI cap levels and l4 audit rate were silently ignored.
+    from unittest.mock import MagicMock
+    r = DecisionResponder( trust_mode="active" )
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "cosa.agents.decision_proxy.config.trust_proxy_config_from_config_mgr",
+                return_value={ "l4_audit_sample_rate": 0.37 } ), \
+         patch( "cosa.agents.swe_team.proxy.config.swe_proxy_config_from_config_mgr",
+                return_value={ "accepted_senders": [ "a@x" ], "deployment_cap_level": 2 } ):
+        assert dpmain._load_swe_team_profile( r ) is True
+    assert r.domain_strategy.l4_audit_rate == 0.37
+    assert r.domain_strategy.trust_mode == "active"   # the responder's mode, not a fixed one
+    assert r.domain_strategy.trust_tracker.categories[ "deployment" ].cap_level == 2
+    assert r.accepted_senders == [ "a@x" ]

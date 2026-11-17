@@ -23,10 +23,11 @@ from datetime import datetime
 from typing import Optional, List
 
 from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
+from cosa.agents.chained_pipeline_state import ChainedDeepResearchAgent
 from .state import ChainedResult, PipelineState
 
 
-class DeepResearchToPresentationAgent:
+class DeepResearchToPresentationAgent( ChainedDeepResearchAgent ):
     """
     Orchestrates a chained workflow: Deep Research → Presentation Generation.
 
@@ -51,6 +52,10 @@ class DeepResearchToPresentationAgent:
         print( f"Research: {result.research_path}" )
         print( f"Presentation: {result.marp_path}" )
     """
+
+    PIPELINE_STATE = PipelineState
+    RESULT_CLASS   = ChainedResult
+    STAGE_LABEL    = "Presentation Generation"
 
     def __init__(
         self,
@@ -99,305 +104,34 @@ class DeepResearchToPresentationAgent:
             debug: Enable debug output
             verbose: Enable verbose output
         """
-        self.query            = query
-        self.user_email       = user_email
-
-        # Deep Research options
-        self.budget           = budget
-        self.lead_model       = lead_model
-        self.no_confirm       = no_confirm
-        self.audience         = audience
-        self.audience_context = audience_context
-        self.source_document  = source_document or [ ]
+        super().__init__(
+            query, user_email, budget=budget, lead_model=lead_model, no_confirm=no_confirm,
+            audience=audience, audience_context=audience_context, source_document=source_document,
+            cli_mode=cli_mode, debug=debug, verbose=verbose
+        )
 
         # Presentation Generator options
         self.target_duration_minutes = target_duration_minutes
         self.target_slide_count      = target_slide_count
         self.theme                   = theme
+    def _stage_voice_io( self ):
+        """Return the presentation generator's voice_io module."""
+        from cosa.agents.presentation_generator import voice_io
 
-        # Common options
-        self.cli_mode         = cli_mode
-        self.debug            = debug
-        self.verbose          = verbose
+        return voice_io
 
-        # Result tracking
-        self.result           = ChainedResult()
-        self._start_time      = None
+    async def _run_second_stage( self, research_path: str ) -> dict:
+        """Run the Presentation Generator on the research report."""
+        return await self._run_presentation_generator( research_path )
 
-        if self.debug:
-            print( f"[DeepResearchToPresentationAgent] Initialized" )
-            print( f"  Query: {query[ :50 ]}..." )
-            print( f"  User: {user_email}" )
-            print( f"  Mode: {'CLI' if cli_mode else 'Voice-driven'}" )
-
-    def _set_modality( self ) -> None:
-        """
-        Set voice/CLI mode on both underlying agents.
-
-        Both Deep Research and Presentation Generator have their own voice_io modules.
-        We must set cli_mode on both to ensure consistent behavior.
-        """
-        from cosa.agents.deep_research import voice_io as dr_voice_io
-        from cosa.agents.presentation_generator import voice_io as pg_voice_io
-
-        dr_voice_io.set_cli_mode( self.cli_mode )
-        pg_voice_io.set_cli_mode( self.cli_mode )
-
-        # Re-establish DR binding as the default for pipeline notifications
-        dr_voice_io.reconfigure()
-
-        if self.debug:
-            mode = "CLI" if self.cli_mode else "Voice-driven"
-            print( f"[DeepResearchToPresentationAgent] Set modality to: {mode}" )
-
-    async def run_async( self ) -> ChainedResult:
-        """
-        Execute the full chain: Deep Research → Presentation Generation.
-
-        Returns:
-            ChainedResult with research_path, yaml_path, marp_path, combined cost
-
-        Raises:
-            Exception: If Deep Research fails critically
-        """
-        self._start_time = time.time()
-        self.result.started_at = datetime.now().isoformat()
-        self.result.state = PipelineState.INITIALIZED
-
-        # Set modality before running either agent
-        self._set_modality()
-
-        try:
-            # Step 1: Run Deep Research
-            await self._notify( "Starting Deep Research pipeline...", priority="medium" )
-            dr_result = await self._run_deep_research()
-
-            if dr_result.get( "cancelled" ):
-                self.result.state = PipelineState.CANCELLED
-                self.result.error = "Deep Research was cancelled by user"
-                return self._finalize_result()
-
-            # Extract report path
-            report_path = dr_result.get( "report_path" )
-            if not report_path:
-                self.result.state = PipelineState.FAILED
-                self.result.error = "Deep Research completed but no report_path returned"
-                return self._finalize_result()
-
-            # Store DR results
-            self.result.research_path = report_path
-            self.result.research_abstract = dr_result.get( "abstract" )
-            self.result.dr_cost = dr_result.get( "cost", 0.0 )
-            self.result.dr_artifacts = dr_result.get( "artifacts", {} )
-            self.result.state = PipelineState.DEEP_RESEARCH_DONE
-
-            # Checkpoint: Confirm DR artifacts before PG handoff
-            dr_artifacts = self.result.dr_artifacts
-            checkpoint_abstract = (
-                f"**Research Report**: {report_path}\n\n"
-                f"**Abstract**: {self.result.research_abstract[ :200 ] if self.result.research_abstract else 'N/A'}...\n\n"
-                f"**Cost**: ${self.result.dr_cost:.4f} | "
-                f"**Tokens**: {dr_artifacts.get( 'tokens_used', 'N/A' ):,} | "
-                f"**Duration**: {dr_artifacts.get( 'duration_seconds', 0 ):.0f}s"
-            )
-
-            await self._notify(
-                f"Deep Research complete! Cost: ${self.result.dr_cost:.4f}",
-                priority="medium",
-                abstract=checkpoint_abstract
-            )
-
-            # Step 2: Run Presentation Generator
-            await self._notify( "Starting Presentation Generation...", priority="medium" )
-            pg_result = await self._run_presentation_generator( report_path )
-
-            if pg_result.get( "cancelled" ):
-                self.result.state = PipelineState.CANCELLED
-                self.result.error = "Presentation Generation was cancelled by user"
-                return self._finalize_result()
-
-            # Store PG results
-            self.result.yaml_path = pg_result.get( "yaml_path" )
-            self.result.marp_path = pg_result.get( "marp_path" )
-            self.result.pg_cost = pg_result.get( "cost", 0.0 )
-            self.result.pg_artifacts = pg_result.get( "artifacts", {} )
-            # Surface the slide count as a top-level field for downstream consumers
-            # (R2P job.py copies it onto its own artifacts dict so live tests can
-            # assert on it). _run_presentation_generator reports it as "total_slides".
-            self.result.slide_count = self.result.pg_artifacts.get( "total_slides" )
-            self.result.state = PipelineState.COMPLETED
-
-            await self._notify(
-                f"Pipeline complete! Total cost: ${self.result.total_cost:.4f}",
-                priority="medium"
-            )
-
-            return self._finalize_result()
-
-        except Exception as e:
-            self.result.state = PipelineState.FAILED
-            self.result.error = str( e )
-
-            await self._notify(
-                f"Pipeline failed: {str( e )[ :100 ]}",
-                priority="urgent"
-            )
-
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-            return self._finalize_result()
-
-    async def _run_deep_research( self ) -> dict:
-        """
-        Execute Deep Research and return results.
-
-        Returns:
-            dict with keys: report_path, abstract, cost, artifacts, cancelled
-        """
-        self.result.state = PipelineState.RUNNING_DEEP_RESEARCH
-
-        # Re-establish DR voice_io binding before DR phase
-        from cosa.agents.deep_research import voice_io as dr_voice_io
-        from cosa.agents.deep_research import cosa_interface as dr_cosa_interface
-        dr_voice_io.reconfigure()
-        dr_cosa_interface.TARGET_USER = self.user_email
-        set_dispatch_context( target_user=self.user_email )
-
-        # Import Deep Research components
-        from cosa.agents.deep_research.config import ResearchConfig
-        from cosa.agents.deep_research.cost_tracker import CostTracker, BudgetExceededError
-        from cosa.agents.deep_research.seed_context import query_with_seed_context
-        from cosa.agents.deep_research.cli import (
-            run_research,
-            generate_abstract_for_cli,
-            save_report_with_frontmatter,
-        )
-        from cosa.config.configuration_manager import ConfigurationManager
-        from cosa.memory.gister import Gister
-        import cosa.utils.util as cu
-
-        # Initialize configuration
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-
-        # Get storage configuration
-        storage_backend = config_mgr.get( "deep research storage backend", default="local" )
-        gcs_bucket = config_mgr.get( "deep research gcs bucket", default=None )
-        output_dir = config_mgr.get( "deep research output directory", default="/io/deep-research" )
-
-        # Build full output path
-        if not output_dir.startswith( "/" ):
-            output_dir = cu.get_project_root() + "/" + output_dir
-        elif not output_dir.startswith( cu.get_project_root() ):
-            output_dir = cu.get_project_root() + output_dir
-
-        # Generate session_name from query using Gister
-        gister = Gister( debug=self.debug )
-        session_name = gister.get_gist(
-            self.query,
-            prompt_key="prompt template for deep research session name"
-        )
-        session_name = session_name.lower().strip() if session_name else "general research query"
-
-        # Derive semantic_topic from session_name
-        semantic_topic = session_name.replace( " ", "-" )
-
-        if self.debug:
-            print( f"[DR] Session name: {session_name}" )
-            print( f"[DR] Semantic topic: {semantic_topic}" )
-            print( f"[DR] Storage backend: {storage_backend}" )
-
-        # Create research configuration
-        config = ResearchConfig(
-            lead_model = self.lead_model if self.lead_model else config_mgr.get(
-                "deep research lead model",
-                default="claude-opus-4-6"
-            ),
-            subagent_model = config_mgr.get(
-                "deep research subagent model",
-                default="claude-sonnet-4-6"
-            ),
-            audience = self.audience or config_mgr.get(
-                "deep research audience",
-                default="academic"
-            ),
-            audience_context = self.audience_context or config_mgr.get(
-                "deep research audience context",
-                default=None
-            ) or None,
-        )
-
-        # Generate unique session ID for this pipeline (needed by CostTracker)
-        import uuid
-        session_id = f"chain-{uuid.uuid4().hex[ :8 ]}"
-
-        # Create cost tracker
-        cost_tracker = CostTracker( session_id=session_id, budget_limit_usd=self.budget )
-
-        try:
-            # Run the research.
-            #
-            # 🔴 THE SEED DOCUMENT ENTERS HERE AND NOWHERE ELSE (row 5726e3c5). It is
-            # deliberately NOT folded into `self.query`, which also feeds the session-name
-            # gist above, the pipeline notifications, and the saved report's frontmatter —
-            # a whole file in any of those is unreadable. One call site, one enrichment.
-            report = await run_research(
-                query        = query_with_seed_context( self.query, self.source_document ),
-                config       = config,
-                cost_tracker = cost_tracker,
-                user_email   = self.user_email,
-                no_confirm   = self.no_confirm,
-                debug        = self.debug,
-                verbose      = self.verbose
-            )
-
-            if report is None:
-                return { "cancelled": True }
-
-            # Generate abstract
-            abstract = await generate_abstract_for_cli(
-                report       = report,
-                config       = config,
-                cost_tracker = cost_tracker,
-                debug        = self.debug
-            )
-
-            # Save report with frontmatter
-            report_path = save_report_with_frontmatter(
-                report          = report,
-                query           = self.query,
-                abstract        = abstract,
-                semantic_topic  = semantic_topic,
-                session_id      = session_id,
-                cost_tracker    = cost_tracker,
-                config          = config,
-                output_dir      = output_dir,
-                user_email      = self.user_email,
-                storage_backend = storage_backend,
-                gcs_bucket      = gcs_bucket,
-                debug           = self.debug
-            )
-
-            # Get cost summary
-            summary = cost_tracker.get_summary()
-
-            return {
-                "report_path" : report_path,
-                "abstract"    : abstract,
-                "cost"        : summary.total_cost_usd,
-                "artifacts"   : {
-                    "report"          : report,
-                    "session_name"    : session_name,
-                    "semantic_topic"  : semantic_topic,
-                    "tokens_used"     : summary.total_input_tokens + summary.total_output_tokens,
-                    "duration_seconds": summary.duration_seconds,
-                },
-                "cancelled"   : False,
-            }
-
-        except BudgetExceededError as e:
-            raise Exception( f"Deep Research budget exceeded: ${e.current_cost:.2f} of ${e.budget_limit:.2f}" )
+    def _store_second_stage_result( self, pg_result: dict ) -> None:
+        """Keep the deck's YAML and Marp paths and its slide count on the result."""
+        self.result.yaml_path   = pg_result.get( "yaml_path" )
+        self.result.marp_path   = pg_result.get( "marp_path" )
+        # Surface the slide count as a top-level field for downstream consumers
+        # (R2P job.py copies it onto its own artifacts dict so live tests can
+        # assert on it). _run_presentation_generator reports it as "total_slides".
+        self.result.slide_count = pg_result.get( "artifacts", {} ).get( "total_slides" )
 
     async def _run_presentation_generator( self, research_path: str ) -> dict:
         """
@@ -420,7 +154,7 @@ class DeepResearchToPresentationAgent:
 
         # Import Presentation Generator components
         from cosa.agents.presentation_generator.orchestrator import PresentationOrchestratorAgent
-        from cosa.agents.presentation_generator.config import PresentationConfig
+        from cosa.agents.presentation_generator.config import PresentationConfig, apply_job_overrides
         from cosa.config.configuration_manager import ConfigurationManager
         import cosa.utils.util as cu
 
@@ -439,15 +173,15 @@ class DeepResearchToPresentationAgent:
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         config = PresentationConfig.from_config( config_mgr, debug=self.debug )
 
-        # Apply overrides
-        if self.target_duration_minutes is not None:
-            config.target_duration_minutes = self.target_duration_minutes
-        if self.target_slide_count is not None:
-            config.target_slide_count = self.target_slide_count
-        if self.audience is not None:
-            config.audience = self.audience
-        if self.theme is not None:
-            config.default_theme = self.theme
+        # Apply overrides (the same rule the presentation job uses; this chain has no content_model arg)
+        apply_job_overrides(
+            config,
+            target_duration_minutes = self.target_duration_minutes,
+            target_slide_count      = self.target_slide_count,
+            audience                = self.audience,
+            theme                   = self.theme,
+            audience_context        = self.audience_context,
+        )
 
         # Create orchestrator
         agent = PresentationOrchestratorAgent(
@@ -486,28 +220,6 @@ class DeepResearchToPresentationAgent:
             },
             "cancelled"   : False,
         }
-
-    def _finalize_result( self ) -> ChainedResult:
-        """Finalize and return the result with timing info."""
-        self.result.completed_at = datetime.now().isoformat()
-        if self._start_time:
-            self.result.duration_seconds = time.time() - self._start_time
-        self.result.total_cost = self.result.dr_cost + self.result.pg_cost
-        return self.result
-
-    async def _notify( self, message: str, priority: str = "medium", **kwargs ) -> None:
-        """
-        Send a notification using the appropriate modality.
-
-        Uses Deep Research voice_io (which is already configured).
-        """
-        from cosa.agents.deep_research import voice_io
-
-        await voice_io.notify( message, priority=priority, **kwargs )
-
-    def get_state( self ) -> PipelineState:
-        """Get current pipeline state."""
-        return self.result.state
 
 
 def quick_smoke_test():

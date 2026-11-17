@@ -108,16 +108,16 @@ def test_is_user_deferred_predicate():
     assert ug.is_user_deferred( _NOW, None ) is False
 
 
-# ── _blocked_by_has_user ──────────────────────────────────────────────────────
+# ── blocked_by_has_user ──────────────────────────────────────────────────────
 
-def test_blocked_by_has_user():
-    assert ug._blocked_by_has_user( [ { "kind": "user", "id": "rick" } ] ) is True
-    assert ug._blocked_by_has_user( [ { "kind": "item", "id": "x" },
+def testblocked_by_has_user():
+    assert ug.blocked_by_has_user( [ { "kind": "user", "id": "rick" } ] ) is True
+    assert ug.blocked_by_has_user( [ { "kind": "item", "id": "x" },
                                       { "kind": "user", "id": "rick" } ] ) is True
-    assert ug._blocked_by_has_user( [ { "kind": "persona", "id": "tiberius" } ] ) is False
-    assert ug._blocked_by_has_user( [ "junk", None ] ) is False       # non-dict refs skipped
-    assert ug._blocked_by_has_user( None ) is False                   # non-list
-    assert ug._blocked_by_has_user( "not-a-list" ) is False
+    assert ug.blocked_by_has_user( [ { "kind": "persona", "id": "tiberius" } ] ) is False
+    assert ug.blocked_by_has_user( [ "junk", None ] ) is False       # non-dict refs skipped
+    assert ug.blocked_by_has_user( None ) is False                   # non-list
+    assert ug.blocked_by_has_user( "not-a-list" ) is False
 
 
 # ── derive_user_chase_until ───────────────────────────────────────────────────

@@ -48,7 +48,8 @@ SUBSCRIBED_EVENTS = [
 # LLM Fallback Configuration
 # ============================================================================
 
-LLM_FALLBACK_MODEL      = "claude-sonnet-4-5-20250929"
+# The model id lives in lupin-app.ini under this key; there is no default in code (Rick, 13 Nov 2026).
+LLM_FALLBACK_MODEL_KEY  = "notification proxy llm fallback model"
 LLM_FALLBACK_MAX_TOKENS = 500
 
 
@@ -91,9 +92,18 @@ TEST_PROFILES = {
         "audience"         : "general",
         "audience_context" : "none",
         "languages"        : "en",
+        "review"           : "one_shot",
     },
     "research_to_podcast" : {
         "description" : "Auto-answer for research-to-podcast chained workflow",
+        "query"            : "artificial intelligence safety research 2026",
+        "budget"           : "no limit",
+        "audience"         : "academic",
+        "audience_context" : "none",
+        "languages"        : "en",
+    },
+    "research_to_podcast_spanish" : {
+        "description" : "Auto-answer for research-to-podcast runs that ask for English and Mexican Spanish",
         "query"            : "artificial intelligence safety research 2026",
         "budget"           : "no limit",
         "audience"         : "academic",
@@ -108,6 +118,7 @@ TEST_PROFILES = {
         "audience_context"         : "none",
         "research"                 : "/tmp/mock-research-document.md",
         "languages"                : "en",
+        "review"                   : "one_shot",
         "prompt"                   : "fix the authentication bug in the login endpoint",
         "project"                  : "lupin",
         "task"                     : "add a health check endpoint to the API",
@@ -167,6 +178,7 @@ TEST_PROFILES = {
         "audience_context" : "none",
         "research"         : "/tmp/mock-research-document.md",
         "languages"        : "en",
+        "review"           : "one_shot",
         "prompt"           : "fix the authentication bug in the login endpoint",
         "project"          : "lupin",
     },
@@ -193,6 +205,7 @@ TEST_PROFILES = {
         "audience_context"        : "none",
         "research"                : "/tmp/mock-research-document.md",
         "languages"               : "en",
+        "review"                  : "one_shot",
         "confirmation"            : "yes",
         "source"                  : "/tmp/mock-source-document.md",
         "target_duration_minutes" : "default",

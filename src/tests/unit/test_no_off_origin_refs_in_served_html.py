@@ -81,6 +81,7 @@ def _violations( sources ):
     return sorted( found )
 
 
+@pytest.mark.census
 def test_no_served_page_references_an_off_origin_url():
     """
     The whole served surface is same-origin.

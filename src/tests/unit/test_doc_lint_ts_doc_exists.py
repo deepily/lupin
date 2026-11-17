@@ -424,6 +424,7 @@ def test_the_real_extractor_counts_commonjs_assignments_by_the_declaration_they_
 
 
 @pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
+@pytest.mark.census
 def test_the_real_census_runs_over_this_repository_and_reads_every_file( ):
     result = ts_doc_exists.census( REPO_ROOT )
     assert result.walked == len( ts_doc_exists.counted_paths( REPO_ROOT ) ) > 100 and result.symbols >= result.undocumented >= 0

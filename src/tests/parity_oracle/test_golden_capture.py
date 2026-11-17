@@ -47,10 +47,13 @@ GOLDEN_PATH = repo_root() / "src" / "tests" / "e2e_ui" / "fixtures" / "golden" /
 
 _CAPTURE_ENABLED = os.environ.get( "LUPIN_PARITY_CAPTURE" ) == "1"
 
-pytestmark = pytest.mark.skipif(
-    not _CAPTURE_ENABLED,
-    reason="golden-capture is a gated recalibration step — set LUPIN_PARITY_CAPTURE=1 to run",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not _CAPTURE_ENABLED,
+        reason="golden-capture is a gated recalibration step — set LUPIN_PARITY_CAPTURE=1 to run",
+    ),
+    pytest.mark.usefixtures( "live_bundle_fresh" ),
+]
 
 
 def _login():
@@ -111,7 +114,7 @@ def test_capture_legacy_golden( page ):
 
     page.goto( LEGACY_URL, wait_until="networkidle", timeout=20_000 )
 
-    # Legacy renders sender cards into #notifications-list (notifications.js:11438).
+    # Legacy renders sender cards into #notifications-list (notifications.js).
     page.wait_for_selector( "#notifications-list .sender-card", timeout=15_000 )
 
     # --- Exploration dump: learn legacy's real contract DOM attributes --------

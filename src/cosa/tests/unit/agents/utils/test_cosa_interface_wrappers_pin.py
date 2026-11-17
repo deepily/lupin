@@ -23,6 +23,9 @@ SPEC = {
     "cosa.agents.bug_fix_expediter.cosa_interface": {
         "notify": ( "progress_group_id", ), "ask": ( "priority", ), "feedback": ( "priority", "response_default" ),
         "choices": ( "priority", "response_default" ), "session": True,  "has": ( "notify", "ask", "feedback", "choices" ) },
+    "cosa.agents.test_fix_expediter.cosa_interface": {
+        "notify": ( "progress_group_id", ), "ask": ( "priority", ), "feedback": ( "priority", "response_default" ),
+        "choices": ( "priority", "response_default" ), "session": True,  "has": ( "notify", "ask", "feedback", "choices" ) },
     "cosa.agents.claude_code.cosa_interface": {
         "notify": (), "ask": (), "feedback": (), "choices": (), "session": False, "has": ( "notify", "ask" ) },
     "cosa.agents.deep_research.cosa_interface": {

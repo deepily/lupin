@@ -1,6 +1,6 @@
 ---
 capability: needset-stage-parts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.stage_parts.route_table@28c12f9bc9
   - lupin_mcp.reuse_needset.stage_parts.final_need_fn@3e78263f0a
@@ -8,10 +8,10 @@ pins:
   - lupin_mcp.reuse_needset.stage_parts.counted@b290dae039
   - lupin_mcp.reuse_needset.stage_parts.Tally@a51b5f124a
   - lupin_mcp.reuse_needset.stage_parts.yield_row@282d0350c1
-  - lupin_mcp.reuse_needset.stage_parts.build_parts@0bdb752762
-  - lupin_mcp.reuse_needset.stage_parts.RejectionLedger@5875c77214
+  - lupin_mcp.reuse_needset.stage_parts.build_parts@5683ed8cea
+  - lupin_mcp.reuse_needset.stage_parts.RejectionLedger@3b887d4c06
   - lupin_mcp.reuse_needset.stage_parts.RejectionLedger.add@e3c1d53314
-  - lupin_mcp.reuse_needset.stage_parts.RejectionLedger.rows@e754ceef84
+  - lupin_mcp.reuse_needset.stage_parts.RejectionLedger.rows@76ea8e5b94
 ---
 # Need set: stage parts
 

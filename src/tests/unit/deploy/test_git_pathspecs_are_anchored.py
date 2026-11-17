@@ -67,7 +67,7 @@ def _offending_lines( text ):
         # Skip a `git ...` that sits INSIDE a string literal — `log "… -> git archive src/ -> SCP …"`
         # is prose describing a deploy, not an invocation. An odd number of double quotes before
         # the match means we are inside one. (Real calls quote their ARGS, not the verb, so the
-        # count before `git` is even.) Caught by deploy-cloud-test.sh:168 on the first run.
+        # count before `git` is even.) Caught by deploy-cloud-test.sh on the first run.
         if line[ : m.start() ].count( '"' ) % 2 == 1:
             continue
         call = m.group( 0 )
@@ -90,6 +90,7 @@ def _offending_lines( text ):
             yield i, line, bare
 
 
+@pytest.mark.census
 @pytest.mark.parametrize( "path", _shell_files(), ids=lambda p: p.name )
 def test_shell_git_pathspecs_are_anchored_to_the_repo_root( path ):
     """

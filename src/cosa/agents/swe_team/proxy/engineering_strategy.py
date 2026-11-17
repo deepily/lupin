@@ -11,6 +11,8 @@ Dependency Rule:
     This module never imports from notification_proxy.
 """
 
+import random
+
 from scipy.stats import beta as beta_dist
 
 from cosa.agents.decision_proxy.base_decision_strategy import BaseDecisionStrategy, DecisionResult
@@ -73,6 +75,11 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         icrl_top_k                 = 5,
         llm_client                 = None,
         cbr_confidence_threshold   = None,
+        l3_act_confidence          = 0.80,
+        l4_min_confidence          = 0.50,
+        l4_audit_rate              = 0.10,
+        audit_random               = None,
+        cap_levels                 = None,
         debug                      = False
     ):
         """
@@ -98,7 +105,15 @@ class EngineeringStrategy( BaseDecisionStrategy ):
             icrl_top_k: Number of similar cases to include in ICRL prompt
             llm_client: Optional LlmClient for ICRL queries
             cbr_confidence_threshold: Threshold below which CBR is considered low-confidence
+            l3_act_confidence: At trust level 3 the proxy acts only at or above this classification confidence (default 0.80)
+            l4_min_confidence: At trust level 4 the proxy queues anything below this confidence (default 0.50)
+            l4_audit_rate: Share of level 4 "act" outcomes sent to the human anyway as an audit sample (default 0.10)
+            audit_random: Zero-argument callable returning a float in [0, 1); random.random when None
+            cap_levels: Optional dict of category name to cap level (1-5) that overrides the built-in cap for those categories
             debug: Enable debug output
+
+        Raises:
+            - ValueError if cap_levels names an unknown category or a cap outside 1-5
         """
         self.debug                      = debug
         self.trust_mode                 = trust_mode
@@ -113,6 +128,10 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         self.icrl_enabled               = icrl_enabled
         self.icrl_top_k                 = icrl_top_k
         self.llm_client                 = llm_client
+        self.l3_act_confidence          = l3_act_confidence
+        self.l4_min_confidence          = l4_min_confidence
+        self.l4_audit_rate              = l4_audit_rate
+        self.audit_random               = audit_random if audit_random is not None else random.random
         self.cbr_confidence_threshold   = cbr_confidence_threshold if cbr_confidence_threshold is not None else DEFAULT_CBR_CONFIDENCE_THRESHOLD
 
         # Conformal wrapper (lazy-initialized on first use)
@@ -121,9 +140,13 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         # Create trust tracker if not provided
         self.trust_tracker = trust_tracker or TrustTracker( debug=debug )
 
-        # Register all engineering categories with their cap levels
+        # Register all engineering categories with their cap levels (cap_levels overrides the built-in cap)
+        cap_levels = cap_levels or {}
+        for cat_name, cap in cap_levels.items():
+            if cat_name not in get_category_names(): raise ValueError( f"cap_levels names unknown category {cat_name!r}" )
+            if cap not in ( 1, 2, 3, 4, 5 ): raise ValueError( f"cap level for {cat_name} must be 1-5, got {cap!r}" )
         for cat_name in get_category_names():
-            cap = get_category_cap_level( cat_name )
+            cap = cap_levels.get( cat_name, get_category_cap_level( cat_name ) )
             self.trust_tracker.register_category( cat_name, cap_level=cap )
 
         # Create circuit breaker if not provided
@@ -194,6 +217,18 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
         return ( category, confidence )
 
+    def get_trust_level( self, category ):
+        """
+        Return the tracker's current level for a category.
+
+        Requires:
+            - category is a category name
+
+        Ensures:
+            - Returns the level from the trust tracker, 1 for an unregistered category
+        """
+        return self.trust_tracker.get_level( category )
+
     def gate( self, category, trust_level, confidence ):
         """
         Gate decision based on trust level, mode, and circuit breaker.
@@ -206,8 +241,13 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         Ensures:
             - In "shadow" mode: always returns "shadow"
             - In "suggest" mode: returns "suggest" for level 2 and above, "shadow" for level 1
-            - In "active" mode: trust-level gating (level 1 = shadow, level 2 = suggest, level 3 and above = act)
+            - In "active" mode: level 1 = shadow, level 2 = suggest
+            - Level 3 acts at confidence >= l3_act_confidence, else suggests
+            - Level 4 acts, except it suggests for the destructive category, below l4_min_confidence,
+              and for a l4_audit_rate share of otherwise-act outcomes (the audit draw)
+            - Level 5 always acts
             - Circuit breaker tripped → returns "defer"
+            - With Thompson Sampling on, the sampled action can only lower the result above, never raise it
 
         Args:
             category: Decision category name
@@ -238,23 +278,47 @@ class EngineeringStrategy( BaseDecisionStrategy ):
                         if self.debug: print( f"[EngineeringStrategy] Conformal defer: {category} (prob={prob:.4f})" )
                         return "defer"
 
-        # Thompson Sampling — probabilistic gate routing
+        # Graded outcome from mode and level first; Thompson may only lower it (row 8295ab5d)
+        action = self._graded_action( trust_level, confidence, category )
         if self.thompson_enabled:
-            return self._gate_thompson( category )
+            sampled = self._gate_thompson( category )
+            if self._ACTION_RANK[ sampled ] < self._ACTION_RANK[ action ]: action = sampled
+        return action
 
+    _ACTION_RANK = { "shadow": 0, "suggest": 1, "act": 2 }
+
+    def _graded_action( self, trust_level, confidence, category ):
+        """
+        Map mode and trust level to shadow, suggest or act (no breaker, conformal or Thompson).
+
+        Requires:
+            - self.trust_mode is "suggest" or "active"
+
+        Ensures:
+            - Suggest mode: "suggest" at level 2 and above, else "shadow"
+            - Active mode: levels as documented in gate()
+
+        Returns:
+            Action string: "shadow", "suggest" or "act"
+        """
         # Suggest mode — suggest at L2+, shadow at L1
         if self.trust_mode == "suggest":
             if trust_level >= 2:
                 return "suggest"
             return "shadow"
 
-        # Active mode — full trust-level gating
+        # Active mode — graded autonomy (row d595321e; levels as in the admin guide)
         if trust_level <= 1:
             return "shadow"
-        elif trust_level == 2:
+        if trust_level == 2:
             return "suggest"
-        else:
+        if trust_level == 3:
+            return "act" if confidence >= self.l3_act_confidence else "suggest"
+        if trust_level == 4:
+            if category == "destructive" or confidence < self.l4_min_confidence: return "suggest"
+            if self.audit_random() < self.l4_audit_rate: return "suggest"      # audit draw: ask the human anyway
             return "act"
+        return "act"
 
     def decide( self, question, category, context=None ):
         """
@@ -424,14 +488,14 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
     def calibrate_conformal( self ):
         """
-        Calibrate the conformal wrapper using BLR predictions across categories.
+        Calibrate the conformal wrapper on the BLR's out-of-sample predictions.
 
-        Collects BLR predict() probabilities and corresponding labels from
-        all categories that have trained BLR models, then calibrates the
-        conformal wrapper.
+        Each trained BLR logs, for every point it learned, the probability it predicted
+        before seeing that point's outcome. Those pairs from every category are the
+        held-out calibration set.
 
         Ensures:
-            - Conformal wrapper is calibrated if sufficient BLR data exists
+            - Calibration uses only logged ( prediction, outcome ) pairs, never counts turned into repeated points
             - Safe to call even if no BLR models are trained
 
         Returns:
@@ -442,24 +506,11 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         probabilities = []
         labels        = []
 
-        for cat_name, cat in self.trust_tracker.categories.items():
-            if cat._blr_model is None or cat._blr_model._feature_count == 0:
-                continue
-
-            x_bar = cat._blr_model._feature_sum / cat._blr_model._feature_count
-            prob, _ = cat._blr_model.predict( x_bar )
-
-            # Use category success rate as proxy for true label
-            if cat.total_decisions > 0:
-                n_success = cat.total_successes
-                n_total   = cat.total_decisions
-                # Generate calibration points proportional to category size
-                for _ in range( n_success ):
-                    probabilities.append( prob )
-                    labels.append( 1 )
-                for _ in range( n_total - n_success ):
-                    probabilities.append( prob )
-                    labels.append( 0 )
+        for cat in self.trust_tracker.categories.values():
+            if cat._blr_model is None: continue
+            for prob, label in cat._blr_model.calibration_pairs:
+                probabilities.append( prob )
+                labels.append( label )
 
         wrapper.calibrate( probabilities, labels )
         return wrapper.get_status()
@@ -562,6 +613,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
         Ensures:
             - Returns DecisionResult with accurate trust level
+            - value holds the proxy's prediction for every action, shadow included
             - Circuit breaker check is performed
             - CBR metadata appended to reason string
 
@@ -575,14 +627,13 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         """
         category, confidence = self.classify( question, sender_id, context )
 
-        # Get actual trust level from tracker (not default L1)
-        trust_level = self.trust_tracker.get_level( category )
+        trust_level = self.get_trust_level( category )
 
         action = self.gate( category, trust_level, confidence )
 
-        value = None
-        if action in ( "act", "suggest" ):
-            value = self.decide( question, category, context )
+        # Shadow predicts too: the orchestrator compares this value with the human's answer, and a
+        # missing prediction would be scored as "proxy would not approve" against every human yes.
+        value = self.decide( question, category, context )
 
         reason = f"Category '{category}' at L{trust_level} ({self.trust_mode} mode) → {action}"
 

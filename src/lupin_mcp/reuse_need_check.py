@@ -14,12 +14,12 @@ Nothing here reaches Jev.
 """
 import argparse
 import ast
-import hashlib
 import json
 import pathlib
 import re
 import sys
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex.candidates.identifier_split import split_identifier
 from lupin_mcp import reuse_tools as rt
 
@@ -48,11 +48,6 @@ TS_MODIFIERS     = frozenset( { "public", "private", "protected", "readonly", "o
 def entry_text_of( rec ):
     """Ensures: returns what Jev sees of one symbol, as the production reader builds it."""
     return rt.entry_text( rec )
-
-
-def file_sha256( path ):
-    """Ensures: returns the sha256 hex digest of the file's bytes."""
-    return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
 
 
 def twin_groups( manifest ):

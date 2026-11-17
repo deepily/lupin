@@ -14,6 +14,7 @@ import time
 
 import cosa.utils.util as cu
 from cosa.agents.llm_client_factory import LlmClientFactory
+from cosa.agents.llm_client_init import init_llm_client
 from cosa.agents.notification_proxy.xml_models import VerificationResponse
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 
@@ -78,14 +79,7 @@ class LlmAnswerVerifier:
         self._client             = None
 
         # Create LLM client
-        try:
-            factory = LlmClientFactory( debug=debug, verbose=verbose )
-            self._client = factory.get_client( llm_spec_key, debug=debug, verbose=verbose )
-            self._available = True
-            if self.debug: print( f"[AnswerVerifier] LLM client ready ({llm_spec_key})" )
-        except Exception as e:
-            print( f"[AnswerVerifier] LLM client unavailable: {e}" )
-            self._available = False
+        self._client, self._available = init_llm_client( LlmClientFactory, llm_spec_key, "AnswerVerifier", debug, verbose )
 
         # Prompt template processor
         self._processor = PromptTemplateProcessor( debug=debug, verbose=verbose )

@@ -16,6 +16,8 @@ import time
 import urllib.error
 import urllib.request
 
+from cosa.utils.http_json import send_json
+
 URL            = "https://api.typesafe.ai/v1/systemone"
 KEY_VARIABLE   = "JEV_API_TOASTER"
 QUESTION_ID    = "claim_stated"
@@ -138,12 +140,7 @@ class CallBudget:
 
 def _post( url, headers, body, timeout ):
     """Send one POST with urllib; return ( status, text, headers ), an error status included."""
-    request = urllib.request.Request( url, data=body, headers=headers, method="POST" )
-    try:
-        with urllib.request.urlopen( request, timeout=timeout ) as response:
-            return response.status, response.read().decode( "utf-8" ), dict( response.headers.items() )
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode( "utf-8", errors="replace" ), dict( e.headers.items() )
+    return send_json( url, body, headers=headers, timeout=timeout )
 
 
 def request_ids( headers ):

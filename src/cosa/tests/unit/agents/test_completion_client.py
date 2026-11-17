@@ -43,6 +43,7 @@ class _FakeCompletion:
     def run( self, prompt, **gen ):
         return type( self ).run_output
     def run_stream( self, prompt, **gen ):
+        type( self ).stream_call = ( prompt, gen )
         return _FakeStreamResult( type( self ).stream_chunks )
 
 
@@ -161,6 +162,22 @@ def test_stream_async_quiet_dot_progress_with_newline( capsys ):
     out = asyncio.run( c.run_async( "prompt", stream=True ) )
     assert out == "." * 130
     assert "." in capsys.readouterr().out
+
+
+def test_stream_async_hands_the_prompt_timeout_and_arguments_to_run_stream():
+    """The stream opens with the prompt, the timeout and the generation arguments."""
+    _FakeCompletion.stream_chunks = [ "a" ]
+    c = _make( debug=False )
+    asyncio.run( c._stream_async( "the prompt", timeout=7.5, temperature=0.25 ) )
+    assert _FakeCompletion.stream_call == ( "the prompt", { "timeout": 7.5, "temperature": 0.25 } )
+
+
+def test_stream_async_ends_the_dot_line_with_one_line_break( capsys ):
+    """Unlike the chat clients, the completion client breaks the line once its stream ends."""
+    _FakeCompletion.stream_chunks = [ "a", "b" ]
+    c = _make( debug=False )
+    asyncio.run( c._stream_async( "prompt" ) )
+    assert capsys.readouterr().out == "..\n"
 
 
 # =========================================================================== #

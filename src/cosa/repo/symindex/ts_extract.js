@@ -218,29 +218,54 @@ function emit( file, name, kind, sig, node, sf, docNode, isPublic = true ) {
                 line: pos.line + 1, end_line: end.line + 1, public: isPublic } );
 }
 
-for ( const abs of req.mode === "shapes" ? [] : req.files ) {
-    const rel  = path.relative( req.root, abs ).split( path.sep ).join( "/" );
-    const kind = scriptKind( abs );
-    const sf   = ts.createSourceFile( abs, fs.readFileSync( abs, "utf8" ), ts.ScriptTarget.Latest, true, kind );
-    for ( const st of sf.statements ) {
+// An expression with any wrapping parentheses removed.
+function bare( e ) { return ts.isParenthesizedExpression( e ) ? bare( e.expression ) : e; }
+
+// The statements of a function expression that is called where it stands (an IIFE), or null for any other statement.
+// Covers `( function() { ... } )()`, `( () => { ... } )()`, `( function() { ... } ).call( this )` and `.apply`, and `!function() { ... }()`.
+function iifeStatements( st ) {
+    if ( !ts.isExpressionStatement( st ) ) return null;
+    let call = bare( st.expression );
+    if ( ts.isPrefixUnaryExpression( call ) ) call = bare( call.operand );
+    else if ( ts.isVoidExpression( call ) ) call = bare( call.expression );
+    if ( !ts.isCallExpression( call ) ) return null;
+    let callee = bare( call.expression );
+    if ( ts.isPropertyAccessExpression( callee ) && ( callee.name.text === "call" || callee.name.text === "apply" ) ) callee = bare( callee.expression );
+    if ( ( ts.isFunctionExpression( callee ) || ts.isArrowFunction( callee ) ) && ts.isBlock( callee.body ) ) return callee.body.statements;
+    return null;
+}
+
+// Emit the definitions of a list of statements. Inside an IIFE the definitions are module-private: they are named as at the top of the
+// file, which is how the duplicate finder and the reuse gate name them, and they are listed as not public.
+function emitStatements( rel, sf, statements, isPublic ) {
+    for ( const st of statements ) {
+        const inner = iifeStatements( st );
+        if ( inner !== null ) { emitStatements( rel, sf, inner, false ); continue; }
         if ( ts.isFunctionDeclaration( st ) && st.name ) {
-            emit( rel, st.name.text, "function", params( st, sf ), st, sf );
+            emit( rel, st.name.text, "function", params( st, sf ), st, sf, null, isPublic );
         } else if ( ts.isClassDeclaration( st ) && st.name ) {
-            emit( rel, st.name.text, "class", "", st, sf );
+            emit( rel, st.name.text, "class", "", st, sf, null, isPublic );
             for ( const m of st.members ) {
                 if ( ts.isMethodDeclaration( m ) || ts.isConstructorDeclaration( m ) || ts.isGetAccessorDeclaration( m ) || ts.isSetAccessorDeclaration( m ) ) {
                     const mname = ts.isConstructorDeclaration( m ) ? "constructor" : m.name.getText( sf );
-                    emit( rel, st.name.text + "." + mname, "method", params( m, sf ), m, sf, null, !isHiddenFn( m ) );
+                    emit( rel, st.name.text + "." + mname, "method", params( m, sf ), m, sf, null, isPublic && !isHiddenFn( m ) );
                 }
             }
         } else if ( ts.isVariableStatement( st ) ) {
             for ( const d of st.declarationList.declarations ) {
                 if ( ts.isIdentifier( d.name ) && d.initializer &&
                      ( ts.isArrowFunction( d.initializer ) || ts.isFunctionExpression( d.initializer ) ) ) {
-                    emit( rel, d.name.text, "function", d.type ? ": " + d.type.getText( sf ).replace( /\s+/g, " " ) : params( d.initializer, sf ), d, sf, st );
+                    emit( rel, d.name.text, "function", d.type ? ": " + d.type.getText( sf ).replace( /\s+/g, " " ) : params( d.initializer, sf ), d, sf, st, isPublic );
                 }
             }
         }
     }
+}
+
+for ( const abs of req.mode === "shapes" ? [] : req.files ) {
+    const rel  = path.relative( req.root, abs ).split( path.sep ).join( "/" );
+    const kind = scriptKind( abs );
+    const sf   = ts.createSourceFile( abs, fs.readFileSync( abs, "utf8" ), ts.ScriptTarget.Latest, true, kind );
+    emitStatements( rel, sf, sf.statements, true );
 }
 process.stdout.write( JSON.stringify( req.mode === "shapes" ? shapes( req ) : out ) );

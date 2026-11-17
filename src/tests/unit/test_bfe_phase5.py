@@ -77,8 +77,8 @@ def test_proxy_init_shadow_mode_default( orchestrator ):
 
 def test_proxy_init_exception_falls_back_to_none( dead_job_context ):
     """If EngineeringStrategy constructor raises, proxy should be None (safe default)."""
-    import cosa.agents.swe_team.proxy.engineering_strategy as es_module
-    with patch.object( es_module, "EngineeringStrategy", side_effect=Exception( "boom" ) ):
+    import cosa.agents.swe_team.proxy as proxy_pkg
+    with patch.object( proxy_pkg, "EngineeringStrategy", side_effect=Exception( "boom" ) ):
         orch = BFEOrchestrator(
             dead_job_context = dead_job_context,
             extra_context    = "",
@@ -91,6 +91,48 @@ def test_proxy_init_exception_falls_back_to_none( dead_job_context ):
     assert orch.last_files_changed == []
     # Trust level resolution still works (returns L1)
     assert orch._resolve_trust_level() == 1
+
+
+def _build_bfe( dead_job_context ):
+    """
+    Build a BFEOrchestrator on the default config.
+
+    Requires:
+        - dead_job_context is a DeadJobContext
+
+    Ensures:
+        - returns the constructed orchestrator
+    """
+    return BFEOrchestrator(
+        dead_job_context = dead_job_context,
+        extra_context    = "",
+        config           = BugFixExpediterConfig(),
+        session_id       = "s1",
+        job_id           = "j1",
+        debug            = False,
+    )
+
+
+def test_proxy_carries_the_ini_caps_and_audit_rate( dead_job_context ):
+    """The INI category caps and audit rate reach the BFE trust proxy."""
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "cosa.agents.decision_proxy.config.trust_proxy_config_from_config_mgr",
+                return_value={ "l4_audit_sample_rate": 0.37 } ), \
+         patch( "cosa.agents.swe_team.proxy.config.swe_proxy_config_from_config_mgr",
+                return_value={ "accepted_senders": [ "a@x" ], "deployment_cap_level": 2 } ):
+        orch = _build_bfe( dead_job_context )
+    assert orch.proxy.l4_audit_rate == 0.37
+    assert orch.proxy.trust_tracker.categories[ "deployment" ].cap_level == 2
+
+
+def test_unknown_trust_model_is_refused_not_defaulted_to_l1( dead_job_context ):
+    """An unknown trust model stops BFE start instead of leaving the proxy unset."""
+    from cosa.agents.decision_proxy.errors import InvalidTrustModelError
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "cosa.agents.decision_proxy.config.trust_proxy_config_from_config_mgr",
+                side_effect=InvalidTrustModelError( "trust model must be one of" ) ):
+        with pytest.raises( InvalidTrustModelError ):
+            _build_bfe( dead_job_context )
 
 
 # =============================================================================

@@ -167,7 +167,7 @@ class TestStampedImplicitFlag:
     def test_stamped_true_wins_without_any_env_chain( self, tmp_path, monkeypatch ):
         # THE SERVER-SIDE FIX. environ=None (os.environ, empty of chain vars) and
         # NO persona match possible — yet a stamped True resolves True. This is the
-        # exact caller shape of tasks.py:652 (is_manager_figure(session_id), no env)
+        # exact caller shape of the `is_manager_figure( session_id )` call in tasks.py (no env)
         # that was universally returning False before the stamp existed.
         monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
         write, find = bridge_factory( tmp_path )

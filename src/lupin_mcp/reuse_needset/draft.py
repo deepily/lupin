@@ -12,13 +12,13 @@ import json
 import re
 import threading
 
+from cosa.repo import code_health_settings as chs
 from cosa.repo.doc_lint import harness_runner, model_transport
 from cosa.repo.symindex import need_input, need_writer
 from lupin_mcp import reuse_need_check as nc
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import keys
 
-DRAFTER_MODEL = "claude-fable-5-1"
 MAX_TRIES     = 2
 MAX_NONE_TRIES = 3
 SLASHED       = re.compile( r"(?<![\w.\-/])(\.{0,2}/)?[\w.\-]+(?:/[\w.\-]+)+" )
@@ -64,7 +64,23 @@ def make_ledger( path, cli_path, server_label ):
     return harness_runner.Ledger( path, binding=f"{model_transport.cli_version( cli_path ) or 'bundled'}|{server_label}" )
 
 
-def drafter_call( model=DRAFTER_MODEL, query_fn=None ):
+def drafter_model( model_id=None ):
+    """
+    Name the drafter's model: the caller's choice, else the INI key.
+
+    Requires:
+        - model_id is a model id, or None to read `reuse need drafter model` from lupin-app.ini
+
+    Ensures:
+        - returns model_id when it is given, and otherwise the INI value read now, never a value written in code
+
+    Raises:
+        - CodeHealthSettingError when model_id is None and the INI key is blank or absent
+    """
+    return model_id if model_id is not None else chs.model_id( chs.DRAFTER_MODEL_KEY )
+
+
+def drafter_call( model=None, query_fn=None ):
     """
     Build the function that sends one prompt to the drafter and returns its text.
 
@@ -72,6 +88,7 @@ def drafter_call( model=DRAFTER_MODEL, query_fn=None ):
         - the returned function takes ( system_prompt, user_prompt ) and blocks until the reply arrives
         - it must not be called from a running event loop
     """
+    model = drafter_model( model )
     return lambda system, user: asyncio.run( model_transport.complete( model, system, user, query_fn=query_fn ) )
 
 
@@ -155,7 +172,7 @@ def ask_ledgered( ask, ledger, version, model_id, system, prompt, stripped_text,
     return reply
 
 
-def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL, max_tries=MAX_TRIES ):
+def draft_need( job, ask, ledger, model_id=None, max_tries=MAX_TRIES ):
     """
     Draft the sentence for one seed, rewriting on a failed check.
 
@@ -173,7 +190,9 @@ def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL, max_tries=MAX_TRIES ):
         - history lists, per try, the failure kinds and the words, and holds no key text
         - rejections lists, per rejected sentence, { try, sentence, failures } with the full failure details, and unreadable lists each reply that could not be read as { try, retry, reply }; both are for the local record
         - the key list is empty for a job with no keys, and the sentence is then checked against the seed alone
+        - model_id names the drafter in the ledger keys; None reads it from lupin-app.ini through drafter_model
     """
+    model_id = drafter_model( model_id )
     seed, write_lang, stripped = job[ "seed" ], job[ "write_lang" ], stripped_input( job[ "seed" ][ "id" ], job[ "stripped" ] )
     version, system = prompt_version(), need_writer.system_prompt( job[ "write_lang" ] )
     failures, avoid, history = None, None, []
@@ -203,7 +222,7 @@ def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL, max_tries=MAX_TRIES ):
     return record
 
 
-def draft_cell( cell, wanted, order, make_job, ask, ledger, model_id=DRAFTER_MODEL, draft_fn=None ):
+def draft_cell( cell, wanted, order, make_job, ask, ledger, model_id=None, draft_fn=None ):
     """
     Draft one cell: walk the seeds in draw order, replacing each failed seed with the next.
 
@@ -220,7 +239,9 @@ def draft_cell( cell, wanted, order, make_job, ask, ledger, model_id=DRAFTER_MOD
 
     Raises:
         - NeedsetError QUOTA_UNFILLABLE when the seeds run out before wanted needs are accepted
+        - CodeHealthSettingError when model_id is None and the drafter's INI key is blank or absent
     """
+    model_id = drafter_model( model_id )
     draft_fn = draft_need if draft_fn is None else draft_fn
     accepted, failed, replacements = [], [], collections.Counter()
     for seed_id in order:
@@ -314,7 +335,7 @@ def none_note( kinds ):
     return f"\nYour previous sentence was rejected. Failure kinds: {', '.join( kinds )}. Write a different sentence."
 
 
-def draft_none( job, ask, ledger, model_id=DRAFTER_MODEL ):
+def draft_none( job, ask, ledger, model_id=None ):
     """
     Draft a nothing-exists need from the symbol list of one file.
 
@@ -327,7 +348,9 @@ def draft_none( job, ask, ledger, model_id=DRAFTER_MODEL ):
         - a sentence that fails reuse_need_check.check_form, or shares a four-word run with a listed symbol, is rewritten, up to MAX_NONE_TRIES
         - an unreadable reply is asked again once, then recorded as UNREADABLE_REPLY
         - reason is NEED_LEAKS_KEY after MAX_NONE_TRIES failed checks
+        - model_id names the drafter in the ledger keys; None reads it from lupin-app.ini through drafter_model
     """
+    model_id = drafter_model( model_id )
     version, system = prompt_version(), need_writer.system_prompt( job[ "write_lang" ] )
     record = { "ok": False, "seed": job[ "seed" ], "key": [], "need": None, "tries": 0, "history": [], "reason": er.NEED_LEAKS_KEY, "meta": job[ "meta" ] }
     note   = ""
@@ -367,10 +390,11 @@ def make_none_drafter( stage, vectors, embed, describe, second_ask, second_ledge
     Raises:
         - NeedsetError CHECKER_EQUALS_DRAFTER when second_model is the drafter's model
     """
-    if second_model == DRAFTER_MODEL: raise er.NeedsetError( er.CHECKER_EQUALS_DRAFTER, second_model )
+    if second_model == drafter_model(): raise er.NeedsetError( er.CHECKER_EQUALS_DRAFTER, second_model )
 
-    def draft_fn( job, ask, ledger, model_id=DRAFTER_MODEL ):
+    def draft_fn( job, ask, ledger, model_id=None ):
         """Draft one nothing need and rule on its absence; the checker may not be the drafter."""
+        model_id = drafter_model( model_id )
         if second_model == model_id: raise er.NeedsetError( er.CHECKER_EQUALS_DRAFTER, second_model )
         record = draft_none( job, ask, ledger, model_id )
         if not record[ "ok" ]: return record

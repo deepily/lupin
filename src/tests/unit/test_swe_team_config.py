@@ -55,7 +55,7 @@ class TestSweTeamConfig:
 
     def test_default_models( self ):
         config = SweTeamConfig()
-        assert config.lead_model == "claude-opus-4-6"
+        assert config.lead_model == "claude-opus-5"
         assert config.worker_model == "claude-sonnet-4-6"
 
     def test_default_safety_limits( self ):
@@ -426,7 +426,7 @@ class TestTrustProxyConfigFactory:
     """Tests for trust_proxy_config_from_config_mgr factory function."""
 
     def test_factory_returns_all_expected_keys( self ):
-        """Factory returns dict with all 36 config keys."""
+        """Factory returns dict with all 37 config keys."""
         from unittest.mock import MagicMock
         from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
 
@@ -453,6 +453,7 @@ class TestTrustProxyConfigFactory:
             "bald_enabled", "bald_defer_threshold",
             "conformal_enabled", "conformal_alpha",
             "icrl_enabled", "icrl_top_k",
+            "trust_model",
         }
         assert set( result.keys() ) == expected_keys
 

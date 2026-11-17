@@ -1,6 +1,6 @@
 ---
 capability: dataframe-crud-schemas-and-intent
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.crud_for_dataframes.schemas.get_schema@4c2233901a
   - cosa.crud_for_dataframes.schemas.get_columns@6cb78d9d12
@@ -11,7 +11,7 @@ pins:
   - cosa.crud_for_dataframes.schemas.get_columns_by_dtype@b9df42cc26
   - cosa.crud_for_dataframes.schemas.get_dedup_keys@f61fa40124
   - cosa.crud_for_dataframes.schemas.validate_schema_type@e65640cf71
-  - cosa.crud_for_dataframes.xml_models.CRUDIntent@6954a19b86
+  - cosa.crud_for_dataframes.xml_models.CRUDIntent@ae268a73d8
   - cosa.crud_for_dataframes.intent_extractor.build_claude_prompt@a6a3156d22
 ---
 # DataFrame CRUD schemas and intent

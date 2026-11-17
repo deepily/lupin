@@ -5,6 +5,77 @@ import asyncio
 import cosa.utils.util as du
 
 
+def format_duration_ms( seconds: float ) -> str:
+    """
+    Format a duration in seconds as whole milliseconds.
+
+    Requires:
+        - seconds is a number
+
+    Ensures:
+        - returns a string such as "1500ms"
+        - the fraction of a millisecond is cut, not rounded
+    """
+    return f"{int( seconds * 1000 )}ms"
+
+
+def print_request_summary( model_name: str, prompt_tokens: int, completion_tokens: int, duration: Optional[ float ], title: str ):
+    """
+    Print the performance summary of one LLM request.
+
+    Requires:
+        - model_name is a string and title is the banner text
+        - prompt_tokens and completion_tokens are non-negative integers
+        - duration is seconds as a number, or None when it was not measured
+
+    Ensures:
+        - prints a banner of title, then model, duration, prompt, completion and total tokens, and tokens per second
+        - the duration prints through format_duration_ms, or as "N/A" when duration is None
+        - tokens per second is inf when duration is None or not positive
+    """
+    total_tokens = prompt_tokens + completion_tokens
+    tps          = completion_tokens / duration if ( duration and duration > 0 ) else float( 'inf' )
+    duration_str = format_duration_ms( duration ) if duration is not None else "N/A"
+
+    du.print_banner( title, prepend_nl=True )
+    print( f"🧠 Model              : {model_name}" )
+    print( f"⏱️ Duration           : {duration_str}" )
+    print( f"🔢 Prompt tokens      : {prompt_tokens}" )
+    print( f"💬 Completion tokens  : {completion_tokens}" )
+    print( f"🧮 Total tokens       : {total_tokens}" )
+    print( f"⚡ Tokens/sec         : {tps:.2f}" )
+    print( "=" * 40 )
+
+
+async def collect_stream_text( stream_context, debug, verbose, newline_after=False ):
+    """
+    Join the text deltas of one streamed model reply, showing progress as they arrive.
+
+    Requires:
+        - stream_context is an async context manager whose result has stream_text( delta=True )
+        - debug and verbose are booleans
+
+    Ensures:
+        - returns the deltas joined in arrival order
+        - with debug and verbose, each delta is echoed as it arrives
+        - otherwise prints one dot per delta, and a line break after every 128th
+        - with newline_after, one more line break is printed once the stream ends
+    """
+    output = [ ]
+    async with stream_context as result:
+        counter = 0
+        async for chunk in result.stream_text( delta=True ):
+            if debug and verbose:
+                print( chunk, end="", flush=True )
+            else:
+                counter += 1
+                if counter % 128 == 0: print()
+                print( ".", end="", flush=True )
+            output.append( chunk )
+    if newline_after: print()
+    return "".join( output )
+
+
 class LlmClientInterface( ABC ):
     """
     Common interface for all LLM client implementations.
@@ -61,10 +132,6 @@ class LlmClientInterface( ABC ):
         """
         pass
     
-    def _format_duration( self, seconds: float ) -> str:
-        """Format a duration in seconds to a readable string."""
-        return f"{int( seconds * 1000 )}ms"
-    
     def _print_metadata( self, prompt_tokens: int, completion_tokens: int, duration: Optional[ float ], client_type: str = "LLM" ):
         """
         Print performance metadata about an LLM request.
@@ -80,18 +147,7 @@ class LlmClientInterface( ABC ):
             - Calculates tokens per second
             - Handles missing duration gracefully
         """
-        total_tokens = prompt_tokens + completion_tokens
-        tps = completion_tokens / duration if ( duration and duration > 0 ) else float( 'inf' )
-        duration_str = self._format_duration( duration ) if duration is not None else "N/A"
-        
-        du.print_banner( f"📊 {client_type} Summary", prepend_nl=True )
-        print( f"🧠 Model              : {self.model_name}" )
-        print( f"⏱️ Duration           : {duration_str}" )
-        print( f"🔢 Prompt tokens      : {prompt_tokens}" )
-        print( f"💬 Completion tokens  : {completion_tokens}" )
-        print( f"🧮 Total tokens       : {total_tokens}" )
-        print( f"⚡ Tokens/sec         : {tps:.2f}" )
-        print( "=" * 40 )
+        print_request_summary( self.model_name, prompt_tokens, completion_tokens, duration, f"📊 {client_type} Summary" )
 
 
 class BaseLlmClient( ABC ):

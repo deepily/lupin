@@ -59,7 +59,7 @@ from cosa.research.phi4_flash_lite_study.arm_markers import ArmNotVerified, chec
 
 # The two arms, named by the INI spec key each one routes to. These keys are read
 # by the FACTORY, not written by this harness — `dm_tutor/phi_4` and
-# `dm_tutor/flash_lite` both already exist at `src/conf/lupin-app.ini:227,232`.
+# `dm_tutor/flash_lite` both already exist in `src/conf/lupin-app.ini`.
 ARM_PHI4       = "phi_4"
 ARM_FLASH_LITE = "flash_lite"
 

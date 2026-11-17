@@ -47,8 +47,8 @@ from lupin_cli.notifications.notification_models import AsyncNotificationRequest
 # cache row written from one would be an empty answer that later replays as real.
 SUCCESS_STATUSES = ( "done", "waiting" )
 
-# v1's queue-time ack, verbatim from todo_fifo_queue.py:754 (formatted at :788 and
-# spoken by _notify at :855). v1 says this the moment it queues a job; the flow was
+# v1's queue-time ack, verbatim from todo_fifo_queue.py (formatted there and
+# spoken by its _notify). v1 says this the moment it queues a job; the flow was
 # silent at hand-off, because a waiting Outcome carries no answer and _speak returns
 # early on a falsy message — so the user said something and heard nothing until the
 # job finished.
@@ -60,7 +60,7 @@ STARTING_A_NEW_JOB = "New {agent_type} job..."
 # outer cap — this is the inner one, and it is the one the user hears about.
 MAX_QUESTION_CHARS = 1000
 
-# The near-match confirmation, verbatim from the queue (todo_fifo_queue.py:620-643):
+# The near-match confirmation, verbatim from the queue (the near-match branch of todo_fifo_queue.py):
 # same sentence, same YES_NO shape, same 30s timeout defaulting to "no", same retry
 # ladder. A user who hears this prompt today must hear the same one after the switch.
 CONFIRMATION_QUESTION = "Is that the same as: {question}?"
@@ -615,7 +615,7 @@ class AskFlow:
             return self._receptionist( trace, question, ctx, "agent_error",
                                        primary_error=outcome.error,
                                        routed_command=job.routing_command )
-        # `routing_command` is REQUIRED by the QueueableJob protocol (queue_protocol.py:61),
+        # `routing_command` is required by the QueueableJob protocol (queue_protocol.py),
         # so read it. It used to be a getattr with an "" fallback, which would have turned a
         # job that violates the protocol into a row with a blank command — silently, and into
         # exactly the nullable blank-defaulted column this plan condemns elsewhere.
@@ -892,7 +892,7 @@ class AskFlow:
                 query_gist         = self.cache.gist( stripped ) if verbatim_source is None else self.cache.normalize( stripped ),
                 user_id            = user_id,
                 session_id         = websocket_id,
-                # 'voice' / 'text' / 'api' is v1's vocabulary (query_log_table.py:84) and
+                # 'voice' / 'text' / 'api' is v1's vocabulary (input_type in query_log_table.py) and
                 # the column is free text. A row whose verbatim is not a person's words
                 # says so here — "api-command" or "api-job" — rather than passing for one.
                 input_type         = input_type,

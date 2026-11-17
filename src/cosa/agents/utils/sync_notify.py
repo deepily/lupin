@@ -24,7 +24,7 @@ from cosa.utils.config_loader import get_api_config, load_api_key
 # instead of getting a fast ConnectionRefused. The prior 5s sat under the
 # 18.76s observed max (measured n=143: min 6.59s, median 6.91s).
 #
-# 🔴 EXPOSED VIA CLI MODE. `peer.py:354` reaches this helper INSIDE `:7999`,
+# Exposed via CLI mode. `_fire_notification` in peer.py reaches this helper inside `:7999`,
 # where a reload tears the caller down too and a budget buys nothing. But
 # `python -m cosa.agents.notification_proxy` and `python -m
 # cosa.agents.decision_proxy` reach it in a SEPARATE OS process, and that mode
@@ -32,14 +32,14 @@ from cosa.utils.config_loader import get_api_config, load_api_key
 # INVOCATION, not of the call site — a per-site in/out classification cannot
 # express that, and an earlier pass excluded this helper because of it.
 #
-# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+# Full derivation: the dev-server-reload-availability doc, section 9(a), removed from the tree; see 8420e8b0a^.
 #
 # 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
 # inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
-# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+# (Cited by symbol, not by line: this used to cite a line range in notify_user_async.py and a
 #  seven-line fix above it silently repointed both copies at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.

@@ -40,8 +40,6 @@ def _ensure_proper_appendages( code: list[str], always_appended: list[str] ) -> 
         - Removes duplicates based on normalized keys
         - Preserves order of original code
     """
-    # du.print_banner( "code BEFORE:", prepend_nl=True )
-    # du.print_list( code )
     #
     # Instantiate an ordered dictionary using the code list to populate the keys and the values. The key string should have all of the spaces removed and lowercased
     code_dict = { line.replace( " ", "" ).lower(): line for i, line in enumerate( code ) }
@@ -56,40 +54,11 @@ def _ensure_proper_appendages( code: list[str], always_appended: list[str] ) -> 
             code_dict.pop( key )
     
     code = list( code_dict.values() )
-    # du.print_banner( "code AFTER:", prepend_nl=True )
-    # du.print_list( code )
     #
     # Append the always_appended list to the code list
     code = code + always_appended
 
     return code
-
-# def _ensure_proper_appendages( code, always_appended ):
-#
-#     du.print_banner( "_ensure_proper_appendages", prepend_nl=True )
-#     print( "always_appended", always_appended )
-#     len_always_appended = -len( always_appended )
-#     print( f"len_always_appended [{len_always_appended}]" )
-#
-#     # Check if the last N elements of 'code' match 'always_appended'
-#     if code[ len_always_appended: ] != always_appended:
-#
-#         print( "code[ len( always_appended ): ] != always_appended" )
-#         print( "code", code[ len_always_appended: ] )
-#
-#         # Identify any elements in 'always_appended' that are already in 'code' but not in the correct position
-#         to_remove = set( code[ len_always_appended: ] ) & set( always_appended )
-#         print( "to_remove", to_remove )
-#
-#         # Create a new list excluding the elements found above, to ensure they are not duplicated
-#         cleaned_code = [ line for line in code if line not in to_remove ]
-#
-#         # Append 'always_appended' to the end of the list
-#         cleaned_code.extend( always_appended )
-#
-#         return cleaned_code
-#
-#     else:
 #
 #         return code
 

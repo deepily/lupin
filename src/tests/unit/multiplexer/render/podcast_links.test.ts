@@ -398,3 +398,25 @@ function installGlobalFetch() {
 const restorers: Array<() => void> = [];
 afterEach( () => { while ( restorers.length ) ( restorers.pop() as () => void )(); } );
 const settle = () => new Promise<void>( r => setImmediate( r ) );
+
+// ── Row 802c94d3: the close listener and the open check the auto-play uses ───────────────────────────────
+test("onPodcastOverlayClosed: a dismissal tells the listener once; a replacing Play Here and a dismissal of nothing do not", async () => {
+  const mod = await import( "../../../../lupin_app/static/js/multiplexer/render/podcastLinks" );
+  let closed = 0;
+  const stop = mod.onPodcastOverlayClosed( () => { closed++; } );
+  assert.equal( mod.isPodcastOverlayOpen(), false );
+  mod.dismissPodcastOverlay();
+  assert.equal( closed, 0, "nothing was open" );
+  mod.showPodcastOverlay( "/app/audio?path=a.mp3&embed=1", "A" );
+  assert.equal( mod.isPodcastOverlayOpen(), true );
+  mod.showPodcastOverlay( "/app/audio?path=b.mp3&embed=1", "B" );
+  assert.equal( closed, 0, "a replacement is not a close" );
+  mod.dismissPodcastOverlay();
+  assert.equal( closed, 1 );
+  assert.equal( mod.isPodcastOverlayOpen(), false );
+  stop();
+  mod.showPodcastOverlay( "/app/audio?path=c.mp3&embed=1", "C" );
+  mod.dismissPodcastOverlay();
+  assert.equal( closed, 1, "a stopped listener hears nothing" );
+});
+

@@ -41,7 +41,7 @@ class TestD2:
 
 
 # ---------------------------------------------------------------------------
-# visual.py (mermaid)
+# visual.py, mermaid
 # ---------------------------------------------------------------------------
 class TestMermaid:
     def test_prompt_with_title( self ):

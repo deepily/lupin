@@ -106,6 +106,11 @@ class TestCostEstimate:
         ce.add_usage( "claude-haiku-4-5", 1_000_000, 1_000_000 )
         assert ce.estimated_cost_usd == pytest.approx( 4.80 )   # 0.80 + 4.0
 
+    def test_a_name_holding_opus_and_haiku_is_priced_as_opus( self ):
+        ce = CostEstimate()
+        ce.add_usage( "opus-haiku", 1_000_000, 1_000_000 )
+        assert ce.estimated_cost_usd == pytest.approx( 90.0 )
+
     def test_sonnet_pricing( self ):
         ce = CostEstimate()
         ce.add_usage( "claude-sonnet-4-6", 1_000_000, 1_000_000 )

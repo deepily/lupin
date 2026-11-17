@@ -78,7 +78,7 @@ def test_format_outreach_ts_summer_is_edt():
 
 def test_format_outreach_ts_winter_is_est():
     tz, _ = resolve_tz( "America/New_York" )
-    assert format_outreach_ts( JAN, tz ) == "2026.01.11 at 16:28:46"   # EST (UTC-5)
+    assert format_outreach_ts( JAN, tz ) == "2026.01.11 at 16:28:46"   # Eastern standard time, five hours behind UTC
 
 
 # ── format_edt_timestamp: the bracketed prefix ───────────────────────────────

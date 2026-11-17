@@ -45,7 +45,7 @@ from lupin_cli.notifications.notify_user_async import calculate_retry_intervals
 
 
 OBSERVED_MAX_RELOAD_SECONDS = 18.76      # row 204911ca §5.0, current-config slice, n=143
-FIELD_CEILING_SECONDS       = 30         # notification_models.py:620-625, Field( le=30 )
+FIELD_CEILING_SECONDS       = 30         # notification_models.py, AsyncNotificationRequest.timeout Field( le=30 )
 HOOK_WALL_CLOCK_CEILING     = 40         # a hook path must not stall longer than this
 
 

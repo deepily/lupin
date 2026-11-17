@@ -35,8 +35,8 @@ References:
 import time
 
 import cosa.utils.util as cu
-from cosa.utils.dm_text import dm_word_count
 from cosa.agents.llm_client_factory import LlmClientFactory
+from cosa.agents.llm_client_init import init_llm_client
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 
 # Everything deterministic is v1's and is IMPORTED, never re-declared. The repair layer
@@ -48,11 +48,8 @@ from cosa.agents.dm_quality_judge.judge import (
     _repair_llm_xml,
     _is_garbage_output,
     _fallback_dimension,
-    _withheld_dimension,
-    _too_long_dimension,
     _get_qualitative_enabled,
-    length_bucket,
-    combine_overall,
+    grade_body,
 )
 from cosa.agents.dm_quality_judge.xml_models import WEIGHT_TO_EMOJI, NONANSWER_EMOJI
 from cosa.agents.dm_quality_judge.xml_models_v2 import (
@@ -205,14 +202,7 @@ class DmQualityJudgeV2:
         if not self.qualitative_enabled:
             print( "[DmQualityJudgeV2] qualitative judging OFF — Length only (row ca7a2cbf)" )
 
-        try:
-            factory         = LlmClientFactory( debug=debug, verbose=verbose )
-            self._client    = factory.get_client( llm_spec_key, debug=debug, verbose=verbose )
-            self._available = True
-            if self.debug: print( f"[DmQualityJudgeV2] LLM client ready ({llm_spec_key})" )
-        except Exception as e:
-            print( f"[DmQualityJudgeV2] LLM client unavailable: {e}" )
-            self._available = False
+        self._client, self._available = init_llm_client( LlmClientFactory, llm_spec_key, "DmQualityJudgeV2", debug, verbose )
 
         self._processor = PromptTemplateProcessor( debug=debug, verbose=verbose )
 
@@ -247,23 +237,7 @@ class DmQualityJudgeV2:
         Returns:
             dict: the full quality grade
         """
-        word_count = dm_word_count( body_text )
-        length     = length_bucket( word_count )
-
-        if not self.qualitative_enabled:
-            directness = _withheld_dimension()
-            tone       = _withheld_dimension()
-        elif word_count > QUALITATIVE_WORD_LIMIT:
-            directness = _too_long_dimension()
-            tone       = _too_long_dimension()
-        else:
-            directness = self._grade_directness( body_text )
-            tone       = self._grade_tone( body_text )
-
-        overall = combine_overall(
-            length[ "weight" ], directness[ "weight" ], tone[ "weight" ], length[ "detail" ]
-        )
-        return { "length": length, "directness": directness, "tone": tone, "overall": overall }
+        return grade_body( body_text, self.qualitative_enabled, QUALITATIVE_WORD_LIMIT, lambda: ( self._grade_directness( body_text ), self._grade_tone( body_text ) ) )
 
     def _build_prompt( self, template_path, routing_command, marker, value ):
         """

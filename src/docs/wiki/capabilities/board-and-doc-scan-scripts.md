@@ -1,6 +1,6 @@
 ---
 capability: board-and-doc-scan-scripts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.fix_api_md_tables.join_split_rows@d7605cec42
   - scripts.fix_api_md_tables.main@08c26d9cad

@@ -472,7 +472,7 @@ class TestQueryOwed:
         # arg 4 — residue of the `statuses` parameter DELETED on 2026-07-19.
         # Arg 4 is now `project`, so it was silently passing a TUPLE as the
         # project filter and going green because the mock never inspects it.
-        # test_stop_hook_heartbeat.py:1369 asserts len( _args ) == 3 to catch
+        # test_stop_hook_heartbeat.py asserts len( _args ) == 3 to catch
         # exactly this shape — but it guards stop.py's CALL SITE, not this
         # suite's own calls, so the residue slipped under a guard built for it.
         ok, count, breakdown = tc.query_owed( https_settings, "k", "p" )

@@ -10,6 +10,7 @@
 | Document | Topic | Source of Truth |
 |----------|-------|-----------------|
 | [websocket-architecture.md](websocket-architecture.md) | WebSocket system design, WebSocketManager API | `websocket_manager.py` |
+| [vm-test-server.md](vm-test-server.md) | The VM's destructive-test server (lupin-rest-test :8000, local pgvector) | `docker-compose.vm-test-overlay.yml`, `lupin-vm.sh` |
 | [websocket-events.md](websocket-events.md) | Event catalog with payload schemas | `lupin-app.ini`, `routers/websocket.py` |
 | [websocket-configuration.md](websocket-configuration.md) | WebSocket config keys and tuning | `lupin-app.ini`, `lupin-app-splainer.ini` |
 | [websocket-troubleshooting.md](websocket-troubleshooting.md) | WebSocket diagnostic procedures | — |

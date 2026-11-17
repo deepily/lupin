@@ -60,7 +60,7 @@ import cosa.utils.util as cu   # noqa: E402
 # ── Confirmed contract (Cheech, 2026-08-03) ──────────────────────────────────
 REJECT_THRESHOLD_WORDS = 150
 EXPECTED_SLOT_ID       = "TEMP-live-gate-smoke"   # Cheech's temp rejecting slot (date field 08-03)
-# Read the SAME sink the running server writes (dm.py:353); NEVER the
+# Read the SAME sink the running server writes (dm.py); NEVER the
 # _DM_TRAFFIC_PRODUCTION_PATH self-guard constant.
 from cosa.rest.routers.dm import _DM_TRAFFIC_JSONL as CORPUS_PATH   # noqa: E402
 

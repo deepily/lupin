@@ -234,7 +234,7 @@ def test_directory_listing_view_url_uses_path_prefix( token ):
 #
 # Policy: any presence of ?scope= (even empty) returns 400 with educational
 # detail. Replaces prior silent-ignore semantics (Phase 4b AC4b.7 original).
-# See src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md
+# See the "Doc-Viewer Scope Unification" design doc (removed by 8420e8b0a; recover it from 8420e8b0a^)
 # (Amendment 2026-05-21) for the policy-flip record.
 # ---------------------------------------------------------------------------
 

@@ -243,6 +243,54 @@ def test_bare_compose_up_exemptions_are_enumerated_not_inferred():
 # 2. THE CLASS THAT MADE THE ABOVE LATENT — container_name where a service goes.
 # ---------------------------------------------------------------------------
 
+def _services_in( compose_rel ):
+    """Ensures: returns the service names and container names of one compose file."""
+    services = yaml.safe_load( _read( compose_rel ) )[ "services" ]
+    return set( services ), { svc.get( "container_name" ) for svc in services.values() if svc.get( "container_name" ) }
+
+
+def _files_named( stripped, variables ):
+    """
+    The compose files a command line names with `-f`, resolved through the script's variables.
+
+    Ensures:
+        - returns the repo-relative names that resolve to a file that exists, in order
+        - a `$VAR` the script does not define, or a file that is absent, is left out, so its services do not count
+    """
+    names = []
+    for tok in re.findall( r'(?:^|\s)-f\s+(\S+)', stripped ):
+        name = variables.get( tok.lstrip( "${" ).rstrip( "}" ) ) if tok.startswith( "$" ) else tok
+        if name and ( REPO_ROOT / name ).is_file(): names.append( name )
+    return names
+
+
+def _unknown_services( text, variables, compose_rel, script_rel ):
+    """
+    The lines whose compose `up -d` or `pull` names something that is not a service.
+
+    A service counts when the base compose file defines it. It also counts when the same line names
+    another compose file with `-f` (an overlay) that defines it. Any other name is an offender.
+    """
+    base_services, base_containers = _services_in( compose_rel )
+    offenders = []
+    for i, line in enumerate( text.splitlines(), start=1 ):
+        stripped = line.strip()
+        if stripped.startswith( "#" ): continue
+        m = re.search( r'docker compose\s+.*?\b(?P<verb>up\s+-d|pull)\b(?P<tail>[^"\n]*)', stripped )
+        if m is None: continue
+
+        named = _named_service( m.group( "tail" ), variables )
+        if named is None: continue
+        services, containers = set( base_services ), set( base_containers )
+        for extra in _files_named( stripped, variables ):
+            more_services, more_containers = _services_in( extra )
+            services |= more_services; containers |= more_containers
+        if named in services: continue
+        why = " (that is a container_name, not a service)" if named in containers else ""
+        offenders.append( f"{script_rel}:{i}  resolves to '{named}'{why}\n      {stripped}" )
+    return offenders
+
+
 @pytest.mark.parametrize( "script_rel", sorted( DEPLOY_SCRIPTS ) )
 def test_compose_verbs_reference_a_real_service( script_rel ):
     """
@@ -254,32 +302,49 @@ def test_compose_verbs_reference_a_real_service( script_rel ):
     under `set -e` it aborted on the `pull` and had never once completed a
     dependency-axis deploy. That script was retired 2026-08-26 (row 0d175dac); the
     arm still guards every surviving deploy script.
+
+    A command that also names an overlay file with `-f` resolves services from that file too.
     """
     text        = _read( script_rel )
-    variables   = _script_vars( text )
     compose_rel = DEPLOY_SCRIPTS[ script_rel ]
-    services    = set( yaml.safe_load( _read( compose_rel ) )[ "services" ] )
-    container_names = {
-        svc.get( "container_name" )
-        for svc in yaml.safe_load( _read( compose_rel ) )[ "services" ].values()
-        if svc.get( "container_name" )
-    }
-
-    offenders = []
-    for i, line in enumerate( text.splitlines(), start=1 ):
-        stripped = line.strip()
-        if stripped.startswith( "#" ): continue
-        m = re.search( r'docker compose\s+.*?\b(?P<verb>up\s+-d|pull)\b(?P<tail>[^"\n]*)', stripped )
-        if m is None: continue
-
-        named = _named_service( m.group( "tail" ), variables )
-        if named is None: continue
-        if named in services: continue
-        why = " (that is a container_name, not a service)" if named in container_names else ""
-        offenders.append( f"{script_rel}:{i}  resolves to '{named}'{why}\n      {stripped}" )
+    offenders   = _unknown_services( text, _script_vars( text ), compose_rel, script_rel )
 
     assert not offenders, (
         f"`docker compose` handed a name that is not a service in {compose_rel}. compose exits "
         f"'no such service: <name>' and, under `set -e`, the deploy dies there.\n  "
         + "\n  ".join( offenders )
     )
+
+
+OVERLAY_LINE = "sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE up -d --force-recreate --no-deps {name}"
+OVERLAY_VARS = { "COMPOSE_FILE": "docker-compose.cloud-gpu.yml", "TEST_COMPOSE_FILE": "docker-compose.vm-test-overlay.yml" }
+
+
+def test_a_service_only_the_overlay_defines_resolves_when_the_line_names_the_overlay():
+    # Reddens if the overlay's services stop counting: the real deploy line would be refused again.
+    line = OVERLAY_LINE.format( name="lupin-rest-test" )
+    assert _unknown_services( line, OVERLAY_VARS, "docker-compose.cloud-gpu.yml", "x.sh" ) == []
+
+
+def test_the_same_name_is_refused_when_the_line_names_only_the_base_file():
+    # Reddens if every file counted whether or not the line names it.
+    line = "sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --force-recreate --no-deps lupin-rest-test"
+    found = _unknown_services( line, OVERLAY_VARS, "docker-compose.cloud-gpu.yml", "x.sh" )
+    assert len( found ) == 1 and "resolves to 'lupin-rest-test'" in found[ 0 ]
+
+
+def test_a_truly_unknown_name_is_refused_even_with_the_overlay():
+    # Reddens if naming an overlay switched the check off.
+    found = _unknown_services( OVERLAY_LINE.format( name="lupin-rest-nope" ), OVERLAY_VARS, "docker-compose.cloud-gpu.yml", "x.sh" )
+    assert len( found ) == 1 and "resolves to 'lupin-rest-nope'" in found[ 0 ]
+
+
+def test_a_container_name_is_still_called_out_with_the_overlay():
+    found = _unknown_services( OVERLAY_LINE.format( name="lupin-rest-cloud-gpu" ), OVERLAY_VARS, "docker-compose.cloud-gpu.yml", "x.sh" )
+    assert len( found ) == 1 and "that is a container_name, not a service" in found[ 0 ]
+
+
+def test_an_undefined_or_missing_overlay_file_adds_no_services():
+    line = OVERLAY_LINE.format( name="lupin-rest-test" )
+    assert len( _unknown_services( line, { "COMPOSE_FILE": OVERLAY_VARS[ "COMPOSE_FILE" ] }, "docker-compose.cloud-gpu.yml", "x.sh" ) ) == 1
+    assert len( _unknown_services( line, { **OVERLAY_VARS, "TEST_COMPOSE_FILE": "no-such-overlay.yml" }, "docker-compose.cloud-gpu.yml", "x.sh" ) ) == 1

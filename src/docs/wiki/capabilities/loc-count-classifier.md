@@ -1,6 +1,6 @@
 ---
 capability: loc-count-classifier
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.loc-analysis.count.lang_of@f7a5547291
   - scripts.loc-analysis.count.ext_of@537548bc5c

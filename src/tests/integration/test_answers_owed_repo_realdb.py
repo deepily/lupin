@@ -248,8 +248,8 @@ def test_mark_answer_delivered_stores_correct_instant_under_nonutc_session( owed
 # ─────────────────────────────────────────────────────────────────────────────
 # Row 3b4002fe — the SIBLINGS of the guarded line.
 #
-# The guard above proves ONE line (notification_repository.py:468, the aware
-# mark_answer_delivered). Its own comment names `responded_at` as the thing to
+# The guard above proves ONE line (`mark_answer_delivered` in notification_repository.py, the aware
+# one). Its own comment names `responded_at` as the thing to
 # stay consistent WITH — and responded_at was still naive, in two places, with
 # no guard at all. delivered_at and last_login_at were naive too. A green guard
 # covering one line while three siblings carry the identical defect reads as
@@ -369,8 +369,8 @@ def test_update_last_login_stores_correct_instant_under_nonutc_session( owed_ses
 # ─────────────────────────────────────────────────────────────────────────────
 # THE EXPIRY PAIR — two wrongs that may be cancelling (Cheech, row 3b4002fe).
 #
-# routers/notifications.py:522 WRITES expires_at as a naive utcnow() + timeout,
-# and notification_repository.py:679 SWEEPS by comparing a naive now against that
+# routers/notifications.py WRITES expires_at as a naive utcnow() + timeout,
+# and notification_repository.py SWEEPS by comparing a naive now against that
 # same TIMESTAMPTZ column. Both sides are interpreted in the session's TimeZone
 # GUC, so when write and sweep happen under the SAME session the two shifts
 # cancel and the sweep looks correct.

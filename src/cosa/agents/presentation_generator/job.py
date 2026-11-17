@@ -21,7 +21,6 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
@@ -275,18 +274,17 @@ class PresentationGeneratorJob( AgenticJobBase ):
               string) as "not provided" and is not copied, because the prompt
               builders would otherwise inject a bogus "Additional audience context: none" line
         """
-        if self.target_duration_minutes is not None:
-            config.target_duration_minutes = self.target_duration_minutes
-        if self.target_slide_count is not None:
-            config.target_slide_count = self.target_slide_count
-        if self.audience is not None:
-            config.audience = self.audience
-        if self.theme is not None:
-            config.default_theme = self.theme
-        if self.content_model is not None:
-            config.content_model = self.content_model
-        if self.audience_context is not None and self.audience_context.strip().lower() not in ( "", "none" ):
-            config.audience_context = self.audience_context
+        from cosa.agents.presentation_generator.config import apply_job_overrides
+
+        apply_job_overrides(
+            config,
+            target_duration_minutes = self.target_duration_minutes,
+            target_slide_count      = self.target_slide_count,
+            audience                = self.audience,
+            theme                   = self.theme,
+            content_model           = self.content_model,
+            audience_context        = self.audience_context,
+        )
 
     async def _execute( self ) -> str:
         """
@@ -314,10 +312,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
         from cosa.config.configuration_manager import ConfigurationManager
 
         # Set sender_id and target_user for notifications
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
+        self._set_chain_identity( cosa_interface )
 
         # Set job_id for auto-injection into all notify() calls
         voice_io.set_job_id( self.id_hash )
@@ -473,10 +468,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
         import os
 
         # Set sender_id and target_user for notifications
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
+        self._set_chain_identity( cosa_interface )
 
         # Set job_id for auto-injection into all notify() calls
         voice_io.set_job_id( self.id_hash )

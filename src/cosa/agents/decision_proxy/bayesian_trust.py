@@ -25,6 +25,9 @@ import numpy as np
 from typing import Dict, Tuple
 
 
+MAX_CALIBRATION_PAIRS = 500   # most recent ( prediction, outcome ) pairs kept for conformal calibration
+
+
 def _sigmoid( x ):
     """
     Numerically stable sigmoid function.
@@ -93,6 +96,10 @@ class BayesianLogisticRegression:
         # Observation counter
         self.n_observations = 0
 
+        # ( probability predicted before learning the point, outcome ) pairs, newest last.
+        # Each prediction was made without seeing its own outcome, so the pairs are out of sample.
+        self.calibration_pairs = []
+
     def predict( self, x ):
         """
         Predict success probability with uncertainty for a feature vector.
@@ -142,6 +149,7 @@ class BayesianLogisticRegression:
             - Posterior is updated with the new observation
             - H_inv remains positive definite
             - Running feature mean is updated
+            - calibration_pairs gains ( prediction made before this update, y ), keeping the newest MAX_CALIBRATION_PAIRS
 
         Args:
             x: Feature vector
@@ -149,6 +157,10 @@ class BayesianLogisticRegression:
         """
         x = np.asarray( x, dtype=np.float64 )
         y = float( y )
+
+        # Record the out-of-sample prediction before this point is learned
+        self.calibration_pairs.append( ( self.predict( x )[ 0 ], int( y ) ) )
+        del self.calibration_pairs[ :-MAX_CALIBRATION_PAIRS ]
 
         # Current prediction
         logit = float( np.dot( self.w, x ) )
@@ -237,6 +249,7 @@ class BayesianLogisticRegression:
             "feature_sum"     : self._feature_sum.tolist(),
             "feature_count"   : self._feature_count,
             "n_observations"  : self.n_observations,
+            "calibration_pairs" : [ [ p, y ] for p, y in self.calibration_pairs ],
         }
 
     @classmethod
@@ -265,4 +278,6 @@ class BayesianLogisticRegression:
         model._feature_sum    = np.array( data[ "feature_sum" ] )
         model._feature_count  = data[ "feature_count" ]
         model.n_observations  = data[ "n_observations" ]
+        # A model saved before calibration pairs existed has no such key; it restores with none
+        if "calibration_pairs" in data: model.calibration_pairs = [ ( p, y ) for p, y in data[ "calibration_pairs" ] ]
         return model

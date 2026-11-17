@@ -141,3 +141,9 @@ run the research to podcast on DOCUMENT_PATH at two am
 turn DOCUMENT_PATH into a podcast tomorrow morning
 do a dry run podcast from DOCUMENT_PATH
 dry run the podcast conversion on DOCUMENT_PATH
+
+# ── Script type: status report ───────────────────────────────────────────────
+make a status report podcast from the research
+turn the research into a status report podcast
+create a status report podcast from the deep research
+research this and make a status report podcast

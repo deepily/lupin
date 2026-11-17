@@ -2,7 +2,7 @@
 Pre-commit gate for the documentation standard (plan 1, section 4.2).
 
 Lints the staged lines of Python and markdown files with ruff, markdownlint-cli2 and the
-doc_lint rules and prints the findings to stderr. It exits 0 on its own crash.
+doc_lint rules and prints the findings to stderr. It exits 0 on its own crash and sends one notification for it, and a failed send never changes the exit.
 The hook is shared by every worktree, and a crashing gate must not block every seat.
 A missing tool prints a loud warning. It does not read PLANNING_IS_PROMPTING_ROOT.
 A staged gitlink, which is a submodule entry, holds no text and is named as not checked.
@@ -66,7 +66,7 @@ from .word_list import configure_root
 BLOCKING_PACKAGES = ()
 REFUSAL_EXIT      = 3
 # The locations --blocking leaves in warn mode. WARN_ONLY_PATHS holds exact repo-relative paths.
-# A file of the same name in any other folder, src/cosa/history.md among them, is held like every other page.
+# A file of the same name in any other folder, a history.md under src/cosa among them, is held like every other page.
 # WARN_ONLY_PREFIXES holds folders, each ending in a slash and matched from the repo root.
 # So src/cosa/history/ is not among them, and neither is a history/ folder below the root.
 # Rick's ruling on the card "María: four rulings", task-store row id=486cc499: history/ and todo-history/ stay warn-only as a
@@ -974,10 +974,10 @@ def collect( root ):
 
     Ensures:
         - returns ( findings, warnings, refusal_lines, tally ); refusal_lines are the printable lines
-        - findings are limited to lines the staged diff touched, minus anything already in refusals
+        - findings are limited to lines the staged diff touched, minus anything already in refusals; a git failure skips the dangling-path rule alone, with one plain warning
         - a finding is_record_exempt names is left out, so a root record file is judged under rule set B
         - a refused or waived finding is left out as that one finding; a finding of another linter with the same place and words stays
-        - a docstring finding with an honoured waiver marker on its line is left out of findings, in a swept file and in any other Python file
+        - a docstring finding, or a line-pointer, dangling-path or commented-out-code finding, with an honoured waiver marker on its line is left out, in any Python file; no other comment finding can be waived
         - refusals hold every mechanical finding anywhere in a staged file inside BLOCKING_PACKAGES
         - refusals also hold every docstring finding anywhere in a staged swept file that no waiver covers
         - a swept file that does not parse is refused, counted in tally["unparsed"], and cannot be waived
@@ -1035,6 +1035,7 @@ def collect( root ):
         warnings.append( Unchecked( line ) if executable and ( p in changed or p in moved_in ) and not is_warn_only( p ) else line )
     warnings  += [ ( Unchecked if p in created and not is_warn_only( p ) else str )( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
     skipped    = []
+    comment_lint.take_path_failure()
     decode_out = []
     for path in paths:
         try:
@@ -1052,11 +1053,18 @@ def collect( root ):
             if ranges.get( path ) and BARE_RETURN.search( source ): ranges[ path ] = [ ( 1, len( split_lines( source ) ) ) ]
             py_sources[ path ] = source
             doc_findings = docstring_lint.lint_source( path, source, root )
-            findings += doc_findings + comment_lint.lint_source( path, source, root )
+            comment_findings = comment_lint.lint_source( path, source, root )
+            findings += doc_findings + comment_findings
+            kept_lines = split_lines( source )
+            honoured   = [ f for f in comment_findings if f.rule in comment_lint.WAIVABLE_RULES and waiver_state( f, line_text( kept_lines, f.line ) ) == "honoured" ]
+            waived    += honoured
+            tally[ "waivers" ] += len( honoured )
             if is_swept( path ): swept.append( ( path, source, doc_findings ) )
             else: waived += [ f for f in doc_findings if waiver_state( f, line_text( split_lines( source ), f.line ) ) == "honoured" ]
         elif path.endswith( ".md" ):
             findings += md_lint.lint_source( path, source, root )
+    path_failure = comment_lint.take_path_failure()
+    if path_failure is not None: warnings.append( f"[doc-lint] WARNING: the dangling-path check was skipped, git could not answer ({path_failure}); every other rule ran" )
     py, md   = [ p for p in paths if p.endswith( ".py" ) and p not in skipped ], [ p for p in paths if p.endswith( ".md" ) and p not in skipped ]
     ruff_findings, ruff_warnings = run_ruff( root, py, sources=py_sources )
     md_findings, md_warnings     = run_markdownlint( root, md )
@@ -1111,6 +1119,69 @@ def collect( root ):
     return kept, ruff_warnings + md_warnings + warnings, lines_out, tally
 
 
+CRASH_SENDER     = "claude.code@lupin.deepily.ai#doc-lint-gate"
+CRASH_TEXT_LIMIT = 200
+
+
+def crash_head( root ):
+    """
+    Name the commit the crashed run was building on.
+
+    Requires:
+        - root is a directory path
+
+    Ensures:
+        - returns the short sha of HEAD, or the word unknown when git cannot give one
+
+    Raises:
+        - nothing
+    """
+    try:
+        return subprocess.run( [ "git", "-C", root, "rev-parse", "--short", "HEAD" ], capture_output=True, text=True, check=True, timeout=10 ).stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+def notify_crash( exc, root, err, query=None, api_key=None, target_of=None ):
+    """
+    Send one notification that the gate crashed.
+
+    Requires:
+        - exc is the exception the gate crashed on
+        - root is a directory path
+        - err is a writable text stream
+        - query, api_key and target_of are None, or match the hook_link_tick helpers of the same names
+        - cosa.utils is imported here and not at the top, because the gate runs from copies that hold only this package
+
+    Ensures:
+        - one notification goes out, naming the exception type and text and the commit the run built on
+        - returns True when the server answered 200, otherwise False
+        - a failed delivery is printed to err as one line
+        - never raises, so the commit is let through whatever happens here
+
+    Raises:
+        - nothing
+    """
+    head   = crash_head( root )
+    detail = f"{type( exc ).__name__}: {str( exc )[ : CRASH_TEXT_LIMIT ]}"
+    try:
+        from cosa.utils import hook_link_tick
+        base, key, target = hook_link_tick.notify_route( os.environ, "HOOK_LINK_API_BASE", api_key=api_key, target_of=target_of )
+        status, answer    = hook_link_tick.send_notify(
+            base, key, target,
+            f"The doc-lint commit gate crashed and let the commit through. {detail}. The commit was built on {head}.",
+            f"Gate crash at {root}, commit built on {head}.\n\n{detail}\n\n{traceback.format_exc()}",
+            CRASH_SENDER, query=hook_link_tick.post_query if query is None else query
+        )
+    except Exception as failure:
+        err.write( f"[doc-lint] crash notification not sent: {type( failure ).__name__}: {failure}\n" )
+        return False
+    if status != 200:
+        err.write( f"[doc-lint] crash notification not sent: HTTP {status} {answer}\n" )
+        return False
+    return True
+
+
 def main( argv=None, err=None ):
     """
     Run the gate.
@@ -1131,6 +1202,7 @@ def main( argv=None, err=None ):
         - otherwise returns 0; the gate itself never returns 1
         - prints the swept-scope denominator on every run that does not crash
         - an internal error is printed as a loud line and the exit is 0, with or without --blocking
+        - an internal error sends one crash notification through notify_crash, and a failed send never changes the exit
         - every warning from a missing tool is printed
 
     Raises:
@@ -1152,6 +1224,7 @@ def main( argv=None, err=None ):
     except Exception as exc:
         say( f"[doc-lint] GATE CRASHED, commit allowed: {type( exc ).__name__}: {exc}" )
         say( traceback.format_exc().rstrip( "\n" ) )
+        notify_crash( exc, args.repo_root, err )
         return 0
     held      = [ w for w in warnings if args.blocking and isinstance( w, Unchecked ) ]
     for warning in warnings + merge_warnings: say( warning.replace( "WARNING:", "REFUSED:", 1 ) if warning in held else warning )

@@ -71,9 +71,10 @@ class TestProxyDefaults:
     def test_llm_fallback_config( self ):
         """
         Ensures:
-            - the LLM fallback model + token budget constants are set
+            - the LLM fallback model key + token budget constants are set
         """
-        assert cfg.LLM_FALLBACK_MODEL.startswith( "claude-" )
+        assert cfg.LLM_FALLBACK_MODEL_KEY == "notification proxy llm fallback model"
+        assert not hasattr( cfg, "LLM_FALLBACK_MODEL" )
         assert cfg.LLM_FALLBACK_MAX_TOKENS > 0
 
     def test_llm_script_matcher_config( self ):

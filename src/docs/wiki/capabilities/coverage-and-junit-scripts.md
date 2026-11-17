@@ -1,6 +1,6 @@
 ---
 capability: coverage-and-junit-scripts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.detect_thread_credited_coverage.exclusive_lines@ca3f7d1687
   - scripts.detect_thread_credited_coverage.call_time_lines@a14c6951e5

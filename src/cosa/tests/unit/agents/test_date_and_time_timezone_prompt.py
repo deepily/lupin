@@ -19,7 +19,7 @@ import pytest
 import cosa.utils.util as du
 
 TEMPLATES = [
-    "/src/conf/prompts/agents/date-and-time.txt",            # the wired one (lupin-app.ini:266)
+    "/src/conf/prompts/agents/date-and-time.txt",            # the wired one (the datetime prompt template key in lupin-app.ini)
     "/src/conf/prompts/agents/date-and-time-reasoner.txt",   # the unwired variant, same defect text
 ]
 

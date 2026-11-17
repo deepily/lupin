@@ -1,6 +1,6 @@
 ---
 capability: embedding-cost-and-training-distribution
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.v2_embedding_cost.summarize@7cfc2e7ba5
   - scripts.v2_embedding_cost.measure@e7f46c7bc4

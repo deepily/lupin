@@ -30,6 +30,7 @@ Behaviour:
 import asyncio
 import logging
 import os
+import shutil
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -40,6 +41,28 @@ from cosa.utils.worktree_artifacts import provision_worktree_artifacts
 
 
 logger = logging.getLogger( __name__ )
+
+
+def has_dangling_git_link( path: str ) -> bool:
+    """
+    Say whether `path` is a linked-worktree folder whose git record no longer exists.
+
+    Requires:
+        - path is an absolute folder path
+
+    Ensures:
+        - True only when `<path>/.git` is a regular file that reads `gitdir: <target>` and <target> does not exist
+        - False for a missing path, a missing or unreadable .git, a .git directory, or a live record
+        - never raises
+    """
+    git_file = os.path.join( path, ".git" )
+    if not os.path.isfile( git_file ): return False
+    try:
+        with open( git_file, "r", encoding="utf-8" ) as f: first_line = f.readline().strip()
+    except OSError:
+        return False
+    if not first_line.startswith( "gitdir:" ): return False
+    return not os.path.exists( first_line[ len( "gitdir:" ): ].strip() )
 
 
 class WorktreeCollisionError( RuntimeError ):
@@ -227,7 +250,13 @@ class WorktreeContext:
             if self.debug:
                 print( f"[WorktreeContext] drain_then_remove: removed={result[ 'removed' ]} "
                        f"wip_committed={result[ 'wip_committed' ]} branch={result[ 'branch' ]}" )
-            if not result[ "removed" ] and result.get( "errors" ):
+            if not result[ "removed" ] and result[ "skipped_reason" ] == "broken_or_not_a_worktree":
+                # Git's record is gone (a host-side prune reads a container-made tree's gitdir as a
+                # missing path and drops it), so the reaper refuses and the folder would stay for good
+                # (row 438a8b49: 42 tfe-* folders). This sandbox is the job's own and any commit it made
+                # is already on its branch, so only a folder with a dangling .git link is deleted.
+                self._remove_dangling_sandbox()
+            elif not result[ "removed" ] and result.get( "errors" ):
                 logger.warning(
                     f"[WorktreeContext] drain_then_remove did not remove {self.path}: "
                     f"{result[ 'errors' ]}"
@@ -240,6 +269,24 @@ class WorktreeContext:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _remove_dangling_sandbox( self ) -> None:
+        """
+        Delete this job's sandbox folder when its .git link points at a record git no longer has.
+
+        Ensures:
+            - folder removed only if has_dangling_git_link( self.path ); otherwise left untouched
+            - symlinked artifacts (.venv and friends) are unlinked, never followed
+            - an OSError is logged as a warning and never raised
+        """
+        if not has_dangling_git_link( self.path ):
+            logger.warning( f"[WorktreeContext] not a git worktree and no dangling link, leaving {self.path}" )
+            return
+        try:
+            shutil.rmtree( self.path )
+            if self.debug: print( f"[WorktreeContext] removed dangling sandbox: {self.path}" )
+        except OSError as e:
+            logger.warning( f"[WorktreeContext] could not remove dangling sandbox {self.path}: {e}" )
 
     def _load_config( self ) -> tuple:
         """

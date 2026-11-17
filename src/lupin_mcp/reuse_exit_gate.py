@@ -41,6 +41,8 @@ import pathlib
 import re
 import sys
 
+from cosa.utils.atomic_json import load_json_dict
+
 MIN_NEW         = 10
 RUNS_REQUIRED   = 2
 EXCLUDED_PREFIX = "EXCLUDED_"
@@ -191,15 +193,6 @@ def unparsed_searched_lines( text ):
     return [ line.strip() for line in text.splitlines() if SEARCHED_LEAD_RE.match( line ) and not SEARCHED_RE.match( line ) ]
 
 
-def _read_json( path ):
-    """Ensures: returns the JSON object in a file, or None when it cannot be read as one."""
-    try:
-        doc = json.loads( pathlib.Path( path ).read_text( encoding="utf-8" ) )
-    except ( OSError, ValueError ):
-        return None
-    return doc if isinstance( doc, dict ) else None
-
-
 def _receipt_symbol( data, receipt_id ):
     """
     Name the symbol a fetch_similar receipt was about.
@@ -209,8 +202,8 @@ def _receipt_symbol( data, receipt_id ):
         - an id that is not 16 hex characters is never turned into a path
     """
     if not isinstance( receipt_id, str ) or not RECEIPT_ID_RE.fullmatch( receipt_id ): return None
-    doc = _read_json( data / "receipts" / f"{receipt_id}.json" )
-    return doc[ "query" ] if doc is not None and doc.get( "tool" ) == "fetch_similar" and isinstance( doc.get( "query" ), str ) else None
+    doc = load_json_dict( data / "receipts" / f"{receipt_id}.json" )
+    return doc[ "query" ] if doc.get( "tool" ) == "fetch_similar" and isinstance( doc.get( "query" ), str ) else None
 
 
 def _usable_search( data, r ):
@@ -228,8 +221,8 @@ def _usable_search( data, r ):
     """
     sid = r.get( "search_id" )
     if r.get( "tool" ) != "record_search" or r.get( "error" ) or not isinstance( sid, str ) or not SEARCH_ID_RE.match( sid ): return None
-    doc = _read_json( data / "search-records" / f"{sid}.json" )
-    if doc is None or doc.get( "id" ) != sid or not isinstance( doc.get( "candidates" ), list ): return None
+    doc = load_json_dict( data / "search-records" / f"{sid}.json" )
+    if doc.get( "id" ) != sid or not isinstance( doc.get( "candidates" ), list ): return None
     return sid, doc, [ c[ "id" ] for c in doc[ "candidates" ] if isinstance( c, dict ) and "id" in c ]
 
 

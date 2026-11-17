@@ -74,7 +74,7 @@ def make_env( tmp_path, ask=None, seed=DRAW_SEED, smoke=False, with_none=True, n
     second_call = second if wrap_second is None else wrap_second( second )
     none_fn = draft.make_none_drafter( stage, vectors, lambda text: [ 1.0, 0.0 ], lambda i: "does a thing", second_call,
                                        harness_runner.Ledger( str( tmp_path / "second.jsonl" ), binding="test" ), "claude-opus-5-5" ) if with_none else None
-    return run.Env( by_id, kept, ctx, twins, strip_fn, ask, book, draft.DRAFTER_MODEL, "max-plan", COMMIT, seed, SPLIT, "test", "2026-10-24T22:00:00-04:00",
+    return run.Env( by_id, kept, ctx, twins, strip_fn, ask, book, draft.drafter_model(), "max-plan", COMMIT, seed, SPLIT, "test", "2026-10-24T22:00:00-04:00",
                     none_draft_fn=none_fn, parallel=2, smoke=smoke, freeze_from=freeze_from )
 
 
@@ -180,7 +180,7 @@ def test_an_accepted_draft_becomes_a_valid_need_and_a_smoke_run_marks_it( tmp_pa
     need   = run.to_need( record, "near_copy", "py", env )
     schema.validate_need( need )
     assert need[ "seed" ] == "pkg.alpha.pyfn0" and need[ "key" ][ "symbols" ] == [ "pkg.alpha.pyfn1" ] and need[ "status" ] == "drafted" and "smoke" not in need
-    assert need[ "drafter" ] == { "model": draft.DRAFTER_MODEL, "prompt_version": draft.prompt_version(), "server": "max-plan" } and need[ "source_commit" ] == COMMIT
+    assert need[ "drafter" ] == { "model": draft.drafter_model(), "prompt_version": draft.prompt_version(), "server": "max-plan" } and need[ "source_commit" ] == COMMIT
     none = run.to_need( { "seed": "pkg/alpha.py", "key": [], "need": NOTHING, "meta": { "route": None, "key_source": None, "key_lang": None } }, "nothing", "py", env )
     assert none[ "seed" ] is None and none[ "key" ][ "symbols" ] == [] and none[ "selection_route" ] is None
     assert run.to_need( record, "near_copy", "py", make_env( tmp_path, smoke=True, name="s.jsonl" ) )[ "smoke" ] is True

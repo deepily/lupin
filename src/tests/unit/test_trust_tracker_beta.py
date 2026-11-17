@@ -146,6 +146,32 @@ class TestBetaBernoulliLevel:
         assert cat.level >= 2
 
 
+class TestLevelFromRate:
+    """The shared climb that the Beta lower bound and the BLR posterior mean both go through."""
+
+    RATES   = { 2: 0.50, 3: 0.70, 4: 0.85, 5: 0.95 }
+    SAMPLES = { 2: 5,    3: 15,   4: 40,   5: 100 }
+
+    def _cat( self, cap_level=5 ):
+        return CategoryTrust( "testing", cap_level=cap_level, rate_thresholds=self.RATES, min_samples=self.SAMPLES )
+
+    def test_each_level_needs_both_its_rate_and_its_sample_count( self ):
+        cat = self._cat()
+        assert cat._level_from_rate( 0.99, 4 )   == 1     # rate high, too few samples for level 2
+        assert cat._level_from_rate( 0.99, 15 )  == 3     # samples reach level 3 only
+        assert cat._level_from_rate( 0.60, 500 ) == 2     # samples ample, rate reaches level 2 only
+        assert cat._level_from_rate( 0.99, 100 ) == 5
+
+    def test_the_climb_stops_at_the_first_missed_level( self ):
+        # Level 4's rate and samples hold, but level 3's rate does not, so the climb ends at 2.
+        cat = self._cat()
+        cat.rate_thresholds = { 2: 0.50, 3: 0.99, 4: 0.10, 5: 0.99 }
+        assert cat._level_from_rate( 0.80, 100 ) == 2
+
+    def test_the_cap_level_is_never_exceeded( self ):
+        assert self._cat( cap_level=3 )._level_from_rate( 0.99, 500 ) == 3
+
+
 class TestTrustTrackerBetaIntegration:
     """Tests for TrustTracker with beta model propagation."""
 

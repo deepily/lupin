@@ -1,6 +1,6 @@
 ---
 capability: doc-viewer-owner-rule
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers._owner_scope.card_is_owned_by@6642017df9
   - cosa.rest.routers._owner_scope.owned_prefix@e4c86cc6c9

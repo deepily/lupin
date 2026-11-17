@@ -15,7 +15,9 @@ import unittest
 import uuid
 from unittest.mock import MagicMock, Mock
 
-from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
+from sqlalchemy.dialects import postgresql
+
+from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository, legacy_similarity_clause, legacy_confidence_clause
 from cosa.rest.postgres_models import PredictionLog
 
 
@@ -96,6 +98,8 @@ class TestGetByNotificationId( _PLRTestBase ):
 class TestGetAccuracySummary( _PLRTestBase ):
     def test_no_filters_with_responses( self ):
         self.session.query.return_value.filter.return_value.scalar.side_effect = [
+            132,   # excluded_legacy_similarity
+            414,   # excluded_legacy_confidence
             10,    # total_predictions
             4,     # total_responded
             3,     # total_correct
@@ -104,6 +108,8 @@ class TestGetAccuracySummary( _PLRTestBase ):
         self.repo._get_breakdown = Mock( side_effect=[ { "by_cat": 1 }, { "by_type": 2 } ] )
         summary = self.repo.get_accuracy_summary()
         self.assertEqual( summary[ "window_days" ], 30 )
+        self.assertEqual( summary[ "excluded_legacy_similarity" ], 132 )
+        self.assertEqual( summary[ "excluded_legacy_confidence" ], 414 )
         self.assertEqual( summary[ "total_predictions" ], 10 )
         self.assertEqual( summary[ "total_responded" ], 4 )
         self.assertEqual( summary[ "total_correct" ], 3 )
@@ -115,6 +121,8 @@ class TestGetAccuracySummary( _PLRTestBase ):
     def test_all_filters_no_responses_uses_or_defaults( self ):
         # All scalars falsy → exercise the `or 0` / `or 0.0` right arcs + responded==0 else.
         self.session.query.return_value.filter.return_value.scalar.side_effect = [
+            None,  # excluded_legacy_similarity → or 0
+            None,  # excluded_legacy_confidence → or 0
             None,  # total_predictions → or 0
             0,     # total_responded  → or 0
             None,  # total_correct    → or 0
@@ -126,11 +134,56 @@ class TestGetAccuracySummary( _PLRTestBase ):
             sender_id="sess-1"
         )
         self.assertEqual( summary[ "window_days" ], 7 )
+        self.assertEqual( summary[ "excluded_legacy_similarity" ], 0 )
+        self.assertEqual( summary[ "excluded_legacy_confidence" ], 0 )
         self.assertEqual( summary[ "total_predictions" ], 0 )
         self.assertEqual( summary[ "total_responded" ], 0 )
         self.assertEqual( summary[ "total_correct" ], 0 )
         self.assertEqual( summary[ "accuracy_rate" ], 0.0 )
         self.assertEqual( summary[ "avg_confidence" ], 0.0 )
+
+
+class TestLegacySimilarityClause( unittest.TestCase ):
+    def _sql( self ):
+        return str( legacy_similarity_clause().compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": True } ) )
+
+    def test_reads_both_similarity_keys_as_floats_above_one( self ):
+        sql = self._sql()
+        self.assertIn( "accuracy_detail ->> 'similarity'", sql )
+        self.assertIn( "accuracy_detail ->> 'avg_similarity'", sql )
+        self.assertEqual( sql.count( "> 1.0" ), 2 )
+        self.assertIn( " OR ", sql )
+
+    def test_summary_filters_exclude_the_legacy_rows_but_keep_null_rows( self ):
+        self.session = MagicMock( name="session" )
+        repo = PredictionLogRepository( self.session )
+        self.session.query.return_value.filter.return_value.scalar.return_value = 0
+        repo._get_breakdown = Mock( return_value={} )
+        repo.get_accuracy_summary()
+        # 3rd query call onward uses the combined filter: NOT coalesce( clause, false ) and NOT confidence > 1
+        calls = self.session.query.return_value.filter.call_args_list
+        sql   = str( calls[ 2 ].args[ 0 ].compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": True } ) )
+        self.assertIn( "NOT coalesce(", sql )
+        self.assertIn( "accuracy_detail ->> 'similarity'", sql )
+        self.assertIn( "prediction_confidence <= 1.0", sql )
+
+    def test_confidence_count_skips_rows_already_counted_as_legacy_similarity( self ):
+        self.session = MagicMock( name="session" )
+        repo = PredictionLogRepository( self.session )
+        self.session.query.return_value.filter.return_value.scalar.return_value = 0
+        repo._get_breakdown = Mock( return_value={} )
+        repo.get_accuracy_summary()
+        args = self.session.query.return_value.filter.call_args_list[ 1 ].args
+        self.assertEqual( len( args ), 3 )
+        sql = [ str( a.compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": True } ) ) for a in args ]
+        self.assertIn( "NOT coalesce(", sql[ 1 ] )
+        self.assertIn( "prediction_confidence > 1.0", sql[ 2 ] )
+
+
+class TestLegacyConfidenceClause( unittest.TestCase ):
+    def test_is_confidence_above_one( self ):
+        sql = str( legacy_confidence_clause().compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": True } ) )
+        self.assertIn( "prediction_confidence > 1.0", sql )
 
 
 class TestGetBreakdown( _PLRTestBase ):

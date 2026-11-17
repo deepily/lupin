@@ -1,10 +1,10 @@
 ---
 capability: eval-provenance-and-commons-migration
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.eval_provenance.compute_sample_signature@3a3151d3e2
   - scripts.eval_provenance.make_provenance@864e4bb74a
-  - scripts.migrate-commons-entry-separator.migrate_directory@3e7fcbc901
+  - scripts.migrate-commons-entry-separator.migrate_directory@8cd89cb9b3
   - scripts.migrate-commons-entry-separator.main@0d4ea59a18
 ---
 # Eval provenance and commons separator migration

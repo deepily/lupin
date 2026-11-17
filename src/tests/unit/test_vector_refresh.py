@@ -271,13 +271,6 @@ def test_the_env_file_is_under_the_home_folder_and_falls_back_to_the_users_home(
     assert vr.env_file_path( {} ) == "/fallback/.lupin/reuse-vector-refresh.env"
 
 
-def test_the_install_writes_the_env_file_path_of_the_host_it_runs_on_into_both_lines( world, cron ):
-    env = { **cron[ "env" ], "HOME": "/home/someone" }
-    run_main( world, [ "--install", "--python", "/py" ], environ=env, crontab_cmd=cron[ "cmd" ] )
-    mine = [ l for l in cron[ "file" ].read_text().splitlines() if vr.CRON_TAG in l ]
-    assert len( mine ) == 2 and all( "REUSE_VECTOR_REFRESH_ENV=/home/someone/.lupin/reuse-vector-refresh.env " in l for l in mine )
-
-
 def test_refresh_dir_sits_under_the_data_dir( world ):
     assert vr.refresh_dir( "/x" ) == world[ "data" ] / "refresh"
 
@@ -297,27 +290,30 @@ def test_print_install_prints_both_lines_and_changes_nothing( world ):
     assert not world[ "data" ].exists()
 
 
-def test_install_status_and_uninstall_keep_other_lines_and_this_jobs_tag_apart_from_the_librarians( world, cron ):
-    cron[ "file" ].write_text( "0 * * * * other\n17 10 * * * lib " + lt.CRON_TAG + "\n" )
+def test_install_is_retired_like_the_other_five_and_writes_nothing( world, cron ):
+    cron[ "file" ].write_text( "0 * * * * other\n" )
+    rc, out, err = run_main( world, [ "--install", "--python", "/py" ], environ=cron[ "env" ], crontab_cmd=cron[ "cmd" ] )
+    assert rc == 1 and out == "" and "lupin_mcp.cron_generate --install" in err
+    assert cron[ "file" ].read_text() == "0 * * * * other\n" and not cron[ "log" ].exists()
+
+
+def test_status_and_uninstall_keep_other_lines_and_this_jobs_tag_apart_from_the_librarians( world, cron ):
+    cron[ "file" ].write_text( "0 * * * * other\n17 10 * * * lib " + lt.CRON_TAG + "\n1 1 * * * a " + vr.CRON_TAG + "\n@reboot b " + vr.CRON_TAG + "\n" )
     env = cron[ "env" ]
-    rc, out, _ = run_main( world, [ "--install", "--python", "/py" ], environ=env, crontab_cmd=cron[ "cmd" ] )
-    assert ( rc, out.strip() ) == ( 0, "installed: 2 lines" )
-    text = cron[ "file" ].read_text()
-    assert "0 * * * * other" in text and text.count( lt.CRON_TAG ) == 1 and text.count( vr.CRON_TAG ) == 2
-    assert "lock-enter " + vr.LOCK_OWNER in cron[ "log" ].read_text()
     assert run_main( world, [ "--status" ], environ=env, crontab_cmd=cron[ "cmd" ] )[ 1 ].strip() == "installed: 2 lines"
     rc, out, _ = run_main( world, [ "--uninstall" ], environ=env, crontab_cmd=cron[ "cmd" ] )
     assert ( rc, out.strip() ) == ( 0, "uninstalled" )
     after = cron[ "file" ].read_text()
-    assert vr.CRON_TAG not in after and lt.CRON_TAG in after
+    assert "0 * * * * other" in after and vr.CRON_TAG not in after and lt.CRON_TAG in after
+    assert "lock-enter " + vr.LOCK_OWNER in cron[ "log" ].read_text()
 
 
 def test_status_reads_not_installed_when_there_is_no_crontab( world, cron ):
     assert run_main( world, [ "--status" ], environ=cron[ "env" ], crontab_cmd=cron[ "cmd" ] )[ 1 ].strip() == "not installed"
 
 
-def test_an_install_without_the_shared_lock_is_refused_and_returns_one( world, cron ):
-    rc, _, err = run_main( world, [ "--install" ], environ={}, crontab_cmd=cron[ "cmd" ] )
+def test_an_uninstall_without_the_shared_lock_is_refused_and_returns_one( world, cron ):
+    rc, _, err = run_main( world, [ "--uninstall" ], environ={}, crontab_cmd=cron[ "cmd" ] )
     assert rc == 1 and err.startswith( "reuse-vector-refresh:" )
     assert not cron[ "file" ].exists()
 
@@ -350,7 +346,7 @@ def test_the_switch_is_read_from_this_jobs_own_key( world, monkeypatch ):
     seen = []
     monkeypatch.setattr( lt, "read_value", lambda key, reader=None, errors=None: seen.append( key ) or "true" )
     rc, _, _ = run_main( world, [], writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
-    assert rc == 0 and seen == [ vr.ENABLED_KEY ] and vr.ENABLED_KEY != lt.ENABLED_KEY
+    assert rc == 0 and seen[ 0 ] == vr.ENABLED_KEY and lt.ENABLED_KEY not in seen and vr.ENABLED_KEY != lt.ENABLED_KEY, "the switch comes first; the status check after the run reads only its own stale-hours key"
 
 
 def test_a_switched_on_run_builds_and_prints_the_summary( world, monkeypatch ):
@@ -505,3 +501,100 @@ def test_the_wrapper_defaults_the_configuration_manager_args_under_a_bare_enviro
 def test_the_wrapper_keeps_a_callers_own_configuration_manager_args( tmp_path ):
     seen = run_wrapper_bare( tmp_path, { "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/mine.ini" } )
     assert seen[ "env" ][ "LUPIN_CONFIG_MGR_CLI_ARGS" ] == "config_path=/mine.ini"
+
+
+def _summaries( world ):
+    """Ensures: returns every job-summary.json the run left under the test data folder, parsed."""
+    return [ json.loads( p.read_text() ) for p in world[ "data" ].rglob( "job-summary.json" ) ]
+
+
+def test_every_run_that_returns_writes_the_status_file_and_files_no_row( world, monkeypatch ):
+    from cosa.repo.symindex import vector_status as vs
+    seen = []
+    monkeypatch.setattr( vs, "check", lambda root, now, **kw: seen.append( ( root, now, kw ) ) )
+    for code, summary in ( ( 0, { "ran": True, "outcome": "built" } ), ( 1, { "ran": False, "outcome": "failed", "reason": "boom" } ), ( 0, { "ran": False, "reason": "not due" } ) ):
+        monkeypatch.setattr( vr, "run_refresh", lambda *a, code=code, summary=summary, **k: ( code, summary ) )
+        assert run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )[ 0 ] == code
+    assert len( seen ) == 3, "built, failed and not-due runs each leave a status"
+    assert all( kw.get( "librarian" ) is None for _, _, kw in seen ), "no librarian is passed, so no store row can be filed"
+    assert all( now == NOON and root == str( world[ "root" ] ) for root, now, _ in seen )
+
+
+def test_the_status_file_really_lands_in_the_refresh_folder_after_a_run( world, monkeypatch ):
+    monkeypatch.setattr( vr, "run_refresh", lambda *a, **k: ( 0, { "ran": False, "reason": "not due" } ) )
+    path = world[ "data" ] / "refresh" / "vector-status.json"
+    assert not path.exists()
+    run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    assert json.loads( path.read_text() )[ "checked_at" ] == NOON.isoformat( timespec="seconds" )
+
+
+def _watch_status( world, monkeypatch ):
+    """Ensures: returns the list that each vector_status.check call appends its ( root, now ) to."""
+    from cosa.repo.symindex import vector_status as vs
+    seen = []
+    monkeypatch.setattr( vs, "check", lambda root, now, **kw: seen.append( ( root, now ) ) )
+    return seen
+
+
+def test_a_switched_off_exit_still_writes_the_status( world, monkeypatch ):
+    seen = _watch_status( world, monkeypatch )
+    rc, _, _ = run_main( world, [], enabled_fn=lambda: False )
+    assert rc == vr.EXIT_DISABLED and seen == [ ( str( world[ "root" ] ), NOON ) ]
+
+
+def test_a_worktree_root_refusal_still_writes_the_status( world, monkeypatch ):
+    seen = _watch_status( world, monkeypatch )
+    def worktree( a ): raise ValueError( "--root /wt is a worktree" )
+    rc, _, _ = run_main( world, [], enabled_fn=lambda: True, writer_factory=worktree )
+    assert rc == vr.EXIT_NAMED and len( seen ) == 1
+
+
+def test_a_missing_credential_refusal_still_writes_the_status( world, monkeypatch ):
+    seen = _watch_status( world, monkeypatch )
+    def no_credentials( a ): raise CandidateError( DEPENDENCY_MISSING, "no key" )
+    rc, _, _ = run_main( world, [], enabled_fn=lambda: True, writer_factory=no_credentials )
+    assert rc == vr.EXIT_NAMED and len( seen ) == 1
+
+
+def test_a_crashed_run_writes_the_status_and_still_raises( world, monkeypatch ):
+    seen = _watch_status( world, monkeypatch )
+    def crash( *a, **k ): raise OSError( "disk" )
+    monkeypatch.setattr( vr, "run_refresh", crash )
+    with pytest.raises( OSError, match="disk" ):
+        run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    assert len( seen ) == 1, "written once, before the exception left main"
+
+
+@pytest.mark.parametrize( "error", [ OSError( "disk" ), ValueError( "bad" ), vr.CandidateError( "X", "detail" ) ] )
+def test_a_failing_status_check_is_logged_and_never_changes_the_exit_code( world, monkeypatch, error ):
+    from cosa.repo.symindex import vector_status as vs
+    def broken( *a, **k ): raise error
+    monkeypatch.setattr( vs, "check", broken )
+    monkeypatch.setattr( vr, "run_refresh", lambda *a, **k: ( 0, { "ran": False, "reason": "not due" } ) )
+    rc, out, _ = run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    assert rc == 0 and json.loads( out )[ "reason" ] == "not due"
+    assert "vector status check failed" in ( world[ "data" ] / "refresh" / vr.LOG_NAME ).read_text()
+
+
+def test_main_leaves_a_job_summary_for_a_switched_off_run_a_finished_run_and_a_crash( world, monkeypatch ):
+    run_main( world, [], enabled_fn=lambda: False )
+    assert _summaries( world )[ 0 ][ "job" ] == "vector-refresh" and _summaries( world )[ 0 ][ "last_attempt" ][ "outcome" ] == "skipped"
+    monkeypatch.setattr( vr, "run_refresh", lambda *a, **k: ( 0, { "ran": True, "outcome": "built", "rows": 5, "built_at": "2026-11-07T17:16:08+00:00" } ) )
+    run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    got = _summaries( world )[ 0 ]
+    assert got[ "last_attempt" ][ "outcome" ] == "clean" and got[ "scan_debt" ][ "freshness" ] == { "built_at": "2026-11-07T17:16:08+00:00", "stale_after_hours": 36 }
+    def crash( *a, **k ): raise OSError( "disk" )
+    monkeypatch.setattr( vr, "run_refresh", crash )
+    with pytest.raises( OSError ):
+        run_main( world, [], enabled_fn=lambda: True, writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
+    last = _summaries( world )[ 0 ][ "last_attempt" ]
+    assert last[ "outcome" ] == "failed" and last[ "failure" ] == "OSError: disk" and last[ "stage" ] == "refresh"
+
+
+@pytest.mark.census
+def test_no_script_calls_the_retired_install_verb_and_lupin_vm_sh_runs_cron_generate_for_this_job_instead():
+    import subprocess
+    root  = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    named = subprocess.run( [ "git", "-C", str( root ), "grep", "-lF", "reuse-vector-refresh.sh --install", "--", "src/scripts" ], capture_output=True, text=True ).stdout.split()
+    assert "src/scripts/lupin-vm.sh" not in named and named == [], "nothing under src/scripts runs the retired verb"
+    assert "cron_generate --only vector-refresh --install" in ( root / "src/scripts/lupin-vm.sh" ).read_text()

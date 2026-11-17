@@ -37,10 +37,18 @@ def port_is_free( port ):
         return probe.connect_ex( ( "127.0.0.1", port ) ) != 0
 
 
-def answers_health( url ):
-    """Say whether GET <url>/health answers 200."""
+def answers_health( url, path="/health", timeout=5, opener=urllib.request.urlopen ):
+    """
+    Say whether GET <url><path> answers 200.
+
+    Requires:
+        - url is a base address, or the whole address when path is ""
+        - opener takes ( address, timeout=seconds ) and returns a context manager holding status
+    Ensures:
+        - returns True for an HTTP 200; False for any other status, a refused connection or no answer within timeout seconds
+    """
     try:
-        with urllib.request.urlopen( f"{url}/health", timeout=5 ) as response: return response.status == 200
+        with opener( f"{url}{path}", timeout=timeout ) as response: return response.status == 200
     except ( urllib.error.URLError, OSError ): return False
 
 

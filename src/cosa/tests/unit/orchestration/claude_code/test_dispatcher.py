@@ -333,7 +333,7 @@ def test_default_message_handler_block_without_text_or_name( lupin_root, capsys 
 
 
 # =========================================================================== #
-# dispatch  (routing)
+# dispatch, routing
 # =========================================================================== #
 def test_dispatch_bounded_routes_to_run_bounded( lupin_root, monkeypatch ):
     """BOUNDED tasks route to _run_bounded."""

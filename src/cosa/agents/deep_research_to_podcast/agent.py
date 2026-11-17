@@ -22,10 +22,12 @@ import os
 from datetime import datetime
 from typing import Optional, List
 
+from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
+from cosa.agents.chained_pipeline_state import ChainedDeepResearchAgent, skipped_topic_names
 from .state import ChainedResult, PipelineState
 
 
-class DeepResearchToPodcastAgent:
+class DeepResearchToPodcastAgent( ChainedDeepResearchAgent ):
     """
     Orchestrates a chained workflow: Deep Research → Podcast Generation.
 
@@ -51,6 +53,10 @@ class DeepResearchToPodcastAgent:
         print( f"Audio: {result.audio_path}" )
     """
 
+    PIPELINE_STATE = PipelineState
+    RESULT_CLASS   = ChainedResult
+    STAGE_LABEL    = "Podcast Generation"
+
     def __init__(
         self,
         query: str,
@@ -65,6 +71,8 @@ class DeepResearchToPodcastAgent:
         # Podcast Generator options
         target_languages: Optional[ List[ str ] ] = None,
         max_segments: Optional[ int ] = None,
+        script_type: Optional[ str ] = None,
+        review: Optional[ str ] = None,
         # Common options
         cli_mode: bool = False,
         debug: bool = False,
@@ -90,312 +98,43 @@ class DeepResearchToPodcastAgent:
             # Podcast Generator options
             target_languages: List of ISO language codes (default: ["en"])
             max_segments: Limit TTS to first N segments (cost control)
+            script_type: Script type name (research_critical or status_report); None means research_critical
+            review: Review mode (ask or one_shot); None means the script type's default
 
             # Common options
             cli_mode: Force CLI text mode (default: voice-driven)
             debug: Enable debug output
             verbose: Enable verbose output
         """
-        self.query            = query
-        self.user_email       = user_email
-
-        # Deep Research options
-        self.budget           = budget
-        self.lead_model       = lead_model
-        self.no_confirm       = no_confirm
-        self.audience          = audience
-        self.audience_context  = audience_context
-        self.source_document   = source_document or [ ]
+        super().__init__(
+            query, user_email, budget=budget, lead_model=lead_model, no_confirm=no_confirm,
+            audience=audience, audience_context=audience_context, source_document=source_document,
+            cli_mode=cli_mode, debug=debug, verbose=verbose
+        )
 
         # Podcast Generator options
         self.target_languages = target_languages or [ "en" ]
         self.max_segments     = max_segments
+        self.script_type      = script_type
+        self.review           = review
+    def _stage_voice_io( self ):
+        """Return the podcast generator's voice_io module."""
+        from cosa.agents.podcast_generator import voice_io
 
-        # Common options
-        self.cli_mode         = cli_mode
-        self.debug            = debug
-        self.verbose          = verbose
+        return voice_io
 
-        # Result tracking
-        self.result           = ChainedResult()
-        self._start_time      = None
+    async def _run_second_stage( self, research_path: str ) -> dict:
+        """Run the Podcast Generator on the research report."""
+        return await self._run_podcast_generator( research_path )
 
-        if self.debug:
-            print( f"[DeepResearchToPodcastAgent] Initialized" )
-            print( f"  Query: {query[ :50 ]}..." )
-            print( f"  User: {user_email}" )
-            print( f"  Mode: {'CLI' if cli_mode else 'Voice-driven'}" )
+    def _store_second_stage_result( self, pg_result: dict ) -> None:
+        """Keep the podcast's audio and script paths on the result."""
+        self.result.audio_path  = pg_result.get( "audio_path" )
+        self.result.script_path = pg_result.get( "script_path" )
 
-    def _set_modality( self ) -> None:
-        """
-        Set voice/CLI mode on both underlying agents.
-
-        Both Deep Research and Podcast Generator have their own voice_io modules.
-        We must set cli_mode on both to ensure consistent behavior.
-        """
-        from cosa.agents.deep_research import voice_io as dr_voice_io
-        from cosa.agents.podcast_generator import voice_io as pg_voice_io
-
-        dr_voice_io.set_cli_mode( self.cli_mode )
-        pg_voice_io.set_cli_mode( self.cli_mode )
-
-        # Re-establish DR binding as the default for pipeline notifications
-        dr_voice_io.reconfigure()
-
-        if self.debug:
-            mode = "CLI" if self.cli_mode else "Voice-driven"
-            print( f"[DeepResearchToPodcastAgent] Set modality to: {mode}" )
-
-    async def run_async( self ) -> ChainedResult:
-        """
-        Execute the full chain: Deep Research → Podcast Generation.
-
-        Returns:
-            ChainedResult with research_path, audio_path, combined cost
-
-        Raises:
-            Exception: If Deep Research fails critically
-        """
-        self._start_time = time.time()
-        self.result.started_at = datetime.now().isoformat()
-        self.result.state = PipelineState.INITIALIZED
-
-        # Set modality before running either agent
-        self._set_modality()
-
-        try:
-            # Step 1: Run Deep Research
-            await self._notify( "Starting Deep Research pipeline...", priority="medium" )
-            dr_result = await self._run_deep_research()
-
-            if dr_result.get( "cancelled" ):
-                self.result.state = PipelineState.CANCELLED
-                self.result.error = "Deep Research was cancelled by user"
-                return self._finalize_result()
-
-            # Extract report path
-            report_path = dr_result.get( "report_path" )
-            if not report_path:
-                self.result.state = PipelineState.FAILED
-                self.result.error = "Deep Research completed but no report_path returned"
-                return self._finalize_result()
-
-            # Store DR results
-            self.result.research_path = report_path
-            self.result.research_abstract = dr_result.get( "abstract" )
-            self.result.dr_cost = dr_result.get( "cost", 0.0 )
-            self.result.dr_artifacts = dr_result.get( "artifacts", {} )
-            self.result.state = PipelineState.DEEP_RESEARCH_DONE
-
-            # Checkpoint: Confirm DR artifacts before PG handoff
-            dr_artifacts = self.result.dr_artifacts
-            checkpoint_abstract = (
-                f"**Research Report**: {report_path}\n\n"
-                f"**Abstract**: {self.result.research_abstract[ :200 ] if self.result.research_abstract else 'N/A'}...\n\n"
-                f"**Cost**: ${self.result.dr_cost:.4f} | "
-                f"**Tokens**: {dr_artifacts.get( 'tokens_used', 'N/A' ):,} | "
-                f"**Duration**: {dr_artifacts.get( 'duration_seconds', 0 ):.0f}s"
-            )
-
-            skipped_names = [ g[ "topic" ] for g in dr_artifacts.get( "skipped_topics", [] ) ]
-            if skipped_names:
-                checkpoint_abstract += f"\n\n**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names )
-
-            await self._notify(
-                f"Deep Research complete! Cost: ${self.result.dr_cost:.4f}" + ( f" ({len( skipped_names )} topics skipped)" if skipped_names else "" ),
-                priority="medium",
-                abstract=checkpoint_abstract
-            )
-
-            # Step 2: Run Podcast Generator
-            await self._notify( "Starting Podcast Generation...", priority="medium" )
-            pg_result = await self._run_podcast_generator( report_path )
-
-            if pg_result.get( "cancelled" ):
-                self.result.state = PipelineState.CANCELLED
-                self.result.error = "Podcast Generation was cancelled by user"
-                return self._finalize_result()
-
-            # Store PG results
-            self.result.audio_path = pg_result.get( "audio_path" )
-            self.result.script_path = pg_result.get( "script_path" )
-            self.result.pg_cost = pg_result.get( "cost", 0.0 )
-            self.result.pg_artifacts = pg_result.get( "artifacts", {} )
-            self.result.state = PipelineState.COMPLETED
-
-            await self._notify(
-                f"Pipeline complete! Total cost: ${self.result.total_cost:.4f}",
-                priority="medium"
-            )
-
-            return self._finalize_result()
-
-        except Exception as e:
-            self.result.state = PipelineState.FAILED
-            self.result.error = str( e )
-
-            await self._notify(
-                f"Pipeline failed: {str( e )[ :100 ]}",
-                priority="urgent"
-            )
-
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-            return self._finalize_result()
-
-    async def _run_deep_research( self ) -> dict:
-        """
-        Execute Deep Research and return results.
-
-        Returns:
-            dict with keys: report_path, abstract, cost, artifacts, cancelled
-        """
-        self.result.state = PipelineState.RUNNING_DEEP_RESEARCH
-
-        # Re-establish DR voice_io binding before DR phase
-        from cosa.agents.deep_research import voice_io as dr_voice_io
-        from cosa.agents.deep_research import cosa_interface as dr_cosa_interface
-        dr_voice_io.reconfigure()
-        dr_cosa_interface.TARGET_USER = self.user_email
-
-        # Import Deep Research components
-        from cosa.agents.deep_research.config import ResearchConfig
-        from cosa.agents.deep_research.cost_tracker import CostTracker, BudgetExceededError
-        from cosa.agents.deep_research.seed_context import query_with_seed_context
-        from cosa.agents.deep_research.cli import (
-            run_research,
-            generate_abstract_for_cli,
-            save_report_with_frontmatter,
-        )
-        from cosa.config.configuration_manager import ConfigurationManager
-        from cosa.memory.gister import Gister
-        import cosa.utils.util as cu
-
-        # Initialize configuration
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-
-        # Get storage configuration
-        storage_backend = config_mgr.get( "deep research storage backend", default="local" )
-        gcs_bucket = config_mgr.get( "deep research gcs bucket", default=None )
-        output_dir = config_mgr.get( "deep research output directory", default="/io/deep-research" )
-
-        # Build full output path
-        if not output_dir.startswith( "/" ):
-            output_dir = cu.get_project_root() + "/" + output_dir
-        elif not output_dir.startswith( cu.get_project_root() ):
-            output_dir = cu.get_project_root() + output_dir
-
-        # Generate session_name from query using Gister
-        gister = Gister( debug=self.debug )
-        session_name = gister.get_gist(
-            self.query,
-            prompt_key="prompt template for deep research session name"
-        )
-        session_name = session_name.lower().strip() if session_name else "general research query"
-
-        # Derive semantic_topic from session_name
-        semantic_topic = session_name.replace( " ", "-" )
-
-        if self.debug:
-            print( f"[DR] Session name: {session_name}" )
-            print( f"[DR] Semantic topic: {semantic_topic}" )
-            print( f"[DR] Storage backend: {storage_backend}" )
-
-        # Create research configuration
-        config = ResearchConfig(
-            lead_model = self.lead_model if self.lead_model else config_mgr.get(
-                "deep research lead model",
-                default="claude-opus-4-6"
-            ),
-            subagent_model = config_mgr.get(
-                "deep research subagent model",
-                default="claude-sonnet-4-6"
-            ),
-            audience = self.audience or config_mgr.get(
-                "deep research audience",
-                default="academic"
-            ),
-            audience_context = self.audience_context or config_mgr.get(
-                "deep research audience context",
-                default=None
-            ) or None,
-        )
-
-        # Generate unique session ID for this pipeline (needed by CostTracker)
-        import uuid
-        session_id = f"chain-{uuid.uuid4().hex[ :8 ]}"
-
-        # Create cost tracker
-        cost_tracker = CostTracker( session_id=session_id, budget_limit_usd=self.budget )
-
-        try:
-            # Run the research.
-            #
-            # 🔴 THE SEED DOCUMENT ENTERS HERE AND NOWHERE ELSE (row 5726e3c5). It is
-            # deliberately NOT folded into `self.query`, which also feeds the session-name
-            # gist above, the pipeline notifications, and the saved report's frontmatter —
-            # a whole file in any of those is unreadable. One call site, one enrichment.
-            skipped_topics = []
-            report = await run_research(
-                query        = query_with_seed_context( self.query, self.source_document ),
-                config       = config,
-                cost_tracker = cost_tracker,
-                user_email   = self.user_email,
-                no_confirm   = self.no_confirm,
-                debug        = self.debug,
-                verbose      = self.verbose,
-                skipped_topics = skipped_topics
-            )
-
-            if report is None:
-                return { "cancelled": True }
-
-            # Generate abstract
-            abstract = await generate_abstract_for_cli(
-                report       = report,
-                config       = config,
-                cost_tracker = cost_tracker,
-                debug        = self.debug
-            )
-
-            # Save report with frontmatter
-            report_path = save_report_with_frontmatter(
-                report          = report,
-                query           = self.query,
-                abstract        = abstract,
-                semantic_topic  = semantic_topic,
-                session_id      = session_id,
-                cost_tracker    = cost_tracker,
-                config          = config,
-                output_dir      = output_dir,
-                user_email      = self.user_email,
-                storage_backend = storage_backend,
-                gcs_bucket      = gcs_bucket,
-                debug           = self.debug
-            )
-
-            # Get cost summary
-            summary = cost_tracker.get_summary()
-
-            return {
-                "report_path" : report_path,
-                "abstract"    : abstract,
-                "cost"        : summary.total_cost_usd,
-                "artifacts"   : {
-                    "report"          : report,
-                    "skipped_topics"  : skipped_topics,
-                    "session_name"    : session_name,
-                    "semantic_topic"  : semantic_topic,
-                    "tokens_used"     : summary.total_input_tokens + summary.total_output_tokens,
-                    "duration_seconds": summary.duration_seconds,
-                },
-                "cancelled"   : False,
-            }
-
-        except BudgetExceededError as e:
-            raise Exception( f"Deep Research budget exceeded: ${e.current_cost:.2f} of ${e.budget_limit:.2f}" )
+    def _skipped_topic_names( self, dr_artifacts: dict ) -> list:
+        """Name the research topics Deep Research skipped, so the checkpoint can say so."""
+        return skipped_topic_names( dr_artifacts )
 
     async def _run_podcast_generator( self, research_path: str ) -> dict:
         """
@@ -414,10 +153,11 @@ class DeepResearchToPodcastAgent:
         from cosa.agents.podcast_generator import cosa_interface as pg_cosa_interface
         pg_voice_io.reconfigure()
         pg_cosa_interface.TARGET_USER = self.user_email
+        set_dispatch_context( target_user=self.user_email )
 
         # Import Podcast Generator components
         from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        from cosa.agents.podcast_generator.config import PodcastConfig
+        from cosa.agents.podcast_generator.script_types import resolve_podcast_config
         import cosa.utils.util as cu
 
         # Validate research document exists
@@ -430,8 +170,16 @@ class DeepResearchToPodcastAgent:
             if self.max_segments:
                 print( f"[PG] Max segments: {self.max_segments}" )
 
-        # Create config
-        config = PodcastConfig()
+        # Request beats script-type profile beats INI
+        from cosa.config.configuration_manager import ConfigurationManager
+        config = resolve_podcast_config(
+            ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ),
+            script_type      = self.script_type,
+            review           = self.review,
+            audience         = self.audience,
+            audience_context = self.audience_context,
+            debug            = self.debug,
+        )
 
         # Create orchestrator
         agent = PodcastOrchestratorAgent(
@@ -474,31 +222,11 @@ class DeepResearchToPodcastAgent:
                 "duration_min" : script.estimated_duration_minutes if script else 0,
                 "audio_paths_by_language"  : state.get( "audio_paths_by_language" ),
                 "script_paths_by_language" : state.get( "script_paths_by_language" ),
+                # Languages whose translation failed; the card names them, since they have no links.
+                "failed_translations"      : dict( agent._failed_translations ),
             },
             "cancelled"   : False,
         }
-
-    def _finalize_result( self ) -> ChainedResult:
-        """Finalize and return the result with timing info."""
-        self.result.completed_at = datetime.now().isoformat()
-        if self._start_time:
-            self.result.duration_seconds = time.time() - self._start_time
-        self.result.total_cost = self.result.dr_cost + self.result.pg_cost
-        return self.result
-
-    async def _notify( self, message: str, priority: str = "medium", **kwargs ) -> None:
-        """
-        Send a notification using the appropriate modality.
-
-        Uses Deep Research voice_io (which is already configured).
-        """
-        from cosa.agents.deep_research import voice_io
-
-        await voice_io.notify( message, priority=priority, **kwargs )
-
-    def get_state( self ) -> PipelineState:
-        """Get current pipeline state."""
-        return self.result.state
 
 
 def quick_smoke_test():

@@ -1,6 +1,6 @@
 ---
 capability: orphaned-dm-buffers-report
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.report-orphaned-dm-buffers.read_buffer@4295ad540c
   - scripts.report-orphaned-dm-buffers.is_session_live@597b8d8807

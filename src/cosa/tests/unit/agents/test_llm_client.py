@@ -8,7 +8,7 @@ run_stream async-context-manager (yielding an async stream_text generator).
 NO real LLM / network / token-model load / spend.
 
 Covers the corrected post-02232a9 behavior:
-  - bug #6: _print_metadata + _format_duration are live and called under
+  - bug #6: _print_metadata + format_duration_ms are live and called under
     debug+verbose (the "📊 Stream Summary" banner) — including the
     duration=None "N/A" branch and the tokens/sec inf branch (duration 0/None).
   - bug #7: _stream_async counter inits before the loop; the counter % 128
@@ -148,22 +148,17 @@ class TestInit:
 
 
 # ----------------------------------------------------------------------------
-# _format_duration + _print_metadata  (bug #6 corrected behavior)
+# _print_metadata  (bug #6 corrected behavior)
 # ----------------------------------------------------------------------------
 class TestFormatAndMetadata:
     """
-    _format_duration ms-formatting + _print_metadata summary (uncommented by the
+    format_duration_ms formatting + _print_metadata summary (uncommented by the
     02232a9 fix).
 
     Ensures ms formatting, the "📊 Stream Summary" banner + tokens/sec line, the
     duration=None "N/A" branch, and the inf tokens/sec branch when duration is
     None or zero.
     """
-
-    def test_format_duration_milliseconds( self ):
-        c, _ = _client()
-        assert c._format_duration( 1.5 )   == "1500ms"
-        assert c._format_duration( 0.042 ) == "42ms"
 
     def test_print_metadata_with_duration( self, capsys ):
         c, _ = _client( model_name="mymodel" )
@@ -174,6 +169,7 @@ class TestFormatAndMetadata:
         assert "Duration" in out and "2000ms" in out
         assert "Total tokens" in out and "30" in out
         assert "Tokens/sec" in out and "10.00" in out    # 20 / 2.0
+        assert "⚡ Tokens/sec         : 10.00" in out         # the shared printer's exact line
 
     def test_print_metadata_duration_none_uses_na_and_inf( self, capsys ):
         c, _ = _client()
@@ -229,6 +225,22 @@ class TestStreamAsync:
         out = _run( c._stream_async( "p" ) )
         assert out == "Answer"
         assert "Answer" in capsys.readouterr().out
+
+    @pytest.mark.parametrize( "completion_mode", [ True, False ] )
+    def test_run_stream_gets_the_prompt_and_settings_in_either_mode( self, completion_mode ):
+        c, mocks = _client( completion_mode=completion_mode )
+        self._attach_stream( c, [ "a" ] )
+        _run( c._stream_async( "the prompt", temperature=0.25 ) )
+        mocks[ "ModelSettings" ].assert_called_with( temperature=0.25 )
+        c.model.run_stream.assert_called_once_with( "the prompt", model_settings=mocks[ "ModelSettings" ].return_value )
+
+    @pytest.mark.parametrize( "completion_mode", [ True, False ] )
+    def test_quiet_output_is_one_dot_per_chunk_and_no_closing_line_break( self, completion_mode, capsys ):
+        c, _ = _client( completion_mode=completion_mode, debug=False, verbose=False )
+        self._attach_stream( c, [ "a", "b" ] )
+        capsys.readouterr()                               # the constructor's banner is not the stream's output
+        _run( c._stream_async( "p" ) )
+        assert capsys.readouterr().out == ".."
 
     def test_agent_mode_dot_progress( self, capsys ):
         c, _ = _client( completion_mode=False, debug=False, verbose=False )

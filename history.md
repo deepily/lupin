@@ -8,7 +8,167 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
-## 2026.11.04 - Session ebd974b4 (Cheech 🌿, manager; crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped) | v0.2.2 PR ready: every merge gate green at 38eb5ac3e, wiki lint 204 to 0
+## 2026.11.16 - Session 8b134124 (Cheech 🌿, manager; crew Maya, Chloé, Pocholo, John, Clayton, Rachel, Tiberius, Sam) | Recall question measured and closed, 356 duplicate findings ruled, all three long PR suites rehearsed green
+
+**Resume here**: memento `.claude-memento-cheech-8b134124.md` (amended at closing, 22:45). Working-branch head is 81194389d or later.
+1. **Landed**: three commits.
+   - 24442c4e6, Maya: the expansion replay reads whole lists, so fusion depth can be measured.
+   - f5ef5eb8c, Chloé: one `apiErrorDetail` helper (row ef75257b).
+   - cabaa58d9, Pocholo: the sample re-judge matched all 300 pairs; row f4ad5450 is not a defect.
+2. **Recall row eeb88bab closed** (Rick: split and close). Need expansion is live. K stays 128: re-measured on whole lists, 101 to 122 of 124 known answers. Fusion depth stays 512. The embedding and known-answer-set questions moved to a9ec6241 and 40e46c73 for Rick's in-house experts.
+3. **Fable sample re-judge**: 296 of 300 pairs agree. Fable's flag rate is 8.3% against Opus's 7.7%; Fable's estimated backlog rate is 6.9% to 9.5%, which contains Opus's 7.5%.
+4. **Duplicate-check triage**: five seats ruled all 356 findings on 8 rows from 15 and 16 Nov: 323 distinct, 14 duplicate, 19 extend. The 33 fixes are row b9cf6490 (approved), in progress on three seat branches; they land only after the PR pyramid.
+5. **PR rehearsal on :8000**: e2e_a 571 passed, 0 failed (ts-582efc2f; the tree and the bundle moved mid-run). e2e_b 597 passed, 0 failed (ts-32ae3b53, clean). Integration 489 passed, 1 failed (ts-175f6588): one of 10 concurrent submits got a 500 because the embedding server failed, bug 351aa5f3. Gates 1 to 4 green at 27e646d0e. The 33 remediation fixes are pinned at refs/cheech/remediation-b9cf6490-{tiberius,pocholo,sam}. The full pyramid runs 17 Nov morning (row d2a18b64).
+6. **Owed 17 Nov**: the Opus drain check at 11:30 (d30a1081, 976 left), then the Opus proof run a7bb7805. Also Sam's 14 Nov remediation 9cc37a94, and the post-game for the 14 to 15 Nov overnight run.
+
+## 2026.11.14 - Session a1bb58be (Mr. Radio 🦉, manager; crew Krishna, Pocholo, Rachel, Maya, Clayton, Rio, Tiberius) | All 24 job switches honoured live; the second accordion step, quiet workers and daily promotion merged; night shift running
+
+**Resume here**: memento `.claude-memento-mr-radio-a1bb58be.md` (amended 23:00). Rick, 23:05: merging reviewed, tested work is the manager's own call; land with a bare `git merge --ff-only <sha>`.
+1. **Landed**: babadf6bc (24 switches c38a49bd, the second accordion step 063fc1a8, drift fix 93b1cfc4, daily promotion 586e23b0, quiet workers 92076977). The live check at 21:47 showed all 25 jobs honoured.
+2. **Landed tonight**: a00b29219 (Rio's podcast tone, row 66f2e4a5) and fbf5560b3 with baseline 88774b68d (row a37e3086 closed). Also 0ccc55b7f (row b92d123b, 8 of 10 e2e_a reds); ts-51ead6c0 passed both halves.
+3. **Waiting to land**: 2dfbc15c3 in my worktree (Maya's 26901b0e2, Krishna's 3562f0459), full unit tier running. John's d3f0f11c4 (the other 2 reds) is with Sam.
+4. **Night shift**: Rio on c80ef763 (P0, merged jobs list; plan approved by Tiberius), Clayton (cc-author-mr-radio-4) on ba82a443 and 2da35ac6, Krishna on b92d123b, Tiberius reviewing.
+5. **Owed**: the post-game (waived five times today); rows 063fc1a8, 93b1cfc4, 61070c08 and 63b1a75a close after full e2e halves.
+
+### Checkpoint | 2026.11.14 23:31 | Rick's 📷: night-shift state recorded; code already committed as merges
+
+## 2026.11.14 - Session 8b134124 (Cheech 🌿, manager; crew John, Sam, Maya, Pocholo) | Merge queue landed, the Opus drain runs on cron, 274 functions triaged, and Rick ruled the full pyramid is for the PR only
+
+**Resume here**: memento `.claude-memento-cheech-8b134124.md` (amended 22:59). Working-branch head is 3d6bef661 or later; the night shift is still running.
+1. **Merged**: 532666d16 (Krishna, symindex sees IIFE-nested JS) and 66acb4be7 (Chloé's chain with Sam's wiki pins). Also 9a7ebd838 and 444122d4a (Maya, reuse gate) and 41976532b (Pocholo, the `--check` refusal). Then a00b29219 (Rio's two commits) and 3d6bef661 (Sam's plan update, row 85044d24). Rick ran the last two in Cheech's pane. The auto-mode classifier refuses seat merges.
+2. **Rick's rulings**: e2e and integration run only before a PR to main (22:40). A working-branch merge needs green unit and census checks plus review. Row e986fbbc audits the workflow wording. Managers land reviewed, tested merges without asking (23:05). The host stays on overnight (23:15).
+3. **Opus drain, row d30a1081**: the hourly `--adaptive` cron runs a daily pass, then a baseline pass. The 21:00 slot was skipped on the run lock. 5,858 were left to judge at 21:04. It resumes in the morning.
+4. **Triage**: Sam ruled 274 functions across five duplicate-check rows. Remediation of the duplicate and extend rulings is held as row 9cc37a94.
+5. **Pyramid at 1809f7a2b, row d2a18b64**: unit 46,313 passed, cosa 10,415, typescript 6,793, smoke 496. The first e2e_a run was void. The parity_oracle conftest rebuilt the bundle mid-run (row 112e1a5e). The re-run had 10 real reds (row b92d123b). Two were a test bug, fixed by John in d3f0f11c4. Eight went to Mr. Radio's lane. Rio fixed e2e_b's one hover-dependent visual red in 374f21815.
+6. **Filed**: 88469dd4 (P0, Maya). Need expansion gets its own Opus model key, then a re-measure of the 60 to 69 of 70 result. The switch flip is Rick's. It ran on Sonnet only through a shared key.
+
+## 2026.11.13 - Session 3c1ff1fb (Cheech 🌿, manager; crew Rio, Tiberius, Chloé, Sam, John) | Merge queue landed, Gate A closed (Opus after rescue), pushed and backed up
+
+**Resume here**: memento `.claude-memento-cheech-3c1ff1fb.md` (amended 22:45). Branch pushed to origin at 4004d2924.
+1. **Merged**: 8c8008771 is the backlog-rescue explainer for Rick's manager. 79febee44 is Rio's chain A, which puts doc-parity-tick under its INI switch. 974a931a0 is Rio's chain B, three reuse fixes. 377960e10 is Chloé's ledger fix, row 395e4bcd. c9265bfa4 is Tiberius's ten reuse fixes, row ff7ad87e. The reuse gate passed 866 of 866.
+2. **Rick's rulings**: Gate A bcc022ff is closed as "Opus after rescue". His condition is that every ruling names its judging model. The Opus budget is 2,400 calls a day, row 40049d7f. He approved rows 3b045c28 and 84742382 for Chloé. The io/tmp sweep lines are installed, closing rows 25118ed7 and 2bd8ce23.
+3. **Rescue 3b045c28**: the second and third rescue steps are at ea5c8c70e, approved by Sam. Saved rulings answer 5,931 of 12,270 definitions. The merge and filing wait for Sam's mutation check and Cheech's go.
+4. **Final pyramid d2a18b64 at 4004d2924**: rows 1 to 4 and 10 to 12 are green. Unit had 45,835 passed and 3 failed. Two failures are fixed; TestTheRatchet is bug 20756314 for Krishna. Coverage moves to tomorrow's quiet window. Smoke ts-dfebd71d is running on :8000.
+5. **Filed**: 93b1cfc4 (accordion shows no toggle for Rick, Krishna). :7999 bounced at 22:37 so the accordion is live. Rio and Tiberius reaped with mementos.
+
+## 2026.11.13 - Session 5f75f136 (Mr. Radio 🦉, manager; crew Maria, Krishna, Maya, Rachel, Pocholo) | Group B model ids and the legacy cron-switch accordion merged; Rick's six decisions recorded
+
+**Resume here**: memento `.claude-memento-mr-radio-5f75f136.md`. Nothing merges into main until John's suites finish (Cheech, 22:42).
+1. **Merged**: f813f2635 (Maya's group B model ids, row a3ecd4ea closed), 08f792289 (rnd README link), 4004d2924 (Krishna's legacy-client scheduled-jobs accordion, row 063fc1a8). Each had passing changed-area tests, census guards and the reuse gate.
+2. **Miss**: 4004d2924 turned test_dom_assert_lint TestTheRatchet red, and the census guards don't select that test. Fix a6634c9de (row 20756314) is with Maria; the gap is bug 7e51f330.
+3. **Rick's rulings**: c38a49bd widened to all 24 registry jobs, and 12 have a switch today. 586e23b0 is deploy-and-smoke to the cloud VM at 18:00. 4fc04cb5 is parked to 20 Nov. 92076977 makes workers quiet by default, with urgent still spoken. The Opus budget is 2,400 calls a day.
+4. **Ready to merge after John**: a43a4cf84 is the VM tester login, row 8d67e474. bc82f35d8 is Maya's spend guard, row 40049d7f, with 313 passed. Pocholo's 7c43c4e64 follows once its E2E halves run.
+5. **Blocked**: the auto-mode classifier refuses seats' pytest in their worktrees; Rick was given an allow-rule text. Toggle-missing bug 93b1cfc4 is next for Krishna.
+
+## 2026.11.11 - Session 67412f28 (Cheech 🌿, manager; crew Rio, Rachel, Chloé, Sam, John, Pocholo, Tiberius, Clayton, Arnold, Extra 1) | Reuse backlog row 2448ae19 closed; code-health rows a24acda1, 6fd6fc0c and 5bb97718 merged; four reviewed bug fixes wait on Rick's admit
+
+**Resume here**: memento `.claude-memento-cheech-67412f28.md`. Claims list and merge tools live in `projects-data/lupin/cheech-tools/` (`followups-2448ae19-pending.md`, `merge_check.sh`).
+1. **Merged 21:52 to 22:34**, each followed by a passing reuse gate:
+   - Rio: d8518023f (lazy_exports, sort_keys, send_json for five POSTs) and caa547e1a (send_json call-site pins).
+   - Clayton: fa7214d88 (gate observer), a0052cf21 (typed config fake) and 436bb3b3e (boolean flag reads).
+   - Pocholo: 9bbd066f8 (test pins) and 84aab5ba6 (main_checkout). Extra 1: 79fcc3090 (read_jsonl).
+   - Arnold: ba2eaf45e (iter_bridge_paths) and 7fd126173 (reaper fold). Tiberius: eec067f58 (row 5bb97718).
+   - Earlier today: d8037019f (row a24acda1) and 779cc159d (row 6fd6fc0c); the memento lists the morning merges.
+2. **Merge pyramid** (row d2a18b64): rows 1 to 4 and 8 are green at a0052cf21. Rows 5 to 7, 10 to 12, 14 and 15 did not run.
+3. **Ready on admit**, each fix approved and each row held for Rick:
+   - ba3ba6c0 → 1007d4557, 635d6535 → 92825b91d, c7e5ee2c → 7df8a624c, 10f45f52 → 442ade25d.
+   - 10f45f52 was filed tonight; 53fef4192 introduced it.
+   - 07091c63 has one measured cause of three cases (Arnold's amendment); no fix yet.
+   - Row bf103bde (the cron reinstall) is Rick's own action; its chase is at 10:30.
+4. **Measured, not caused by tonight's merges**: the websocket_router teardown errors exist unchanged at 97be8fad9. The default_log_fn flake fails at the same rate at the parent commit.
+5. The merge helper now refuses a duplicate outcome key only when it appears on both sides of a conflict.
+6. Last Call row ae7d2742 filed and installed for Rick's broadcast b079341b.
+
+## 2026.11.11 - Session f55fd006 (Mr. Radio 🦉, manager; crew Maya, Sam, Krishna) | VM e2e_a 503/8/25 to 532/3/0; podcast auto-play merged; duplicate check found running on Fable
+
+**Resume here**: memento `.claude-memento-mr-radio-f55fd006.md` (22:27 amend). Three items wait on Rick: rows 92076977 and 4fc04cb5, and the crontab pause.
+1. **VM test server** (row 8d67e474): merged 21dc74a43 (deploy recreates lupin-rest-test), f97b2bb00 (login wait leaves /auth/), 51a8730bf (half budgets 3300 s) and fa989d64d (mp3 fixture). The login fix cleared the admin_users red seen in 3 of 3 runs. The remaining reds are VM gaps: the Cloud Run embedding server answers 503, and claude-plans and skills-distillation are absent.
+2. **Podcast auto-play in Play Here** (row 802c94d3): Maya's 7279a0925. Typecheck and stylelint green, 103/103 TypeScript tests. Its e2e test runs on the VM next.
+3. **Duplicate check** (row 556238f5, closed): the drain stopped at 17:40 on Fable's 429. The judge is hard-coded `claude-fable-5-1`: 45,100 calls, about $2,014 notional. Rick ruled Sonnet out, and an Opus inter-rater study is proposed (row 4fc04cb5).
+4. **Quiet workers** (row 92076977): the multiplexer speaks every high-priority notify. Krishna's server-side downgrade d95a1b5e5 is green but held, because it also quiets Cheech and maria.
+5. **Pushed** 36a3e7da8..9c07a4aaa on Rick's yes. A chained command misses the `Bash(git push:*)` rule.
+
+**Checkpoint**: 2026.11.11 22:35; history and memento only, the code landed as reviewed merges.
+
+## 2026.11.10 - Session 24d257d2 (Mr. Radio 🦉, manager; crew Sam, Krishna, Rio, Clayton, John, Tiffany, all reaped with verified mementos) | Push and VM install done; VM test server up; reuse back-fill A to F merged; next server update now checks itself
+
+- **Rick's end-of-session push** (row aadb5e4b): reuse gate exit 0, then `git push` to `340084718`. On the VM: code sync, an idle check, and a restart so the app migrated its schema. Preflight post read 78 passed, 0 blocking, then the VM was stopped. Rows 1dcecdb9 (the ~/.lupin file-modes check) and aadb5e4b closed.
+- **VM destructive-test server** (row 8d67e474): Sam's overlay compose and test-server verbs merged as `728555051`. Bring-up on the VM: secrets written, roles applied, `lupin_db_test` 28 tables with 0 problems, `/health` 200 on :8000, venue_idle exit 0. Rick created Secret Manager `lupin-db-test-password`. Still open: `firewall open 8000` and a tester login.
+- **The next server update checks itself** (row c22e5ec1, Rick by voice): `deploy` warns on missing Secret Manager secrets, with names derived from the script. It recreates the overlay. The post arm checks the refresh cron and the overlay test server. It also carries four bring-up fixes: roles needs LUPIN_ROOT, a new `up-db` step, refresh waits 180 s, and the cron verb exports LUPIN_CONFIG_MGR_CLI_ARGS. Merged as `36a3e7da8`. Review caught the overlay check failing on every healthy VM, because `--check` lacked `--database lupin_db_test`.
+- **Reuse back-fill A to F** (Rick's ruling on row 5f8fc615): A `b346438dc`, B `ac37c0cb5`, C `0b1fcc002`, D `465f269cb`, F `6b1b051f3`; E was Cheech's. Reuse gate on the branch: 389 passed, 0 failed. The duplicate and extend findings are in 4 held follow-up rows (e8af0b55, e100ff64, 021a7fa6, 8d1f9e10).
+- **Lessons**: the reuse gate reads committed lines, so an uncommitted `merge --no-commit` shows it the old lines. Check a seat's sha, or a trial merge, in a detached tree. Auto mode refuses a seat's crontab install, Secret Manager writes and firewall rules, so those are lines a person runs. A reap reconciles rows by persona name: reaping my "Tiffany" seat moved 11 of the lupin-mobile manager Tiffany's rows to me. I reassigned them back; bug row 85c8606f.
+- **Blocked on Rick, chase 11 Nov 10:30**: d47761a5 needs `install-refresh-cron vm` re-run after the push. Its first run failed on the missing config variable, now fixed. 8d67e474 needs the firewall rule, a tester login and the acceptance e2e half.
+
+## 2026.11.06 - Session 6bd4df2a (Mr. Radio 🦉, manager; crew Clayton, Rachel, Rio, Tiffany, Sam, John, Pocholo, María, Maya, Krishna, Tiberius, all reaped with mementos) | Backup cut from 22.3 GB to 5.3 GB; eight rows merged, including the trust model switch and BLR persistence
+
+- **Backup size** (Rick's broadcast b4fd692e, row b08f6dd9, `298ac866f`):
+  - The Postgres dump is now zstd custom format: 17.4 GB down to 314 MB.
+  - A new Baseline key, `io table capture embeddings = False`, stops embedding input/output rows.
+  - Rick approved clearing the notification vectors and running `VACUUM FULL`: the database went from 8.9 GB to 1.4 GB.
+  - Rick ran the cleanup himself (the old .sql dump, and `--delete-excluded` on DATA02). The DATA02 mirror is now 5.3 GB.
+- **Merged to wip-v0.2.3, each reviewed:**
+  - da64aaab, per-day decision history (`a32f9e7dc`, migration 5efa1547bd37).
+  - cfc7dd01, the trust model switch: the INI key `swe team trust proxy trust model` (count, beta or blr) and BLR fed from ratified decisions (`1b50e9bd9`). Its missed test fix is `dea6b42cb`, found by Cheech.
+  - db72d167 and ebd71917, speech link leaks (`f7718ee7d`, `853f37e1b`).
+  - 942d2b41: regeneration skips input_and_output while capture is off (`b049a7142`).
+  - a9643589: one shared `swe_team/strategy_builder.py` for the SWE team, BFE and the decision_proxy entry point. A bad trust model fails the BFE job, as Rick ruled (`4036803c5`).
+  - 5bb93a7b, BLR state persisted in `trust_states.blr_state` (`9924171d1`, migration a7c3e91b5d20, run on dev by the boot-time upgrade).
+- **Triage**: María's five archived-branch rows held no missing work, so all were closed. The janitor compares ancestry, not content, so the v0.2.2 squash `d0180365c` makes old branches look thousands of commits ahead (P3 row 8f3aa058, awaiting Rick's approval).
+- **Lesson**: after a merge, run the touched `src/tests/unit` files, not only the cosa agent directory. `1b50e9bd9` left `test_swe_team_config.py` red until `dea6b42cb`.
+- **Gates at `9924171d1`**: census guards 1593 passed, 11 skipped; agent unit tests 4868 passed at `4036803c5`. My full unit run is not evidence (the tree moved mid-run). Cheech's run at `853f37e1b` was 44,059 passed and 1 failed, and that failure was fixed in `dea6b42cb`.
+- **Not mine, still open**: the :7999 bounce warns of a stale client bundle (`npm run build`).
+
+## 2026.11.05 - Session e801716f (Cheech 🌿, manager; crew Krishna, Maya, Rio, Pocholo, all reaped with mementos) | Nine decision proxy fixes merged onto wip-v0.2.3, plus optional need expansion for the reuse search
+
+- **Decision proxy fixes merged**, each reviewed before the merge:
+  - Each gated confirmation writes a best-effort organic proxy_decisions row (`31dc803cc`, row 5ac3d5d7).
+  - BLR feature 3 carries the recent error rate, and demotion lowers the trust level (`158031580`).
+  - Two tests pin the shadow and suggest order of the Thompson rank (`47965d78c`).
+  - Conformal calibration reads the BLR's out-of-sample predictions (`1038fd726`, row 50d8d3a1).
+  - The proxy admin guide matches the merged gate, breaker, demotion and cap code, in three passes (`7eae37082`, `777c823fe`, `14f0ecd33`, row 76d3462f).
+  - Free-text accuracy uses a true cosine (`00f8b8aaf`); multiple-choice and batch answers are scored (`6c41a7346`); the engineering classifier matches whole words (`39cf5cce5`).
+  - Mr. Radio's merges are in his entry below.
+- **Need expansion for the reuse search** is merged behind `reuse candidate need expansion enabled = false` (`d67643a8b`). Its wiki page is merged too (`d82c7be7a`). On the synthetic set, 60 of 70 rose to 69, with 9 recovered and 0 lost. On the real set, 27 of 27 keep their best answer and 4 secondary entries are lost. Rick decides whether to switch it on.
+- **Gates at `777c823fe`**: reuse 61 of 61; unit 43,974 passed with the 1 known red (`test_a_detector_change_forces_a_full_rescan`, its fix parked for Rick); cosa 10,178 passed. At `14f0ecd33`, a docs-only merge, reuse and unit were re-run with the same result.
+- **Merge lesson**: run `git log --oneline HEAD..<tip>` before every merge. `4422c0759` pulled in Rio's unreviewed Thompson rank tests because his reuse lines were stacked on them. They were reviewed afterwards and approved.
+- **Closed at the end of the shift**: María's rows 212d4058 and 589102de, whose fixes are on wip as `aee873d2b` and `1b21c4413`.
+- **Owed, waiting on Rick**:
+  - The design call on row a60aa733, the always-yes vote (Cheech recommends keeping the 79% always-yes rate as the v0.2.3 bar).
+  - Re-parking Dart row f25c661d (recommended for 17 Nov; only his login can move it).
+  - Held rows 4e6d795d, 3570497d, b3ba8f11 and 3905b9d9.
+  - Deleting the 43 test rows that leaked into the dev proxy_decisions table (row 5ac3d5d7).
+  - The need-expansion switch.
+
+## 2026.11.05 - Session 7d6c85af (Mr. Radio 🦉, manager; crew Chloé, Tiberius, Rachel, John, all reaped) | Seven decision proxy defect fixes merged; unit tier red only on the held secret rescan
+
+- **Merged to wip, all reviewed** (Rick AFK per broadcast `c874731e`: run the list down, no pushes):
+  - Morning: three decision proxy fixes (rows c73bcfa0, 251f26fb, 0bba595e) in `96d6c8207`, `31760db88` and `92c6e1761`. Two more (rows 139cddd6, d595321e) landed with the breaker trip record and test follow-ups in `83522536f`.
+  - Same morning: the approve-link guard test `77cb117b3`, the bundle freshness check `903c2d685`, the compose drift probe fix `256858a43`, and nested speech-link stripping `556687aa5`.
+  - Afternoon: a strategy supplies its own trust level (row c7b2b3e4), and the three cap keys reach the engineering strategy (row c8f20219). Both landed in `cb801d88b` with the reuse review for 8 definitions; Rachel wrote them and John approved.
+- **The reuse gate went red on wip** with 12 definitions that had no outcome line. I split them by the commit that added each (`git log -S`): Rachel covered 8 in `993529f58`, and Cheech covered 6 in `4422c0759`.
+- **Gates on `14f0ecd33`**:
+  - Reuse gate: 61 of 61.
+  - Unit: 43,974 passed. The one red is `test_secret_scan::test_a_detector_change_forces_a_full_rescan`; merging the parked fix `refs/parked/v0.2.3-secret-rescan-14170bef` (`feb37011b`, approved by John) clears it once Rick approves row 14170bef.
+  - Cosa: 10,178 passed.
+  - `orchestrator.py` is at 99% coverage, missing 3 lines that predate today.
+- **Rows filed and held for Rick** (9; one-click approve line on tonight's card, `io/tmp/2026.11.05-evening-summary-mr-radio.md`):
+  - 14170bef, the secret rescan.
+  - 85f6848f and d2d6a192, already fixed in `83522536f`.
+  - 5d0eb55b, 6d7f809b, c5cfca7c, fc9fb290, da64aaab and fe2e8c8f.
+- **Row cfc7dd01** (the Beta and BLR trust models are never used): chased at 19:20 Eastern, but Rick was offline. Next chase is 10:30 Eastern on 6 Nov. Recommendation: drop it for v0.2.3.
+- **Lessons**:
+  - A fixed-string search for one spelling missed `l4_audit_rate`, and I claimed on row 6d7f809b that no level 4 audit sampling existed. Search for the noun alone before claiming something is absent.
+  - `assert '701' not in reason` matched pytest's temp folder `pytest-701`. An assertion that a number is absent from a string needs a word boundary (row c5cfca7c).
+  - fetch_similar answers CALL_FAILED here, so reuse rulings rest on record_search. Call record_search with `receipt_id`, or the search does not link to its receipt.
+- **Memento sweep**: 23 trashed, 11 kept for live seats (Mr. Radio, Cheech, María, Tiffany).
+
+## 2026.11.04 - Session ebd974b4 (Cheech 🌿, manager; crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped) | v0.2.2 merged into main and released; wip-v0.2.3 cut; wiki lint 204 to 0
+
+- **Evening, after the first ritual**:
+  - **The release.** PR #23 was squash-merged into main as `d0180365c`, and release v0.2.2 is published there with the source zip.
+  - **Who ran what.** Auto mode refused the merge call, and the branch guard refused branch creation. Rick ran both scripts himself, with `BRANCH_GUARD_ALLOW=rick` for the branch.
+  - **The new branch** is `wip-v0.2.3-2026.11.04-online-preference-learning`. María's parked fixes are cherry-picked onto it as `aee873d2b` and `1b21c4413`, so the old line stays out of its history. Her 165 tests pass, and so do the 1,594 census guards. Local wip-v0.2.1 and wip-v0.2.2 are deleted after content checks.
+  - **The squash stranded three gate settings.** The doclint push epoch and the reuse gate's `since` were no longer ancestors. The gate's `base` named the deleted branch. Pre-push doclint skipped everything, and the reuse gate exited 3. `fb62363bc` re-points them at `d0180365c` and main. María owes its review and 3 reuse outcome lines (row e69ab353).
 
 - **The three smoke reds are fixed and merged.** The compose-drift probe counts compose secrets as mounts (`69dcf6bb0`). Presentation and chain jobs send their asks to the right user (`131116482`). The SWE-team proxy test and the two live presentation smokes skip without a running proxy (`acefc4184`, `401135a53`).
 - **Rick's voice reports, fixed**: a relative markdown link in the doc viewer opens the file it names (`f66c5b4f5`). The approve landing page reads an escaped P0 link (`dfaf35e75`). The README marks the Bayesian trust proxy as deprecated, with Rick's Coming Soon text, and its figures are re-derived (`401135a53`, `f1307a14a`, `a03a28525`).
@@ -24,7 +184,10 @@
   - A sed by line number after an earlier edit can delete a function and still pass py_compile. After a scripted edit, run `pytest --collect-only` and read the diff (Rio).
   - A worktree added from inside a seat tree nests under it. Give an absolute path under the main repo's `.claude/worktrees/` (Krishna).
   - The decision proxy's trust gate runs only the `count` model. Beta, BLR, Thompson, conformal and ICRL are reached only from tests (Pocholo, measured 4 Nov 01:51 UTC, read-only).
-- **Owed**: the PR into main on Rick's word, then Mr. Radio's test VM deploy (row a7177417) and wip-v0.2.3.
+- **Owed**:
+  - María's review of `fb62363bc` and her outcome lines (row e69ab353, held for Rick).
+  - Mr. Radio's test VM deploy at `d0180365c` (row a7177417).
+  - The parked v0.2.3 rows.
 
 ## 2026.11.03 - Session d5ed7a66 (Cheech 🌿, manager; crew Sam) | What's new for v0.2.2 rewritten, the PR's merge gates run at d8747550c, three smoke rows filed
 

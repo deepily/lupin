@@ -271,6 +271,13 @@ class TestCycleIsStoreBacked:
         store_broken = { "a": { "b" }, "b": { "c" } }                              # c→a missing
         assert cycle_is_store_backed( [ "a", "b", "c" ], store_broken ) is False
 
+    def test_a_non_dict_store_or_a_falsy_persona_is_false_not_an_error( self ):
+        # The docstring says never raises; the edge test it now calls is the one that guards these.
+        assert cycle_is_store_backed( [ "Ann", "Bob" ], None )            is False
+        assert cycle_is_store_backed( [ "Ann", "Bob" ], [ "Ann" ] )       is False
+        assert cycle_is_store_backed( [ "Ann", None ], self.STORE )       is False
+        assert cycle_is_store_backed( [ "Ann", "" ], self.STORE )         is False
+
 
 # ── STALENESS-FILTER: hold_is_stale predicate (bug bc1bc373) ─────────────────────
 

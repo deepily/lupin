@@ -35,6 +35,7 @@ import json
 import os
 
 import cosa.utils.util as cu
+from cosa.utils.file_hash import file_sha256
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Roots. Krishna's `fd0cd863` guard points at THESE — one definition, not a
@@ -135,14 +136,10 @@ def sha256_file( path ):
         - returns None for a missing path rather than raising, because a tier that
           produced no junit file must still be attestable, and a crash here would
           destroy the very record that says so
-        - reads in chunks so a large log does not have to fit in memory
+        - the digest comes from cosa.utils.file_hash.file_sha256, which reads in chunks
     """
     if path is None or not os.path.exists( path ): return None
-    digest = hashlib.sha256()
-    with open( path, "rb" ) as handle:
-        for chunk in iter( lambda: handle.read( 65536 ), b"" ):
-            digest.update( chunk )
-    return digest.hexdigest()
+    return file_sha256( path )
 
 
 def canonical_payload( record ):

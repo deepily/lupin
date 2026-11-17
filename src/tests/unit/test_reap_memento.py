@@ -423,7 +423,7 @@ def test_coordinate_all_verified_never_polls():
     assert slept[ "n" ] == 0                        # no pending → poll loop never entered
 
 
-# ── resolve_pointer_target + pointer-following (defects at reap_memento.py:104,120) ──
+# ── resolve_pointer_target + pointer-following (defects in the pointer handling of reap_memento.py) ──
 def _pointer( record_name="rio-80d0e093.md", sid8="80d0e093" ):
     """A real-shape POINTER slot: current:/mirror:/regenerate: preamble, header on line 5."""
     return (

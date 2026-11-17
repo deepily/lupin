@@ -34,7 +34,7 @@ class MultiplexerConfigResponse( BaseModel ):
     multiplexer_max_meta_display_bytes: int
     # Lane E WP13 (F6) — INI default seed for the TTS preview-fraction slider.
     # The slider renderer layers a localStorage override on top of this default
-    # (parity with notifications.js:791,804-811). Float in [0, 1]; default 0.25.
+    # (parity with TTS_FRACTION_PREF_KEY in notifications.js). Float in [0, 1]; default 0.25.
     tts_preview_fraction: float
 
 
@@ -74,7 +74,7 @@ async def get_multiplexer_config(
     )
 
     # Lane E WP13 (F6) — TTS preview-fraction INI default seed (key shared with
-    # the legacy /api/get-client-config payload at system.py:663-666).
+    # the legacy /api/get-client-config payload built in system.py).
     tts_preview_fraction = config_mgr.get(
         "tts preview fraction",
         default     = 0.25,

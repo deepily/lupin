@@ -1,6 +1,6 @@
 ---
 capability: needset-revalidation
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.revalidate.read_index@d820b1b9db
   - lupin_mcp.reuse_needset.revalidate.load_frozen@e830e3d10d
@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.reuse_needset.revalidate.near_new_definitions@d17b58ce90
   - lupin_mcp.reuse_needset.revalidate.gone_line@6438dd3b7e
   - lupin_mcp.reuse_needset.revalidate.revalidate@cd9ddee1d9
-  - lupin_mcp.reuse_needset.revalidate.refreeze@7f5dac32b2
+  - lupin_mcp.reuse_needset.revalidate.refreeze@aa1220f165
   - lupin_mcp.reuse_needset.revalidate.source_reader@7ad5153262
   - lupin_mcp.reuse_needset.revalidate.real_evidence@b80da31fe7
   - lupin_mcp.reuse_needset.revalidate.parse_args@dcb12fbff7

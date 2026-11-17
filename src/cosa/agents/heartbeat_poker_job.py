@@ -32,6 +32,7 @@ from typing import Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
+from lupin_mcp import cron_switch_read
 
 
 # Valid enum values for RecipientSpec — module constants so callers + tests share them.
@@ -138,6 +139,7 @@ class HeartbeatPokerJob( AgenticJobBase ):
         max_duration_seconds      : int                       = 43_200,   # 12h
         clock                     : Optional[ Clock ]         = None,
         notify_fn                 : Optional[ Callable ]      = None,
+        switch                    : Optional[ object ]        = None,     # row c38a49bd: a TickSwitch; None builds the real one for job "pokes"
         user_id      : str  = None,
         user_email   : str  = None,
         session_id   : str  = None,
@@ -194,6 +196,7 @@ class HeartbeatPokerJob( AgenticJobBase ):
         # --- config ---
         self.recipients                = list( recipients )
         self.cadence_seconds           = cadence_seconds
+        self._switch                   = switch if switch is not None else cron_switch_read.for_job( "pokes", print )
         self.termination_topic         = termination_topic
         self.termination_signal_kinds  = list( termination_signal_kinds )
         self.workstream_id             = workstream_id
@@ -346,6 +349,8 @@ class HeartbeatPokerJob( AgenticJobBase ):
         Returns:
             str: the exit summary (also stored on answer_conversational). All three exits return
             normally, so the queue marks the job done.
+
+        The scoring and delivery run only on a tick whose `cron job pokes enabled` switch reads true.
         """
         self._job_start_iso = self._clock.now_iso()
         job_start_monotonic = self._clock.monotonic()
@@ -372,11 +377,13 @@ class HeartbeatPokerJob( AgenticJobBase ):
             if self._clean_termination_seen():
                 return self._exit_summary( "clean" )
 
-            # 4. score the previous tick + dead-man's-switch (never an exit)
-            self._detect_and_escalate()
+            # 4 and 5 run only while `cron job pokes enabled` reads true (row c38a49bd); a skipped tick still sleeps
+            if self._switch.allowed():
+                # 4. score the previous tick + dead-man's-switch (never an exit)
+                self._detect_and_escalate()
 
-            # 5. deliver this tick
-            self._deliver_tick()
+                # 5. deliver this tick
+                self._deliver_tick()
 
             # 6. wait one cadence
             await self._clock.sleep( self.cadence_seconds )

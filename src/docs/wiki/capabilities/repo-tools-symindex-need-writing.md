@@ -1,15 +1,15 @@
 ---
 capability: repo-tools-symindex-need-writing
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.symindex.need_writer.Reply@cd90278f37
-  - cosa.repo.symindex.need_writer.sdk_reply@3b0fcd9905
+  - cosa.repo.symindex.need_writer.sdk_reply@236fdf1e02
   - cosa.repo.symindex.need_writer.write_need@172377d471
   - cosa.repo.symindex.need_writer.run_members@cbd9ff2eda
   - cosa.repo.symindex.need_writer.redo_from_resend_list@6f981c06d9
   - cosa.repo.symindex.need_writer.sample_members@742b152665
   - cosa.repo.symindex.need_writer.needs_document@b3887afbe8
-  - cosa.repo.symindex.need_writer.main@44b8a14078
+  - cosa.repo.symindex.need_writer.main@ef12e0ef28
 ---
 # Need sentences: the writing run
 

@@ -771,7 +771,8 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
             "token_expiry_threshold_secs": 300,           # 5 mins in seconds
             "token_refresh_dedup_window_ms": 60000,       # 60 secs in milliseconds
             "websocket_heartbeat_interval_secs": 30,      # Reference value (secs)
-            "app_timezone": "America/New_York"            # IANA timezone for display
+            "app_timezone": "America/New_York",           # IANA timezone for display
+            "podcast_auto_play_here_on_finish": true      # a finished podcast starts in the Play Here player
         }
     """
     # Note: user_id parameter required by Depends() - validates JWT token
@@ -803,7 +804,6 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
     )
 
     # TTS preview-and-pause cost-reduction feature (2026-05-13)
-    # See src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-design.md
     tts_preview_enabled = config_mgr.get(
         "tts preview enabled",
         default=True, return_type="boolean"
@@ -817,8 +817,13 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
         default=100, return_type="int"
     )
 
+    # Podcast auto-play: a finished podcast job starts in the Play Here player by itself (row 802c94d3)
+    podcast_auto_play_here_on_finish = config_mgr.get(
+        "podcast auto play here on finish",
+        default=True, return_type="boolean"
+    )
+
     # Commons Traffic Visibility — broadcast-card Recent Activity feature flag (2026-05-14)
-    # See src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (Q9 — default True)
     commons_traffic_visibility_enabled = config_mgr.get(
         "commons traffic visibility enabled",
         default=True, return_type="boolean"
@@ -875,15 +880,17 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
         "tts_preview_fraction"           : float( tts_preview_fraction ),
         "tts_preview_min_chars"          : int( tts_preview_min_chars ),
 
+        # Podcast auto-play: the page starts a finished podcast's audio in the Play Here player when true
+        "podcast_auto_play_here_on_finish"                : bool( podcast_auto_play_here_on_finish ),
+
         # TTS interaction mode (chorus / solo) — drives mode-conditional icon
         # rendering for the per-session DND toggle on each sender card. Added
-        # 2026-05-14 evening per src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
+        # with the per-session DND toggle and slider move (the design note "2026.05.14-per-session-dnd-toggle-and-slider-move" was deleted in commit 8420e8b0a).
         "tts_interaction_mode"           : config_mgr.get( "tts interaction mode", default="chorus" ),
 
         # Commons Traffic Visibility (2026-05-14) — feature flag for the broadcast-card
         # Recent Activity stream. JS-side reads this at constructor time to gate the
         # render block + WS subscription. Default True per Q9 ratification.
-        # See src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
         "commons_traffic_visibility_enabled"              : bool( commons_traffic_visibility_enabled ),
         "commons_traffic_visibility_default_hours_window" : commons_traffic_visibility_default_hours_window,
     }

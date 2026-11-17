@@ -250,7 +250,7 @@ def test_bridge_last_activity_none_for_bad_type():
     assert _bridge_last_activity_epoch( { "last_activity_epoch": "not-a-number" } ) is None
 
 
-# 2026-05-13 fix per src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md —
+# Fix per the broadcast stale-bridge phantom note (removed by 8420e8b0a) —
 # fall back to `idle_detection.last_interaction_at` ISO string (the field the
 # real bridge writer populates) when no numeric epoch field is present.
 
@@ -1569,7 +1569,7 @@ def test_execute_broadcast_history_includes_target_session_attribution():
 
 
 # ─── _dedupe_broadcasts_by_id ──────────────────────────────────────────────
-# Per `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md` —
+# Per the commons traffic visibility design note (removed by 8420e8b0a) —
 # collapse Phase 2 per-recipient fanout rows to one admin-overview row.
 
 
@@ -1837,7 +1837,7 @@ def test_execute_broadcast_history_dedupes_broadcast_fanout_end_to_end():
 # Every formerly-silent recipient-filter gate now emits a filtered_out entry,
 # and execute_broadcast carries filtered_out in BOTH 200 shapes — so a silent
 # broadcast miss (the 2026-06-06 class) is visible to the sender.
-# Per src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §3.
+# Per the broadcast-miss duplicate-listener root-cause note, section 3 (removed by 8420e8b0a).
 
 
 def test_receipts_bridge_unreadable():

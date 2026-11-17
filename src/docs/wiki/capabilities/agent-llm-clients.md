@@ -1,12 +1,14 @@
 ---
 capability: agent-llm-clients
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.llm_client_factory.LlmClientFactory@5d763bec1a
   - cosa.agents.llm_client_factory.LlmClientFactory.get_client@cf9b95d876
-  - cosa.agents.base_llm_client.LlmClientInterface@de0959601e
-  - cosa.agents.chat_client.ChatClient@9726b133d2
-  - cosa.agents.completion_client.CompletionClient@ef6a1ebf81
+  - cosa.agents.base_llm_client.LlmClientInterface@0dc063f365
+  - cosa.agents.base_llm_client.format_duration_ms@ce592a7e25
+  - cosa.agents.chat_client.ChatClient@f43b7b6e18
+  - cosa.agents.completion_client.CompletionClient@37390fc3ce
+  - cosa.agents.base_llm_client.collect_stream_text@7b09d57745
   - cosa.agents.completion_client.CompletionClient.run_async@6000cce0ae
   - cosa.agents.completion_client.clean_llm_response@ba1097590b
   - cosa.agents.gemini_vertex_client.GeminiVertexClient@dd7f926f66
@@ -20,10 +22,10 @@ pins:
 `LlmClientFactory().get_client( key )` returns the client an agent uses to send a prompt to a model. Every client answers `run( prompt )` and `await run_async( prompt )` with a string, whatever the vendor.
 
 ## What it does
-- The factory is a singleton. `get_client` first looks `key` up in the INI through `ConfigurationManager`, and otherwise reads it as `vendor:model`. The colon is the only vendor delimiter. `_parse_model_descriptor` reads a string with no colon that starts `llm_deepily_` as a Deepily model. It reads any other string with no colon as a local vLLM model id.
+- The factory is a singleton. `get_client` first looks `key` up in the INI through `ConfigurationManager`, and otherwise reads it as `vendor:model`. The colon is the only vendor delimiter. `_parse_model_descriptor` reads a string with no colon that starts `llm_deepily_` as a Deepily model. It reads any other string with no colon as a local vLLM model id. `collect_stream_text` is the one loop that joins a streamed reply and prints its progress dots; `ChatClient`, `CompletionClient` and `LlmClient` all call it.
 - A configured spec picks the client by its prefix. `vllm://host:port@model` with prompt format `instruction_completion` or `special_token` gives a `CompletionClient`; any other `vllm://` spec gives a `ChatClient`. `vertex://location@model` gives a `GeminiVertexClient`. Anything else gives a `ChatClient`.
 - `ChatClient` goes through pydantic_ai; `CompletionClient` posts to an OpenAI-style completions URL and strips code fences from the reply with `clean_llm_response`.
-- `TokenCounter` uses tiktoken, or `len( text ) // 4` when it is missing. `LlmError` and its subclasses are defined, and only the docstrings of `base_llm_client.py` and `model_registry.py` promise them. No client raises one: the one non-test `raise Llm*Error` in `src/cosa` is `ModelRegistry.get_model_config` (`LlmConfigError`), which the factory never calls (grep, outside tests, 7 Oct 2026).
+- `TokenCounter` uses tiktoken, or `len( text ) // 4` when it is missing. `LlmError` and its subclasses are defined, and only the docstrings of `base_llm_client.py` and `model_registry.py` promise them. No client raises one: the one non-test `raise Llm*Error` in `src/cosa` is `ModelRegistry.get_model_config` (`LlmConfigError`), which the factory never calls (grep, outside tests, 7 Oct 2026). `format_duration_ms( seconds )` in `base_llm_client` is the one millisecond formatter. both clients' `_print_metadata` call it.
 
 ## Invariants
 - A `vertex://` spec without `@` raises `ValueError`, and so does the location `us-central1` (it returns 404 for these models; use `global`).

@@ -103,6 +103,7 @@ def test_the_resident_search_is_made_once_under_the_servers_data_directory( tmp_
 def test_data_root_is_the_reuse_review_directory_of_this_repository( monkeypatch ):
     import cosa.repo.symindex.paths as paths
     import cosa.utils.util as du
+    monkeypatch.delenv( rc.ROOT_VARIABLE, raising=False )         # the unit conftest sets it for every test; this one tests the fallback
     monkeypatch.setattr( du, "get_project_root", lambda: "/repo" )
     monkeypatch.setattr( paths, "data_dir", lambda root: f"{root}/data/reuse-review" )
     assert rc.data_root() == "/repo/data/reuse-review"

@@ -74,7 +74,7 @@ SENDERS_VISIBLE_ROUTE = "**/api/notifications/senders-visible/**"
 CONVERSATION_ROUTE    = "**/api/notifications/conversation-by-date/**"
 
 # CC sender ids carry a '#'; only they emit the session block (with the
-# `.sender-session-name` span) — see templates_sender_card.test.ts:210.
+# `.sender-session-name` span) — see templates_sender_card.test.ts.
 CC_SENDER = "claude.code@lupin.deepily.ai#r5e2e"
 
 

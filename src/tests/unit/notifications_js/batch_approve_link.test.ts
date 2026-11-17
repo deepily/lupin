@@ -95,8 +95,9 @@ beforeEach( () => {
   buildDOM();
 } );
 
-before( () => {
+before( async () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
+  await import( "../../../lupin_app/static/js/shared/approve-link.js" );   // row 009d2d53: notifications.js reads the shared module off window
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );
@@ -106,10 +107,12 @@ before( () => {
 
 // ---- parsing ---------------------------------------------------------------
 
-const parse = ( list: string | null ): string[] | null => ( ui._parseBatchIds as ( l: string | null ) => string[] | null ).call( ui, list );
-const link  = ( href: string | null ): unknown => ( ui._batchLinkOf as ( h: string | null ) => unknown ).call( ui, href );
+// Row 009d2d53: the parsing lives in shared/approve-link.js; notifications.js reads it off window.
+const lib   = (): Record<string, ( ...a: any[] ) => any> => ( window as unknown as { LUPIN_APPROVE_LINK: Record<string, ( ...a: any[] ) => any> } ).LUPIN_APPROVE_LINK;
+const parse = ( list: string | null ): string[] | null => lib().parseBatchIds!( list );
+const link  = ( href: string | null ): unknown => lib().batchLinkOf!( href );
 
-test( "_parseBatchIds keeps order and refuses empty, short, upper-case, repeated and trailing-comma lists", () => {
+test( "parseBatchIds keeps order and refuses empty, short, upper-case, repeated and trailing-comma lists", () => {
   assert.deepEqual( parse( `${ ROW_B },${ ROW_A }` ), [ ROW_B, ROW_A ] );
   assert.equal( parse( null ), null );
   assert.equal( parse( "" ), null );
@@ -119,7 +122,7 @@ test( "_parseBatchIds keeps order and refuses empty, short, upper-case, repeated
   assert.equal( parse( `${ ROW_A },` ), null );
 } );
 
-test( "_batchLinkOf reads an approve and a drop, and refuses what it cannot trust", () => {
+test( "batchLinkOf reads an approve and a drop, and refuses what it cannot trust", () => {
   assert.deepEqual( link( OK( [ ROW_A, ROW_B ] ) ), { ids: [ ROW_A, ROW_B ], move: "queued", reason: null } );
   assert.deepEqual( link( OK( [ ROW_A ], "dropped", "&reason=duplicate%20refile" ) ), { ids: [ ROW_A ], move: "dropped", reason: "duplicate refile" } );
   assert.equal( link( null ), null );

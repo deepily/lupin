@@ -24,6 +24,7 @@ from typing import Optional, Callable
 import cosa.utils.util as cu
 
 from cosa.agents.shared.sdk_error_result import raise_error_result
+from cosa.agents.decision_proxy.errors import InvalidTrustModelError
 from cosa.agents.bug_fix_expediter.state import BFEPhase, BFE_PHASE_ORDINALS, DiagnosisResult, ProposedFix, FixResult
 from cosa.agents.bug_fix_expediter.prompts.diagnosis import (
     DIAGNOSIS_SYSTEM_PROMPT,
@@ -44,6 +45,11 @@ from cosa.agents.bug_fix_expediter.plan_writer import PlanWriter
 from cosa.agents.shared.git_strategist import GitStrategist
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.fix_executor import FixExecutor
+from cosa.agents.shared.edit_agent_options import build_edit_agent_options
+from cosa.agents.shared.tool_use_summary import summarize_tool_use
+from cosa.agents.shared.coder_stream import read_coder_stream
+from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, extract_last_balanced
 
 # SWE Team reuse — safety, hooks, test runner (kept for back-compat;
 # FixExecutor imports these directly, but existing BFE test fixtures may
@@ -162,12 +168,15 @@ class BFEOrchestrator:
         # to route git / SDK operations into an isolated sandbox.
         self._worktree_cwd: Optional[ str ] = None
         try:
-            from cosa.agents.swe_team.proxy.engineering_strategy import EngineeringStrategy
-            self.proxy = EngineeringStrategy(
+            from cosa.agents.swe_team.strategy_builder import build_ini_engineering_strategy
+            self.proxy, _ = build_ini_engineering_strategy(
                 trust_mode = self.config.trust_mode,
                 debug      = self.debug,
             )
             if self.debug: print( f"[BFEOrchestrator] Trust proxy initialized (mode={self.config.trust_mode})" )
+        except InvalidTrustModelError:
+            # An unknown trust model is refused at startup, not run on defaults (same rule as the SWE team orchestrator)
+            raise
         except ImportError as e:
             if self.debug: print( f"[BFEOrchestrator] Trust proxy import failed: {e} — defaulting to L1/commit_only" )
         except Exception as e:
@@ -534,56 +543,20 @@ class BFEOrchestrator:
         Returns:
             DiagnosisResult: Parsed or fallback diagnosis
         """
-        text = raw_response.strip()
+        data, failure = parse_diagnosis_json( raw_response )
 
-        # Strip markdown code fences
-        if "```json" in text:
-            text = text.split( "```json" )[ -1 ]
-        if "```" in text:
-            text = text.split( "```" )[ 0 ]
-
-        # Find last JSON object: search backward for } then find matching {
-        json_str = self._extract_last_json_object( text )
-
-        if json_str is None:
-            logger.warning( "No JSON object found in response — returning fallback" )
+        if data is None:
+            logger.warning( f"{failure} — returning fallback" )
             return self._fallback_diagnosis( raw_response[ :500 ] )
 
         try:
-            data = json.loads( json_str )
             return DiagnosisResult( **data )
 
-        except ( json.JSONDecodeError, ValueError, TypeError ) as e:
+        except ( ValueError, TypeError ) as e:
             logger.warning( f"JSON parse/validation failed: {e}" )
             return self._fallback_diagnosis( raw_response[ :500 ] )
 
-    @staticmethod
-    def _extract_last_json_object( text: str ) -> Optional[ str ]:
-        """
-        Extract the last JSON object from text by finding matching braces.
-
-        Args:
-            text: Text that may contain a JSON object
-
-        Returns:
-            str or None: Extracted JSON string, or None if not found
-        """
-        # Find last closing brace
-        close_idx = text.rfind( "}" )
-        if close_idx == -1:
-            return None
-
-        # Walk backward to find matching opening brace
-        depth = 0
-        for i in range( close_idx, -1, -1 ):
-            if text[ i ] == "}":
-                depth += 1
-            elif text[ i ] == "{":
-                depth -= 1
-                if depth == 0:
-                    return text[ i : close_idx + 1 ]
-
-        return None
+    _extract_last_json_object = staticmethod( extract_json_object )
 
     @staticmethod
     def _fallback_diagnosis( reason: str ) -> DiagnosisResult:
@@ -599,14 +572,7 @@ class BFEOrchestrator:
         Returns:
             DiagnosisResult: Low-confidence fallback
         """
-        return DiagnosisResult(
-            root_cause          = reason,
-            error_category      = "unknown",
-            confidence          = 0.1,
-            evidence            = [ "Failed to parse structured diagnosis" ],
-            affected_components = [],
-            is_transient        = False,
-        )
+        return DiagnosisResult( **fallback_diagnosis_fields( reason ) )
 
     # =========================================================================
     # Phase 3: Proposal
@@ -851,20 +817,7 @@ class BFEOrchestrator:
         Returns:
             str or None: Extracted JSON array string, or None if not found
         """
-        close_idx = text.rfind( "]" )
-        if close_idx == -1:
-            return None
-
-        depth = 0
-        for i in range( close_idx, -1, -1 ):
-            if text[ i ] == "]":
-                depth += 1
-            elif text[ i ] == "[":
-                depth -= 1
-                if depth == 0:
-                    return text[ i : close_idx + 1 ]
-
-        return None
+        return extract_last_balanced( text, "[", "]" )
 
     @staticmethod
     def _auto_select_fix( fixes: list ) -> Optional:
@@ -1422,46 +1375,15 @@ class BFEOrchestrator:
         options = self._build_coder_options( guard, cosa_interface )
 
         try:
-            collected_text = []
-            files_changed  = []
-
             # Bug 15 WORKAROUND: claude-agent-sdk ≥ 0.1.36 rejects str prompt when
             # can_use_tool is set on options. Upstream (unresolved as of 2026-04-17):
             # https://github.com/anthropics/claude-code/issues/18735 — remove the
             # wrap_prompt_for_streaming() call once upstream lands the fix.
-            async for message in sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ):
-                guard.check_timeout()
-
-                if self._is_cancelled():
-                    break
-
-                if isinstance( message, AssistantMessage ):
-                    for block in message.content:
-                        if isinstance( block, TextBlock ):
-                            collected_text.append( block.text )
-                        elif isinstance( block, ToolUseBlock ):
-                            # Track file changes
-                            if block.name in ( "Edit", "Write" ):
-                                file_path = block.input.get( "file_path", "" )
-                                if file_path and file_path not in files_changed:
-                                    files_changed.append( file_path )
-                                await post_tool_hook( block.name, block.input, guard )
-                            await self._notify(
-                                voice_io,
-                                f"Coder: {self._summarize_tool_use( block )}",
-                                priority="low",
-                            )
-                elif isinstance( message, TextBlock ):
-                    collected_text.append( message.text )
-                elif isinstance( message, ResultMessage ):
-                    if message.is_error: raise_error_result( message, "BFEOrchestrator", logger )
-                    msg_text = getattr( message, "text", str( message ) )[ :200 ]
-                    await self._notify( voice_io, msg_text, priority="low" )
-                elif isinstance( message, RateLimitEvent ):
-                    logger.warning( f"Rate limited: retry_after={getattr( message, 'retry_after', '?' )}s" )
-
-            guard.check_iteration()
-            coder_output = "".join( collected_text ).strip()
+            coder_output, files_changed = await read_coder_stream(
+                sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ),
+                guard, lambda text, priority="low": self._notify( voice_io, text, priority=priority ), self._is_cancelled, "BFEOrchestrator", logger,
+                ( AssistantMessage, TextBlock, ToolUseBlock, ResultMessage, RateLimitEvent ), post_tool_hook,
+            )
 
             if self.debug: print( f"[BFEOrchestrator] Coder output: {len( coder_output )} chars, {len( files_changed )} files changed" )
 
@@ -1608,16 +1530,10 @@ class BFEOrchestrator:
         Returns:
             ClaudeAgentOptions configured for code editing
         """
-        return ClaudeAgentOptions(
-            model           = self.config.worker_model,
-            system_prompt   = CODER_SYSTEM_PROMPT,
-            tools           = [ "Read", "Edit", "Bash" ],
-            cwd             = self._worktree_cwd or cu.get_project_root(),
-            permission_mode = "acceptEdits",
-            can_use_tool    = build_can_use_tool( cosa_interface, guard, "code-fixer" ),
-            max_turns       = self.config.max_fix_attempts * 10,
-            max_budget_usd  = self.config.budget_usd,
-            effort          = self.config.thinking_effort,
+        return build_edit_agent_options(
+            self.config, self._worktree_cwd, CODER_SYSTEM_PROMPT,
+            build_can_use_tool( cosa_interface, guard, "code-fixer" ),
+            self.config.max_fix_attempts * 10
         )
 
     @staticmethod
@@ -1652,28 +1568,6 @@ class BFEOrchestrator:
         lines.append( f"- `git -C {worktree_path} diff --stat origin/main`" )
         return lines
 
-    @staticmethod
-    def _summarize_tool_use( block ) -> str:
-        """
-        Compact single-line summary of a ToolUseBlock for progress notifications.
-
-        Gives a tool-specific digest that surfaces the key argument instead of the bare
-        tool name. Parity with TFE's `TFEOrchestrator._summarize_tool_use`. Truncated to 100 chars.
-        """
-        name = block.name
-        inp  = block.input or {}
-        if name == "Bash":
-            cmd = inp.get( "command", "" ) or ""
-            first_line = cmd.splitlines()[ 0 ] if cmd else ""
-            return f"Bash: {first_line[ :100 ]}" if first_line else "Bash"
-        if name in ( "Read", "Edit", "Write" ):
-            fp = inp.get( "file_path", "" ) or ""
-            return f"{name}: {fp[ -100: ]}" if fp else name
-        if name in ( "Grep", "Glob" ):
-            pat = inp.get( "pattern", "" ) or ""
-            return f"{name}: {pat[ :100 ]}" if pat else name
-        return name
-
     def _build_tester_options( self, guard, cosa_interface ):
         """
         Build ClaudeAgentOptions for the Tester agent.
@@ -1685,16 +1579,9 @@ class BFEOrchestrator:
         Returns:
             ClaudeAgentOptions configured for test writing and execution
         """
-        return ClaudeAgentOptions(
-            model           = self.config.worker_model,
-            system_prompt   = TESTER_SYSTEM_PROMPT,
-            tools           = [ "Read", "Edit", "Bash" ],
-            cwd             = self._worktree_cwd or cu.get_project_root(),
-            permission_mode = "acceptEdits",
-            can_use_tool    = build_can_use_tool( cosa_interface, guard, "tester" ),
-            max_turns       = 10,
-            max_budget_usd  = self.config.budget_usd,
-            effort          = self.config.thinking_effort,
+        return build_edit_agent_options(
+            self.config, self._worktree_cwd, TESTER_SYSTEM_PROMPT,
+            build_can_use_tool( cosa_interface, guard, "tester" ), 10
         )
 
     # =========================================================================

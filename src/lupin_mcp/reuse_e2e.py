@@ -11,6 +11,7 @@ import math
 
 from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_stage2_fit as fit
+from cosa.utils.agreement_stats import mcnemar_exact
 
 SAMPLE_SHA256   = "5b6d84fc2dd8dc458b36255e129001f55e3fbe4d252c14c6d65a4994779a91fd"
 MANIFEST_SHA256 = "bfbfceab399cf753093f0c9ee0bec73a0de00738a0696126a669e129de466941"
@@ -153,14 +154,6 @@ def wilson( k, n, z=Z_95 ):
     centre = ( p + z * z / ( 2 * n ) ) / ( 1 + z * z / n )
     half   = z * math.sqrt( p * ( 1 - p ) / n + z * z / ( 4 * n * n ) ) / ( 1 + z * z / n )
     return max( 0.0, centre - half ), min( 1.0, centre + half )
-
-
-def mcnemar_exact( only_a, only_b ):
-    """Ensures: returns the exact two-sided McNemar p of two discordant counts, 1.0 for none."""
-    n = only_a + only_b
-    if n == 0: return 1.0
-    low = min( only_a, only_b )
-    return min( 1.0, 2 * sum( math.comb( n, i ) for i in range( low + 1 ) ) / 2 ** n )
 
 
 def _hit( search, key ):

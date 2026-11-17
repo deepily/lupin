@@ -577,3 +577,11 @@ def test_the_api_keys_INSERT_binds_each_parameter_to_the_column_that_NAMES_it( w
     assert bound[ "is_active" ]    == row[ 4 ]
     assert bound[ "created_at" ]   == row[ 5 ]
     assert bound[ "last_used_at" ] == row[ 6 ]
+
+
+def test_the_seed_is_skipped_when_the_vm_switch_is_zero_and_opens_no_connection( monkeypatch, capsys ):
+    # Reddens if the switch is removed: seed_if_missing would reach _connect (here a failure) and the VM's empty dev DB.
+    monkeypatch.setenv( "LUPIN_TEST_SEED_FROM_DEV", "0" )
+    monkeypatch.setattr( mod, "_connect", lambda name: pytest.fail( "connected with the switch at 0" ) )
+    assert mod.seed_if_missing() is None
+    assert "companion copy from dev skipped" in capsys.readouterr().out

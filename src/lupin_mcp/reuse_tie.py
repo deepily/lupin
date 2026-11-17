@@ -10,6 +10,7 @@ Nothing here sends anything, runs a model, or writes a file.
 import datetime
 import subprocess
 
+from cosa.rest.task_store_rules import persona_from_created_by
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp.persona_normalization import canonical_persona_key
 
@@ -34,11 +35,6 @@ def commit_facts( root, sha ):
     if got.returncode != 0: raise ValueError( f"{sha} is not a commit in {root}: {got.stderr.strip()}" )
     stamp, _, message = got.stdout.partition( "\n" )
     return { "time": datetime.datetime.fromisoformat( stamp ), "message": message }
-
-
-def _persona_of( record ):
-    """Ensures: returns the persona key of a record's caller, `<persona> <session id>`, or empty."""
-    return canonical_persona_key( str( record.get( "caller", "" ) ).rpartition( " " )[ 0 ] )
 
 
 def _lookup_record( records, receipt_id ):
@@ -74,7 +70,7 @@ def _writers( message, records ):
         - only personas that appear as a caller in the call log are looked for
     """
     text = f" {canonical_persona_key( message )} "
-    return sorted( key for key in { _persona_of( r ) for r in records } - { "" } if f" {key} " in text )
+    return sorted( key for key in { persona_from_created_by( r.get( "caller" ) ) for r in records } - { "" } if f" {key} " in text )
 
 
 def _from_commit( records, facts ):
@@ -90,7 +86,7 @@ def _from_commit( records, facts ):
     if not names: return { "tie": NO_TIE, "reason": "the commit message names no persona that made a lookup in the call log" }
     if len( names ) > 1: return { "tie": NO_TIE, "reason": f"the commit message names more than one lookup persona ({', '.join( names )}), so the writer is not certain" }
     persona = names[ 0 ]
-    before  = [ r for r in records if r.get( "tool" ) == HEURISTIC_TOOL and not r.get( "error" ) and r.get( "receipt_id" ) and _persona_of( r ) == persona
+    before  = [ r for r in records if r.get( "tool" ) == HEURISTIC_TOOL and not r.get( "error" ) and r.get( "receipt_id" ) and persona_from_created_by( r.get( "caller" ) ) == persona
                 and datetime.datetime.fromisoformat( r[ "ts" ] ) < facts[ "time" ] ]
     if not before: return { "tie": NO_TIE, "reason": f"{persona} made no {HEURISTIC_TOOL} lookup before the commit" }
     last = max( before, key=lambda r: datetime.datetime.fromisoformat( r[ "ts" ] ) )

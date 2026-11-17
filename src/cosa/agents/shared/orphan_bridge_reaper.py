@@ -17,18 +17,11 @@ from typing import Any, Callable, Dict, List, Optional
 # Stale keys (bridge gone) are pruned at end-of-sweep, so the dict stays bounded.
 _REAPED_SENTINEL = -1
 
-# Bridge filenames that are NOT sessions (never reap these).
-_NON_SESSION_BRIDGE_TOKENS = ( "buffer", "listener" )
-
 
 def _default_list_bridges( session_dir ):
-    """List cc-*.json bridge files (excluding buffer/listener sidecars)."""
-    if not session_dir.exists():
-        return []
-    return [
-        p for p in session_dir.glob( "cc-*.json" )
-        if not any( tok in p.name for tok in _NON_SESSION_BRIDGE_TOKENS )
-    ]
+    """List cc-*.json bridge files, buffer and listener sidecars left out."""
+    from lupin_cli.claude_code.hooks.lib.sessions_dir import iter_bridge_paths
+    return list( iter_bridge_paths( session_dir ) )
 
 
 def _default_read_bridge( path ):

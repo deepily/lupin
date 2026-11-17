@@ -47,7 +47,7 @@ def test_build_config_holds_exactly_the_documented_fields_with_the_fixed_constan
     assert sorted( cfg ) == sorted( [ "model_id", "backend", "temperature", "unscorable_policy", "prompt_version", "system_prompt_sha", "parser_sha",
                                       "min_nodes", "max_candidates", "min_candidates", "list_depth", "fusion_head", "body_chars", "clone_cover",
                                       "jscpd", "scrub_sha", "config_sha" ] )
-    assert ( cfg[ "model_id" ], cfg[ "max_candidates" ], cfg[ "min_candidates" ], cfg[ "list_depth" ], cfg[ "fusion_head" ], cfg[ "clone_cover" ] ) == ( "claude-fable-5-1", 10, 5, 10, 2, 0.5 )
+    assert ( cfg[ "model_id" ], cfg[ "max_candidates" ], cfg[ "min_candidates" ], cfg[ "list_depth" ], cfg[ "fusion_head" ], cfg[ "clone_cover" ] ) == ( "claude-opus-5-5", 10, 5, 10, 2, 0.5 )
     assert cfg[ "min_nodes" ] == 25 and cfg[ "body_chars" ] == 4000 and cfg[ "jscpd" ] == JSCPD
     assert cfg[ "config_sha" ] == cf.config_sha( cfg ) and len( cfg[ "config_sha" ] ) == 64
 
@@ -213,7 +213,7 @@ def test_code_that_moved_since_the_freeze_is_refused( tmp_path, over ):
 def test_a_frozen_file_edited_by_hand_fails_its_own_sha(tmp_path):
     path = str( tmp_path / "f.json" )
     cf.freeze( make(), path )
-    text = open( path ).read().replace( '"model_id": "claude-fable-5-1"', '"model_id": "claude-opus-5-5"' )
+    text = open( path ).read().replace( '"model_id": "claude-opus-5-5"', '"model_id": "claude-fable-5-1"' )
     open( path, "w" ).write( text )
     with pytest.raises( err.DuplicateCheckError, match="recomputes to" ) as caught:
         cf.verify_frozen( path, make() )
@@ -227,3 +227,14 @@ def test_verify_frozen_with_no_file_raises_rather_than_passing(tmp_path):
 
 def test_the_old_error_name_is_the_same_class_because_the_frozen_prompt_hash_reads_it():
     assert err.SemdupError is err.DuplicateCheckError and "SemdupError" in inspect.getsource( judge.parse_reply )
+
+
+def test_the_judge_model_comes_from_the_ini_key_and_a_change_there_changes_the_config_sha( monkeypatch ):
+    """Switching the judge is an INI edit, and the config sha still changes with it."""
+    keys = []
+    monkeypatch.setattr( cf.chs, "model_id", lambda key, config=None: keys.append( key ) or "ini-judge" )
+    from_ini = make()
+    assert from_ini[ "model_id" ] == "ini-judge" and keys == [ cf.chs.JUDGE_MODEL_KEY ]
+    named = make( model_id="claude-opus-5-5" )
+    assert named[ "model_id" ] == "claude-opus-5-5" and keys == [ cf.chs.JUDGE_MODEL_KEY ]
+    assert named[ "config_sha" ] != from_ini[ "config_sha" ] and named == { **from_ini, "model_id": "claude-opus-5-5", "config_sha": named[ "config_sha" ] }

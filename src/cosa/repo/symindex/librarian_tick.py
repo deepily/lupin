@@ -39,7 +39,11 @@ import sys
 from cosa.repo.symindex import build as build_mod
 from cosa.repo.symindex import paths
 from cosa.repo.symindex.librarian_queue import CORRELATION_KEY, MOBILE_CORRELATION_KEY, MOBILE_ROLLUP_PREFIX, Librarian
+from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
 from cosa.repo.symindex.wiki_lint import queue
+from cosa.utils.atomic_json import load_json_dict
+from cosa.utils.flag_text import is_flag_on
+from lupin_mcp import job_summary_adapters as jsa
 
 CRON_TAG         = "# wiki-librarian-tick"
 CRON_SCHEDULE    = "17 10 * * *"
@@ -140,7 +144,7 @@ def read_enabled( reader=None, errors=None, key=ENABLED_KEY ):
         - a read failure appends its message to errors when errors is a list
         - never raises
     """
-    return ( read_value( key, reader, errors ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
+    return is_flag_on( read_value( key, reader, errors ) )
 
 
 def read_persona( key, reader=None, default=DEFAULT_PERSONA ):
@@ -204,11 +208,7 @@ def read_state( path ):
     Ensures:
         - returns the dict in the file, or an empty dict when the file is absent or unreadable
     """
-    try:
-        with open( path, encoding="utf-8" ) as handle: state = json.load( handle )
-    except ( OSError, ValueError ):
-        return {}
-    return state if isinstance( state, dict ) else {}
+    return load_json_dict( path )
 
 
 def write_state( path, state ):
@@ -241,7 +241,7 @@ def make_logger( path ):
     return log
 
 
-class LiveStore:
+class LiveStore( TaskStoreAdapter ):
     """
     The store adapter the tick uses: the task-store HTTP client behind three calls.
 
@@ -249,13 +249,15 @@ class LiveStore:
         - settings is the dict load_task_store_settings returns
         - api_key is the outbound key string
         - client is the task_store_client module, or a stand-in with the same functions
+
+    Ensures:
+        - a create is filed by the row's manager persona with the tick named in brackets, "cheech (wiki-librarian tick)",
+          under the standing authority; an amend carries the tick as its actor and the same authority
     """
 
-    def __init__( self, settings, api_key, client ):
-        """Keep the three collaborators."""
-        self.settings = settings
-        self.api_key  = api_key
-        self.client   = client
+    create_extra = { "authority": "standing" }
+    filer_tool   = ACTOR
+    amend_extra  = { "actor": ACTOR, "authority": "standing" }
 
     def _pages( self, correlation_key, extra ):
         """
@@ -263,14 +265,14 @@ class LiveStore:
 
         Ensures:
             - returns ( True, status, { "tasks": rows } ) holding every row, following offsets while the store says more remain
-            - returns ( False, status, body ) for a failed page, and for a page the store marks truncated
+            - returns ( False, status, body ) for a failed page
+            - a page the store cut short for size ("truncated") is followed to the next offset, since has_more stays true and the cut page holds at least one row
         """
         rows, offset = [], 0
         while True:
             params = { "correlation_key": correlation_key, "limit": PAGE_LIMIT, "offset": offset, **extra }
             ok, status, body = self.client.query_tasks( self.settings, self.api_key, params )
             if not ok: return False, status, body
-            if body.get( "truncated" ): return False, status, { "error": "the store truncated the read" }
             page  = body.get( "tasks", [] )
             rows += page
             if not body.get( "has_more" ) or not page: return True, status, { "tasks": rows }
@@ -292,14 +294,6 @@ class LiveStore:
     def query_all( self, correlation_key ):
         """Return ( ok, status, body ) for every row, done and dropped included."""
         return self._merged( correlation_key, ( { "include_terminal": "true", "hide_parked": "false" }, { "status": "not_approved" } ) )
-
-    def create( self, payload ):
-        """Return ( ok, status, body ) for one create; the actor is stamped here."""
-        return self.client.create_task( self.settings, self.api_key, { **payload, "created_by": ACTOR, "authority": "standing" } )
-
-    def amend( self, item_id, note ):
-        """Return ( ok, status, body ) for one append-only amendment."""
-        return self.client.amend_task( self.settings, self.api_key, item_id, { "note": note, "actor": ACTOR, "authority": "standing" } )
 
 
 def notify_owner( persona, text, environ, post=None, api_key=None ):
@@ -429,6 +423,49 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
     return ( 2 if held else 0 ), summary
 
 
+CRONTAB_OVERRIDE    = "LUPIN_CRONTAB"                              # one variable every crontab writer honors, so a scratch crontab is safe for all of them
+GENERATED_BLOCK_TAG = "# lupin-cron-generated"                      # ends the header comment of the block lupin_mcp.cron_generate writes
+
+
+def crontab_command( environ, own_variable=None ):
+    """
+    Pick the crontab command a tool reads and writes through.
+
+    Requires:
+        - environ maps names to values; own_variable names the tool's older override, or is None
+    Ensures:
+        - returns [ environ[ LUPIN_CRONTAB ] ] when that is set and not empty, so one scratch crontab covers every tool
+        - else returns [ the tool's own variable ] when it is set, else [ "crontab" ]
+    """
+    if environ.get( CRONTAB_OVERRIDE ): return [ environ[ CRONTAB_OVERRIDE ] ]
+    return [ environ.get( own_variable, "crontab" ) ] if own_variable else [ "crontab" ]
+
+
+def install_command( root ):
+    """
+    Say the one shell command that writes every Lupin cron line.
+
+    Requires:
+        - root is the main checkout path
+    Ensures:
+        - returns the cd, environment and cron_generate --install line, with no leading space and no newline
+    """
+    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src .venv/bin/python -m lupin_mcp.cron_generate --install"
+
+
+def install_moved_text( root ):
+    """
+    Say where the cron installer went.
+
+    Requires:
+        - root is the main checkout path
+    Ensures:
+        - returns the text a retired --install prints: one tool writes every cron line, and the exact command that runs it
+    """
+    return ( "--install is retired: one tool writes every Lupin cron line from src/conf/job-registry.json. From the main checkout, with PLANNING_IS_PROMPTING_ROOT set, run:\n"
+             f"  {install_command( root )}" )
+
+
 def cron_lines_for( run, schedule, boot_delay_seconds ):
     """
     Pair a daily cron line with a slow-start reboot line for one command.
@@ -460,19 +497,20 @@ def cron_lines( root, python, log_path ):
     return cron_lines_for( run, CRON_SCHEDULE, 120 )
 
 
-def merge_lines( current, lines, tag=CRON_TAG ):
+def merge_lines( current, lines, tag=CRON_TAG, legacy=() ):
     """
     Replace every tagged line of a crontab text with lines.
 
     Requires:
         - current is the crontab text; lines is the list from cron_lines or an empty list
-        - tag is the comment that ends each line of one tool; the default is the librarian's
+        - tag is the comment that ends each line of one tool, or a tuple of such comments; the default is the librarian's
+        - legacy is a tuple of substrings: an old line holding one of them, whatever its ending, is a hand-written copy of a line being replaced
 
     Ensures:
-        - lines that do not carry the tag keep their text and order
+        - lines that do not carry the tag, and hold no legacy substring, keep their text and order
         - the tagged lines end the text, once each
     """
-    kept = [ line for line in current.splitlines() if not line.rstrip().endswith( tag ) ]
+    kept = [ line for line in current.splitlines() if not line.rstrip().endswith( tag ) and not any( word in line for word in legacy ) ]
     return "\n".join( kept + list( lines ) ) + "\n"
 
 
@@ -497,7 +535,7 @@ def load_crontab_lock( environ ):
     return module.crontab_lock
 
 
-def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG ):
+def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG, legacy=() ):
     """
     Do the read, backup and write of one crontab edit; the caller holds the lock.
 
@@ -512,20 +550,21 @@ def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG ):
         os.makedirs( backup_dir, exist_ok=True )
         with open( os.path.join( backup_dir, f"crontab-{now.strftime( '%Y%m%d-%H%M%S' )}.txt" ), "w", encoding="utf-8" ) as handle: handle.write( old )
     except OSError as error: return None, f"no backup, so no write: {error}"
-    new   = merge_lines( old, lines, tag )
+    new   = merge_lines( old, lines, tag, legacy )
     write = subprocess.run( [ *crontab_cmd, "-" ], input=new, capture_output=True, text=True )
     if write.returncode != 0: return None, f"crontab write failed: {write.stderr.strip()}"
     return new, None
 
 
-def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, owner="wiki-librarian-tick" ):
+def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, owner="wiki-librarian-tick", legacy=() ):
     """
     Read, back up and rewrite the crontab under the shared lock.
 
     Requires:
         - lines is the list to install, or an empty list to remove ours
         - crontab_cmd is the command list, for example [ "crontab" ]
-        - tag and owner name the tool: its line tag and the owner the lock records; the defaults are the librarian's
+        - tag and owner name the tool: its line tag (or a tuple of tags) and the owner the lock records; the defaults are the librarian's
+        - legacy is passed to merge_lines
 
     Ensures:
         - the whole read and write sit inside the lock
@@ -535,24 +574,59 @@ def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, ow
     """
     lock = load_crontab_lock( environ )
     with lock( owner=owner ):
-        new, failure = _rewrite( lines, crontab_cmd, backup_dir, now, tag )
+        new, failure = _rewrite( lines, crontab_cmd, backup_dir, now, tag, legacy )
     if failure is not None: raise RuntimeError( failure )
     return new
 
 
-def status_text( crontab_text, tag=CRON_TAG ):
+def status_text( crontab_text, tag=CRON_TAG, expected=2 ):
     """
     Describe the tagged lines found in a crontab text.
 
     Requires:
         - tag is the comment that ends each line of one tool; the default is the librarian's
+        - expected is the number of lines a full install writes, or a tuple of the numbers that count as full
 
     Ensures:
-        - returns "installed: 2 lines", "partly installed: n lines" or "not installed"
+        - returns "installed: n lines" when n is expected, "partly installed: n lines" for any other n above 0, or "not installed"
     """
     count = sum( 1 for line in crontab_text.splitlines() if line.rstrip().endswith( tag ) )
     if count == 0: return "not installed"
-    return f"installed: {count} lines" if count == 2 else f"partly installed: {count} lines"
+    full = expected if isinstance( expected, tuple ) else ( expected, )
+    return f"installed: {count} lines" if count in full else f"partly installed: {count} lines"
+
+
+def manage_cron( args, root, environ, now, out, err, cmd, backup_dir, tag, owner, expected, label, print_text ):
+    """
+    Run one per-job cron verb: print, retired install, uninstall or status.
+
+    Requires:
+        - args has install, status and uninstall flags; none set means --print-install
+        - cmd is the crontab command list; backup_dir is where uninstall backs up first; tag, owner and expected are the job's own
+        - print_text is a callable returning the text --print-install shows; label starts an error line; out and err take one line
+    Ensures:
+        - --install is retired: install_moved_text goes to err and 1 is returned, with the crontab untouched
+        - --status reports through status_text; --uninstall goes through edit_crontab with tag and owner, after a backup, then says "uninstalled"
+        - otherwise print_text() goes to out and nothing changes
+        - returns 0, or 1 with "label: reason" on err when the install is refused or the crontab call fails
+    """
+    if args.install:
+        err( install_moved_text( root ) )
+        return 1
+    try:
+        if args.status:
+            read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
+            out( status_text( read.stdout if read.returncode == 0 else "", tag, expected ) )
+            return 0
+        if args.uninstall:
+            edit_crontab( [], environ, cmd, backup_dir, now, tag=tag, owner=owner )
+            out( "uninstalled" )
+            return 0
+        out( print_text() )
+        return 0
+    except ( InstallRefused, RuntimeError ) as error:
+        err( f"{label}: {error}" )
+        return 1
 
 
 def _live_store():
@@ -622,15 +696,18 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     args    = parser.parse_args( argv )
     root    = args.root or os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
     folder  = data_dir( root )
-    cmd     = crontab_cmd or [ environ.get( "WIKI_LIBRARIAN_CRONTAB", "crontab" ) ]
+    cmd     = crontab_cmd or crontab_command( environ, "WIKI_LIBRARIAN_CRONTAB" )
     lines   = cron_lines( root, args.python, os.path.join( folder, LOG_NAME ) )
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return 0
+    if args.install:
+        print( install_moved_text( root ), file=err )
+        return 1
     try:
-        if args.install or args.uninstall:
-            edit_crontab( [] if args.uninstall else lines, environ, cmd, os.path.join( folder, "crontab-backups" ), now )
-            print( "uninstalled" if args.uninstall else "installed: 2 lines", file=out )
+        if args.uninstall:
+            edit_crontab( [], environ, cmd, os.path.join( folder, "crontab-backups" ), now )
+            print( "uninstalled", file=out )
             return 0
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
@@ -644,6 +721,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if not ( enabled_fn or ( lambda: read_enabled( errors=read_errors ) ) )():
         log( f"tick could not read {ENABLED_KEY}, so it stays off: {read_errors[ 0 ]}" if read_errors else f"tick is switched off: {ENABLED_KEY} is not true" )
         print( json.dumps( { "ran": False, "reason": "switched off" }, sort_keys=True ), file=out )
+        jsa.record_librarian( folder, { "ran": False, "reason": "switched off" }, EXIT_DISABLED, now, environ )
         return EXIT_DISABLED
     pending   = os.path.join( folder, PENDING_NAME )
     wiki_dir  = os.path.join( root, "src", "docs", "wiki" )
@@ -656,8 +734,13 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     else:
         mobile_librarian = ( make_mobile_librarian or _live_mobile_librarian )( corpus, environ, os.path.join( folder, MOBILE_PENDING_NAME ), log )
         mobile           = lambda: run_mobile( corpus, mobile_librarian, log )
-    code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), args.misses_out or os.path.join( folder, MISSES_NAME ),
-                              os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, vector_check=check, mobile=mobile )
+    try:
+        code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), args.misses_out or os.path.join( folder, MISSES_NAME ),
+                                  os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, vector_check=check, mobile=mobile )
+    except Exception as error:                                         # the job's own record says it failed; the exception still ends the run
+        jsa.record_librarian( folder, { "ran": False, "reason": f"{type( error ).__name__}: {error}" }, 1, now, environ )
+        raise
+    jsa.record_librarian( folder, summary, code, now, environ )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
 

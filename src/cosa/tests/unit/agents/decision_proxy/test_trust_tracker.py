@@ -159,10 +159,23 @@ def test_level_blr_uses_posterior_rate_when_ready():
     for _ in range( 30 ):
         c.record_decision( True, timestamp=now )
     c._blr_model = MagicMock()
+    c._blr_model.n_observations = 30
     c._blr_model.posterior_mean_rate.return_value = 0.99
     level = c.level
     c._blr_model.posterior_mean_rate.assert_called_once()
     assert level == 5
+
+
+def test_level_blr_falls_back_when_model_has_few_observations():
+    c = CategoryTrust( "x", trust_model="blr", min_samples=LOW_MIN_SAMPLES )
+    now = time.time()
+    for _ in range( 30 ):
+        c.record_decision( True, timestamp=now )
+    c._blr_model = MagicMock()
+    c._blr_model.n_observations = 5                      # young model: its posterior is not trusted
+    with patch( "scipy.stats.beta.ppf", return_value=0.99 ):
+        assert c.level == 5
+    c._blr_model.posterior_mean_rate.assert_not_called()
 
 
 def test_level_blr_breaks_when_posterior_rate_low():
@@ -171,6 +184,7 @@ def test_level_blr_breaks_when_posterior_rate_low():
     for _ in range( 30 ):
         c.record_decision( True, timestamp=now )
     c._blr_model = MagicMock()
+    c._blr_model.n_observations = 30
     c._blr_model.posterior_mean_rate.return_value = 0.1     # below L2 → break
     assert c.level == 1
 
@@ -433,3 +447,239 @@ def test_get_stats_returns_per_category_dicts():
     assert "a" in stats
     assert stats[ "a" ][ "category_name" ] == "a"
     assert stats[ "a" ][ "total_decisions" ] == 1
+
+
+# ── restore_category (row 251f26fb, D2) ──────────────────────────────────────
+
+def _tracker_with( **kw ):
+    tracker = TrustTracker( **SMALL_COUNT_KW, **kw )
+    tracker.register_category( "testing" )
+    return tracker
+
+
+def test_restore_category_sets_totals_and_a_level_that_matches_the_stored_counts():
+    tracker = _tracker_with()
+    with _frozen_time( 1_000_000.0 ):
+        assert tracker.restore_category( "testing", 4, 1, 1_000_000.0 ) is True
+        cat = tracker.categories[ "testing" ]
+        assert ( cat.total_successes, cat.total_rejections, cat.total_decisions ) == ( 4, 1, 5 )
+        assert len( cat.decisions ) == 5 and sum( 1 for _, ok in cat.decisions if ok ) == 4
+        assert tracker.get_level( "testing" ) > 1, "four stored successes must lift the level above L1"
+
+
+def test_restore_category_history_decays_from_the_stored_timestamp():
+    tracker = _tracker_with( rolling_window_days=30 )
+    day = 86_400.0
+    with _frozen_time( 100 * day ):
+        assert tracker.restore_category( "testing", 3, 0, 99 * day ) is True       # inside the window
+        assert tracker.categories[ "testing" ].decisions[ 0 ][ 0 ] == 99 * day
+    other = _tracker_with( rolling_window_days=30 )
+    with _frozen_time( 100 * day ):
+        assert other.restore_category( "testing", 3, 0, 10 * day ) is True         # long outside it
+        cat = other.categories[ "testing" ]
+        assert cat.decisions == [] and cat.total_decisions == 3, "totals survive, stale history is pruned"
+        assert other.get_level( "testing" ) == 1
+
+
+def test_restore_category_refuses_an_unknown_category_and_a_category_that_already_has_decisions():
+    tracker = _tracker_with()
+    assert tracker.restore_category( "nope", 5, 0, 1.0 ) is False
+    tracker.record_decision( "testing", True )
+    assert tracker.restore_category( "testing", 9, 9, 1.0 ) is False
+    assert tracker.categories[ "testing" ].total_decisions == 1, "a refused restore must change nothing"
+
+
+def test_a_stored_trip_caps_the_restored_level_and_no_trip_leaves_it_to_the_counters():
+    with _frozen_time( 1_000_000.0 ):
+        free = _tracker_with()
+        free.restore_category( "testing", 4, 0, 1_000_000.0 )
+        earned = free.get_level( "testing" )
+        assert earned > 2, "four stored successes against thresholds 1/2/3/4 earn a high level"
+
+        tripped = _tracker_with()
+        tripped.restore_category( "testing", 4, 0, 1_000_000.0, trip={ "tripped_level": 2, "successes_at_trip": 4 } )
+        assert tripped.get_level( "testing" ) == 2 and tripped.categories[ "testing" ].trip_active()
+
+
+def test_a_trip_is_earned_back_by_new_successes_and_then_stores_as_none():
+    # Thresholds 1/2/3/4: a trip at level 3 needs l4 - l3 = 1 new success; a trip at level 2 needs l3 - l2 = 1.
+    with _frozen_time( 1_000_000.0 ):
+        tracker = _tracker_with()
+        tracker.restore_category( "testing", 4, 0, 1_000_000.0, trip={ "tripped_level": 2, "successes_at_trip": 4 } )
+        cat = tracker.categories[ "testing" ]
+        assert cat.trip_state() == { "status": "tripped", "tripped_level": 2, "successes_at_trip": 4 }
+        tracker.record_decision( "testing", False, timestamp=1_000_000.0 )         # a rejection earns nothing back
+        assert cat.trip_active() and tracker.get_level( "testing" ) == 2
+        tracker.record_decision( "testing", True, timestamp=1_000_000.0 )
+        assert not cat.trip_active() and cat.trip_state() is None
+        assert tracker.get_level( "testing" ) > 2, "once earned back, the counters decide again"
+
+
+def test_record_trip_remembers_the_demoted_level_and_ignores_an_unknown_category():
+    with _frozen_time( 1_000_000.0 ):
+        tracker = _tracker_with()
+        tracker.restore_category( "testing", 4, 0, 1_000_000.0 )
+        tracker.demote_category( "testing", 2 )
+        tracker.record_trip( "testing" )
+        cat = tracker.categories[ "testing" ]
+        assert ( cat.trip_level, cat.trip_successes ) == ( tracker.get_level( "testing" ), 4 )
+        tracker.record_trip( "nope" )                                              # no category, no error
+
+
+def test_a_trip_at_the_top_level_never_caps():
+    cat = CategoryTrust( "testing", **SMALL_COUNT_KW )
+    cat.trip_level, cat.trip_successes = 5, 0
+    assert cat.trip_active() is False
+
+
+def test_a_stored_trip_carries_the_status_the_dashboard_reads():
+    # proxy-dashboard.js treats a circuit_breaker_state with no status as "closed", i.e. OK.
+    with _frozen_time( 1_000_000.0 ):
+        tracker = _tracker_with()
+        tracker.restore_category( "testing", 4, 0, 1_000_000.0, trip={ "tripped_level": 2, "successes_at_trip": 4 } )
+        state = tracker.categories[ "testing" ].trip_state()
+        assert state[ "status" ] == "tripped"
+        assert ( state.get( "status" ) or "closed" ).lower() != "closed", "the dashboard's own default must not apply"
+
+
+# ── restore_category with per-day history (row da64aaab) ─────────────────────
+
+def _epoch_of( day, hour=12 ):
+    from datetime import datetime, timezone
+    return datetime.strptime( day, "%Y-%m-%d" ).replace( hour=hour, tzinfo=timezone.utc ).timestamp()
+
+
+def test_restore_category_with_history_stamps_each_day_so_old_decisions_age_out_of_the_window():
+    # 190 old successes and 10 fresh failures. Without history all 200 load stamped "just now".
+    history = { "2026-09-20": [ 190, 0 ], "2026-11-06": [ 0, 10 ] }
+    now     = _epoch_of( "2026-11-06" )
+    with_hist, without = _tracker_with( rolling_window_days=30 ), _tracker_with( rolling_window_days=30 )
+    with _frozen_time( now ):
+        assert with_hist.restore_category( "testing", 190, 10, now, history=history ) is True
+        assert without.restore_category( "testing", 190, 10, now ) is True
+        a, b = with_hist.categories[ "testing" ], without.categories[ "testing" ]
+        assert len( { t for t, _ in b.decisions } ) == 1, "control: no history means one stamp for all 200"
+        assert len( b.decisions ) == 200 and b.recent_error_rate( window=200 ) == 0.05
+        assert len( a.decisions ) == 10 and a.recent_error_rate( window=200 ) == 1.0, "the 190 old ones aged out"
+        assert ( a.total_successes, a.total_rejections, a.total_decisions ) == ( 190, 10, 200 ), "totals are untouched"
+
+
+def test_restore_category_with_history_weights_a_day_old_success_above_a_two_week_old_one():
+    history = { "2026-10-23": [ 1, 0 ], "2026-11-05": [ 1, 0 ] }       # 14 days and 1 day before the frozen time
+    now     = _epoch_of( "2026-11-06" )
+    tracker = _tracker_with( rolling_window_days=30, decay_half_life_days=14 )
+    with _frozen_time( now ):
+        tracker.restore_category( "testing", 2, 0, now, history=history )
+        stamps = sorted( t for t, _ in tracker.categories[ "testing" ].decisions )
+        assert stamps == [ _epoch_of( "2026-10-23", 0 ), _epoch_of( "2026-11-05", 0 ) ], "stamped at the start of the UTC day"
+        assert 1.2 < tracker.categories[ "testing" ]._effective_decision_count() < 1.5     # about 0.5 + 0.95
+
+
+def test_restore_category_with_an_empty_history_restores_no_rolling_history_but_keeps_totals():
+    tracker = _tracker_with()
+    now     = _epoch_of( "2026-11-06" )
+    with _frozen_time( now ):
+        assert tracker.restore_category( "testing", 3, 1, now, history={} ) is True
+        cat = tracker.categories[ "testing" ]
+        assert cat.decisions == [] and cat.total_decisions == 4
+
+# ============================================================================
+# TrustTracker.record_decision_with_features (row cfc7dd01)
+# ============================================================================
+def test_tracker_feeds_blr_with_the_built_feature_vector():
+    t = TrustTracker( trust_model="blr", debug=True )
+    t.register_category( "a" ); t.register_category( "b" )
+    t.record_decision( "b", False )                       # b has one rejection, so its recent error rate is 1.0
+    with patch.object( CategoryTrust, "build_feature_vector", wraps=CategoryTrust.build_feature_vector ) as build:
+        lvl = t.record_decision_with_features( "b", True, "one two three" )
+    assert build.call_args.args == ( "one two three", 1 )          # b was registered second
+    assert build.call_args.kwargs[ "recent_error_rate" ] == 1.0
+    assert t.categories[ "b" ]._blr_model._feature_count == 1       # BLR was fed
+    assert t.categories[ "a" ]._blr_model is None                   # categories stay isolated
+    assert t.categories[ "b" ].total_decisions == 2                 # history recorded once for this call
+    assert lvl == t.categories[ "b" ].level
+
+
+def test_tracker_record_with_features_unknown_category_records_nothing( capsys ):
+    t = TrustTracker( trust_model="blr", debug=True )
+    assert t.record_decision_with_features( "nope", True, "q" ) == 1
+    assert "Unknown category: nope" in capsys.readouterr().out
+    t2 = TrustTracker( trust_model="blr" )
+    assert t2.record_decision_with_features( "nope", True, "q" ) == 1   # silent without debug
+
+
+# ── BLR state survives a restart (row 5bb93a7b) ──────────────────────────────
+
+_BLR_QUESTIONS = [ "deploy the build?", "delete the old branch?", "merge the fix?", "retry the test run?", "push the commit?" ]
+
+
+def _trained_blr_tracker( model="blr" ):
+    tracker = TrustTracker( trust_model=model )
+    tracker.register_category( "testing" )
+    for i in range( 12 ):
+        tracker.record_decision_with_features( "testing", i % 3 != 0, _BLR_QUESTIONS[ i % len( _BLR_QUESTIONS ) ] )
+    return tracker
+
+
+def test_a_blr_model_saved_and_restored_into_a_fresh_tracker_predicts_the_same():
+    trained = _trained_blr_tracker()
+    saved   = trained.blr_state_for( "testing" )
+    probe   = np.array( [ 1.0, 0.5, 0.25, 0.1 ] )
+
+    fresh = TrustTracker( trust_model="blr" )
+    fresh.register_category( "testing" )
+    assert fresh.categories[ "testing" ]._blr_model is None, "a fresh tracker starts BLR from zero"
+    assert fresh.restore_category( "testing", 8, 4, 1_000_000.0, blr_state=saved ) is True
+
+    before = trained.categories[ "testing" ]._blr_model
+    after  = fresh.categories[ "testing" ]._blr_model
+    assert after.predict( probe ) == before.predict( probe )
+    assert after.n_observations == before.n_observations == 12
+    assert after.posterior_mean_rate() == before.posterior_mean_rate()
+
+
+def test_the_saved_blr_state_survives_a_json_round_trip():
+    import json
+    saved = json.loads( json.dumps( _trained_blr_tracker().blr_state_for( "testing" ) ) )
+    fresh = TrustTracker( trust_model="blr" )
+    fresh.register_category( "testing" )
+    fresh.restore_category( "testing", 8, 4, 1_000_000.0, blr_state=saved )
+    probe = np.array( [ 1.0, 0.5, 0.25, 0.1 ] )
+    assert fresh.categories[ "testing" ]._blr_model.predict( probe ) == _trained_blr_tracker().categories[ "testing" ]._blr_model.predict( probe )
+
+
+def test_blr_state_for_is_none_without_a_blr_model_to_save():
+    count = TrustTracker( **SMALL_COUNT_KW )
+    count.register_category( "testing" )
+    count.record_decision( "testing", True )
+    assert count.blr_state_for( "testing" ) is None, "the count model keeps no BLR state"
+
+    blr = TrustTracker( trust_model="blr" )
+    blr.register_category( "testing" )
+    assert blr.blr_state_for( "testing" ) is None, "no decision with features yet, so no model"
+    assert blr.blr_state_for( "nope" ) is None, "unknown category"
+
+
+def test_restore_ignores_blr_state_unless_the_trust_model_is_blr():
+    saved = _trained_blr_tracker().blr_state_for( "testing" )
+    for model in ( "count", "beta" ):
+        tracker = TrustTracker( trust_model=model )
+        tracker.register_category( "testing" )
+        assert tracker.restore_category( "testing", 8, 4, 1_000_000.0, blr_state=saved ) is True
+        assert tracker.categories[ "testing" ]._blr_model is None, model
+
+
+def test_restore_without_blr_state_leaves_a_blr_tracker_with_no_model():
+    tracker = TrustTracker( trust_model="blr" )
+    tracker.register_category( "testing" )
+    tracker.restore_category( "testing", 8, 4, 1_000_000.0 )
+    assert tracker.categories[ "testing" ]._blr_model is None
+
+
+def test_blr_state_for_is_none_for_count_and_beta_even_when_a_model_was_fed():
+    # Mutation guard: record_decision_with_features builds a model under any trust model,
+    # so only the trust_model check inside blr_state_for keeps count and beta from saving one.
+    for model in ( "count", "beta" ):
+        tracker = _trained_blr_tracker( model )
+        assert tracker.categories[ "testing" ]._blr_model is not None, model
+        assert tracker.blr_state_for( "testing" ) is None, model

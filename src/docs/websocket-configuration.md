@@ -47,6 +47,14 @@ All WebSocket configuration lives in `src/conf/lupin-app.ini` under the `[Lupin:
 - **Default**: `24`
 - **Purpose**: Maximum age in hours before a session is considered stale and eligible for cleanup.
 
+### `cc session worker default voice mode`
+
+- **Type**: one of `quiet`, `speakerphone`, `inherit`
+- **Default**: `quiet`, with no default in code: a missing, blank or unknown value refuses the spawn and names the key
+- **Purpose**: how a session started by `spawn_sessions` begins its voice. `quiet` is speakerphone off with the ding kept. `speakerphone` turns it on. `inherit` takes the mode-aware default (solo off, chorus on). A manager always inherits, whatever role it was spawned with.
+- **Read by**: `spawn_sessions`, through ConfigurationManager in the long-running MCP process, so a change needs an MCP restart.
+- **Wire effect**: the server adds `worker_quiet: true` to the notification event of a quiet worker. This is a field on the existing `notification_queue_update` event, not a new event, so `websocket available events` does not change. The legacy client rewrites a quiet worker's `high` to `medium` and leaves `urgent` alone. The multiplexer does not speak a quiet worker's `high` and speaks its `urgent`.
+
 ### `websocket available events`
 
 - **Type**: Comma-separated string
@@ -65,6 +73,8 @@ names = ConfigurationManager().get( "websocket available events", return_type="l
 ```
 
 Added: `task_store_changed`, the task panes' invalidation push. No other key is needed for it; the web client's `QueueTransport` carries it in its subscribed-events list. The legacy page's `_buildQueueAuthMessage` in `notifications.js` carries it as well.
+
+Added: `cron_job_switch_changed`, sent after an administrator flips a scheduled job's switch. The legacy page's `_buildQueueAuthMessage` and the multiplexer's `QUEUE_SUBSCRIBED_EVENTS` subscribe to it, on the queue socket only.
 
 Warning: **That reader is a bare `value.split( ", " )` with no per-token strip.**
 

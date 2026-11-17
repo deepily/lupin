@@ -111,7 +111,7 @@ RENDER_ONLY_SCENARIOS = [
 # YAML Fixture Resolution
 #
 # Auto-discovery removed 2026-04-30 (Session b195a160) — see Cluster E in
-# src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md. The discovered
+# the "Postmortem — 2026-04-29 17:39 EDT All-Test Run on `:8000`" doc (removed by 8420e8b0a; recover it from 8420e8b0a^). The discovered
 # YAML path was reachable from the test process but not from the server view,
 # producing a 404 mid-run. Pinning to a checked-in fixture removes the brittleness.
 # `--yaml-path` CLI flag still overrides the fixture for ad-hoc dev runs.
@@ -537,8 +537,11 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
         abs_path = recorded
         if not os.path.isabs( abs_path ):
             import cosa.utils.util as cu
-            # job.py records pptx_path relative to io/ (it strips the io_base prefix).
-            abs_path = os.path.join( cu.get_project_root(), "io", recorded.lstrip( "/" ) )
+            from cosa.utils.main_checkout import main_checkout_of
+            # job.py records pptx_path relative to io/ (it strips the io_base prefix). The server that
+            # rendered the deck writes into the MAIN checkout's io/, so a seat worktree must look there.
+            root     = cu.get_project_root()
+            abs_path = os.path.join( main_checkout_of( root ) or root, "io", recorded.lstrip( "/" ) )
 
         verdict = verify_presentation_deck( abs_path )
         if verdict:

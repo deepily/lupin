@@ -22,6 +22,7 @@ from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.candidates import search as sx_search
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp import reuse_need_check as nc
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
@@ -113,7 +114,7 @@ def check_pins( labels_dir, answer_key, expected_shas="pinned" ):
     wanted = control_report.LABEL_PINS if expected_shas == "pinned" else expected_shas
     if wanted is None: return
     paths   = { **{ n: f"{labels_dir}/{n}" for n in control_report.LABEL_FILES }, control_report.KEY_FILE: answer_key }
-    changed = sorted( n for n, p in paths.items() if control_report.file_sha( p ) != wanted[ n ] )
+    changed = sorted( n for n, p in paths.items() if file_sha256( p ) != wanted[ n ] )
     if changed: raise er.NeedsetError( er.CONTROL_LABELS_CHANGED, f"the hash of {', '.join( changed )} is not the pinned one" )
 
 
@@ -334,8 +335,9 @@ def draft_all( rows, strip_fn, ask, ledger, max_tries=draft.MAX_TRIES ):
         - outcome is accepted_later or undrafted
     """
     needs, undrafted, rejected = {}, [], []
+    model_id = draft.drafter_model()      # read once, so one run's ledger keys name one model
     for row in rows:
-        rec = draft.draft_need( draft_job( row, strip_fn ), ask, ledger, max_tries=max_tries )
+        rec = draft.draft_need( draft_job( row, strip_fn ), ask, ledger, model_id=model_id, max_tries=max_tries )
         who = { k: row[ k ] for k in ( "pair", "stratum", "label", "unsure", "raters" ) }
         if rec[ "ok" ]: needs[ row[ "pair" ] ] = rec[ "need" ]
         else: undrafted.append( { **who, "reason": rec[ "reason" ] } )

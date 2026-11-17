@@ -1,8 +1,8 @@
 ---
 capability: agentic-job-contract
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.agentic_job_base.AgenticJobBase@a1e585a11b
+  - cosa.agents.agentic_job_base.AgenticJobBase@9e82116efa
   - cosa.agents.agentic_job_base.AgenticJobBase.__init__@c9e3ac2365
   - cosa.agents.agentic_job_base.AgenticJobBase.do_all@1a00149391
   - cosa.agents.agentic_job_base.AgenticJobBase.base_id@5c2da75c6e
@@ -19,11 +19,11 @@ pins:
 ## What a subclass provides
 - Two class attributes: `JOB_TYPE` (for example `"deep_research"`) and `JOB_PREFIX` (`"dr"`). The id is `{prefix}-{8 hex}`.
 - A `last_question_asked` property, `do_all()` and `async _execute()`. All three are abstract, so a class without them cannot be instantiated.
-- `do_all()` is what the queue calls. `DeepResearchJob.do_all` shows the shape: set `RUNNING` and `started_at`, run `asyncio.run( self._execute() )`, then end in `CANCELLED` or `COMPLETED` and return the conversational answer. On an exception it sets `FAILED` and re-raises, so the pool's `Future` carries the error. `_run_execute( label, subject, failure_prefix )` holds the running, completed and failed part. It has no cancelled branch. `ClaudeCodeJob`, the two chained jobs and `SweTeamJob` call it from `do_all`.
+- `do_all()` is what the queue calls. `DeepResearchJob.do_all` shows the shape: set `RUNNING` and `started_at`, run `asyncio.run( self._execute() )`, then end in `CANCELLED` or `COMPLETED` and return the conversational answer. On an exception it sets `FAILED` and re-raises, so the pool's `Future` carries the error. `_run_execute( label, subject, failure_prefix )` holds the running, completed and failed part. It has no cancelled branch. `ClaudeCodeJob`, the two chained jobs and `SweTeamJob` call it from `do_all`. The two chained research jobs also share `_run_chained_pipeline` and `_run_chained_dry_run`, which their `_execute` calls ([[research-chained-pipelines]]).
 - Thirteen production classes subclass it (grep of `src` outside tests at `08509073d`). They are `ClaudeCodeJob`, `DeepResearchJob`, `PodcastGeneratorJob`, `PresentationGeneratorJob`, `DeepResearchToPodcastJob`, `DeepResearchToPresentationJob`, `BugFixExpediterJob`, `TestFixExpediterJob`, `TestSuiteJob`, `SweTeamJob`, `HeartbeatPokerJob`, `ArbiterConsumerJob` and `MockAgenticJob`.
 
 ## What the base gives
-- Queue fields: `id_hash`, `user_id`, `session_id`, `push_counter`, `scheduled_at`, `monopolize`, `state` (a `JobState`), `result`, `artifacts`, `answer_conversational`.
+- Queue fields: `id_hash`, `user_id`, `session_id`, `push_counter`, `scheduled_at`, `monopolize`, `state` (a `JobState`), `result`, `artifacts`, `answer_conversational`. The chained jobs share `_io_view_link`, `_skipped_topics_line` and `_dry_run_io_path`. They build a doc link, a skipped-topics line and a mock artifact path.
 - `notify_progress` and `notify_completion` send through the shared [[agent-voice-io]] module, tagged with the job's id so they land on its job card. They never raise.
 - `request_cancel()` sets `_cancel_requested` and, when the job stored an orchestrator, its `_stop_requested`. Stopping is cooperative: `_execute` must poll the flag.
 

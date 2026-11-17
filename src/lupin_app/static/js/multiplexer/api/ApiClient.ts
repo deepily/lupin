@@ -166,6 +166,23 @@ export class ApiError extends Error {
 }
 
 /**
+ * The `detail` of a JSON error body, or `fallback` when the body carries none.
+ *
+ * Callers find the body in an ApiError message their own way and pass it in, so each keeps its
+ * own start marker. A body that is not JSON, has no `detail`, or has an empty `detail` gives
+ * `fallback`. A `detail` that is not a string gives `fallback`, or its JSON text when
+ * `stringifyNonString` is true (FastAPI sends validation errors as a list). Never throws.
+ */
+export function apiErrorDetail<T>( body: string, fallback: T, stringifyNonString = false ): string | T {
+  try {
+    const detail = ( JSON.parse( body ) as { detail?: unknown } | null )?.detail;
+    if ( typeof detail === "string" ) return detail === "" ? fallback : detail;
+    if ( detail !== undefined && stringifyNonString ) return JSON.stringify( detail );
+  } catch { /* not JSON: no detail */ }
+  return fallback;
+}
+
+/**
  * Sends authenticated JSON requests to the server's API with a timeout.
  *
  * It offers the HTTP verbs plus a few named calls for broadcast, proxy acknowledge and dev server bounce.

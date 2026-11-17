@@ -14,6 +14,7 @@ src/rnd is clean, so a future unlabelled projection lands red here.
 Run: PYTHONPATH=src python -m pytest src/tests/unit/test_evidence_fidelity_guard.py -v
 """
 
+import pytest
 import json
 import os
 import shutil
@@ -140,6 +141,7 @@ class TestRealTreeIsClean( unittest.TestCase ):
     def _rnd( self ):
         return cu.get_project_root() + "/src/rnd"
 
+    @pytest.mark.census
     def test_no_unlabelled_projection_in_src_rnd( self ):
         problems = guard.check_evidence_tree( self._rnd() )
         self.assertEqual( problems, [], "evidence-fidelity problems in src/rnd:\n" + "\n".join( problems ) )

@@ -66,14 +66,12 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # `owed_only` flag. This module is a PARITY checker: if it re-derived "owed"
 # locally it could certify parity against its own opinion rather than against
 # what the oracle actually counts, which is worse than no check at all.
-# Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
 # Parity runs through the ONE canonical row-level predicate. `owed_status_row` is
 # the row twin of `owed_status_clause` (the SQL behind the server's `owed_only`),
 # so this checker measures owed EXACTLY as the oracle counts it. Deliberately NOT
 # `is_owed`: that is the general non-terminal predicate and would count
 # blocked/claimed/review, letting a PARITY checker certify parity against its own
 # opinion rather than against what the Stop hook actually reads.
-# Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
 from cosa.rest.task_store_owed import owed_status_row
 
 # Title used only when a TaskCreate carried no subject (replay_task_subjects

@@ -158,6 +158,12 @@ def seed_if_missing():
                f"replace real credentials. Aborting before any connection is opened." )
         sys.exit( 3 )
 
+    # The VM's destructive-test server has an empty lupin_db_dev; its companions come from
+    # `lupin-vm.sh test-server seed-companions` instead (row 8d67e474). "0" skips this copy.
+    if os.environ.get( "LUPIN_TEST_SEED_FROM_DEV", "1" ) == "0":
+        _info( "LUPIN_TEST_SEED_FROM_DEV=0: companion copy from dev skipped" )
+        return
+
     _info( "Checking companion credentials in test database..." )
 
     try:

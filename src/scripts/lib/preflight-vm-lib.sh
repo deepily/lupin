@@ -698,6 +698,22 @@ pfv_mode_matches() {
     return 1
 }
 
+# ── pfv_mode_within ──────────────────────────────────────────────────────────
+# Say whether an observed octal mode grants nothing beyond a ceiling mode.
+#
+# Requires:
+#   - $1 = observed octal mode (as `stat -c %a` prints it), $2 = ceiling octal mode
+# Ensures:
+#   - returns 0 when every permission bit set in $1 is also set in $2 (750 is within 750 and 700; 755 is not)
+#   - returns 1 when $1 grants any bit $2 does not
+#   - returns 2 when either value is empty or not octal (UNKNOWN is never folded into a pass)
+pfv_mode_within() {
+    local observed="$1" ceiling="$2"
+    case "$observed" in ""|*[!0-7]*) return 2 ;; esac
+    case "$ceiling"  in ""|*[!0-7]*) return 2 ;; esac
+    [ $(( 8#$observed & ~8#$ceiling & 8#7777 )) -eq 0 ]
+}
+
 # ── pfv_owner_matches ────────────────────────────────────────────────────────
 # Compare an observed numeric uid:gid against an expected one.
 #
@@ -1032,16 +1048,26 @@ pfv_dist_present() {
 #   - $1 = space-separated bundle names that are required
 #   - $2 = space-separated names of the bundle folders on the checkout that hold a manifest.json ("" for none)
 # Ensures:
-#   - echoes OK and returns 0 when every required name is present
+#   - echoes OK and returns 0 when every required name is present and the stamp agrees with HEAD
 #   - otherwise echoes MISSING: followed by the absent names, in the order required, and returns 1
-#   - pure: both facts are passed in, so the classification is tested without a VM
+#   - when nothing is missing but the bundles are not known to match the source, echoes STALE: with the reason and returns 1
+#   - pure: all facts are passed in, so the classification is tested without a VM
+#
+# Present is not fresh (row 8d67e474, 16 Nov 2026): the VM held a bundle built before d819f7446 while its source had
+# that commit, every file was present, and a test failed 3 of 3. push-dist writes dist/.dist-stamp holding the commit
+# the bundles were judged FRESH at (check_bundle_freshness.py, which needs esbuild and so cannot run on the VM host).
+#   - $3 = the first line of dist/.dist-stamp ("" when the file is absent)
+#   - $4 = the checkout's HEAD sha ("" when unreadable)
 pfv_dist_status() {
-    local required="$1" present=" $2 " name missing=""
+    local required="$1" present=" $2 " stamp="$3" head="$4" name missing=""
     for name in $required; do
         case "$present" in *" $name "*) ;; *) missing="$missing $name" ;; esac
     done
-    [ -z "$missing" ] && { echo "OK"; return 0; }
-    echo "MISSING:${missing}"; return 1
+    [ -n "$missing" ] && { echo "MISSING:${missing}"; return 1; }
+    [ -z "$stamp" ] && { echo "STALE: no .dist-stamp, so nothing says the bundles match the source"; return 1; }
+    [ -z "$head" ] && { echo "STALE: HEAD unreadable, so the stamp cannot be compared"; return 1; }
+    [ "$stamp" != "$head" ] && { echo "STALE: bundles were judged fresh at ${stamp:0:8} but the checkout is at ${head:0:8}"; return 1; }
+    echo "OK"; return 0
 }
 
 # ── pfv_environ_lookup ───────────────────────────────────────────────────────
@@ -1449,4 +1475,139 @@ pfv_test_login_env_status() {
         1|2) printf 'PLAIN'; return 1 ;;
         *) printf 'UNREADABLE'; return 3 ;;
     esac
+}
+
+# ── pfv_cron_status ──────────────────────────────────────────────────────────
+# Is the reuse-vector-refresh cron line in the crontab text? (row c22e5ec1)
+# `lupin-vm.sh install-refresh-cron vm` is a separate by-hand step and nothing said whether it had run.
+# cron_generate writes `<schedule> <entry script> vector-refresh cron >> <log> 2>&1 # reuse-vector-refresh`;
+# the predicate is a line that is not a comment, runs `vector-refresh cron`, and ends in that tag.
+#
+# Requires:
+#   - $1 is the output of `crontab -l` (empty when there is no crontab)
+# Ensures:
+#   - prints PRESENT and returns 0 when such a line exists
+#   - prints ABSENT and returns 1 otherwise, including for empty text and for a commented-out line
+pfv_cron_status() {
+    if grep -Eq '^[[:space:]]*[^#[:space:]].* vector-refresh cron .*# reuse-vector-refresh[[:space:]]*$' <<< "${1:-}"; then
+        printf 'PRESENT'; return 0
+    fi
+    printf 'ABSENT'; return 1
+}
+
+# ── pfv_overlay_present ──────────────────────────────────────────────────────
+# Does the test-server overlay exist on this host? Its checks run only when it does.
+#
+# Requires:
+#   - $1 is the output of `docker ps -a --format '{{.Names}}'`, one name per line
+#   - $2 is the overlay's app container name
+# Ensures:
+#   - returns 0 when a line equals $2 exactly (a longer name that merely contains it does not count), else 1
+pfv_overlay_present() {
+    grep -Fxq -- "$2" <<< "${1:-}"
+}
+
+# ── pfv_test_login_email ─────────────────────────────────────────────────────
+# The tester login's address, read from the compose secret file push-test-server-secrets writes.
+#
+# Requires:
+#   - $1 is a path; the file holds `export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='<address>'`
+# Ensures:
+#   - prints the address and returns 0 when it is there and has only letters, digits and . _ % + @ -
+#     (it is placed in a SQL string, so any other character is refused)
+#   - returns 1 printing nothing when the file is unreadable, the line is missing, or the address has another character
+#   - never prints the password line
+pfv_test_login_email() {
+    local email
+    email="$( sed -n "s/^export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='\(.*\)'\$/\1/p" "$1" 2>/dev/null | head -1 )"
+    case "$email" in
+        ""|*[!A-Za-z0-9._%+@-]*) return 1 ;;
+    esac
+    printf '%s' "$email"
+}
+
+# ── pfv_count_status ─────────────────────────────────────────────────────────
+# Read a `select count(*)` answer.
+#
+# Requires:
+#   - $1 is the text psql -tA printed
+# Ensures:
+#   - prints PRESENT and returns 0 for a whole number of 1 or more
+#   - prints ABSENT and returns 1 for 0
+#   - prints UNKNOWN and returns 3 for anything else (empty, an error), so a failed query is never read as absent
+pfv_count_status() {
+    local n
+    n="$( printf '%s' "${1:-}" | tr -d '[:space:]' )"
+    case "$n" in
+        ""|*[!0-9]*) printf 'UNKNOWN'; return 3 ;;
+    esac
+    if [ "$(( 10#$n ))" -ge 1 ]; then printf 'PRESENT'; return 0; fi
+    printf 'ABSENT'; return 1
+}
+
+# ── pfv_iap_rule_covering ────────────────────────────────────────────────────
+# Find the firewall rule that lets the IAP range reach a TCP port.
+#
+# Requires:
+#   - $1 is a port number
+#   - $2 is the text of `gcloud compute firewall-rules list` printed with
+#     --format="value(name,direction,disabled,sourceRanges.list(separator=';'),allowed[].map().firewall_rule().list(separator=';'))"
+#     (one rule per line, tab-separated; the allowed list is comma-separated, as gcloud prints it)
+# Ensures:
+#   - prints the first matching rule name and returns 0
+#   - a rule matches when it is INGRESS, not disabled, lists 35.235.240.0/20 or 0.0.0.0/0, and allows
+#     the port as tcp, all, tcp:PORT or a tcp:LOW-HIGH range holding it
+#   - prints nothing and returns 1 when no rule matches
+pfv_iap_rule_covering() {
+    local port="$1" rules="$2" name direction disabled ranges allowed entry spec low high
+    while IFS='|' read -r name direction disabled ranges allowed; do
+        [ "$direction" = "INGRESS" ] || continue
+        [ "$disabled" = "True" ] && continue
+        case ";$ranges;" in
+            *";35.235.240.0/20;"*|*";0.0.0.0/0;"*) ;;
+            *) continue ;;
+        esac
+        for entry in ${allowed//,/ }; do
+            case "$entry" in
+                all|tcp) printf '%s' "$name"; return 0 ;;
+                tcp:*)
+                    spec="${entry#tcp:}"; low="${spec%-*}"; high="${spec#*-}"
+                    if [[ "$low" =~ ^[0-9]+$ && "$high" =~ ^[0-9]+$ ]] \
+                        && [ "$port" -ge "$low" ] && [ "$port" -le "$high" ]; then
+                        printf '%s' "$name"; return 0
+                    fi ;;
+            esac
+        done
+    done <<< "$( printf '%s' "$rules" | tr '\t' '|' )"
+    return 1
+}
+
+# ── pfv_iap_port_states ──────────────────────────────────────────────────────
+# Say, for every declared VM port, whether an IAP rule covers it.
+#
+# Requires:
+#   - $1 is a readable path to src/conf/vm-iap-ports.tsv
+#   - $2 is the rule listing described at pfv_iap_rule_covering (it may be empty)
+# Ensures:
+#   - prints one line per declared port: port|tier|PRESENT|rule-name or port|tier|ABSENT|
+#   - returns 0 when every block-tier port is present, 1 when one is absent
+#   - returns 2 (printing nothing) when the file is unreadable
+#   - returns 3 when a row has no numeric port or a tier other than block or warn; it names the row on stderr
+pfv_iap_port_states() {
+    local file="$1" rules="$2" row port tier rule rc=0 rows
+    rows="$( pfv_parse_manifest "$file" )" || return 2
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        port="$( pfv_row_field "$row" 1 3 )" || { printf 'bad row in %s: %s\n' "$file" "$row" >&2; return 3; }
+        tier="$( pfv_row_field "$row" 2 3 )"
+        [[ "$port" =~ ^[0-9]+$ ]] || { printf 'bad port in %s: %s\n' "$file" "$row" >&2; return 3; }
+        case "$tier" in block|warn) ;; *) printf 'bad tier in %s: %s\n' "$file" "$row" >&2; return 3 ;; esac
+        if rule="$( pfv_iap_rule_covering "$port" "$rules" )"; then
+            printf '%s|%s|PRESENT|%s\n' "$port" "$tier" "$rule"
+        else
+            printf '%s|%s|ABSENT|\n' "$port" "$tier"
+            [ "$tier" = "block" ] && rc=1
+        fi
+    done <<< "$rows"
+    return $rc
 }

@@ -111,6 +111,7 @@ def test_the_population_is_swept_and_the_positive_controls_bite():
     assert not any( "test_new.py" in v for v in violations( { "src/tests/e2e_ui/test_new.py": "# page.locator( '.row' ).first.click()\n" } ) )
 
 
+@pytest.mark.census
 def test_no_e2e_first_click_reaches_a_row_the_test_does_not_own():
     assert violations( _e2e_sources() ) == []
 

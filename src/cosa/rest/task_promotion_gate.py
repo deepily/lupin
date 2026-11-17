@@ -17,6 +17,7 @@ to prove the call happens.
 from cosa.rest.task_approval_settings import _ini_value, approver_persona_for_account
 from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_store_rules       as rules
+from cosa.utils.flag_text import is_flag_on
 
 import re
 import uuid
@@ -117,7 +118,7 @@ def get_asynchronous_enabled():
     """
     raw = _ini_value( INI_KEY_ASYNCHRONOUS, "string", None )
     if raw is None: return FALLBACK_ASYNCHRONOUS
-    return str( raw ).strip().lower() in ( "true", "1", "yes", "on" )
+    return is_flag_on( raw )
 
 
 def promotion_is_asynchronous( requested, enabled_fn=get_asynchronous_enabled ):
@@ -635,7 +636,7 @@ def _default_ask( **kwargs ):
     # that never left the process.
     #
     # `notify_user_sync` RETURNS on every transport failure rather than raising
-    # (notify_user_sync.py:457-490), with `response_value=None`. The `or` below then
+    # (lupin_cli/notifications/notify_user_sync.py), with `response_value=None`. The `or` below then
     # substituted `response_default` — which was "yes" at the time — and `bool( None )`
     # left `default_used` False. So the gate's `try/except` belt around `ask_fn` could
     # never fire: nothing raised.

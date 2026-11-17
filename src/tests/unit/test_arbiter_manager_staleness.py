@@ -874,7 +874,7 @@ def test_persona_twin_live_suppresses_stale_ghost():
     job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
                  log_fn=lambda e, **k: logs.append( ( e, k ) ) )
     snap = _snap(
-        _row( "dead-54622550", "manager", 2820, persona="mr radio" ),   # ghost (stale)
+        _row( "dead-54622550", "manager", 2820, persona="mr radio" ),   # a ghost row, stale
         _row( "live-cd637762", "manager",   10, persona="mr radio" ),   # live twin (fresh)
     )
     fired = job._check_manager_staleness( snap, NOW, active_managers=[ "mr radio" ] )
@@ -1382,7 +1382,7 @@ class TestLeverB_LastSignalVelocity:
         true positive still pokes. Drive two advancing episodes (streak→1) then an
         episode whose last-signal did NOT advance (same instant math) → reset → poke."""
         gw = _GW()
-        job = _job( gw )   # streak=2
+        job = _job( gw )   # a streak of two
         self._episode( job, gw, 0 )       # ep1
         self._episode( job, gw, 60 )      # ep2 advanced → streak 1
         # ep3 with a LARGER age so last_seen does NOT advance vs ep2:

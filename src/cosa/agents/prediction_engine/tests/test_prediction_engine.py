@@ -190,7 +190,7 @@ def test_get_embedding_store_failure_returns_none():
 
 
 # ---- prod bug #11 FIXED (Tiberius) — _get_llm_client wrong-import ------------------------ #
-# prediction_engine.py:990 imported LlmClientFactory from cosa.agents.llm_client (no such symbol)
+# _get_llm_client in prediction_engine.py imported LlmClientFactory from cosa.agents.llm_client (no such symbol)
 # instead of cosa.agents.llm_client_factory → ImportError swallowed by the bare except →
 # _get_llm_client() always returned None → the LLM-synthesis tier of open-ended prediction was
 # dead, silently falling back to CBR retrieval. Import corrected; 991-992 now reachable + covered
@@ -331,7 +331,7 @@ def test_yes_no_majority_vote_no_qualifier():
 
 
 # =========================================================================== #
-# _extract_valid_options ( staticmethod )
+# _extract_valid_options, a staticmethod
 # =========================================================================== #
 def test_extract_valid_options_none():
     assert PredictionEngine._extract_valid_options( None ) is None
@@ -541,15 +541,16 @@ def test_mc_multi_validation_all_invalid_cold_start():
     assert r.metadata[ "reason" ] == "no_valid_options_after_filtering"
 
 
-def test_mc_validation_header_not_in_options_kept_as_is():
+def test_mc_validation_header_not_in_options_is_not_predicted():
     eng = _engine()
     cases = [ ( 90.0, { "decision_value": json.dumps( { "answers": { "DB": "PG" } } ) } ) ]
-    # options define a DIFFERENT header → option_info None for "DB" → keep prediction
+    # options define a DIFFERENT header → "DB" is never predicted (row fa884f81)
     options = { "questions": [ { "header": "Other", "multi_select": False,
                                  "options": [ { "label": "Z" } ] } ] }
     eng._get_embedding_store = lambda: _store( cases=cases )
     r = eng._predict_multiple_choice( "m", "approach", [ 0.1 ], options )
-    assert r.predicted_value == { "answers": { "DB": "PG" } }
+    assert r.predicted_value is None
+    assert r.metadata[ "reason" ] == "no_valid_mc_cases"
 
 
 # =========================================================================== #
@@ -1246,3 +1247,24 @@ def test_enrich_batch_embedding_none_continues_loop_multi_header():
     actual = { "answers": { "H1": "x", "H2": "y" } }
     eng._enrich_with_embedding_similarity( actual, pr, RESPONSE_TYPE_OPEN_ENDED_BATCH )
     assert "_embedding_similarity" not in actual
+
+
+# ---------------------------------------------------------------------------
+# _predict_two_tier — what each caller passes into the shared skeleton
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "method, searched", [ ( "_predict_open_ended", "open_ended" ), ( "_predict_open_ended_batch", "open_ended_batch" ) ] )
+def test_each_predictor_searches_and_stamps_its_own_response_type( method, searched ):
+    eng   = _engine()
+    store = _store( cases=[ ( 95.0, { "question": "q?", "decision_value": "x" } ) ] )
+    eng._get_embedding_store = lambda: store
+    r = getattr( eng, method )( "q?", "input", [ 0.1 ] )
+    assert store.find_similar.call_args.kwargs[ "response_type" ] == searched and r.response_type == searched
+
+
+def test_open_ended_leaves_a_json_looking_answer_as_text_and_batch_parses_it():
+    dv = json.dumps( { "answers": { "Topic": "quantum" } } )
+    for method, expected in ( ( "_predict_open_ended", dv ), ( "_predict_open_ended_batch", { "answers": { "Topic": "quantum" } } ) ):
+        eng = _engine()
+        eng._get_embedding_store = lambda: _store( cases=[ ( 95.0, { "question": "q?", "decision_value": dv } ) ] )
+        assert getattr( eng, method )( "q?", "input", [ 0.1 ] ).predicted_value == expected

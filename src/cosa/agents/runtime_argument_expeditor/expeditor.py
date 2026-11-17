@@ -38,8 +38,10 @@ from lupin_cli.notifications.notification_models import (
 )
 from cosa.utils.notification_utils import (
     format_open_ended_batch_for_tts,
-    convert_open_ended_batch_for_api
+    convert_open_ended_batch_for_api,
+    extract_qualifier_comment
 )
+from cosa.utils.csv_text import split_csv
 
 
 # --------------------------------------------------------------------------- #
@@ -646,7 +648,7 @@ class RuntimeArgumentExpeditor:
         # ("KISS") extracted from a natural utterance, so it is NOT in `missing`
         # above and its fuzzy handler is skipped — then the bare topic is handed
         # downstream where a file path is expected and the job dies with
-        # FileNotFoundError at runtime (podcast_generator/job.py:216-223). Treat a
+        # FileNotFoundError at runtime (the research-document check in podcast_generator/job.py). Treat a
         # present-but-non-existing-path value as UNRESOLVED and run the same fuzzy
         # matcher the missing case uses. The matcher SEED is original_question (the
         # full utterance, the validated input), not the bare pre-filled value; a
@@ -812,7 +814,7 @@ class RuntimeArgumentExpeditor:
                 return None
 
             # "yes [comment: ...]" or "no [comment: ...]"
-            comment = self._extract_comment( response )
+            comment = extract_qualifier_comment( response )[ 1 ]
 
             if lower.startswith( "yes" ):
                 if comment:
@@ -1228,7 +1230,7 @@ class RuntimeArgumentExpeditor:
             return None
 
         # MULTIPLE_CHOICE returns the raw label OR JSON { "answers": { <header>: label } }.
-        # Parsing copied verbatim in shape from todo_fifo_queue.py:1069-1077.
+        # Parsing copied verbatim in shape from the MULTIPLE_CHOICE parsing in todo_fifo_queue.py.
         selected = response.response_value.strip()
         if selected.startswith( "{" ):
             try:
@@ -1405,27 +1407,6 @@ class RuntimeArgumentExpeditor:
         # (bug 68198c9f). The measured stage-killer: an undeliverable confirm.
         context.reason = self._classify_ask_failure( response )
         return None
-
-    @staticmethod
-    def _extract_comment( response_text ):
-        """
-        Extract comment text from a YES_NO response with annotation.
-
-        Requires:
-            - response_text is a string like "yes [comment: change budget to 10]"
-
-        Ensures:
-            - Returns the comment string if pattern matches
-            - Returns None if no comment found
-
-        Args:
-            response_text: Raw YES_NO response string
-
-        Returns:
-            str or None: Extracted comment text or None
-        """
-        match = re.search( r'\[comment:\s*(.+?)\]', response_text )
-        return match.group( 1 ).strip() if match else None
 
     def _batch_collect_args( self, batchable_args, fallback_questions, user_email, fallback_defaults=None, command_key=None, abstract=None, *, context=None ):
         """
@@ -1611,7 +1592,7 @@ class RuntimeArgumentExpeditor:
         search_paths_key = declaration.get( "search_paths_key" ) or "podcast generator source search paths"
         search_paths_raw = config_mgr.get( search_paths_key, default="/src" )
         if self.debug: print( f"[Expeditor] Extra search paths from {search_paths_key!r}" )
-        search_dirs = [ d.strip() for d in search_paths_raw.split( "," ) if d.strip() ]
+        search_dirs = split_csv( search_paths_raw )
         source_extensions = DEFAULT_FILE_EXTENSIONS
 
         for search_dir in search_dirs:

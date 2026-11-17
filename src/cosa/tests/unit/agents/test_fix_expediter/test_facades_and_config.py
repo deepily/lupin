@@ -66,32 +66,45 @@ class TestPackageInit( unittest.TestCase ):
 class TestCosaInterface( unittest.TestCase ):
 
     def test_sender_id_constant_and_helper( self ):
-        self.assertEqual( tfe_ci.SENDER_ID, "test_fix_expediter@lupin.deepily.ai" )
-        self.assertEqual( tfe_ci._get_sender_id(), tfe_ci.SENDER_ID )
+        # SENDER_ID is a mutable module global (a job sets its own suffix), so test the builder
+        self.assertTrue( tfe_ci.SENDER_ID.startswith( "test.fix.expediter@" ) )
+        self.assertEqual( tfe_ci._get_sender_id(), tfe_ci._dispatcher.build_sender_id() )
+        self.assertTrue( tfe_ci._get_sender_id( suffix="tfe-1" ).endswith( "#tfe-1" ) )
 
-    def test_notify_progress_delegates_to_bfe( self ):
-        with patch.object( tfe_ci, "_bfe_notify_progress", AsyncMock( return_value="NP" ) ) as m:
-            out = _run( tfe_ci.notify_progress( "msg", priority="high" ) )
-        self.assertEqual( out, "NP" )
-        m.assert_awaited_once_with( "msg", priority="high" )
+    def test_sender_id_is_not_the_bfe_one( self ):
+        from cosa.agents.bug_fix_expediter import cosa_interface as bfe_ci
+        self.assertNotEqual( tfe_ci._dispatcher.agent_type, bfe_ci._dispatcher.agent_type )
+        self.assertNotIn( "bug.fix.expediter", tfe_ci._get_sender_id() )
 
-    def test_ask_confirmation_delegates_to_bfe( self ):
-        with patch.object( tfe_ci, "_bfe_ask_confirmation", AsyncMock( return_value=True ) ) as m:
-            out = _run( tfe_ci.ask_confirmation( "ok?", default="yes" ) )
-        self.assertTrue( out )
-        m.assert_awaited_once_with( "ok?", default="yes" )
+    def _dispatcher_mock( self ):
+        return MagicMock( notify_progress=AsyncMock( return_value=None ),
+                          ask_confirmation=AsyncMock( return_value=True ),
+                          get_feedback=AsyncMock( return_value="fb" ),
+                          present_choices=AsyncMock( return_value={ "a": 1 } ) )
 
-    def test_get_feedback_delegates_to_bfe( self ):
-        with patch.object( tfe_ci, "_bfe_get_feedback", AsyncMock( return_value="fb" ) ) as m:
-            out = _run( tfe_ci.get_feedback( "prompt", timeout=5 ) )
-        self.assertEqual( out, "fb" )
-        m.assert_awaited_once_with( "prompt", timeout=5 )
+    def test_wrappers_run_on_tfe_dispatcher_with_tfe_identity( self ):
+        d = self._dispatcher_mock()
+        with patch.object( tfe_ci, "_dispatcher", d ), \
+             patch.object( tfe_ci, "SENDER_ID", "test.fix.expediter@lupin.deepily.ai#x" ), \
+             patch.object( tfe_ci, "TARGET_USER", "u@x.com" ), \
+             patch.object( tfe_ci, "SESSION_NAME", "sess" ):
+            _run( tfe_ci.notify_progress( "msg", priority="high", progress_group_id="pg-1" ) )
+            self.assertTrue( _run( tfe_ci.ask_confirmation( "ok?", default="yes", priority="low" ) ) )
+            self.assertEqual( _run( tfe_ci.get_feedback( "prompt", timeout=5 ) ), "fb" )
+            self.assertEqual( _run( tfe_ci.present_choices( [ { "q": 1 } ], title="T" ) ), { "a": 1 } )
+        self.assertEqual( d.sender_id, "test.fix.expediter@lupin.deepily.ai#x" )
+        self.assertEqual( d.target_user, "u@x.com" )
+        self.assertEqual( d.session_name, "sess" )
+        d.notify_progress.assert_awaited_once()
+        self.assertEqual( d.notify_progress.await_args.kwargs[ "progress_group_id" ], "pg-1" )
+        d.ask_confirmation.assert_awaited_once()
+        d.get_feedback.assert_awaited_once()
+        d.present_choices.assert_awaited_once()
 
-    def test_present_choices_delegates_to_bfe( self ):
-        with patch.object( tfe_ci, "_bfe_present_choices", AsyncMock( return_value={ "a": 1 } ) ) as m:
-            out = _run( tfe_ci.present_choices( [ { "q": 1 } ], title="T" ) )
-        self.assertEqual( out, { "a": 1 } )
-        m.assert_awaited_once_with( [ { "q": 1 } ], title="T" )
+    def test_smoke_test_runs( self ):
+        with redirect_stdout( io.StringIO() ) as out:
+            tfe_ci.quick_smoke_test()
+        self.assertIn( "completed successfully", out.getvalue() )
 
 
 def _echo_get( ini_key, default=None, return_type=None ):
@@ -99,11 +112,16 @@ def _echo_get( ini_key, default=None, return_type=None ):
     return default
 
 
+def _echo_required( ini_key, return_type=None, **kwargs ):
+    _echo_get.seen[ ini_key ] = return_type
+    return f"model-for[{ini_key}]"
+
+
 class TestConfig( unittest.TestCase ):
 
     def test_defaults_and_budget_mirror( self ):
         c = _Config()
-        self.assertEqual( c.lead_model, "claude-opus-4-6" )
+        self.assertEqual( c.lead_model, "claude-opus-5" )     # read from the INI, not from code
         self.assertTrue( c.auto_fix_enabled )
         self.assertEqual( c.max_clusters, 8 )
         self.assertEqual( c.min_diagnosis_confidence, 0.65 )
@@ -119,6 +137,7 @@ class TestConfig( unittest.TestCase ):
         _echo_get.seen = {}
         self.cfg_mgr = MagicMock()
         self.cfg_mgr.get.side_effect = _echo_get
+        self.cfg_mgr.get_required.side_effect = _echo_required
 
     def _clean_env( self ):
         # Ensure the override env var is absent for the default from_config path.
@@ -132,6 +151,7 @@ class TestConfig( unittest.TestCase ):
             os.environ.pop( "TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE", None )
             c = _Config.from_config( self.cfg_mgr, debug=False )
         self.assertEqual( c.budget_usd, 15.0 )             # mirror still runs
+        self.assertEqual( ( c.lead_model, c.worker_model ), ( "model-for[test fix expediter lead model]", "model-for[test fix expediter worker model]" ) )
         seen = _echo_get.seen
         self.assertEqual( seen[ "test fix expediter lead model" ],      "string" )
         self.assertEqual( seen[ "test fix expediter auto fix enabled" ], "boolean" )

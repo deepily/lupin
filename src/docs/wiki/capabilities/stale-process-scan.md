@@ -1,6 +1,6 @@
 ---
 capability: stale-process-scan
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.stale-process-scan.running_processes@43db071a58
   - scripts.stale-process-scan.classify@7bf70c3d85

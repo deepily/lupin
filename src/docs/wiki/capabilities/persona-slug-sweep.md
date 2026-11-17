@@ -1,6 +1,6 @@
 ---
 capability: persona-slug-sweep
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.sweep_persona_slug_canonicalization.topic_stem@3f352e945b
   - scripts.sweep_persona_slug_canonicalization.persona_segment_of_session@588ee57134
@@ -10,6 +10,7 @@ pins:
   - scripts.sweep_persona_slug_canonicalization.discover_owners_from_bridges@229375e602
   - scripts.sweep_persona_slug_canonicalization.run_sweep@5f207e6bc3
   - scripts.sweep_persona_slug_canonicalization.main@edfc4ef044
+  - lupin_mcp.persona_normalization.dm_topic_for@dfab24b98c
 ---
 # Persona slug sweep
 

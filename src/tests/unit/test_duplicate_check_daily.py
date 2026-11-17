@@ -2,15 +2,18 @@
 import datetime
 import json
 import os
+import pathlib
 import subprocess
 
 import pytest
 
+from cosa.repo import code_health_settings as chs
 from cosa.repo.duplicate_check import config as cf
 from cosa.repo.duplicate_check import errors as err
 from cosa.repo.duplicate_check import judge as jd
 from cosa.repo.duplicate_check.proof import proof_cli
 from lupin_mcp import duplicate_check_daily as dd
+from lupin_mcp import duplicate_check_history as hist
 from tests.unit.test_duplicate_check_score_run import JSCPD, SCRUB, FakeBackend, FakeClient, function
 from tests.unit.test_librarian_tick import cron   # noqa: F401  (fixture: the fake crontab and the fake lock)
 
@@ -49,7 +52,7 @@ def parts_of( tmp_path, **over ):
     backend = FakeBackend()
     cfg     = cf.build_config( "max-plan", "unsettable:bounded-cc", "stub", *jd.prompt_parts(), SCRUB, 4000, JSCPD, min_nodes=10 )
     base    = { "client": FakeClient(), "backend": backend, "data_dir": str( tmp_path / "io" ), "version_fn": lambda p: "9.9", "verify": lambda: cfg,
-                "structural": lambda tree, c: ( lambda defs: [] ) }
+                "config": KeyConfig( { chs.DAILY_BUDGET_KEY: f"{cfg[ 'model_id' ]}=100000" } ), "structural": lambda tree, c: ( lambda defs: [] ) }
     return { **base, **over }
 
 
@@ -66,7 +69,7 @@ def worktrees( repo ): return [ l for l in git( repo, "worktree", "list" ).split
 
 def results( tmp_path ):
     folder = tmp_path / "io" / "duplicate-check-daily"
-    return sorted( p for p in folder.glob( "*.json" ) if p.name != dd.LAST_SUCCESS )
+    return sorted( p for p in folder.glob( "*.json" ) if p.name not in ( dd.LAST_SUCCESS, "job-summary.json" ) )
 
 
 def test_a_first_run_judges_the_last_24_hours_once_clusters_the_duplicates_and_advances_last_success( repo, tmp_path ):
@@ -74,7 +77,7 @@ def test_a_first_run_judges_the_last_24_hours_once_clusters_the_duplicates_and_a
     parts = parts_of( tmp_path )
     doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts )
     assert doc[ "window" ] == { "start": c1, "end": c3, "commits": 2 }, "the 24 hour window starts at the newest commit older than a day"
-    assert doc[ "status" ] == "ok" and doc[ "judged" ] == 3 and doc[ "judge_calls" ] == 3 and doc[ "carried" ] == [] and doc[ "advanced_to" ] == c3
+    assert doc[ "status" ] == "ok" and doc[ "judged" ] == 3 and doc[ "judge_calls" ] == 3 and doc[ "left_to_judge" ] == [] and doc[ "advanced_to" ] == c3
     assert len( doc[ "clusters" ] ) == 1 and len( doc[ "clusters" ][ 0 ] ) == 3, "a1, a2 and a3 share a marker"
     assert doc[ "trigger" ] == "hand" and doc[ "elapsed_seconds" ] >= 0 and doc[ "cap" ] == 10
     assert json.loads( ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).read_text() )[ "commit" ] == c3
@@ -98,7 +101,7 @@ def test_the_cap_stops_at_a_commit_boundary_and_the_rest_carries_with_progress_k
     c1, c2, c3 = history( repo )
     parts = parts_of( tmp_path )
     one   = dd.run( repo, NOW, "cron", 1, "/bin/claude", parts )
-    assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 1 and len( one[ "carried" ] ) == 2 and one[ "advanced_to" ] == c1 and one[ "judged" ] == 1
+    assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 1 and len( one[ "left_to_judge" ] ) == 2 and one[ "advanced_to" ] == c1 and one[ "judged" ] == 1
     two   = dd.run( repo, NOW + datetime.timedelta( minutes=5 ), "cron", 10, "/bin/claude", parts )
     assert two[ "judge_calls" ] == 2, "the function judged yesterday came from the ledger, the other two were asked"
     assert two[ "status" ] == "ok" and two[ "advanced_to" ] == c3 and two[ "window" ][ "start" ] == c1
@@ -153,7 +156,7 @@ def test_a_new_definition_is_never_paired_with_its_own_earlier_version( repo, tm
     commit( repo, { "client/a1.py": function( "a1", [ "MARKA", "MARKD" ], 3 ) }, "change a1", 2 )
     dropped = []
     real    = dd.pool_without_earlier_versions
-    monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh: dropped.append( [ d[ "name" ] for d in fresh ] ) or real( tree, fresh ) )
+    monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh, left=None: dropped.append( [ d[ "name" ] for d in fresh ] ) or real( tree, fresh, left ) )
     ledgers = []
     real_led = proof_cli.proof_ledger
     monkeypatch.setattr( dd.proof_cli, "proof_ledger", lambda *a, **k: ledgers.append( real_led( *a, **k ) ) or ledgers[ -1 ] )
@@ -183,6 +186,15 @@ def test_each_prerequisite_that_fails_writes_a_failed_record_naming_it_and_judge
     assert "the prompt changed" in doc[ "detail" ]
 
 
+def test_a_saturated_embeddings_service_is_recorded_as_the_judging_error_with_the_service_named( repo, tmp_path ):
+    from cosa.repo.symindex.candidates.errors import CandidateError, SERVICE_SATURATED
+    history( repo )
+    def saturated( tree, cfg ): raise CandidateError( SERVICE_SATURATED, "the embeddings service refused 33 calls" )
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, structural=saturated ) )
+    assert ( doc[ "status" ], doc[ "stage" ] ) == ( "failed", dd.STAGE_JUDGING )
+    assert doc[ "error" ] == "CandidateError: SERVICE_SATURATED: the embeddings service refused 33 calls"
+
+
 def test_the_worktrees_are_removed_when_the_run_fails_part_way( repo, tmp_path ):
     history( repo )
     class Boom( FakeBackend ):
@@ -205,6 +217,41 @@ def test_the_run_uses_the_one_shared_wiring_builder_and_its_own_ledger_folder( r
     dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
     assert len( seen ) == 1 and str( seen[ 0 ][ 0 ] ) == str( tmp_path / "io" / "duplicate-check-daily" / "vectors" )
     assert ( tmp_path / "io" / "duplicate-check-daily" / "judge-ledger.jsonl" ).exists() and not ( tmp_path / "io" / "proof" ).exists()
+
+
+def ledger_lines( path ):
+    """Ensures: returns the parsed records of a ledger file, in order."""
+    return [ json.loads( line ) for line in path.read_text( encoding="utf-8" ).splitlines() ]
+
+
+def test_a_claude_version_change_keeps_every_prior_ruling_and_the_run_asks_the_model_for_none_of_them_row_395e4bcd( repo, tmp_path, monkeypatch ):
+    history( repo )
+    parts  = parts_of( tmp_path )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.317 (Claude Code)" )
+    first  = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts )
+    ruled  = [ r for r in ledger_lines( folder / "judge-ledger.jsonl" ) if "key" in r ]
+    assert first[ "status" ] == "ok" and len( ruled ) == 3
+    ( folder / "last-success.json" ).unlink()                       # the same window is owed again, so the ledger is the only thing that can answer it
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.318 (Claude Code)" )
+    second = dd.run( repo, NOW + datetime.timedelta( hours=1 ), "hand", 10, "/bin/claude", parts )
+    after  = ledger_lines( folder / "judge-ledger.jsonl" )
+    assert second[ "status" ] == "ok" and second[ "judge_calls" ] == 0 and second[ "judged" ] == 3, "every ruling is read back, none is asked again"
+    assert [ r for r in after if "key" in r ] == ruled and "ledger_rotated" not in second
+    assert sorted( p.name for p in folder.glob( "judge-ledger*" ) ) == [ "judge-ledger.jsonl" ], "nothing is renamed aside"
+    assert [ r for r in after if "binding" in r ][ -1 ][ "binding" ] == "claude_cli=/bin/claude|max-plan|max-plan"
+
+
+def test_each_ruling_records_the_claude_version_that_wrote_it_and_the_two_versions_stay_told_apart_row_395e4bcd( repo, tmp_path, monkeypatch ):
+    history( repo )
+    parts  = parts_of( tmp_path )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.317 (Claude Code)" )
+    dd.run( repo, NOW, "hand", 1, "/bin/claude", parts )
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.318 (Claude Code)" )
+    dd.run( repo, NOW + datetime.timedelta( hours=1 ), "hand", 10, "/bin/claude", parts )
+    stamps = [ r[ "cli" ] for r in ledger_lines( folder / "judge-ledger.jsonl" ) if "key" in r ]
+    assert stamps == [ "2.1.317 (Claude Code)" ] + [ "2.1.318 (Claude Code)" ] * 2, "the first ruling is the old version's, the other two the new one's"
 
 
 def test_the_window_starts_at_the_first_commit_when_no_commit_is_a_day_old( repo ):
@@ -249,9 +296,10 @@ def test_main_finds_the_root_from_the_working_directory_when_none_is_given( repo
     assert json.loads( out[ 0 ] )[ "window" ][ "end" ] == git( repo, "rev-parse", "main" )
 
 
-def test_main_needs_a_cap():
+def test_main_with_no_limit_and_a_blank_key_refuses( capsys ):
     with pytest.raises( SystemExit ):
-        dd.main( [ "--root", "." ] )
+        dd.main( [ "--root", "." ], config=KeyConfig( { } ) )
+    assert "external repo lupin duplicate check ceiling" in capsys.readouterr().err
 
 
 def test_the_counting_backend_counts_each_call_and_passes_the_answer_through():
@@ -268,7 +316,7 @@ def test_git_names_the_command_when_it_fails( tmp_path ):
 
 def test_the_live_parts_are_built_without_a_call():
     parts = dd.live_parts()
-    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier" } and callable( parts[ "structural" ] )
+    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier", "urgent", "noter", "rows_by_mark", "cron_has_baseline" } and callable( parts[ "structural" ] )
 
 
 def lines_of( **over ):
@@ -277,15 +325,15 @@ def lines_of( **over ):
     return dd.cron_lines( **{ **args, **over } )
 
 
-def test_the_daily_line_runs_at_twelve_oh_seven_with_trigger_cron_and_the_reboot_line_waits_after_a_boot_with_trigger_reboot():
+def test_the_daily_line_runs_at_ten_every_day_with_trigger_cron_and_the_reboot_line_waits_after_a_boot_with_trigger_reboot():
     daily, reboot = lines_of()
     tail = "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --cap 40 --claude-cli-path /bin/claude --trigger {} >> /log/daily.log 2>&1 # duplicate-check-daily"
-    assert daily == "7 12 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
+    assert daily == "0 10 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
 
 
 def test_the_cron_lines_carry_the_named_environment_shell_quoted_and_nothing_else():
-    daily, reboot = lines_of( carried={ "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/c block=Lupin:+Dev x", "DEEPILY_DATA_DIR": "/mnt/d" } )
-    for line in ( daily, reboot ):
+    daily, *rest, reboot = lines_of( carried={ "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/c block=Lupin:+Dev x", "DEEPILY_DATA_DIR": "/mnt/d" } )
+    for line in ( daily, *rest, reboot ):
         assert "LUPIN_CONFIG_MGR_CLI_ARGS='config_path=/c block=Lupin:+Dev x' DEEPILY_DATA_DIR=/mnt/d /py -m" in line
     assert "DEEPILY_DATA_DIR" not in lines_of()[ 0 ]
 
@@ -294,10 +342,10 @@ def test_the_default_branch_adds_nothing_to_the_cron_lines():
     assert lines_of( branch=dd.BRANCH ) == lines_of() and "--branch" not in "".join( lines_of( branch=dd.BRANCH ) )
 
 
-def test_a_given_branch_goes_into_both_cron_lines_after_the_trigger():
+def test_a_given_branch_goes_into_every_cron_line_after_the_trigger():
     daily, reboot = lines_of( branch="wip-v0.2.2" )
     tail = "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --cap 40 --claude-cli-path /bin/claude --trigger {} --branch wip-v0.2.2 >> /log/daily.log 2>&1 # duplicate-check-daily"
-    assert daily == "7 12 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
+    assert daily == "0 10 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
 
 
 def test_a_branch_name_with_shell_characters_is_quoted_in_both_cron_lines():
@@ -305,19 +353,31 @@ def test_a_branch_name_with_shell_characters_is_quoted_in_both_cron_lines():
         assert "--branch 'feature/a b;rm -rf x' >> /log/daily.log" in line
 
 
-def test_print_install_and_install_carry_the_branch_given_on_the_command_line( tmp_path, cron ):
+def test_print_install_carries_the_branch_given_on_the_command_line_and_install_is_retired( tmp_path, cron ):
     base = [ "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py", "--branch", "wip-x" ]
     code, out, _ = cron_main( tmp_path, [ "--print-install", *base ], cron )
     assert code == 0 and out[ 0 ].count( "--branch wip-x >> " ) == 2
-    assert cron_main( tmp_path, [ "--install", *base ], cron, cron[ "env" ] )[ 0 ] == 0
-    assert cron[ "file" ].read_text().count( "--branch wip-x >> " ) == 2
+    code, out, err = cron_main( tmp_path, [ "--install", *base ], cron, cron[ "env" ] )
+    assert code == 1 and out == [] and "lupin_mcp.cron_generate --install" in err[ 0 ] and not cron[ "file" ].exists(), "nothing is written"
     plain = cron_main( tmp_path, [ "--print-install", *base[ :-2 ] ], cron )[ 1 ][ 0 ]
     assert "--branch" not in plain
 
 
-def test_the_schedule_is_thirty_minutes_after_the_shadow_audit_drain():
+def test_no_slot_is_after_last_call_and_the_baseline_slot_sits_between_the_daily_run_and_the_shadow_audit_drain():
     from lupin_mcp import reuse_shadow
-    assert reuse_shadow.CRON_SCHEDULE == "37 11 * * *" and dd.CRON_SCHEDULE == "7 12 * * *"
+    hour = lambda schedule: int( schedule.split()[ 1 ] ) * 60 + int( schedule.split()[ 0 ] )
+    assert dd.CRON_SCHEDULE == "0 10 * * *" and dd.BASELINE_SCHEDULE == "7 11 * * *" and reuse_shadow.CRON_SCHEDULE == "37 11 * * *"
+    assert hour( dd.CRON_SCHEDULE ) < hour( dd.BASELINE_SCHEDULE ) < hour( reuse_shadow.CRON_SCHEDULE ), "the baseline slot waits an hour for the daily run and ends before the drain"
+    assert dd.CRON_SCHEDULE.split()[ 2: ] == [ "*", "*", "*" ] and dd.BASELINE_SCHEDULE.split()[ 2: ] == [ "*", "*", "*" ], "every day, weekends included"
+    assert not hasattr( dd, "SECOND_SCHEDULE" ), "the 18:07 slot is gone"
+
+
+class KeyConfig:
+    """A config that answers get from a dict, honouring the key and the default."""
+
+    def __init__( self, values ): self.values = values
+
+    def get( self, key, default="", silent=False, return_type="string" ): return self.values[ key ] if key in self.values else default
 
 
 def cron_main( tmp_path, argv, cron, environ=None ):
@@ -327,39 +387,53 @@ def cron_main( tmp_path, argv, cron, environ=None ):
     return code, out, err
 
 
-def test_print_install_prints_both_lines_and_changes_nothing( tmp_path, cron ):
+def test_print_install_prints_the_lines_and_changes_nothing( tmp_path, cron ):
     code, out, _ = cron_main( tmp_path, [ "--print-install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron, { "LUPIN_CONFIG_MGR_CLI_ARGS": "a b" } )
     assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 2 and "LUPIN_CONFIG_MGR_CLI_ARGS='a b'" in out[ 0 ] and not cron[ "file" ].exists()
 
 
-def test_install_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron ):
-    cron[ "file" ].write_text( "0 * * * * other\n" )
-    argv = [ "--install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ]
-    assert cron_main( tmp_path, argv, cron, cron[ "env" ] )[ :2 ] == ( 0, [ "installed: 2 lines" ] )
-    assert "lock-enter " + dd.LOCK_OWNER in cron[ "log" ].read_text()
+def test_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron ):
+    cron[ "file" ].write_text( f"0 * * * * other\n0 10 * * * a {dd.CRON_TAG}\n@reboot b {dd.CRON_TAG}\n" )
     assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 2 lines" ]
     assert cron_main( tmp_path, [ "--uninstall" ], cron, cron[ "env" ] )[ 1 ] == [ "uninstalled" ]
     entered = [ line for line in cron[ "log" ].read_text().splitlines() if line.startswith( "lock-enter" ) ]
-    assert entered == [ "lock-enter " + dd.LOCK_OWNER ] * 2, "the install and the uninstall each take the lock as this job, and nothing else enters it"
-    assert cron[ "log" ].read_text().count( "lock-exit" ) == 2, "and each lets it go"
+    assert entered == [ "lock-enter " + dd.LOCK_OWNER ], "the uninstall takes the lock as this job, and nothing else enters it"
+    assert cron[ "log" ].read_text().count( "lock-exit" ) == 1, "and lets it go"
     text = cron[ "file" ].read_text()
     assert text.strip() == "0 * * * * other", "only the other line is left, and nothing was added"
-    assert list( ( tmp_path / "io" / "duplicate-check-daily" / "crontab-backups" ).iterdir() ), "a backup is written before each change"
+    assert list( ( tmp_path / "fleet-data" / tmp_path.name / "code-health" / "duplicate-check-daily" / "crontab-backups" ).iterdir() ), "a backup is written before each change"
+
+
+def blank_key_main( tmp_path, cron, flag ):
+    """Run main in a cron mode with a blank ceiling key; return ( code, stdout lines )."""
+    cron[ "file" ].write_text( f"0 * * * * other\n0 10 * * * a {dd.CRON_TAG}\n@reboot b {dd.CRON_TAG}\n" )
+    out = []
+    code = dd.main( [ flag ], environ={ "LUPIN_ROOT": str( tmp_path ), **cron[ "env" ] }, out=out.append, err=lambda t: None, crontab_cmd=cron[ "cmd" ], config=KeyConfig( { } ) )
+    return code, out
+
+
+def test_status_works_with_a_blank_ceiling_key( tmp_path, cron ):
+    assert blank_key_main( tmp_path, cron, "--status" ) == ( 0, [ "installed: 2 lines" ] )
+
+
+def test_uninstall_works_with_a_blank_ceiling_key_and_removes_the_cron_lines( tmp_path, cron ):
+    assert blank_key_main( tmp_path, cron, "--uninstall" ) == ( 0, [ "uninstalled" ] )
+    assert cron[ "file" ].read_text().strip() == "0 * * * * other"
 
 
 def test_status_says_not_installed_when_there_is_no_crontab( tmp_path, cron ):
     assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "not installed" ]
 
 
-def test_an_install_without_the_shared_lock_is_refused_with_one_and_the_reason( tmp_path, cron ):
-    code, out, err = cron_main( tmp_path, [ "--install", "--cap", "40", "--claude-cli-path", "/bin/claude" ], cron, { } )
+def test_an_uninstall_without_the_shared_lock_is_refused_with_one_and_the_reason( tmp_path, cron ):
+    code, out, err = cron_main( tmp_path, [ "--uninstall" ], cron, { } )
     assert code == 1 and err[ 0 ].startswith( "duplicate-check-daily:" ) and out == [ ] and not cron[ "file" ].exists()
 
 
-def test_the_cron_modes_that_build_lines_need_a_cap_and_status_and_uninstall_do_not( tmp_path, cron ):
+def test_the_cron_modes_that_build_lines_need_a_limit_and_status_and_uninstall_do_not( tmp_path, cron ):
     for mode in ( "--print-install", "--install" ):
         with pytest.raises( SystemExit ):
-            cron_main( tmp_path, [ mode ], cron, cron[ "env" ] )
+            dd.main( [ mode ], environ=cron[ "env" ], config=KeyConfig( { } ) )
     assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 0 ] == 0
 
 
@@ -376,15 +450,16 @@ def test_the_root_of_the_cron_lines_falls_back_to_the_working_directory( tmp_pat
 
 
 def test_the_default_err_goes_to_standard_error_and_the_default_cron_command_is_crontab( tmp_path, cron, capsys, monkeypatch ):
-    monkeypatch.setattr( dd.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess( cmd, 0, stdout="", stderr="" ) if cmd[ 0 ] == "crontab" else pytest.fail( cmd ) )
+    real = subprocess.run                                                  # the data folder's git lookup is real; only crontab is faked
+    monkeypatch.setattr( dd.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess( cmd, 0, stdout="", stderr="" ) if cmd[ 0 ] == "crontab" else real( cmd, **k ) if cmd[ 0 ] == "git" else pytest.fail( str( cmd ) ) )
     out = []
     assert dd.main( [ "--status" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append ) == 0 and out == [ "not installed" ]
-    assert dd.main( [ "--install", "--cap", "1", "--claude-cli-path", "/b" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append, crontab_cmd=cron[ "cmd" ] ) == 1
+    assert dd.main( [ "--uninstall" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append, crontab_cmd=cron[ "cmd" ] ) == 1
     assert "duplicate-check-daily:" in capsys.readouterr().err
 
 
 
-def test_findings_are_one_per_new_definition_with_the_rest_of_the_cluster_and_no_session_without_session_of():
+def test_findings_are_one_per_cluster_with_the_rest_of_the_cluster_and_no_session_without_session_of():
     fresh = [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta" } ]
     pool  = [ { "id": "p1", "name": "b", "file": "f2.py", "line": 2, "text": "tb" } ]
     win   = { "start": "s", "end": "e", "commits": 1 }
@@ -402,9 +477,9 @@ def test_a_run_with_a_filer_files_the_findings_and_records_the_answer_and_withou
         calls.append( ( findings, folder ) )
         return { "filed": len( findings ) }
     doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, filer=filer ) )
-    assert doc[ "filing" ] == { "filed": 3 } and len( calls ) == 1 and len( calls[ 0 ][ 0 ] ) == 3
+    assert doc[ "filing" ] == { "filed": 1 } and len( calls ) == 1 and len( calls[ 0 ][ 0 ] ) == 1
     assert calls[ 0 ][ 1 ] == tmp_path / "io" / "duplicate-check-daily"
-    assert json.loads( results( tmp_path )[ 0 ].read_text() )[ "filing" ] == { "filed": 3 }
+    assert json.loads( results( tmp_path )[ 0 ].read_text() )[ "filing" ] == { "filed": 1 }
     plain = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", 10, "/bin/claude", parts_of( tmp_path ) )
     assert "filing" not in plain
 
@@ -413,9 +488,9 @@ def test_a_run_with_no_filer_still_writes_every_finding_with_the_eight_fields_th
     history( repo )
     doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
     saved = json.loads( results( tmp_path )[ 0 ].read_text() )
-    assert "filing" not in saved and len( saved[ "findings" ] ) == 3 and saved[ "findings" ] == doc[ "findings" ]
+    assert "filing" not in saved and len( saved[ "findings" ] ) == 1 and saved[ "findings" ] == doc[ "findings" ]
     for f in saved[ "findings" ]:
-        assert all( k in f for k in ( "id", "name", "file", "line", "session_id", "others", "window", "correlation_key" ) )
+        assert all( k in f for k in ( "id", "name", "file", "line", "others", "window", "correlation_key" ) )
         assert f[ "correlation_key" ].startswith( "epic:dupcheck-" ) and "text" not in f
 
 
@@ -432,10 +507,10 @@ def test_the_live_filer_files_with_the_configured_manager_the_roster_and_the_liv
     monkeypatch.setattr( vh, "pick_declared_managers_from_env", lambda project: [ "roster-" + project ] )
     monkeypatch.setattr( dd.filing, "LiveStore", lambda: "store" )
     monkeypatch.setattr( dd.filing, "file_findings", lambda findings, folder, store, declared, roster: ( findings, folder, store, declared, roster ) )
-    assert dd.live_filer( [ "f" ], tmp_path ) == ( [ "f" ], tmp_path, "store", "manager-on-duty", [ "roster-lupin" ] ), "an empty setting falls back to the placeholder"
+    assert dd.live_filer( [ "f" ], tmp_path ) == ( [ "f" ], tmp_path, "store", "", [ "roster-lupin" ] ), "an empty setting is passed on empty, so the filer refuses it rather than guessing"
     seen[ "value" ] = "real-manager"
     assert dd.live_filer( [ "f" ], tmp_path )[ 3 ] == "real-manager"
-    assert seen[ "env" ] == "LUPIN_CONFIG_MGR_CLI_ARGS" and seen[ "key" ] == "arbiter manager on duty"
+    assert seen[ "env" ] == "LUPIN_CONFIG_MGR_CLI_ARGS" and seen[ "key" ] == "duplicate check triage owner"
 
 
 def test_a_filer_that_raises_is_recorded_and_the_run_still_writes_its_file_and_advances_last_success( repo, tmp_path ):
@@ -478,7 +553,7 @@ def test_a_run_with_an_auditor_records_its_answer_and_a_raising_auditor_is_recor
         seen.append( ( [ f[ "commit" ] for f in findings ], folder ) )
         return { "queued": len( findings ) }
     doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, auditor=auditor ) )
-    assert doc[ "audit" ] == { "queued": 3 } and "filing" not in doc and sorted( seen[ 0 ][ 0 ] ) == sorted( [ c2, c2, c3 ] )
+    assert doc[ "audit" ] == { "queued": 1 } and "filing" not in doc and len( seen[ 0 ][ 0 ] ) == 1 and seen[ 0 ][ 0 ][ 0 ] in ( c2, c3 )
     def broken( findings, folder ): raise OSError( "disk full" )
     bad = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path, auditor=broken, filer=lambda f, d: { "filed": 0 } ) )
     assert bad[ "audit" ] == { "error": "OSError: disk full" } and bad[ "filing" ] == { "filed": 0 } and bad[ "status" ] == "ok"
@@ -492,11 +567,13 @@ def test_the_live_auditor_ties_each_finding_with_the_lookup_tools_logs_and_queue
     monkeypatch.setattr( dd.behaviour, "read_refusals", lambda data: [ "row" ] )
     monkeypatch.setattr( dd.tie_mod, "find_tie", lambda sid, rows, records, root, sha: ( sid, rows, records, root, sha ) )
     monkeypatch.setattr( dd.rt, "load_receipt", lambda ctx, rid: ( ctx, rid ) )
-    def queue( findings, tie_of, receipt_of, data_dir, today ):
-        seen.update( tie=tie_of( findings[ 0 ] ), receipt=receipt_of( "r1" ), data_dir=data_dir, today=today )
+    monkeypatch.setattr( dd.rt, "prepare", lambda ctx: ( set(), [ { "id": "pkg.f", "file": "pkg.py", "name": "f", "line": 3 } ], "sha", "gen" ) )
+    def queue( findings, tie_of, receipt_of, data_dir, today, index_id_of ):
+        seen.update( tie=tie_of( findings[ 0 ] ), receipt=receipt_of( "r1" ), data_dir=data_dir, today=today, index_id=index_id_of( findings[ 0 ] ) )
         return "queued"
     monkeypatch.setattr( dd.audit, "queue_audits", queue )
-    assert dd.live_auditor( [ { "id": "d1", "commit": "abc" } ], tmp_path ) == "queued"
+    assert dd.live_auditor( [ { "id": "d1", "commit": "abc", "file": "pkg.py", "name": "f", "line": 3 } ], tmp_path ) == "queued"
+    assert seen[ "index_id" ] == "pkg.f", "the finding is named by the index the sweep reads"
     assert seen[ "logs" ] == Ctx.data / "call-log" and seen[ "tie" ] == ( "d1", [ "row" ], [ "rec" ], Ctx.root, "abc" )
     assert seen[ "receipt" ] == ( Ctx, "r1" ) and seen[ "data_dir" ] == Ctx.data and seen[ "today" ] == datetime.date.today().isoformat()
 
@@ -549,13 +626,21 @@ def test_a_rename_alone_leaves_its_functions_out_and_an_edit_beside_it_judges_on
     assert names == [ "added", "edit" ], "the renamed and edited file is read against its old path"
 
 
-def test_a_new_definition_naming_the_lookup_tool_is_left_unjudged_and_counted_and_the_run_goes_on_to_advance( repo, tmp_path ):
+def test_a_new_definition_naming_the_lookup_tool_is_judged_with_the_name_replaced_and_the_run_advances( repo, tmp_path ):
     c1 = commit( repo, { "server/s1.py": function( "s1", [ "MARKB" ], 50 ) }, "old", 48 )
     c2 = commit( repo, { "client/a1.py": function( "a1", [ "MARKA" ], 2 ), "client/a2.py": function( "a2", [ "MARKA" ], 4 ), "client/leak.py": "def leak( x ):\n    return check_exists( x )\n" }, "a1, a2 and a leak", 3 )
-    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
-    assert doc[ "status" ] == "ok" and doc[ "advanced_to" ] == c2 and doc[ "judge_calls" ] == 2, "only the two clean definitions were asked"
-    assert [ ( u[ "code" ], "check_exists" in u[ "detail" ] ) for u in doc[ "unreadable" ] ] == [ ( err.BLINDNESS_BREACH, True ) ]
-    assert doc[ "carried" ] == [], "a definition that can never be shown is not carried to the next run"
+    class Recording( FakeBackend ):
+        """Ensures: keeps each prompt the judge was sent."""
+        prompts = []
+        async def complete( self, model, system, user ):
+            self.prompts.append( system + "\n" + user )
+            return await super().complete( model, system, user )
+    Recording.prompts = []
+    doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, backend=Recording() ) )
+    assert doc[ "status" ] == "ok" and doc[ "advanced_to" ] == c2 and doc[ "judge_calls" ] == 3, "the definition that names the tool was asked too"
+    assert doc[ "unreadable" ] == [] and doc[ "left_to_judge" ] == []
+    seen = "\n".join( Recording.prompts )
+    assert "check_exists" not in seen and "TOOLNAME" in seen, "the judge saw the placeholder, never the tool name"
 
 
 def branched( repo, name, hours_ago ):
@@ -590,7 +675,7 @@ def test_a_pinned_branch_idle_three_days_with_a_newer_branch_beside_it_is_refuse
     doc      = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path, notifier=notifier ), branch="wip-old" )
     assert doc[ "status" ] == "failed" and doc[ "stage" ] == dd.STAGE_GUARD and doc[ "refusal" ] == dd.STALE_BRANCH, "a stale branch is a failed day, never a clean one"
     assert doc[ "branch" ] == "wip-old" and doc[ "newest" ] == "wip-new" and doc[ "idle_days" ] == 4.2 and doc[ "judge_calls" ] == 0 and doc[ "notified" ] is True
-    assert "--branch wip-new" in doc[ "reinstall" ] and "--cap 300" in doc[ "reinstall" ] and "--claude-cli-path /bin/claude" in doc[ "reinstall" ] and f"cd {repo} " in doc[ "reinstall" ]
+    assert 'set "--branch" to wip-new' in doc[ "reinstall" ] and f"{repo}/src/conf/job-registry.json" in doc[ "reinstall" ] and f"cd {repo} " in doc[ "reinstall" ] and "--install" in doc[ "reinstall" ].split( "\n" )[ 1 ]
     assert len( notifier.sent ) == 1 and "wip-old" in notifier.sent[ 0 ][ 0 ] and "wip-old" in notifier.sent[ 0 ][ 1 ] and doc[ "reinstall" ] in notifier.sent[ 0 ][ 1 ]
     assert "/" not in notifier.sent[ 0 ][ 0 ], "the spoken line holds no path"
     assert len( results( tmp_path ) ) == 1 and json.loads( results( tmp_path )[ 0 ].read_text() )[ "refusal" ] == dd.STALE_BRANCH
@@ -630,7 +715,7 @@ def test_a_pinned_branch_that_does_not_exist_is_refused_and_the_newest_other_bra
     stale_repo( repo )
     notifier = Notifier()
     doc      = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path, notifier=notifier ), branch="gone" )
-    assert doc[ "refusal" ] == dd.MISSING_BRANCH and doc[ "status" ] == "failed" and doc[ "newest" ] == "wip-new" and "--branch wip-new" in doc[ "reinstall" ]
+    assert doc[ "refusal" ] == dd.MISSING_BRANCH and doc[ "status" ] == "failed" and doc[ "newest" ] == "wip-new" and 'set "--branch" to wip-new' in doc[ "reinstall" ]
     assert "no longer exists" in notifier.sent[ 0 ][ 0 ] and "does not resolve" in notifier.sent[ 0 ][ 1 ]
 
 
@@ -700,7 +785,7 @@ def test_the_live_notifier_falls_back_to_the_live_post_key_recipient_and_environ
 
 def test_the_reinstall_command_quotes_the_branch_for_the_shell():
     command = dd.reinstall_command( "/main", "/py", 300, "/bin/claude", "wip; rm -rf x" )
-    assert command.endswith( "--branch 'wip; rm -rf x'" ) and command.startswith( "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --install --cap 300" )
+    assert "set \"--branch\" to 'wip; rm -rf x' in the duplicate-check entry" in command
 
 
 def test_an_idle_pinned_branch_with_only_older_branches_beside_it_is_not_refused( repo, tmp_path ):
@@ -711,3 +796,607 @@ def test_an_idle_pinned_branch_with_only_older_branches_beside_it_is_not_refused
     assert dd.branch_guard( repo, "wip-pinned", NOW + datetime.timedelta( days=10 ) ) is None, "idle for days, still the newest work there is"
     branched( repo, "wip-newer", 2 )
     assert dd.branch_guard( repo, "wip-pinned", NOW )[ "newest" ] == "wip-newer", "the same pin is refused once a newer branch exists"
+
+
+def test_every_run_appends_one_history_line_and_the_result_file_carries_the_schema_version_and_start_time( repo, tmp_path ):
+    history( repo )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    doc    = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    lines  = hist.read_lines( folder )
+    assert len( lines ) == 1 and lines[ 0 ][ "run_file" ] == "2026-11-03-120000-hand.json" and lines[ 0 ][ "status" ] == "ok"
+    assert doc[ "schema_version" ] == hist.SCHEMA_VERSION and doc[ "started_at" ] == NOW.isoformat() and lines[ 0 ][ "started_at" ] == NOW.isoformat()
+    assert ( lines[ 0 ][ "judged" ], lines[ 0 ][ "judge_calls" ], lines[ 0 ][ "left_to_judge" ], lines[ 0 ][ "mode" ] ) == ( 3, 3, 0, "daily" )
+
+
+def test_a_failed_run_appends_a_line_with_the_same_keys_and_the_result_file_gains_the_unmeasured_keys_as_none( repo, tmp_path ):
+    history( repo )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    doc = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", 10, None, parts_of( tmp_path ) )
+    good, bad = hist.read_lines( folder )
+    assert set( good ) == set( bad ) and bad[ "status" ] == "failed" and bad[ "failure" ].startswith( "claude_binary: " ) and bad[ "left_to_judge" ] is None
+    assert all( doc[ k ] is None for k in dd.UNREACHED ) and doc[ "schema_version" ] == hist.SCHEMA_VERSION
+
+
+def folder_of( tmp_path ): return tmp_path / "io" / "duplicate-check-daily"
+
+
+def test_with_a_ceiling_the_cap_is_the_number_of_definitions_to_judge_when_that_is_under_the_ceiling( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    doc   = dd.run( repo, NOW, "cron", None, "/bin/claude", parts, ceiling=10 )
+    assert ( doc[ "cap" ], doc[ "ceiling" ], doc[ "judge_calls" ], doc[ "status" ], doc[ "judged" ] ) == ( 3, 10, 3, "ok", 3 ), "three definitions, three calls, nothing carried"
+    again = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", None, "/bin/claude", parts, ceiling=10 )
+    assert ( again[ "cap" ], again[ "judge_calls" ], again[ "status" ] ) == ( 0, 0, "ok" ), "nothing new, so nothing to pay for"
+
+
+def test_with_a_ceiling_below_the_work_the_ceiling_is_the_cap_and_the_rest_carries_to_a_run_that_finishes_it( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    one   = dd.run( repo, NOW, "cron", None, "/bin/claude", parts, ceiling=2 )
+    assert ( one[ "cap" ], one[ "judge_calls" ], one[ "status" ], len( one[ "left_to_judge" ] ) ) == ( 2, 2, "carried", 1 )
+    two   = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", None, "/bin/claude", parts, ceiling=2 )
+    assert ( two[ "status" ], two[ "judge_calls" ], two[ "left_to_judge" ] ) == ( "ok", 1, [] ), "the three-call day was finished in two runs of at most two calls"
+
+
+def test_a_baseline_run_judges_every_definition_of_the_tree_leaves_last_success_alone_and_marks_the_baseline_complete( repo, tmp_path ):
+    history( repo )
+    folder = folder_of( tmp_path )
+    doc    = dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path ), ceiling=100, baseline=True )
+    assert doc[ "mode" ] == "baseline" and doc[ "judged" ] == 5 and doc[ "judge_calls" ] == 5 and doc[ "status" ] == "ok", "s1, old, a1, a2 and a3: the tree, not the 24 hours"
+    assert not ( folder / dd.LAST_SUCCESS ).exists() and dd.read_baseline( folder )[ "status" ] == dd.BASELINE_DONE
+    assert hist.read_lines( folder )[ 0 ][ "mode" ] == "baseline"
+
+
+def test_a_baseline_that_the_cap_cuts_short_stays_in_progress_and_later_runs_finish_it_then_do_nothing( repo, tmp_path ):
+    history( repo )
+    folder = folder_of( tmp_path )
+    parts  = parts_of( tmp_path )
+    one    = dd.run( repo, NOW, "hand", 2, "/bin/claude", parts, baseline=True )
+    assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 2 and len( one[ "left_to_judge" ] ) == 3
+    assert dd.read_baseline( folder ) == { "status": dd.BASELINE_OPEN, "end": git( repo, "rev-parse", "main" ), "left_to_judge": 3, "at": NOW.isoformat(), "branch": "main" }
+    two    = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts, baseline=True )
+    assert two[ "judge_calls" ] == 3 and two[ "status" ] == "ok" and dd.read_baseline( folder )[ "status" ] == dd.BASELINE_DONE
+    calls = parts[ "backend" ].calls
+    three  = dd.run( repo, NOW + datetime.timedelta( minutes=2 ), "hand", 10, "/bin/claude", parts, baseline=True )
+    assert three[ "note" ] == "baseline complete" and three[ "judge_calls" ] == 0 and parts[ "backend" ].calls == calls and three[ "mode" ] == "baseline"
+
+
+def test_a_baseline_run_does_not_move_the_daily_marker_so_the_daily_window_still_starts_where_it_did( repo, tmp_path ):
+    c1, c2, c3 = history( repo )
+    folder = folder_of( tmp_path )
+    dd.write_json( folder / dd.LAST_SUCCESS, { "commit": c1, "at": NOW.isoformat() } )
+    dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path ), ceiling=100, baseline=True )
+    assert dd.read_last_success( folder )[ "commit" ] == c1
+
+
+def test_the_baseline_window_is_the_whole_branch_and_a_tree_with_no_source_files_has_no_definitions( repo, tmp_path ):
+    first = commit( repo, { "README.md": "hi" }, "readme", 30 )
+    assert dd.baseline_window( repo ) == { "start": first, "end": first, "commits": [] }
+    assert dd.baseline_definitions( repo, dd.baseline_window( repo ) ) == { "defs": [], "commit_of": { }, "test_dropped": 0 }
+    assert dd.read_baseline( folder_of( tmp_path ) ) is None
+
+
+def rows_of( *carried ):
+    """Ensures: returns daily history lines that carried these counts, one a day back."""
+    return [ { "mode": "daily", "status": "carried", "carried": n, "started_at": ( NOW - datetime.timedelta( days=len( carried ) - i ) ).isoformat() } for i, n in enumerate( carried ) ]
+
+
+def seed( tmp_path, *carried ):
+    """Ensures: writes the history lines of earlier daily runs."""
+    for row in rows_of( *carried ): hist.append_line( folder_of( tmp_path ), row )
+
+
+def test_the_rising_guard_names_the_series_and_tells_rick_once_per_run_through_the_notifier( tmp_path ):
+    seed( tmp_path, 1, 2 )
+    notifier = Notifier()
+    got = dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b", "c" ] }, NOW, 2, notifier )
+    assert got == { "runs": 2, "series": [ 1, 2, 3 ], "notified": True }
+    assert "count left to judge rose on 2 runs in a row, to 3" in notifier.sent[ 0 ][ 0 ] and "left to judge, oldest run first: 1, 2, 3" in notifier.sent[ 0 ][ 1 ] and "/" not in notifier.sent[ 0 ][ 0 ]
+    assert "carried" not in notifier.sent[ 0 ][ 0 ] + notifier.sent[ 0 ][ 1 ] and "owed" not in notifier.sent[ 0 ][ 0 ] + notifier.sent[ 0 ][ 1 ]
+
+
+@pytest.mark.parametrize( "notifier,sent", [ ( None, False ), ( Notifier( answer=False ), False ), ( Notifier( answer=RuntimeError( "down" ) ), False ) ] )
+def test_a_missing_refusing_or_broken_notifier_leaves_the_guard_result_with_notified_false( tmp_path, notifier, sent ):
+    seed( tmp_path, 1, 2 )
+    got = dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b", "c" ] }, NOW, 2, notifier )
+    assert got[ "notified" ] is sent and got[ "series" ] == [ 1, 2, 3 ]
+
+
+def test_a_fall_or_a_flat_step_or_too_little_history_raises_no_alarm( tmp_path ):
+    seed( tmp_path, 5, 2 )
+    notifier = Notifier()
+    assert dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b", "c" ] }, NOW, 2, notifier ) is None
+    assert dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b" ] }, NOW, 1, notifier ) is None
+    assert dd.rising_guard( folder_of( tmp_path / "none" ), { "status": "carried", "trigger": "cron", "left_to_judge": [ "a" ] }, NOW, 2, notifier ) is None
+    assert notifier.sent == []
+
+
+def test_a_daily_run_whose_left_to_judge_count_rose_on_the_last_runs_records_rising_and_alerts_and_a_baseline_run_never_does( repo, tmp_path ):
+    history( repo )
+    seed( tmp_path, 0, 1 )
+    notifier = Notifier()
+    doc = dd.run( repo, NOW, "cron", 1, "/bin/claude", parts_of( tmp_path, notifier=notifier ), rise_limit=2 )
+    assert len( doc[ "left_to_judge" ] ) == 2 and doc[ "rising" ] == { "runs": 2, "series": [ 0, 1, 2 ], "notified": True } and len( notifier.sent ) == 1
+    base = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 1, "/bin/claude", parts_of( tmp_path, notifier=notifier ), baseline=True, rise_limit=1 )
+    assert "rising" not in base and len( notifier.sent ) == 1
+
+
+def test_a_daily_run_whose_backlog_is_falling_has_no_rising_key( repo, tmp_path ):
+    history( repo )
+    seed( tmp_path, 9, 8 )
+    doc = dd.run( repo, NOW, "cron", 1, "/bin/claude", parts_of( tmp_path, notifier=Notifier() ), rise_limit=2 )
+    assert "rising" not in doc
+
+
+def test_the_cron_lines_with_a_ceiling_carry_ceiling_and_not_cap_and_a_baseline_line_runs_at_eleven_oh_seven_before_the_reboot_line():
+    plain = lines_of( cap=None, ceiling=1500 )
+    assert len( plain ) == 2 and all( "--ceiling 1500 --claude-cli-path" in l and "--cap" not in l for l in plain )
+    with_base = lines_of( cap=None, ceiling=1500, baseline=True )
+    assert len( with_base ) == 3 and with_base[ 1 ].startswith( "7 11 * * * " ) and " --trigger cron --baseline >> " in with_base[ 1 ] and with_base[ 2 ].startswith( "@reboot" )
+    assert not any( "--baseline" in l for l in plain )
+
+
+def test_the_status_reads_none_partly_and_fully_installed_with_or_without_the_baseline_line():
+    tag = dd.CRON_TAG
+    status = lambda text: dd.lt.status_text( text, tag, dd.INSTALLED_LINES )
+    assert status( "" ) == "not installed" and status( f"0 1 * * * x {tag}\n" ) == "partly installed: 1 lines"
+    assert status( f"a {tag}\nb {tag}\nother\n" ) == "installed: 2 lines" and status( f"a {tag}\nb {tag}\nc {tag}\n" ) == "installed: 3 lines"
+    assert status( f"a {tag}\n" * 5 ) == "partly installed: 5 lines"
+
+
+def test_main_takes_a_ceiling_or_a_cap_but_not_both_and_prints_the_baseline_line_when_asked( tmp_path, cron ):
+    with pytest.raises( SystemExit ): dd.main( [ "--cap", "1", "--ceiling", "2", "--root", "." ] )
+    code, out, _ = cron_main( tmp_path, [ "--print-install", "--ceiling", "1500", "--with-baseline", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron )
+    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 3 and "--ceiling 1500" in out[ 0 ] and "--baseline" in out[ 0 ]
+
+
+def test_main_passes_the_ceiling_the_baseline_flag_and_the_rise_limit_to_the_run( repo, tmp_path, monkeypatch ):
+    history( repo )
+    monkeypatch.setattr( dd.model_transport, "configure", lambda path=None: None )
+    seen = {}
+    monkeypatch.setattr( dd, "run", lambda *a, **k: seen.update( k ) or { "status": "ok", "trigger": "hand" } )
+    argv = [ "--ceiling", "7", "--baseline", "--rise-limit", "5", "--root", str( repo ), "--claude-cli-path", "/bin/claude" ]
+    assert dd.main( argv, parts=parts_of( tmp_path ), now=NOW, out=lambda text: None ) == 0
+    assert ( seen[ "ceiling" ], seen[ "baseline" ], seen[ "rise_limit" ] ) == ( 7, True, 5 )
+
+
+HOLDER = "import fcntl, sys, time; h = open( sys.argv[ 1 ], 'a' ); fcntl.flock( h, fcntl.LOCK_EX ); print( 'held', flush=True ); time.sleep( 60 )"
+
+
+def hold_from_another_process( data_dir ):
+    """Ensures: returns a live process holding the run lock under data_dir, once it says so."""
+    import sys
+    folder = pathlib.Path( data_dir ) / "duplicate-check-daily"
+    folder.mkdir( parents=True, exist_ok=True )
+    proc = subprocess.Popen( [ sys.executable, "-c", HOLDER, str( folder / dd.RUN_LOCK ) ], stdout=subprocess.PIPE, text=True )
+    assert proc.stdout.readline().strip() == "held"
+    return proc
+
+
+def test_the_run_lock_is_refused_while_another_process_holds_it_and_is_free_once_that_process_ends( tmp_path ):
+    proc = hold_from_another_process( tmp_path )
+    try:
+        with dd.run_lock( tmp_path ) as held: assert held is False
+    finally:
+        proc.kill()
+        proc.wait()
+    with dd.run_lock( tmp_path ) as held: assert held is True, "a killed holder leaves nothing behind"
+    with dd.run_lock( tmp_path ) as first:
+        with dd.run_lock( tmp_path ) as second: assert ( first, second ) == ( True, False ), "two holders in one process are told apart too"
+    with dd.run_lock( tmp_path ) as again: assert again is True, "and the lock is let go when the block ends"
+
+
+def test_a_second_run_exits_cleanly_without_running_while_one_holds_the_lock( repo, tmp_path, monkeypatch ):
+    monkeypatch.setattr( dd.model_transport, "configure", lambda path=None: None )
+    calls = []
+    monkeypatch.setattr( dd, "run", lambda *a, **k: calls.append( 1 ) or { "status": "ok", "trigger": "reboot" } )
+    argv = [ "--cap", "1", "--trigger", "reboot", "--root", str( repo ), "--claude-cli-path", "/bin/claude" ]
+    proc, out = hold_from_another_process( tmp_path / "io" ), [ ]
+    try: code = dd.main( argv, parts=parts_of( tmp_path ), now=NOW, out=out.append )
+    finally:
+        proc.kill()
+        proc.wait()
+    assert code == 0 and calls == [ ] and json.loads( out[ 0 ] ) == { "status": "skipped", "trigger": "reboot", "note": "another run holds the run lock" }
+    out.clear()
+    assert dd.main( argv, parts=parts_of( tmp_path ), now=NOW, out=out.append ) == 0 and calls == [ 1 ] and json.loads( out[ 0 ] )[ "status" ] == "ok", "with the lock free the run goes ahead"
+
+
+def failed_line( tmp_path ):
+    """Ensures: returns the one history line a failed run left, read back from runs.jsonl."""
+    got = hist.read_lines( folder_of( tmp_path ) )
+    assert len( got ) == 1
+    return got[ 0 ]
+
+
+def test_a_branch_guard_refusal_appends_a_failed_history_line_and_the_file_holds_the_schema_and_the_unmeasured_keys_as_none( repo, tmp_path ):
+    stale_repo( repo )
+    doc  = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path ), branch="wip-old" )
+    line = failed_line( tmp_path )
+    assert ( line[ "status" ], line[ "failure" ], line[ "run_file" ], line[ "judge_calls" ] ) == ( "failed", "branch_guard: stale_branch", "2026-11-03-120000-cron.json", 0 )
+    assert doc[ "schema_version" ] == hist.SCHEMA_VERSION and all( doc[ k ] is None for k in dd.UNREACHED )
+
+
+def test_a_failure_while_judging_appends_a_failed_history_line_naming_the_stage_and_the_error_and_keeps_the_window( repo, tmp_path, monkeypatch ):
+    history( repo )
+    monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh, left=None: ( _ for _ in () ).throw( RuntimeError( "pool broke" ) ) )
+    doc  = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    line = failed_line( tmp_path )
+    assert line[ "failure" ] == "judging: RuntimeError: pool broke" and line[ "window_end" ] == doc[ "window" ][ "end" ] and line[ "left_to_judge" ] is None
+    assert doc[ "schema_version" ] == hist.SCHEMA_VERSION and doc[ "findings" ] is None and not ( folder_of( tmp_path ) / dd.LAST_SUCCESS ).exists()
+
+
+def test_a_failure_choosing_the_window_is_recorded_as_a_failed_setup_run_that_moves_nothing( repo, tmp_path, monkeypatch ):
+    history( repo )
+    monkeypatch.setattr( dd, "window_of", lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "git failed" ) ) )
+    doc  = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    line = failed_line( tmp_path )
+    assert ( doc[ "status" ], doc[ "stage" ], doc[ "error" ] ) == ( "failed", dd.STAGE_SETUP, "RuntimeError: git failed" ) and doc[ "window" ] is None
+    assert line[ "failure" ] == "setup: RuntimeError: git failed" and line[ "window_end" ] is None and doc[ "judge_calls" ] == 0
+    assert not ( folder_of( tmp_path ) / dd.LAST_SUCCESS ).exists() and len( worktrees( repo ) ) == 1
+
+
+def test_a_failure_making_the_worktree_is_recorded_with_the_window_and_the_half_made_tree_is_released( repo, tmp_path, monkeypatch ):
+    history( repo )
+    released = []
+    monkeypatch.setattr( dd.source_at, "ensure_worktree", lambda *a, **k: ( _ for _ in () ).throw( OSError( "disk full" ) ) )
+    monkeypatch.setattr( dd, "release", lambda root, tree: released.append( tree ) )
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert doc[ "stage" ] == dd.STAGE_SETUP and doc[ "error" ] == "OSError: disk full" and doc[ "window" ][ "end" ] == git( repo, "rev-parse", "main" )
+    assert len( released ) == 1 and released[ 0 ].name.startswith( dd.WORKTREE_PREFIX ) and failed_line( tmp_path )[ "failure" ] == "setup: OSError: disk full"
+
+
+def test_a_frozen_configuration_that_fails_to_load_after_the_prerequisites_passed_is_recorded_as_a_failed_setup_run( repo, tmp_path ):
+    history( repo )
+    good  = parts_of( tmp_path )[ "verify" ]
+    def verify():
+        if next( calls ) == 0: return good()
+        raise err.DuplicateCheckError( err.CONFIG_DRIFT, "changed between calls" )
+    calls = iter( range( 5 ) )
+    doc   = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path, verify=verify ) )
+    assert doc[ "stage" ] == dd.STAGE_SETUP and "changed between calls" in doc[ "error" ] and failed_line( tmp_path )[ "status" ] == "failed"
+
+
+def test_baseline_definitions_map_each_definition_to_the_end_commit_and_read_the_pools_files( repo ):
+    c1, c2, c3 = history( repo )
+    commit( repo, { "tools/outside.py": function( "outside", [ "MARKO" ], 3 ), "client/lib.min.js": "function minified(){return 1}\n", "client/types.d.ts": "export declare function typed(): void;\n" }, "files the pool skips", 1 )
+    window = dd.baseline_window( repo )
+    tree   = repo
+    got    = dd.baseline_definitions( tree, window )
+    names  = sorted( d[ "name" ] for d in got[ "defs" ] )
+    assert window[ "start" ] == c1 and window[ "end" ] == git( repo, "rev-parse", "main" ) != c1
+    pooled = sorted( d[ "name" ] for d in [ *dd.label_prep.tree_definitions( tree )[ "server_defs" ], *dd.label_prep.tree_definitions( tree )[ "client_defs" ] ] )
+    assert "minified" not in names and "typed" not in names, "the pool skips .min.js and .d.ts files, so the baseline does not ask for them"
+    assert names == pooled == [ "a1", "a2", "a3", "old", "outside", "s1" ] and all( d[ "origin" ] == "new" for d in got[ "defs" ] )
+    assert set( got[ "commit_of" ].values() ) == { window[ "end" ] } and set( got[ "commit_of" ] ) == { d[ "id" ] for d in got[ "defs" ] }
+    assert [ ( d[ "file" ], d[ "line" ] ) for d in got[ "defs" ] ] == sorted( ( d[ "file" ], d[ "line" ] ) for d in got[ "defs" ] )
+
+
+def test_a_baseline_finding_carries_the_end_commit_in_its_history_line( repo, tmp_path ):
+    history( repo )
+    dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path ), ceiling=100, baseline=True )
+    line = hist.read_lines( folder_of( tmp_path ) )[ 0 ]
+    assert set( line[ "findings_by_commit" ] ) == { git( repo, "rev-parse", "main" ) } and line[ "findings" ] == sum( line[ "findings_by_commit" ].values() )
+
+
+def test_the_reinstall_text_is_the_same_whatever_the_baseline_or_limit_a_run_had( repo, tmp_path ):
+    stale_repo( repo )
+    plain = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path ), branch="wip-old", ceiling=1500 )
+    held  = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: True ), branch="wip-old", ceiling=1500 )
+    asked = dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: False ), branch="wip-old", ceiling=1500, baseline=True )
+    assert plain[ "reinstall" ] == held[ "reinstall" ] == asked[ "reinstall" ], "the registry holds the limit, the binary and the baseline, so the text does not carry them"
+    text = dd.reinstall_command( "/m", "/py", 40, "/c", "b" )
+    first, second, third = text.split( "\n" )
+    assert third == dd.ceiling_note(), "no config means no printed value"
+    assert first == "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time."
+    assert second.startswith( "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src " ) and second.endswith( " -m lupin_mcp.cron_generate --install" )
+
+
+def test_the_crontab_reader_finds_a_tagged_baseline_line_and_nothing_else( cron ):
+    assert dd.baseline_installed( cron[ "cmd" ] ) is False, "no crontab at all"
+    cron[ "file" ].write_text( f"0 * * * * other --baseline\n7 11 * * * run --baseline {dd.CRON_TAG}\n" )
+    assert dd.baseline_installed( cron[ "cmd" ] ) is True
+    cron[ "file" ].write_text( f"0 10 * * * run --cap 1 {dd.CRON_TAG}\n0 * * * * other --baseline\n" )
+    assert dd.baseline_installed( cron[ "cmd" ] ) is False, "a baseline flag on another tool's line is not ours"
+
+
+def test_the_crontab_reader_answers_false_when_the_command_cannot_run_and_reads_the_environment_by_default( monkeypatch ):
+    assert dd.baseline_installed( [ "/no/such/crontab-binary" ] ) is False
+    seen = []
+    monkeypatch.setattr( dd.subprocess, "run", lambda cmd, **k: seen.append( cmd ) or subprocess.CompletedProcess( cmd, 1, stdout="", stderr="" ) )
+    monkeypatch.setenv( "DUPLICATE_CHECK_DAILY_CRONTAB", "mycron" )
+    assert dd.baseline_installed() is False and seen == [ [ "mycron", "-l" ] ]
+
+
+def test_the_live_parts_give_the_branch_guard_the_crontab_reader():
+    assert dd.live_parts()[ "cron_has_baseline" ] is dd.baseline_installed
+
+
+def test_the_rising_alert_fires_on_the_first_crossing_only_and_a_fall_resets_it( repo, tmp_path ):
+    seed( tmp_path, 1, 2 )
+    notifier = Notifier()
+    doc = { "status": "carried", "trigger": "cron", "left_to_judge": [ "a", "b", "c" ] }
+    first = dd.rising_guard( folder_of( tmp_path ), doc, NOW, 2, notifier )
+    assert first[ "notified" ] is True and "repeat" not in first
+    hist.append_line( folder_of( tmp_path ), hist.line_of( { **doc, "started_at": NOW.isoformat() }, "x.json" ) )
+    again = dd.rising_guard( folder_of( tmp_path ), { **doc, "left_to_judge": [ 1, 2, 3, 4 ] }, NOW + datetime.timedelta( hours=6 ), 2, notifier )
+    assert again[ "repeat" ] is True and again[ "notified" ] is False and again[ "series" ] == [ 2, 3, 4 ] and len( notifier.sent ) == 1
+    hist.append_line( folder_of( tmp_path ), hist.line_of( { **doc, "left_to_judge": [], "started_at": ( NOW + datetime.timedelta( hours=7 ) ).isoformat() }, "y.json" ) )
+    after_fall = dd.rising_guard( folder_of( tmp_path ), doc, NOW + datetime.timedelta( hours=8 ), 2, notifier )
+    assert after_fall is None, "after a fall the series is short again"
+
+
+def test_baseline_definitions_include_the_client_script_files_under_the_pools_client_directory( repo ):
+    history( repo )
+    js = "function widgetTotal( items ) {\n    let total = 0;\n    for ( const item of items ) { total += item.price * item.count; }\n    return total;\n}\n"
+    commit( repo, { f"{dd.label_prep.CLIENT_DIR}/widget.js": js }, "a client script", 1 )
+    got = dd.baseline_definitions( repo, dd.baseline_window( repo ) )
+    mine = [ d for d in got[ "defs" ] if d[ "file" ] == f"{dd.label_prep.CLIENT_DIR}/widget.js" ]
+    assert [ d[ "name" ] for d in mine ] == [ "widgetTotal" ] and mine[ 0 ][ "origin" ] == "new" and mine[ 0 ][ "id" ] in got[ "commit_of" ]
+
+
+def rule_on( tmp_path, run_stem, finding_ids, verdict="DISTINCT" ):
+    """Ensures: appends one verdict line per finding id to the folder's verdicts file."""
+    path = tmp_path / "io" / "duplicate-check-daily" / "verdicts.jsonl"
+    with path.open( "a" ) as f:
+        for fid in finding_ids: f.write( json.dumps( { "run": run_stem, "finding": fid, "verdict": verdict, "class": "pins-a-different-case", "by": "cheech", "ts": "2026-11-09T15:00:00Z" } ) + "\n" )
+
+
+def test_a_finding_with_a_verdict_line_is_left_out_of_the_next_run_and_the_filer_gets_none( repo, tmp_path ):
+    history( repo )
+    first  = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    stem   = results( tmp_path )[ 0 ].stem
+    ids    = [ f[ "id" ] for f in first[ "findings" ] ]
+    assert len( ids ) == 1
+    rule_on( tmp_path, stem, ids, "EXTEND" )
+    ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).unlink()
+    filed  = []
+    second = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path, filer=lambda found, folder: filed.append( found ) or {} ) )
+    assert second[ "findings" ] == [] and filed == [ [] ] and "settled_error" not in second
+
+
+def test_a_damaged_verdicts_file_leaves_nothing_out_and_the_record_says_why( repo, tmp_path ):
+    history( repo )
+    dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    ( tmp_path / "io" / "duplicate-check-daily" / "verdicts.jsonl" ).write_text( "not json\n" )
+    ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).unlink()
+    second = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert len( second[ "findings" ] ) == 1 and "verdicts.jsonl line 1 is not a verdict record" in second[ "settled_error" ]
+
+
+def test_two_new_definitions_that_repeat_each_other_are_one_finding_the_lowest_id_whichever_side_was_judged():
+    fresh = [ { "id": "n2", "name": "b", "file": "f2.py", "line": 2, "text": "tb" }, { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta" } ]
+    pool  = [ { "id": "p1", "name": "c", "file": "f3.py", "line": 3, "text": "tc" } ]
+    win   = { "start": "s", "end": "e", "commits": 1 }
+    for group in ( [ "n1", "n2" ], [ "n2", "n1" ] ):
+        got = dd.findings_of( [ group ], fresh, pool, win, {} )
+        assert [ f[ "id" ] for f in got ] == [ "n1" ] and got[ 0 ][ "others" ] == [ { "id": "n2", "name": "b", "file": "f2.py" } ]
+    three = dd.findings_of( [ [ "n1", "n2", "p1" ] ], fresh, pool, win, {} )
+    assert [ f[ "id" ] for f in three ] == [ "n1" ] and [ o[ "id" ] for o in three[ 0 ][ "others" ] ] == [ "n2", "p1" ]
+    assert dd.findings_of( [ [ "p1", "q" ], [ "n2", "p1" ] ], fresh, pool, win, {} )[ 0 ][ "id" ] == "n2", "a cluster of pool members alone gives none, the next gives its new one"
+
+
+def test_a_verdict_on_either_new_definition_of_a_cluster_settles_the_whole_cluster():
+    fresh = [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta" }, { "id": "n2", "name": "b", "file": "f2.py", "line": 2, "text": "tb" } ]
+    pool  = [ { "id": "p1", "name": "c", "file": "f3.py", "line": 3, "text": "tc" } ]
+    win   = { "start": "s", "end": "e", "commits": 1 }
+    key   = lambda i, t: dd.filing.correlation_key( i, t )
+    group = [ [ "n1", "n2", "p1" ] ]
+    assert [ f[ "id" ] for f in dd.findings_of( group, fresh, pool, win, {} ) ] == [ "n1" ]
+    assert dd.findings_of( group, fresh, pool, win, {}, None, { key( "n1", "ta" ) } ) == [], "the lowest id's verdict settles it"
+    assert dd.findings_of( group, fresh, pool, win, {}, None, { key( "n2", "tb" ) } ) == [], "the other side's verdict settles it too"
+    assert dd.findings_of( group, fresh, pool, win, {}, None, { key( "n2", "changed" ) } ) != [], "a verdict on other text is not this cluster's"
+    assert len( dd.findings_of( [ [ "n1", "p1" ], [ "n2", "p1" ] ], fresh, pool, win, {}, None, { key( "n2", "tb" ) } ) ) == 1, "only the settled cluster is left out"
+
+
+SMOKE = "def quick_smoke_test():\n    def helper( items ):\n        tags = [ \"MARKS\" ]\n        out = []\n        for item in items:\n            out.append( item * 9 )\n        return out\n    return helper( [ 1 ] )\n"
+
+
+@pytest.mark.parametrize( "file, name, expected", [
+    ( "src/tests/unit/test_a.py", "f", True ), ( "src/cosa/tests/unit/x.py", "f", True ), ( "tests/x.py", "f", True ), ( "src/cosa/agents/foo/tests/x.py", "f", True ),
+    ( "src/conftest.py", "f", True ), ( "conftest.py", "f", True ), ( "src/web/a.test.ts", "f", True ), ( "src/web/a.test.js", "f", True ),
+    ( "src/pkg/mod.py", "quick_smoke_test", True ), ( "src/pkg/mod.py", "quick_smoke_test.<locals>.helper", True ), ( "src/pkg/mod.py", "Cls.quick_smoke_test", True ),
+    ( "src/pkg/mod.py", "helper", False ), ( "src/pkg/mod.py", "quick_smoke_tester", False ), ( "src/pkg/contest.py", "f", False ), ( "src/pkg/attest.py", "f", False ),
+    ( "src/web/a.ts", "f", False ), ( "src/latests/a.py", "f", False ), ( "src/web/a.spec.ts", "f", False ), ( "src/pkg/test/a.py", "f", False ), ( "src/pkg/thing_test.py", "f", False ),
+    ( "src/cosa/agents/test_suite/test_runner.py", "f", False ), ( "src/cosa/rest/routers/test_suite.py", "f", False ),
+    ( "src/cosa/rest/test_suite_completion_watchdog.py", "f", False ), ( "src/cosa/rest/routers/notifications/test_notifications.py", "f", False ),
+    ( "src/scripts/test_websocket_notification.py", "f", False ),
+] )
+def test_is_test_code_names_each_kind_of_test_code_and_nothing_else( file, name, expected ):
+    assert dd.is_test_code( file, name ) is expected
+
+
+def test_without_test_code_keeps_order_and_counts_what_it_left_out():
+    defs = [ { "file": "a.py", "name": "x" }, { "file": "src/tests/t.py", "name": "y" }, { "file": "b.py", "name": "z" } ]
+    assert dd.without_test_code( defs ) == ( [ defs[ 0 ], defs[ 2 ] ], 1 )
+    assert dd.without_test_code( [] ) == ( [], 0 )
+
+
+def test_a_window_that_adds_only_test_files_owes_nothing_and_a_mixed_window_owes_only_the_code( repo, tmp_path ):
+    commit( repo, { "client/base.py": function( "base", [ "MARKB" ], 2 ) }, "base", 48 )
+    commit( repo, { "tests/test_t.py": function( "test_one", [ "MARKT" ], 3 ), "client/conftest.py": function( "fix", [ "MARKF" ], 4 ), "client/mod.py": SMOKE }, "tests only", 5 )
+    only   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert only[ "backlog_total" ] == 0 and only[ "judge_calls" ] == 0
+    assert only[ "test_code_dropped" ][ "backlog" ] == 4, "test_one, fix, quick_smoke_test and its local helper"
+    commit( repo, { "client/code.py": function( "real", [ "MARKR" ], 5 ), "tests/test_u.py": function( "test_two", [ "MARKU" ], 6 ) }, "mixed", 2 )
+    mixed = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert mixed[ "backlog_total" ] == 1 and mixed[ "test_code_dropped" ][ "backlog" ] == 1
+
+
+def test_the_pool_leaves_test_code_out_and_reports_how_many_and_a_run_records_it( repo, tmp_path ):
+    commit( repo, { "client/old.py": function( "old", [ "MARKO" ], 1 ) }, "base", 48 )
+    commit( repo, { "client/code.py": function( "real", [ "MARKR" ], 5 ), "tests/test_fake.py": function( "real", [ "MARKR" ], 5 ), "client/smoke.py": SMOKE }, "pool", 1 )
+    left = []
+    pool = dd.pool_without_earlier_versions( repo, [], left )
+    names = sorted( ( d[ "file" ], d[ "name" ] ) for d in pool )
+    assert ( "client/code.py", "real" ) in names
+    assert not [ n for n in names if dd.is_test_code( *n ) ], "no test definition is offered as a candidate"
+    assert left[ 0 ] == 2, "the smoke test and its local; the pool's file list does not read a tests/ folder of this fixture"
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert doc[ "test_code_dropped" ] == { "backlog": 3, "pool": 2 }, "backlog: test_fake, the smoke test and its local"
+    assert dd.pool_without_earlier_versions( repo, [] ) == pool, "the count argument is optional"
+
+
+def test_a_baseline_run_leaves_test_code_out_and_counts_it( repo ):
+    commit( repo, { "client/code.py": function( "real", [ "MARKR" ], 5 ), "client/smoke.py": SMOKE }, "base", 1 )
+    got = dd.baseline_definitions( repo, dd.baseline_window( repo ) )
+    assert [ d[ "name" ] for d in got[ "defs" ] ] == [ "real" ]
+    assert got[ "test_dropped" ] == 2, "the smoke test and its local"
+
+
+def test_the_reinstall_text_is_pinned_to_a_literal():
+    assert dd.reinstall_command( "/m", "/py", 40, "/c", "b" ) == (
+        "In /m/src/conf/job-registry.json, set \"--branch\" to b in the duplicate-check entry's run.argv; the cron lines read it at run time.\n"
+        "If the schedule changed too, run: cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src .venv/bin/python -m lupin_mcp.cron_generate --install\n"
+        "The judge-call ceiling is not in the registry: it is the INI key `external repo lupin duplicate check ceiling` in src/conf/lupin-app.ini." )
+
+
+def manifest_of( tmp_path ):
+    path = tmp_path / "io" / "duplicate-check-daily" / dd.MANIFEST
+    return [ json.loads( l ) for l in path.read_text().splitlines() ] if path.exists() else []
+
+
+def test_each_judged_definition_gets_one_manifest_line_and_each_finding_names_the_model_that_ruled( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts )
+    lines = manifest_of( tmp_path )
+    cfg   = parts[ "verify" ]()
+    assert len( lines ) == doc[ "judged" ] == 3 and len( { l[ "id" ] for l in lines } ) == 3
+    assert all( l[ "run_file" ] == "2026-11-03-120000-hand.json" and l[ "model_id" ] == cfg[ "model_id" ] and l[ "config_sha" ] == cfg[ "config_sha" ] and l[ "time" ] == NOW.isoformat() for l in lines )
+    assert sorted( l[ "file" ] for l in lines ) == [ "client/a0.py", "client/a1.py", "client/a2.py" ]
+    assert doc[ "findings" ] and all( f[ "judge_model" ] == cfg[ "model_id" ] for f in doc[ "findings" ] )
+    dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts )
+    assert len( manifest_of( tmp_path ) ) == 3, "the empty second window adds no line"
+
+
+def test_a_definition_the_cap_left_is_not_in_the_manifest_until_a_later_run_judges_it( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    first = dd.run( repo, NOW, "hand", 1, "/bin/claude", parts )
+    assert len( manifest_of( tmp_path ) ) == first[ "judged" ] < 3
+
+
+def test_append_manifest_writes_nothing_and_makes_no_file_for_an_empty_list( tmp_path ):
+    dd.append_manifest( tmp_path / "none", [], { "model_id": "m", "config_sha": "s" }, "r.json", NOW )
+    assert not ( tmp_path / "none" ).exists()
+
+
+def test_the_manifest_names_the_model_that_ruled_a_definition_ruled_from_saved_rulings_and_the_run_model_for_the_others( tmp_path ):
+    cfg  = { "model_id": "claude-opus-5-5", "config_sha": "s" }
+    defs = [ { "id": "d-1", "file": "a.py" }, { "id": "d-2", "file": "b.py" } ]
+    dd.append_manifest( tmp_path / "io" / "duplicate-check-daily", defs, cfg, "r.json", NOW, reused={ "d-1": [ "claude-fable-5-1" ] } )
+    lines = { l[ "id" ]: l for l in manifest_of( tmp_path ) }
+    assert lines[ "d-1" ][ "model_id" ] == lines[ "d-1" ][ "reused_from_model" ] == "claude-fable-5-1", "a Fable ruling is not filed under Opus"
+    assert lines[ "d-2" ][ "model_id" ] == "claude-opus-5-5" and "reused_from_model" not in lines[ "d-2" ]
+
+
+def row( a, b, model, verdict="near_duplicate", reused=False ):
+    """Build a judge verdict row; a reused row carries reused_from_model, as judge_run writes it."""
+    return { "id": a, "candidate": b, "verdict": verdict, "model": model, **( { "reused_from_model": model } if reused else {} ) }
+
+
+def test_a_finding_names_the_models_of_the_rows_that_flag_its_cluster_not_the_run_model_and_marks_a_reused_ruling( ):
+    finding = { "id": "d-1", "others": [ { "id": "d-2", "name": "n", "file": "f" } ] }
+    saved   = [ row( "d-1", "d-2", "claude-fable-5-1", reused=True ), row( "d-1", "d-9", "claude-opus-5-5" ), row( "d-9", "d-1", "claude-opus-5-5" ) ]
+    assert dd.finding_judges( finding, saved, "claude-opus-5-5" ) == { "judge_model": "claude-fable-5-1", "reused_from_model": "claude-fable-5-1" }, "a Fable ruling is not filed as Opus"
+    mixed   = [ *saved, row( "d-2", "d-1", "claude-opus-5-5" ) ]
+    assert dd.finding_judges( finding, mixed, "claude-opus-5-5" ) == { "judge_model": "claude-fable-5-1+claude-opus-5-5", "reused_from_model": "claude-fable-5-1" }
+    fresh   = [ row( "d-2", "d-1", "claude-opus-5-5" ), row( "d-1", "d-2", "claude-opus-5-5", verdict="related" ) ]
+    assert dd.finding_judges( finding, fresh, "claude-opus-5-5" ) == { "judge_model": "claude-opus-5-5" }, "a related row flags nothing, and a new ruling has no reused_from_model"
+    assert dd.finding_judges( finding, [], "claude-opus-5-5" ) == { "judge_model": "claude-opus-5-5" }
+
+
+def test_a_run_under_another_model_files_findings_from_saved_rulings_as_judged_by_the_model_that_ruled_them( repo, tmp_path ):
+    history( repo )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    fable  = parts_of( tmp_path )
+    cfg    = fable[ "verify" ]()
+    budget = KeyConfig( { chs.DAILY_BUDGET_KEY: "claude-fable-5-1=100000, claude-opus-5-5=100000" } )      # the spend guard refuses a model with no budget, so both judges get one
+    fable[ "verify" ] = lambda: { **cfg, "model_id": "claude-fable-5-1" }
+    fable[ "config" ] = budget
+    first  = dd.run( repo, NOW, "hand", 10, "/bin/claude", fable )
+    assert first[ "judge_calls" ] == 3 and { f[ "judge_model" ] for f in first[ "findings" ] } == { "claude-fable-5-1" }
+    ( folder / dd.LAST_SUCCESS ).unlink()
+    opus   = parts_of( tmp_path )
+    opus[ "verify" ] = lambda: { **cfg, "model_id": "claude-opus-5-5" }
+    opus[ "config" ] = budget
+    second = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", opus )
+    assert second[ "judge_calls" ] == 0 and second[ "judged" ] == 3 and second[ "findings" ], "every ruling was read from the saved Fable ones"
+    assert all( f[ "judge_model" ] == f[ "reused_from_model" ] == "claude-fable-5-1" for f in second[ "findings" ] ), "a Fable ruling is not filed as Opus"
+    assert { l[ "model_id" ] for l in manifest_of( tmp_path )[ 3: ] } == { "claude-fable-5-1" }
+
+
+def test_a_judge_model_with_no_frozen_file_fails_the_frozen_prerequisite_by_name_and_judges_nothing( repo, tmp_path ):
+    history( repo )
+    def verify(): raise FileNotFoundError( 2, "No such file", "/conf/semdup-frozen-claude-opus-5-5.json" )
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, verify=verify ) )
+    assert doc[ "status" ] == "failed" and doc[ "prerequisite" ] == dd.PREREQ_FROZEN and "semdup-frozen-claude-opus-5-5.json" in doc[ "detail" ] and doc[ "judge_calls" ] == 0
+
+
+# ---- the daily call budget per model (row 40049d7f) ----
+
+def model_of( parts ): return parts[ "verify" ]()[ "model_id" ]
+
+
+def seed_calls( tmp_path, day, calls, model ):
+    """Ensures: appends one history line of calls started on the day, naming the model or None."""
+    stamp = datetime.datetime.fromisoformat( f"{day}T08:00:00+00:00" )
+    hist.append_line( tmp_path / "io" / "duplicate-check-daily", { **hist.line_of( { "status": "ok", "trigger": "cron", "started_at": stamp.isoformat(), "judge_calls": calls, "judge_model": model }, "seed.json" ) } )
+
+
+def test_a_spent_budget_skips_the_slot_with_no_call_and_moves_nothing( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    model = model_of( parts )
+    parts[ "config" ] = KeyConfig( { chs.DAILY_BUDGET_KEY: f"{model}=50" } )
+    seed_calls( tmp_path, "2026-11-03", 50, model )
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )
+    assert doc[ "status" ] == dd.SKIPPED and doc[ "judge_calls" ] == 0 and doc[ "judge_model" ] == model
+    assert "50 calls started today of 50" in doc[ "note" ] and chs.DAILY_BUDGET_KEY in doc[ "note" ]
+    assert parts[ "backend" ].calls == 0, "the fake backend was never reached"
+    assert not ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).exists(), "a skipped slot advances nothing"
+    assert len( worktrees( repo ) ) == 1, "the refusal comes before any worktree is made"
+    assert hist.read_lines( tmp_path / "io" / "duplicate-check-daily" )[ -1 ][ "status" ] == dd.SKIPPED
+
+
+def test_the_run_cap_is_lowered_to_the_calls_the_budget_leaves( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    model = model_of( parts )
+    parts[ "config" ] = KeyConfig( { chs.DAILY_BUDGET_KEY: f"{model}=50" } )
+    seed_calls( tmp_path, "2026-11-03", 48, model )
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )
+    assert doc[ "cap" ] == 2 and doc[ "judge_calls" ] <= 2 and doc[ "judge_model" ] == model, "ten were asked for, two were left"
+    assert doc[ "status" ] == "carried", "the cap left definitions unjudged, so they carry"
+
+
+def test_only_todays_calls_on_this_model_are_charged_except_lines_that_name_no_model( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    model = model_of( parts )
+    parts[ "config" ] = KeyConfig( { chs.DAILY_BUDGET_KEY: f"{model}=50" } )
+    seed_calls( tmp_path, "2026-11-02", 500, model )
+    seed_calls( tmp_path, "2026-11-03", 500, "some-other-model" )
+    assert dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )[ "status" ] == "ok", "yesterday's calls and another model's calls leave the budget whole"
+    seed_calls( tmp_path, "2026-11-03", 50, None )
+    assert dd.run( repo, NOW + datetime.timedelta( hours=1 ), "cron", 10, "/bin/claude", parts )[ "status" ] == dd.SKIPPED, "a line with no model is charged to this one"
+
+
+def test_a_model_the_budget_key_does_not_list_fails_the_run_at_setup_naming_the_key( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path, config=KeyConfig( { chs.DAILY_BUDGET_KEY: "claude-sonnet-5-5=10" } ) )
+    doc   = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )
+    assert doc[ "status" ] == "failed" and doc[ "stage" ] == dd.STAGE_SETUP and doc[ "judge_calls" ] == 0 and chs.DAILY_BUDGET_KEY in doc[ "error" ]
+    assert not ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).exists()
+
+
+def test_with_no_config_part_the_budget_comes_from_the_live_ini( repo, tmp_path, monkeypatch ):
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development" )
+    history( repo )
+    parts = parts_of( tmp_path )
+    del parts[ "config" ]
+    real = parts[ "verify" ]()
+    parts[ "verify" ] = lambda: { **real, "model_id": "claude-opus-5-5" }
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts )
+    assert doc[ "judge_model" ] == "claude-opus-5-5" and doc[ "status" ] == "ok", "the real INI lists claude-opus-5-5"

@@ -275,7 +275,7 @@ class TestFleetStatusVisual:
         # Pass the LOCATOR (not raw bytes) so the visual plugin applies its
         # animations="disabled" + mask handling; explicit .png so the baseline is
         # named correctly (plugin only auto-appends .png when name is None). Repo
-        # convention: test_multiplexer_phase6c_section_d_visual.py:161.
+        # convention: test_multiplexer_phase6c_section_d_visual.py.
         assert_snapshot( container, name="fleet-status-populated.png", snap_y=True )
 
 

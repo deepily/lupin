@@ -43,8 +43,6 @@ import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 
 # Bootstrap: this script runs before cosa is importable.
 _lupin_root = os.environ.get( "LUPIN_ROOT" )
@@ -54,6 +52,7 @@ _src_path = os.path.join( _lupin_root, "src" )
 if _src_path not in sys.path: sys.path.insert( 0, _src_path )
 
 from cosa.agents.test_suite.v2_client import submit_body, read_reply
+from cosa.utils.http_json import send_json
 
 
 BASE_URL      = "http://localhost:8000"
@@ -97,21 +96,10 @@ def _http( method, path, token=None, body=None, timeout=30 ):
 
     Returns ( status_code, decoded_json_or_text ).
     """
-    url  = f"{BASE_URL}{path}"
-    data = json.dumps( body ).encode() if body is not None else None
-    req  = urllib.request.Request( url, data=data, method=method )
-    req.add_header( "Content-Type", "application/json" )
-    if token:
-        req.add_header( "Authorization", f"Bearer {token}" )
-    try:
-        with urllib.request.urlopen( req, timeout=timeout ) as resp:
-            raw = resp.read().decode()
-            try:    return resp.status, json.loads( raw )
-            except json.JSONDecodeError: return resp.status, raw
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode()
-        try:    return e.code, json.loads( raw )
-        except json.JSONDecodeError: return e.code, raw
+    headers         = { "Authorization": f"Bearer {token}" } if token else None
+    status, raw, _  = send_json( f"{BASE_URL}{path}", payload=body, headers=headers, timeout=timeout, method=method )
+    try:    return status, json.loads( raw )
+    except json.JSONDecodeError: return status, raw
 
 
 def login():

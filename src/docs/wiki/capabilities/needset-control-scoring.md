@@ -1,20 +1,19 @@
 ---
 capability: needset-control-scoring
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.planted_purposes.stage_sources@187dea5976
   - lupin_mcp.reuse_needset.planted_purposes.write_lines@fa3a2a9983
   - lupin_mcp.reuse_needset.planted_purposes.load_lines@51f189492a
   - lupin_mcp.reuse_needset.planted_purposes.merged_store@8bf78fbc86
   - lupin_mcp.reuse_needset.planted_purposes.main@ac7a5240ed
-  - lupin_mcp.reuse_needset.control_report.same_job_labels@e0e07ae12b
+  - lupin_mcp.reuse_needset.control_report.same_job_labels@d727cc2042
   - lupin_mcp.reuse_needset.control_report.ranks_of@036d420ae3
   - lupin_mcp.reuse_needset.control_report.pair_row@fae561963e
   - lupin_mcp.reuse_needset.control_report.figures@12494561e3
   - lupin_mcp.reuse_needset.control_report.scored@812d8bd008
   - lupin_mcp.reuse_needset.planted_purposes.lines_path@458ba28195
   - lupin_mcp.reuse_needset.planted_purposes.is_ignored@080de7aef9
-  - lupin_mcp.reuse_needset.control_report.file_sha@02de889277
   - lupin_mcp.reuse_needset.control_report.content_words@6945de07d6
   - lupin_mcp.reuse_needset.control_report.word_overlap@b4707892e5
   - lupin_mcp.reuse_needset.control_report.position@2113b62ebe
@@ -35,6 +34,6 @@ The control plants 20 rewrites and scores whether the checker finds them. A real
 - `pair_row` builds one pair's row from the checker's receipt. Retrieved means in the ids sent to the judge. Accepted means retrieved and rated relevant. Given the live check's judge sweeps, the plant and original also carry `fusion` and `judge` ([[needset-judge-readings]]).
 - `ranks_of` gives a plant's place in each source list and in the merged list, read to its end. `position` is the place of one id in one list.
 - `figures` scores one population: retrieval, judge given retrieval and end to end, each a `count` with a Wilson interval. Undrafted pairs count as misses in the intention-to-treat figures.
-- `word_overlap` measures the leakage audit over each text's `content_words`: the share a need and a purpose line share. `file_sha` hashes the label files.
+- `word_overlap` measures the leakage audit over each text's `content_words`: the share a need and a purpose line share. `file_sha256` from [[utils-file-hash]] hashes the label files.
 - The pass mark compares each plant with its own original, found by one search where both compete. It passes when originals found and plants missed exceed the reverse by at most two, over drafted pairs only.
 - `retrieval_bare` counts plants found with no purpose line, from a second planted stage whose transport refuses every request. `scored` splits the 15 same-job pairs from the 5 others, a negative control. The originals' rate has a Wilson interval beside the attribution stage's 27 of 37; nothing stops the run.

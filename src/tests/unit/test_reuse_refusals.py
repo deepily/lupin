@@ -12,6 +12,7 @@ import threading
 import pytest
 
 import cosa.utils.util as cu
+from cosa.utils import secret_drift
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_refusals as rr
 
@@ -72,7 +73,7 @@ def test_a_run_leaves_one_record_per_scanned_line_accepted_or_refused_with_its_r
     assert len( rows[ 4 ][ "reasons" ] ) == 1 and rows[ 4 ][ "reasons" ][ 0 ].startswith( "the outcome is EXTENDED but the ruling" ) and rows[ 4 ][ "pairs" ] == [ [ "lupin_mcp.new_helper", RID ] ], "a pairing reason"
     lines = doc.read_text( encoding="utf-8" ).splitlines()
     assert [ r[ "n" ] for r in rows ] == [ lines.index( x ) + 1 for x in ( GOOD, NOT_IN_LOG, BAD_SHAPE, TOKEN_LINE, MISMATCH ) ], "n is the line's position in the document, counting from 1"
-    assert len( { r[ "doc" ] for r in rows } ) == 1 and shown[ "document" ] == rows[ 0 ][ "doc" ] == rr.document_hash( doc.read_text( encoding="utf-8" ) )
+    assert len( { r[ "doc" ] for r in rows } ) == 1 and shown[ "document" ] == rows[ 0 ][ "doc" ] == secret_drift.sha256_of( doc.read_text( encoding="utf-8" ) )
     assert [ x[ "n" ] for x in shown[ "refusals" ] ] == [ r[ "n" ] for r in rows[ 1: ] ]
 
 
@@ -114,7 +115,7 @@ def test_two_writers_never_tear_or_double_a_line( data ):
     for t in threads: t.join()
     rows = kept( data )                                                  # every line must parse: a torn line would raise here
     assert len( rows ) == 80 and len( { ( r[ "doc" ], r[ "n" ] ) for r in rows } ) == 80, "three writers per document, one record per document and line"
-    assert {r[ "doc" ] for r in rows} == {rr.document_hash( t ) for t in texts}
+    assert {r[ "doc" ] for r in rows} == {secret_drift.sha256_of( t ) for t in texts}
 
 
 def test_a_torn_last_line_and_a_foreign_line_do_not_stop_the_next_record( data ):

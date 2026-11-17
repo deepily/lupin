@@ -18,9 +18,8 @@ import asyncio
 import signal
 import sys
 
+from cosa.agents.utils.proxy_agents.base_cli import add_common_args
 from cosa.agents.notification_proxy.config import (
-    DEFAULT_SERVER_HOST,
-    DEFAULT_SERVER_PORT,
     DEFAULT_SESSION_ID,
     DEFAULT_PROFILE,
     DEFAULT_STRATEGY,
@@ -46,32 +45,10 @@ def parse_args():
         description = "Notification Proxy Agent — auto-responds to expediter questions"
     )
 
-    parser.add_argument(
-        "--host",
-        default = DEFAULT_SERVER_HOST,
-        help    = f"Server hostname (default: {DEFAULT_SERVER_HOST})"
-    )
-    parser.add_argument(
-        "--port",
-        type    = int,
-        default = DEFAULT_SERVER_PORT,
-        help    = f"Server port (default: {DEFAULT_SERVER_PORT})"
-    )
-    parser.add_argument(
-        "--email",
-        default = None,
-        help    = "Login email (overrides env vars)"
-    )
-    parser.add_argument(
-        "--password",
-        default = None,
-        help    = "Login password (overrides env vars)"
-    )
-    parser.add_argument(
-        "--session-id",
-        default = DEFAULT_SESSION_ID,
-        help    = f"WebSocket session ID (default: '{DEFAULT_SESSION_ID}')"
-    )
+    # Shared args: host, port, email, password, session-id, debug, verbose, dry-run
+    add_common_args( parser )
+    parser.set_defaults( session_id = DEFAULT_SESSION_ID )
+
     parser.add_argument(
         "--profile",
         default = DEFAULT_PROFILE,
@@ -83,21 +60,6 @@ def parse_args():
         default = DEFAULT_STRATEGY,
         choices = STRATEGY_CHOICES,
         help    = f"Response strategy: llm_script (Phi-4), rules (keywords), auto (Phi-4 + rules fallback). Default: {DEFAULT_STRATEGY}"
-    )
-    parser.add_argument(
-        "--debug",
-        action  = "store_true",
-        help    = "Enable debug output"
-    )
-    parser.add_argument(
-        "--verbose",
-        action  = "store_true",
-        help    = "Enable verbose output (implies debug)"
-    )
-    parser.add_argument(
-        "--dry-run",
-        action  = "store_true",
-        help    = "Display notifications without computing or submitting responses"
     )
 
     return parser.parse_args()

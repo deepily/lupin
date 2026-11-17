@@ -32,6 +32,13 @@ import pytest
 from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
 from cosa.agents.deep_research_to_podcast.state import PipelineState, ChainedResult
 
+# The fake graphs below replace `cosa.agents.deep_research` (and the generator package) with a plain
+# module that has no __path__. Python can then import only submodules that are already in sys.modules,
+# so the ones the shared chain frame imports and the graph does not fake are loaded here, once, in every
+# order. Without these lines these files passed only when an earlier test on the worker had loaded them.
+import cosa.agents.deep_research.job  # noqa: F401
+import cosa.agents.podcast_generator.script_types  # noqa: F401
+
 
 # ----------------------------------------------------------------------------
 # Helpers
@@ -260,6 +267,26 @@ class TestRunAsync:
         agent._set_modality.assert_called_once()
         agent._run_podcast_generator.assert_awaited_once_with( "/io/dr/report.md" )
 
+    def test_skipped_topics_reach_the_checkpoint_card_and_headline( self ):
+        agent = self._agent()
+        agent._run_deep_research = AsyncMock( return_value={
+            "cancelled"   : False,
+            "report_path" : "/io/dr/report.md",
+            "abstract"    : "abs",
+            "cost"        : 1.0,
+            "artifacts"   : {
+                "tokens_used"      : 10,
+                "duration_seconds" : 5,
+                "skipped_topics"   : [ { "topic" : "alpha" }, { "topic" : "beta" } ],
+            },
+        } )
+        agent._run_podcast_generator = AsyncMock( return_value={ "cancelled": True } )
+        _run( agent.run_async() )
+
+        checkpoint = [ c for c in agent._notify.await_args_list if c.args[ 0 ].startswith( "Deep Research complete" ) ][ 0 ]
+        assert "(2 topics skipped)" in checkpoint.args[ 0 ]
+        assert "**Skipped topics (2)**: alpha; beta" in checkpoint.kwargs[ "abstract" ]
+
     def test_dr_cancelled_sets_cancelled( self ):
         agent = self._agent()
         agent._run_deep_research     = AsyncMock( return_value={ "cancelled": True } )
@@ -440,6 +467,13 @@ class TestRunDeepResearch:
         # TARGET_USER propagated to DR cosa_interface
         assert graph.dr_cosa_iface.TARGET_USER == "u@test.com"
 
+    def test_research_phase_sets_the_per_task_target_user( self ):
+        graph = _DRGraph( cfg_values={ "deep research output directory": "io/dr" } )
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( "cosa.agents.utils.agent_notification_dispatcher.set_dispatch_context" ) as set_ctx:
+            _run( self._agent()._run_deep_research() )
+        set_ctx.assert_called_once_with( target_user="u@test.com" )
+
     def test_absolute_output_dir_outside_root_is_root_prefixed( self ):
         graph = _DRGraph( cfg_values={ "deep research output directory": "/io/dr" } )
         agent = self._agent()
@@ -590,6 +624,13 @@ class TestRunPodcastGenerator:
         assert result[ "artifacts" ][ "title" ]         == "My Episode"
         assert result[ "artifacts" ][ "segment_count" ] == 7
         assert result[ "artifacts" ][ "duration_min" ]  == 12
+
+    def test_podcast_phase_sets_the_per_task_target_user( self ):
+        graph = _PGGraph()
+        with graph.patcher(), patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.agents.deep_research_to_podcast.agent.set_dispatch_context" ) as set_ctx:
+            _run( self._agent()._run_podcast_generator( "/io/dr/report.md" ) )
+        set_ctx.assert_called_once_with( target_user="u@test.com" )
 
     def test_script_none_returns_cancelled( self ):
         graph = _PGGraph( script=None )

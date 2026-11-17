@@ -117,28 +117,47 @@ def parse_jscpd( report, defs, cover ):
     return sorted( ( { "ids": list( ids ), "size": size, "source": "jscpd" } for ids, size in sizes.items() ), key=lambda p: ( -p[ "size" ], p[ "ids" ] ) )
 
 
-def _dups_keys( spec, paths, defs ):
+def _numbered( entries, repeated_keys ):
+    """
+    Number repeated keys "~2", "~3" as dups does, a left-out repeat taking its slot.
+
+    Requires:
+        - entries are ( key, line, id ) in extraction order; repeated_keys are entries of definitions extract_tree left out, which carry the id of the one it kept
+
+    Ensures:
+        - returns { dups id: definition id }; a key with left-out repeats is numbered in line order, any other key in extraction order
+        - a left-out repeat maps to the id it shares with the definition that was kept
+    """
+    groups = collections.defaultdict( list )
+    for e in list( entries ) + list( repeated_keys ): groups[ e[ 0 ] ].append( e )
+    keys = {}
+    for key, group in groups.items():
+        if any( e in repeated_keys for e in group ): group = sorted( group, key=lambda e: e[ 1 ] )
+        for n, ( _, _, did ) in enumerate( group, 1 ): keys[ key if n == 1 else f"{key}~{n}" ] = did
+    return keys
+
+
+def _dups_keys( spec, paths, defs, repeated=() ):
     """
     Map the ids dups.find_duplicates gives to the definition ids of this package.
 
     Requires:
         - paths are the Python files in the order extract_tree read them, and defs their definitions in extraction order
+        - repeated are the repeated_ids entries extract_tree left out for those files, empty unless some were
 
     Ensures:
-        - returns { dups id: definition id }, numbering a repeated dups id "~2", "~3" as dups does
+        - returns { dups id: definition id }, numbering a repeated dups id "~2", "~3" as dups does, a left-out repeat taking its slot
 
     Raises:
         - ValueError if a definition's file is not among the paths
     """
     modules = {}
     for p in paths: modules[ pathlib.Path( p ).relative_to( spec.root ).as_posix() ] = module_name( spec, pathlib.Path( p ) )
-    keys, seen = {}, collections.Counter()
+    entries = []
     for d in defs:
         if d[ "file" ] not in modules: raise ValueError( f"{d[ 'file' ]} is not one of the Python files given" )
-        key = ".".join( x for x in ( modules[ d[ "file" ] ], d[ "name" ] ) if x )
-        seen[ key ] += 1
-        keys[ key if seen[ key ] == 1 else f"{key}~{seen[ key ]}" ] = d[ "id" ]
-    return keys
+        entries.append( ( ".".join( x for x in ( modules[ d[ "file" ] ], d[ "name" ] ) if x ), d[ "line" ], d[ "id" ] ) )
+    return _numbered( entries, [ ( ".".join( x for x in ( modules[ r[ "file" ] ], r[ "name" ] ) if x ), r[ "line" ], r[ "id" ] ) for r in repeated if r[ "file" ] in modules ] )
 
 
 def _map_pairs( found, keys, defs, source ):
@@ -153,6 +172,7 @@ def _map_pairs( found, keys, defs, source ):
         - an exact clone has similarity 1.0; a near clone carries the Jaccard dups found
         - size is the similarity times the node count of the smaller definition, rounded, so it grows with the code shared
         - a group of three exact clones gives all three pairs
+        - two dups ids that map to one definition ( a repeat extract_tree left out, and the copy it kept ) give no pair
 
     Raises:
         - ValueError if dups names a definition that keys does not hold
@@ -168,11 +188,12 @@ def _map_pairs( found, keys, defs, source ):
         for name in ( a, b ):
             if name not in keys: raise ValueError( f"dups reported {name}, which is not a definition of the given files" )
         ids = tuple( sorted( ( keys[ a ], keys[ b ] ) ) )
+        if ids[ 0 ] == ids[ 1 ]: continue
         pairs[ ids ] = { "ids": list( ids ), "size": round( sim * min( nodes[ ids[ 0 ] ], nodes[ ids[ 1 ] ] ) ), "source": source }
     return sorted( pairs.values(), key=lambda p: ( -p[ "size" ], p[ "ids" ] ) )
 
 
-def python_clones( spec, paths, defs, min_nodes, threshold=dups.DEFAULT_THRESH ):
+def python_clones( spec, paths, defs, min_nodes, threshold=dups.DEFAULT_THRESH, repeated=() ):
     """
     Map the exact and near pairs of dups.find_duplicates onto Python definitions.
 
@@ -187,30 +208,26 @@ def python_clones( spec, paths, defs, min_nodes, threshold=dups.DEFAULT_THRESH )
     Raises:
         - ValueError if a file of defs is not among the paths, or dups names a definition this package does not have
     """
-    keys  = _dups_keys( spec, paths, defs )
+    keys  = _dups_keys( spec, paths, defs, repeated )
     found = dups.find_duplicates( spec, [ pathlib.Path( p ) for p in paths ], min_nodes=min_nodes, threshold=threshold )
     return _map_pairs( found, keys, defs, "dups" )
 
 
-def _script_keys( defs ):
+def _script_keys( defs, repeated=() ):
     """
     Map the ids dups gives a script definition to the definition ids of this package.
 
     Requires:
-        - defs are script definitions in the order extract_tree read them
+        - defs are script definitions in the order extract_tree read them; repeated are its repeated_ids entries for those files, empty unless some were
 
     Ensures:
-        - returns { "<file>#<name>": id }, numbering a repeated key "~2", "~3" as dups does
+        - returns { "<file>#<name>": id }, numbering a repeated key "~2", "~3" as dups does, a left-out repeat taking its slot
     """
-    keys, seen = {}, collections.Counter()
-    for d in defs:
-        key = f"{d[ 'file' ]}#{d[ 'name' ]}"
-        seen[ key ] += 1
-        keys[ key if seen[ key ] == 1 else f"{key}~{seen[ key ]}" ] = d[ "id" ]
-    return keys
+    return _numbered( [ ( f"{d[ 'file' ]}#{d[ 'name' ]}", d[ "line" ], d[ "id" ] ) for d in defs ],
+                      [ ( f"{r[ 'file' ]}#{r[ 'name' ]}", r[ "line" ], r[ "id" ] ) for r in repeated ] )
 
 
-def script_clones( spec, files, defs, min_nodes, threshold=dups.DEFAULT_THRESH ):
+def script_clones( spec, files, defs, min_nodes, threshold=dups.DEFAULT_THRESH, repeated=() ):
     """
     Map the exact and near pairs dups finds among script files onto their definitions.
 
@@ -227,7 +244,7 @@ def script_clones( spec, files, defs, min_nodes, threshold=dups.DEFAULT_THRESH )
         - ValueError if dups names a definition this package does not have
     """
     found = dups.find_duplicates( spec, [], min_nodes=min_nodes, threshold=threshold, js_files=[ pathlib.Path( f ) for f in files ] )
-    return _map_pairs( found, _script_keys( defs ), defs, "dups" )
+    return _map_pairs( found, _script_keys( defs, repeated ), defs, "dups" )
 
 
 def clone_pairs( *pair_lists ):

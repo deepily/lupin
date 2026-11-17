@@ -499,18 +499,6 @@ class TestFormatSummary:
         assert "?" in text
 
 
-# ─── _now_run_ts tests ────────────────────────────────────────────────────
-
-
-class TestNowRunTs:
-
-    def test_run_ts_format( self ):
-        ts = migrate_module._now_run_ts()
-        assert ts.endswith( "Z" )
-        assert "T" in ts
-        assert len( ts ) == 16  # YYYYMMDDTHHMMSSZ
-
-
 # ─── main() tests ─────────────────────────────────────────────────────────
 
 

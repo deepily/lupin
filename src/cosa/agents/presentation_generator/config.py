@@ -13,6 +13,28 @@ from datetime import datetime
 from typing import Optional
 
 import cosa.utils.util as cu
+from cosa.agents.shared.config_loader import load_kwargs_from_ini, model_field
+
+# Field name -> INI key. max_source_chars reads the shared base key (not presentation-prefixed),
+# the identical key the podcast config reads: single source of truth for the char ceiling.
+PRESENTATION_INI_KEYS = {
+    "content_model"           : "presentation generator content model",
+    "automated_content_model" : "presentation generator automated content model",
+    "content_max_turns"       : "presentation generator content max turns",
+    "target_duration_minutes" : "presentation generator target duration minutes",
+    "slides_per_minute"       : "presentation generator slides per minute",
+    "target_slide_count"      : "presentation generator target slide count",
+    "title_style"             : "presentation generator title style",
+    "max_revisions"           : "presentation generator max revisions",
+    "default_theme"           : "presentation generator default theme",
+    "templates_path"          : "presentation generator templates path",
+    "output_dir_template"     : "presentation generator output dir template",
+    "audience"                : "presentation generator audience",
+    "veo_model"               : "presentation generator veo model",
+    "pptx_export_enabled"     : "presentation generator pptx export enabled",
+    "review_timeout_seconds"  : "presentation generator review timeout seconds",
+    "max_source_chars"        : "agent source content max chars",
+}
 
 
 @dataclass
@@ -33,8 +55,8 @@ class PresentationConfig:
     """
 
     # Model selection
-    content_model            : str   = "claude-opus-4-6"
-    automated_content_model  : str   = "claude-sonnet-4-6"
+    content_model            : str   = model_field( "presentation generator content model" )
+    automated_content_model  : str   = model_field( "presentation generator automated content model" )
     # Bounded-CC (in-process sdk_query) turn cap for each content-phase LLM call
     # (analysis/outline/elaboration/mermaid/matplotlib/d2/json). Each call is
     # single-shot; the bounded path REQUIRES an explicit max_turns.
@@ -96,37 +118,15 @@ class PresentationConfig:
         Returns:
             PresentationConfig: Configured instance
         """
-        def _get( key, default=None, return_type="str" ):
-            val = config_mgr.get( f"presentation generator {key}", default=default, return_type=return_type )
-            if debug: print( f"  Config: presentation generator {key} = {val}" )
-            return val
+        kwargs = load_kwargs_from_ini( cls, config_mgr, PRESENTATION_INI_KEYS, debug=debug, label="PresentationConfig" )
 
-        # Optional explicit slide count. Read RAW (return_type="str") then coerce:
-        # a None default with return_type="int" crashes on int(None) when the key
-        # is absent/empty. Empty or absent → None → duration formula (default path).
-        _raw_slide_count   = _get( "target slide count", default=None )
-        target_slide_count = int( _raw_slide_count ) if _raw_slide_count not in ( None, "" ) else None
+        # Optional explicit slide count. The loader reads it raw (a str field read), then it is
+        # coerced here: a None default with return_type="int" would crash on int(None) when the
+        # key is absent. Empty or absent -> None -> duration formula (default path).
+        raw_slide_count = kwargs[ "target_slide_count" ]
+        kwargs[ "target_slide_count" ] = int( raw_slide_count ) if raw_slide_count not in ( None, "" ) else None
 
-        return cls(
-            content_model           = _get( "content model",           default="claude-opus-4-6" ),
-            automated_content_model = _get( "automated content model", default="claude-sonnet-4-6" ),
-            content_max_turns       = _get( "content max turns",        default=5,     return_type="int" ),
-            target_duration_minutes = _get( "target duration minutes", default=15,    return_type="int" ),
-            slides_per_minute       = _get( "slides per minute",       default=1.0,   return_type="float" ),
-            target_slide_count      = target_slide_count,
-            title_style             = _get( "title style",             default="assertion" ),
-            max_revisions           = _get( "max revisions",           default=3,     return_type="int" ),
-            default_theme           = _get( "default theme",           default="default" ),
-            templates_path          = _get( "templates path",          default="/src/cosa/agents/presentation_generator/templates/themes/" ),
-            output_dir_template     = _get( "output dir template",     default="io/presentations/{user}" ),
-            audience                = _get( "audience",                default="general" ),
-            veo_model               = _get( "veo model",              default="veo-2.0-generate-001" ),
-            pptx_export_enabled     = _get( "pptx export enabled",    default=True, return_type="boolean" ),
-            review_timeout_seconds  = _get( "review timeout seconds", default=600,  return_type="int" ),
-            # SHARED base key (NOT presentation-prefixed) — read directly so podcast
-            # config reads the identical key. Single source of truth for the ceiling.
-            max_source_chars        = config_mgr.get( "agent source content max chars", default=200000, return_type="int" ),
-        )
+        return cls( **kwargs )
 
     def get_output_path( self, user_id, topic, file_type="yaml" ):
         """
@@ -169,6 +169,43 @@ class PresentationConfig:
 # Smoke Test
 # =============================================================================
 
+def apply_job_overrides(
+    config,
+    target_duration_minutes = None,
+    target_slide_count      = None,
+    audience                = None,
+    theme                   = None,
+    content_model           = None,
+    audience_context        = None,
+) -> None:
+    """
+    Overlay a job's per-request args onto an INI-loaded presentation config, in place.
+
+    The one copy of the rule, shared by the presentation job and the research-to-presentation agent.
+
+    Requires:
+        - config is a PresentationConfig instance
+
+    Ensures:
+        - Each argument that is not None replaces the matching config field; theme replaces default_theme
+        - audience_context treats the expeditor "none" sentinel and the empty string as "not provided"
+          and is not copied, because the prompt builders would otherwise add a bogus
+          "Additional audience context: none" line
+    """
+    if target_duration_minutes is not None:
+        config.target_duration_minutes = target_duration_minutes
+    if target_slide_count is not None:
+        config.target_slide_count = target_slide_count
+    if audience is not None:
+        config.audience = audience
+    if theme is not None:
+        config.default_theme = theme
+    if content_model is not None:
+        config.content_model = content_model
+    if audience_context is not None and audience_context.strip().lower() not in ( "", "none" ):
+        config.audience_context = audience_context
+
+
 def quick_smoke_test():
     """Quick smoke test for PresentationConfig."""
     import cosa.utils.util as cu
@@ -179,7 +216,7 @@ def quick_smoke_test():
         # Test 1: Default instantiation
         print( "Testing default instantiation..." )
         config = PresentationConfig()
-        assert config.content_model == "claude-opus-4-6"
+        assert config.content_model.startswith( "claude-" )
         assert config.target_duration_minutes == 15
         assert config.slides_per_minute == 1.0
         assert config.title_style == "assertion"
@@ -208,7 +245,7 @@ def quick_smoke_test():
         from cosa.config.configuration_manager import ConfigurationManager
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         loaded = PresentationConfig.from_config( config_mgr, debug=True )
-        assert loaded.content_model == "claude-opus-4-6"
+        assert loaded.content_model.startswith( "claude-" )
         assert loaded.target_duration_minutes == 15
         assert loaded.slides_per_minute == 1.0
         assert loaded.title_style == "assertion"

@@ -43,7 +43,8 @@ Example:
 import argparse
 
 import cosa.utils.util as cu
-from cosa.agents.utils.chained_cli import add_deep_research_arguments, add_mode_arguments, run_chained_cli
+from cosa.agents.podcast_generator.__main__ import parse_languages_arg
+from cosa.agents.utils.chained_cli import add_deep_research_arguments, add_mode_arguments, run_agent_and_report, run_chained_cli
 
 # User-visible args: the canonical list of args that end users should see
 # and interact with. Engineering params (models, debug, etc.) are excluded.
@@ -116,24 +117,9 @@ Mode Options:
     return parser.parse_args()
 
 
-def parse_languages( languages_str: str ) -> list:
-    """
-    Parse comma-separated language codes into a list.
-
-    Args:
-        languages_str: Comma-separated ISO codes (e.g., "en,es-MX")
-
-    Returns:
-        list: List of language codes, or None if empty
-    """
-    if not languages_str:
-        return None
-    return [ lang.strip() for lang in languages_str.split( "," ) if lang.strip() ]
-
-
 def show_dry_run( args: argparse.Namespace ) -> None:
     """Show what the pipeline would do without executing."""
-    target_languages = parse_languages( args.languages ) or [ "en" ]
+    target_languages = parse_languages_arg( args.languages ) or [ "en" ]
 
     print( "\n[DRY RUN MODE - No API calls will be made]\n" )
     print( "Pipeline Configuration:" )
@@ -178,6 +164,17 @@ def show_dry_run( args: argparse.Namespace ) -> None:
     print( "  - Podcast audio:   /io/podcasts/{user_email}/{date}-{topic}.mp3" )
 
 
+def _show_success( result ):
+    """Print the podcast's artifact lines and the cost summary for a finished run."""
+    print( f"\nPodcast Audio: {result.audio_path}" )
+    if result.script_path:
+        print( f"Podcast Script: {result.script_path}" )
+    print( f"\nCost Summary:" )
+    print( f"  Deep Research:     ${result.dr_cost:.4f}" )
+    print( f"  Podcast Generator: ${result.pg_cost:.4f}" )
+    print( f"  Total:             ${result.total_cost:.4f}" )
+
+
 async def run_pipeline( args: argparse.Namespace ) -> int:
     """
     Run the Deep Research → Podcast Generation pipeline.
@@ -194,7 +191,7 @@ async def run_pipeline( args: argparse.Namespace ) -> int:
     cu.print_banner( "Deep Research → Podcast Pipeline", prepend_nl=True )
 
     # Parse language codes
-    target_languages = parse_languages( args.languages )
+    target_languages = parse_languages_arg( args.languages )
 
     # Show configuration
     print( f"Query: {args.query}" )
@@ -222,57 +219,7 @@ async def run_pipeline( args: argparse.Namespace ) -> int:
         verbose          = args.verbose,
     )
 
-    try:
-        # Run the pipeline
-        result = await agent.run_async()
-
-        # Show results
-        print( "\n" + "=" * 60 )
-        print( "PIPELINE RESULTS" )
-        print( "=" * 60 )
-
-        if result.is_success():
-            print( f"\n✓ Pipeline completed successfully!\n" )
-            print( f"Research Report: {result.research_path}" )
-            if result.research_abstract:
-                print( f"Abstract: {result.research_abstract[ :100 ]}..." )
-            print( f"\nPodcast Audio: {result.audio_path}" )
-            if result.script_path:
-                print( f"Podcast Script: {result.script_path}" )
-            print( f"\nCost Summary:" )
-            print( f"  Deep Research:     ${result.dr_cost:.4f}" )
-            print( f"  Podcast Generator: ${result.pg_cost:.4f}" )
-            print( f"  Total:             ${result.total_cost:.4f}" )
-            print( f"\nDuration: {result.duration_seconds:.1f} seconds" )
-            return 0
-
-        elif result.is_partial():
-            print( f"\n⚠ Pipeline partially completed\n" )
-            print( f"Deep Research completed successfully:" )
-            print( f"  Report: {result.research_path}" )
-            print( f"  Cost: ${result.dr_cost:.4f}" )
-            print( f"\nPodcast Generation failed:" )
-            print( f"  Error: {result.error}" )
-            print( f"\nYou can retry podcast generation separately with:" )
-            print( f"  python -m cosa.agents.podcast_generator --research {result.research_path}" )
-            return 1
-
-        else:
-            print( f"\n✗ Pipeline failed\n" )
-            print( f"State: {result.state.value}" )
-            print( f"Error: {result.error}" )
-            return 1
-
-    except KeyboardInterrupt:
-        print( "\n\n⚠ Interrupted by user" )
-        return 1
-
-    except Exception as e:
-        print( f"\n✗ Pipeline error: {e}" )
-        if args.debug:
-            import traceback
-            traceback.print_exc()
-        return 1
+    return await run_agent_and_report( args, agent, "Podcast Generation", _show_success, "python -m cosa.agents.podcast_generator --research {research_path}" )
 
 
 def main():

@@ -13,10 +13,11 @@ import asyncio
 from typing import Optional
 
 from cosa.agents.notification_proxy.config import (
-    LLM_FALLBACK_MODEL,
+    LLM_FALLBACK_MODEL_KEY,
     LLM_FALLBACK_MAX_TOKENS,
     get_anthropic_api_key,
 )
+from cosa.repo import code_health_settings as chs
 
 
 class LLMFallbackStrategy:
@@ -99,6 +100,10 @@ class LLMFallbackStrategy:
         Ensures:
             - Returns a concise answer string
             - Returns None on API error or empty response
+            - Calls the model named by the `notification proxy llm fallback model` INI key, read now
+
+        Raises:
+            - CodeHealthSettingError when the key is blank or absent, and the strategy is available
 
         Args:
             notification: Notification event data dict
@@ -117,11 +122,13 @@ class LLMFallbackStrategy:
         # Build prompt
         prompt = self._build_prompt( message, abstract, response_type, title )
 
+        model_id = chs.model_id( LLM_FALLBACK_MODEL_KEY )    # a blank or absent key raises here, outside the API try below, so it is never read as an API failure
+
         try:
-            if self.debug: print( f"[LLMFallback] Calling {LLM_FALLBACK_MODEL} ({len( prompt )} chars)..." )
+            if self.debug: print( f"[LLMFallback] Calling {model_id} ({len( prompt )} chars)..." )
 
             response = await self._client.messages.create(
-                model      = LLM_FALLBACK_MODEL,
+                model      = model_id,
                 max_tokens = LLM_FALLBACK_MAX_TOKENS,
                 messages   = [ {
                     "role"    : "user",

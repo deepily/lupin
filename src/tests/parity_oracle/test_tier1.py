@@ -25,6 +25,8 @@ import pytest
 from tests.e2e_ui.parity_oracle import CONTRACT_SKELETON_JS, HARNESS_URL_PATH, load_scenario
 
 # Component-isolation is :7999-eligible — default there, override via env.
+pytestmark = pytest.mark.usefixtures( "live_bundle_fresh" )
+
 BASE_URL    = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:7999" )
 HARNESS_URL = f"{BASE_URL}{HARNESS_URL_PATH}"
 

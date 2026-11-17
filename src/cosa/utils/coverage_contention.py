@@ -46,6 +46,8 @@ import re
 import sys
 from typing import Callable, Iterable, List, Optional, Tuple
 
+from cosa.utils.flag_text import is_flag_on
+
 
 EXIT_CLEAR      = 0
 EXIT_CONTENDED  = 1
@@ -439,7 +441,7 @@ def escape_hatch_engaged( environ=None ) -> bool:
           silently disable the guard
     """
     raw = ( environ if environ is not None else os.environ ).get( ESCAPE_HATCH_ENV, "" )
-    return raw.strip().lower() in ( "1", "true", "yes", "on" )
+    return is_flag_on( raw )
 
 
 def render_refusal( offenders: List[ Tuple[ int, str ] ] ) -> str:

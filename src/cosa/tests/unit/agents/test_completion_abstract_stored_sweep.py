@@ -16,13 +16,16 @@ abstract for the notification but not storing it for the transition is exactly
 the bug. This is a static-source guard so a future edit that adds a new
 completion path but forgets the store fails here instead of on stage.
 
-Scope: the six agents that use the completion_abstract variable pattern —
-podcast (real + dry-run), the two deep_research pipelines (dry-run), claude_code
-(real + two mock), and the BFE/TFE expediters (real + dry-run). Agents that build
-their abstract inline (no completion_abstract variable) are out of this guard's
-reach by construction; they are covered by their own suites.
+Scope: the four agents that use the completion_abstract variable pattern in their own
+job.py — podcast (real + dry-run), claude_code (real + two mock), and the BFE/TFE
+expediters (real + dry-run). The two deep_research chains build their card in a hook and
+store it in the shared frame, `AgenticJobBase._run_chained_pipeline` and
+`_run_chained_dry_run`; the frame tests below cover them. Agents that build their
+abstract inline (no completion_abstract variable) are out of this guard's reach by
+construction; they are covered by their own suites.
 """
 
+import ast
 import re
 
 import pytest
@@ -31,8 +34,6 @@ import cosa.utils.util as cu
 
 _AGENTS = [
     "podcast_generator",
-    "deep_research_to_podcast",
-    "deep_research_to_presentation",
     "claude_code",
     "bug_fix_expediter",
     "test_fix_expediter",
@@ -71,3 +72,36 @@ def test_control_scanner_actually_matches():
     src = _job_src( "podcast_generator" )
     assert _BUILD.findall( src ), "build regex matched nothing — the guard is inert"
     assert _STORE.findall( src ), "store regex matched nothing — the guard is inert"
+
+
+_CHAIN_JOBS  = [ "deep_research_to_podcast", "deep_research_to_presentation" ]
+_FRAME_STORE = re.compile( r"""artifacts\[\s*["']abstract["']\s*\]\s*=\s*completion_abstract""" )
+
+
+def _function_source( src, name ):
+    """Return the source of the method called name in src; fail loudly when there is none."""
+    for node in ast.walk( ast.parse( src ) ):
+        if isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ) and node.name == name:
+            return ast.get_source_segment( src, node )
+    raise AssertionError( f"no function named {name} in the source" )
+
+
+@pytest.mark.parametrize( "frame", [ "_run_chained_pipeline", "_run_chained_dry_run" ] )
+def test_the_chained_frame_stores_the_abstract_for_the_transition( frame ):
+    """Both frame methods store the abstract their hook built; the chain cards ride this store."""
+    with open( cu.get_project_root() + "/src/cosa/agents/agentic_job_base.py", encoding="utf-8" ) as fh:
+        body = _function_source( fh.read(), frame )
+    assert len( _FRAME_STORE.findall( body ) ) == 1, (
+        f"{frame} must store completion_abstract in artifacts['abstract'] exactly once "
+        f"(bug 9b481811): the chain jobs no longer store it themselves"
+    )
+
+
+@pytest.mark.parametrize( "agent", _CHAIN_JOBS )
+def test_each_chain_job_runs_through_the_frame_and_supplies_both_cards( agent ):
+    """_execute calls the frame, and the hooks that build the real and dry-run cards exist."""
+    src = _job_src( agent )
+    assert "self._run_chained_pipeline()" in _function_source( src, "_execute" )
+    for hook in ( "_chain_completion", "_store_dry_run_results" ):
+        assert _function_source( src, hook ), hook
+    assert not _STORE.findall( src ), f"{agent}/job.py stores the abstract itself again; the frame owns the store"

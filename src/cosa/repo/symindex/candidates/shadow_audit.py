@@ -363,7 +363,7 @@ def audits_in_week( data_dir, today ):
     return sum( v[ "audits" ] for day, v in daily_volume( data_dir ).items() if first <= datetime.date.fromisoformat( day ) <= end )
 
 
-def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_language=False, weekly_cap=None ):
+def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_language=False, weekly_cap=None, on_failure=None ):
     """
     Drain the audit queue through the full-sweep transport.
 
@@ -389,6 +389,7 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
           stops before a sweep when the tokens spent so far plus the largest sweep seen would pass max_tokens; the rest stay queued
         - with max_tokens or weekly_cap the result also holds stopped_by, "ceiling" or "weekly_cap" when the run stopped for that reason, else None; with max_tokens it also holds spent_tokens
         - without either the result keeps its five keys
+        - with on_failure, each failed item calls on_failure( item id, the exception ) once, before the item is requeued or dropped; without it a failure leaves no record but the count
     """
     queued, corrupt = [], 0
     for path in sorted( p for p in _folder( data_dir, "shadow-pending" ).glob( "*.json" ) if not p.name.startswith( TEMP_PREFIX ) ):
@@ -421,6 +422,7 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
             stored  = store_receipt( data_dir, receipt )
         except Exception as exc:               # a transport failure, a malformed answer or a damaged receipt file leaves the item queued, behind the fresh ones
             failed += 1
+            if on_failure is not None: on_failure( item[ "id" ], exc )
             if isinstance( exc, CandidateError ) and exc.detail == UNKNOWN_ENTRY and item[ "attempts" ] + 1 >= UNKNOWN_ENTRY_TRIES:
                 os.remove( path )
                 dropped += 1

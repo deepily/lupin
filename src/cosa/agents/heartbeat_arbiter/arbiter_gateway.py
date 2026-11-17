@@ -19,7 +19,7 @@ The consumer needs three methods:
 """
 from typing import List, Optional
 
-from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp.persona_normalization import dm_topic_for as _dm_topic_for_root
 
 
 class LupinArbiterGateway:
@@ -43,21 +43,7 @@ class LupinArbiterGateway:
         self.persona_icon      = persona_icon
         self.persona_color     = persona_color
 
-    @staticmethod
-    def dm_topic_for( identifier ):
-        """
-        Derive a server-pattern-safe DM topic from a recipient identifier.
-
-        Ensures:
-            - Routes through the shared `persona_slug` root, so the topic always
-              equals `dm-{persona_slug( identifier, sep='_' )}`. That is
-              byte-identical to the Poker gateway, the cascade scheduler and the
-              MCP DM layer (`_derive_dm_topic`).
-            - Accent-proof: "Mr Radio" gives "dm-mr_radio" and "María" gives
-              "dm-maria". A slug that kept accents would split one persona's DMs
-              across two topic files, "dm-maría" and "dm-maria"
-        """
-        return f"dm-{persona_slug( identifier, sep='_' )}"
+    dm_topic_for = staticmethod( _dm_topic_for_root )   # one definition, in lupin_mcp.persona_normalization
 
     def who( self, retention_hours: int = 24 ) -> List[ dict ]:
         """

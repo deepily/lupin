@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
+import sys
 
 import cosa.utils.util as cu
 from cosa.repo.labelling import packets as lb_packets
@@ -224,7 +225,7 @@ def main( argv=None, make_parts=proof_cli.live_parts ):
         - builds the pool as the proof builds it, so each definition is the one the proof judged
         - stages the extended key and both packets beside the originals, checks them, then swaps them in; --check stages and checks, then removes the staged files
         - the record carries the sha of the original key rows and of each original packet's bytes, before and after
-        - returns 0
+        - returns 0, or 2 after one refusal line on stderr (both shas and models) when the run was planted under another config, before any parts are built
 
     Raises:
         - ValueError if the second reviewer has labels, an owed pair is already in the key, a definition is not in the pool, or a staged file fails its check
@@ -242,7 +243,10 @@ def _main( argv, make_parts, out ):
     args   = parser.parse_args( argv )
     cfg    = cfg_mod.verify_frozen( frozen.frozen_path(), frozen.live_config() )
     run    = proof_cli.load_run( args.run_dir )
-    if run[ "config_sha" ] != cfg[ "config_sha" ]: raise ValueError( f"the run was planted under config {run[ 'config_sha' ]}, the frozen one is {cfg[ 'config_sha' ]}" )
+    if run[ "config_sha" ] != cfg[ "config_sha" ]:
+        models = { d[ "config_sha" ]: d[ "model_id" ] for d in ( json.loads( f.read_text( encoding="utf-8" ) ) for f in pathlib.Path( frozen.frozen_path() ).parent.glob( frozen.FROZEN_GLOB ) ) }
+        print( proof_cli.REFUSED_FOREIGN_RUN.format( run_dir=args.run_dir, run_sha=run[ "config_sha" ][ :12 ], run_model=models.get( run[ "config_sha" ], "no frozen file for it" ), live_sha=cfg[ "config_sha" ][ :12 ], live_model=cfg[ "model_id" ] ), file=sys.stderr )
+        return 2
     parts  = make_parts( cu.get_project_root(), pathlib.Path( args.run_dir ), cfg, args.parallel )
     spec   = proof_cli.build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], {}, [], {}, [] )
     owed   = owed_pairs( args.record )

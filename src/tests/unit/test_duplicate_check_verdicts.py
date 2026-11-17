@@ -4,6 +4,7 @@ The verdict-line writer of the check, and the weekly table's reading of its file
 Every run is a real result file in a temporary folder, written under the name the check gives it. The store is a small amender
 that answers in the shape of the real task store and records each note it was sent. Nothing calls a model or touches the shared data folder.
 """
+import datetime
 import io
 import json
 
@@ -204,8 +205,10 @@ def test_the_command_files_a_back_fill_with_file_only_and_needs_exactly_one_of_r
 
 def test_the_command_builds_the_live_store_when_a_row_is_given_and_none_is_passed( folder, monkeypatch ):
     store = Amender()
-    monkeypatch.setattr( dv.ff, "LiveStore", lambda: store )
-    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=io.StringIO() ) == 0 and store.sent == [ ( ROW, LINE_OK ) ]
+    seen  = { }
+    monkeypatch.setattr( dv, "seat_actor", lambda: "clayton 26f75e16" )
+    monkeypatch.setattr( dv, "SeatStore", lambda actor: seen.update( actor=actor ) or store )
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=io.StringIO() ) == 0 and store.sent == [ ( ROW, LINE_OK ) ] and seen == { "actor": "clayton 26f75e16" }
 
 
 # ---- the weekly table's side ----
@@ -284,3 +287,172 @@ def test_the_weekly_command_refuses_with_exit_3_when_the_verdict_file_is_corrupt
 def test_the_verdict_file_name_is_the_one_the_writer_appends_to_and_it_sits_beside_the_result_files( folder ):
     dv.write_verdict( LINE_OK, folder, ROW, Amender() )
     assert rb.VERDICTS_FILE == "verdicts.jsonl" and ( folder / rb.VERDICTS_FILE ).is_file() and ( folder / "2026-11-03-111218-hand.json" ).is_file()
+
+
+def test_settled_keys_are_the_keys_of_the_findings_a_line_rules_on_whatever_the_verdict_and_nothing_else( folder ):
+    ( folder / "verdicts.jsonl" ).write_text( "\n".join( json.dumps( { "run": "2026-11-03-111218-hand", "finding": fid, "verdict": v, "class": "c", "by": "x", "ts": "t" } )
+                                                         for fid, v in ( ( "d-a1", "DISTINCT" ), ( "d-a3", "DUPLICATE" ) ) ) + "\n" )
+    assert rb.settled_keys( folder ) == { "epic:dupcheck-d-a1", "epic:dupcheck-d-a3" }
+
+
+def test_a_line_for_a_run_with_no_readable_file_or_a_finding_without_a_key_settles_nothing_and_no_file_is_empty( folder, tmp_path ):
+    assert rb.settled_keys( folder ) == set()
+    ( folder / "2026-11-05-090000-cron.json" ).write_text( json.dumps( { "date": "2026-11-05", "trigger": "cron", "judge_calls": 1, "elapsed_seconds": 1.0, "findings": [ { "id": "d-k" } ] } ) )
+    ( folder / "verdicts.jsonl" ).write_text( "\n".join( json.dumps( { "run": r, "finding": f, "verdict": "EXTEND", "class": "c", "by": "x", "ts": "t" } )
+                                                         for r, f in ( ( "2026-11-09-000000-hand", "d-gone" ), ( "2026-11-05-090000-cron", "d-k" ) ) ) + "\n" )
+    assert rb.settled_keys( folder ) == set()
+
+
+def test_a_damaged_verdicts_line_is_raised_by_settled_keys_as_read_verdicts_raises_it( folder ):
+    ( folder / "verdicts.jsonl" ).write_text( "garbage\n" )
+    with pytest.raises( ValueError, match="line 1 is not a verdict record" ): rb.settled_keys( folder )
+
+
+class StrictStore:
+    """A store that answers an amend with HTTP 422 unless the body names an actor."""
+
+    def __init__( self ):
+        self.bodies = [ ]
+
+    def request( self, method, url, api_key, timeout, body=None ):
+        self.bodies.append( body )
+        if not body.get( "actor" ): return False, 422, { "detail": "actor: Field required" }
+        return True, 200, { "item": { } }
+
+
+@pytest.fixture
+def strict( monkeypatch ):
+    """Ensures: the hooks' store client talks to a StrictStore, and the seat is Clayton's."""
+    from lupin_cli.claude_code.hooks.lib import task_store_client as client
+    store = StrictStore()
+    monkeypatch.setattr( client, "_request", store.request )
+    monkeypatch.setattr( client, "read_api_key", lambda: "key" )
+    from lupin_cli.claude_code.hooks.lib import task_store_settings
+    monkeypatch.setattr( task_store_settings, "load_task_store_settings", lambda: { "api_base_url": "http://x", "timeout_seconds": 5 } )
+    monkeypatch.setattr( dv, "seat_actor", lambda: "clayton 26f75e16", raising=False )
+    return store
+
+
+def test_the_command_amends_the_row_with_an_actor_stamped_from_the_seat_so_the_store_accepts_it( folder, strict ):
+    out = io.StringIO()
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=out ) == 0, out.getvalue()
+    assert strict.bodies[ 0 ][ "actor" ] == "clayton 26f75e16" and strict.bodies[ 0 ][ "note" ] == LINE_OK and strict.bodies[ 0 ][ "authority" ] == "standing"
+    assert len( lines( folder ) ) == 1
+
+
+def test_the_stores_amend_refuses_a_call_with_no_actor_and_the_command_leaves_the_file_as_it_was( folder, strict, monkeypatch ):
+    from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
+    from lupin_mcp import duplicate_check_filing as ff
+    bare = ff.LiveStore()
+    assert bare.amend( ROW, LINE_OK )[ 1 ] == 422, "the filer's own store sends no actor, which is the defect"
+    monkeypatch.setattr( dv, "seat_actor", lambda: "" )
+    out = io.StringIO()
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=out ) == 3 and "HTTP 422" in out.getvalue() and not ( folder / "verdicts.jsonl" ).exists()
+
+
+def test_the_seat_actor_is_the_bridge_persona_and_the_session_id_the_way_task_amend_stamps_it( monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    monkeypatch.setattr( sb, "get_claude_session_id_with_source", lambda: ( "26f75e16-6b01-4705-b16f-85cb4f32e043", sb.SOURCE_PPID ) )
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } if sid.startswith( "26f75e16" ) else None )
+    assert dv.seat_actor() == "clayton 26f75e16"
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: None )
+    with pytest.raises( dv.VerdictRefused, match="no voice persona" ): dv.seat_actor()
+
+
+def test_the_body_a_seat_store_sends_is_accepted_by_the_stores_own_amend_model_and_carries_every_field_it_requires():
+    from cosa.rest.routers.tasks import TaskAmendIn
+    seen = [ ]
+
+    class Client:
+        def amend_task( self, settings, api_key, item_id, payload ):
+            seen.append( payload )
+            return True, 200, { }
+
+    store        = dv.SeatStore( "clayton 26f75e16", settings={ "api_base_url": "http://x" }, api_key="k" )
+    store.client = Client()
+    store.amend( ROW, LINE_OK )
+    required = { name for name, field in TaskAmendIn.model_fields.items() if field.is_required() }
+    assert "actor" in required, "the pin is aimed at the model that refused the call"
+    assert required <= set( seen[ 0 ] ), "a field the model requires is missing from the body"
+    assert TaskAmendIn( **seen[ 0 ] ).actor == "clayton 26f75e16", "extra=forbid and the field limits are the model's own"
+
+
+@pytest.mark.parametrize( "source", [ "cwd_fallback", "generated_fallback" ] )
+def test_a_session_id_that_came_from_a_fallback_is_refused_so_no_guessed_actor_reaches_the_store( monkeypatch, source ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    monkeypatch.setattr( sb, "get_claude_session_id_with_source", lambda: ( "26f75e16-6b01-4705-b16f-85cb4f32e043", source ) )
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } )
+    with pytest.raises( dv.VerdictRefused, match=source ): dv.seat_actor()
+
+
+@pytest.mark.parametrize( "source", [ "env", "ppid", "grandparent" ] )
+def test_a_session_id_reached_by_a_definitive_door_is_accepted( monkeypatch, source ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    monkeypatch.setattr( sb, "get_claude_session_id_with_source", lambda: ( "26f75e16-6b01-4705-b16f-85cb4f32e043", source ) )
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } )
+    assert dv.seat_actor() == "clayton 26f75e16"
+
+
+def test_the_command_exits_3_and_writes_nothing_when_the_seat_id_is_a_fallback( folder, monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge as sb
+    monkeypatch.setattr( sb, "get_claude_session_id_with_source", lambda: ( "26f75e16-6b01-4705-b16f-85cb4f32e043", "cwd_fallback" ) )
+    monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Clayton" } )
+    out = io.StringIO()
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=out ) == 3 and "cwd_fallback" in out.getvalue() and "Nothing was written" in out.getvalue() and not ( folder / "verdicts.jsonl" ).exists()
+
+
+def corrected( verdict, by="rachel" ):
+    """Ensures: returns LINE_OK with another verdict and another seat's name on it."""
+    return swap( "by", by ).replace( "verdict=EXTEND", f"verdict={verdict}" )
+
+
+def test_a_correction_is_appended_after_the_ruling_with_its_own_author_and_the_replaced_verdict( folder ):
+    store = Amender()
+    dv.write_verdict( swap( "verdict", "DISTINCT" ), folder, ROW, store )
+    rec = dv.write_verdict( corrected( "EXTEND" ), folder, ROW, store, correct=True )
+    got = lines( folder )
+    assert [ r[ "verdict" ] for r in got ] == [ "DISTINCT", "EXTEND" ] and [ r[ "by" ] for r in got ] == [ "cheech", "rachel" ]
+    assert "corrects" not in got[ 0 ] and got[ 1 ][ "corrects" ] == "DISTINCT" and rec == got[ 1 ]
+    assert store.sent[ 1 ] == ( ROW, corrected( "EXTEND" ) + " corrects=DISTINCT" ), "the row carries the correction line and the verdict it replaces"
+
+
+def test_every_reader_of_the_verdict_file_reports_the_corrected_verdict( folder ):
+    dv.write_verdict( swap( "verdict", "DISTINCT" ), folder, ROW, Amender() )
+    runs, _ = rb.read_check_runs( folder, rb.week_of( "2026-11-08" ) )
+    before  = rb.weekly_report( [], [], [], "2026-11-08", tz=datetime.timezone.utc, check_dir=folder, store=None )
+    assert rb.check_counts( runs[ 0 ], None, rb.read_verdicts( folder ) )[ "not_dup" ] == 1
+    dv.write_verdict( corrected( "EXTEND" ), folder, ROW, Amender(), correct=True )
+    logged = rb.read_verdicts( folder )
+    assert logged == { ( RUN, "d-a1" ): "EXTEND" } and rb.verdict_of( None, "epic:dupcheck-d-a1", None, logged[ ( RUN, "d-a1" ) ] ) == "EXTEND"
+    counts = rb.check_counts( runs[ 0 ], None, logged )
+    assert counts[ "real" ] == 1 and counts[ "not_dup" ] == 0, "the weekly table's counts follow the correction"
+    assert rb.weekly_report( [], [], [], "2026-11-08", tz=datetime.timezone.utc, check_dir=folder, store=None ) != before
+    assert rb.settled_keys( folder ) == { "epic:dupcheck-d-a1" }, "a corrected finding stays settled"
+    with pytest.raises( dv.VerdictRefused, match="is already EXTEND" ): dv.write_verdict( corrected( "EXTEND", by="john" ), folder, ROW, Amender(), correct=True )
+
+
+def test_a_finding_may_be_corrected_again_and_the_last_correction_is_the_verdict( folder ):
+    dv.write_verdict( swap( "verdict", "DISTINCT" ), folder, ROW, Amender() )
+    dv.write_verdict( corrected( "EXTEND" ), folder, ROW, Amender(), correct=True )
+    dv.write_verdict( corrected( "DUPLICATE", by="john" ), folder, ROW, Amender(), correct=True )
+    assert [ r.get( "corrects" ) for r in lines( folder ) ] == [ None, "DISTINCT", "EXTEND" ] and rb.read_verdicts( folder ) == { ( RUN, "d-a1" ): "DUPLICATE" }
+
+
+def test_a_correction_of_a_finding_with_no_ruling_is_refused_and_writes_nothing( folder ):
+    store = Amender()
+    with pytest.raises( dv.VerdictRefused, match="no verdict line to correct" ): dv.write_verdict( corrected( "EXTEND" ), folder, ROW, store, correct=True )
+    assert not ( folder / "verdicts.jsonl" ).exists() and store.sent == [ ]
+
+
+def test_a_plain_second_line_is_still_refused_and_the_refusal_names_the_correction_flag( folder ):
+    dv.write_verdict( LINE_OK, folder, ROW, Amender() )
+    with pytest.raises( dv.VerdictRefused, match="with --correct" ): dv.write_verdict( swap( "verdict", "DISTINCT" ), folder, ROW, Amender() )
+
+
+def test_the_command_corrects_with_the_flag_and_refuses_a_correction_that_changes_nothing( folder ):
+    dv.main( [ swap( "verdict", "DISTINCT" ), "--file-only", "--data-dir", str( folder.parent ) ], out=io.StringIO() )
+    out = io.StringIO()
+    assert dv.main( [ corrected( "EXTEND" ), "--file-only", "--correct", "--data-dir", str( folder.parent ) ], out=out ) == 0 and '"corrects": "DISTINCT"' in out.getvalue()
+    out = io.StringIO()
+    assert dv.main( [ corrected( "EXTEND" ), "--file-only", "--correct", "--data-dir", str( folder.parent ) ], out=out ) == 3 and "changes nothing" in out.getvalue()
+    assert len( lines( folder ) ) == 2

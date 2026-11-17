@@ -148,8 +148,8 @@ def test_one_foreign_match_among_own_matches_denies_and_names_only_the_foreign( 
     )
     reason = _guard( PATTERN, [ 701, 702 ], proc, worktree )
     assert reason is not None
-    assert "702" in reason
-    assert "701" not in reason
+    assert "  pid 702  comm=" in reason       # the foreign process is listed as a pid entry
+    assert "pid 701" not in reason             # a bare "701" can sit in a temp folder named pytest-701
 
 
 def test_a_second_sweep_is_checked_when_the_first_matches_only_my_own( worktree, elsewhere ):

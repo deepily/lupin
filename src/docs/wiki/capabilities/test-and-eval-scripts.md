@@ -1,6 +1,6 @@
 ---
 capability: test-and-eval-scripts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.test_harness.mock_job.MockAgenticJob@bce2eb7919
   - cosa.agents.test_harness.mock_submit.build_plain_mock_job@23b298c517
@@ -9,7 +9,7 @@ pins:
   - scripts.check_schema_at_head.classify@eea0a7d7a4
   - scripts.check_dead_claims.find_live_claims@55856ed256
   - scripts.bridge_pin_sweep.sweep@6b207ec6e8
-  - scripts.check_bundle_freshness.check_bundle@bacc3d7387
+  - scripts.check_bundle_freshness.check_bundle@52424de60a
 ---
 # Test and eval scripts
 

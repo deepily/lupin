@@ -306,7 +306,7 @@ def test_the_row_records_which_way_rick_answered( client, repo, settings, asks )
 
     # 🔴 THIS GUARD WAS BLIND FROM BIRTH, NOT FROM THE FIELD MOVE — Mr. Radio 🦉, and the
     # measurement is one `git show` away. At 47cff912, the commit that INTRODUCED this test,
-    # the assertion read `"keypress" in authority` AND `task_promotion_gate.py:111` already
+    # the assertion read `"keypress" in authority` and `task_promotion_gate.py` already
     # returned "rick-approved (timed-out default, not a keypress)". Same substring, same sha.
     # ⇒ THE P0 GUARD HAS NEVER ONCE DISCRIMINATED A KEYPRESS FROM A DEFAULT.
     # ⇒ AND THE STALE RED IS THE ONLY REASON ANYBODY LOOKED. `6de5fdc4` moved the prose out
@@ -320,7 +320,7 @@ def test_the_row_records_which_way_rick_answered( client, repo, settings, asks )
     # a list of two negatives. An exact match is the only form that stays correct as the
     # source set grows — every source but this one fails it, including ones not yet written.
     # 🔴 endswith, NOT ==, AND THE REASON IS A SECOND BRANCH I HAD NOT DRIVEN — Tiberius 👑,
-    # confirmed by me at tasks.py:1184: `transition_reason = f"{payload.reason} · {note}" if
+    # confirmed by me in tasks.py: `transition_reason = f"{payload.reason} · {note}" if
     # payload.reason else note`. The gate note is APPENDED to a caller-supplied reason, never
     # assigned over it, so `== ` is correct ONLY on the branch where the caller sent none —
     # which is the only branch this test drove. My exact match was green because of my own

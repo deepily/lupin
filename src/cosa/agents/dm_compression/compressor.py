@@ -107,7 +107,7 @@ class DmCompressionAgent( AgentBase ):
         # literal braces of their own — code fences, dict literals, f-strings.
         # `str.format` reads every brace as a field and raises KeyError on the
         # first one it cannot resolve. The judge hit exactly this and documents
-        # it at judge.py:748.
+        # it in the comment above the .replace() call in dm_quality_judge/judge.py.
         template = self.prompt_template
 
         # Append the per-message target BEFORE the body is substituted, so the
@@ -125,21 +125,6 @@ class DmCompressionAgent( AgentBase ):
         self.prompt = template.replace( "{dm_body}", frozen_text )
 
         self.xml_response_tag_names = [ "thoughts", "compressed" ]
-
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Not implemented — this agent holds no state worth restoring.
-
-        Requires:
-            - file_path points to a JSON file
-
-        Ensures:
-            - raises NotImplementedError
-
-        Raises:
-            - NotImplementedError always
-        """
-        raise NotImplementedError( "DmCompressionAgent.restore_from_serialized_state() not implemented" )
 
 
 def quick_smoke_test():

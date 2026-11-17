@@ -1116,6 +1116,13 @@ def create_task(
     # Fail-open: the write is never rejected for title length.
     guarded_title, guarded_body, title_guard = rules.soft_guard_title( payload.title, payload.body )
 
+    # Every row is filed by a persona (Rick, 9 Nov 2026, row 1c56470f). A login's creator is
+    # stamped from its validated account below, so only an API-key caller's declared creator is
+    # judged here. Refused before anything is written.
+    if account_email is None:
+        refusal = rules.creator_refusal( payload.created_by, approver_keys=approval.get_approvers() )
+        if refusal is not None: raise HTTPException( status_code=422, detail=refusal )
+
     owner_persona       = _canon_persona( payload.owner_persona )
     accountable_manager = _canon_persona( payload.accountable_manager )
 
@@ -3260,8 +3267,8 @@ def query_tasks(
             #
             # ⛔ SCOPED TO THIS BRANCH ON PURPOSE. /api/tasks is NOT internal-only —
             # the multiplexer parses the FULL-ROW shape (render/taskListModel.ts,
-            # render/TaskListRenderer.ts, notifications.js:386, a 60s poll at
-            # multiplexer/boot.ts:586). This branch returns BEFORE any row is
+            # render/TaskListRenderer.ts, notifications.js, a 60s poll in
+            # multiplexer/boot.ts). This branch returns before any row is
             # materialized, so `breakdown` provably cannot reach that shape.
             # count_only has exactly ONE non-test consumer in the tree (the hook's
             # query_owed), which is what makes always-return safe HERE and only here.

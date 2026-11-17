@@ -252,11 +252,26 @@ def clean_test_db():
         clean_job_history( conn )   # keeps pending jobs scheduled in the future (row a80630a4)
 
     with engine.connect() as conn:
-        count    = conn.execute( text( "SELECT count(*) FROM users WHERE is_protected" ) ).scalar()
+        # Every companion must be present and protected. A protected ADMIN beyond the
+        # companions is allowed: it is the smoke admin made by create_admin_test_account.py,
+        # which marks itself protected so this cleanup stops deleting it (row 77718bf0).
+        # The shared tester login is allowed too: create_test_mock_user.py protects it, because
+        # on the VM no seeded companion carries it. Any other protected row is a leftover from a
+        # prior test or a seed regression.
+        count    = conn.execute(
+            text( "SELECT count(*) FROM users WHERE is_protected AND email = ANY( :emails )" ),
+            { "emails": list( COMPANION_EMAILS ) }
+        ).scalar()
         expected = len( COMPANION_EMAILS )
         assert count == expected, (
             f"SAFETY: expected {expected} protected companions after teardown, got {count}"
         )
+        strays = conn.execute(
+            text( "SELECT email FROM users WHERE is_protected AND NOT ( email = ANY( :emails ) ) "
+                  "AND NOT ( roles @> CAST( '[\"admin\"]' AS jsonb ) )" ),
+            { "emails": list( COMPANION_EMAILS ) + [ e for e in [ os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ) ] if e ] }
+        ).fetchall()
+        assert not strays, f"SAFETY: unexpected protected non-admin users after teardown: {strays}"
 
     yield
 
@@ -668,7 +683,8 @@ def server_embedder():
     Tests use this to avoid instantiating `ProseEmbeddingEngine` in the
     pytest process, which would collide with the FastAPI server's already-
     loaded models on GPU 0 (user's GPU is maximally packed, <1 GB free
-    after server warm-up). The server exposes its cached singleton via
+    after server warm-up). This is the no-GPU rule applied: a test reaches the
+    models only through the service (planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU"). The server exposes its cached singleton via
     HTTP; tests just call the endpoint.
 
     Scope:

@@ -1,5 +1,5 @@
 """
-Build the stored vector set by posting batches of text to the embeddings endpoints.
+Build the stored vector set through the embedding provider, in batches of text.
 
 The build loads no model and makes no device choice: the GPU work runs in the server.
 No function body is embedded. The text is the name, path, signature, docstring and purpose line.
@@ -8,8 +8,12 @@ import pathlib
 import time
 
 from cosa.repo.symindex.candidates import vector_store as vs
-from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, ENGINE_NOT_LOADED
+from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, ENGINE_NOT_LOADED, SERVICE_SATURATED
+from cosa.utils import secret_drift
+from cosa.utils.batch_halving import embed_in_halves
 
+# No-GPU rule (planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU"): this module reaches the model only through the embeddings service. A service that stays
+# crowded stops the pass at once with SERVICE_SATURATED (see embed_all's refusal_limit); nothing here asks for a GPU to be freed.
 # 16, not 64: a code batch of 32 or 64 holding a text over about 2,000 characters made model server 0.1.2 answer
 # 500. Its log shows CUDA out of memory on GPU 0, where vLLM holds about 17 GB and leaves the server about 7 GB
 # at float32. The same rows in batches of 16 answered 200.
@@ -54,7 +58,7 @@ class EndpointClient:
 
     def info( self ):
         """
-        Read GET /api/embeddings/info.
+        Read the embeddings service's info body, through the provider.
 
         Ensures:
             - returns the parsed body, with its engines block
@@ -63,16 +67,7 @@ class EndpointClient:
             - RuntimeError when the key is missing or the answer is not 200
         """
         from cosa.memory.embedding_provider import EmbeddingProvider
-        base_url, api_key, prefix = EmbeddingProvider._resolve_http_target( True )
-        if not api_key: raise RuntimeError( "embeddings info: no API key found" )
-        get = self._get
-        if get is None:
-            import requests
-            get = requests.get
-        response = get( f"{base_url}{prefix}/info", headers={ "X-API-Key": api_key }, timeout=30 )
-        if response.status_code != 200:
-            raise RuntimeError( f"embeddings info answered {response.status_code}: {response.text[ :200 ]}" )
-        return response.json()
+        return EmbeddingProvider.read_info( pin_fastapi=True, get=self._get )
 
 
 def entry_texts( entry, purpose ):
@@ -94,27 +89,55 @@ def entry_texts( entry, purpose ):
     return { "code": code, "prose": prose, "concat": code + "\n" + prose }
 
 
-def _embed_halving( client, batch, content_type, role, pause_seconds, sleep ):
+def _embed_halving( client, batch, content_type, role, pause_seconds, sleep, refusals=None ):
     """
     Embed one batch, and when the server refuses it, embed its two halves instead.
+
+    Requires:
+        - refusals is None, or { "count", "limit" } shared by every batch of one embed_all pass
 
     Ensures:
         - returns one vector per text, in order
         - a refused batch of two or more texts is split in the middle and each half tried alone, down to one text
         - the pause is taken before each retry, so a crowded GPU is not hit again at once
-        - a refused single text raises what the client raised
+        - without refusals, a refused single text raises what the client raised
+        - with refusals, every refusal adds one to its count, and a refused single text is the end of the pass
+
+    Raises:
+        - CandidateError SERVICE_SATURATED when the count passes the limit or a single text is refused, chained to the client's error
     """
-    try: return client.embed( batch, content_type, role )
-    except Exception:                    # the server answers a crowded GPU with a 500 whatever the client wraps it in
-        if len( batch ) < 2: raise
-        sleep( pause_seconds )
-        mid   = len( batch ) // 2
-        first = _embed_halving( client, batch[ :mid ], content_type, role, pause_seconds, sleep )
-        sleep( pause_seconds )
-        return first + _embed_halving( client, batch[ mid: ], content_type, role, pause_seconds, sleep )
+    def refused( error, refused_batch ):
+        """Ensures: counts the refusal; ends the pass past the limit or on a single text."""
+        if refusals is None: return
+        refusals[ "count" ] += 1
+        if refusals[ "count" ] > refusals[ "limit" ] or len( refused_batch ) < 2: raise CandidateError( SERVICE_SATURATED, saturated_message( refusals, error ) ) from error
+
+    def refused_alone( error, _batch ):
+        """Ensures: raises the error the client raised for the one text."""
+        raise error
+
+    # the server answers a crowded GPU with a 500 whatever the client wraps it in, so any exception is a refusal
+    return embed_in_halves( lambda b: client.embed( b, content_type, role ), batch, refused_alone, before_half=lambda _depth: sleep( pause_seconds ), on_failure=refused )
 
 
-def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sleep, on_batch=None ):
+def saturated_message( refusals, exc ):
+    """
+    Say why a pass stopped on a saturated embeddings service.
+
+    Requires:
+        - refusals is { "count", "limit" }; exc is the client's last error
+
+    Ensures:
+        - names the service, the refusal count, the limit and the type of the last error; the error's own text is left out, because a
+          server's 500 body can speak of hardware, and it stays on the exception chain
+        - says the run stops and may be run again once the service answers; it asks nobody to change the service or its hardware
+    """
+    return ( f"the embeddings service (the FastAPI embeddings route and the model server behind it) refused {refusals[ 'count' ]} calls "
+             f"in this pass. The pass stops at a single refused text or past the limit of {refusals[ 'limit' ]}, instead of retrying smaller batches. "
+             f"Run it again once the service answers. Last refusal: {type( exc ).__name__}." )
+
+
+def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sleep, on_batch=None, refusal_limit=None ):
     """
     Embed every text in batches, one batch at a time, with a pause between batches.
 
@@ -125,11 +148,15 @@ def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sle
         - a batch the server refuses is retried in halves, down to one text, so a GPU shared with another process still gets every text
         - with on_batch, it is called as on_batch( start, vectors ) the moment each batch returns, start being the index of the batch's first text, so a caller can keep the work done if a later batch fails
         - every vector has the length of the first
+        - with refusal_limit, the pass counts every refused call, halves included, and stops once the count passes the limit or a single text is refused;
+          without it, the pass retries for as long as halving allows
 
     Raises:
         - CandidateError EMBEDDING_SHAPE when a batch returns the wrong count or a ragged row
+        - CandidateError SERVICE_SATURATED when refusal_limit is given and the refused calls pass it, or a single text is refused
     """
-    vectors = []
+    refusals = None if refusal_limit is None else { "count": 0, "limit": refusal_limit }
+    vectors  = []
     i       = 0
     while i < len( texts ):
         end, longest = i, 0
@@ -138,7 +165,7 @@ def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sle
             if end > i and ( end - i + 1 ) * longest > CHAR_BUDGET: break
             end += 1
         batch = texts[ i:end ]
-        out   = _embed_halving( client, batch, content_type, role, pause_seconds, sleep )
+        out   = _embed_halving( client, batch, content_type, role, pause_seconds, sleep, refusals )
         if len( out ) != len( batch ):
             raise CandidateError( EMBEDDING_SHAPE, f"asked for {len( batch )} vectors and got {len( out )}" )
         vectors.extend( out )
@@ -158,7 +185,7 @@ def reuse_mismatches( old_manifest, info ):
 
     Requires:
         - old_manifest is the sealed manifest of the live set
-        - info is the body of GET /api/embeddings/info, with its engines block
+        - info is the body of the service's info read, with its engines block
 
     Ensures:
         - returns [] only when the code engine, the prose engine, the device class, the libraries and the
@@ -244,7 +271,7 @@ def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pa
     out = pathlib.Path( out_dir )
     out.mkdir( parents=True, exist_ok=True )
     row_ids   = [ e[ "id" ] for e in rows ]
-    hashes    = { name: [ vs.text_hash( t ) for t in texts[ name ] ] for name in vs.MATRICES }
+    hashes    = { name: [ secret_drift.sha256_of( t ) for t in texts[ name ] ] for name in vs.MATRICES }
     usable    = reuse is not None and reuse.row_texts is not None and not reuse_mismatches( reuse.manifest, info )
     dimension = None
     for name in vs.MATRICES:

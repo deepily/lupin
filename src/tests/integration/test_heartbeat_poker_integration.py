@@ -38,6 +38,7 @@ Design: `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md`
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -154,6 +155,7 @@ def build_poker( gateway, recipients, cancel_after=3, **kwargs ):
         commons                  = gateway,
         clock                    = clock,
         notify_fn                = lambda message, priority: notes.append( ( message, priority ) ),
+        switch                   = kwargs.pop( "switch", SimpleNamespace( allowed=lambda: True ) ),      # row c38a49bd: never build the real switch, which reads the main tree's INI
         **kwargs,
     )
     clock.job = poker

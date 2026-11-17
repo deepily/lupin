@@ -1,6 +1,6 @@
 ---
 capability: credential-drift-and-scrubbing
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.credential_file_scrubber.count_value_occurrences@83f950bac1
   - cosa.utils.credential_file_scrubber.format_report@34636f2dfc
@@ -9,8 +9,6 @@ pins:
   - cosa.utils.credential_file_scrubber.scan_for_values@1b4d566b5a
   - cosa.utils.credential_file_scrubber.scrub_file@a2bf50e0cd
   - cosa.utils.credential_file_scrubber.scrub_roots@18845a9900
-  - cosa.utils.credential_watch.container_is_busy@4209a05774
-  - cosa.utils.credential_watch.should_restart_containers@ee9b44da22
   - cosa.utils.secret_drift.sha256_of@8f5c74bfb5
   - cosa.utils.secret_drift.fingerprint_key_file@335f84b427
   - cosa.utils.secret_drift.fingerprint_secret_manager@5b2c1c02fe
@@ -19,7 +17,7 @@ pins:
 ---
 # Credential drift and scrubbing
 
-Three small checks around credentials: an API key file against its Secret Manager copy, credential values left in files, and the OAuth token watcher.
+Two small checks around credentials: an API key file against its Secret Manager copy, and credential values left in files.
 
 ## What it does
 - `secret_drift.check_key_drift( key_path, secret_id, project_id, version="latest", runner=subprocess.run )` returns a dict. It holds `status` (`match`, `drift` or `unknown`), both sha256 digests and a `detail` sentence.
@@ -27,8 +25,6 @@ Three small checks around credentials: an API key file against its Secret Manage
 - `credential_file_scrubber.scan_for_values( roots, values )` runs `grep -rlFa -f -` with the values on stdin. It returns `{ "paths", "unreadable" }` and raises `ValueError` for an empty value list.
 - `count_value_occurrences( path, values )` counts verbatim hits in one file. `is_recently_modified( path, window_seconds=300, now=None )` is true for a file written inside the window. `scrub_file( path, values )` rewrites one file through a temp file, fsync and rename, keeps the mode, and returns `{ path, before, after, changed }`.
 - `scrub_roots( roots, values=None, window_seconds=300, exclude=(), dry_run=False )` finds and scrubs. A recently written or excluded file is skipped and listed. A file that vanishes between the scan and its rewrite is listed under `unreadable` and the run carries on. With no values it reads `credential_env_values()`. `format_report( result )` prints counts and paths only. `main( argv )` returns 0 when no occurrence survives and 1 otherwise.
-- `credential_watch.should_restart_containers( previous_inode, current_inode, expires_at_ms, now_ms, min_remaining_s=120.0 )` returns `( act, reason )`. It acts only when the inode changed and the new token has more than the minimum left.
-- `container_is_busy( ps_output, markers )` returns `( busy, reason )`. Empty output counts as busy. The markers are `pytest`, `playwright`, `run-integration-tests` and `run-e2e-ui-tests`.
 
 ## Don't
 - Don't treat `unknown` from `check_key_drift` as a pass. The comparison did not happen.
@@ -36,5 +32,5 @@ Three small checks around credentials: an API key file against its Secret Manage
 
 ## Invariants
 - No function here returns or prints a credential value. Reports hold digests, counts, paths and key names.
-- Redaction rules come from `cosa.utils.secret_redaction`. `should_restart_containers` returns `False` on the first observation.
-- `credential_watch` is pure logic. Its docstring names `src/scripts/credential-refresh-watcher.py`, which is not tracked; only the `.service` file is.
+- Redaction rules come from `cosa.utils.secret_redaction`.
+- The OAuth token watcher (`credential_watch` and its systemd unit) was retired on 17 Aug 2026, once each container held its own grant.

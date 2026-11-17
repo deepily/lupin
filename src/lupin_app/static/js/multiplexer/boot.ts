@@ -40,6 +40,8 @@ import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
 import { createAwaitingResponseHydration } from "./stores/awaitingResponseHydration";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
+import { PodcastAutoplay, wirePodcastAutoplay } from "./wirePodcastAutoplay";
+import { isPodcastOverlayOpen, onPodcastOverlayClosed, showPodcastOverlay } from "./render/podcastLinks";
 import { wireTtsPlayback } from "./wireTtsPlayback";
 import { wireQaMetrics } from "./wireQaMetrics";
 import { resolveTransportSessionIds } from "./shared/transportSessionIds";
@@ -75,6 +77,7 @@ import {
   createDirectTtsRenderer,
   createHoldingAreaRenderer,
   createEpicBoardRenderer,
+  createBackgroundJobsRenderer,
   createSectionToolbarRenderer,
   createNavBarRenderer,
   type TtsPreviewSliderRenderer,
@@ -368,12 +371,16 @@ function bootMultiplexer(): void {
   // paint chorus until the answer lands, for the same reason the auto-fix box paints
   // unchecked: showing solo iconography before anyone has read the setting would claim a
   // monopoly mode nobody has confirmed.
+  // Row 802c94d3 — the same fetch carries `podcast_auto_play_here_on_finish`. A finished podcast starts in the Play Here
+  // player by itself when it is true. It is off until the answer lands (a failed fetch leaves it off), like the other flags.
+  const podcastAutoplayConfig = { enabled: false };
   apiClient.get<{
     tts_preview_enabled?                 : boolean;
     tts_preview_min_chars?               : number;
     app_timezone?                        : string;
     test_fix_expediter_auto_fix_enabled? : boolean;
     tts_interaction_mode?                : string;
+    podcast_auto_play_here_on_finish?    : boolean;
   }>("/api/config/client")
     .then((c) => {
       ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
@@ -385,12 +392,16 @@ function bootMultiplexer(): void {
         console.error("multiplexer: /api/config/client carries no app_timezone, so times show in UTC");
       }
       stores.submitJobs.setAutoFixDefault(!!c.test_fix_expediter_auto_fix_enabled);
+      podcastAutoplayConfig.enabled = c.podcast_auto_play_here_on_finish === true;
       renderer.setTtsInteractionMode(c.tts_interaction_mode === "solo" ? "solo" : "chorus");
     })
     .catch((err) => {
       // Keep legacy's defaults (disabled, 100 chars, chorus icons). With no app_timezone, times show in UTC.
       console.error("multiplexer: the client config fetch failed, so app_timezone is unset and times show in UTC", err);
     });
+  const podcastAutoplay = new PodcastAutoplay( { show: showPodcastOverlay, isOpen: isPodcastOverlayOpen }, () => podcastAutoplayConfig.enabled );
+  onPodcastOverlayClosed( () => podcastAutoplay.onClosed() );
+  wirePodcastAutoplay( eventBus, podcastAutoplay, window );
   wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({
     fraction : readLiveTtsFraction(),
     enabled  : ttsPreviewConfig.enabled,
@@ -1081,6 +1092,15 @@ function bootMultiplexer(): void {
   // load simply now has a consumer.
   void epicStoriesLoaded.then( () => epicBoardRenderer.repaint() );
 
+  // Background jobs (row d540113f): Rick's ruling puts the accordion in this client, right after
+  // the Epic Board. Row c80ef763: the list also carries each job's on/off switch, so it takes its own fetch of
+  // GET /api/jobs/summary and GET /api/cron-jobs (no store feeds it), its own poll, and the
+  // `cron_job_switch_changed` socket frame from the event bus.
+  const backgroundJobsRenderer = createBackgroundJobsRenderer({ api: apiClient, eventBus });
+  const backgroundJobsMountEl = document.getElementById("background-jobs-pane");
+  if (backgroundJobsMountEl === null) throw new Error("multiplexer: #background-jobs-pane not found");
+  backgroundJobsRenderer.mount(backgroundJobsMountEl);
+
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
   // carbon-copy of the legacy floating #section-toolbar: per-section visibility
   // toggles + collapse-all/expand-all. Drives the ViewStateStore (persisted);
@@ -1296,6 +1316,7 @@ function bootMultiplexer(): void {
       debugPanelRenderer          : "mounted",
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
+      backgroundJobsRenderer      : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
       sectionToolbarRenderer      : "mounted",
       // Lane L4 (v0.1.9) — top nav / logout bar.
@@ -1341,6 +1362,7 @@ function bootMultiplexer(): void {
   // phase6c smoke test asserts (an ORDERED equality, not a set).
   console.log("[multiplexer] holdingAreaRenderer:mounted");
   console.log("[multiplexer] epicBoardRenderer:mounted");
+  console.log("[multiplexer] backgroundJobsRenderer:mounted");
   console.log("[multiplexer] sectionToolbarRenderer:mounted");
   // Parity B-4 — Time Saved mounts LAST of all the panes, in the pre-allocated
   // slot block below the toolbar, so its handshake sits after the toolbar's.

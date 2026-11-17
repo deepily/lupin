@@ -363,7 +363,7 @@ class TestExecute( unittest.TestCase ):
 
 
 # ===========================================================================
-# _resubmit_original_job()
+# _resubmit_original_job
 # ===========================================================================
 class TestResubmit( unittest.TestCase ):
 
@@ -490,7 +490,7 @@ class TestResubmit( unittest.TestCase ):
 
 
 # ===========================================================================
-# _execute_dry_run()
+# _execute_dry_run
 # ===========================================================================
 class TestExecuteDryRun( unittest.TestCase ):
 
@@ -546,7 +546,7 @@ class TestExecuteDryRun( unittest.TestCase ):
 
 
 # ===========================================================================
-# _write_final_report()
+# _write_final_report
 # ===========================================================================
 class TestWriteFinalReport( unittest.TestCase ):
 

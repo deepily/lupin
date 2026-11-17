@@ -81,6 +81,37 @@ def _loads_whitespace_tolerant( text: str ) -> Any:
         return value
 
 
+def extract_last_balanced( text: str, open_char: str, close_char: str ) -> Optional[ str ]:
+    """
+    Extract the last balanced span of text between one bracket pair, by matching depth.
+
+    The walk starts at the last close_char and goes back to the open_char that brings the depth to zero.
+    Brackets inside string values count like any other. The callers parse the span and fall back when that fails.
+
+    Requires:
+        - text is a string
+        - open_char and close_char are the two different one-character brackets of a pair, e.g. "[" and "]"
+
+    Ensures:
+        - returns the substring from the matching open_char through the last close_char, or None
+        - returns None when text holds no close_char, or the last close_char has no matching open_char
+    """
+    close_idx = text.rfind( close_char )
+    if close_idx == -1:
+        return None
+
+    depth = 0
+    for i in range( close_idx, -1, -1 ):
+        if text[ i ] == close_char:
+            depth += 1
+        elif text[ i ] == open_char:
+            depth -= 1
+            if depth == 0:
+                return text[ i : close_idx + 1 ]
+
+    return None
+
+
 def extract_json_object( text: str ) -> Optional[ str ]:
     """
     Extract the last balanced JSON object from text by matching braces.
@@ -99,20 +130,7 @@ def extract_json_object( text: str ) -> Optional[ str ]:
         - Trailing prose is cut by the fence handling in `recover_json_object`,
           before this function is reached.
     """
-    close_idx = text.rfind( "}" )
-    if close_idx == -1:
-        return None
-
-    depth = 0
-    for i in range( close_idx, -1, -1 ):
-        if text[ i ] == "}":
-            depth += 1
-        elif text[ i ] == "{":
-            depth -= 1
-            if depth == 0:
-                return text[ i : close_idx + 1 ]
-
-    return None
+    return extract_last_balanced( text, "{", "}" )
 
 
 # A pause tag the model copied verbatim into a JSON string: <break time="1.5s"/> with the quotes

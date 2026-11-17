@@ -10,6 +10,7 @@ fallback questions.
 
 from typing import List
 from pydantic import Field, field_validator
+from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 
@@ -50,9 +51,7 @@ class ExpeditorResponse( BaseXMLModel ):
     @classmethod
     def coerce_none_to_empty_str( cls, v ):
         """Coerce None (from empty XML tags like <foo></foo>) to empty string."""
-        if v is None:
-            return ""
-        return v
+        return none_to_empty( v )
 
     def is_complete( self ):
         """
@@ -241,9 +240,7 @@ class ArgConfirmationResponse( BaseXMLModel ):
     @classmethod
     def coerce_none_to_empty_str( cls, v ):
         """Coerce None (from empty XML tags like <foo></foo>) to empty string."""
-        if v is None:
-            return ""
-        return v
+        return none_to_empty( v )
 
     def is_approval( self ):
         """

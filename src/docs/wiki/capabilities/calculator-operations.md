@@ -1,6 +1,6 @@
 ---
 capability: calculator-operations
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.calculator.calc_operations.arithmetic@967a828eef
   - cosa.agents.calculator.calc_operations.compare_prices@1d0b3c3710
@@ -11,7 +11,7 @@ pins:
   - cosa.agents.calculator.dispatcher.dispatch@82a1c77171
   - cosa.agents.calculator.dispatcher.extract_calc_intent_xml@ceecc80a1a
   - cosa.agents.calculator.dispatcher.format_result_for_voice@4065d1225e
-  - cosa.agents.calculator.xml_models.CalcIntent@7b3af6281a
+  - cosa.agents.calculator.xml_models.CalcIntent@68ac21b7f7
 ---
 # Calculator operations
 

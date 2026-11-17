@@ -112,7 +112,14 @@
             "german audio"
           ]
         }
-      ]
+      ],
+      "script_type": {
+        "value": "status_report",
+        "triggers": [
+          "status report",
+          "status-report"
+        ]
+      }
     }
   },
   "agent router go to research to podcast": {
@@ -197,7 +204,14 @@
             "german audio"
           ]
         }
-      ]
+      ],
+      "script_type": {
+        "value": "status_report",
+        "triggers": [
+          "status report",
+          "status-report"
+        ]
+      }
     }
   },
   "agent router go to claude code": {

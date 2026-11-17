@@ -403,6 +403,7 @@ def repin_guidance( offenders, texts ):
     )
 
 
+@pytest.mark.census
 def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
     """
     THE GUARD. Scans what git tracks — not what someone remembered to list.
@@ -1003,6 +1004,7 @@ def test_the_exemption_set_cannot_grow_silently():
     )
 
 
+@pytest.mark.census
 def test_no_silent_default_for_the_project_id_in_shell_scripts():
     """
     `${LUPIN_GCP_PROJECT_ID:-<anything>}` is a SILENT default — it hands a caller a
@@ -1097,6 +1099,7 @@ def test_precedence_guard_bites_on_literals_and_spares_derived_values( body, exp
     assert stealers_in( body ) == expected
 
 
+@pytest.mark.census
 def test_no_executable_surface_sets_a_vertex_precedence_stealer_to_a_literal():
     """
     THE INVERSION, APPLIED TO THE PRECEDENCE-STEALERS TOO.

@@ -40,7 +40,7 @@ def make_git_ops( with_push_branch=True, **overrides ):
 
 
 # ===========================================================================
-# resolve_trust_level (static)
+# resolve_trust_level, static
 # ===========================================================================
 class TestResolveTrustLevel( unittest.TestCase ):
 
@@ -74,7 +74,7 @@ class TestResolveTrustLevel( unittest.TestCase ):
 
 
 # ===========================================================================
-# generate_slug (static)
+# generate_slug, static
 # ===========================================================================
 class TestGenerateSlug( unittest.TestCase ):
 

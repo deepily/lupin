@@ -10,11 +10,11 @@ import collections
 import contextlib
 import fcntl
 import json
-import os
 import pathlib
 import time
 
 from cosa.repo.doc_lint import jev_transport as jt
+from cosa.utils.atomic_json import write_json_atomic
 from lupin_mcp import reuse_ceiling as rc
 from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_pack as rp
@@ -219,11 +219,8 @@ def _stage_lock( env ):
 
 
 def _write_json( path, record ):
-    """Ensures: writes the record whole or not at all, with no temporary file left."""
-    path.parent.mkdir( parents=True, exist_ok=True )
-    tmp = path.with_name( path.name + ".tmp" )
-    tmp.write_text( json.dumps( record, sort_keys=True, indent=1 ) + "\n", encoding="utf-8" )
-    os.replace( tmp, path )
+    """Ensures: writes the record whole or not at all, sorted and indented."""
+    write_json_atomic( path, record, indent=1, trailing_newline=True, sort_keys=True )
 
 
 def _stop_reason( sweep, budget ):

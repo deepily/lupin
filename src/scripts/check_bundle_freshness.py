@@ -17,12 +17,20 @@ A check keyed on the input set cries wolf there. The precise claim is narrower.
 One comparison catches every drift that changes the delivered bytes (content or population).
 It is silent on drift that does not.
 
-Exit codes (four states, three codes):
+Harness bundles: a driver that writes no manifest, such as build-parity-harness.sh, is judged too.
+Its shipped output files are the record: each is rebuilt into a temp directory and compared byte for byte.
+Before this, a stale parity-harness.js passed the check that the LUPIN_TEST_BASE_URL tests rely on.
+
+Exit codes (four states, four codes):
     0  every judged bundle is `FRESH`: a rebuild would produce byte-identical output.
-       `NOT-BUILT` bundles do not block this.
+       `NOT-BUILT` and `DORMANT` bundles do not block this. A dormant bundle is a built bundle that has
+       drifted but that no tracked file loads, so no page serves it.
     1  at least one bundle is `STALE`: a rebuild would change the delivered bytes.
+       This wins over 2: a bundle that could not be checked never hides one that is stale.
     2  `REFUSED`: could not answer (no esbuild, unparseable build script, a build that failed,
        or a bundle never built that something references). An unanswered question is never a clean 0.
+    3  the checker itself crashed. Python's own exit for an uncaught exception is 1, which
+       would read as `STALE`, so a crash is caught and reported with its traceback instead.
 
 """
 
@@ -35,6 +43,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 
 from pathlib import Path
 
@@ -50,10 +59,12 @@ FRESH        = "FRESH"
 STALE        = "STALE"
 REFUSED      = "REFUSED"
 NOT_BUILT    = "NOT-BUILT"
+DORMANT      = "DORMANT"
 
 EXIT_FRESH   = 0
 EXIT_STALE   = 1
 EXIT_REFUSED = 2
+EXIT_CRASHED = 3
 
 # Paths that MENTION a bundle's output without LOADING it. A driver names its own outputs in
 # comments, a tsconfig names an outDir, and prose describes both — none of that is a consumer.
@@ -271,7 +282,9 @@ def check_bundle( root, script_path, esbuild ):
 
     Ensures:
         - returns a dict carrying "name", "status" and enough detail to print a report row
-        - "status" is one of `FRESH`, `STALE`, `REFUSED` — never a bare boolean
+        - "status" is one of `FRESH`, `STALE`, `DORMANT`, `NOT-BUILT`, `REFUSED` — never a bare boolean
+        - a built bundle whose rebuild differs is `STALE` when a tracked file loads its output or git cannot say who does,
+          and `DORMANT` only when git answers that nothing loads it
         - a question that cannot be answered returns `REFUSED` with a "reason", never `FRESH`
 
     Notes:
@@ -366,7 +379,122 @@ def check_bundle( root, script_path, esbuild ):
             with open( meta_path, encoding="utf-8" ) as handle:
                 result[ "sources" ] = len( json.load( handle ).get( "inputs", {} ) )
 
-    result[ "status" ] = FRESH if result[ "rebuilt_hash" ] == shipped_hash else STALE
+    if result[ "rebuilt_hash" ] == shipped_hash:
+        result[ "status" ] = FRESH
+        return result
+    loaders = consumers_of( root, spec[ "outdir" ] )
+    if loaders == []:
+        # Built once, drifted since, and nothing loads it: the delivered bytes are not delivered to anyone.
+        result[ "status" ] = DORMANT
+        result[ "reason" ] = f"{spec['outdir']} has drifted from its source, but no tracked file loads it, so no page serves the old bytes"
+    else:
+        result[ "status" ] = STALE      # a loader exists, or git could not say: stay loud
+    return result
+
+
+def discover_harness_bundles( root ):
+    """
+    Find the bundles built by drivers that write no manifest, such as the parity harness.
+
+    A harness driver names each output file in an `OUTFILE=` line, so the shipped bytes themselves are what a rebuild
+    is compared with. A driver with more than one entry names a second pair as `<PREFIX>_ENTRY=` and `<PREFIX>_OUTFILE=`.
+
+    Requires:
+        - root is the project root as a Path
+
+    Ensures:
+        - returns one dict per output file: "name", "script", "driver", "entry", "outfile", "flags", "error"
+        - "error" is None, or says why the driver could not be read (the other fields are then None)
+        - drivers that write a manifest are left to discover_bundles, and a script with no `ENTRY=` line is not a bundle driver
+    """
+    found = []
+    for script in sorted( ( root / "src" / "scripts" ).glob( "build-*.sh" ) ):
+        text = script.read_text( encoding="utf-8" )
+        if "manifest.json" in text or not re.search( r'^(?:[A-Z]+_)?ENTRY="', text, re.M ): continue
+        try:
+            spec = parse_build_script( script )
+        except BuildScriptError as error:
+            found.append( { "name": script.stem.replace( "build-", "" ), "script": script, "driver": script.stem.replace( "build-", "" ),
+                            "entry": None, "outfile": None, "flags": None, "error": f"unparseable build script: {error}" } )
+            continue
+        for prefix in re.findall( r'^((?:[A-Z]+_)?)ENTRY="', text, re.M ):
+            entry   = re.search( rf'^{prefix}ENTRY="([^"]+)"', text, re.M ).group( 1 )
+            outfile = re.search( rf'^{prefix}OUTFILE="([^"]+)"', text, re.M )
+            if outfile is None:
+                found.append( { "name": prefix.lower().strip( "_" ) or script.stem.replace( "build-", "" ), "script": script, "driver": script.stem.replace( "build-", "" ),
+                                "entry": entry, "outfile": None, "flags": None, "error": f"no {prefix}OUTFILE= for {prefix}ENTRY= in {script.name}" } )
+                continue
+            out_rel = outfile.group( 1 ).replace( "$OUTDIR", spec[ "outdir" ] )
+            found.append( { "name": os.path.splitext( os.path.basename( out_rel ) )[ 0 ], "script": script, "driver": script.stem.replace( "build-", "" ),
+                            "entry": entry, "outfile": out_rel, "flags": spec[ "flags" ], "error": None } )
+    return found
+
+
+def check_harness_bundle( root, bundle, esbuild ):
+    """
+    Rebuild one harness bundle in a temp directory and compare it with the shipped file.
+
+    Same question as check_bundle, answered without a manifest: the shipped file's own hash is the record.
+
+    Requires:
+        - root is the project root as a Path
+        - bundle is a dict returned by discover_harness_bundles
+        - esbuild is a path to an executable esbuild binary, or None
+
+    Ensures:
+        - returns a dict shaped like check_bundle's, with "driver" naming the driver stem for the remedy line
+        - "status" is `FRESH`, `STALE`, `DORMANT`, `NOT-BUILT` or `REFUSED`, by the same rules as check_bundle
+        - a missing shipped file is `NOT-BUILT` only when no tracked file loads it
+        - a question that cannot be answered returns `REFUSED` with a "reason", never `FRESH`
+    """
+    result = { "name": bundle[ "name" ], "script": bundle[ "script" ].name, "driver": bundle[ "driver" ], "status": REFUSED, "reason": None,
+               "shipped_hash": None, "rebuilt_hash": None, "sources": None, "entry": bundle[ "entry" ] }
+    if bundle[ "error" ] is not None:
+        result[ "reason" ] = bundle[ "error" ]
+        return result
+    if esbuild is None:
+        result[ "reason" ] = "esbuild binary not found — run `npm install` from the project root"
+        return result
+    if not ( root / bundle[ "entry" ] ).is_file():
+        result[ "reason" ] = f"entry not found: {bundle['entry']}"
+        return result
+
+    shipped = root / bundle[ "outfile" ]
+    if not shipped.is_file():
+        loaders = consumers_of( root, bundle[ "outfile" ] )
+        if loaders is None:
+            result[ "reason" ] = f"{bundle['outfile']} has never been built and git could not be asked who references it — refusing rather than assuming nobody does"
+        elif loaders:
+            result[ "reason" ] = f"{bundle['outfile']} has never been built, but {len( loaders )} file(s) reference it — that is a live 404: {', '.join( loaders[ :3 ] )}"
+        else:
+            result[ "status" ] = NOT_BUILT
+            result[ "reason" ] = f"{bundle['outfile']} has never been built in this tree, and no tracked file loads it — a dormant driver, not a delivery gap"
+        return result
+
+    result[ "shipped_hash" ] = short_sha( shipped.read_bytes() )
+
+    with tempfile.TemporaryDirectory( prefix="bundle-freshness-" ) as scratch:
+        out_path  = os.path.join( scratch, os.path.basename( bundle[ "outfile" ] ) )
+        meta_path = os.path.join( scratch, "meta.json" )
+        command   = [ esbuild, bundle[ "entry" ] ] + bundle[ "flags" ] + [ f"--outfile={out_path}", f"--metafile={meta_path}", "--log-level=warning" ]
+        completed = subprocess.run( command, cwd=root, capture_output=True, text=True, check=False )
+        if completed.returncode != 0 or not os.path.isfile( out_path ):
+            detail = ( completed.stderr or completed.stdout or "" ).strip().splitlines()
+            result[ "reason" ] = f"dry-run build failed (exit {completed.returncode}): {detail[ 0 ] if detail else 'no output produced'}"
+            return result
+        with open( out_path, "rb" ) as handle:
+            result[ "rebuilt_hash" ] = short_sha( handle.read() )
+        with open( meta_path, encoding="utf-8" ) as handle:
+            result[ "sources" ] = len( json.load( handle ).get( "inputs", {} ) )
+
+    if result[ "rebuilt_hash" ] == result[ "shipped_hash" ]:
+        result[ "status" ] = FRESH
+        return result
+    if consumers_of( root, bundle[ "outfile" ] ) == []:
+        result[ "status" ] = DORMANT
+        result[ "reason" ] = f"{bundle['outfile']} has drifted from its source, but no tracked file loads it, so no page serves the old bytes"
+    else:
+        result[ "status" ] = STALE
     return result
 
 
@@ -388,6 +516,32 @@ def current_sha( root ):
         cwd=root, capture_output=True, text=True, check=False
     )
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
+
+
+def remedy( root, name, driver_stem=None ):
+    """
+    The exact command that rebuilds one bundle, as a line for the report.
+
+    Requires:
+        - root is the project root, as a Path or a string
+        - name is a bundle name such as `nav`, whose driver is `src/scripts/build-<name>.sh`
+        - driver_stem is the driver's name after `build-` when it differs from the bundle's, as for a harness bundle
+
+    Ensures:
+        - always names the driver, which rebuilds that bundle and no other
+        - names `npm run build` only when package.json's build script runs the driver
+        - says `npm run build` does not build it when package.json is readable and omits the driver
+        - falls back to the driver alone when package.json cannot be read
+    """
+    name   = driver_stem or name
+    driver = f"bash src/scripts/build-{name}.sh"
+    try:
+        build = json.loads( ( Path( root ) / "package.json" ).read_text( encoding="utf-8" ) )[ "scripts" ][ "build" ]
+    except ( OSError, ValueError, KeyError ):
+        return f"Run: {driver}"
+    if f"build-{name}.sh" in build:
+        return f"Run: npm run build (or {driver})"
+    return f"Run: {driver} (`npm run build` does not build it)"
 
 
 def format_report( root, results, sha ):
@@ -423,7 +577,7 @@ def format_report( root, results, sha ):
     ]
 
     for entry in results:
-        if entry[ "status" ] in ( REFUSED, NOT_BUILT ):
+        if entry[ "status" ] in ( REFUSED, NOT_BUILT, DORMANT ):
             lines.append( f"  {entry['name']:<14} {entry['status']:<9} {'-':>7}  {'-':<13} {'-':<13}" )
             lines.append( f"      ↳ {entry['reason']}" )
             continue
@@ -435,7 +589,7 @@ def format_report( root, results, sha ):
         )
         if entry[ "status" ] == STALE:
             lines.append(
-                f"      ↳ a rebuild WOULD change the delivered bytes. Run: npm run build"
+                f"      ↳ a rebuild WOULD change the delivered bytes. {remedy( root, entry[ 'name' ], entry.get( 'driver' ) )}"
             )
 
     judged = [ e for e in results if e[ "status" ] in ( FRESH, STALE ) ]
@@ -462,8 +616,10 @@ def main( argv=None ):
 
     Ensures:
         - returns EXIT_FRESH only when at least one bundle was judged and all were `FRESH`
-        - returns EXIT_REFUSED when any bundle could not be judged, and when none were found
-        - returns EXIT_STALE when any judged bundle was `STALE`
+        - returns EXIT_STALE when any judged bundle was `STALE`, even if another could not be judged
+        - returns EXIT_REFUSED when a bundle could not be judged and none was stale, and when none were found
+        - returns EXIT_CRASHED, with a traceback on stderr, when the checker itself raises
+        - a `DORMANT` bundle, built and drifted but loaded by no page, does not block EXIT_FRESH and never counts as `FRESH`
         - a NOT_BUILT bundle does not block EXIT_FRESH, but EXIT_FRESH still requires that at
           least one bundle was actually judged — an all-NOT_BUILT tree has measured nothing
           and must not report a clean zero
@@ -482,34 +638,42 @@ def main( argv=None ):
     parser.add_argument( "--quiet", action="store_true", help="print only the verdict lines" )
     args = parser.parse_args( argv )
 
-    root    = PROJECT_ROOT
-    esbuild = root / "node_modules" / ".bin" / "esbuild"
-    esbuild = str( esbuild ) if os.access( esbuild, os.X_OK ) else None
+    try:
+        root    = PROJECT_ROOT
+        esbuild = root / "node_modules" / ".bin" / "esbuild"
+        esbuild = str( esbuild ) if os.access( esbuild, os.X_OK ) else None
 
-    scripts = discover_bundles( root )
-    if not scripts:
-        print( "check_bundle_freshness: REFUSED — no build-*.sh driver emits a manifest.json",
-               file=sys.stderr )
-        return EXIT_REFUSED
+        scripts   = discover_bundles( root )
+        harnesses = discover_harness_bundles( root )
+        if not scripts and not harnesses:
+            print( "check_bundle_freshness: REFUSED — no build-*.sh driver emits a manifest.json or a harness bundle",
+                   file=sys.stderr )
+            return EXIT_REFUSED
 
-    results = [ check_bundle( root, script, esbuild ) for script in scripts ]
+        results  = [ check_bundle( root, script, esbuild ) for script in scripts ]
+        results += [ check_harness_bundle( root, bundle, esbuild ) for bundle in harnesses ]
 
-    lines = format_report( root, results, current_sha( root ) )
-    if args.quiet:
-        lines = [ line for line in lines if line.strip() ]
-    print( "\n".join( lines ) )
+        lines = format_report( root, results, current_sha( root ) )
+        if args.quiet:
+            lines = [ line for line in lines if line.strip() ]
+        print( "\n".join( lines ) )
 
-    if any( entry[ "status" ] == REFUSED for entry in results ): return EXIT_REFUSED
-    if any( entry[ "status" ] == STALE   for entry in results ): return EXIT_STALE
+        if any( entry[ "status" ] == STALE   for entry in results ): return EXIT_STALE
+        if any( entry[ "status" ] == REFUSED for entry in results ): return EXIT_REFUSED
 
-    if not any( entry[ "status" ] == FRESH for entry in results ):
-        # Every bundle was NOT_BUILT: nothing was measured. A clean exit here would be the
-        # vacuous green this file exists to prevent.
-        print( "check_bundle_freshness: REFUSED — no bundle was built, so nothing was measured",
-               file=sys.stderr )
-        return EXIT_REFUSED
+        if not any( entry[ "status" ] == FRESH for entry in results ):
+            # Every bundle was NOT_BUILT: nothing was measured. A clean exit here would be the
+            # vacuous green this file exists to prevent.
+            print( "check_bundle_freshness: REFUSED — no bundle was built, so nothing was measured",
+                   file=sys.stderr )
+            return EXIT_REFUSED
 
-    return EXIT_FRESH
+        return EXIT_FRESH
+
+    except Exception:
+        traceback.print_exc()
+        print( "check_bundle_freshness: CRASHED — the checker itself failed; this is not a STALE verdict", file=sys.stderr )
+        return EXIT_CRASHED
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-pair-labelling
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.routers.pair_labelling.LabelUpload@98f8fd6b17
   - cosa.rest.routers.pair_labelling.packets_dir@a598427cb3

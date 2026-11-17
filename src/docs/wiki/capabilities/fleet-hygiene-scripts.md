@@ -1,6 +1,6 @@
 ---
 capability: fleet-hygiene-scripts
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.apply_claude_permissions.default_source_path@6ceb20dc59
   - scripts.apply_claude_permissions.default_target_path@c6d96e21c3

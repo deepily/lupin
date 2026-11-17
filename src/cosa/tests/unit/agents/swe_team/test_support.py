@@ -40,7 +40,7 @@ class TestSweTeamConfigDefaults( unittest.TestCase ):
 
     def test_default_values( self ):
         c = swe_config.SweTeamConfig()
-        self.assertEqual( c.lead_model,   "claude-opus-4-6" )
+        self.assertEqual( c.lead_model,   "claude-opus-5" )      # read from the INI, not from code
         self.assertEqual( c.worker_model, "claude-sonnet-4-6" )
         self.assertEqual( c.max_iterations_per_task, 10 )
         self.assertEqual( c.max_tokens_per_session, 500_000 )
@@ -63,12 +63,19 @@ class TestSweTeamConfigFromConfig( unittest.TestCase ):
         _echo_get.seen = {}
         self.cfg_mgr = MagicMock()
         self.cfg_mgr.get.side_effect = _echo_get
+        self.cfg_mgr.get_required.side_effect = self._get_required
+
+    @staticmethod
+    def _get_required( ini_key, return_type=None, **kwargs ):
+        _echo_get.seen[ ini_key ] = return_type
+        return f"model-for[{ini_key}]"
 
     def test_from_config_dispatches_all_return_types( self ):
         # One pass exercises all four return_type arms (str/int/bool/float fields
         # are all present in key_map) plus the false side of each type check.
         c = swe_config.SweTeamConfig.from_config( self.cfg_mgr, debug=False )
-        self.assertEqual( c.lead_model, "claude-opus-4-6" )  # default fell through
+        self.assertEqual( c.lead_model, "model-for[swe team lead model]" )  # read with get_required, no default
+        self.assertEqual( c.worker_model, "model-for[swe team worker model]" )
         seen = _echo_get.seen
         self.assertEqual( seen[ "swe team lead model" ],              "string" )
         self.assertEqual( seen[ "swe team max iterations per task" ], "int" )

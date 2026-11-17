@@ -36,24 +36,7 @@ class DateAndTimeAgent( AgentBase ):
         self.prompt   = self.prompt_template.format( question=self.question, timezone=self.timezone )
         self.xml_response_tag_names   = [ "thoughts", "brainstorm", "evaluation", "code", "example", "returns", "explanation" ]
     
-        # self.serialize_prompt_to_json = self.config_mgr.get( "agent todo list serialize prompt to json", default=False, return_type="boolean" )
-        # self.serialize_code_to_json   = self.config_mgr.get( "agent todo list serialize code to json",   default=False, return_type="boolean" )
     
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Restore date and time agent state from JSON file.
-        
-        Requires:
-            - file_path points to valid JSON file
-            
-        Ensures:
-            - Raises NotImplementedError (not implemented)
-            
-        Raises:
-            - NotImplementedError always
-        """
-        
-        raise NotImplementedError( "DateAndTimeAgent.restore_from_serialized_state() not implemented" )
     
     
 def quick_smoke_test():

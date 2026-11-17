@@ -298,7 +298,7 @@ def build_prompt( body, ask_outside="lead2" ):
 
     # .replace(), not .format(): DM bodies carry literal braces — dict literals,
     # f-strings, code fences — and str.format reads every one as a field. The
-    # judge hit exactly this (judge.py:748).
+    # judge hit exactly this (dm_quality_judge/judge.py, _grade_qualitative).
     if ask_outside in ( "lead2", "inside2", "outside2" ):
         # One spec, chosen here rather than by the model. The three differ only
         # in WHERE the request goes, which is the comparison that means anything.

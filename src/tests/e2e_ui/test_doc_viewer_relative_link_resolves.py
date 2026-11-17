@@ -1,7 +1,8 @@
 """
 E2E regression: a relative link inside a rendered markdown file opens the file it names.
 
-WHATS-NEW.md links the rewrite plan as a repo-relative path, which is right on GitHub.
+VERSION-HISTORY.md links the rewrite plan as a repo-relative path, which is right on GitHub.
+The link sat in WHATS-NEW.md until v0.2.3 archived the v0.2.2 narrative there.
 The viewer left that href alone. The browser resolved it against `/app/` and opened
 `/app/src/rnd/...`, a 404, although the file exists.
 
@@ -21,7 +22,7 @@ import requests
 
 BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 
-WHATS_NEW_PATH = "lupin/WHATS-NEW.md"
+SOURCE_PATH    = "lupin/VERSION-HISTORY.md"
 LINK_TEXT      = "documentation rewrite plan"
 PLAN_REL       = "src/rnd/v0.2.2/2026.09.30-lupin-af-documentation-rewrite-plan/2026.09.30-lupin-af-documentation-rewrite-plan.md"
 PLAN_NAME      = PLAN_REL.rsplit( "/", 1 )[ -1 ]
@@ -45,9 +46,9 @@ def authed_page( page, context ):
 
 class TestDocViewerRelativeLinkResolves:
 
-    def test_whats_new_plan_link_points_into_the_viewer( self, authed_page ):
+    def test_the_archived_plan_link_points_into_the_viewer( self, authed_page ):
         """The rendered href is the viewer URL for the plan, not the bare repo-relative path."""
-        authed_page.goto( f"{BASE_URL}/app/docs?path={WHATS_NEW_PATH}", wait_until="networkidle" )
+        authed_page.goto( f"{BASE_URL}/app/docs?path={SOURCE_PATH}", wait_until="networkidle" )
         link = authed_page.locator( "#doc-viewer-target a", has_text=LINK_TEXT ).first
         link.wait_for( timeout=10_000 )
         authed_page.wait_for_function(
@@ -59,9 +60,9 @@ class TestDocViewerRelativeLinkResolves:
         )
         assert link.get_attribute( "href" ) == f"/app/docs?path=lupin/{PLAN_REL}"
 
-    def test_clicking_the_whats_new_plan_link_lands_on_the_plan( self, authed_page ):
+    def test_clicking_the_archived_plan_link_lands_on_the_plan( self, authed_page ):
         """The acceptance criterion: click the link, land on the plan, rendered, no 404."""
-        authed_page.goto( f"{BASE_URL}/app/docs?path={WHATS_NEW_PATH}", wait_until="networkidle" )
+        authed_page.goto( f"{BASE_URL}/app/docs?path={SOURCE_PATH}", wait_until="networkidle" )
         link = authed_page.locator( "#doc-viewer-target a", has_text=LINK_TEXT ).first
         link.wait_for( timeout=10_000 )
         authed_page.wait_for_function(

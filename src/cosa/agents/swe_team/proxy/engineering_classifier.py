@@ -13,6 +13,8 @@ Dependency Rule:
     This module never imports from notification_proxy.
 """
 
+import re
+
 from cosa.agents.decision_proxy.category_classifier import CategoryClassifier
 from cosa.agents.swe_team.proxy.engineering_categories import ENGINEERING_CATEGORIES
 
@@ -23,6 +25,55 @@ SENDER_CATEGORY_HINTS = {
     "swe.coder"   : None,       # Coders produce all categories
     "swe.lead"    : None,       # Leads produce all categories
 }
+
+
+SUFFIXES       = ( "s", "es", "d", "ed", "ing", "er", "ers", "ize", "ized", "izes", "izing" )
+E_SUFFIXES     = ( "ing", "er", "ers" )
+DOUBLE_SUFFIXES = ( "ed", "ing", "er", "ers" )
+SHORT_KEYWORD  = 3
+
+
+def keyword_pattern( keyword ):
+    """
+    Build the pattern that finds a keyword as a whole word, with its common endings.
+
+    A raw substring test let "pip" match inside "pipeline" and "test" inside "latest".
+    Plain whole-word matching then missed "deployer", "containerized" and "truncated".
+
+    Requires:
+        - keyword is a non-empty lower-case string
+
+    Ensures:
+        - A keyword made only of letters also matches with a common ending such as s, ed, ing, er or ized
+        - A keyword ending in "e" also matches with the "e" dropped before ing, er or ers
+        - A keyword of four letters or more also matches with its last letter doubled before ed, ing, er or ers
+        - A keyword of three letters or fewer takes only a plural "s", so "pip" never matches "pipes"
+        - A keyword with a space or punctuation ( "rm -rf", "requirements.txt" ) matches only as written
+        - No match may start or end inside a longer word
+    """
+    forms = [ re.escape( keyword ) ]
+    if keyword.isalpha():
+        if len( keyword ) <= SHORT_KEYWORD:
+            forms.append( re.escape( keyword ) + "s" )
+        else:
+            forms += [ re.escape( keyword ) + suffix for suffix in SUFFIXES ]
+            if keyword.endswith( "e" ): forms += [ re.escape( keyword[ :-1 ] ) + suffix for suffix in E_SUFFIXES ]
+            forms += [ re.escape( keyword ) + keyword[ -1 ] + suffix for suffix in DOUBLE_SUFFIXES ]
+    return r"(?<!\w)(?:" + "|".join( forms ) + r")(?!\w)"
+
+
+def keyword_in_text( keyword, text ):
+    """
+    Test whether a keyword occurs in text as a whole word or phrase, endings allowed.
+
+    Requires:
+        - keyword is a non-empty lower-case string
+        - text is a lower-case string
+
+    Ensures:
+        - Returns True when keyword_pattern finds a match in text
+    """
+    return re.search( keyword_pattern( keyword ), text ) is not None
 
 
 class EngineeringClassifier( CategoryClassifier ):
@@ -82,7 +133,7 @@ class EngineeringClassifier( CategoryClassifier ):
                 continue  # General is the fallback, not scored
 
             keywords = cat_def[ "keywords" ]
-            match_count = sum( 1 for kw in keywords if kw in question_lower )
+            match_count = sum( 1 for kw in keywords if keyword_in_text( kw, question_lower ) )
 
             if match_count > 0:
                 # Base confidence: proportional to keyword matches (capped)

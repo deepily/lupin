@@ -74,6 +74,12 @@ def test_pairing_share_counts_ties_as_half_and_names_the_empty_case():
     assert jr.pairing_share( [ row( "s00", "a", 1, 0.5 ) ] ) == { "share": None, "pairings": 0 }
 
 
+def test_pairing_share_rounds_a_non_terminating_share_to_six_places_and_skips_unanswered_plants():
+    rows = [ row( "s00", "a", 1, 0.9 ), row( "s01", "a", 1, 0.5 ), row( "s02", "a", 1, 0.1 ), row( "n0", "a", 1, 0.5 ), row( "n1", "a", 1, 0.3 ),
+             row( "n2", "a", 1, 0.99, answered=False ) ]
+    assert jr.pairing_share( rows ) == { "share": 0.583333, "pairings": 6 }          # 2 + 1.5 + 0 = 3.5 of 6; the unanswered 0.99 is left out
+
+
 def test_index_results_refuses_a_repeated_pair_and_an_unknown_arm():
     r = row( "s00", jp.ARM_BASELINE, 1, 0.5 )
     with pytest.raises( ValueError, match="twice" ): jr.index_results( [ r, dict( r ) ] )

@@ -1,6 +1,6 @@
 ---
 capability: auth-page-state-and-actions
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.html.auth.js.auth.isAuthenticated@c399353a85
   - src.lupin_app.static.html.auth.js.auth.getCurrentUser@90aa91c6db

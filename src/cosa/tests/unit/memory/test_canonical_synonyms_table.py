@@ -109,7 +109,7 @@ class TestAddSynonym( unittest.TestCase ):
             self.assertTrue( table.add_synonym( "snap1", "How Are You?", confidence_score=90.0, source="test" ) )
         kw = repo.add_synonym.call_args.kwargs
         self.assertEqual( kw[ "snapshot_id" ], "snap1" )
-        self.assertEqual( kw[ "question_normalized" ], "how are you?" )    # normalizer.lower()
+        self.assertEqual( kw[ "question_normalized" ], "how are you?" )    # the normalizer lowercases
         self.assertEqual( kw[ "question_gist" ], "how are you?" )
         self.assertEqual( kw[ "embedding_verbatim" ], [ 0.1 ] * 768 )
         self.assertEqual( kw[ "confidence_score" ], 90.0 )

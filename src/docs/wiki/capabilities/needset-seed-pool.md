@@ -1,6 +1,6 @@
 ---
 capability: needset-seed-pool
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.pool.read_pool_symbols@bf3ba07224
   - lupin_mcp.reuse_needset.pool.is_test_path@cacfe6ec9b

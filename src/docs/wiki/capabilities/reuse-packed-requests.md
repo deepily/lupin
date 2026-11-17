@@ -1,6 +1,6 @@
 ---
 capability: reuse-packed-requests
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_pack.question_key@69eaf5db8b
   - lupin_mcp.reuse_pack.pack_request@9a8322fd1a

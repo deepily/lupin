@@ -32,7 +32,9 @@ Python: a class or function whose name does not start with `_`, at module level 
 `__init__`, including public classes nested in classes. `__all__` is ignored. The index counts **entries**, one per definition: overloads, property getters and setters and redefinitions repeat a name, and each repeat is its own entry whose id gets `#2`, `#3`. A count of entries is therefore not a count of unique names.
 `diff --all` adds private names, dunders and helpers nested in functions (`f.<locals>.g`).
 TS/JS: every top-level function, class, public method and function-valued `const`; `private`,
-`protected` and `#private` members are left out. Ids are `<module path>.<qualified name>`, prefixed
+`protected` and `#private` members are left out. A function, class or function-valued `const` declared directly
+inside a top-level IIFE is indexed as private. Its name is the one it would have at the top of the file.
+`diff --all` and `fetch_similar` see it. The public listing does not. Ids are `<module path>.<qualified name>`, prefixed
 `<repo>:` for any tree that is not lupin.
 Dart: top-level functions, getters and setters, classes, mixins, enums, extensions and extension types,
 plus the methods and constructors of each. Typedefs, top-level variables and constants, and class fields

@@ -364,7 +364,7 @@ class TestCompareOpenEnded:
     """Test compare_open_ended() with dual strategy."""
 
     def test_embedding_sim_above_threshold( self ):
-        """Embedding similarity >= 0.85 → match."""
+        """Embedding similarity >= 0.75 → match."""
         from cosa.agents.prediction_engine.accuracy_comparators import compare_open_ended
         match, detail = compare_open_ended(
             { "value": "snake_case" },
@@ -374,14 +374,14 @@ class TestCompareOpenEnded:
         assert detail[ "method" ] == "embedding_similarity"
 
     def test_embedding_sim_below_threshold( self ):
-        """Embedding similarity < 0.85 → no match."""
+        """Embedding similarity < 0.75 → no match."""
         from cosa.agents.prediction_engine.accuracy_comparators import compare_open_ended
         match, detail = compare_open_ended(
             { "value": "snake_case" },
             { "value": "camelCase", "_embedding_similarity": 0.60 }
         )
         assert match is False
-        assert detail[ "threshold" ] == 0.85
+        assert detail[ "threshold" ] == 0.75
 
     def test_exact_match_fallback( self ):
         """No embedding sim → falls back to exact match."""

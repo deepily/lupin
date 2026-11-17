@@ -10,12 +10,13 @@ import shutil
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import errors as lb_errors
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
-from cosa.repo.symindex.candidates import arm_run
+from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check import extract as ex
 from cosa.repo.duplicate_check import judge as jd
 from cosa.repo.duplicate_check.proof import label_load as ll
@@ -332,6 +333,7 @@ def test_live_parts_wires_the_run_folder_the_pools_and_the_ledger_beside_the_pro
         def cleanup( self ): seen[ "cleaned" ] = True
 
     monkeypatch.setattr( pc.cu, "get_project_root", lambda: str( tmp_path / "proj" ) )
+    monkeypatch.setattr( pc.chs, "data_dir", lambda root, config=None: tmp_path / "data" / pathlib.Path( root ).name )
     monkeypatch.setattr( pc.frozen, "live_config", lambda: world.toy.cfg )
     monkeypatch.setattr( pc.frozen, "frozen_path", lambda: "frozen.json" )
     monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: "9.9" )
@@ -341,7 +343,7 @@ def test_live_parts_wires_the_run_folder_the_pools_and_the_ledger_beside_the_pro
     w       = parts[ "wiring" ]
     assert seen[ "cleaned" ] and seen[ "n" ] == world.toy.cfg[ "min_nodes" ] and seen[ "vectors" ] == world.run_dir / "vectors"
     assert [ d[ "name" ] for d in parts[ "distractors" ] ] == [ "o1", "d1" ] and parts[ "mono_defs" ] == [ world.toy.m[ "m1" ] ]
-    assert w[ "client" ] == "C" and w[ "parallel" ] == 2 and w[ "data_dir" ] == str( tmp_path / "proj" ) + "/io" and w[ "frozen_path" ] == "frozen.json"
+    assert w[ "client" ] == "C" and w[ "parallel" ] == 2 and w[ "data_dir" ] == str( tmp_path / "data" / "proj" ) and w[ "frozen_path" ] == "frozen.json"
     assert w[ "cache_dir" ] == world.run_dir / "vectors" and w[ "clock" ]() [ 4 ] == "-"
     assert callable( w[ "structural_pairs" ] ) and "ledger" not in w and not ( tmp_path / "proj" ).exists()
 
@@ -352,6 +354,62 @@ def test_proof_ledger_makes_the_proof_folder_and_binds_the_ledger_to_the_binary(
     pc.proof_ledger( str( tmp_path ), "/bin/claude", backend )
     first   = ( tmp_path.joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME ).read_text( encoding="utf-8" )
     assert jd.ledger_binding( "claude_cli=/bin/claude|version=9.9", backend ) in first and first.count( "max-plan" ) >= 2
+
+
+# ---- the proof ledger helper ---------------------------------------------------------------------------------------
+
+def ledger_at( tmp_path, monkeypatch, version, cli="/bin/claude" ):
+    """Make the proof ledger as Claude Code `version` would; returns ( backend, ledger path )."""
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: version )
+    backend = jd.MaxPlanBackend()
+    pc.proof_ledger( str( tmp_path ), cli, backend )
+    return backend, tmp_path.joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME
+
+
+def test_proof_ledger_keeps_its_strict_binding_a_new_version_or_another_binary_is_refused( tmp_path, monkeypatch ):
+    backend, _ = ledger_at( tmp_path, monkeypatch, "2.1.317" )
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.318" )
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.proof_ledger( str( tmp_path ), "/bin/claude", backend )
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.317" )
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.proof_ledger( str( tmp_path ), "/new/claude", backend )
+    assert pc.proof_ledger( str( tmp_path ), "/bin/claude", backend ).recorded.endswith( "|max-plan|max-plan" )
+
+
+# ---- daily_ledger (row 395e4bcd) -----------------------------------------------------------------------------------
+
+def daily_at( tmp_path, monkeypatch, version, cli="/bin/claude" ):
+    """Make the daily ledger as Claude Code `version` would; returns ( ledger, ledger path )."""
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: version )
+    ledger = pc.daily_ledger( str( tmp_path ), cli, jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    return ledger, tmp_path.joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME
+
+
+def test_daily_ledger_binds_to_the_binary_and_server_not_the_version_and_stamps_each_ruling( tmp_path, monkeypatch ):
+    ledger, path = daily_at( tmp_path, monkeypatch, "2.1.317" )
+    ledger.put( "k1", { "rulings": [] } )
+    lines = [ json.loads( line ) for line in path.read_text( encoding="utf-8" ).splitlines() ]
+    assert lines == [ { "binding": "claude_cli=/bin/claude|max-plan|max-plan" }, { "key": "k1", "value": { "rulings": [] }, "cli": "2.1.317" } ]
+
+
+def test_daily_ledger_after_an_update_keeps_every_ruling_and_appends_a_version_free_binding_to_an_old_one( tmp_path, monkeypatch ):
+    _, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
+    held = pc.harness_runner.Ledger( path, binding=pc._ledger_binding( "/bin/claude", jd.MaxPlanBackend() ) )
+    held.put( "k1", { "rulings": [ 1 ] } )
+    before = path.read_text( encoding="utf-8" )
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.318" )
+    again = pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    assert again.get( "k1" ) == { "rulings": [ 1 ] } and path.read_text( encoding="utf-8" ).startswith( before ), "nothing is rewritten or renamed"
+    assert json.loads( path.read_text( encoding="utf-8" ).splitlines()[ -1 ] ) == { "binding": "claude_cli=/bin/claude|max-plan|max-plan" }
+    assert [ p.name for p in path.parent.iterdir() ] == [ pc.LEDGER_NAME ]
+    again.put( "k2", { "rulings": [] } )
+    assert pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER ).entries.keys() == { "k1", "k2" }
+
+
+def test_daily_ledger_still_refuses_another_binary_and_a_file_of_rulings_with_no_binding( tmp_path, monkeypatch ):
+    _, path = daily_at( tmp_path, monkeypatch, "2.1.317" )
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.daily_ledger( str( tmp_path ), "/new/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
+    path.write_text( json.dumps( { "key": "k", "value": { "rulings": [] } } ) + "\n", encoding="utf-8" )
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.daily_ledger( str( tmp_path ), "/bin/claude", jd.MaxPlanBackend(), pr.PROOF_FOLDER )
 
 
 # ---- main ---------------------------------------------------------------------------------------------------------
@@ -483,14 +541,41 @@ def test_check_with_nothing_changing_prints_its_json_and_returns_0( venue, tmp_p
     assert json.loads( capsys.readouterr().out )[ "status" ] == "checked"
 
 
-def test_main_refuses_a_run_folder_planted_under_another_config_sha( tmp_path, monkeypatch ):
+def test_main_refuses_a_run_folder_planted_under_another_config_sha( tmp_path, monkeypatch, capsys ):
     other = World( tmp_path, config_sha="not-the-frozen-sha" )
     monkeypatch.setattr( pc.frozen, "frozen_path", lambda: other.toy.wiring[ "frozen_path" ] )
     monkeypatch.setattr( pc.frozen, "live_config", lambda: other.toy.cfg )
     monkeypatch.setattr( model_transport, "configure", lambda cli_path=None, cwd=None: None )
     def no_parts( *a ): raise AssertionError( "make_parts must not be called" )
-    with pytest.raises( ValueError, match=f"planted under config not-the-frozen-sha, the frozen one is {other.toy.cfg[ 'config_sha' ]}" ):
-        pc.main( [ "--run-dir", str( other.run_dir ), "--check" ], make_parts=no_parts, run_proof=refuse_run )
+    assert pc.main( [ "--run-dir", str( other.run_dir ), "--check" ], make_parts=no_parts, run_proof=refuse_run ) == 2
+    seen = capsys.readouterr()
+    lines = seen.err.strip().splitlines()
+    assert seen.out == "" and len( lines ) == 1, lines
+    live = other.toy.cfg
+    assert f"planted under config not-the-froz" in lines[ 0 ] and f"the current config is {live[ 'config_sha' ][ :12 ]} ({live[ 'model_id' ]})" in lines[ 0 ]
+    assert "no frozen file for it" in lines[ 0 ] and "plant a proof under the current config" in lines[ 0 ]
+
+
+def test_a_run_planted_under_the_same_config_but_another_model_is_refused_and_names_both_models( tmp_path, monkeypatch, capsys ):
+    """Guard: a difference in model_id alone is never accepted, though both frozen files verify."""
+    world  = World( tmp_path )
+    live   = world.toy.cfg
+    folder = pathlib.Path( world.toy.wiring[ "frozen_path" ] ).parent
+    older  = { **live, "model_id": "claude-older-model" }
+    older[ "config_sha" ] = cfg_mod.config_sha( older )
+    assert older[ "config_sha" ] != live[ "config_sha" ] and { k for k in live if live[ k ] != older[ k ] } == { "model_id", "config_sha" }
+    ( folder / "semdup-frozen-older.json" ).write_text( json.dumps( older ), encoding="utf-8" )
+    run = world.key.parent.parent
+    key = json.loads( world.key.read_text( encoding="utf-8" ) )
+    key[ "config_sha" ] = older[ "config_sha" ]
+    world.key.write_text( json.dumps( key ), encoding="utf-8" )
+    monkeypatch.setattr( pc.frozen, "frozen_path", lambda: world.toy.wiring[ "frozen_path" ] )
+    monkeypatch.setattr( pc.frozen, "live_config", lambda: live )
+    monkeypatch.setattr( model_transport, "configure", lambda cli_path=None, cwd=None: None )
+    def no_parts( *a ): raise AssertionError( "make_parts must not be called: a model-only difference was accepted" )
+    assert pc.main( [ "--run-dir", str( run ), "--check" ], make_parts=no_parts, run_proof=refuse_run ) == 2
+    line = capsys.readouterr().err.strip()
+    assert f"planted under config {older[ 'config_sha' ][ :12 ]} (claude-older-model)" in line and f"current config is {live[ 'config_sha' ][ :12 ]} ({live[ 'model_id' ]})" in line
 
 
 # ---- the third rater ---------------------------------------------------------------------------------------------
@@ -531,7 +616,7 @@ def test_main_takes_the_third_raters_majority_on_a_dispute( venue, capsys ):
     assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     assert len( ran ) == 1 and ran[ 0 ][ "labels" ][ odd ] is False
     third    = str( pl.labels_path( packet ) )
-    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, None, third, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "third_labels" ] == arm_run.sha256_of( third )
+    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, None, third, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "third_labels" ] == file_sha256( third )
 
 
 # ---- the trial run --------------------------------------------------------------------------------------------
@@ -677,3 +762,18 @@ def test_main_runs_the_proof_with_the_supplement_third_file_in_the_provenance( v
     rc                       = pc.main( [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", *[ x for p in paths for x in ( "--labels", p ) ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=run_proof )
     assert rc == 0 and ran[ 0 ][ "labels" ][ split ] is True
     assert ran[ 0 ][ "provenance" ][ "supplement" ][ "third_labels" ] == ll.fingerprints( paths, None, None, venue.key, cu.get_project_root(), supp )[ "supplement" ][ "third_labels" ]
+
+
+def test_staged_pairs_survives_two_identical_script_definitions_in_one_file_the_4_nov_daily_check_failure( tmp_path ):
+    """The real file at 8277bb7ee holds one arrow twice; dups numbers both, extraction keeps one."""
+    toy    = Toy( tmp_path )
+    root   = tmp_path / "repo"
+    ( root / "src" ).mkdir( parents=True )
+    real   = pathlib.Path( __file__ ).parent / "fixtures" / "duplicate_check" / "task_status_filter.test.ts.txt"
+    ( root / "src" / "task_status_filter.test.ts" ).write_text( real.read_text( encoding="utf-8" ), encoding="utf-8" )
+    report = ex.extract_tree( root, [ root / "src" / "task_status_filter.test.ts" ], "server" )
+    assert [ r[ "name" ] for r in report[ "repeated_ids" ] ] == [ "owners" ], "the fixture must still hold the repeated definition"
+    pool   = [ d for d in report[ "definitions" ] if d[ "nodes" ] >= toy.cfg[ "min_nodes" ] ]
+    assert pool
+    pairs  = pc.staged_pairs( root, pool, {}, toy.cfg, NO_JSCPD )
+    assert isinstance( pairs, list )

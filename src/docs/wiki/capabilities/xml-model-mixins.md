@@ -1,11 +1,13 @@
 ---
 capability: xml-model-mixins
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.io_models.xml_models.CodeLinesMixin@45503194f3
   - cosa.agents.io_models.xml_models.CommaListMixin@2a13caa229
   - cosa.agents.io_models.utils.util_xml_pydantic.CdataSafeXMLMixin@50b8b5186a
   - cosa.agents.io_models.utils.util_xml_pydantic.extract_tagged_xml@a0538ed96c
+  - cosa.agents.io_models.utils.number_fields.ConfidenceFloatMixin@e7ec3ece27
+  - cosa.agents.io_models.utils.number_fields.ConfidenceFloatMixin.get_confidence_float@2c61b3246d
 ---
 # XML model mixins and tag extraction
 
@@ -16,6 +18,7 @@ Shared behaviour for the response models of [[xml-io-models]], and the one funct
 - `get_function_name` returns the first function name in the code, or `None`. `to_xml` writes `code` as nested line tags in the order of `XML_FIELDS`.
 - `CommaListMixin.get_matches_list` splits a comma-separated `matches` string into trimmed, non-empty names. It returns `[]` for a blank string.
 - `CdataSafeXMLMixin.from_xml` lifts each CDATA span behind a sentinel, lets the base class repair the rest, then puts the spans back unchanged. List it before `BaseXMLModel` in the bases.
+- `ConfidenceFloatMixin.get_confidence_float` reads a model's string `confidence` field as a number clamped to 0.0 through 1.0, and gives 0.0 when the text does not parse. It never raises. `CRUDIntent`, `CalcIntent`, `ScriptMatcherResponse`, `BatchScriptMatcherResponse`, `VerificationResponse` and `OpenEndedSynthesisResponse` take it from here and keep no copy. List it before `BaseXMLModel` in the bases, so it adds a method and no pydantic field.
 - `extract_tagged_xml( raw_response, tag )` returns the first `<tag>` block, tags included, after it drops code fences.
 
 ## Don't

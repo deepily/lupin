@@ -106,7 +106,7 @@ def test_a_hit_goes_to_the_innermost_definition_and_a_hit_in_none_is_dropped_and
     assert sorted( found ) == [ "a.Outer", "a.Outer.inner", "b.f" ]
     assert found[ "a.Outer.inner" ][ "terms" ] == { "x", "y" } and found[ "a.Outer.inner" ][ "lines" ] == { 6 }       # line 6 is inside both spans: the inner one takes it
     assert found[ "a.Outer" ][ "lines" ] == { 15 }
-    assert dropped == 3                                                                                     # a.py:1 (for two terms, one line), c.py:1 with no span, and z.py:3 in no indexed file
+    assert dropped == 3                                                                                     # a.py:1 (for two terms, one line), c.py:1 with no span, and z.py:3 in no indexed file  # doc-lint: waive line-pointer -- fixture locations inside the synthetic index
     assert ( "a.py", 1 ) not in { ( f[ "rec" ][ "file" ], l ) for f in found.values() for l in f[ "lines" ] }       # a hit before the first definition is given to no neighbour
 
 

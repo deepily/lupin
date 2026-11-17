@@ -1080,3 +1080,32 @@ class TestQualityAuditOverage:
         import cosa.rest.routers.dm as dm
         dm._record_dm_quality( self._grade( 16.7 ) )
         assert "avg_overage=16.7x" in dm.format_dm_quality_audit_line()
+
+
+# ---------------------------------------------------------------------------
+# grade_body — the one skeleton both judges call
+# ---------------------------------------------------------------------------
+
+def _boom():
+    raise AssertionError( "the qualitative grader must not run" )
+
+
+class TestGradeBody:
+    """One test per branch of the shared skeleton, with the grader stubbed."""
+
+    def test_qualitative_off_withholds_both_and_never_calls_the_grader( self ):
+        from cosa.agents.dm_quality_judge.judge import grade_body
+        got = grade_body( "short body", False, 150, _boom )
+        assert got[ "directness" ][ "weight" ] is None and got[ "tone" ][ "weight" ] is None and got[ "length" ][ "weight" ] == 2
+
+    def test_a_body_past_the_limit_is_marked_too_long_and_never_calls_the_grader( self ):
+        from cosa.agents.dm_quality_judge.judge import grade_body, _too_long_dimension
+        got = grade_body( "word " * 11, True, 10, _boom )
+        assert got[ "directness" ] == _too_long_dimension() and got[ "tone" ] == _too_long_dimension()
+
+    def test_a_body_at_the_limit_goes_to_the_grader_and_its_dicts_are_returned_and_combined( self ):
+        from cosa.agents.dm_quality_judge.judge import grade_body
+        d = { "emoji": "d", "weight": 2, "detail": "dd" }
+        t = { "emoji": "t", "weight": 0, "detail": "tt" }
+        got = grade_body( "word " * 10, True, 10, lambda: ( d, t ) )
+        assert got[ "directness" ] is d and got[ "tone" ] is t and got[ "overall" ][ "weight" ] in ( 1, 2 )

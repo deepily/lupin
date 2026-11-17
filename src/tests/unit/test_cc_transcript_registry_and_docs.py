@@ -59,7 +59,7 @@ CC_TRANSCRIPT_EVENTS = frozenset( [
     "cc_transcript_watch", "cc_transcript_unwatch", "cc_transcript_append", "cc_transcript_state",
 ] )
 
-# The twenty-five names committed before this feature, read from lupin-app.ini:1729 on
+# The twenty-five names committed before this feature, read from `lupin-app.ini` on
 # 2026-09-27 at sha 7db04b8af and pinned here as a LITERAL. This is the side of the
 # comparison that must not be derived from the file under test — otherwise both sides
 # move together and the assertion is a tautology.
@@ -77,7 +77,10 @@ COMMITTED_EVENTS_BEFORE = frozenset( [
 # a name arriving in the INI must still be reviewed here, as the assertion below insists.
 TASK_STORE_EVENTS = frozenset( [ "task_store_changed" ] )
 
-EXPECTED_EVENTS = COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS
+# Row 063fc1a8 (2026-11-13): the scheduled-job switch flip.
+CRON_SWITCH_EVENTS = frozenset( [ "cron_job_switch_changed" ] )
+
+EXPECTED_EVENTS = COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS | CRON_SWITCH_EVENTS
 
 
 # ── A2.6 ──────────────────────────────────────────────────────────────────────
@@ -99,7 +102,7 @@ def configured_event_names():
     from cosa.config.configuration_manager import ConfigurationManager
 
     # env_var_name ALONE — the manager refuses env_var_name together with config_path,
-    # and this is the form its peers use (test_dm_tutor_prompt_keeps_the_subject.py:39).
+    # and this is the form its peers use (see test_dm_tutor_prompt_keeps_the_subject.py).
     # It is also the right one: the env var is how the running server resolves its config,
     # so reading through it measures the same block the server will read.
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
@@ -166,7 +169,8 @@ def test_the_four_names_are_not_already_among_the_committed_twenty_five():
         f"was read as. Re-read lupin-app.ini and date the change."
     )
     assert not ( TASK_STORE_EVENTS & ( COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS ) )
-    assert len( EXPECTED_EVENTS ) == 30
+    assert not ( CRON_SWITCH_EVENTS & ( COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS ) )
+    assert len( EXPECTED_EVENTS ) == 31
 
 
 # ── A2.7 ──────────────────────────────────────────────────────────────────────

@@ -119,7 +119,7 @@ Eligible if **any** of these holds:
 
 Suites that qualify:
 - `src/tests/smoke/test_proxy_integration.py` (any scenario — CRUD and expediter mutate state)
-- `src/tests/run-integration-tests.sh` (final merge gate)
+- `src/tests/run-integration-tests.sh` (the last gate before a PR to main)
 - `src/scripts/run-e2e-ui-tests.sh` (functional and visual)
 - `src/tests/run-presentation-regression.sh` (all variants)
 
@@ -176,12 +176,12 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 | Docker smoke | :7999 (host only) | `./src/tests/run-docker-smoke-gate.sh` | any skip, error or missing file is a failure; not offered inside a container |
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks, non-destructive; `src/tests/smoke/` files are heterogeneous, route each by the rubric in the "Testing venues" section above |
 | WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | connection, auth, events |
-| Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | **final merge gate**; always `--bg` |
-| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v`; one half: `--half a` / `--half b` | the merge gate runs two halves, `e2e_a` then `e2e_b`; a new test file must be in `src/tests/e2e_ui/partition/` (`test_e2e_halves_partition.py` fails on a file in neither half or both); `-k visual` for visual only, `--update-snapshots` to rebaseline (snapshots are version-controlled) |
+| Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | **last gate before a PR to main** (not needed to merge to the working branch); always `--bg` |
+| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v`; one half: `--half a` / `--half b` | the PR-to-main gate runs two halves, `e2e_a` then `e2e_b`; a new test file must be in `src/tests/e2e_ui/partition/` (`test_e2e_halves_partition.py` fails on a file in neither half or both); `-k visual` for visual only, `--update-snapshots` to rebaseline (snapshots are version-controlled) |
 | Interactive proxy | :8000 (scheduled) | `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` | mutates state |
 | Presentation regression | :8000 (scheduled) | `./src/tests/run-presentation-regression.sh --bg` | real LLM spend; `--include-opus` / `--all` variants |
 
-**Before you ask for review**: run `src/tests/run-census-guards.sh` beside the tests of the files you changed. A census guard counts something across the whole tree, so new code can turn it red while none of its files changed. The set is chosen two ways. A file named `test_every_*`, `*census*`, `*_pin*`, `*pins*` or `*pinned*` runs whole. In any other tracked unit file, each `test_every_*` function runs by node id. So name a new census guard to match one of those.
+**Before you ask for review**: run `src/tests/run-census-guards.sh` beside the tests of the files you changed. A census guard counts something across the whole tree, so new code can turn it red while none of its files changed. The set is chosen two ways. A file named `test_every_*`, `*census*`, `*_pin*`, `*pins*` or `*pinned*` runs whole. In any other tracked unit file, each `test_every_*` function, and each test or class marked `@pytest.mark.census`, runs by node id. So name a new census guard to match one of those, or mark it `@pytest.mark.census` when its file name cannot change. The sweep of tests that count across the tree, with what each does, is `src/docs/doctrine/census-sweep.md`.
 
 **`--bg` mandate**: integration, E2E UI, and presentation regression exceed the 10-min Bash timeout — always launch with `--bg` from Claude Code; monitor the matching `/tmp/*-latest.log`. PID-file overlap guards prevent concurrent runs.
 
@@ -486,10 +486,21 @@ One row per topic; every path below exists (checked by `src/tests/unit/test_clau
 | Everything this file used to say | `src/docs/doctrine/claude-md-receipts-archive.md` | tracing where a rule came from |
 | Index of all documentation | `src/docs/README.md` | looking for a page |
 
+## Two kinds of merge
+
+There are two merges, and each has its own gate. The 15-row pyramid below belongs to the second only.
+
+| Merge | Who | Gate | Not required |
+|---|---|---|---|
+| **To the working branch** (a manager's standing authority) | the manager | the unit tier green for the files changed, `src/tests/run-census-guards.sh` green, and a reviewer's verdict of Merge | `e2e_a`, `e2e_b`, `integration`, the other `:8000` rows, and the full 15 rows |
+| **PR to main** | the manager, on the user's word to push | all 15 rows of the table under "PR merge requirements" | nothing |
+
+"Green" in "green AND reviewed" means the working-branch gate in this table. It never means the full pyramid. A pyramid run is no reason to hold a working-branch merge. Rick said so on 14 November 2026: "This is overkill and an absolute productivity killer". The audit behind this wording is `src/docs/doctrine/merge-gate-wording-audit.md`.
+
 ## PR merge requirements
 
 <!-- merge-pyramid-suites: typecheck stylelint doclint reuse unit cosa coverage typescript smoke docker_smoke websocket integration e2e_a e2e_b -->
-All must pass before merging to main, in this order. First typecheck → stylelint → doclint → reuse → unit → cosa → coverage.
+All must pass before a PR to main, in this order. A merge to the working branch needs only the gate in "Two kinds of merge" above. First typecheck → stylelint → doclint → reuse → unit → cosa → coverage.
 Then typescript → smoke → docker_smoke → serial bridge guard → websocket smoke. Then e2e UI and visual regression,
 as two halves e2e_a then e2e_b. Last is integration, which is the final gate. Each requires 100% pass. Venues and
 commands are in the "Testing" section above.
@@ -693,7 +704,7 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 **URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The `?scope=` query param is **retired**: its presence answers HTTP 400 with a pointer to this section.
 
 - **Lupin files**: `/app/docs?path=lupin/<rel>` — e.g. `/app/docs?path=lupin/bug-fix-queue.md`, `/app/docs?path=lupin/src/rnd/foo.md`. Whitelist authority is `lupin/.docview.yml` at repo root.
-- **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile` — same URL shape, scope name is the project name.
+- **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile`, `unified-headless-wrapper` — same URL shape, scope name is the project name.
 - **Source of truth**: `src/conf/lupin-app.ini` § `external repos` plus each repo's `.docview.yml` (when present).
 
 The floor blocklist and upload are described in `src/docs/wiki/capabilities/doc-viewer.md`. Runtime discovery, supported file types, Folder/Roots/Upload and the example URLs are in `src/docs/doctrine/claude-md-receipts-archive.md` § "Doc viewer scope (unified path-prefix routing)".

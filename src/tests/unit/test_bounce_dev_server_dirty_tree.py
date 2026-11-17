@@ -123,6 +123,7 @@ def _make_tree( *, git=True, dirty=False, warn_body="import sys\nsys.exit( 0 )\n
     env[ "UNWARNED_PAUSE_SECS" ] = "0"
     env[ "LUPIN_DB_GRANTS_CHECK" ]  = "skip"     # the grants step has its own tests; these assert the exact docker calls
     env[ "LUPIN_CLAUDE_LOGIN_CHECK" ] = "skip"     # the login step has its own tests (test_dev_claude_login_check.py)
+    env[ "LUPIN_BUNDLE_FRESHNESS_CHECK" ] = "skip"     # the bundle step has its own tests (test_bounce_bundle_freshness.py)
     return tmp, env
 
 

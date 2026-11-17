@@ -125,22 +125,6 @@ class BugInjector( AgentBase ):
             
         return self.prompt_response_dict
     
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Restore bug injector state from JSON file.
-        
-        Requires:
-            - file_path points to valid JSON file
-            
-        Ensures:
-            - Raises NotImplementedError (not implemented)
-            
-        Raises:
-            - NotImplementedError always
-        """
-        
-        raise NotImplementedError( "BugInjector.restore_from_serialized_state() not implemented" )
-
 def quick_smoke_test():
     """Quick smoke test to validate BugInjector functionality."""
     import cosa.utils.util as du

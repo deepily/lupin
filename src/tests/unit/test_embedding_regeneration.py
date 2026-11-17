@@ -23,6 +23,8 @@ from cosa.rest.db.embedding_regeneration import (
     LOCAL_NORM_FLOOR,
     NORMALIZED_NORM_CEILING,
     REGEN_SPECS,
+    active_specs,
+    capture_embeddings_enabled,
     checkpoint_path,
     classify_norm,
     is_excluded,
@@ -36,10 +38,11 @@ from cosa.rest.db.embedding_regeneration import (
     save_checkpoint,
     should_proceed,
     current_hour_in_configured_zone,
-    split_batch,
     summarize_verification,
     validate_fresh_vector,
 )
+
+from cosa.utils.batch_halving import split_batch
 
 
 def _vector_with_norm( norm, dim=EMBEDDING_DIM ):
@@ -589,6 +592,38 @@ class TestUnreachableServerIsNotABatchSizeProblem:
         assert [ r[ 0 ] for r in result ] == [ 0, 1, 2, 3 ]
         assert all( vector is None for _, vector in result )
 
+    class _Budget:
+        """Records what the splitter teaches the batch budget."""
+        def __init__( self ):
+            self.events = [ ]
+        def record_success( self ):
+            self.events.append( "success" )
+        def record_failure( self ):
+            self.events.append( "failure" )
+
+    class _FitsTwo:
+        """Refuses a batch of more than two texts, and a text called bad."""
+        def __init__( self ):
+            self.asked = [ ]
+        def generate_embeddings_batch( self, texts, content_type=None ):
+            self.asked.append( list( texts ) )
+            if len( texts ) > 2 or "bad" in texts: raise RuntimeError( "CUDA out of memory" )
+            return [ [ float( len( t ) ) ] for t in texts ]
+
+    def test_the_budget_learns_each_refusal_and_a_whole_batch_success_but_not_a_half( self ):
+        import cosa.rest.db.embedding_regeneration as er
+
+        budget = self._Budget()
+        whole  = er._embed_with_split_retry( self._FitsTwo(), [ ( 1, "a" ), ( 2, "bb" ) ], "prose", budget=budget )
+        assert whole == [ ( 1, [ 1.0 ] ), ( 2, [ 2.0 ] ) ] and budget.events == [ "success" ]
+
+        budget  = self._Budget()
+        provider = self._FitsTwo()
+        got = er._embed_with_split_retry( provider, [ ( 1, "a" ), ( 2, "bb" ), ( 3, "bad" ), ( 4, "d" ) ], "prose", budget=budget )
+        assert got == [ ( 1, [ 1.0 ] ), ( 2, [ 2.0 ] ), ( 3, None ), ( 4, [ 1.0 ] ) ]
+        assert provider.asked == [ [ "a", "bb", "bad", "d" ], [ "a", "bb" ], [ "bad", "d" ], [ "bad" ], [ "d" ] ]
+        assert budget.events == [ "failure", "failure", "failure" ]
+
     def test_the_exception_is_a_runtimeerror_so_existing_callers_still_catch_it( self ):
         # Subclassing is what keeps this a safe change for every other call site.
         from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
@@ -821,3 +856,95 @@ class TestAdaptiveBudget:
         # turns the adaptive budget back into the hardcoded constant it replaced.
         with pytest.raises( ValueError, match="growth" ):
             AdaptiveBudget( start=50_000, growth=growth )
+
+
+# --------------------------------------------------------------------------- #
+# The capture switch (row 942d2b41). With `io table capture embeddings` False the
+# input_and_output vectors are NULL on purpose (cleared 6 Nov 2026), and fill
+# selects by source text, not by NULL vector, so it would re-embed every row.
+# --------------------------------------------------------------------------- #
+class _StubConfig:
+    """Config stand-in that records the call and answers with a fixed value."""
+    def __init__( self, value ):
+        self.value = value
+        self.calls = []
+
+    def get( self, key, default=None, return_type=None ):
+        self.calls.append( ( key, default, return_type ) )
+        return self.value
+
+
+class TestActiveSpecs:
+
+    def test_switch_off_drops_every_input_and_output_spec( self ):
+        labels = [ spec.label for spec in active_specs( False ) ]
+        assert labels == [ "decisions" ]
+
+    def test_switch_on_keeps_every_spec( self ):
+        assert active_specs( True ) == REGEN_SPECS
+
+    def test_switch_off_drops_exactly_the_input_and_output_table( self ):
+        dropped = [ s.label for s in REGEN_SPECS if s not in active_specs( False ) ]
+        assert dropped == [ "io_input", "io_output" ]
+        assert all( s.table == "input_and_output" for s in REGEN_SPECS if s.label in dropped )
+
+    def test_explicit_specs_argument_is_filtered( self ):
+        only_io = [ s for s in REGEN_SPECS if s.table == "input_and_output" ]
+        assert active_specs( False, only_io ) == []
+
+
+class TestCaptureEmbeddingsEnabled:
+
+    def test_reads_the_ini_key_with_the_code_default_true( self ):
+        config = _StubConfig( False )
+        assert capture_embeddings_enabled( config ) is False
+        assert config.calls == [ ( "io table capture embeddings", True, "boolean" ) ]
+
+    def test_true_is_returned_as_true( self ):
+        assert capture_embeddings_enabled( _StubConfig( True ) ) is True
+
+
+class TestRunHonoursTheCaptureSwitch:
+    """Calls _run with the database, provider and fill stubbed out."""
+
+    @staticmethod
+    def _drive( monkeypatch, capture, command, only=None ):
+        import contextlib
+        import cosa.config.configuration_manager as cm
+        import cosa.memory.embedding_provider as ep
+        import cosa.rest.db.database as dbm
+        import cosa.rest.db.embedding_regeneration as er
+
+        seen = []
+
+        @contextlib.contextmanager
+        def fake_db():
+            yield object()
+
+        monkeypatch.setattr( cm, "ConfigurationManager", lambda **kwargs: _StubConfig( capture ) )
+        monkeypatch.setattr( dbm, "get_db", fake_db )
+        monkeypatch.setattr( ep, "get_embedding_provider", lambda: object() )
+        monkeypatch.setattr( er, "_probe_busy", lambda: False )
+        monkeypatch.setattr( er, "current_hour_in_configured_zone", lambda: 3 )
+        monkeypatch.setattr( er, "should_proceed", lambda **kwargs: None )
+        monkeypatch.setattr( er, "_fill", lambda session, spec, provider, **kwargs: seen.append( spec.label ) )
+        monkeypatch.setattr( er, "_verify", lambda session, spec, prefix: ( seen.append( spec.label ) or { "ok": True } ) )
+        monkeypatch.setattr( er, "_ensure_columns", lambda session, specs, prefix, apply: ( seen.extend( s.label for s in specs ) or 0 ) )
+        monkeypatch.setattr( er, "_plan", lambda session, prefix, specs: seen.extend( s.label for s in specs ) )
+        return er._run( command=command, only=only ), seen
+
+    @pytest.mark.parametrize( "command", [ "fill", "verify", "ensure-columns", "plan" ] )
+    def test_switch_off_never_touches_the_io_specs( self, monkeypatch, command ):
+        rc, seen = self._drive( monkeypatch, False, command )
+        assert rc == 0
+        assert seen == [ "decisions" ]
+
+    def test_switch_off_refuses_an_io_spec_by_name( self, monkeypatch ):
+        rc, seen = self._drive( monkeypatch, False, "fill", only="io_input" )
+        assert rc == 1
+        assert seen == []
+
+    def test_switch_on_fills_every_spec( self, monkeypatch ):
+        rc, seen = self._drive( monkeypatch, True, "fill" )
+        assert rc == 0
+        assert seen == [ spec.label for spec in REGEN_SPECS ]

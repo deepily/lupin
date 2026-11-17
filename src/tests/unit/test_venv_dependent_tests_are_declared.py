@@ -113,7 +113,7 @@ BREAKS_WITHOUT_VENV = {
     # resolve-venv-pytest.sh. The file does not skip when both are absent, so the tests fail by name.
     # Measured both ways in one worktree (seat-cc-author-cheech-1, on 578eac2e2 plus this change), the
     # `.venv` link moved aside and restored, the interpreter pinned to the main checkout, on a host
-    # with no /opt/venv:
+    # with no /opt/venv present:
     #     .venv      7 passed
     #     no .venv   7 failed
     #     .venv      7 passed   (restore control)
@@ -145,6 +145,12 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "nonexistent path used to prove the refusal fires. Measured BOTH ways at 998dd427 "
         "in this worktree, the `.venv` symlink moved aside and restored between the two "
         "runs: 10 passed without, 10 passed with.",
+    "test_job_registry_and_service.py":
+        "the two `.venv/bin/python` strings are EXPECTED VALUES: one is the argv the service is "
+        "asserted to build and the other a command template the registry is asserted to expand. "
+        "The spawn is a recording stub (`Spawner`), so no interpreter is started. Measured both ways at "
+        "325deac2a in a detached worktree, the `.venv` symlink moved aside and restored between "
+        "the two runs: 28 passed without, 28 passed with.",
     "test_coverage_contention.py":
         "the `.venv/bin/pytest` strings are FIXTURE DATA — command lines the checker under "
         "test is asked to parse. Nothing is executed, so no interpreter is needed.",
@@ -208,6 +214,18 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "Measured BOTH ways at c7c456cb6 in one worktree, the `.venv` symlink moved aside and "
         "restored, the interpreter pinned to the main checkout so only the target moved: 33 passed "
         "with a `.venv`, 33 passed without, 33 passed with again.",
+    "test_librarian_tick.py":
+        "the one `.venv/bin/python` is the EXPECTED TEXT of the retired-install message "
+        "(`install_moved_text( \"/m\" )` is asserted equal to a literal). Nothing opens, runs or checks "
+        "that path, so it is text in the test and never a property of the tree running the suite. "
+        "Measured BOTH ways at 17fce2541 in one worktree, the two files below run together, the `.venv` "
+        "symlink moved aside and restored with `readlink` read after, the interpreter pinned to the main "
+        "checkout so only the target moved: 222 passed with a `.venv`, 222 passed without, 222 passed with again.",
+    "test_duplicate_check_daily.py":
+        "the one `.venv/bin/python` is the EXPECTED TEXT of the reinstall instruction "
+        "(`reinstall_command( ... )` is asserted equal to a literal). Nothing opens, runs or checks that "
+        "path. Measured in the same three-arm run as `test_librarian_tick.py` (both files together, 222 tests): "
+        "222 passed with a `.venv`, 222 passed without, 222 passed with again.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "

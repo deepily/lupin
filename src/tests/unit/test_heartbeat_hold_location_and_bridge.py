@@ -71,7 +71,7 @@ class TestHoldCorrectZone:
         → zone /mnt is an ancestor of the real repo roots at /mnt/DATA01/.../<repo>. When a
         swept repo root sits under the zone (and is not the fleet subtree), the zone spans
         real repo roots → too broad to judge → None."""
-        fdr, zone = self._fleet_at( monkeypatch, tmp_path, "data", "lupin" )   # zone = tmp/data
+        fdr, zone = self._fleet_at( monkeypatch, tmp_path, "data", "lupin" )   # the zone is tmp/data
         rogue = tmp_path / "data" / "DATA01" / "some-repo"; rogue.mkdir( parents=True )
         assert hh.hold_correct_zone( swept_roots=[ str( rogue ) ] ) is None
 

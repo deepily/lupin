@@ -1,6 +1,6 @@
 ---
 capability: swe-workload-runner
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.swe_workload_runner.login@3e75e65991
   - scripts.swe_workload_runner.get_websocket_session_id@1ee8bfdf5d

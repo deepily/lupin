@@ -45,6 +45,8 @@ import sys
 import json
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 
+from cosa.utils.batch_halving import embed_in_halves
+
 # Bound on the /api/busy probe (row f6ce66f1).
 _BUSY_PROBE_TIMEOUT_SECONDS = 3
 
@@ -125,6 +127,43 @@ REGEN_SPECS: List[RegenSpec] = [
     RegenSpec( "decisions",  "prediction_decisions", "id", "question",
                "question_embedding",     "question_embedding_regen",     "prose" ),
 ]
+
+# Row 942d2b41. With the INI key `io table capture embeddings` False, the
+# input_and_output vectors were cleared to NULL (cleared 6 Nov 2026, row b08f6dd9),
+# and fill selects by source text, not by a NULL vector, so it would re-embed every
+# row. The simplest honest fix is to skip the whole table while the switch is off.
+CAPTURE_SWITCH_TABLE = "input_and_output"
+
+
+def capture_embeddings_enabled( config_mgr ) -> bool:
+    """
+    Read the INI key that says whether input_and_output rows carry vectors.
+
+    Requires:
+        - config_mgr has a ConfigurationManager-style get( key, default=, return_type= )
+
+    Ensures:
+        - returns the key's boolean value, True when the key is absent (the code default,
+          the same default InputAndOutputTable.insert_io_row uses)
+    """
+    return config_mgr.get( "io table capture embeddings", default=True, return_type="boolean" )
+
+
+def active_specs( capture_embeddings: bool, specs: Optional[Sequence[RegenSpec]] = None ) -> List[RegenSpec]:
+    """
+    Drop the input_and_output specs when their vectors were cleared and capture is off.
+
+    Requires:
+        - capture_embeddings is a bool; specs is a sequence of RegenSpec or None for REGEN_SPECS
+
+    Ensures:
+        - returns every spec when capture_embeddings is True
+        - returns the specs whose table is not input_and_output when it is False
+    """
+    specs = REGEN_SPECS if specs is None else specs
+    if capture_embeddings: return list( specs )
+    return [ spec for spec in specs if spec.table != CAPTURE_SWITCH_TABLE ]
+
 
 # Rows that exist to be wrong. `clamp-001` ("non-unit vector", norm exactly 3.0)
 # is a test fixture asserting the out-of-range clamp; regenerating it into a real
@@ -354,7 +393,7 @@ class AdaptiveBudget:
     when one is refused. The run finds the real ceiling on whatever hardware it
     meets, and no constant needs re-tuning by hand.
 
-    Pairs with split_batch(): this sets the target size, that recovers the batch
+    Pairs with batch_halving.split_batch(): this sets the target size, that recovers the batch
     that overshot.
     """
 
@@ -406,30 +445,6 @@ class AdaptiveBudget:
         """
         self._current = max( self.floor, self._current // 2 )
         return self._current
-
-
-def split_batch( batch: Sequence[Any] ) -> List[List[Any]]:
-    """
-    Halve a batch that the embedder refused, for retry.
-
-    A failed batch is not evidence that any row in it is bad. It may only have been
-    too big for the memory free at that moment. Halving converges on the real
-    culprit, or on success, in log2(n) attempts.
-
-    Requires:
-        - batch is a sequence
-
-    Ensures:
-        - returns [] for an empty batch
-        - returns [] for a single-item batch — one item cannot be split, and the
-          caller must treat that as a genuine per-row failure rather than retry
-          forever
-        - otherwise returns exactly two non-empty halves covering the batch in order
-    """
-    if len( batch ) <= 1:
-        return []
-    middle = len( batch ) // 2
-    return [ list( batch[ :middle ] ), list( batch[ middle: ] ) ]
 
 
 def is_off_peak( hour_edt: int, end_hour: int = OFF_PEAK_END_HOUR ) -> bool:
@@ -672,13 +687,13 @@ def _probe_busy( url=None ):   # pragma: no cover - live HTTP boundary
         return None
 
 
-def _plan( session, prefix="" ):   # pragma: no cover - live DB boundary
-    """Count what would be regenerated per spec. Issues SELECTs only."""
+def _plan( session, prefix="", specs=None ):   # pragma: no cover - live DB boundary
+    """Count what would be regenerated per spec, SELECTs only; specs defaults to REGEN_SPECS."""
     from sqlalchemy import text as sql_text
 
     grand_total = 0
     print( f"{'spec':12} {'table':22} {'to regen':>12} {'missing vec':>12} {'no text':>9}" )
-    for spec in REGEN_SPECS:
+    for spec in ( REGEN_SPECS if specs is None else specs ):
         table   = qualify( spec.table, prefix )
         # `excluded` keeps plan's headline count honest against what fill will
         # actually attempt — an excluded row is not an embedding call anyone owes.
@@ -695,7 +710,7 @@ def _plan( session, prefix="" ):   # pragma: no cover - live DB boundary
     return grand_total
 
 
-def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None ):   # pragma: no cover - live embedder boundary
+def _embed_with_split_retry( provider, rows, content_type, budget=None ):   # pragma: no cover - live embedder boundary
     """
     Embed (id, text) rows, halving the batch on failure until it fits or is one row.
 
@@ -714,25 +729,27 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None 
     """
     from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
 
-    try:
-        vectors = provider.generate_embeddings_batch( [ r[ 1 ] for r in rows ], content_type=content_type )
-        if budget is not None and depth == 0: budget.record_success()
-        return list( zip( [ r[ 0 ] for r in rows ], vectors ) )
-    except EmbeddingProviderUnreachable:
-        # Deliberately NOT recorded as a batch-size failure: the budget's job is to
-        # learn how big a batch the GPU tolerates, and a dead server teaches it nothing.
-        raise
-    except Exception as error:
+    def alone_failed( error, batch ):
+        """Ensures: reports the one row and returns it with no vector."""
+        print( f"    single row {batch[ 0 ][ 0 ]} failed to embed alone: {type( error ).__name__}: {str( error )[ :90 ]}" )
+        return [ ( batch[ 0 ][ 0 ], None ) ]
+
+    def on_failure( error, batch ):
+        """Ensures: teaches the budget the failure and says the batch is being split."""
+        # EmbeddingProviderUnreachable never gets here (it is passed through below). The budget learns how big a
+        # batch the GPU tolerates, and a dead server teaches it nothing.
         if budget is not None: budget.record_failure()
-        halves = split_batch( rows )
-        if not halves:
-            print( f"    single row {rows[ 0 ][ 0 ]} failed to embed alone: {type( error ).__name__}: {str( error )[ :90 ]}" )
-            return [ ( rows[ 0 ][ 0 ], None ) ]
-        print( f"    batch of {len( rows )} failed ({type( error ).__name__}) — splitting" )
-        out = []
-        for half in halves:
-            out.extend( _embed_with_split_retry( provider, half, content_type, depth + 1, budget ) )
-        return out
+        if len( batch ) > 1: print( f"    batch of {len( batch )} failed ({type( error ).__name__}) — splitting" )
+
+    def on_success( at_depth ):
+        """Ensures: teaches the budget a success of the whole batch, not of a half."""
+        if budget is not None and at_depth == 0: budget.record_success()
+
+    def embed( batch ):
+        """Ensures: returns ( row id, vector ) for each row."""
+        return list( zip( [ r[ 0 ] for r in batch ], provider.generate_embeddings_batch( [ r[ 1 ] for r in batch ], content_type=content_type ) ) )
+
+    return embed_in_halves( embed, rows, alone_failed, on_failure=on_failure, on_success=on_success, passthrough=( EmbeddingProviderUnreachable, ) )
 
 
 def _bulk_write_shadow( session, table, pk, shadow_column, pairs ):   # pragma: no cover - live DB boundary
@@ -926,9 +943,12 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
     """Open a session, dispatch the subcommand, print a report. Returns exit code."""
     from cosa.rest.db.database import get_db
 
-    specs = [ spec for spec in REGEN_SPECS if only is None or spec.label == only ]
+    from cosa.config.configuration_manager import ConfigurationManager
+    capture = capture_embeddings_enabled( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+    if not capture: print( f"  io table capture embeddings = False: skipping {CAPTURE_SWITCH_TABLE} (its vectors were cleared)" )
+    specs = [ spec for spec in active_specs( capture ) if only is None or spec.label == only ]
     if not specs:
-        print( f"no spec matches --only={only!r}; valid: {[ s.label for s in REGEN_SPECS ]}" )
+        print( f"no spec matches --only={only!r}; valid: {[ s.label for s in active_specs( capture ) ]}" )
         return 1
 
     target = prefix or "LIVE TABLES"
@@ -936,7 +956,7 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
 
     with get_db() as session:
         if command == "plan":
-            _plan( session, prefix )
+            _plan( session, prefix, active_specs( capture ) )
             return 0
 
         if command == "ensure-columns":

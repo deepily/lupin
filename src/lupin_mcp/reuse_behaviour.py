@@ -20,16 +20,20 @@ Exit 0 means the page was made. Exit 3 means it could not be: the date is not a 
 import argparse
 import datetime
 import json
+import os
 import pathlib
 import re
 import shlex
 import sys
 
 import cosa.utils.util as cu
+from cosa.repo.symindex import librarian_queue as lq
 from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import shadow_audit as sa
 from cosa.repo.symindex.candidates.errors import CandidateError
 from lupin_mcp import duplicate_check_filing as ff
+from lupin_mcp import duplicate_check_status as dcs
+from lupin_mcp import job_summary_adapters as jsa
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_outcome as ro
 from lupin_mcp import reuse_refusals as rr
@@ -42,6 +46,7 @@ UNDATED_ROW    = "left out: time not readable"
 PAGE_FOLDER    = "reuse-behaviour"                                  # under the data folder; one file per end date
 CRON_TAG       = "# reuse-behaviour-weekly"
 CRON_SCHEDULE  = "0 18 * * *"                                       # every day at 18:00, an hour the host is on; the run skips when the last complete week's page is saved
+CARRIED        = ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR", "COSA_VOICE_MANAGERS__LUPIN" )     # names copied into the cron lines from the printing process; duplicate_check_daily carries the same three
 BOOT_DELAY     = 360                                                # seconds after a boot, after the daily check's 300
 CHECK_FOLDER   = "duplicate-check-daily"                            # under the data folder; the same folder duplicate_check_daily.FOLDER names
 CHECK_NAME     = re.compile( r"^\d{4}-\d{2}-\d{2}-\d{6}-.+\.json$" )   # <date>-<time>-<trigger>.json; last-success.json does not match
@@ -79,14 +84,7 @@ def read_refusals( data_dir ):
         - returns the records in file order, one dict per line that is a JSON object
         - a missing file gives an empty list; a line that is not a JSON object is skipped, as the writer skips it
     """
-    path = pathlib.Path( data_dir ) / rr.REFUSALS_NAME
-    if not path.exists(): return []
-    out = []
-    for raw in path.read_text( encoding="utf-8" ).splitlines():
-        try: row = json.loads( raw )
-        except ValueError: continue
-        if isinstance( row, dict ): out.append( row )
-    return out
+    return lq.read_pending( str( pathlib.Path( data_dir ) / rr.REFUSALS_NAME ) )
 
 
 def reason_label( reason ):
@@ -301,6 +299,30 @@ def read_verdicts( folder ):
     return got
 
 
+def settled_keys( folder ):
+    """
+    Collect the correlation keys of findings that already have a verdict line.
+
+    Requires:
+        - folder is the check's result folder, holding VERDICTS_FILE and the result files the lines name
+    Ensures:
+        - returns the set of correlation keys of the findings a line rules on, whatever the verdict word, found by the line's run and finding id in that run's result file
+        - a key holds the definition's text hash, so changed code is a new key and is not in the set
+        - a line whose run file cannot be read, or whose finding has no key there, adds nothing
+        - a missing verdicts file gives an empty set
+    Raises:
+        - ValueError from read_verdicts for a line that is not a verdict record
+    """
+    folder  = pathlib.Path( folder )
+    wanted  = read_verdicts( folder )
+    keys    = set()
+    for run in sorted( { run for run, _finding in wanted } ):
+        got = read_check_run( folder / f"{run}.json" )
+        if got is None: continue
+        keys |= { key for _verdict, key, fid in got[ "findings" ] if key is not None and ( run, fid ) in wanted }
+    return keys
+
+
 def verdict_of( field, key, store, logged=None ):
     """
     Name the crew's verdict on one finding.
@@ -428,7 +450,7 @@ def cron_lines( root, python, log_path, carried=None ):
     return lt.cron_lines_for( run, CRON_SCHEDULE, BOOT_DELAY )
 
 
-def main( argv=None, out=None, store=None ):
+def main( argv=None, out=None, store=None, environ=None ):
     """
     Run the weekly page from the command line.
 
@@ -437,7 +459,7 @@ def main( argv=None, out=None, store=None ):
         - --data-dir holds refusals.jsonl, the receipts folder and, unless --log-dir says otherwise, the call-log folder; it defaults to the lookup tools' choice
         - --write also saves the page as <data dir>/reuse-behaviour/reuse-behaviour-<end>.txt, replacing that day's file
         - --skip-if-saved, with --write, makes no page and prints one line saying so when that file already exists and is not empty; it returns 0
-        - --print-cron prints the two cron lines and nothing else; it installs nothing
+        - --print-cron prints the two cron lines and nothing else; it installs nothing; each name in the carried-names tuple that is set in environ (os.environ when not given) is copied into both lines
         - the page carries the daily duplicate check table from <data dir>/duplicate-check-daily, or from --check-dir; verdicts come from the finding, then verdicts.jsonl in that folder, then the task store (unless store is given)
         - returns 0 when the page was made, 3 with the reason printed when it could not be
     """
@@ -453,14 +475,17 @@ def main( argv=None, out=None, store=None ):
     ap.add_argument( "--python", default=sys.executable )
     a    = ap.parse_args( argv )
     if a.skip_if_saved and not a.write: ap.error( "--skip-if-saved needs --write" )
-    out  = out if out is not None else sys.stdout
-    root = cu.get_project_root()
+    out     = out if out is not None else sys.stdout
+    environ = environ if environ is not None else os.environ
+    root    = cu.get_project_root()
     if a.print_cron:
         if a.log_path is None:
             print( "REFUSING: --print-cron needs --log-path. Nothing was made.", file=out )
             return EXIT_NOT_MADE
-        print( "\n".join( cron_lines( root, a.python, a.log_path ) ), file=out )
+        print( "\n".join( cron_lines( root, a.python, a.log_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) } ) ), file=out )
         return 0
+    started = datetime.datetime.now()
+    folder  = pathlib.Path( environ.get( "LUPIN_JOB_SUMMARY_DIR" ) or pathlib.Path( root ) / "io" / "jobs" ) / "reuse-behaviour"       # not under the data folder: a config refusal happens before the data folder is known
     try:
         end   = a.end if a.end is not None else last_complete_week_end( datetime.datetime.now().astimezone().date() ).isoformat()
         end   = week_of( end )[ 1 ].isoformat()
@@ -468,16 +493,19 @@ def main( argv=None, out=None, store=None ):
         saved = data / PAGE_FOLDER / f"reuse-behaviour-{end}.txt"
         if a.skip_if_saved and saved.is_file() and saved.stat().st_size > 0:
             print( f"SKIPPED: the page for {end} is already saved at {saved}.", file=out )
+            jsa.record_behaviour( folder, "skipped", started, environ=environ )
             return 0
         records, _bad = eg.merge_call_logs( a.log_dir or data / "call-log" )
-        page  = weekly_report( records, read_refusals( data ), sa.load_receipts( data ), end, check_dir=a.check_dir or data / CHECK_FOLDER, store=store if store is not None else ff.LiveStore() )
+        page  = weekly_report( records, read_refusals( data ), sa.load_receipts( data ), end, check_dir=a.check_dir or ( data / CHECK_FOLDER if a.data_dir else dcs.folder_of( root ) ), store=store if store is not None else ff.LiveStore() )
         if a.write:
             saved.parent.mkdir( parents=True, exist_ok=True )
             saved.write_text( page + "\n", encoding="utf-8" )
     except ( OSError, ValueError, CandidateError ) as e:
         print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was made.", file=out )
+        jsa.record_behaviour( folder, "failed", started, f"{type( e ).__name__}: {e}", environ )
         return EXIT_NOT_MADE
     print( page, file=out )
+    jsa.record_behaviour( folder, "clean", started, environ=environ )
     return 0
 
 

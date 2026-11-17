@@ -35,9 +35,11 @@ from lupin_mcp import respin_credit
 from lupin_mcp import skeleton_crew
 from lupin_mcp import reap_memento
 from lupin_mcp import reap_branch
+from lupin_mcp import worker_voice_mode
 from cosa.agents.shared import seat_teardown
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
+from cosa.utils.main_checkout import main_checkout_of
 from cosa.utils.worktree_venv import provision_worktree_venv
 from cosa.utils.worktree_artifacts import provision_worktree_artifacts
 from cosa.utils.seat_worktree  import provision_seat_worktree, drift_disclosure
@@ -627,16 +629,8 @@ def _main_checkout_of( start ):
     Returns:
         Path
     """
-    try:
-        out = subprocess.run(
-            [ "git", "-C", str( start ), "rev-parse", "--path-format=absolute", "--git-common-dir" ],
-            capture_output=True, text=True, timeout=10
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return Path( out.stdout.strip() ).resolve().parent
-    except ( OSError, subprocess.SubprocessError ):
-        pass
-    return start
+    owner = main_checkout_of( start )
+    return Path( owner ).resolve() if owner is not None else start
 
 
 def _credit_held( respin_credit_fn ):
@@ -785,6 +779,7 @@ def spawn_sessions(
     fleet_gate_fn      : Callable = default_fleet_gate,
     fleet_config_fn    : Optional[ Callable ] = None,
     fleet_census_fn    : Optional[ Callable ] = None,
+    voice_config_fn    : Optional[ Callable ] = None,
     dry_run            : bool = False,
     model              : Optional[ str ] = None,
     runner             : Callable = default_runner,
@@ -820,8 +815,9 @@ def spawn_sessions(
           serialize via the server's atomic allocate-or-409.
         - When `model` is a non-empty string, forwards `--model <model>` to every
           child via the build_spawn_argv claude_args seam, so the child boots on
-          that model instead of the user default (Fable-5-managers / Opus-5-
-          workers, 2026-08-17). When `model` is None/empty, NO --model
+          that model instead of the user default (managers inherit the user
+          default, measured as Opus 5.5 on 13 Nov 2026; workers Sonnet 5.5).
+          When `model` is None/empty, no --model
           flag is passed and the child inherits the user default (today's fail-open
           behavior). The resolved model is echoed on EVERY roster entry and at the
           top level (spawn-ack verification → verify-allocated-MODEL).
@@ -862,6 +858,7 @@ def spawn_sessions(
         spawn_cap: max children
         dry_run: pass --dry-run; do not persist the manifest
         model: resolved model id to pin via `--model` (None → inherit user default)
+        voice_config_fn: injected () -> ConfigurationManager for the worker voice mode key
         name_prefix: tmux session name prefix
         runner: injected subprocess runner
         session_dir: injected session/manifest directory
@@ -952,6 +949,14 @@ def spawn_sessions(
             f"argument does not do that, it applies the default {DEFAULT_SPAWN_PROJECT!r}. "
             f"The caller's own repo here is {detect_project()!r}."
         )
+
+    # How the children's voice starts (row 92076977). Read once, before any child is spawned, so a
+    # mistyped INI value refuses the whole spawn naming the key instead of failing half-way.
+    # A manager role forwards `inherit` without reading the INI.
+    if voice_config_fn is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        voice_config_fn = lambda: ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    voice_env = worker_voice_mode.worker_voice_env( role, voice_config_fn )
 
     # ── Give the seat a .venv it can actually run the unit tier with (row 9b2abfb7) ──
     #
@@ -1143,7 +1148,8 @@ def spawn_sessions(
         env  = {
             "COSA_VOICE_SPAWNED_BY" : manager_session_id,
             "COSA_VOICE_HEADLESS"   : "1",
-            "COSA_VOICE_ROLE"       : role
+            "COSA_VOICE_ROLE"       : role,
+            **voice_env
         }
         # Owner-lineage drift fix (2026-06-22): freeze the manager's persona AS IT
         # IS NOW (spawn time) so the child can stamp it onto its bridge. The
@@ -1467,25 +1473,64 @@ def _is_store_error( resp ):
     return ( not isinstance( resp, dict ) ) or resp.get( "status" ) == "error"
 
 
-def _latest_event_receipt( tst, api_url, api_key, item_id ):
+def _fetch_item_events( tst, api_url, api_key, item_id ):
     """
-    Return the receipt_refs carried by an item's LATEST audit event (GET
-    /api/tasks/{id}/events, ordered ascending), or None.
+    Return an item's audit events, oldest first, or an empty list on any failure.
 
-    Fail-safe-toward-reassign: a missing/empty trail, a store-error read, a
-    non-dict body, or a raising read ALL yield None — treated as "no receipt", so
-    the caller reassigns rather than auto-closing. Auto-close fires ONLY on a
-    POSITIVE receipt, so a read failure can NEVER cause a wrong close.
+    Ensures:
+        - returns a list; never raises
+        - a store error, a non-dict body or a raising read all give an empty list
     """
     try:
         resp = tst.task_store_request( "GET", f"/api/tasks/{item_id}/events", api_url, api_key )
     except Exception:
-        return None
-    events = ( resp.get( "events" ) if isinstance( resp, dict ) else None ) or []
+        return []
+    return ( resp.get( "events" ) if isinstance( resp, dict ) else None ) or []
+
+
+def _latest_receipt( events ):
+    """
+    Return the receipt_refs on the newest event, or None.
+
+    Ensures:
+        - an empty list gives None
+    """
     if not events:
         return None
-    refs = events[ -1 ].get( "receipt_refs" )
-    return refs if refs else None
+    return events[ -1 ].get( "receipt_refs" ) or None
+
+
+def _token_names_session( text, session_id ):
+    """
+    Say whether the last word of a label is a prefix of the session id.
+
+    Ensures:
+        - a blank or non-string label gives False
+        - a last word under eight characters gives False
+    """
+    tokens = text.split() if isinstance( text, str ) else []
+    return bool( tokens ) and len( tokens[ -1 ] ) >= 8 and session_id.startswith( tokens[ -1 ] )
+
+
+def _row_is_other_sessions( item, events, session_id, reaping_manager ):
+    """
+    Say whether a row sharing the reaped persona name belongs to another session.
+
+    A shared persona name does not say whose row it is. A row is foreign when the
+    identity has a session id and no created_by or event actor names that session.
+    The accountable manager must also differ from the reaping manager.
+
+    Ensures:
+        - without a session id, returns False and the name-keyed behaviour stands
+    """
+    if not session_id:
+        return False
+    if _token_names_session( item.get( "created_by" ), session_id ):
+        return False
+    if any( _token_names_session( event.get( "actor" ), session_id ) for event in events ):
+        return False
+    accountable = item.get( "accountable_manager" )
+    return not ( accountable and reaping_manager and persona_slug( accountable ) == persona_slug( reaping_manager ) )
 
 
 def _default_reconcile_store_items( identity, dead_owner_slugs, reaping_manager, reason="" ):
@@ -1504,8 +1549,12 @@ def _default_reconcile_store_items( identity, dead_owner_slugs, reaping_manager,
           (`reaping_manager`) → else unclassifiable. This kills the self-owned-stub
           re-orphan (harness TaskCreate hardcodes owner==accountable_manager==self)
           AND the same-batch case.
-      (c) SURFACE — ALWAYS returns { closed, reassigned, unclassifiable } (lists of
-          item ids); any per-item store error lands the item in unclassifiable.
+      (c) Surface — always returns { closed, reassigned, unclassifiable,
+          skipped_other_session } (lists of item ids); any per-item store error
+          lands the item in unclassifiable.
+      (d) Skip — a row owned by the same persona name but never touched by the
+          reaped session is left alone and listed in skipped_other_session. The
+          check runs before the receipt close, so such a row is never closed.
 
     Reaches the store via the SAME `task_store_tools` client cosa_voice_mcp uses
     for its task verbs, with api_url/api_key resolved exactly as the sibling
@@ -1520,16 +1569,20 @@ def _default_reconcile_store_items( identity, dead_owner_slugs, reaping_manager,
         - reaping_manager is the reaping manager's persona NAME, or None
 
     Ensures:
-        - returns { "closed": [...], "reassigned": [...], "unclassifiable": [...] }
+        - returns { "closed": [...], "reassigned": [...], "unclassifiable": [...],
+          "skipped_other_session": [...] }
+        - skips (never moves or closes) a row that `_row_is_other_sessions` calls
+          foreign; with no session_id in the identity nothing is skipped
         - auto-closes ONLY on a positive latest-event receipt; otherwise reassigns
           per the alive→reaping-manager→unclassifiable precedence
         - never raises
     """
-    summary    = { "closed": [], "reassigned": [], "unclassifiable": [] }
+    summary    = { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
     owner_name = _identity_persona_name( identity )
     if not owner_name:
         return summary                          # no owner key → nothing to query
     owner_key  = persona_slug( owner_name )
+    session_id = identity.get( "session_id" )
     try:
         from lupin_mcp import task_store_tools as tst
         from cosa.utils.config_loader import get_api_config, load_api_key
@@ -1550,7 +1603,11 @@ def _default_reconcile_store_items( identity, dead_owner_slugs, reaping_manager,
         if item.get( "status" ) in ( "done", "dropped" ):
             continue                            # terminal — nothing to reconcile
         try:
-            receipt = _latest_event_receipt( tst, api_url, api_key, item_id )
+            events = _fetch_item_events( tst, api_url, api_key, item_id )
+            if _row_is_other_sessions( item, events, session_id, reaping_manager ):
+                summary[ "skipped_other_session" ].append( item_id )
+                continue
+            receipt = _latest_receipt( events )
             if receipt:
                 resp_t = tst.task_transition_impl( api_url, api_key, actor, item_id, "done", receipt_refs=receipt )
                 ( summary[ "unclassifiable" ] if _is_store_error( resp_t ) else summary[ "closed" ] ).append( item_id )
@@ -1699,6 +1756,8 @@ def dismiss_sessions(
           receipt / reassign-to-live-manager / surface) and the per-session
           summaries are aggregated into the result's `reconciliation` block. The
           reconciler is FAIL-SAFE — a raising reconciler NEVER breaks the reap.
+          The block also carries skipped_other_session: rows with the reaped
+          persona's name that the reaped session never touched. They stay put.
           DEFAULT is None (skip) so unit reaps pointed at a live :7999 stay
           hermetic; the real `_default_reconcile_store_items` is wired by the MCP
           wrapper (the live reap entrypoint). See the seam comment below.
@@ -1901,7 +1960,7 @@ def dismiss_sessions(
     # a live :7999; the reconciler resolves the reaping-manager persona + the
     # dead-owner slug set (every persona reaped in THIS batch, incl. the reaped
     # owner) so a self-owned stub is escalated to the manager, never re-orphaned.
-    reconciliation   = { "closed": [], "reassigned": [], "unclassifiable": [] }
+    reconciliation   = { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
     reaping_manager  = _resolve_session_persona_name( session_dir, manager_session_id ) if reconcile_items_fn is not None else None
     dead_owner_slugs = set()
     if reconcile_items_fn is not None:
@@ -2006,7 +2065,7 @@ def dismiss_sessions(
             try:
                 summary = reconcile_items_fn( ident, dead_owner_slugs, reaping_manager, reason )
                 if isinstance( summary, dict ):
-                    for category in ( "closed", "reassigned", "unclassifiable" ):
+                    for category in ( "closed", "reassigned", "unclassifiable", "skipped_other_session" ):
                         reconciliation[ category ].extend( summary.get( category ) or [] )
             except Exception:
                 pass  # producer must NEVER break the reap

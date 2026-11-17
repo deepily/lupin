@@ -348,7 +348,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
 
     def test_dormant_worker_stale_interaction_fresh_mtime_included( self ):
         # HEADLINE REGRESSION (2026-06-05): stale last_interaction but fresh mtime → reachable.
-        # src/rnd/v0.1.8/2026.06.05-broadcast-liveness-mtime-filter.md
+        # design "Broadcast reachability: filter on bridge mtime (liveness), not interaction recency", removed by 8420e8b0a
         from datetime import datetime, timedelta, timezone
         stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=9 ) ).isoformat()
         now_epoch = datetime.now( timezone.utc ).timestamp()

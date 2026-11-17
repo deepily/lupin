@@ -44,14 +44,20 @@ from cosa.memory.input_and_output_table import InputAndOutputTable
 _EMB = [ 0.1 ] * 768
 
 
-def _make( debug=False, verbose=False, async_default=False ):
-    """Build an InputAndOutputTable with its ctor deps mocked. Returns (table, question_tbl, provider)."""
-    cfg = Mock()
-    cfg.get.side_effect = lambda key, default=None, return_type=None: {
+def _make( debug=False, verbose=False, async_default=False, capture=None ):
+    """
+    Build an InputAndOutputTable with its ctor deps mocked. Returns (table, question_tbl, provider).
+
+    capture=None leaves `io table capture embeddings` out of the config, so the code default applies.
+    """
+    values = {
         "embedding dimensions":         "768",
         "debug text truncation length": 48,
         "async embedding generation":   async_default,
-    }.get( key, default )
+    }
+    if capture is not None: values[ "io table capture embeddings" ] = capture
+    cfg = Mock()
+    cfg.get.side_effect = lambda key, default=None, return_type=None: values.get( key, default )
     question_tbl = Mock()
     question_tbl.get_embedding.return_value = _EMB
     question_tbl.has.return_value = False
@@ -234,6 +240,64 @@ class TestInsertIoRow( unittest.TestCase ):
         self.assertEqual( kwargs[ "explanation" ], "Async embedding generation failed" )
         self.assertEqual( kwargs[ "caller" ], "insert_io_row async thread" )
         self.assertEqual( table.async_failure_count, 1 )
+
+
+class TestCaptureEmbeddingsSwitch( unittest.TestCase ):
+    """insert_io_row() under the INI key `io table capture embeddings`."""
+
+    def test_off_stores_now_with_no_embeddings_and_no_pool_work( self ):
+        """Off: one row stored on the caller's thread, both vectors None, no model and no pool call."""
+        table, question_tbl, provider = _make( capture=False )
+        repo, ctx, repo_ctx = _patch_repo()
+        with ctx, repo_ctx, patch( "cosa.memory.input_and_output_table.Stopwatch" ), \
+             _capture_pool_submit() as submitted, patch( "builtins.print" ):
+            table.insert_io_row(
+                date="2026-11-06", time="11:00:00", input_type="notification", input="NOTIFICATION: task/high",
+                output_raw="r", output_final="[src] r", solution_path_wo_root="p", async_embedding=True,
+            )
+        self.assertEqual( submitted, [ ] )
+        question_tbl.get_embedding.assert_not_called()
+        question_tbl.has.assert_not_called()
+        provider.generate_embedding.assert_not_called()
+        repo.insert_io_row.assert_called_once_with(
+            date="2026-11-06", time="11:00:00", input_type="notification", input="NOTIFICATION: task/high",
+            input_embedding=None, output_raw="r", output_final="[src] r", output_final_embedding=None,
+            solution_path_wo_root="p",
+        )
+
+    def test_off_keeps_embeddings_the_caller_supplied( self ):
+        """Off generates nothing, but a vector the caller passed is stored as given."""
+        table, question_tbl, provider = _make( capture=False )
+        repo, ctx, repo_ctx = _patch_repo()
+        supplied = [ 0.9 ] * 768
+        with ctx, repo_ctx, patch( "cosa.memory.input_and_output_table.Stopwatch" ), patch( "builtins.print" ):
+            table.insert_io_row( input_type="t", input="q", input_embedding=supplied,
+                                 output_raw="r", output_final="o", async_embedding=False )
+        kw = repo.insert_io_row.call_args.kwargs
+        self.assertEqual( kw[ "input_embedding" ], supplied )
+        self.assertIsNone( kw[ "output_final_embedding" ] )
+        provider.generate_embedding.assert_not_called()
+
+    def test_on_still_generates( self ):
+        """On, set explicitly: the existing generation path runs."""
+        table, question_tbl, provider = _make( capture=True )
+        repo, ctx, repo_ctx = _patch_repo()
+        with ctx, repo_ctx, patch( "cosa.memory.input_and_output_table.Stopwatch" ), patch( "builtins.print" ):
+            table.insert_io_row( input_type="t", input="q", output_raw="r", output_final="o", async_embedding=False )
+        kw = repo.insert_io_row.call_args.kwargs
+        self.assertEqual( kw[ "input_embedding" ], _EMB )
+        self.assertEqual( kw[ "output_final_embedding" ], _EMB )
+
+    def test_key_absent_defaults_to_capture( self ):
+        """The key is read by its exact name with default True, so an INI without it still embeds."""
+        table, question_tbl, _ = _make()
+        repo, ctx, repo_ctx = _patch_repo()
+        with ctx, repo_ctx, patch( "cosa.memory.input_and_output_table.Stopwatch" ), patch( "builtins.print" ):
+            table.insert_io_row( input_type="t", input="q", output_raw="r", output_final="o", async_embedding=False )
+        reads = [ c for c in table._config_mgr.get.call_args_list if c.args[ 0 ] == "io table capture embeddings" ]
+        self.assertEqual( len( reads ), 1 )
+        self.assertIs( reads[ 0 ].kwargs[ "default" ], True )
+        question_tbl.get_embedding.assert_called_once_with( "q" )
 
 
 class TestRowCount( unittest.TestCase ):

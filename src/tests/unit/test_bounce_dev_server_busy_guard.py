@@ -92,6 +92,7 @@ def _run( busy_rc=None, warn_rc=0, extra_args=(), pause_secs="0", real_probe_url
     env[ "UNWARNED_PAUSE_SECS" ] = pause_secs
     env[ "LUPIN_DB_GRANTS_CHECK" ]  = "skip"     # the grants step has its own tests; these assert the exact docker calls
     env[ "LUPIN_CLAUDE_LOGIN_CHECK" ] = "skip"     # the login step has its own tests (test_dev_claude_login_check.py)
+    env[ "LUPIN_BUNDLE_FRESHNESS_CHECK" ] = "skip"     # the bundle step has its own tests (test_bounce_bundle_freshness.py)
     if real_probe_url is not None:
         env[ "BOUNCE_BUSY_URL" ] = real_probe_url   # the real probe reads this
     else:

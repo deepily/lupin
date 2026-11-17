@@ -57,6 +57,7 @@ if _SRC_PATH not in sys.path:              # pragma: no cover - bootstrap: src-p
     sys.path.insert( 0, _SRC_PATH )
 
 import cosa.utils.util as du   # noqa: E402
+from cosa.utils.agreement_stats import percentile as shared_percentile   # noqa: E402  — the one linear-interpolation percentile
 from cosa.rest.v2.registry import resolve   # noqa: E402  — the table the CRUD exclusion reads
 
 # The provenance-stamp contract lives in paired_eval (the paired orchestrator, which imports
@@ -92,7 +93,7 @@ PATH_NEEDS_INPUT  = "needs_input"
 #
 # `path` staying "receptionist" for both is CORRECT, not a compromise: the receptionist
 # genuinely served the request either way. What differs is WHY it was reached, and
-# route_reason is the field whose whole job is naming which rule fired (flow.py:783).
+# route_reason is the field whose whole job is naming which rule fired (`_unresolved_route_reason` in flow.py).
 # Row 1568269d landed that marker at ced053a1; the flow can tell them apart. This harness
 # is one of the two readers that still could not.
 #
@@ -113,7 +114,7 @@ ROUTE_ROUTER_ERROR  = "router_error"
 ROUTE_EXTRACT_ERROR = "extract_error"
 ROUTE_REPLAY_ERROR  = "replay_error"
 
-# The two doors to the receptionist, as the flow labels them (flow.py:1175).
+# The two doors to the receptionist, as the flow labels them (`_unresolved_route_reason` in flow.py).
 ROUTE_USER_PICKED_RECEPTIONIST = "user_picked_receptionist"
 ROUTE_UNKNOWN_COMMAND          = "unknown_command"
 
@@ -130,8 +131,8 @@ ROUTE_ERROR_REASONS = frozenset( {
 # finished. Those are not cache misses. The harness cannot see the cache on that path
 # at all, and it was reporting the blindness as 0.0.
 #
-# The flow's whole status vocabulary is seven values (flow.py:178/647/687/735,
-# executor.py:121/151/202): done, failed, needs_input, expired, parked, rejected — all
+# The flow's whole status vocabulary is seven values (set in flow.py and
+# executor.py): done, failed, needs_input, expired, parked, rejected — all
 # terminal FOR THIS CALL — and `waiting`, the executor's single deferred outcome. So
 # this set is one member, and a new deferred status is a one-line edit here.
 #
@@ -545,12 +546,11 @@ def _crud_agents_enabled() -> bool:
     """
     try:
         from cosa.config.configuration_manager import ConfigurationManager
-        value = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
-            "crud for dataframes agents enabled", default="true"
+        return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
+            "crud for dataframes agents enabled", default="true", return_type="boolean"
         )
     except Exception:
         return True
-    return str( value ).strip().lower() == "true"
 
 
 def _is_cacheable_command( command: Optional[ str ], crud_enabled: Optional[ bool ]=None ) -> bool:
@@ -618,14 +618,7 @@ def percentile( values: Sequence[ float ], pct: float ) -> Optional[ float ]:
     """
     if not values:
         return None
-    ordered = sorted( values )
-    if len( ordered ) == 1:
-        return round( float( ordered[ 0 ] ), 3 )
-    rank = ( pct / 100.0 ) * ( len( ordered ) - 1 )
-    low  = int( rank )
-    high = min( low + 1, len( ordered ) - 1 )
-    frac = rank - low
-    return round( ordered[ low ] + ( ordered[ high ] - ordered[ low ] ) * frac, 3 )
+    return round( float( shared_percentile( values, pct / 100.0 ) ), 3 )
 
 
 def _rate( numerator: int, denominator: int ) -> Optional[ float ]:
@@ -939,7 +932,7 @@ def threshold_table(
     # ⚠️ OBSERVED IS NOT ENOUGH FOR A FLOOR SWEEP — it also needs a SCORE to sweep.
     # Caught on the real records rather than reasoned out: eval-2026-08-25-16-53-36 has
     # exactly ONE observed row in each pass (a needs_input, which does reach the cache —
-    # the lookup runs at flow.py:210, the args refusal at flow.py:285) and it carried no
+    # the lookup runs before the args refusal in flow.py) and it carried no
     # similarity. An observed-only gate therefore still printed 0.0 at all four floors
     # off a denominator of 1. With no similarity anywhere, every floor is 0.0 BY
     # CONSTRUCTION and the table is evidence of nothing.
@@ -986,7 +979,8 @@ def latency_delta( cold: Dict[ str, Any ], warm: Dict[ str, Any ] ) -> Dict[ str
 
 
 # ---------------------------------------------------------------------------
-# The paired median-Δ gate MOVED to src/scripts/paired_eval.py (row d8d019f6).
+# The paired median-Δ gate moved to a separate paired_eval script (row d8d019f6), since
+# removed with V1 (commit 75ad1bd8b); it is in git history.
 #
 # It is a CROSS-ARM concern — it pairs v2's and v1's per-utterance client spans and
 # computes the design-§6 median-OF-deltas with a ≥20% PASS/FAIL. The version that once

@@ -294,9 +294,9 @@ class TestRunResearch( unittest.IsolatedAsyncioTestCase ):
         self.assertIsNone( report )
 
     async def test_theme_select_runtime_error_returns_none( self ):
-        # Was an armed xfail-strict TRIPWIRE for the logger-NameError bug (cli.py:430);
+        # Was an armed xfail-strict TRIPWIRE for the logger-NameError bug (the theme-selection handler in run_research);
         # de-armed once the fix (import logging + module-level logger) landed — now asserts
-        # the graceful return None on a select_themes technical failure (line 431 reachable).
+        # the graceful return None on a select_themes technical failure (the handler's return is reachable).
         th = themes( ( "A", [ 0 ] ), ( "B", [ 1 ] ), ( "C", [ 2 ] ) )
         with rr_env( [ clar(), plan( 5 ), th ], select_themes=RuntimeError( "tech fail" ) ):
             report = await cli.run_research( query="q", config=make_config(),
@@ -304,9 +304,9 @@ class TestRunResearch( unittest.IsolatedAsyncioTestCase ):
         self.assertIsNone( report )
 
     async def test_topic_select_runtime_error_returns_none( self ):
-        # Was an armed xfail-strict TRIPWIRE for the logger-NameError bug (cli.py:469);
+        # Was an armed xfail-strict TRIPWIRE for the logger-NameError bug (the topic-selection handler in run_research);
         # de-armed once the fix landed — now asserts the graceful return None on a
-        # select_topics technical failure (line 470 reachable).
+        # select_topics technical failure (the handler's return is reachable).
         th = themes( ( "Solo", [ 0, 1, 2, 3, 4 ] ) )
         with rr_env( [ clar(), plan( 5 ), th ], select_topics=RuntimeError( "tech fail" ) ):
             report = await cli.run_research( query="q", config=make_config(),
@@ -507,7 +507,7 @@ class TestSaveReport( unittest.TestCase ):
 
 
 # ===========================================================================
-# main()
+# main
 # ===========================================================================
 def main_args( **over ):
     base = dict(

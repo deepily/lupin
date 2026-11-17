@@ -91,8 +91,9 @@ def main() -> int:
         return 2
 
     broadcast_id = body.get( "broadcast_id" )
-    # Key the wait on `recipients` (successful PUSHES, commons.py:497), NOT
-    # len(sessions)/expected_recipients (:492). recipients is what actually got a
+    # Key the wait on `recipients` (successful pushes, the `successful` count
+    # returned by execute_broadcast in commons.py), not
+    # len(sessions)/expected_recipients (also set in execute_broadcast). recipients is what actually got a
     # push scheduled; a recipient whose push threw is not one we can wait for. Do
     # not "helpfully" change this to len(sessions) — it would wait forever on a
     # recipient that never receives.
@@ -100,7 +101,7 @@ def main() -> int:
     filtered_out = body.get( "filtered_out", [] )
 
     if recipients == 0:
-        # Real branch, not an error: status "no-active-sessions" (commons.py:464).
+        # Real branch, not an error: status "no-active-sessions" (the zero-recipients branch of execute_broadcast in commons.py).
         print( f"[bounce-warn] no active sessions to warn (filtered_out={len( filtered_out )}). Proceeding." )
         return 0
 

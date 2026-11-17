@@ -11,7 +11,7 @@ See: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/12-config-inventory.md
 import os
 from dataclasses import dataclass
 
-from cosa.agents.shared.config_loader import load_kwargs_from_ini
+from cosa.agents.shared.config_loader import load_kwargs_from_ini, model_field
 from typing import Optional
 
 
@@ -33,8 +33,8 @@ class TestFixExpediterConfig:
     """
 
     # === Model Selection ===
-    lead_model                    : str   = "claude-opus-4-6"
-    worker_model                  : str   = "claude-sonnet-4-6"
+    lead_model                    : str   = model_field( "test fix expediter lead model" )
+    worker_model                  : str   = model_field( "test fix expediter worker model" )
 
     # === Extended thinking ===
     # Per-invocation override (via job param or API request body). None = SDK default.
@@ -186,8 +186,8 @@ def quick_smoke_test():
     try:
         # 1: Default instantiation
         config = TestFixExpediterConfig()
-        assert config.lead_model == "claude-opus-4-6"
-        assert config.worker_model == "claude-sonnet-4-6"
+        assert config.lead_model.startswith( "claude-" )
+        assert config.worker_model.startswith( "claude-" )
         assert config.auto_fix_enabled == True
         assert config.max_clusters == 8
         assert config.max_cluster_seed_failures == 50

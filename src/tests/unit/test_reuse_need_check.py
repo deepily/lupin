@@ -11,6 +11,7 @@ import re
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from lupin_mcp import reuse_need_check as nc
 from lupin_mcp import reuse_tools as rt
 
@@ -336,10 +337,10 @@ def write_inputs( tmp_path, needs ):
     ( tmp_path / "manifest.json" ).write_text( json.dumps( MANIFEST ) )
     ( tmp_path / "symbols.jsonl" ).write_text( "\n".join( json.dumps( r ) for r in INDEX.values() ) + "\n" )
     ( tmp_path / "sample.json" ).write_text( json.dumps( { "strata": { "one": { "members": [ A ] }, "two": { "members": [ D ] } } } ) )
-    ( tmp_path / "needs.json" ).write_text( json.dumps( needs_document( nc.file_sha256( tmp_path / "sample.json" ), needs ) ) )
+    ( tmp_path / "needs.json" ).write_text( json.dumps( needs_document( file_sha256( tmp_path / "sample.json" ), needs ) ) )
     return [ "--needs", str( tmp_path / "needs.json" ), "--manifest", str( tmp_path / "manifest.json" ), "--index", str( tmp_path / "symbols.jsonl" ),
              "--sample", str( tmp_path / "sample.json" ), "--out-dir", str( tmp_path / "out" ),
-             "--sample-sha256", nc.file_sha256( tmp_path / "sample.json" ), "--manifest-sha256", nc.file_sha256( tmp_path / "manifest.json" ), "--size", "2" ]
+             "--sample-sha256", file_sha256( tmp_path / "sample.json" ), "--manifest-sha256", file_sha256( tmp_path / "manifest.json" ), "--size", "2" ]
 
 
 def test_main_writes_both_files_and_exits_zero_when_all_pass( tmp_path ):
@@ -348,7 +349,7 @@ def test_main_writes_both_files_and_exits_zero_when_all_pass( tmp_path ):
     full   = json.loads( ( tmp_path / "out" / "check-results.json" ).read_text() )
     resend = json.loads( ( tmp_path / "out" / "resend-list.json" ).read_text() )
     assert full[ "summary" ][ "all_pass" ] is True and resend == []
-    assert full[ "needs_sha256" ] == nc.file_sha256( tmp_path / "needs.json" ) and len( full[ "needs_sha256" ] ) == 64
+    assert full[ "needs_sha256" ] == file_sha256( tmp_path / "needs.json" ) and len( full[ "needs_sha256" ] ) == 64
 
 
 def test_main_exits_one_and_keeps_the_token_out_of_the_resend_file( tmp_path ):
@@ -403,7 +404,7 @@ def test_the_results_record_the_sha_of_all_three_inputs( tmp_path ):
     assert nc.main( args ) == 0
     full = json.loads( ( tmp_path / "out" / "check-results.json" ).read_text() )
     for key, name in ( ( "needs_sha256", "needs.json" ), ( "sample_sha256", "sample.json" ), ( "manifest_sha256", "manifest.json" ) ):
-        assert full[ key ] == nc.file_sha256( tmp_path / name )
+        assert full[ key ] == file_sha256( tmp_path / name )
 
 
 def test_the_results_name_the_index_generation_and_its_sha( tmp_path ):
@@ -415,7 +416,7 @@ def test_the_results_name_the_index_generation_and_its_sha( tmp_path ):
     assert nc.main( args ) == 0
     full = json.loads( ( tmp_path / "out" / "check-results.json" ).read_text() )
     assert full[ "index_generation" ] == "gen-abc123def0"
-    assert full[ "index_sha256" ] == nc.file_sha256( gen / "symbols.jsonl" )
+    assert full[ "index_sha256" ] == file_sha256( gen / "symbols.jsonl" )
 
 
 @pytest.mark.parametrize( "flag", [ "--sample-sha256", "--manifest-sha256" ] )

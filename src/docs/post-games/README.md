@@ -6,6 +6,13 @@ Rick ruled this home on 3 Oct 2026: "Let's keep that under src/docs/post-games/v
 
 File naming: `yyyy.mm.dd-<slug>-post-game.md`. Frontmatter names the manager. The local, untracked folder `io/post-games/` that held earlier post-games was deleted on 3 Oct 2026 on Rick's word (14 files). Nothing written before that date is kept here.
 
+## v0.2.3
+
+| Date | Retro | Manager | Tier | Tags |
+|---|---|---|---|---|
+| 10 Nov 2026 | [Mr. Radio's crew: push and VM install, VM test server, reuse back-fill A to F, VM deploy checks](v0.2.3/2026.11.10-mr-radio-crew-vm-and-backfill-post-game.md) | Mr. Radio 🦉 | full | crew-run · no-roundtable · no-deposits · from-memento-witness · first-real-run-at-console · gate-start-moved-before-sweep · reap-reconciles-by-name · reviewer-asked-healthy-case |
+| 10 Nov 2026 | [Cheech's evening crew: backlog split, duplicate-check close-out, Background Jobs fixes](v0.2.3/2026.11.10-cheech-evening-crew-post-game.md) | Cheech 🌿 | full | crew-run · no-roundtable · from-memento-witness · gate-read-before-commit · duplicate-of-a-landed-fix · reap-reconciles-by-name · reviewer-caught-over-reach · live-data-apply-routed-to-operator |
+
 ## v0.2.2
 
 | Date | Retro | Manager | Tier | Tags |

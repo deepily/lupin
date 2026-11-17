@@ -200,9 +200,9 @@ class TestEngineeringClassifier:
 class TestEngineeringStrategy:
     """Tests for the EngineeringStrategy pipeline."""
 
-    def _make_strategy( self, trust_mode="shadow", debug=False ):
+    def _make_strategy( self, trust_mode="shadow", debug=False, audit_random=None ):
         from cosa.agents.swe_team.proxy.engineering_strategy import EngineeringStrategy
-        return EngineeringStrategy( trust_mode=trust_mode, debug=debug )
+        return EngineeringStrategy( trust_mode=trust_mode, debug=debug, audit_random=audit_random )
 
     def test_name_is_swe_engineering( self ):
         """Strategy name is 'swe_engineering'."""
@@ -242,10 +242,15 @@ class TestEngineeringStrategy:
         assert strategy.gate( "testing", 2, 0.80 ) == "suggest"
 
     def test_active_mode_l3_acts( self ):
-        """In active mode, L3+ returns 'act'."""
-        strategy = self._make_strategy( trust_mode="active" )
+        """In active mode, level 3 and above act, with the audit draw pinned above the rate."""
+        strategy = self._make_strategy( trust_mode="active", audit_random=lambda: 0.99 )
         assert strategy.gate( "testing", 3, 0.80 ) == "act"
         assert strategy.gate( "testing", 4, 0.80 ) == "act"
+
+    def test_active_mode_l4_audit_draw_suggests( self ):
+        """A draw under the audit rate makes level 4 suggest instead of act."""
+        strategy = self._make_strategy( trust_mode="active", audit_random=lambda: 0.0 )
+        assert strategy.gate( "testing", 4, 0.80 ) == "suggest"
 
     def test_decide_high_risk_requires_review( self ):
         """High-risk categories return 'requires_review'."""
@@ -269,7 +274,7 @@ class TestEngineeringStrategy:
         assert isinstance( result, DecisionResult )
         assert result.action == "shadow"
         assert result.category == "testing"
-        assert result.value is None
+        assert result.value == "approved", "shadow still predicts; only the action says do not act"
         assert result.trust_level == 1
         assert result.confidence > 0
 
@@ -384,3 +389,60 @@ class TestSweProxyExports:
 
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )
+
+
+class TestEngineeringStrategyCapLevels:
+    """The cap_levels argument overrides the registered cap per category."""
+
+    def test_cap_levels_override_registered_cap( self ):
+        """A category in cap_levels gets that cap; the others keep their constants."""
+        from cosa.agents.swe_team.proxy.engineering_strategy import EngineeringStrategy
+        from cosa.agents.swe_team.proxy.engineering_categories import get_category_cap_level
+        strategy = EngineeringStrategy( cap_levels={ "deployment": 1 } )
+        cats     = strategy.trust_tracker.categories
+        assert cats[ "deployment" ].cap_level == 1
+        assert cats[ "testing" ].cap_level    == get_category_cap_level( "testing" )
+
+    @pytest.mark.parametrize( "bad", [ 0, 6, -1 ] )
+    def test_cap_level_outside_1_to_5_raises( self, bad ):
+        """A cap outside 1-5 is refused at construction."""
+        from cosa.agents.swe_team.proxy.engineering_strategy import EngineeringStrategy
+        with pytest.raises( ValueError, match="deployment" ):
+            EngineeringStrategy( cap_levels={ "deployment": bad } )
+
+    def test_unknown_category_in_cap_levels_raises( self ):
+        """A typo'd category name is refused rather than silently ignored."""
+        from cosa.agents.swe_team.proxy.engineering_strategy import EngineeringStrategy
+        with pytest.raises( ValueError, match="nonesuch" ):
+            EngineeringStrategy( cap_levels={ "nonesuch": 2 } )
+
+
+class TestOrchestratorAppliesIniCapLevels:
+    """The orchestrator passes the three INI cap keys to its strategy."""
+
+    def _build( self, swe_cfg ):
+        from unittest.mock import patch
+        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
+        from cosa.agents.swe_team.config import SweTeamConfig
+        with patch( "cosa.config.configuration_manager.ConfigurationManager" ), \
+             patch( "cosa.agents.decision_proxy.config.trust_proxy_config_from_config_mgr", return_value={} ), \
+             patch( "cosa.agents.swe_team.proxy.config.swe_proxy_config_from_config_mgr", return_value=swe_cfg ):
+            return SweTeamOrchestrator( task_description="t", config=SweTeamConfig( trust_mode="shadow" ) )
+
+    def test_ini_caps_reach_the_tracker( self ):
+        """deployment 1, destructive 2, architecture 4 land on the live tracker."""
+        orch = self._build( { "deployment_cap_level": 1, "destructive_cap_level": 2, "architecture_cap_level": 4 } )
+        cats = orch.proxy.trust_tracker.categories
+        assert ( cats[ "deployment" ].cap_level, cats[ "destructive" ].cap_level, cats[ "architecture" ].cap_level ) == ( 1, 2, 4 )
+
+    def test_level_never_exceeds_ini_cap_after_many_successes( self ):
+        """With the deployment cap at 1, 2000 successes still read level 1."""
+        orch = self._build( { "deployment_cap_level": 1 } )
+        for _ in range( 2000 ): orch.proxy.trust_tracker.record_decision( "deployment", True )
+        assert orch.proxy.trust_tracker.get_level( "deployment" ) == 1
+
+    def test_missing_keys_keep_constants( self ):
+        """An empty config (INI read failed) leaves every constant cap in place."""
+        from cosa.agents.swe_team.proxy.engineering_categories import get_category_cap_level
+        orch = self._build( {} )
+        assert orch.proxy.trust_tracker.categories[ "deployment" ].cap_level == get_category_cap_level( "deployment" )

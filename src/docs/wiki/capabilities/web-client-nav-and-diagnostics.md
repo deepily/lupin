@@ -1,6 +1,6 @@
 ---
 capability: web-client-nav-and-diagnostics
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.diagnostic.boot.createBrowserDeps@5a806f7c47
   - src.lupin_app.static.js.diagnostic.boot.wireDiagnostic@b7a1f6d4c3
@@ -18,7 +18,7 @@ pins:
   - src.lupin_app.static.js.nav.lupinNav.wireEvents@be4d22470d
   - src.lupin_app.static.js.nav.lupinNav.mountNav@19164425c6
   - src.lupin_app.static.js.nav.lupinNav.scheduleMount@a6c394230d
-  - src.lupin_app.static.js.websocket-diagnostic.WebSocketDiagnosticTool@4cd3b305a3
+  - src.lupin_app.static.js.websocket-diagnostic.WebSocketDiagnosticTool@3561fc999b
   - src.lupin_app.static.js.websocket-diagnostic.startDiagnosticTest@5a4a9caf29
   - src.lupin_app.static.js.websocket-diagnostic.stopDiagnosticTest@a80eee4c2e
   - src.lupin_app.static.js.websocket-diagnostic.clearDiagnosticLogs@9f401579f0

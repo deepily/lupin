@@ -97,7 +97,7 @@ def test_tracker_enter_unhealthy_once_then_rearm():
     tr.observe( "healthy", _at( 0 ) )                             # baseline
     assert tr.observe( "unhealthy", _at( 1 ) ) == [ "enter_unhealthy" ]
     assert tr.observe( "unhealthy", _at( 2 ) ) == [ ]            # no change → no re-escalate
-    assert tr.observe( "healthy",   _at( 3 ) ) == [ ]            # recovery (transition, not unhealthy)
+    assert tr.observe( "healthy",   _at( 3 ) ) == [ ]            # a recovery: a transition that is not unhealthy
     assert tr.observe( "unhealthy", _at( 4 ) ) == [ "enter_unhealthy" ]   # re-armed
 
 

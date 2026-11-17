@@ -202,7 +202,7 @@ def test_capture_legacy_fullpage_horizontal_golden( page ):
 # A REAL-SHAPED action-required notification (Tiberius's caution: NOT a minimal
 # stub — carry every field a live AR notification carries, id_hash especially, so
 # client normalize/validation does not silently drop it → empty pane + false frame).
-# Field shape reverse-engineered from processNotification (notifications.js:5844-5880:
+# Field shape reverse-engineered from processNotification (notifications.js:
 # response_requested→addActionRequiredNotification) + addActionRequiredNotification
 # (:16149). Injected via a SEPARATE AR-only path (the client method), never the
 # shared parity scenario.

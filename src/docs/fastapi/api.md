@@ -4895,6 +4895,36 @@ object
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/duplicate-check/status`
+
+> **Get Status**
+
+Ensures: returns status.snapshot of the run history as of now.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+## GET `/api/duplicate-check/job-summary`
+
+> **Get Job Summary**
+
+Ensures: returns the job-summary/1 record of the run history as of now.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
 ## GET `/api/pair-labelling/state`
 
 > **Progress of one reviewer**
@@ -4983,6 +5013,101 @@ Raises:
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/jobs/summary`
+
+> **Health of every background job**
+
+One entry per registered job: state, reasons, debts, schedule, evidence. Health is computed here, never by the page.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/jobs/{job}/run`
+
+> **Run one job now**
+
+Starts one run outside the schedule, with trigger hand. Refused while the job's run lock is held. Rick's login only.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| job | string | True |  |
+| target |  | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/cron-jobs`
+
+> **Every scheduled job with its on/off switch**
+
+One row per registry job. The fields are job, title, schedule, key, enabled, honoured, drift, last_changed_by and last_changed_at. The enabled field is read fresh from the configuration file, and is null when the file does not say. The honoured field is false when the job does not read its switch, so flipping it would change nothing. The drift field is true when the file disagrees with the endpoint's record of the last flip, meaning it was edited by hand. The caller_is_admin field is true only for an administrator login, so a client can show the switches read-only to everyone else.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## PUT `/api/cron-jobs/{job}/enabled`
+
+> **Admin: turn one scheduled job on or off**
+
+Body { on: bool }. Writes `cron job <job> enabled` to the configuration file and returns the row re-read from the file. Administrator login only: an API-key caller or a non-admin login is refused with 403 and nothing is written. An unknown job is a 404. A job that does not read its switch, or a key the file lacks or defines twice, is a 409 and nothing is written.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| job | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[CronJobSwitchIn](#cronjobswitchin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ---
 
 # 📋 Components
@@ -5063,6 +5188,9 @@ caller's persona and session id; only the id is used, and the card names the sea
 |-------|------|-------------|
 | path | string |  |
 | actor | string |  |
+| script_type |  |  |
+| languages |  |  |
+| review |  |  |
 
 
 ## AskRequest
@@ -5283,6 +5411,19 @@ Response model for user creation.
 | message | string |  |
 | user | object |  |
 | user_id | string |  |
+
+
+## CronJobSwitchIn
+
+
+Body for PUT /api/cron-jobs/{job}/enabled.
+
+`on` is a bare JSON boolean. Any other field, and any other type, is a 422.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| on | boolean | True lets the job run, false makes its next start exit without work. |
 
 
 ## DeleteUserRequest
@@ -6410,6 +6551,9 @@ Body for POST /api/podcast-proxy/from-viewer: the document as `<scope>/<path>`.
 | Field | Type | Description |
 |-------|------|-------------|
 | path | string |  |
+| script_type |  |  |
+| languages |  |  |
+| review |  |  |
 
 
 ## VoicePersonaSampleRequest

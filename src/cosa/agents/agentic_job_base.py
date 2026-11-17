@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 import cosa.utils.util as cu
+from cosa.agents.chained_pipeline_state import skipped_topic_names
 from cosa.rest.job_state import JobState
 
 
@@ -308,6 +309,262 @@ class AgenticJobBase( ABC ):
             # Re-raise so the agentic-pool Future captures the exception.
             # Backlog item 5: canonical Future contract.
             raise
+
+    # -------------------------------------------------------------------------
+    # Chained Deep Research frame (podcast and presentation jobs)
+    # -------------------------------------------------------------------------
+
+    CHAIN_TITLE             = ""
+    CHAIN_NOUN              = ""
+    DRY_RUN_ICON            = ""
+    DRY_RUN_SECOND_STAGE    = ()
+    _DRY_RUN_RESEARCH_STEPS = (
+        "[RESEARCH] skipping query clarification",
+        "[RESEARCH] skipping research planning",
+        "[RESEARCH] skipping subquery research (5 queries)",
+        "[RESEARCH] skipping report synthesis",
+        "[RESEARCH] skipping report write to disk",
+    )
+
+    def _set_chain_identity( self, cosa_interface ) -> None:
+        """
+        Point the notifications of this chained run at this job's sender and user.
+
+        Requires:
+            - cosa_interface is a COSA interface module with SENDER_ID, TARGET_USER and _get_sender_id
+            - self.base_id and self.user_email are set
+
+        Ensures:
+            - the module globals name this job, for code that still reads them
+            - the per-task dispatch context names this job, so concurrent jobs do not cross
+        """
+        from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
+
+        # base_id strips the ::user_id scope suffix
+        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
+        cosa_interface.TARGET_USER = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
+
+    def _io_view_link( self, path, label ):
+        """
+        Make a doc-viewer markdown link for a file under the project io/ directory.
+
+        Requires:
+            - path is a string or None
+            - label is the link text
+
+        Ensures:
+            - a path under io/ comes back as "[label](/app/docs?path=<quoted rel>)"
+            - any other path, empty or not, comes back unchanged
+
+        Raises:
+            - nothing
+        """
+        import urllib.parse
+        io_base = cu.get_project_root() + "/io/"
+        if path and path.startswith( io_base ):
+            rel = path.replace( io_base, "" )
+            return f"[{label}](/app/docs?path={urllib.parse.quote( rel )})"
+        return path
+
+    @staticmethod
+    def _skipped_topic_names( result ) -> list:
+        """
+        List the topics the research stage skipped.
+
+        Requires:
+            - result is a ChainedResult whose dr_artifacts may hold "skipped_topics"
+
+        Ensures:
+            - returns the topic names, empty when none were skipped
+
+        Raises:
+            - nothing
+        """
+        return skipped_topic_names( result.dr_artifacts )
+
+    @staticmethod
+    def _skipped_topics_line( skipped_names ) -> str:
+        """
+        Build the "Skipped topics" line of a completion card.
+
+        Requires:
+            - skipped_names is a non-empty list of topic names
+
+        Ensures:
+            - returns one markdown line naming the count and every topic
+
+        Raises:
+            - nothing
+        """
+        return f"**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names )
+
+    def _dry_run_io_path( self, folder, filename ) -> str:
+        """
+        Name a mock artifact of a dry run.
+
+        Requires:
+            - folder is an io/ subfolder name such as "podcasts"
+            - self.user_email and self.id_hash are set
+
+        Ensures:
+            - returns "/io/<folder>/<email>/dry-run-<id>/<filename>"
+
+        Raises:
+            - nothing
+        """
+        return f"/io/{folder}/{self.user_email}/dry-run-{self.id_hash}/{filename}"
+
+    def _store_dry_run_research( self ) -> None:
+        """
+        Store the mock research report of a chained dry run.
+
+        Requires:
+            - self.user_email and self.id_hash are set
+
+        Ensures:
+            - research_path is a job attribute and an artifacts entry
+            - research_abstract is a mock text in artifacts
+
+        Raises:
+            - nothing
+        """
+        self.research_path = self._dry_run_io_path( "deep-research", "report.md" )
+        self.artifacts[ "research_path" ]     = self.research_path
+        self.artifacts[ "research_abstract" ] = "Mock abstract from dry-run mode."
+
+    async def _run_chained_pipeline( self ) -> str:
+        """
+        Run a research-then-second-stage pipeline through the agent this job builds.
+
+        The shared body of _execute for the chained Deep Research jobs.
+        The subclass supplies CHAIN_TITLE, CHAIN_NOUN, _make_agent, _chain_pipeline_state,
+        _chain_debug_lines, _store_chain_artifacts, _chain_completion and _chain_return_tail.
+
+        Ensures:
+            - dry_run routes to _run_chained_dry_run before any agent is built
+            - a cancelled run returns the cancellation text; a failed run notifies urgently and raises
+            - on success the artifacts, cost summary and abstract are stored and the completion notified
+            - the job id is cleared from voice_io whatever happens
+
+        Raises:
+            - Exception carrying the pipeline's error when the run ended in the failed state
+        """
+        from cosa.agents.deep_research import voice_io, cosa_interface
+
+        if self.dry_run:
+            return await self._run_chained_dry_run( voice_io, cosa_interface )
+
+        pipeline_state = self._chain_pipeline_state()
+        name           = type( self ).__name__
+        self._set_chain_identity( cosa_interface )
+
+        # Set job_id for auto-injection into all downstream notify() calls
+        voice_io.set_job_id( self.id_hash )
+
+        if self.debug:
+            print( f"[{name}] Query: {self.query[ :80 ]}..." )
+            print( f"[{name}] Budget: ${self.budget}" if self.budget else f"[{name}] Budget: unlimited" )
+            for line in self._chain_debug_lines(): print( f"[{name}] {line}" )
+
+        try:
+            await voice_io.notify(
+                f"Starting {self.CHAIN_TITLE.lower()} pipeline: {self.query[ :60 ]}...",
+                priority="medium", job_id=self.id_hash, queue_name="run"
+            )
+
+            result = await self._make_agent().run_async()
+
+            if result.state == pipeline_state.CANCELLED:
+                await voice_io.notify( "Pipeline was cancelled.", priority="medium", job_id=self.id_hash, queue_name="run" )
+                return f"{self.CHAIN_TITLE} pipeline was cancelled by the user."
+
+            if result.state == pipeline_state.FAILED:
+                error_msg = result.error or "Unknown error"
+                await voice_io.notify( f"Pipeline failed: {error_msg[ :80 ]}", priority="urgent", job_id=self.id_hash, queue_name="run" )
+                raise Exception( error_msg )
+
+            self._store_chain_artifacts( result )
+            self.artifacts[ "research_path" ]     = result.research_path
+            self.artifacts[ "research_abstract" ] = result.research_abstract
+            self.cost_summary = {
+                "dr_cost_usd"    : result.dr_cost,
+                "pg_cost_usd"    : result.pg_cost,
+                "total_cost_usd" : result.total_cost,
+            }
+            self.artifacts[ "cost_summary" ] = self.cost_summary
+
+            # The abstract rides the running→done transition (running_fifo_queue._transition_to_done
+            # reads artifacts["abstract"]); without it the done card renders blank (bug 2da4095a).
+            completion_abstract, spoken_suffix = await self._chain_completion( result )
+            self.artifacts[ "abstract" ] = completion_abstract
+
+            try:
+                await voice_io.notify(
+                    f"Research to {self.CHAIN_NOUN} complete. Total cost ${result.total_cost:.4f}.{spoken_suffix}",
+                    priority   = "medium",
+                    abstract   = completion_abstract,
+                    job_id     = self.id_hash,
+                    queue_name = "run",
+                )
+            except Exception as notify_err:
+                print( f"[{name}] completion notify failed: {notify_err}" )
+
+            return f"Pipeline complete! Research report and {self.CHAIN_NOUN} generated. Total cost: ${result.total_cost:.4f}. {self._chain_return_tail()}"
+
+        finally:
+            voice_io.clear_job_id()
+
+    async def _run_chained_dry_run( self, voice_io, cosa_interface ) -> str:
+        """
+        Simulate a chained pipeline with low-priority breadcrumb notifications and mock results.
+
+        Requires:
+            - voice_io and cosa_interface are the Deep Research modules
+            - the subclass supplies DRY_RUN_ICON, DRY_RUN_SECOND_STAGE and _store_dry_run_results
+
+        Ensures:
+            - one breadcrumb per step, each followed by a one second pause
+            - the mock artifacts, a zero cost summary and the completion abstract are stored
+            - the completion is notified and the job id cleared
+            - returns the dry-run summary text
+        """
+        import asyncio
+
+        name = type( self ).__name__
+        self._set_chain_identity( cosa_interface )
+
+        # Set job_id for auto-injection into all downstream notify() calls
+        voice_io.set_job_id( self.id_hash )
+
+        if self.debug: print( f"[{name}] DRY RUN MODE for: {self.query[ :50 ]}..." )
+
+        steps = (
+            ( f"Starting {self.CHAIN_TITLE.lower()} simulation", ) + self._DRY_RUN_RESEARCH_STEPS + self.DRY_RUN_SECOND_STAGE
+        )
+        for step in steps:
+            await voice_io.notify( f"{self.DRY_RUN_ICON}Dry run: {step}", priority="low", job_id=self.id_hash, queue_name="run" )
+            await asyncio.sleep( 1.0 )
+
+        completion_abstract = self._store_dry_run_results()
+        self.cost_summary   = {
+            "dr_cost_usd"    : 0.0,
+            "pg_cost_usd"    : 0.0,
+            "total_cost_usd" : 0.0,
+        }
+        self.artifacts[ "cost_summary" ] = self.cost_summary
+
+        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+        self.artifacts[ "abstract" ] = completion_abstract
+
+        await voice_io.notify(
+            f"{self.DRY_RUN_ICON}Dry run complete! Pipeline simulation finished.",
+            priority="medium", abstract=completion_abstract, job_id=self.id_hash, queue_name="run"
+        )
+
+        voice_io.clear_job_id()
+        return f"Dry run complete. Research and {self.CHAIN_NOUN} simulation finished."
 
     @abstractmethod
     async def _execute( self ) -> str:

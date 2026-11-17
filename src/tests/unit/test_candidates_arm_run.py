@@ -11,6 +11,7 @@ import types
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex.candidates import arm_run
 from cosa.repo.symindex.candidates import arms
 from cosa.repo.symindex.candidates.errors import CandidateError
@@ -66,7 +67,7 @@ class TestLoadNeeds:
     def test_the_reserved_file_is_refused_by_its_hash( self, tmp_path ):
         path = write_needs( tmp_path )
         with pytest.raises( CandidateError ):
-            arm_run.load_needs( path, arm_run.sha256_of( path ) )
+            arm_run.load_needs( path, file_sha256( path ) )
 
 
 class TestSnapshots:
@@ -221,6 +222,9 @@ class TestPage:
         text = ( tmp_path / "out" / "page.md" ).read_text()
         assert "abc123" in text and "## Arms not measured yet" in text and "| C1 |" in text
         assert "| all | 5 | " in text
+        import hashlib
+        assert f"| manifest_hash | {hashlib.sha256( manifest.read_bytes() ).hexdigest()} |" in text
+        assert f"| needs_sha | {hashlib.sha256( open( needs, 'rb' ).read() ).hexdigest()} |" in text
 
     def test_main_wires_the_real_environment( self, tmp_path, monkeypatch, capsys ):
         held = cache_for( [ "n1", "n2" ], { "n1": "parse_config" } )

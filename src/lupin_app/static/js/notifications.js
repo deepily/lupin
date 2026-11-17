@@ -1508,6 +1508,8 @@ class NotificationsUI {
                 this.appTimezone = config.app_timezone || null;
                 if ( !this.appTimezone ) this.error( "Client config carries no app_timezone: times show in UTC" );
                 this.tfeAutoFixDefault = !!config.test_fix_expediter_auto_fix_enabled;
+                // Row 802c94d3: a finished podcast starts in the Play Here player by itself when this is true.
+                this.podcastAutoPlayHereOnFinish = config.podcast_auto_play_here_on_finish === true;
                 this.envLabel = config.env_label || "DEVELOPMENT";
                 this.updateElement( "env-label", `[${this.envLabel}]: ` );
 
@@ -1578,6 +1580,7 @@ class NotificationsUI {
             this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
             this.appTimezone = null;                                // No default: the zone comes from the server, so time displays show UTC
             this.tfeAutoFixDefault = false;                         // Conservative fallback
+            this.podcastAutoPlayHereOnFinish = false;               // A failed fetch leaves a finished podcast to the Play Here link
 
             // TTS preview-and-pause fallbacks — conservative: feature DISABLED
             // on config-fetch failure so we don't accidentally truncate audio.
@@ -2839,6 +2842,20 @@ class NotificationsUI {
             });
         }
 
+        // Podcast choices: shown only while the podcast box is ticked; one-shot only for a status report.
+        const podcastOptions = document.getElementById( 'research-podcast-options' );
+        const podcastType = document.getElementById( 'research-podcast-type' );
+        const oneShotRow = document.getElementById( 'research-podcast-oneshot-row' );
+        if ( podcastCb && podcastOptions && podcastType && oneShotRow ) {
+            const syncPodcastOptions = () => {
+                podcastOptions.style.display = podcastCb.checked ? 'flex' : 'none';
+                oneShotRow.style.display = podcastType.value === 'status_report' ? 'flex' : 'none';
+            };
+            podcastCb.addEventListener( 'change', syncPodcastOptions );
+            presentationCb.addEventListener( 'change', syncPodcastOptions );
+            podcastType.addEventListener( 'change', syncPodcastOptions );
+        }
+
 
         // Research STT button (voice input)
         const researchSttBtn = document.getElementById( 'research-stt-button' );
@@ -3391,6 +3408,8 @@ class NotificationsUI {
                 // Row 8796333b: one invalidation push per committed task-store write. The
                 // queue socket only, for the same reason as the two names above.
                 "task_store_changed",
+                // Row 063fc1a8: an administrator flipped a scheduled job's switch. Queue socket only.
+                "cron_job_switch_changed",
                 "auth_success",
                 "auth_error",
                 "connect",
@@ -3721,6 +3740,11 @@ class NotificationsUI {
 
                 case "task_store_changed":
                     this._handleTaskStoreChanged();
+                    break;
+
+                case "cron_job_switch_changed":
+                    // Row 063fc1a8: cron-jobs.js owns the section; this only hands it the row.
+                    if ( window.cronJobs ) window.cronJobs.applyEvent( envelope );
                     break;
 
                 case "notification_responded":
@@ -4202,7 +4226,15 @@ class NotificationsUI {
             const schedulingParams = this._getSchedulingParams( 'research' );
             let args = { query: topic, budget: budget, dry_run: dryRun };
             if ( withPodcast ) {
-                args.target_languages = [ 'en', 'es-MX' ];
+                // English only unless the Spanish switch is on; no type unless it is not research critical.
+                const scriptType = document.getElementById( 'research-podcast-type' ).value;
+                if ( scriptType !== 'research_critical' ) {
+                    args.script_type = scriptType;
+                    args.review = document.getElementById( 'research-podcast-oneshot' ).checked ? 'one_shot' : 'ask';
+                }
+                if ( document.getElementById( 'research-podcast-spanish' ).checked ) {
+                    args.languages = [ 'en', 'es-MX' ];
+                }
             } else if ( withPresentation ) {
                 args.target_duration_minutes = 15;
             }
@@ -6827,6 +6859,9 @@ class NotificationsUI {
             return;
         }
 
+        // A finished podcast's Play Here link starts by itself (row 802c94d3); live arrivals only.
+        this._maybeAutoPlayPodcast( notification );
+
         // Manager-lineage badge — live-path parity with the full-load (senders-visible)
         // hydration (Tiffany 2026-06-17). The server now stamps top-level
         // `manager_persona` on EVERY CC-sender emit (notification_fifo_queue.py
@@ -7110,8 +7145,21 @@ class NotificationsUI {
         if ( notification.sender_id ) {
             const parsed    = this.parseSenderId( notification.sender_id );
             const sessionId = parsed && parsed.sessionId;
+            // Quiet workers (row 92076977): the server stamps `worker_quiet: true` on the event of a
+            // spawned, non-manager session whose speakerphone is off. The stamp wins over a stored
+            // "loud" entry, so a fresh worker shows and behaves quiet from its first notification.
+            const workerQuiet = notification.worker_quiet === true;
+            if ( sessionId && workerQuiet && this.conversationModes[ sessionId ] !== false ) {
+                this._setConversationModeLocal( sessionId, false );
+                this._setStripIconConvMode( sessionId, false );
+            }
             if ( sessionId && this.conversationModes[ sessionId ] === false ) {
-                if ( notification.priority === "high" || notification.priority === "urgent" ) {
+                // A quiet worker's urgent notify still speaks, by Rick's design. Every other quiet
+                // session, such as a manager Rick quieted by hand, keeps the rewrite of both priorities.
+                const rewritten = workerQuiet
+                    ? notification.priority === "high"
+                    : ( notification.priority === "high" || notification.priority === "urgent" );
+                if ( rewritten ) {
                     this.log( `[QUIET-MODE] Rewriting priority for muted session ${sessionId}: ${notification.priority} → medium` );
                     notification.priority      = "medium";
                     notification.suppress_ding = false;
@@ -18856,6 +18904,11 @@ class NotificationsUI {
 
         // Apply saved visibility state
         this.applySectionVisibility();
+
+        // Row 61070c08: the handlers above are bound late (init() awaits audio and IndexedDB
+        // first), so a click before this line does nothing. This attribute is the signal a test
+        // or script waits on before it clicks a toolbar button.
+        toolbar.dataset.bound = 'true';
         this.log( 'Section visibility toolbar initialized' );
     }
 
@@ -21078,6 +21131,8 @@ class NotificationsUI {
         // /app/audio?path= link is deliberately left alone and still opens a
         // new tab (Rick wants both paths).
         document.addEventListener( "click", ( ev ) => this._handleEmbeddedAudioClick( ev ) );
+        // The player page says when its audio plays or ends, so a finished podcast can queue behind it (row 802c94d3).
+        window.addEventListener( "message", ( ev ) => this._onPodcastPlayerMessage( ev ) );
 
         // Authenticated-download interception. /api/io/file is guarded by a
         // Bearer-token dependency that reads the Authorization HEADER only, and
@@ -21088,44 +21143,37 @@ class NotificationsUI {
     }
 
     /**
-     * Reads the row id out of an approve-link href, or returns null when it is not one.
+     * The shared approve-link module, published as window.LUPIN_APPROVE_LINK.
      *
-     * The href is `/app/tasks/approve?row=<full lowercase uuid>`, relative or with a loopback origin.
+     * The link parsing, the click handlers and the redraw check live there once, and the
+     * multiplexer imports the same file. This client keeps only what the module takes as arguments.
+     * Those are how a move is sent, how a row is read, and how text is shown.
+     *
+     * Ensures: returns null, with one console error, when the module did not load. The page keeps working
+     * and approve links are left as plain links, the same degrade as a missing status-chip module.
      */
-    _approveLinkRowId( href ) {
-        return this._rowIdAfter( "/app/tasks/approve?row=", href );
+    _approveLinkLib() {
+        const lib = window.LUPIN_APPROVE_LINK;
+        if ( !lib && !this._approveLinkMissingReported ) {
+            this._approveLinkMissingReported = true;
+            console.error( "shared/approve-link.js did not load: window.LUPIN_APPROVE_LINK is missing" );
+        }
+        return lib || null;
     }
 
-    /**
-     * The row and level a priority link href names, or null.
-     *
-     * The href is `/app/tasks/approve?row=<id>&priority=P0`. The plain approve link is null here and a priority link is null for `_approveLinkRowId`.
-     */
-    _approvePriorityLink( href ) {
-        const normalized = this._normalizeDocLinkHref( href );
-        if ( !normalized ) return null;
-        const at = normalized.lastIndexOf( "&priority=" );
-        if ( at < 0 ) return null;
-        const priority = normalized.slice( at + "&priority=".length );
-        const rowId    = this._rowIdAfter( "/app/tasks/approve?row=", normalized.slice( 0, at ) );
-        return rowId !== null && /^P[0-5]$/.test( priority ) ? { rowId, priority } : null;
+    /** The sender the shared handlers use: `_transitionTask`. */
+    _approveLinkSender() {
+        return { transitionTask: ( id, toStatus, extras ) => this._transitionTask( id, toStatus, extras ) };
     }
 
-    /**
-     * Reads the row id out of a 📋 view-link href, or returns null when it is not one.
-     *
-     * The href is `/app/tasks/view?row=<full lowercase uuid>`, relative or with a loopback origin.
-     */
-    _viewLinkRowId( href ) {
-        return this._rowIdAfter( "/app/tasks/view?row=", href );
+    /** The shower the shared 📋 handlers use. */
+    _approveLinkShower() {
+        return ( anchor, text, title ) => this._showAbstractFor( anchor, text, title, true );
     }
 
-    /** The full lowercase row id after `prefix` in a link href, or null. */
-    _rowIdAfter( prefix, href ) {
-        const normalized = this._normalizeDocLinkHref( href );
-        if ( !normalized || !normalized.startsWith( prefix ) ) return null;
-        const id = normalized.slice( prefix.length );
-        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test( id ) ? id : null;
+    /** The reader the shared handlers use: `_readTask`. */
+    _approveLinkReader() {
+        return ( id ) => this._readTask( id );
     }
 
     /**
@@ -21143,232 +21191,41 @@ class NotificationsUI {
     }
 
     /**
-     * The title, priority, owner, status and full body of a row as one block of text.
-     *
-     * Ensures: a missing field reads as a dash, "unowned" or "(no body)", never "undefined".
-     */
-    _taskOverlayText( row ) {
-        const facts = `Priority: ${row.priority ?? "—"} · Owner: ${row.owner_persona ?? "unowned"} · Status: ${row.status ?? "—"}`;
-        return `${row.title ?? "(no title)"}\n${facts}\n\n${row.body ?? "(no body)"}`;
-    }
-
-    /**
-     * Document-level click handler for the 📋 view link in a card.
-     *
-     * Ensures:
-     *     - any other click is left untouched
-     *     - the browser does not follow the link
-     *     - the row is read and shown the way the abstract 📋 shows text: in the Reading Pane in
-     *       horizontal layout, in the tooltip beside the link otherwise; a failed read says so there
-     *     - no overlay opens and no tab opens
-     */
-    async _handleViewLinkClick( ev ) {
-        const anchor = ev.target.closest( "a[href]" );
-        if ( !anchor ) return;
-        const rowId = this._viewLinkRowId( anchor.getAttribute( "href" ) );
-        if ( rowId === null ) return;
-        ev.preventDefault();
-        const row = await this._readTask( rowId );
-        this._showAbstractFor( anchor, row === null ? "Could not read this ticket." : this._taskOverlayText( row ), `Ticket ${rowId.slice( 0, 8 )}`, true );
-    }
-
-    /**
-     * Checks every unchecked approve link under the given roots, one read per distinct row id.
-     *
-     * Ensures:
-     *     - a link is checked once; one already clicked (pending) is left alone
-     *     - not_approved, or a failed read, leaves the live link as it is
-     *     - a row that left not_approved for a live or done status becomes a disabled "approved ✅"
-     *     - a dropped or wont_fix row becomes plain text naming that status, never "approved"
-     */
-    async _markApproveLinks( roots ) {
-        const byRow = new Map();
-        for ( const root of roots ) {
-            const found = root.matches( "a[href]" ) ? [ root ] : Array.from( root.querySelectorAll( "a[href]" ) );
-            for ( const anchor of found ) {
-                const id = this._approveLinkRowId( anchor.getAttribute( "href" ) ) ?? this._approvePriorityLink( anchor.getAttribute( "href" ) )?.rowId ?? null;
-                if ( id === null || anchor.hasAttribute( "data-approve-checked" ) ) continue;
-                anchor.setAttribute( "data-approve-checked", "1" );
-                byRow.set( id, [ ...( byRow.get( id ) || [] ), anchor ] );
-            }
-        }
-        await Promise.all( Array.from( byRow, async ( [ id, anchors ] ) => {
-            const row = await this._readTask( id );
-            if ( row === null || !row.status || row.status === "not_approved" ) return;
-            const closed = row.status === "dropped" || row.status === "wont_fix";
-            for ( const anchor of anchors ) {
-                if ( !anchor.isConnected || anchor.dataset.approveState === "pending" ) continue;
-                const verdict = document.createElement( "span" );
-                verdict.className   = closed ? "approve-link-result approve-link-closed" : "approve-link-result approve-link-approved";
-                verdict.textContent = closed ? row.status : "approved ✅";
-                if ( !closed ) verdict.setAttribute( "aria-disabled", "true" );
-                anchor.replaceWith( verdict );
-            }
-        } ) );
-    }
-
-    /**
      * Checks the approve links under `root`, then each batch of nodes drawn into it later.
      */
     _observeApproveLinks( root ) {
-        this._markApproveLinks( [ root ] );
-        this._approveLinkObserver = new MutationObserver( ( records ) => {
-            const added = [];
-            for ( const rec of records ) rec.addedNodes.forEach( ( n ) => { if ( n.nodeType === 1 ) added.push( n ); } );
-            if ( added.length > 0 ) this._markApproveLinks( added );
-        } );
-        this._approveLinkObserver.observe( root, { childList: true, subtree: true } );
+        const lib = this._approveLinkLib();
+        if ( lib ) this._approveLinkStop = lib.observeApproveLinks( root, this._approveLinkReader() );
     }
 
-    /**
-     * Document-level click handler for the one-click approve link in a card.
-     *
-     * Requires:
-     *     - ev is a click event; any other click is left untouched
-     *
-     * Ensures:
-     *     - the browser does not follow the link
-     *     - `_transitionTask( id, "queued" )` runs once per link: a second click while the
-     *       request is out sends nothing
-     *     - on success the link becomes the disabled text "approved ✅"
-     *     - on a refusal or a pending answer the link becomes the server's message, word for word
-     */
-    async _handleApproveLinkClick( ev ) {
-        const anchor = ev.target.closest( "a[href]" );
-        if ( !anchor ) return;
-        const rowId = this._approveLinkRowId( anchor.getAttribute( "href" ) );
-        if ( rowId === null ) return;
-        ev.preventDefault();
-        if ( anchor.dataset.approveState === "pending" ) return;
-        anchor.dataset.approveState = "pending";
-        anchor.setAttribute( "aria-disabled", "true" );
-        anchor.style.opacity = "0.5";
-        const result = await this._transitionTask( rowId, "queued", {} );
-        const outcome = document.createElement( "span" );
-        outcome.className = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
-        outcome.textContent = result.ok ? "approved ✅" : result.message;
-        if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
-        anchor.replaceWith( outcome );
+    /** Click handler for the one-click approve link. */
+    _handleApproveLinkClick( ev ) {
+        const lib = this._approveLinkLib();
+        return lib ? lib.handleApproveLinkClick( ev, ev.target, this._approveLinkSender() ) : false;
     }
 
-    /**
-     * Document-level click handler for the one-click priority link.
-     *
-     * Ensures:
-     *     - any other click is left untouched; the browser does not follow the link
-     *     - one request per link: a second click while it is out sends nothing
-     *     - the request is the approve move plus `promote_priority`; the server decides who may
-     *     - success becomes the disabled text "approved at <level> ✅"; a refusal or pending answer becomes the server's words
-     */
-    async _handleApprovePriorityLinkClick( ev ) {
-        const anchor = ev.target.closest( "a[href]" );
-        if ( !anchor ) return;
-        const link = this._approvePriorityLink( anchor.getAttribute( "href" ) );
-        if ( link === null ) return;
-        ev.preventDefault();
-        if ( anchor.dataset.approveState === "pending" ) return;
-        anchor.dataset.approveState = "pending";
-        anchor.setAttribute( "aria-disabled", "true" );
-        anchor.style.opacity = "0.5";
-        const result = await this._transitionTask( link.rowId, "queued", { promote_priority: link.priority } );
-        const outcome = document.createElement( "span" );
-        outcome.className = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
-        outcome.textContent = result.ok ? `approved at ${link.priority} ✅` : result.message;
-        if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
-        anchor.replaceWith( outcome );
+    /** Click handler for the one-click priority link. */
+    _handleApprovePriorityLinkClick( ev ) {
+        const lib = this._approveLinkLib();
+        return lib ? lib.handleApprovePriorityLinkClick( ev, ev.target, this._approveLinkSender() ) : false;
     }
 
-    /**
-     * A comma list of full row ids as an array, or null when the list cannot be trusted.
-     *
-     * Ensures: null for an empty list, a short or malformed id, or the same id twice.
-     */
-    _parseBatchIds( list ) {
-        if ( !list ) return null;
-        const ids = list.split( "," );
-        if ( ids.some( ( id ) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test( id ) ) ) return null;
-        if ( new Set( ids ).size !== ids.length ) return null;
-        return ids;
+    /** Click handler for the 📋 view link. */
+    _handleViewLinkClick( ev ) {
+        const lib = this._approveLinkLib();
+        return lib ? lib.handleViewLinkClick( ev, ev.target, this._approveLinkReader(), this._approveLinkShower() ) : false;
     }
 
-    /** The query of a link whose normalized href starts with `prefix`, or null. */
-    _batchParams( prefix, href ) {
-        const normalized = this._normalizeDocLinkHref( href );
-        if ( !normalized || !normalized.startsWith( prefix ) ) return null;
-        return new URLSearchParams( normalized.slice( prefix.indexOf( "?" ) + 1 ) );
+    /** Click handler for a batch approve link. */
+    _handleBatchApproveLinkClick( ev ) {
+        const lib = this._approveLinkLib();
+        return lib ? lib.handleBatchApproveLinkClick( ev, ev.target, this._approveLinkSender() ) : false;
     }
 
-    /**
-     * What a batch approve-link href asks for: { ids, move, reason }, or null.
-     *
-     * Ensures: null for a bad id list, a move other than queued or dropped, or a drop with a blank reason.
-     */
-    _batchLinkOf( href ) {
-        const params = this._batchParams( "/app/tasks/approve?rows=", href );
-        if ( params === null ) return null;
-        const ids  = this._parseBatchIds( params.get( "rows" ) );
-        const move = params.get( "move" );
-        if ( ids === null || ( move !== "queued" && move !== "dropped" ) ) return null;
-        const reason = ( params.get( "reason" ) || "" ).trim();
-        if ( move === "dropped" && reason === "" ) return null;
-        return { ids, move, reason: move === "dropped" ? reason : null };
-    }
-
-    /**
-     * Document-level click handler for a batch approve link: one move for every listed row.
-     *
-     * Ensures:
-     *     - any other click is left untouched
-     *     - the browser does not follow the link; an untrusted list sends nothing
-     *     - one run per link: a second click while it is out sends nothing
-     *     - the link becomes a summary line and one line per row, applied or refused with the server's words
-     */
-    async _handleBatchApproveLinkClick( ev ) {
-        const anchor = ev.target.closest( "a[href]" );
-        if ( !anchor ) return;
-        const href = anchor.getAttribute( "href" );
-        const normalized = this._normalizeDocLinkHref( href );
-        if ( !normalized || !normalized.startsWith( "/app/tasks/approve?rows=" ) ) return;
-        ev.preventDefault();
-        const link = this._batchLinkOf( href );
-        if ( link === null || anchor.dataset.approveState === "pending" ) return;
-        anchor.dataset.approveState = "pending";
-        anchor.setAttribute( "aria-disabled", "true" );
-        anchor.style.opacity = "0.5";
-        const extras  = link.reason === null ? {} : { reason: link.reason };
-        const results = await Promise.all( link.ids.map( ( id ) => this._transitionTask( id, link.move, extras ) ) );
-        const lines   = results.map( ( r, i ) => `${link.ids[ i ].slice( 0, 8 )} ${r.ok ? "applied ✅" : `refused: ${r.message}`}` );
-        const done    = results.filter( ( r ) => r.ok ).length;
-        const outcome = document.createElement( "span" );
-        outcome.className = done === lines.length ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
-        outcome.style.whiteSpace = "pre-line";
-        outcome.textContent = [ `${done} of ${lines.length} applied`, ...lines ].join( "\n" );
-        anchor.replaceWith( outcome );
-    }
-
-    /**
-     * Document-level click handler for a batch 📋 view link: one line per row.
-     *
-     * Ensures:
-     *     - any other click is left untouched; the browser does not follow the link
-     *     - every row is read; a row that could not be read says so and the rest still show
-     *     - the text is shown the way the abstract 📋 shows text
-     */
-    async _handleBatchViewLinkClick( ev ) {
-        const anchor = ev.target.closest( "a[href]" );
-        if ( !anchor ) return;
-        const href = anchor.getAttribute( "href" );
-        const normalized = this._normalizeDocLinkHref( href );
-        if ( !normalized || !normalized.startsWith( "/app/tasks/view?rows=" ) ) return;
-        ev.preventDefault();
-        const ids = this._parseBatchIds( this._batchParams( "/app/tasks/view?rows=", href ).get( "rows" ) );
-        if ( ids === null ) {
-            this._showAbstractFor( anchor, "This link does not name a clean list of full ticket ids.", "Held rows", true );
-            return;
-        }
-        const rows  = await Promise.all( ids.map( ( id ) => this._readTask( id ) ) );
-        const lines = rows.map( ( row, i ) => `${ids[ i ].slice( 0, 8 )} · ${row === null ? "could not be read" : `${row.status ?? "—"} · ${row.title ?? "(no title)"}`}` );
-        this._showAbstractFor( anchor, lines.join( "\n" ), `${ids.length} held rows`, true );
+    /** Click handler for a batch 📋 view link. */
+    _handleBatchViewLinkClick( ev ) {
+        const lib = this._approveLinkLib();
+        return lib ? lib.handleBatchViewLinkClick( ev, ev.target, this._approveLinkReader(), this._approveLinkShower() ) : false;
     }
 
     /**
@@ -21486,7 +21343,8 @@ class NotificationsUI {
      */
     _normalizeDocLinkHref( href ) {
         if ( !href ) return href;
-        return href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, "" );
+        const lib = this._approveLinkLib();
+        return lib ? lib.normalizeDocLinkHref( href ) : href;
     }
 
     /**
@@ -21547,7 +21405,7 @@ class NotificationsUI {
      * @returns {HTMLElement} the overlay element (for tests / callers)
      */
     _showPodcastOverlay( audioUrl, title ) {
-        // Single instance — replace any existing overlay.
+        // Single instance — replace any existing overlay (silently: a replacement is not a close).
         const existing = document.getElementById( "podcast-overlay" );
         if ( existing ) existing.remove();
 
@@ -21645,7 +21503,113 @@ class NotificationsUI {
      */
     _dismissPodcastOverlay() {
         const overlay = document.getElementById( "podcast-overlay" );
-        if ( overlay ) overlay.remove();
+        if ( !overlay ) return;
+        overlay.remove();
+        this._onPodcastOverlayClosed();
+    }
+
+    // ---- Podcast auto-play (row 802c94d3) -------------------------------------------------------
+    // A finished podcast job's notification carries a Play Here link in its abstract. When the INI
+    // setting `podcast auto play here on finish` is true the first such link opens in the Play Here
+    // overlay at once. Audio already playing is never cut off, and two podcasts finishing together
+    // play one after the other: a podcast that finishes meanwhile waits in a queue. A browser that
+    // blocks the start gets a visible Play button inside the player page (audio-player.html).
+
+    /**
+     * The queue state of the auto-play, created on first use.
+     *
+     * @returns {{waiting: Array<{url: string, title: string}>, ended: boolean, seen: Set<string>}}
+     */
+    _podcastAutoState() {
+        if ( !this._podcastAuto ) this._podcastAuto = { waiting: [], ended: false, seen: new Set() };
+        return this._podcastAuto;
+    }
+
+    /**
+     * The first Play Here URL in a markdown abstract, or null.
+     *
+     * It is an `/app/audio?path=` link that carries embed=1.
+     *
+     * @param {string|null|undefined} abstract
+     * @returns {string|null}
+     */
+    _firstPlayHereLink( abstract ) {
+        if ( typeof abstract !== "string" ) return null;
+        for ( const match of abstract.matchAll( /\]\((\/app\/audio\?[^)\s]*)\)/g ) ) {
+            if ( /[?&]embed=1(?:&|$)/.test( match[ 1 ] ) ) return match[ 1 ];
+        }
+        return null;
+    }
+
+    /**
+     * Offer a live notification to the auto-play: start its podcast now, queue it, or ignore it.
+     *
+     * @param {Object} notification - the notification of a notification_queue_update frame
+     */
+    _maybeAutoPlayPodcast( notification ) {
+        if ( this.podcastAutoPlayHereOnFinish !== true ) return;
+        const url = this._firstPlayHereLink( notification.abstract );
+        if ( url === null ) return;
+        const id    = notification.id_hash || notification.id;
+        const state = this._podcastAutoState();
+        if ( id ) {
+            if ( state.seen.has( id ) ) return;
+            state.seen.add( id );
+        }
+        // One finished podcast arrives as two notifications (the job's own and the queue's "Podcast complete!"), with
+        // different ids and the same audio path; the second would queue and play again after the first (row ba82a443).
+        const key = new URLSearchParams( url.split( "?" )[ 1 ] || "" ).get( "path" ) || url;
+        if ( state.seen.has( "path:" + key ) ) return;
+        state.seen.add( "path:" + key );
+        const title = this._podcastUrlTitle( url ) || "Podcast";
+        const busy  = document.getElementById( "podcast-overlay" ) !== null && !state.ended;
+        if ( busy ) { state.waiting.push( { url, title } ); return; }
+        this._startAutoPlayPodcast( { url, title } );
+    }
+
+    /**
+     * Show one podcast in the Play Here overlay and mark the player busy.
+     *
+     * @param {{url: string, title: string}} podcast
+     */
+    _startAutoPlayPodcast( podcast ) {
+        this._podcastAutoState().ended = false;
+        this._showPodcastOverlay( podcast.url, podcast.title );
+    }
+
+    /**
+     * Start the next waiting podcast, if there is one.
+     */
+    _startNextAutoPlayPodcast() {
+        const next = this._podcastAutoState().waiting.shift();
+        if ( next ) this._startAutoPlayPodcast( next );
+    }
+
+    /**
+     * Called when the overlay was dismissed: the player is free, so the next podcast starts.
+     */
+    _onPodcastOverlayClosed() {
+        this._podcastAutoState().ended = false;
+        this._startNextAutoPlayPodcast();
+    }
+
+    /**
+     * Handle a window message from the player page.
+     *
+     * `playing` marks the player busy; `ended` frees it and starts the next podcast.
+     * Only same-origin messages that carry the player's source are acted on.
+     *
+     * @param {MessageEvent} ev
+     */
+    _onPodcastPlayerMessage( ev ) {
+        const data = ev.data;
+        if ( ev.origin !== window.location.origin || !data || typeof data !== "object" || data.source !== "lupin-audio-player" ) return;
+        if ( data.event === "playing" ) {
+            this._podcastAutoState().ended = false;
+        } else if ( data.event === "ended" ) {
+            this._podcastAutoState().ended = true;
+            this._startNextAutoPlayPodcast();
+        }
     }
 
     /**

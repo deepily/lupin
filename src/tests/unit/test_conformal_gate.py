@@ -148,3 +148,27 @@ class TestConformalGateIntegration:
 
         assert status[ "calibrated" ] is True
         assert status[ "calibration_size" ] == 60  # 30 + 30 decisions total
+
+
+    def test_calibration_uses_logged_predictions_not_category_counts( self ):
+        """Calibration size is the number of logged pairs, and the points are not one repeated value."""
+        strategy = _make_strategy( conformal_enabled=True, trust_mode="active" )
+        _train_blr_on_category( strategy, "testing", n_success=25, n_failure=15 )
+        # Category counts say 2 decisions; the BLR logged 40 pairs
+        cat = strategy.trust_tracker.categories[ "testing" ]
+        cat.total_successes = 2
+        cat.total_decisions = 2
+
+        status = strategy.calibrate_conformal()
+
+        assert status[ "calibration_size" ] == 40
+        assert len( { p for p, _ in cat._blr_model.calibration_pairs } ) > 1
+
+    def test_calibration_skips_categories_without_a_blr( self ):
+        """A category with no BLR adds no points, and too few points leaves the wrapper uncalibrated."""
+        strategy = _make_strategy( conformal_enabled=True, trust_mode="active" )
+        _train_blr_on_category( strategy, "testing", n_success=5, n_failure=5 )
+
+        status = strategy.calibrate_conformal()
+
+        assert status[ "calibrated" ] is False

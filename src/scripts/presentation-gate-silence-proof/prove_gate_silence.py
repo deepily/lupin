@@ -322,9 +322,8 @@ def submit_build( base, jwt, source_path, duration=15, audience="general" ):
 
 
 def _queue( base, jwt, name ):
-    # Queue names: todo | run | done | dead (queues.py:461-465). Every branch
-    # returns {"{name}_jobs_metadata": [ {job_id, status, ...} ]} (queues.py:
-    # 547/605/636). Regular users get self-owned jobs — the submitter owns the
+    # Queue names: todo | run | done | dead (the get_queue handler in
+    # queues.py). Every branch returns {"{name}_jobs_metadata": [ {job_id, status, ...} ]}. Regular users get self-owned jobs — the submitter owns the
     # pr- job, so a self-filtered read finds it.
     r = requests.get(
         f"{base}/api/get-queue/{name}",
@@ -522,7 +521,7 @@ def main():
     print( f"[proof] authenticated user_id={user_id}" )
 
     # HARD precondition — a monopolizer holding the lock would defer our foreign
-    # pr- forever (Gate B, queue_consumer.py:106-124). Verify BEFORE spending the
+    # pr- forever (Gate B, the monopolize hold in queue_consumer.py). Verify before spending the
     # window. --force only for a deliberate override.
     if not args.force:
         ps = require_lock_clear( args.base, jwt )
@@ -531,7 +530,7 @@ def main():
         print( "[proof] --force: skipping lock-clear precondition" )
 
     # Programmatic session id: ^[a-z][a-z0-9]*-[a-z0-9-]{1,47}$ (is_valid_session_id,
-    # websocket.py:179). Spaces/uppercase fail it → close-before-accept → 403.
+    # in websocket.py). Spaces/uppercase fail it → close-before-accept → 403.
     session_id = f"arnold-gate-{uuid.uuid4().hex[:8]}"
     silent = SilentConnectedUser( args.base, session_id, jwt, answer_mode=True )
     silent.start()

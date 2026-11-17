@@ -27,10 +27,10 @@ Notes:
 import logging
 from typing import Optional, Any
 from dataclasses import dataclass
+from functools import partial
 
 from .config import PodcastConfig
-from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate
-from cosa.agents.shared.sdk_error_result import raise_error_result
+from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate, temperature_to_steer
 # D6-LENIENT JSON recovery — single source of truth lives in the parsing module
 from .prompts.script_generation import lenient_json_loads
 
@@ -68,32 +68,15 @@ PODCAST_SCRIPT_TOOLS = []
 # job pg-efc6b2c8 (2026-08-04), where the response opened by apologising that it
 # could not create `/home/rruiz/.claude/plans/create-a-podcast-script-*.md`.
 #
-# Valid values, read from the installed SDK (claude_agent_sdk/types.py:24,
+# Valid values, read from the installed SDK (claude_agent_sdk/types.py (PermissionMode),
 # v0.1.56): "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk".
 PODCAST_PERMISSION_MODE = "default"
 
 
-def _temperature_to_steer( temperature: float ) -> str:
-    """
-    Map a legacy per-call temperature into a system-prompt creativity steer.
-
-    `ClaudeAgentOptions` exposes no per-call temperature, so the creativity
-    intent is expressed in the prompt instead. Higher temperature means more
-    creative dialogue; lower means more focused, precise output.
-
-    Requires:
-        - temperature is a float
-
-    Ensures:
-        - returns a non-empty steer string for high (>= 0.75) or low (<= 0.55)
-          temperatures
-        - returns "" for mid-range temperatures (no explicit steer)
-    """
-    if temperature >= 0.75:
-        return "Write with creative, natural, varied phrasing."
-    if temperature <= 0.55:
-        return "Write with precise, focused, deterministic phrasing."
-    return ""
+# The cut-offs and wording are this client's own; the rule is the shared one.
+_temperature_to_steer = partial( temperature_to_steer, high=0.75, low=0.55,
+                                 high_steer="Write with creative, natural, varied phrasing.",
+                                 low_steer="Write with precise, focused, deterministic phrasing." )
 
 
 @dataclass
@@ -108,7 +91,7 @@ class APIResponse:
     model         : str
     input_tokens  : int
     output_tokens : int
-    stop_reason   : str
+    stop_reason   : Optional[ str ]   # None = completion state unknown (not "end_turn")
     sdk_cost_usd  : float = 0.0
     raw_response  : Any   = None
 
@@ -123,34 +106,6 @@ class CostEstimate( BoundedCCCostEstimate ):
     (`total_sdk_cost_usd`). Under the bounded-CC path the SDK telemetry is
     covered by the fixed Max plan and is not billed per token.
     """
-    # Pricing per million tokens (approximate, as of 2025)
-    OPUS_INPUT_PRICE    : float = 15.0
-    OPUS_OUTPUT_PRICE   : float = 75.0
-    SONNET_INPUT_PRICE  : float = 3.0
-    SONNET_OUTPUT_PRICE : float = 15.0
-
-    def add_usage( self, model: str, input_tokens: int, output_tokens: int ):
-        """
-        Add token usage from an LLM call (token-based price estimate).
-
-        Args:
-            model: Model name used
-            input_tokens: Input tokens consumed
-            output_tokens: Output tokens generated
-        """
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_api_calls += 1
-
-        # Estimate cost based on model
-        if "opus" in model.lower():
-            cost = ( input_tokens * self.OPUS_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.OPUS_OUTPUT_PRICE / 1_000_000 )
-        else:  # Sonnet or other
-            cost = ( input_tokens * self.SONNET_INPUT_PRICE / 1_000_000 +
-                     output_tokens * self.SONNET_OUTPUT_PRICE / 1_000_000 )
-
-        self.estimated_cost_usd += cost
 
 
 class PodcastAPIClient( BoundedCCClientBase ):
@@ -322,36 +277,10 @@ class PodcastAPIClient( BoundedCCClientBase ):
         if self.debug:
             print( f"[PodcastAPIClient] sdk_query {model} for {call_type} (max_turns={self.config.script_max_turns})" )
 
-        collected      = []
-        input_tokens   = 0
-        output_tokens  = 0
-        sdk_cost_usd   = 0.0
-        stop_reason    = "end_turn"
-
-        async for message in sdk_query( prompt=user_message, options=options ):
-            if isinstance( message, AssistantMessage ):
-                for block in message.content:
-                    if isinstance( block, TextBlock ):
-                        collected.append( block.text )
-            elif isinstance( message, TextBlock ):
-                collected.append( message.text )
-            elif isinstance( message, ResultMessage ):
-                if message.is_error: raise_error_result( message, f"PodcastAPIClient {call_type}", logger )
-                usage         = message.usage or {}
-                input_tokens  = usage.get( "input_tokens", 0 )
-                output_tokens = usage.get( "output_tokens", 0 )
-                sdk_cost_usd  = message.total_cost_usd or 0.0
-                stop_reason   = message.stop_reason or "end_turn"
-
-        content = "".join( collected ).strip()
-
-        # Record usage (token estimate) + SDK cost telemetry (Max-plan covered)
-        self.cost_estimate.add_usage(
-            model         = model,
-            input_tokens  = input_tokens,
-            output_tokens = output_tokens,
+        content, input_tokens, output_tokens, sdk_cost_usd, stop_reason = await self._collect_reply(
+            sdk_query( prompt=user_message, options=options ), model, call_type,
+            AssistantMessage, TextBlock, ResultMessage,
         )
-        self.cost_estimate.add_sdk_cost( sdk_cost_usd )
 
         if self.debug:
             print( f"[PodcastAPIClient] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f}" )

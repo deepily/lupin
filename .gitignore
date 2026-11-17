@@ -54,6 +54,8 @@ src/conf/long-term-memory/test-*.db
 # so it is no longer in the gitignored set — there's nothing to ignore. Keep the
 # backup-file exclusion (still emitted into long-term-memory/ by backup-postgres.sh).
 src/conf/long-term-memory/postgresql-backup.sql
+src/conf/long-term-memory/postgresql-backup.dump
+src/conf/long-term-memory/postgresql-backup.dump.tmp
 
 # Migration results - contains plaintext passwords for initial setup
 src/scripts/auth_migration/migration_results.json

@@ -33,6 +33,13 @@ from unit_test_utilities import UnitTestUtilities
 from cosa.rest.routers.websocket import router, auth_test, websocket_audio_endpoint, websocket_queue_endpoint, is_valid_session_id
 from cosa.rest.routers.websocket import get_websocket_manager, get_active_tasks, get_app_debug
 
+# LOAD-BEARING IMPORT, DO NOT REMOVE AS "UNUSED" (bug 10f45f52; the mechanism is documented in
+# test_system_router.py, bug e9e31de7). Code under test imports cosa.rest.db.database lazily while
+# the tests below wrap calls in patch.dict( "sys.modules", ... ). On exit patch.dict restores its
+# pre-patch snapshot and drops every sqlalchemy module imported inside. Importing it here puts
+# it in the snapshot, so nothing is re-loaded and the guard in src/conftest.py stays quiet.
+import cosa.rest.db.database  # noqa: F401
+
 
 def _patch_fastapi_main( mock_main ):
     """

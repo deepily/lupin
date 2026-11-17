@@ -15,6 +15,7 @@ import time
 import types
 
 from cosa.repo.symindex.candidates import vector_store
+from cosa.utils.jsonl_file import read_jsonl
 from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import check, draft, finalize, freeze, hardness, keys, loss_trace, run, schema, stage_seeds, stages
@@ -68,8 +69,7 @@ class RejectionLedger:
 
     def rows( self ):
         """Ensures: returns the rows in file order, [] for a file not yet written."""
-        if not os.path.exists( self.path ): return []
-        with open( self.path, encoding="utf-8" ) as f: return [ json.loads( line ) for line in f if line.strip() ]
+        return read_jsonl( self.path, missing_ok=True )
 
 
 def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally, rejections, partners=False, job_for=run.routed_job, draft_fn=draft.draft_need, check_fn=check.second_check ):
@@ -188,7 +188,7 @@ def build_parts( env, built, lists, models, drafter, second, ledgers, partners=F
     vectors  = load_vectors( env.ctx.candidate_stage.vectors_dir )
     rows     = set( vectors.ids )
     pooled   = [ r for r in kept if r[ "id" ] in rows ]
-    renv     = types.SimpleNamespace( ctx=keys.KeyContext( pooled, measures, bodies, env.seed, vectors ), ask=drafter, ledger=ledgers[ "draft" ], model_id=draft.DRAFTER_MODEL,
+    renv     = types.SimpleNamespace( ctx=keys.KeyContext( pooled, measures, bodies, env.seed, vectors ), ask=drafter, ledger=ledgers[ "draft" ], model_id=draft.drafter_model(),
                                       calls_log=None, by_id=by_id, strip_fn=env.strip_fn, server=env.server, source_commit=env.source_commit, smoke=False )
     tally    = Tally()
     final    = final_need_fn( renv, route_table( lists, env.seed ), lambda prompt: second( SECOND_SYSTEM, prompt ), ledgers[ "second" ], models[ "second" ], tally, ledgers[ "rejections" ], partners )

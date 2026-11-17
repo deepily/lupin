@@ -29,7 +29,6 @@ import signal
 import subprocess
 import sys
 import time
-import unicodedata
 from datetime import datetime, timezone
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
@@ -48,6 +47,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json, bu
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.listener_processes import LISTENER_MODULE_NAME, find_live_listener_pids, listener_spawn_lock
 from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
+from lupin_mcp.persona_normalization import memento_slugs
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
 from cosa.rest.voice_persona_helpers import resolve_session_start_persona_chain, pick_declared_managers_from_env
@@ -145,7 +145,7 @@ def _resolve_cc_pid( hook_ppid ):
         # Find the LAST ")" to skip past comm field safely
         comm_end = stat_line.rindex( ")" )
         fields_after_comm = stat_line[comm_end + 2:].split()
-        # fields_after_comm[0] = state, fields_after_comm[1] = ppid
+        # the first field after the name is the state, the second is the parent pid
         cc_pid = int( fields_after_comm[1] )
         return cc_pid
     except ( FileNotFoundError, IndexError, ValueError, PermissionError, OSError ):
@@ -565,14 +565,14 @@ _BANNER_PROBE_TIMEOUT_SECONDS = 3
 # fast ConnectionRefused. The prior 2s failed every reload window it landed in
 # (measured n=143: min 6.59s, median 6.91s).
 #
-# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+# The derivation document is no longer in the tree; it is in git history.
 #
 # 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
 # inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
-# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+# (Cited by symbol, not by line: this used to cite a line range in notify_user_async.py and a
 #  seven-line fix above it silently repointed every copy at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
@@ -989,38 +989,7 @@ _MEMENTO_MAX_BYTES        = 8000
 _MEMENTO_BODY_LEAD_BYTES  = 3000
 
 
-def _persona_slugs( persona_name ):
-    """
-    Every slug a persona's mementos might be filed under, best first.
-
-    Accents are why this returns a list: "María" naively slugs to "mar-a", which
-    misses the accent-folded files writers produce. The folded form (maria) comes
-    first, and the mangled form is also returned so legacy records stay reachable.
-
-    Requires:
-        - persona_name is a string or None
-
-    Ensures:
-        - Returns [ ascii_slug, … ] with the accent-folded form first, the
-          naive form appended only when it differs
-        - Returns [] for an empty/None name or a name with no alphanumerics
-        - Never raises
-    """
-    if not persona_name: return []
-
-    lowered = persona_name.strip().lower()
-
-    # Accent-folded: "maría" -> "maria". NFKD splits the letter from its accent;
-    # dropping combining marks leaves the base letter.
-    folded  = "".join( ch for ch in unicodedata.normalize( "NFKD", lowered )
-                       if not unicodedata.combining( ch ) )
-
-    out = []
-    for candidate in ( folded, lowered ):
-        slug = re.sub( r"[^a-z0-9]+", "-", candidate ).strip( "-" )
-        if slug and slug not in out: out.append( slug )
-
-    return out
+_persona_slugs = memento_slugs                      # one definition, in lupin_mcp.persona_normalization
 
 
 def _written_at_of( header ):
@@ -2011,8 +1980,7 @@ def main():
         # and ignored entirely when the dir already exists, so it cannot guarantee
         # 2770. The setgid bit makes bridges written here inherit THIS dir's group,
         # so a cross-uid writer (container uid 1001 ⇄ host) and reader share access
-        # regardless of who wrote last. See
-        # src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md.
+        # regardless of who wrote last.
         try:
             os.chmod( session_dir, 0o2770 )
         except OSError as e:
@@ -2148,13 +2116,18 @@ def main():
         # one is just enable_speakerphone on its session_id. Fully env-gated:
         # zero effect on normal interactive sessions (the block only runs when
         # COSA_VOICE_SPAWNED_BY is present).
-        # See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
         _spawned_by = os.environ.get( "COSA_VOICE_SPAWNED_BY" )
         if _spawned_by:
             session_data[ "spawned_by" ]      = _spawned_by
             session_data[ "headless" ]        = os.environ.get( "COSA_VOICE_HEADLESS", "" ) == "1"
             session_data[ "role" ]            = os.environ.get( "COSA_VOICE_ROLE", "reviewer" )
-            session_data[ "speakerphone_on" ] = False
+            # Worker default voice mode (row 92076977): spawn_sessions forwards the INI key's word,
+            # and a manager spawn forwards `inherit`. An absent or unknown word keeps today's False,
+            # so a child spawned by an older server behaves as before.
+            from lupin_mcp import worker_voice_mode as _wvm
+            from lupin_cli.claude_code.hooks.lib.session_bridge import _get_default_speakerphone
+            session_data[ "speakerphone_on" ] = _wvm.speakerphone_for_mode(
+                os.environ.get( _wvm.ENV_VAR ), _get_default_speakerphone )
             # Owner-lineage drift fix (2026-06-22): freeze the manager's persona-at-
             # spawn onto this worker's bridge so the arbiter resolves the TRUE
             # spawning manager for a finished/dead worker WITHOUT re-deriving the
@@ -2180,7 +2153,6 @@ def main():
         # None). So whenever a prior bridge carries a valid voice_persona dict,
         # preserve it regardless of whether the transient id rotated.
         # See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §5
-        #      src/rnd/v0.1.7/2026.05.22-voice-persona-request-tool-and-compaction-carry-forward.md
         if old_data and isinstance( old_data.get( "voice_persona" ), dict ):
             session_data[ "voice_persona" ] = old_data[ "voice_persona" ]
 
@@ -2312,8 +2284,6 @@ def main():
     #
     # Host-side only: prune_dead_persona_bridges() short-circuits to no-op
     # when called from inside a container (host PIDs invisible there).
-    #
-    # See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
     try:
         from lupin_cli.claude_code.hooks.lib.session_bridge import prune_dead_persona_bridges
         pruned_count = prune_dead_persona_bridges()
@@ -2348,14 +2318,12 @@ def main():
         # spawn-injected COSA_VOICE_PERSONA_CHAIN > headless-no-default >
         # per-repo COSA_VOICE_PREFERRED_PERSONA__<PROJECT> > None (random).
         # Full precedence contract lives in the pure helper.
-        # See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
         chain = resolve_session_start_persona_chain( project, os.environ )
         # Reserve-from-random (Rick, 2026-06-11): thread the project's
         # declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, sourced
         # from fleet-roster.env and tmux-forwarded by start-cc-with-tmux.sh)
         # to the allocate endpoint on EVERY call — chain or plain random —
         # so neither draw can squat a declared manager's name.
-        # See: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
         declared_managers = pick_declared_managers_from_env( project, os.environ )
         # ── TEMPORARY DEBUG (2026-05-19, Tiberius session 4e724860) ─────────
         # Investigating why LookML hook never successfully allocates a persona
@@ -2398,8 +2366,8 @@ def main():
     # is_manager_figure()'s IMPLICIT source — "is this session's allocated
     # persona one of the repo's NAMED standing personas
     # (COSA_VOICE_PREFERRED_PERSONA__<PROJECT>)?" — can ONLY be resolved HERE,
-    # where the caller's real env lives. The server (tasks.py:652 G1 blocked-mint
-    # guard, and any future v2-experiment manager-vs-worker stratum classifier)
+    # where the caller's real env lives. The server (the blocked-mint guard in
+    # tasks.py, and any future v2-experiment manager-vs-worker stratum classifier)
     # runs in the lupin-rest-dev container, whose env carries ZERO
     # COSA_VOICE_PREFERRED_PERSONA__* vars and LUPIN_ROOT=/var/lupin — so a
     # server-side re-derive fails closed for EVERY caller (Rick's Option A,
@@ -2429,6 +2397,15 @@ def main():
             # out-of-band drive never saw it because the test monkeypatches
             # _spawn_listener, so the clobbering write never runs.
             session_data[ MANAGER_FIGURE_BRIDGE_FIELD ] = _mf_implicit
+            # Amendment 2 (Tiberius, row 92076977): a spawned session whose allocated persona is a
+            # standing manager is a manager whatever role it was spawned with (Cheech was measured
+            # as role "author"), so it gets the mode-aware default, not the worker's quiet start.
+            if _mf_implicit and session_data.get( "spawned_by" ):
+                from lupin_cli.claude_code.hooks.lib.session_bridge import (
+                    _get_default_speakerphone as _inherit_fn, set_speakerphone )
+                _mf_on = bool( _inherit_fn() )
+                session_data[ "speakerphone_on" ] = _mf_on
+                set_speakerphone( stable_session_id, _mf_on )
             if not set_manager_figure_implicit( stable_session_id, _mf_implicit ):
                 print( "[register_session] WARNING: manager-figure stamp not written "
                        "(bridge unresolved); is_manager_figure will fall back to the "

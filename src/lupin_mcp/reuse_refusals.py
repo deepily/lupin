@@ -9,23 +9,18 @@ Nothing here sends anything or runs a model.
 """
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import pathlib
 import sys
 import time
 
+from cosa.utils import secret_drift
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_outcome as ro
 
 REFUSALS_NAME = "refusals.jsonl"
 NOT_CHECKED   = 3                                               # the exit code for a run that could not check: neither a pass nor a refusal
-
-
-def document_hash( text ):
-    """Ensures: returns the sha256 of the document text, as hex."""
-    return hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()
 
 
 def scanned_lines( text ):
@@ -83,7 +78,7 @@ def record( data_dir, text, verdicts ):
         - a last line with no newline is left alone and the next record starts on a new line
         - returns the number of records appended
     """
-    doc, path, stamp = document_hash( text ), pathlib.Path( data_dir ) / REFUSALS_NAME, time.strftime( "%Y-%m-%dT%H:%M:%S%z" )
+    doc, path, stamp = secret_drift.sha256_of( text ), pathlib.Path( data_dir ) / REFUSALS_NAME, time.strftime( "%Y-%m-%dT%H:%M:%S%z" )
     with path.open( "a+b" ) as f:
         fcntl.flock( f, fcntl.LOCK_EX )
         try:
@@ -159,7 +154,7 @@ def main( argv=None, out=None ):
     refused  = [ v for v in verdicts if v[ "status" ] == "refused" ]
     try: appended = record( data, text, verdicts )
     except OSError as e: return not_checked( e, out )
-    print( json.dumps( { "document": document_hash( text ), "scanned": len( verdicts ), "refused": len( refused ), "appended": appended,
+    print( json.dumps( { "document": secret_drift.sha256_of( text ), "scanned": len( verdicts ), "refused": len( refused ), "appended": appended,
                          "refusals": [ { "n": v[ "n" ], "reasons": v[ "reasons" ] } for v in refused ], "missing": missing }, indent=2 ), file=out )
     return 1 if refused or missing else 0
 

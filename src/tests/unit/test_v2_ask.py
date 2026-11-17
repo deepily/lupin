@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from cosa.rest.routers import v2_ask
+from tests.helpers.typed_config import TypedConfigFake
 
 
 # ────────────────────────────────────────────────────────────── result fixture
@@ -356,12 +357,7 @@ def test_resume_422_on_missing_pending_id():
 
 # ────────────────────────────────────────────────────────────── build_ask_flow
 
-class _FakeConfig:
-    def __init__( self, values ):
-        self._values = values
-
-    def get( self, key, default=None, return_type="string", silent=False ):
-        return self._values.get( key, default )
+_FakeConfig = TypedConfigFake
 
 
 def _patch_stack( monkeypatch, captured ):
@@ -381,6 +377,9 @@ def _patch_stack( monkeypatch, captured ):
                          lambda name, todo_queue=None: types.SimpleNamespace( tag=f"exe:{name}", queue=todo_queue ) )
     monkeypatch.setattr( "cosa.rest.v2.pending.PendingRequests", lambda *a, **k: types.SimpleNamespace( tag="pending" ) )
     monkeypatch.setattr( "cosa.rest.v2.flow.AskFlow", _FakeAskFlow )
+    # The real table builds the process-wide ConfigurationManager from get_project_root(). Alone in a
+    # process, a test that fakes the root as "/proj" then fails reading /proj/src/conf/lupin-app.ini.
+    monkeypatch.setattr( "cosa.memory.query_log_table.QueryLogTable", lambda *a, **k: types.SimpleNamespace( tag="query_log" ) )
 
 
 def test_build_ask_flow_wires_from_ini( monkeypatch ):
@@ -456,6 +455,28 @@ def test_source_document_scopes_are_the_registry_plus_io_and_docs_rebuilt_per_ca
     second = scopes_fn()
     assert calls == [ cfg, cfg ]
     assert second is not first
+
+
+@pytest.mark.parametrize( "raw,expected", [ ( "true", True ), ( "TRUE", True ), ( "  True  ", False ), ( "false", False ), ( "yes", False ) ] )
+def test_the_crud_flag_is_read_as_a_boolean_without_stripping( monkeypatch, raw, expected ):
+    """
+    The CRUD flag is a plain boolean read: true in any case is on, all else is off.
+
+    A value padded with spaces is off. The old read stripped first.
+    """
+    captured = {}
+    _patch_stack( monkeypatch, captured )
+    cfg = _FakeConfig( { "v2 flow enabled": True, "v2 executor": "inline", "v2 trace dir": "", "crud for dataframes agents enabled": raw } )
+    v2_ask.build_ask_flow( cfg )
+    assert captured[ "kwargs" ][ "crud_enabled" ] is expected
+
+
+def test_a_missing_crud_flag_builds_the_flow_with_crud_on( monkeypatch ):
+    """A key absent from the INI answers on, the same default the queue reads."""
+    captured = {}
+    _patch_stack( monkeypatch, captured )
+    v2_ask.build_ask_flow( _FakeConfig( { "v2 flow enabled": True, "v2 executor": "inline", "v2 trace dir": "" } ) )
+    assert captured[ "kwargs" ][ "crud_enabled" ] is True
 
 
 def test_build_ask_flow_hands_the_queue_to_the_executor( monkeypatch ):

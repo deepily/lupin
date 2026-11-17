@@ -553,7 +553,7 @@ class TestRecipientChipTextInjection:
         # multiplexer's unit tier asserts it; this e2e case did not, and mid-text insertion
         # is exactly where a caret left at the end would be invisible.
         #
-        # (The pointer here read `BroadcastCardRenderer.ts:398` until 2026-09-27. Same cause
+        # (The pointer here named a line of `BroadcastCardRenderer.ts` until 2026-09-27. Same cause
         # as the @all case above: the TS sibling carries this sentence verbatim, so the
         # quote verified against a file this test never loads.)
         caret = notifications_page.evaluate(

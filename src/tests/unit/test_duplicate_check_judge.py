@@ -1,6 +1,7 @@
 """Unit tests for duplicate_check.judge: prompt, parser, backends and the ledgered run."""
 import asyncio
 import json
+import pathlib
 import re
 
 import pytest
@@ -314,14 +315,72 @@ def test_a_resume_after_a_kill_makes_no_repeat_call_and_returns_the_same_rows(tm
     assert len( first.calls ) == 3 and second.calls == [] and two == one
 
 
-@pytest.mark.parametrize( "change", [ { "model_id": "claude-opus-5-5" }, { "prompt_version": "semdup-test0002" } ] )
-def test_a_changed_model_or_prompt_version_is_a_ledger_miss( tmp_path, change ):
+def test_a_changed_prompt_version_is_a_ledger_miss( tmp_path ):
     news, cands = world()
     path = str( tmp_path / "l" )
     run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ) )
     again = FakeBackend()
-    run( news[ :1 ], cands, again, hr.Ledger( path ), cfg={ **CFG, **change } )
+    run( news[ :1 ], cands, again, hr.Ledger( path ), cfg={ **CFG, "prompt_version": "semdup-test0002" } )
     assert len( again.calls ) == 1
+
+
+OPUS = { **CFG, "model_id": "claude-opus-5-5" }
+
+
+def test_a_ruling_of_another_model_is_reused_with_no_call_and_every_row_names_the_model_that_ruled_it( tmp_path ):
+    news, cands = world()
+    path = str( tmp_path / "l" )
+    first = run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ) )
+    again = FakeBackend()
+    out   = run( news[ :1 ], cands, again, hr.Ledger( path ), cfg=OPUS )
+    assert again.calls == [] and [ v[ "verdict" ] for v in out[ "verdicts" ] ] == [ v[ "verdict" ] for v in first[ "verdicts" ] ] and len( out[ "verdicts" ] ) == 3
+    assert { ( v[ "model" ], v[ "reused_from_model" ] ) for v in out[ "verdicts" ] } == { ( "claude-fable-5-1", "claude-fable-5-1" ) }, "a Fable ruling never reads as an Opus one"
+    assert out[ "reused" ] == { news[ 0 ][ "id" ]: [ "claude-fable-5-1" ] }
+
+
+def test_a_new_ruling_names_its_model_and_carries_no_reused_from_model_and_reuse_writes_nothing_to_the_ledger( tmp_path ):
+    news, cands = world()
+    path   = str( tmp_path / "l" )
+    first  = run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ), cfg=OPUS )
+    assert { v[ "model" ] for v in first[ "verdicts" ] } == { "claude-opus-5-5" } and not any( "reused_from_model" in v for v in first[ "verdicts" ] ) and first[ "reused" ] == {}
+    before = pathlib.Path( path ).read_bytes()
+    run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ), cfg=CFG )
+    assert pathlib.Path( path ).read_bytes() == before
+
+
+def test_a_shortlist_that_moved_is_reused_when_every_candidate_has_one_saved_verdict_and_asked_when_one_is_new( tmp_path ):
+    news, cands = world()
+    d, ids = news[ 0 ], cands[ news[ 0 ][ "id" ] ]
+    path   = str( tmp_path / "l" )
+    run( [ d ], { d[ "id" ]: ids }, FakeBackend(), hr.Ledger( path ) )
+    fewer  = FakeBackend()
+    out    = run( [ d ], { d[ "id" ]: ids[ :2 ] }, fewer, hr.Ledger( path ), cfg=OPUS )
+    assert fewer.calls == [] and { v[ "candidate" ] for v in out[ "verdicts" ] } == { ids[ 0 ][ "id" ], ids[ 1 ][ "id" ] } and out[ "reused" ] == { d[ "id" ]: [ "claude-fable-5-1" ] }
+    fresh  = definition( "fresh", "def fresh( z ):\n    return z - 1", origin="server" )
+    more   = FakeBackend()
+    out    = run( [ d ], { d[ "id" ]: [ *ids, fresh ] }, more, hr.Ledger( path ), cfg=OPUS )
+    assert len( more.calls ) == 1 and out[ "reused" ] == {} and not any( "reused_from_model" in v for v in out[ "verdicts" ] ) and { v[ "model" ] for v in out[ "verdicts" ] } == { "claude-opus-5-5" }
+
+
+def test_a_candidate_with_two_different_saved_verdicts_is_not_reused_and_the_judge_is_asked( tmp_path ):
+    news, cands = world()
+    d, ids = news[ 0 ], cands[ news[ 0 ][ "id" ] ]
+    path   = str( tmp_path / "l" )
+    run( [ d ], { d[ "id" ]: ids }, FakeBackend(), hr.Ledger( path ) )
+    kept   = hr.Ledger( path )
+    other  = [ { "candidate": ids[ 0 ][ "id" ], "verdict": "distinct", "reason": "x" } ]
+    kept.put( hr.ledger_key( jd.STAGE, jd._pair( d, ids[ 1: ] ), CFG[ "prompt_version" ], "claude-sonnet-5-5", 0 ), { "rulings": other } )
+    asked  = FakeBackend()
+    run( [ d ], { d[ "id" ]: ids[ :2 ] }, asked, hr.Ledger( path ), cfg=OPUS )
+    assert len( asked.calls ) == 1
+
+
+def test_reuse_is_a_hit_before_the_cap_so_a_cap_of_zero_still_rules_a_saved_definition( tmp_path ):
+    news, cands = world()
+    path = str( tmp_path / "l" )
+    run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ) )
+    out  = asyncio.run( jd.judge_run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ), 0, OPUS, SCRUB, 1, max_calls=0 ) )
+    assert out[ "unjudged" ] == [] and len( out[ "verdicts" ] ) == 3
 
 
 def test_a_changed_slot_or_candidate_text_is_a_ledger_miss(tmp_path):
@@ -330,7 +389,8 @@ def test_a_changed_slot_or_candidate_text_is_a_ledger_miss(tmp_path):
     run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ), slot=0 )
     other_slot = FakeBackend()
     run( news[ :1 ], cands, other_slot, hr.Ledger( path ), slot=1 )
-    edited = { news[ 0 ][ "id" ]: [ { **cands[ news[ 0 ][ "id" ] ][ 0 ], "text": cands[ news[ 0 ][ "id" ] ][ 0 ][ "text" ] + " " }, *cands[ news[ 0 ][ "id" ] ][ 1: ] ] }
+    first  = cands[ news[ 0 ][ "id" ] ][ 0 ]
+    edited = { news[ 0 ][ "id" ]: [ definition( first[ "name" ], first[ "text" ] + " # edited", origin="server" ), *cands[ news[ 0 ][ "id" ] ][ 1: ] ] }
     other_text = FakeBackend()
     run( news[ :1 ], edited, other_text, hr.Ledger( path ), slot=0 )
     assert len( other_slot.calls ) == 1 and len( other_text.calls ) == 1
@@ -457,7 +517,7 @@ def test_a_definition_whose_every_candidate_names_a_scrub_token_gets_no_ruling_a
     cands[ news[ 0 ][ "id" ] ] = [ only ]
     backend     = FakeBackend()
     out         = asyncio.run( jd.judge_run( news[ :1 ], cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, skip_breaching=True ) )
-    assert backend.calls == [] and out == { "verdicts": [], "unjudged": [] }
+    assert backend.calls == [] and out == { "verdicts": [], "unjudged": [], "reused": {} }
 
 
 def test_the_cap_is_tested_before_the_definition_is_blinded_or_a_prompt_is_built(tmp_path, monkeypatch):
@@ -474,3 +534,48 @@ def test_a_reply_that_must_be_asked_again_past_the_cap_leaves_the_definition_unj
     backend     = FakeBackend( replies=[ "I think they match" ] )
     out         = asyncio.run( jd.judge_run( news[ :1 ], cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, max_calls=1 ) )
     assert len( backend.calls ) == 1 and [ u[ "code" ] for u in out[ "unjudged" ] ] == [ err.JUDGE_CAP_REACHED ]
+
+
+def test_with_redact_tools_a_definition_and_a_candidate_naming_a_tool_are_judged_and_the_judge_sees_the_placeholder(tmp_path):
+    news, cands = world()
+    news[ 0 ]   = { **news[ 0 ], "text": "def first( x ):\n    return check_exists( x )  # MARK0" }
+    leaky       = definition( "leaky", "def leaky( y ):\n    return reuse-receipt( y )  # MARK1", origin="new" )
+    cands[ news[ 1 ][ "id" ] ][ 0 ] = leaky
+    backend = FakeBackend()
+    out     = asyncio.run( jd.judge_run( news, cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, skip_breaching=True, redact_tools=True ) )
+    assert out[ "unjudged" ] == [] and len( backend.calls ) == 3 and {v[ "id" ] for v in out[ "verdicts" ]} == {n[ "id" ] for n in news}
+    seen = "\n".join( user for _model, _system, user in backend.calls )
+    assert "check_exists" not in seen and "reuse-receipt" not in seen and bl.PLACEHOLDER in seen and leaky[ "id" ] in {v[ "candidate" ] for v in out[ "verdicts" ]}
+
+
+def test_with_redact_tools_an_arm_label_in_a_definition_is_still_left_unjudged(tmp_path):
+    news, cands = world()
+    news[ 0 ]   = { **news[ 0 ], "text": "def first( x ):\n    return 'ARM-WITH'" }
+    backend = FakeBackend()
+    out     = asyncio.run( jd.judge_run( news, cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, skip_breaching=True, redact_tools=True ) )
+    assert [ ( u[ "id" ], u[ "code" ] ) for u in out[ "unjudged" ] ] == [ ( news[ 0 ][ "id" ], err.BLINDNESS_BREACH ) ] and len( backend.calls ) == 2
+
+
+def test_a_ledgered_ruling_names_the_candidate_by_the_id_the_run_has_now_not_the_id_it_was_saved_under( tmp_path ):
+    # the baseline replayed a daily run's ruling that named a function as "server" while it held that function as "new" (row d8c78588)
+    news, cands = world()
+    path        = str( tmp_path / "l" )
+    first       = run( news[ :1 ], cands, FakeBackend(), hr.Ledger( path ) )
+    saved       = cands[ news[ 0 ][ "id" ] ]
+    twin_saved  = saved[ 0 ]
+    assert { v[ "candidate" ] for v in first[ "verdicts" ] } == { c[ "id" ] for c in saved }
+    renamed     = [ { **c, "origin": "new", "id": ex.definition_id( "new", c[ "file" ], c[ "name" ], c[ "text" ] ) } for c in saved ]
+    assert renamed[ 0 ][ "id" ] != twin_saved[ "id" ]
+    second_back = FakeBackend()
+    second      = run( news[ :1 ], { news[ 0 ][ "id" ]: renamed }, second_back, hr.Ledger( path ) )
+    assert second_back.calls == []
+    assert { v[ "candidate" ] for v in second[ "verdicts" ] } == { c[ "id" ] for c in renamed }
+    assert [ v[ "verdict" ] for v in second[ "verdicts" ] ] == [ v[ "verdict" ] for v in first[ "verdicts" ] ]
+
+
+def test_rehomed_drops_a_ruling_naming_a_definition_the_run_does_not_hold_and_leaves_an_unreadable_value_alone():
+    held = definition( "held", "def held( x ):\n    return x", origin="server" )
+    value = { "rulings": [ { "candidate": held[ "id" ], "verdict": "related", "reason": "r" }, { "candidate": "d-0000000000", "verdict": "duplicate", "reason": "r" } ] }
+    assert jd.rehomed( value, [ held ] ) == { "rulings": [ value[ "rulings" ][ 0 ] ] }
+    unreadable = { "unreadable": { "code": "x", "detail": "y" } }
+    assert jd.rehomed( unreadable, [ held ] ) is unreadable

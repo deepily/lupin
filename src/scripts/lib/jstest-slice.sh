@@ -267,7 +267,10 @@ jstest_slice_exec() {
 # There is no per-process RSS watchdog here: a legitimate worker holds about 2.3 GB.
 UNIT_SLICE="${UNIT_SLICE:-unittier.slice}"
 UNIT_MEM_MAX="${UNIT_MEM_MAX:-16G}"
-UNIT_RUNTIME_MAX="${UNIT_RUNTIME_MAX:-3600}"
+# RuntimeMaxSec. Measured 2026-11-13 (Sam, row ac03e38e): the unit tier with coverage on at
+# -n 2 took 3,631 s under peer load at 143246827, 31 s over the old 3600 s cap, so the cap killed
+# a working run at about 99%. 7200 is about twice that figure. A cap kill is now named below.
+UNIT_RUNTIME_MAX="${UNIT_RUNTIME_MAX:-7200}"
 UNIT_OOM_EXIT=72
 
 # Run "$@" in the capped scope and report an OOM kill. Replaces the shell, as the JS lane does.
@@ -289,11 +292,22 @@ unit_scope_exec() {
 }
 
 # Runs inside the scope. Runs "$@", then reads this cgroup's oom_kill count.
+# systemd ends a scope that outlives RuntimeMaxSec with SIGTERM to every process in it, ours
+# included. The trap lets the command finish dying first, then a run that was terminated at
+# about UNIT_RUNTIME_MAX seconds is named as a cap kill. A SIGTERM from any other cause, early
+# in the run, is not.
 # Ensures: returns the command's own status, except UNIT_OOM_EXIT when that status was
 #          non-zero and the scope saw at least one OOM kill.
 unit_scope_inner() {
+    local started=$SECONDS termed=0
+    trap 'termed=1' TERM
     "$@"
     local rc=$? cg kills=""
+    trap - TERM
+    if [ "$termed" -eq 1 ] && [ $(( SECONDS - started )) -ge $(( UNIT_RUNTIME_MAX - 5 )) ]; then
+        echo "🔴 [unit-lane] killed at the RuntimeMaxSec cap: systemd ended this run after $(( SECONDS - started )) s (RuntimeMaxSec=$UNIT_RUNTIME_MAX)." >&2
+        echo "    The tier's own status was $rc. This is a time limit, not a test failure or a hang; raise UNIT_RUNTIME_MAX to run longer." >&2
+    fi
     cg="$( sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null )"
     [ -n "$cg" ] && kills="$( awk '$1 == "oom_kill" { print $2 }' "/sys/fs/cgroup${cg}/memory.events" 2>/dev/null )"
     if [ -n "$kills" ] && [ "$kills" -gt 0 ]; then

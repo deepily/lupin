@@ -1,6 +1,6 @@
 ---
 capability: app-timezone-readers
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.config.app_timezone.InvalidAppTimezoneError@07c4aa3130
   - cosa.config.app_timezone.get_zone_for_key@fb1b5bc0d1

@@ -481,41 +481,21 @@ def test_status_before_install_says_not_installed_and_exits_one( tmp_path, cron 
     assert r.returncode == 1 and "NOT INSTALLED" in r.stdout
 
 
-def test_install_writes_one_tagged_line_after_a_backup_and_keeps_the_other_job( tmp_path, cron ):
-    r    = _cron( tmp_path, cron, "--install" )
-    text = cron.file.read_text()
-
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "0 3 * * * /usr/bin/other-job" in text and text.count( "# hook-link-tick" ) == 1
-    assert f"{cron.repo}/src/scripts/hook-link-tick.sh" in text
-    backups = list( ( cron.home / ".claude" ).glob( "crontab-backup-*.txt" ) )
-    assert len( backups ) == 1 and backups[ 0 ].read_text() == "0 3 * * * /usr/bin/other-job\n"
-    assert _cron( tmp_path, cron, "--status" ).returncode == 0
+def _seed( cron ):
+    """Ensures: the crontab holds the other job and one hook-link-tick line."""
+    cron.file.write_text( "0 3 * * * /usr/bin/other-job\n" + f"2,12,22,32,42,52 * * * * {cron.repo}/src/scripts/hook-link-tick.sh >> /l 2>&1 # hook-link-tick\n" )
 
 
-def test_install_twice_leaves_one_line( tmp_path, cron ):
-    _cron( tmp_path, cron, "--install" ); first = cron.file.read_text()
-    r = _cron( tmp_path, cron, "--install" )
-    assert r.returncode == 0 and "already installed" in r.stdout
-    assert cron.file.read_text() == first and first.count( "# hook-link-tick" ) == 1
-
-
-def test_install_carries_the_persona_named_at_install_time( tmp_path, cron ):
-    _cron( tmp_path, cron, "--install", extra={ "HOOK_LINK_DM": "mr radio" } )
-    assert "HOOK_LINK_DM='mr radio' " in cron.file.read_text()
-
-
-def test_install_refuses_when_the_backup_cannot_be_written( tmp_path, cron ):
-    ( cron.home ).mkdir( exist_ok=True )
-    ( cron.home / ".claude" ).write_text( "a file where the backup folder should be" )
+def test_install_is_retired_prints_the_generator_command_and_writes_nothing( tmp_path, cron ):
     before = cron.file.read_text()
     r      = _cron( tmp_path, cron, "--install" )
-    assert r.returncode == 1 and "ABORTED" in r.stderr and cron.file.read_text() == before
+    assert r.returncode == 1 and "lupin_mcp.cron_generate --install" in r.stderr and f"cd {cron.repo} " in r.stderr
+    assert cron.file.read_text() == before and not list( ( cron.home / ".claude" ).glob( "crontab-backup-*.txt" ) ), "no line, no backup"
 
 
-def test_install_reports_a_crontab_that_refuses_the_write( tmp_path, cron ):
-    r = _cron( tmp_path, cron, "--install", extra={ "CRONTAB_FAIL": "1" } )
-    assert r.returncode == 1 and "INSTALL FAILED" in r.stderr
+def test_status_after_the_line_is_present_exits_zero( tmp_path, cron ):
+    _seed( cron )
+    assert _cron( tmp_path, cron, "--status" ).returncode == 0
 
 
 def test_install_refuses_when_the_checkout_has_no_script( tmp_path, cron ):
@@ -526,7 +506,7 @@ def test_install_refuses_when_the_checkout_has_no_script( tmp_path, cron ):
 
 
 def test_uninstall_removes_only_its_own_line_after_a_backup( tmp_path, cron ):
-    _cron( tmp_path, cron, "--install" )
+    _seed( cron )
     r = _cron( tmp_path, cron, "--uninstall" )
     assert r.returncode == 0 and cron.file.read_text() == "0 3 * * * /usr/bin/other-job\n"
     assert len( list( ( cron.home / ".claude" ).glob( "crontab-backup-*.txt" ) ) ) >= 1
@@ -539,16 +519,15 @@ def test_uninstall_when_not_installed_removes_nothing( tmp_path, cron ):
 
 
 def test_uninstall_aborts_when_the_backup_cannot_be_written( tmp_path, cron ):
-    _cron( tmp_path, cron, "--install" )
-    for p in ( cron.home / ".claude" ).glob( "crontab-backup-*.txt" ): p.unlink()
-    shutil.rmtree( cron.home / ".claude" ); ( cron.home / ".claude" ).write_text( "blocked" )
+    _seed( cron )
+    cron.home.mkdir( exist_ok=True ); ( cron.home / ".claude" ).write_text( "blocked" )
     before = cron.file.read_text()
     r      = _cron( tmp_path, cron, "--uninstall" )
     assert r.returncode == 1 and "ABORTED" in r.stderr and cron.file.read_text() == before
 
 
 def test_uninstall_reports_a_crontab_that_refuses_the_write( tmp_path, cron ):
-    _cron( tmp_path, cron, "--install" )
+    _seed( cron )
     r = _cron( tmp_path, cron, "--uninstall", extra={ "CRONTAB_FAIL": "1" } )
     assert r.returncode == 1 and "UNINSTALL FAILED" in r.stderr
 

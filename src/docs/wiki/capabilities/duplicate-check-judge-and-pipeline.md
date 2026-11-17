@@ -1,15 +1,16 @@
 ---
 capability: duplicate-check-judge-and-pipeline
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.judge.MaxPlanBackend@5cd98e2615
   - cosa.repo.duplicate_check.judge.WorkServerBackend@b57813f170
   - cosa.repo.duplicate_check.judge.build_prompt@929dcbf40c
-  - cosa.repo.duplicate_check.judge.judge_run@494a2083f8
+  - cosa.repo.duplicate_check.judge.judge_run@99623cea22
   - cosa.repo.duplicate_check.judge.ledger_binding@176c22d9f9
   - cosa.repo.duplicate_check.judge.parse_reply@a4690fda14
+  - cosa.repo.duplicate_check.judge.rehomed@0bd68846c1
   - cosa.repo.duplicate_check.judge.prompt_parts@a14ac429b6
-  - cosa.repo.duplicate_check.pipeline.judge_all@f7d505d5e8
+  - cosa.repo.duplicate_check.pipeline.judge_all@6ac6b9eb10
   - cosa.repo.duplicate_check.score_run.aggregate_runs@3ebf5a13a3
   - cosa.repo.duplicate_check.score_run.main@a728498f59
   - cosa.repo.duplicate_check.score_run.score_run@cd812d42a2
@@ -22,10 +23,11 @@ pins:
 # Duplicate checker: judge and scoring
 The judge makes one blind, ledgered model call per new definition and rules on each of its candidates.
 - `build_prompt` builds the system and user prompts, with random-suffix tags around every block. `prompt_parts` returns the three texts behind the prompt version.
-- `parse_reply` parses a reply strictly into one verdict per label. `judge_run` judges each definition once and resumes from the ledger. A model call that raises `ModelCallError` leaves its definition unjudged as `JUDGE_CALL_FAILED`, is not ledgered, and the other definitions go on.
+- `parse_reply` parses a reply strictly into one verdict per label. `judge_run` judges each definition once and resumes from the ledger. A finished ruling read back from the ledger goes through `rehomed` first. With no call under the run's model, `ledger_reuse.lookup` answers from a saved ruling of any model. Each row names its judge in `model`, and a reused row adds `reused_from_model`. A model call that raises `ModelCallError` leaves its definition unjudged as `JUDGE_CALL_FAILED`, is not ledgered, and the other definitions go on.
+- `rehomed( value, records )` points a ledgered ruling's candidates at the definitions the run holds now. The ledger key holds the candidates' text, not their ids, and an id carries its origin. So a function a daily run ruled on as `server` has a different id in the baseline run, where it is new. A candidate id the run holds stays. One that is that record's id under the other origin becomes the record's id. A ruling whose candidate is neither is dropped, because it names a definition the run does not hold. A value with no `rulings` comes back unchanged.
 - `ledger_binding` names what a ledger is bound to, so another binary or server is refused.
 - `MaxPlanBackend` uses bounded Claude Code, which has no temperature setting. `WorkServerBackend` uses Rick's work server and passes temperature 0.
-- With `skip_breaching`, `judge_run` and `judge_all` leave a definition that carries a scrub token unjudged with code `BLINDNESS_BREACH`, and leave out a candidate that carries one. The cap is tested before a definition is blinded and before each prompt is built. The daily check sets it, so a definition naming `check_exists` no longer stops the run.
+- With `skip_breaching`, `judge_run` and `judge_all` leave a definition with a scrub token unjudged as `BLINDNESS_BREACH`. They also leave out a candidate that carries one. The cap is tested before a definition is blinded and before each prompt is built. The daily check sets it, and also sets `redact_tools` in the wiring for `judge_all`. A definition naming `check_exists` is then judged with the name replaced by `TOOLNAME`, and no longer stops the run.
 - `judge_all` drops server definitions that carry a scrub token, then embeds the pool, picks each definition's candidates and judges them once. `breaching_ids` finds those definitions and returns only their sorted ids, with no count. `judge_all` returns the count and ids under `dropped`. The scorer and the proof both call `judge_all`.
 - `score_run` scores one run's client and reports the dropped definitions as `dropped_from_pool`. `aggregate_runs` hands the reports to the named unscorable-run policy and refuses when none is named.
 - `main` scores the run directory named on the command line and writes its report there.

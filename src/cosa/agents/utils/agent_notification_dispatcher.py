@@ -65,12 +65,14 @@ logger = logging.getLogger( __name__ )
 ctx_sender_id    : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_sender_id",    default=None )
 ctx_target_user  : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_target_user",  default=None )
 ctx_session_name : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_session_name", default=None )
+ctx_session_id   : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_session_id",   default=None )
 
 
 def set_dispatch_context(
     sender_id    : Optional[ str ] = None,
     target_user  : Optional[ str ] = None,
     session_name : Optional[ str ] = None,
+    session_id   : Optional[ str ] = None,
 ) -> dict:
     """
     Set the per-task dispatch context for this asyncio task / thread.
@@ -80,7 +82,7 @@ def set_dispatch_context(
     so writing to them leaks state across jobs. ContextVars isolate each task.
 
     Requires:
-        - At least one of sender_id, target_user, session_name is provided.
+        - At least one of sender_id, target_user, session_name, session_id is provided.
           (None values are skipped — only set what's provided.)
 
     Ensures:
@@ -92,6 +94,7 @@ def set_dispatch_context(
         sender_id    : Per-task sender_id override (None = leave ContextVar unchanged).
         target_user  : Per-task target_user override.
         session_name : Per-task session_name override.
+        session_id   : Per-task session id, the sender suffix of a role-aware dispatcher.
 
     Returns:
         dict[str, contextvars.Token]: Tokens for resetting the ContextVars
@@ -107,6 +110,8 @@ def set_dispatch_context(
         tokens[ "target_user" ] = ctx_target_user.set( target_user )
     if session_name is not None:
         tokens[ "session_name" ] = ctx_session_name.set( session_name )
+    if session_id is not None:
+        tokens[ "session_id" ] = ctx_session_id.set( session_id )
     return tokens
 
 
@@ -128,6 +133,8 @@ def reset_dispatch_context( tokens: dict ) -> None:
         ctx_target_user.reset( tokens[ "target_user" ] )
     if "session_name" in tokens:
         ctx_session_name.reset( tokens[ "session_name" ] )
+    if "session_id" in tokens:
+        ctx_session_id.reset( tokens[ "session_id" ] )
 
 
 def _prepend_operator_routing( abstract: Optional[ str ], original_target: str ) -> str:
@@ -210,7 +217,7 @@ class AgentNotificationDispatcher:
         """
         Resolve the sender_id for a notification call.
 
-        Priority: a role-aware agent with a role builds a role-specific sender_id. Otherwise the `ctx_sender_id` ContextVar wins (per-task isolation, set by job execution). Otherwise `self.sender_id` applies (the instance default for CLI and single-job paths).
+        Priority: a role-aware agent with a role builds a role-specific sender_id, suffixed by the `ctx_session_id` ContextVar or else `self.session_id`. Otherwise the `ctx_sender_id` ContextVar wins (per-task isolation, set by job execution). Otherwise `self.sender_id` applies (the instance default for CLI and single-job paths).
         The role-aware path comes first because its role-suffixed id is orthogonal to the per-job sender. The ContextVar takes priority over instance state so concurrent agentic-pool jobs never see each other's sender_id leaking through the shared dispatcher instance.
 
         Args:
@@ -220,10 +227,11 @@ class AgentNotificationDispatcher:
             str: Resolved sender_id
         """
         if self.supports_role and role:
-            suffix = None
-            if self.session_id:
+            suffix     = None
+            session_id = ctx_session_id.get() or self.session_id
+            if session_id:
                 # Strip user-scope suffix (::user_id) — only the base hash is needed
-                suffix = self.session_id.split( "::" )[ 0 ] if "::" in self.session_id else self.session_id
+                suffix = session_id.split( "::" )[ 0 ] if "::" in session_id else session_id
             return build_sender_id( f"{self.agent_type}.{role}", suffix=suffix )
         ctx_value = ctx_sender_id.get()
         if ctx_value is not None:
@@ -760,6 +768,94 @@ def make_interface_functions( namespace, notify_extras=(), ask_extras=(), feedba
         )
 
     wrappers = ( notify_progress, ask_confirmation, get_feedback, present_choices )
+    for wrapper in wrappers:
+        wrapper.__module__ = namespace[ "__name__" ]
+    return wrappers
+
+
+def make_role_interface_functions( namespace ):
+    """
+    Build the four async wrappers of a role-aware agent's cosa_interface module.
+
+    The SWE team sends each notification under a role of its own, so its module has no SENDER_ID and takes role as its second parameter.
+    Each wrapper copies the module's session id and target user onto the module's dispatcher, then awaits one dispatcher method with the role.
+    Everything is read from `namespace` on every call, never captured, because callers assign SESSION_ID, SESSION_NAME and TARGET_USER at run time and tests patch `_dispatcher`.
+
+    Requires:
+        - namespace is the calling module's globals(), holding _dispatcher, SESSION_ID, SESSION_NAME and TARGET_USER
+
+    Ensures:
+        - Returns ( notify_progress, ask_confirmation, request_decision, get_feedback ), all coroutine functions
+        - Each takes its text first and role second, so a positional call such as ask_confirmation( question, role, default, timeout, abstract ) keeps working
+        - Only notify_progress copies SESSION_NAME onto the dispatcher
+        - request_decision awaits the dispatcher's present_choices
+    """
+
+    def push_identity( dispatcher ):
+        dispatcher.session_id  = namespace[ "SESSION_ID" ]
+        dispatcher.target_user = namespace[ "TARGET_USER" ]
+
+    async def notify_progress(
+        message: str,
+        role: str = "lead",
+        priority: str = "medium",
+        abstract: Optional[ str ] = None,
+        session_name: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        queue_name: Optional[ str ] = None,
+        progress_group_id: Optional[ str ] = None,
+    ) -> None:
+        """Send a fire-and-forget progress notification from one agent role."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        dispatcher.session_name = namespace[ "SESSION_NAME" ]
+        await dispatcher.notify_progress(
+            message, priority=priority, abstract=abstract,
+            session_name=session_name, job_id=job_id,
+            queue_name=queue_name, progress_group_id=progress_group_id,
+            role=role
+        )
+
+    async def ask_confirmation(
+        question: str,
+        role: str = "lead",
+        default: str = "no",
+        timeout: int = 120,
+        abstract: Optional[ str ] = None,
+    ) -> bool:
+        """Ask a yes/no question from one agent role and return the boolean result."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.ask_confirmation(
+            question, default=default, timeout=timeout,
+            abstract=abstract, role=role
+        )
+
+    async def request_decision(
+        question: str,
+        options: list,
+        role: str = "lead",
+        timeout: int = 300,
+        abstract: Optional[ str ] = None,
+    ) -> dict:
+        """Present multiple-choice questions from one agent role and return the answers."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.present_choices(
+            options, timeout=timeout, abstract=abstract, role=role
+        )
+
+    async def get_feedback(
+        prompt: str,
+        role: str = "lead",
+        timeout: int = 300,
+    ) -> Optional[ str ]:
+        """Get open-ended feedback from the user for one agent role."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.get_feedback( prompt, timeout=timeout, role=role )
+
+    wrappers = ( notify_progress, ask_confirmation, request_decision, get_feedback )
     for wrapper in wrappers:
         wrapper.__module__ = namespace[ "__name__" ]
     return wrappers

@@ -165,7 +165,7 @@ def test_waiting_does_not_move_any_other_denominator():
     assert m[ "client_p50_ms" ]       == 444.8
     # ⚠️ THESE FOUR CHANGED FROM 0.0 TO None (row 647f3733 follow-up, 2026-08-25), and the
     # line they replace carried a claim the data does not support. It read:
-    #     assert m[ "replay_failure_rate" ] == 0.0  # honest: replay is attempted synchronously
+    #     assert m[ "replay_failure_rate" ] == 0.0  # honest: replay is attempted synchronously  # doc-lint: waive commented-out-code -- the retired assertion, quoted as the record of what changed
     # If replay really were attempted synchronously before the enqueue, a waiting row could
     # carry replay_error and the rate would be honest. MEASURED across all 12
     # io/v2-flow/eval-*/records.jsonl files — 300 rows carrying one of the four error
@@ -301,7 +301,7 @@ def test_response_status_reads_the_contract_field():
 # THE REAL-RECORDS CASE — found by running the fix against the actual run,
 # not by reasoning about it. eval-2026-08-25-16-53-36 has exactly ONE observed
 # response per pass (a needs_input, which DOES reach the cache: the lookup runs
-# at flow.py:210 and the args refusal at flow.py:285) and it carries no
+# in flow.py, and so does the args refusal) and it carries no
 # similarity. An observed-only gate called that "measurable" and printed 0.0 at
 # all four floors off a denominator of 1 — the same false clean, one row wide.
 # ---------------------------------------------------------------------------

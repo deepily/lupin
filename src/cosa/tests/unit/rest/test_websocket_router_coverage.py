@@ -48,6 +48,13 @@ from cosa.rest.routers.websocket import (
 )
 from cosa.rest.auth import TokenExpiredException
 
+# LOAD-BEARING IMPORT, DO NOT REMOVE AS "UNUSED" (bug 10f45f52; the mechanism is documented in
+# test_system_router.py, bug e9e31de7). Code under test imports cosa.rest.db.database lazily while
+# the tests below wrap calls in patch.dict( "sys.modules", ... ). On exit patch.dict restores its
+# pre-patch snapshot and drops every sqlalchemy module imported inside. Importing it here puts
+# it in the snapshot, so nothing is re-loaded and the guard in src/conftest.py stays quiet.
+import cosa.rest.db.database  # noqa: F401
+
 _TS = "2026-01-01T12:00:00"
 _SID = "wise penguin"
 

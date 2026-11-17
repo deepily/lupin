@@ -1,10 +1,10 @@
 ---
 capability: rest-core-commons-watchers
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.commons_ack_watcher.CommonsAckWatcher@a06a007445
   - cosa.rest.commons_activity_watcher.CommonsActivityWatcher@5db7d5954c
-  - cosa.rest.commons_rate_limiter.CommonsBroadcastRateLimiter@b7721b48be
+  - cosa.rest.commons_rate_limiter.CommonsBroadcastRateLimiter@bbdf7fe272
 ---
 # Commons watchers and broadcast limit
 

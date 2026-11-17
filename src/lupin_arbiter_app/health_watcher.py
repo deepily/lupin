@@ -40,6 +40,7 @@ from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
+from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
 from lupin_arbiter_app.poll_loop import run_poll_loop
 
 
@@ -333,8 +334,7 @@ class ContainerHealthTracker:
 
     def _prune( self, now: datetime.datetime ) -> None:
         """Drop transition timestamps older than the flap window (rolling)."""
-        while self.transitions and ( now - self.transitions[ 0 ] ).total_seconds() > self.flap_window_seconds:
-            self.transitions.popleft()
+        self.transitions = deque( prune_window( self.transitions, now, self.flap_window_seconds ) )
 
     def is_flapping( self ) -> bool:
         """Ensures: True iff transitions-in-window ≥ flap_threshold."""
@@ -421,8 +421,7 @@ class RestartLoopTracker:
 
     def _prune( self, now: datetime.datetime ) -> None:
         """Drop rise timestamps older than the window (rolling)."""
-        while self.rises and ( now - self.rises[ 0 ] ).total_seconds() > self.window_seconds:
-            self.rises.popleft()
+        self.rises = deque( prune_window( self.rises, now, self.window_seconds ) )
 
     def rises_in_window( self ) -> int:
         """Ensures: returns the count of RestartCount rises currently in the window."""
@@ -454,6 +453,7 @@ class HealthWatcherLoop:
         blind_threshold_polls   : int                  = 3,
         restart_inspect_fn      : Optional[ Callable[ [ str ], Optional[ int ] ] ] = None,
         restart_loop_threshold  : int                  = 2,
+        switch                  : Optional[ Any ]      = None,
     ) -> None:
         """
         Validate the arguments and build one health tracker and one restart tracker per container.
@@ -462,6 +462,7 @@ class HealthWatcherLoop:
             - containers is a non-empty list of container names
             - interval_seconds, flap_window_seconds, blind_threshold_polls are positive
             - flap_threshold >= 1 and restart_loop_threshold >= 1
+            - switch is None, or a TickSwitch the loop checks before every poll
 
         Ensures:
             - one ContainerHealthTracker per container (flap-excluded if listed)
@@ -492,6 +493,7 @@ class HealthWatcherLoop:
         self._log_fn                = log_fn if log_fn is not None else _default_log_fn
         self._store                 = store
         self._interval_seconds      = interval_seconds
+        self._switch                = switch
         self._blind_threshold_polls = blind_threshold_polls
         self._restart_inspect_fn    = restart_inspect_fn
 
@@ -660,7 +662,7 @@ class HealthWatcherLoop:
 
         One bad poll never exits the loop, because the observer must keep observing.
         """
-        run_poll_loop( self._stop, self.poll_once, self._log, self._clock, self._interval_seconds )
+        run_poll_loop( self._stop, self.poll_once, self._log, self._clock, self._interval_seconds, self._switch )
 
     def start( self ) -> None:
         """Spawn the daemon poll thread."""

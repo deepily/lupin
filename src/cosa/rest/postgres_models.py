@@ -626,7 +626,7 @@ class Notification( Base ):
     # ask that has not yet been confirmed-received. RECEIPT-gated — set only by
     # the three setters in the §4.3 contract (a woken SSE waiter, the §4.4 pull
     # ack, or a §4.5 re-attach land), NEVER by a send signal or an emit attempt.
-    # See src/rnd/v0.1.9/2026.08.01-late-answer-handback.md §4.1.
+    # See the design note "2026.08.01-late-answer-handback" (deleted in commit 8420e8b0a) §4.1.
     answer_delivered_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime( timezone=True ),
         nullable=True
@@ -945,6 +945,8 @@ class TrustState( Base ):
         - id is automatically generated UUID
         - updated_at tracks last modification
         - circuit_breaker_state stored as JSONB
+        - decision_history holds per-day approved/rejected counts as JSONB (NULL before the column existed)
+        - blr_state holds the BLR trust model's serialized posterior as JSONB (NULL unless the "blr" trust model wrote it)
     """
     __tablename__ = "trust_states"
 
@@ -993,6 +995,20 @@ class TrustState( Base ):
 
     # Circuit breaker
     circuit_breaker_state: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
+    # Per-day decision buckets {"YYYY-MM-DD": [approved, rejected]} (UTC days). NULL on a row written
+    # before the column existed: restore then stamps its decisions with updated_at, as it used to.
+    decision_history: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
+    # BayesianLogisticRegression.to_dict() for the category (weights, covariance, counters). NULL for the
+    # "count" and "beta" trust models, which keep no such state. Row 5bb93a7b.
+    blr_state: Mapped[Optional[dict]] = mapped_column(
         JSONB,
         nullable=True
     )
@@ -1450,7 +1466,7 @@ class TaskItem( Base ):
        # Invariant immediately after park: park_reason_captured_at == updated_ts,
        # EXACTLY. A later BODY CHANGE stamps body_changed_ts strictly greater, and
        # task_store_owed.park_reason_is_stale reads THAT gap as the quote having
-       # expired. Design: src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md
+       # expired. Design: the design note "2026.07.19-park-reason-staleness-detection" (deleted in commit 8420e8b0a)
        #
        # ⚠️ THE PREDICATE READS `body_changed_ts` (below), NOT `updated_ts`. That
        # was bug 54924128 (2026-07-26): `updated_ts` moves on EVERY write, so a

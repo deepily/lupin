@@ -107,7 +107,7 @@ class TestTheDoorServesLinksIntoASecondSpellingOfItsOwnRoot:
         assert exc.status_code == 400 and "escapes" in exc.detail.lower()
 
     def test_the_floor_blocklist_is_applied_to_the_LANDED_path( self, served ):
-        # typed `src/env.md` is innocent; it lands on `<alias>/.env`, which the floor blocks
+        # typed `src/env.md` is innocent; it lands on `<alias>/.env`, which the floor blocks  doc-lint: waive dangling-path -- a typed path used as test input
         exc = _refused( "lupin/src/env.md" )
         assert exc.status_code == 400 and "blocklist" in exc.detail.lower()
 
@@ -188,7 +188,7 @@ class TestReceiptPathsUseTheSamePredicate:
         assert present[ 0 ].replace( "lupin/.env", "X" ) == absent[ 0 ].replace( "lupin/sub/.env", "X" )
 
     def test_the_blocklist_judges_the_LANDED_path_of_a_link( self, layout ):
-        # typed `src/env.md` is innocent; it lands on `<alias>/.env`
+        # typed `src/env.md` is innocent; it lands on `<alias>/.env`  doc-lint: waive dangling-path -- a typed path used as test input
         assert "blocklist" in self._check( layout, "lupin/src/env.md" )[ 0 ]
 
     def test_an_ordinary_file_is_accepted_and_a_missing_one_is_not( self, layout ):

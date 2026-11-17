@@ -173,6 +173,47 @@ def _safe_remove( fpath: str ) -> None:
         pass
 
 
+def flush_tick( switch, send_fn, outbox_dir, ttl_seconds, logger=None ):
+    """
+    Run one tick of the flush daemon: flush the spool unless the switch says off.
+
+    Requires:
+        - switch has allowed() -> bool, as lupin_mcp.cron_switch_read.TickSwitch does
+        - send_fn, outbox_dir and ttl_seconds are as in flush()
+
+    Ensures:
+        - flush() runs only when switch.allowed() is True; a skipped tick leaves the spool untouched
+        - a flush() exception is logged as a warning when a logger is given, and never raised
+        - returns the flush stats, or None when the tick was skipped or flush raised
+    """
+    try:
+        if switch.allowed(): return flush( send_fn, outbox_dir, ttl_seconds )
+    except Exception as e:
+        if logger is not None:
+            logger.warning( f"[notify-outbox] flush error: {e}" )
+    return None
+
+
+def run_flusher( switch, send_fn, outbox_dir, ttl_seconds, interval_seconds, logger=None, sleep=None, stop=None ):
+    """
+    Run the flush daemon's loop: sleep, then flush once, until stop says so.
+
+    Requires:
+        - switch, send_fn, outbox_dir, ttl_seconds and logger are as in flush_tick
+        - interval_seconds > 0
+        - sleep is a callable taking seconds, or None for time.sleep
+        - stop is a zero-argument callable that returns True to end the loop, or None to run forever
+
+    Ensures:
+        - each pass sleeps first, then makes one flush_tick; a skipped or failed tick still loops
+        - returns only when stop() returns True, checked before every pass
+    """
+    sleep = sleep if sleep is not None else time.sleep
+    while stop is None or not stop():
+        sleep( interval_seconds )
+        flush_tick( switch, send_fn, outbox_dir, ttl_seconds, logger )
+
+
 def start_flusher(
     send_fn          : Callable[ [ dict ], bool ],
     outbox_dir       : str,
@@ -188,26 +229,22 @@ def start_flusher(
         - interval_seconds > 0
 
     Ensures:
-        - on first call: spawns ONE daemon thread that calls flush() every
-          interval_seconds and returns True
+        - on first call: spawns a single daemon thread that runs run_flusher and returns True
         - on subsequent calls: no-op, returns False (already running)
         - the loop never dies on a flush() exception (logged if logger given)
+        - builds the `cron job notify-outbox enabled` switch before it marks the daemon started, so a
+          failure to build it leaves the daemon startable on the next call
+        - the loop checks that switch fresh from disk before every flush; a false or unreadable
+          switch skips that flush and the loop keeps running
     """
     global _flusher_started
+    from lupin_mcp import cron_switch_read
     with _flusher_lock:
         if _flusher_started:
             return False
+        switch = cron_switch_read.for_job( "notify-outbox", logger.warning if logger is not None else print )
         _flusher_started = True
 
-    def _loop():  # pragma: no cover - unbounded `while True` around a real time.sleep; any call enters a loop that never returns, so no test can execute this body and reach the next statement
-        while True:
-            time.sleep( interval_seconds )
-            try:
-                flush( send_fn, outbox_dir, ttl_seconds )
-            except Exception as e:
-                if logger is not None:
-                    logger.warning( f"[notify-outbox] flush error: {e}" )
-
-    t = threading.Thread( target=_loop, name="notify-outbox-flusher", daemon=True )
+    t = threading.Thread( target=run_flusher, args=( switch, send_fn, outbox_dir, ttl_seconds, interval_seconds, logger ), name="notify-outbox-flusher", daemon=True )
     t.start()
     return True

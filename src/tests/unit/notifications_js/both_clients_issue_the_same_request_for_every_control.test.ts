@@ -159,7 +159,8 @@ import { createEpicBoardRenderer } from "../../../lupin_app/static/js/multiplexe
 const HERE               = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS   = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
 const TASK_LIST_STORE_TS = resolve( HERE, "../../../lupin_app/static/js/multiplexer/stores/TaskListStore.ts" );
-const APPROVE_LINK_TS    = resolve( HERE, "../../../lupin_app/static/js/multiplexer/render/approveLink.ts" );
+// Row 009d2d53: the multiplexer's row read moved into the shared module (approveLink.ts re-exports it).
+const APPROVE_LINK_TS    = resolve( HERE, "../../../lupin_app/static/js/shared/approve-link.js" );
 const HOLDING_STORE_TS   = resolve( HERE, "../../../lupin_app/static/js/multiplexer/stores/HoldingAreaStore.ts" );
 
 
@@ -337,8 +338,8 @@ test( "CENSUS: the multiplexer's mutating row-request surface is exactly the fou
 
 test( "CENSUS: the multiplexer's one row read is built in one place and encodes the id", () => {
   const src   = readFileSync( APPROVE_LINK_TS, "utf8" );
-  const sites = [ ...src.matchAll( /api\.get<[^>]*>\(\s*`\/api\/tasks\/[^`]*`/g ) ].map( m => m[ 0 ] );
-  assert.equal( sites.length, 1, `approveLink.ts has ${ sites.length } row-read sites, not 1:\n  ${ sites.join( "\n  " ) }` );
+  const sites = [ ...src.matchAll( /api\.get(?:<[^>]*>)?\(\s*`\/api\/tasks\/[^`]*`/g ) ].map( m => m[ 0 ] );
+  assert.equal( sites.length, 1, `shared/approve-link.js has ${ sites.length } row-read sites, not 1:\n  ${ sites.join( "\n  " ) }` );
   assert.match( sites[ 0 ]!, /encodeURIComponent/, `the multiplexer's row read builds its URL without encoding the id: ${ sites[ 0 ] }` );
 } );
 

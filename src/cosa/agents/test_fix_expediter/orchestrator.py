@@ -28,7 +28,12 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from cosa.agents.shared.sdk_error_result import raise_error_result
+from cosa.agents.shared.coder_stream import read_coder_stream
 from cosa.agents.shared.resume_guard import resume_covers
+from cosa.agents.shared.tool_use_summary import summarize_tool_use
+from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
+from cosa.agents.shared.edit_agent_options import build_edit_agent_options
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, extract_last_balanced
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
     TFEPhase,
@@ -197,7 +202,7 @@ class TFEOrchestrator:
             # passed as a kwarg → TypeError caught below → hundreds of
             # "[TFE notify error]" log lines per TFE run with no actual
             # progress notifications sent. See plan:
-            # src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md
+            # the TFE forensics capture plan (removed from the tree; see 8420e8b0a^)
             await cosa_interface.notify_progress(
                 message,
                 priority=priority,
@@ -554,67 +559,26 @@ class TFEOrchestrator:
         Handles clean JSON, markdown-fenced JSON, and JSON embedded in prose.
         Returns a low-confidence fallback on any parse failure.
         """
-        text = raw_response.strip()
-
-        # Strip markdown code fences if present
-        if "```json" in text:
-            text = text.split( "```json" )[ -1 ]
-        if "```" in text:
-            text = text.split( "```" )[ 0 ]
-
-        json_str = self._extract_last_json_object( text )
-        if json_str is None:
-            logger.warning(
-                f"[TFE] No JSON object in response for {cluster_id} — fallback"
-            )
+        data, failure = parse_diagnosis_json( raw_response )
+        if data is None:
+            logger.warning( f"[TFE] {failure} for {cluster_id} — fallback" )
             return self._fallback_diagnosis( cluster_id, raw_response[ :500 ] )
 
         try:
-            data = json.loads( json_str )
             # Ensure cluster_id is populated even if the LLM omitted it
             if "cluster_id" not in data or not data[ "cluster_id" ]:
                 data[ "cluster_id" ] = cluster_id
             return TestDiagnosisResult( **data )
-        except ( json.JSONDecodeError, ValueError, TypeError ) as e:
+        except ( ValueError, TypeError ) as e:
             logger.warning( f"[TFE] JSON parse failed for {cluster_id}: {e}" )
             return self._fallback_diagnosis( cluster_id, raw_response[ :500 ] )
 
-    @staticmethod
-    def _extract_last_json_object( text: str ) -> Optional[ str ]:
-        """
-        Extract the last balanced JSON object from text.
-
-        Walks backward from the last `}` to find the matching `{`.
-        Returns None if no balanced object is found.
-        """
-        close_idx = text.rfind( "}" )
-        if close_idx == -1:
-            return None
-
-        depth = 0
-        for i in range( close_idx, -1, -1 ):
-            if text[ i ] == "}":
-                depth += 1
-            elif text[ i ] == "{":
-                depth -= 1
-                if depth == 0:
-                    return text[ i : close_idx + 1 ]
-
-        return None
+    _extract_last_json_object = staticmethod( extract_json_object )
 
     @staticmethod
     def _fallback_diagnosis( cluster_id: str, reason: str ) -> TestDiagnosisResult:
         """Low-confidence fallback diagnosis used on SDK/parse failures."""
-        return TestDiagnosisResult(
-            cluster_id          = cluster_id,
-            root_cause          = reason,
-            error_category      = "unknown",
-            confidence          = 0.1,
-            evidence            = [ "Failed to parse structured diagnosis" ],
-            affected_components = [],
-            is_transient        = False,
-            test_symptoms       = [],
-        )
+        return TestDiagnosisResult( cluster_id=cluster_id, test_symptoms=[], **fallback_diagnosis_fields( reason ) )
 
     # ───────────────────────────────────────────────────────────────
     # Phase 2 onward: full implementations (propose, fix, git, validation rerun)
@@ -898,37 +862,14 @@ class TFEOrchestrator:
         except json.JSONDecodeError:
             pass
 
-        # Attempt 2: top-level JSON array (walk backward from last `]`)
-        close_idx = text.rfind( "]" )
-        if close_idx != -1:
-            depth = 0
-            for i in range( close_idx, -1, -1 ):
-                if text[ i ] == "]":
-                    depth += 1
-                elif text[ i ] == "[":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[ i : close_idx + 1 ]
-                        try:
-                            return json.loads( candidate )
-                        except json.JSONDecodeError:
-                            break
-
-        # Attempt 3: top-level JSON object (walk backward from last `}`)
-        close_idx = text.rfind( "}" )
-        if close_idx != -1:
-            depth = 0
-            for i in range( close_idx, -1, -1 ):
-                if text[ i ] == "}":
-                    depth += 1
-                elif text[ i ] == "{":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[ i : close_idx + 1 ]
-                        try:
-                            return json.loads( candidate )
-                        except json.JSONDecodeError:
-                            break
+        # Attempts 2 and 3: the last balanced top-level array, then the last balanced object
+        for open_char, close_char in ( ( "[", "]" ), ( "{", "}" ) ):
+            candidate = extract_last_balanced( text, open_char, close_char )
+            if candidate is not None:
+                try:
+                    return json.loads( candidate )
+                except json.JSONDecodeError:
+                    pass
 
         return None
 
@@ -1461,46 +1402,15 @@ class TFEOrchestrator:
         options = self._build_tfe_coder_options( guard, cosa_interface_module )
 
         try:
-            collected_text = []
-            files_changed  = []
-
             # Bug 15 WORKAROUND: claude-agent-sdk ≥ 0.1.36 rejects str prompt when
             # can_use_tool is set on options. Upstream (unresolved as of 2026-04-17):
             # https://github.com/anthropics/claude-code/issues/18735 — remove the
             # wrap_prompt_for_streaming() call once upstream lands the fix.
-            async for message in sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ):
-                guard.check_timeout()
-
-                if self._is_cancelled():
-                    break
-
-                if isinstance( message, AssistantMessage ):
-                    for block in message.content:
-                        if isinstance( block, TextBlock ):
-                            collected_text.append( block.text )
-                        elif isinstance( block, ToolUseBlock ):
-                            if block.name in ( "Edit", "Write" ):
-                                file_path = block.input.get( "file_path", "" )
-                                if file_path and file_path not in files_changed:
-                                    files_changed.append( file_path )
-                                await post_tool_hook( block.name, block.input, guard )
-                            await self._notify(
-                                f"Coder: {self._summarize_tool_use( block )}",
-                                priority="low",
-                            )
-                elif isinstance( message, TextBlock ):
-                    collected_text.append( message.text )
-                elif isinstance( message, ResultMessage ):
-                    if message.is_error: raise_error_result( message, "TFEOrchestrator coder", logger )
-                    msg_text = getattr( message, "text", str( message ) )[ :200 ]
-                    await self._notify( msg_text, priority="low" )
-                elif isinstance( message, RateLimitEvent ):
-                    logger.warning(
-                        f"Rate limited: retry_after={getattr( message, 'retry_after', '?' )}s"
-                    )
-
-            guard.check_iteration()
-            coder_output = "".join( collected_text ).strip()
+            coder_output, files_changed = await read_coder_stream(
+                sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ),
+                guard, self._notify, self._is_cancelled, "TFEOrchestrator coder", logger,
+                ( AssistantMessage, TextBlock, ToolUseBlock, ResultMessage, RateLimitEvent ), post_tool_hook,
+            )
 
             if self.debug: print(
                 f"[TFEOrchestrator] Coder output: {len( coder_output )} chars, "
@@ -1706,29 +1616,6 @@ class TFEOrchestrator:
         return lines
 
     @staticmethod
-    def _summarize_tool_use( block ) -> str:
-        """
-        Compact single-line summary of a ToolUseBlock for progress notifications.
-
-        A bare `Coder: {block.name}` line gave long runs of identical entries with no
-        context, so this builds a tool-specific digest that surfaces the key argument.
-        The argument is truncated to 100 chars to keep notification text tight.
-        """
-        name = block.name
-        inp  = block.input or {}
-        if name == "Bash":
-            cmd = inp.get( "command", "" ) or ""
-            first_line = cmd.splitlines()[ 0 ] if cmd else ""
-            return f"Bash: {first_line[ :100 ]}" if first_line else "Bash"
-        if name in ( "Read", "Edit", "Write" ):
-            fp = inp.get( "file_path", "" ) or ""
-            return f"{name}: {fp[ -100: ]}" if fp else name
-        if name in ( "Grep", "Glob" ):
-            pat = inp.get( "pattern", "" ) or ""
-            return f"{name}: {pat[ :100 ]}" if pat else name
-        return name
-
-    @staticmethod
     def _derive_budget_tier( proposed, cluster=None ) -> str:
         """
         Derive the Coder turn-budget tier from a proposal's affected-file count.
@@ -1766,30 +1653,16 @@ class TFEOrchestrator:
         max_turns = budget_by_tier.get(
             self._current_budget_tier, self.config.coder_budget_medium_turns
         )
-        return ClaudeAgentOptions(
-            model           = self.config.worker_model,
-            system_prompt   = TFE_CODER_SYSTEM_PROMPT,
-            tools           = [ "Read", "Edit", "Bash" ],
-            cwd             = self._worktree_cwd or cu.get_project_root(),
-            permission_mode = "acceptEdits",
-            can_use_tool    = build_can_use_tool( cosa_interface_module, guard, "tfe-coder" ),
-            max_turns       = max_turns,
-            max_budget_usd  = self.config.budget_usd,
-            effort          = self.config.thinking_effort,
+        return build_edit_agent_options(
+            self.config, self._worktree_cwd, TFE_CODER_SYSTEM_PROMPT,
+            build_can_use_tool( cosa_interface_module, guard, "tfe-coder" ), max_turns
         )
 
     def _build_tfe_tester_options( self, guard, cosa_interface_module ):
         """Build ClaudeAgentOptions for the TFE Tester agent."""
-        return ClaudeAgentOptions(
-            model           = self.config.worker_model,
-            system_prompt   = TFE_TESTER_SYSTEM_PROMPT,
-            tools           = [ "Read", "Edit", "Bash" ],
-            cwd             = self._worktree_cwd or cu.get_project_root(),
-            permission_mode = "acceptEdits",
-            can_use_tool    = build_can_use_tool( cosa_interface_module, guard, "tfe-tester" ),
-            max_turns       = 10,
-            max_budget_usd  = self.config.budget_usd,
-            effort          = self.config.thinking_effort,
+        return build_edit_agent_options(
+            self.config, self._worktree_cwd, TFE_TESTER_SYSTEM_PROMPT,
+            build_can_use_tool( cosa_interface_module, guard, "tfe-tester" ), 10
         )
 
     # ───────────────────────────────────────────────────────────────

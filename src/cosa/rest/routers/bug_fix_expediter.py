@@ -40,7 +40,7 @@ router = APIRouter( tags=[ "bug-fix-expediter" ] )
 # does it too" is the claim a tombstone rests on:
 #   · the job is built by the same `create_agentic_job` this handler called;
 #   · the id is scoped through the same `user_job_tracker.register_scoped_job`, in the
-#     queued executor (executor.py:197) rather than here;
+#     queued executor (v2/executor.py) rather than here;
 #   · the two scheduling fields and the lineage stamp land on the job in the factory;
 #   · the 400s for a token with no uid or email are the 401s `submit` already raises.
 #

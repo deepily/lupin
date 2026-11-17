@@ -461,8 +461,8 @@ class TestGatedConfirmation:
         team_io.notify_progress.assert_called_once()
         msg = team_io.notify_progress.call_args[ 1 ][ "message" ]
         assert "Auto-approved by proxy" in msg
-        # Trust tracker should record success
-        mock_proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=True )
+        # No human answered, so the auto-approval earns no trust credit (row 0bba595e)
+        mock_proxy.trust_tracker.record_decision.assert_not_called()
 
     def test_proxy_shadow_mode_falls_through( self ):
         """Shadow mode should evaluate but still fall through to ask_confirmation."""
@@ -908,8 +908,8 @@ class TestTrustFeedbackLoop:
         assert result is False
         mock_proxy.trust_tracker.record_decision.assert_called_once_with( "deployment", success=False )
 
-    def test_active_act_records_success( self ):
-        """Active mode auto-approve → record success=True, ask_confirmation NOT called."""
+    def test_active_act_records_nothing( self ):
+        """Active mode auto-approve records no trust feedback; ask_confirmation NOT called."""
         orch, mock_proxy = self._make_orch_with_mock_proxy(
             trust_mode="active", proxy_action="act", proxy_value="approved", proxy_category="testing"
         )
@@ -925,7 +925,7 @@ class TestTrustFeedbackLoop:
 
         assert result is True
         team_io.ask_confirmation.assert_not_called()
-        mock_proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=True )
+        mock_proxy.trust_tracker.record_decision.assert_not_called()
 
     def test_suggest_mode_records_agreement( self ):
         """Suggest: proxy suggests approve, user follows → record success=True."""

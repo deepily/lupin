@@ -18,6 +18,27 @@ from typing import List, Optional
 from collections import Counter
 
 
+def is_blank_case( record ):
+    """
+    True when a retrieved case carries no usable answer and must cast no vote.
+
+    A shadow row (the proxy's own unconfirmed guess) and a deferred row are stored
+    with an empty decision_value. Counting one casts a "" verdict in CBR and a "no"
+    vote in the yes/no reader.
+
+    Requires:
+        - record is a dict that may carry "ratification_state" and "decision_value"
+
+    Ensures:
+        - True when ratification_state is "shadow" (any case) or decision_value is
+          missing, None or whitespace only
+        - False otherwise
+    """
+    state = ( record.get( "ratification_state" ) or "" ).strip().lower()
+    if state == "shadow": return True
+    return not ( record.get( "decision_value" ) or "" ).strip()
+
+
 @dataclass
 class CBRPrediction:
     """
@@ -73,7 +94,7 @@ class CBRDecisionStore:
         Predict a decision value using CBR retrieval and majority vote.
 
         Steps: (1) retrieve top_k similar cases from the embedding store.
-        (2) With 0 cases, return an empty prediction. (3) Majority vote on decision_value.
+        (2) Blank shadow/deferred cases are dropped; with 0 cases left, return an empty prediction. (3) Majority vote on decision_value.
         (4) confidence = max_similarity * verdict_consistency.
 
         Requires:
@@ -83,7 +104,7 @@ class CBRDecisionStore:
 
         Ensures:
             - Returns CBRPrediction with verdict, confidence, cases, count
-            - verdict is None if no cases found
+            - verdict is None if no voting cases found (blank shadow rows cast no vote)
             - confidence is 0.0 if no cases found
 
         Args:
@@ -101,6 +122,9 @@ class CBRDecisionStore:
             limit     = self.top_k,
             threshold = 0.0,  # Retrieve all, let confidence scoring filter
         )
+
+        # Blank shadow/deferred rows cast no vote
+        results = [ ( sim, record ) for sim, record in results if not is_blank_case( record ) ]
 
         # Step 2: No cases → empty prediction
         if not results:

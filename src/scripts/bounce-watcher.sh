@@ -44,6 +44,17 @@ INPROGRESS="${BOUNCE_DIR}/bounce.inprogress"
 BOUNCE_SCRIPT="${LUPIN_ROOT}/src/scripts/bounce-dev-server.sh"
 POLL_INTERVAL="${BOUNCE_WATCHER_POLL_SECS:-2}"
 
+# THE SWITCH (row c38a49bd). `cron job side-services enabled` in the main configuration file is read
+# fresh, at most once every SWITCH_RECHECK_SECS, through lupin_mcp.cron_switch_read.read_switch, the
+# same parse rule every other job uses. Off or unreadable (no default in code): the loop stays alive,
+# but it stamps no heartbeat and claims no trigger, so the button answers 503 instead of pretending.
+SWITCH_INI="${BOUNCE_WATCHER_INI:-${LUPIN_ROOT}/src/conf/lupin-app.ini}"
+SWITCH_RECHECK_SECS="${BOUNCE_WATCHER_SWITCH_SECS:-60}"
+SWITCH_PYTHON="${LUPIN_ROOT}/.venv/bin/python"
+[ -x "${SWITCH_PYTHON}" ] || SWITCH_PYTHON="python3"
+switch_state="unread"
+switch_checked_at=0
+
 mkdir -p "${BOUNCE_DIR}"
 
 # A crash mid-bounce would strand the in-progress marker and make the endpoint
@@ -55,7 +66,41 @@ log() { echo "[bounce-watcher] $*"; }
 
 log "watching ${TRIGGER} (heartbeat every ${POLL_INTERVAL}s → ${HEARTBEAT})"
 
+# Print on, off or unknown for the side-services switch, through the repository's own check
+# (lupin_mcp.cron_switch_read). An unreadable key also makes that check write the job's failed
+# summary, so the jobs page turns red. A missing interpreter or a failed import prints unknown, never on.
+read_switch() {
+    local answer
+    answer="$( PYTHONPATH="${LUPIN_ROOT}/src" "${SWITCH_PYTHON}" -m lupin_mcp.cron_switch_read --job side-services --ini "${SWITCH_INI}" --root "${LUPIN_ROOT}" 2>/dev/null | tail -n 1 )"
+    echo "${answer:-unknown}"
+}
+
+# Refresh switch_state when the last read is old enough, logging one line when the answer changes.
+refresh_switch() {
+    local now previous answer
+    now="$( date +%s )"
+    if [ $(( now - switch_checked_at )) -lt "${SWITCH_RECHECK_SECS}" ]; then return; fi
+    switch_checked_at="${now}"
+    previous="${switch_state}"
+    answer="$( read_switch )"
+    case "${answer}" in on|off) switch_state="${answer}" ;; *) switch_state="unknown" ;; esac
+    if [ "${switch_state}" = "${previous}" ]; then return; fi
+    case "${switch_state}" in
+        on)      if [ "${previous}" != "unread" ]; then log "INI key 'cron job side-services enabled' is true, so the watcher runs again"; fi ;;
+        off)     log "INI key 'cron job side-services enabled' is false, so the watcher stamps no heartbeat and claims no trigger until it is true" ;;
+        unknown) log "ERROR: INI key 'cron job side-services enabled' is missing or holds neither true nor false, so the watcher stamps no heartbeat and claims no trigger" ;;
+    esac
+}
+
 while true; do
+    refresh_switch
+    if [ "${switch_state}" != "on" ]; then
+        # A trigger dropped before the switch went off would fire a surprise bounce on the way back on.
+        if [ -f "${TRIGGER}" ]; then rm -f "${TRIGGER}"; log "discarded a trigger seen while the switch is not on"; fi
+        sleep "${POLL_INTERVAL}"
+        continue
+    fi
+
     # Stamp liveness every loop — this is exactly what the endpoint checks.
     date +%s > "${HEARTBEAT}"
 

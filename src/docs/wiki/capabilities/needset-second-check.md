@@ -1,12 +1,12 @@
 ---
 capability: needset-second-check
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.check.matched_prompt@f878f4a0cd
   - lupin_mcp.reuse_needset.check.none_check_prompt@87b6303a43
   - lupin_mcp.reuse_needset.check.parse_check@cc5d877af3
   - lupin_mcp.reuse_needset.check.prompt_version@f20cdfd0ab
-  - lupin_mcp.reuse_needset.check.second_check@5b7c8ab29c
+  - lupin_mcp.reuse_needset.check.second_check@c2100a335c
   - lupin_mcp.reuse_needset.check.disputed@298fb71d20
   - lupin_mcp.reuse_needset.check.check_needs@7cab5a6c9d
 ---

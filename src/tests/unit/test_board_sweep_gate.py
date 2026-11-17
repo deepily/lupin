@@ -400,7 +400,7 @@ def test_the_frozen_total_appears_only_as_dated_history( sweep_dir ):
 #
 # Bug `c2d6bcfa` (María 🌸 filed, Clayton 😎 root-caused, 2026-07-31). `rearm()` refreshes a
 # ledger against a fresh board and is called from NOWHERE — only the read-only
-# `sweep_progress_line` runs, from `stop.py:436`. So `board-sweep-maria.json` and
+# `sweep_progress_line` runs, from the Stop hook (`stop.py`). So `board-sweep-maria.json` and
 # `board-sweep-mr-radio.json` were written once on 2026-07-25/26 at 22/22 and 71/71 and stood
 # untouched for five days, with `reviewed >= live_owed` permanently true. A gate that reports
 # a five-day-old sweep in the present tense is not a gate.

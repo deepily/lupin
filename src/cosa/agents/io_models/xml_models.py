@@ -24,6 +24,7 @@ All models inherit from BaseXMLModel and include quick_smoke_test() methods.
 import time
 from typing import Optional, List, Union, Literal, ClassVar
 from pydantic import Field, field_validator, model_validator
+from cosa.agents.io_models.field_validators import none_to_empty, require_nonempty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel, XMLParsingError
 
@@ -441,10 +442,7 @@ class ReceptionistResponse( BaseXMLModel ):
         Raises:
             - ValueError if thoughts is empty after stripping whitespace
         """
-        trimmed = v.strip()
-        if not trimmed:
-            raise ValueError( "thoughts cannot be empty" )
-        return trimmed
+        return require_nonempty( v, "thoughts cannot be empty" )
         
     @field_validator( "answer" )
     @classmethod
@@ -461,10 +459,7 @@ class ReceptionistResponse( BaseXMLModel ):
         Raises:
             - ValueError if answer is empty after stripping whitespace
         """
-        trimmed = v.strip()
-        if not trimmed:
-            raise ValueError( "answer cannot be empty" )
-        return trimmed
+        return require_nonempty( v, "answer cannot be empty" )
         
     def is_safe_content( self ) -> bool:
         """
@@ -745,9 +740,7 @@ class CodeResponse( CodeLinesMixin, BaseXMLModel ):
     @classmethod
     def validate_thoughts( cls, v ):
         """Ensure thoughts is not empty."""
-        if not v or not v.strip():
-            raise ValueError( "Thoughts cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "Thoughts cannot be empty" )
     
     @field_validator( 'returns' )
     @classmethod
@@ -972,9 +965,7 @@ class CalendarResponse( CodeResponse ):
     @classmethod
     def validate_question( cls, v ):
         """Ensure question is not empty."""
-        if not v or not v.strip():
-            raise ValueError( "Question cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "Question cannot be empty" )
     
     @classmethod 
     def quick_smoke_test( cls, debug: bool = False ) -> bool:
@@ -1137,9 +1128,7 @@ class BrainstormIdeas( BaseXMLModel ):
     @classmethod
     def validate_ideas( cls, v ):
         """Ensure idea fields are not empty."""
-        if not v or not v.strip():
-            raise ValueError( "Brainstorm ideas cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "Brainstorm ideas cannot be empty" )
     
     @classmethod
     def get_example_for_template( cls ) -> 'BrainstormIdeas':
@@ -1205,9 +1194,7 @@ class CodeBrainstormResponse( CodeLinesMixin, BaseXMLModel ):
     @classmethod
     def validate_text_fields( cls, v ):
         """Ensure text fields are not empty."""
-        if not v or not v.strip():
-            raise ValueError( "Text fields cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "Text fields cannot be empty" )
     
     @field_validator( 'returns' )
     @classmethod
@@ -1758,17 +1745,13 @@ class IterativeDebuggingMinimalistResponse( BaseXMLModel ):
     @classmethod
     def validate_thoughts( cls, v ):
         """Ensure thoughts is not empty."""
-        if not v or not v.strip():
-            raise ValueError( "thoughts cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "thoughts cannot be empty" )
     
     @field_validator( 'one_line_of_code' )
     @classmethod
     def validate_code_line( cls, v ):
         """Ensure code line is not empty."""
-        if not v or not v.strip():
-            raise ValueError( "one_line_of_code cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "one_line_of_code cannot be empty" )
     
     def is_successful( self ) -> bool:
         """Check if debugging was successful."""
@@ -1875,9 +1858,7 @@ class IterativeDebuggingFullResponse( CodeLinesMixin, BaseXMLModel ):
     @classmethod
     def validate_text_fields( cls, v ):
         """Ensure text fields are not empty."""
-        if not v or not v.strip():
-            raise ValueError( "Text fields cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "Text fields cannot be empty" )
     
     @field_validator( 'returns' )
     @classmethod
@@ -1988,9 +1969,7 @@ class WeatherResponse( BaseXMLModel ):
     @classmethod
     def validate_rephrased_answer( cls, v ):
         """Ensure rephrased_answer is not empty."""
-        if not v or not v.strip():
-            raise ValueError( "rephrased_answer cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "rephrased_answer cannot be empty" )
     
     def is_temperature_response( self ) -> bool:
         """Check if this response contains temperature information."""
@@ -2115,9 +2094,7 @@ class FormatterResponse( BaseXMLModel ):
     @classmethod
     def validate_rephrased_answer( cls, v ):
         """Ensure rephrased_answer is not empty."""
-        if not v or not v.strip():
-            raise ValueError( "rephrased_answer cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "rephrased_answer cannot be empty" )
 
 
 class VoxCommandResponse( BaseXMLModel ):
@@ -2354,9 +2331,7 @@ class GistResponse( BaseXMLModel ):
         Raises:
             ValueError: If gist is empty
         """
-        if not v or not v.strip():
-            raise ValueError( "Gist cannot be empty" )
-        return v.strip()
+        return require_nonempty( v, "Gist cannot be empty" )
     
     @classmethod
     def get_example_for_template( cls ) -> 'GistResponse':
@@ -2554,9 +2529,7 @@ class QualifierClassification( BaseXMLModel ):
     @field_validator( "*", mode="before" )
     @classmethod
     def coerce_none_to_empty_str( cls, v ):
-        if v is None:
-            return ""
-        return v
+        return none_to_empty( v )
 
     def is_question( self ):
         """Return True if the classified intent is 'question'."""
@@ -2669,9 +2642,7 @@ class FuzzyFileMatchResponse( CommaListMixin, BaseXMLModel ):
         A valid zero match would then be reported as status="error", the same as a real parse failure.
         The matches field is documented as an empty string if no matches; this validator lets the model hold it.
         """
-        if v is None:
-            return ""
-        return v
+        return none_to_empty( v )
 
     @classmethod
     def get_example_for_template( cls ) -> 'FuzzyFileMatchResponse':

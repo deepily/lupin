@@ -87,9 +87,33 @@ export function podcastFullFaceUrl( audioUrl: string ): string {
   return `${base}?${params.toString()}`;
 }
 
+const closeListeners = new Set<() => void>();
+
+/**
+ * Ask to be told when the floating player is dismissed, by the user or by code.
+ *
+ * Ensures: the listener runs after the overlay is removed and not when a new Play Here replaces it; returns a function that stops the listening.
+ */
+export function onPodcastOverlayClosed( listener: () => void ): () => void {
+  closeListeners.add( listener );
+  return (): void => { closeListeners.delete( listener ); };
+}
+
+/** True while the floating player is on the page. */
+export function isPodcastOverlayOpen(): boolean {
+  return document.getElementById( PODCAST_OVERLAY_ID ) !== null;
+}
+
+/** Remove the floating player and say nothing about it. Used by a replacing Play Here. */
+function removePodcastOverlay(): boolean {
+  const overlay = document.getElementById( PODCAST_OVERLAY_ID );
+  overlay?.remove();
+  return overlay !== null;
+}
+
 /** Remove the floating player if it is open. Removing the iframe stops the audio. */
 export function dismissPodcastOverlay(): void {
-  document.getElementById( PODCAST_OVERLAY_ID )?.remove();
+  if ( removePodcastOverlay() ) for ( const listener of [ ...closeListeners ] ) listener();
 }
 
 /**
@@ -101,7 +125,7 @@ export function dismissPodcastOverlay(): void {
  * only the user closes it.
  */
 export function showPodcastOverlay( embedUrl: string, title: string ): HTMLElement {
-  dismissPodcastOverlay();
+  removePodcastOverlay();
 
   const overlay = document.createElement( "div" );
   overlay.id        = PODCAST_OVERLAY_ID;

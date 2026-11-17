@@ -249,6 +249,14 @@ KNOWN_DIVERGENT_MOUNTS = {
         "cloud-gpu" : "2026-10-15 — the vectors live on the dev host, which the VM cannot see; "
                       "no caller sends it a host vectors path (row d3f71441).",
     },
+    # ── the code-health data folder (row 6fd6fc0c, b9d881a53, 2026-11-11) ────
+    # The duplicate check's run history, job summary, lock and daily log live here, written by the
+    # Run-now button and the job-summary writer on :7999 and :8000. The cloud leg runs neither, so it
+    # neither mounts the folder nor sets DEEPILY_DATA_DIR, the mount's partner below.
+    "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/code-health": {
+        "cloud-gpu" : "2026-11-13 — the duplicate check runs on the dev host and :7999/:8000; the VM "
+                      "has no Run-now caller and no job-summary writer (row 6fd6fc0c, found by row d2a18b64).",
+    },
 }
 
 # ── KNOWN_DIVERGENT_ENV ───────────────────────────────────────────────────
@@ -289,6 +297,10 @@ KNOWN_DIVERGENT_ENV = {
     "LUPIN_REUSE_REVIEW_DATA_ROOT": {
         "cloud-gpu" : "2026-10-15 — the partner of the reuse-review mount, which the VM does not take (row d3f71441).",
     },
+    "DEEPILY_DATA_DIR": {
+        "cloud-gpu" : "2026-11-13 — the partner of the code-health mount, which the VM does not take "
+                      "(row 6fd6fc0c, found by row d2a18b64).",
+    },
     # LUPIN_FLOW_RATIO_DIR's exemption was REMOVED 2026-09-26 with its mount partner — see
     # the /var/lupin/flow-ratio comment in KNOWN_DIVERGENT_MOUNTS above for why the original
     # argument was sound about the flow-ratio slider and silently wrong about the
@@ -308,6 +320,12 @@ KNOWN_DIVERGENT_ENV = {
                       "skeleton crew switch; :7999 keeps the real src/conf/lupin-app.ini, which the "
                       "launcher and every Stop hook read.",
         "cloud-gpu" : "2026-10-10 — no test server on the VM.",
+    },
+    "LUPIN_CRON_SWITCH_INI": {
+        "dev-dev"   : "2026-11-14 — only :8000 gets a test-only copy of the configuration file for the "
+                      "scheduled-job switches; :7999 keeps the real src/conf/lupin-app.ini, which every "
+                      "cron job reads at its next start (row 063fc1a8).",
+        "cloud-gpu" : "2026-11-16 — the VM overlay sets it too (row 8d67e474); guarded by test_vm_test_server_overlay.py.",
     },
     "LUPIN_HEARTBEAT_POKE_MUTE_FILE": {
         "dev-dev"   : "2026-10-02 — only :8000 gets a test-only poke switch file; :7999 keeps the "
@@ -426,7 +444,7 @@ KNOWN_DIVERGENT_ENV = {
 # differs from the host owner, so git needs a safe.directory entry per mount. Dev binds the
 # whole projects dir as the same user, so git never objects there and needs none.
 # test_preflight_vm_host_test_fixes.py pins this env to cloud-gpu's own bind table.
-for _n in range( 7 ):
+for _n in range( 8 ):
     KNOWN_DIVERGENT_ENV[ f"GIT_CONFIG_KEY_{_n}" ] = KNOWN_DIVERGENT_ENV[ f"GIT_CONFIG_VALUE_{_n}" ] = {
         "dev-dev"  : "2026-09-30 — dev binds the whole projects dir as the owning user; git never objects.",
         "dev-test" : "2026-09-30 — same.",

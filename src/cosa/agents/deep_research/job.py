@@ -30,6 +30,99 @@ from cosa.agents.deep_research.seed_context import normalize_source_document, qu
 from cosa.rest.job_state import JobState
 
 
+def resolve_output_settings( config_mgr ) -> tuple:
+    """
+    Read where a Deep Research report is stored.
+
+    Requires:
+        - config_mgr is a ConfigurationManager
+
+    Ensures:
+        - returns ( storage_backend, gcs_bucket, output_dir )
+        - output_dir is absolute and under the project root, whether the INI value was relative,
+          rooted at "/" or already under the root
+
+    Raises:
+        - nothing
+    """
+    storage_backend = config_mgr.get( "deep research storage backend", default="local" )
+    gcs_bucket      = config_mgr.get( "deep research gcs bucket", default=None )
+    output_dir      = config_mgr.get( "deep research output directory", default="/io/deep-research" )
+
+    if not output_dir.startswith( "/" ):
+        output_dir = cu.get_project_root() + "/" + output_dir
+    elif not output_dir.startswith( cu.get_project_root() ):
+        output_dir = cu.get_project_root() + output_dir
+
+    return storage_backend, gcs_bucket, output_dir
+
+
+def derive_session_name( query, debug=False ) -> tuple:
+    """
+    Name a research session from its query with the Gister.
+
+    Requires:
+        - query is a non-empty string
+
+    Ensures:
+        - returns ( session_name, semantic_topic )
+        - session_name is lower case and trimmed, or "general research query" when the gist is empty or None
+        - semantic_topic is session_name with spaces turned into dashes
+
+    Raises:
+        - nothing
+    """
+    from cosa.memory.gister import Gister
+
+    session_name = Gister( debug=debug ).get_gist( query, prompt_key="prompt template for deep research session name" )
+    session_name = session_name.lower().strip() if session_name else ""
+    if not session_name:
+        session_name = "general research query"
+    return session_name, session_name.replace( " ", "-" )
+
+
+async def abstract_and_save_report( report, query, config, cost_tracker, session_id, semantic_topic, output_settings, user_email, debug=False ) -> tuple:
+    """
+    Write the abstract of a finished research report and save the report with its frontmatter.
+
+    Requires:
+        - report is the text run_research returned
+        - output_settings is the tuple resolve_output_settings returned
+
+    Ensures:
+        - returns ( abstract, report_path )
+
+    Raises:
+        - whatever generate_abstract_for_cli or save_report_with_frontmatter raises, such as BudgetExceededError
+    """
+    from cosa.agents.deep_research.cli import generate_abstract_for_cli, save_report_with_frontmatter
+
+    storage_backend, gcs_bucket, output_dir = output_settings
+
+    abstract = await generate_abstract_for_cli(
+        report       = report,
+        config       = config,
+        cost_tracker = cost_tracker,
+        debug        = debug
+    )
+
+    report_path = save_report_with_frontmatter(
+        report          = report,
+        query           = query,
+        abstract        = abstract,
+        semantic_topic  = semantic_topic,
+        session_id      = session_id,
+        cost_tracker    = cost_tracker,
+        config          = config,
+        output_dir      = output_dir,
+        user_email      = user_email,
+        storage_backend = storage_backend,
+        gcs_bucket      = gcs_bucket,
+        debug           = debug
+    )
+    return abstract, report_path
+
+
 class DeepResearchJob( AgenticJobBase ):
     """
     Background job for Deep Research execution.
@@ -241,38 +334,18 @@ class DeepResearchJob( AgenticJobBase ):
         # Import research components
         from cosa.agents.deep_research.config import ResearchConfig
         from cosa.agents.deep_research.cost_tracker import CostTracker, BudgetExceededError
-        from cosa.agents.deep_research.cli import (
-            run_research,
-            generate_abstract_for_cli,
-            save_report_with_frontmatter,
-        )
+        from cosa.agents.deep_research.cli import run_research
         from cosa.config.configuration_manager import ConfigurationManager
-        from cosa.memory.gister import Gister
 
         # Initialize configuration
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
-        # Get storage configuration
-        storage_backend = config_mgr.get( "deep research storage backend", default="local" )
-        gcs_bucket      = config_mgr.get( "deep research gcs bucket", default=None )
-        output_dir      = config_mgr.get( "deep research output directory", default="/io/deep-research" )
+        # Get storage configuration and the full output path
+        output_settings = resolve_output_settings( config_mgr )
+        storage_backend = output_settings[ 0 ]
 
-        # Build full output path
-        import cosa.utils.util as cu
-        if not output_dir.startswith( "/" ):
-            output_dir = cu.get_project_root() + "/" + output_dir
-        elif not output_dir.startswith( cu.get_project_root() ):
-            output_dir = cu.get_project_root() + output_dir
-
-        # Generate session_name from query using Gister
-        gister = Gister( debug=self.debug )
-        session_name = gister.get_gist( self.query, prompt_key="prompt template for deep research session name" )
-        session_name = session_name.lower().strip()
-        if not session_name:
-            session_name = "general research query"
-
-        # Derive semantic_topic from session_name
-        semantic_topic = session_name.replace( " ", "-" )
+        # Generate session_name from query using Gister, and derive semantic_topic from it
+        session_name, semantic_topic = derive_session_name( self.query, debug=self.debug )
 
         # Set sender_id, target_user, and session_name for notifications.
         # Module globals are mutated for backward compatibility (CLI path reads
@@ -347,28 +420,9 @@ class DeepResearchJob( AgenticJobBase ):
 
             self.report = report
 
-            # Generate abstract
-            self.abstract = await generate_abstract_for_cli(
-                report       = report,
-                config       = config,
-                cost_tracker = cost_tracker,
-                debug        = self.debug
-            )
-
-            # Save report with frontmatter
-            self.report_path = save_report_with_frontmatter(
-                report          = report,
-                query           = self.query,
-                abstract        = self.abstract,
-                semantic_topic  = semantic_topic,
-                session_id      = self.id_hash,
-                cost_tracker    = cost_tracker,
-                config          = config,
-                output_dir      = output_dir,
-                user_email      = self.user_email,
-                storage_backend = storage_backend,
-                gcs_bucket      = gcs_bucket,
-                debug           = self.debug
+            # Generate abstract, then save the report with frontmatter
+            self.abstract, self.report_path = await abstract_and_save_report(
+                report, self.query, config, cost_tracker, self.id_hash, semantic_topic, output_settings, self.user_email, debug=self.debug
             )
 
             # Store artifacts

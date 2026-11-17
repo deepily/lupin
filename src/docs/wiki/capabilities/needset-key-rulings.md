@@ -1,6 +1,6 @@
 ---
 capability: needset-key-rulings
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.keys.cut@897fbfc7c6
   - lupin_mcp.reuse_needset.keys.same_job_prompt@b18a1cd240

@@ -117,6 +117,16 @@
             display: none;
         }
 
+        .doc-podcast-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .doc-podcast-option[hidden] {
+            display: none;
+        }
+
         .doc-upload-status {
             font-size: 12px;
             color: #1f2937;
@@ -425,6 +435,18 @@
                 <div id="doc-podcast-confirm" class="doc-podcast-confirm" data-testid="doc-podcast-confirm"
                      role="group" aria-label="Confirm the podcast" hidden>
                     <span id="doc-podcast-text" data-testid="doc-podcast-text"></span>
+                    <label class="doc-podcast-option" for="doc-podcast-type">Type
+                        <select id="doc-podcast-type" data-testid="doc-podcast-type">
+                            <option value="research_critical" selected>Research critical</option>
+                            <option value="status_report">Status report</option>
+                        </select>
+                    </label>
+                    <label class="doc-podcast-option" for="doc-podcast-spanish">
+                        <input type="checkbox" id="doc-podcast-spanish" data-testid="doc-podcast-spanish"> Also in Spanish
+                    </label>
+                    <label class="doc-podcast-option" id="doc-podcast-oneshot-row" for="doc-podcast-oneshot" hidden>
+                        <input type="checkbox" id="doc-podcast-oneshot" data-testid="doc-podcast-oneshot" checked> One shot (no script review)
+                    </label>
                     <button type="button" id="doc-podcast-yes" class="doc-download-btn"
                             data-testid="doc-podcast-yes">Yes, make it</button>
                     <button type="button" id="doc-podcast-cancel" class="doc-download-btn"

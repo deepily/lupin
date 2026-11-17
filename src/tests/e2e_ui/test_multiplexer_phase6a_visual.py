@@ -266,13 +266,21 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     # ~1881px contiguous block on this pane → intermittent visual FAIL. The
     # `networkidle` wait above does NOT gate font loading. Await
     # document.fonts.ready + two animation frames so the final glyph is committed
-    # before capture. Mirrors test_multiplexer_task_editing.py:316-318 (the one
+    # before capture. Mirrors `test_task_editing_controls_visual` in test_multiplexer_task_editing.py (the one
     # test already doing this right). Pure load barrier — comparators/tolerances
     # untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
 
     # Brief settle window for any post-inject layout repaint.
+    time.sleep( 0.2 )
+
+    # Park the pointer at the page corner. This test never moves the mouse, so wherever
+    # Playwright left it decided whether a bucket header showed its :hover shade: the 9 Nov
+    # baseline holds the Job History header shaded and the e2e_b run at 1809f7a2b did not
+    # (31,473 pixels, all in that header). The same park is used in
+    # test_legacy_keep_place_toggle_style.py.
+    page.mouse.move( 0, 0 )
     time.sleep( 0.2 )
 
     # Capture the entire #jobs-pane (avoids body-level layout drift).

@@ -1,6 +1,6 @@
 ---
 capability: needset-key-neighbours
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.keys.twins_of@e792508cf7
   - lupin_mcp.reuse_needset.keys.assign_routes@fc0df60129

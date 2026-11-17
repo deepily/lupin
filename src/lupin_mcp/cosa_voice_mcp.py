@@ -54,12 +54,12 @@ import sys
 import time
 import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import ValidationError
 from fastmcp import FastMCP
 
-from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp.persona_normalization import dm_topic_for as _derive_dm_topic
 from lupin_mcp import validation_alert_throttle
 
 # Import from lupin_cli.notifications (the notification library)
@@ -993,7 +993,7 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
 # Speakerphone TTS Contract (once-stated, single-sourced)
 # ============================================================================
 #
-# Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md §4: the full standing
+# Per the "cosa-voice Per-Turn Rider Slim" doc §4 (removed by 8420e8b0a; recover it from 8420e8b0a^): the full standing
 # TTS contract is stated ONCE here in the session-init `instructions` payload.
 # The per-turn `<system-reminder>` rider (hook_common._speakerphone_reminder_body)
 # is now slim and only points at this section. The brevity prose is
@@ -1297,7 +1297,7 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
 # On a FINAL notify send-failure, persist the request to an on-disk outbox and let
 # a background flusher retry it (reusing its idempotency_key, so the server de-dups)
 # until ack or TTL. Rides only local disk — no fleet, no messaging dependency.
-# Design: src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md (lever A1).
+# Design: the "Messaging-Coordination Plane" design doc, lever A1 (removed by 8420e8b0a; recover it from 8420e8b0a^).
 import uuid as _uuid
 from lupin_mcp import notify_outbox as _notify_outbox
 
@@ -2033,7 +2033,7 @@ def ask_yes_no(
             "return_len"   : len( result )
         } )
         # exit_code == 0 is NOT proof a human acted (row e5f21fff): an OfflineEvent
-        # lands here with default_used=True (notify_user_sync.py:295-303), and the
+        # lands here with default_used=True (the OfflineEvent branch of `_send_sync_notification` in notify_user_sync.py), and the
         # server can flag a substitution on a RespondedEvent. Mark it.
         if response.default_used:
             return f"{DEFAULT_USED_MARKER}{result}"
@@ -2126,7 +2126,7 @@ def ask_multiple_choice(
     # D1 (bug f433fbae) — plumb a server-side response_default so an OFFLINE
     # user does not 503. ask_yes_no has always passed its string default here
     # (:1528); the MULTIPLE_CHOICE path omitted it, so notifications.py raised
-    # HTTPException(503, "User is offline and no default response provided")
+    # an HTTP 503 error ("User is offline and no default response provided")
     # whenever is_connected read False — including the FALSE-offline window right
     # after a server bounce wipes the in-memory ws_manager, i.e. a user at the
     # keyboard. Serialized as the SAME shape _parse_multiple_choice_response
@@ -2161,7 +2161,7 @@ def ask_multiple_choice(
 
     if response.exit_code == 0:
         # 🔴 DROP SITE 1 of 2 (row e5f21fff) — and the one nobody filed.
-        # exit_code == 0 is NOT proof a human acted. notify_user_sync.py:295-303
+        # exit_code == 0 does not prove a human acted. The OfflineEvent branch of `_send_sync_notification` in notify_user_sync.py
         # maps an OfflineEvent to exit_code=0 / default_used=True, commented
         # "Offline with default = success", so a PROVABLY ABSENT user returns
         # through this success branch, is parsed as an answer, and never reaches
@@ -2308,6 +2308,31 @@ def _validate_multiple_choice_default( default: dict, questions: list ) -> None:
                 )
 
 
+def _parse_answers_response( response_value: Optional[ str ], label: str ) -> dict:
+    """
+    Read the JSON answers a choice or batch notification returns.
+
+    Requires:
+        - response_value is None or a JSON string
+        - label names the kind of notification, for the warning
+
+    Ensures:
+        - returns { "answers": {} } for None or an empty string
+        - returns the parsed dict when the JSON is an object, and { "answers": parsed } for any other JSON value
+        - returns { "answers": { "response": response_value } } and logs a warning naming the label when the text is not JSON
+    """
+    import json
+    if not response_value:
+        return { "answers": {} }
+
+    try:
+        parsed = json.loads( response_value )
+        return parsed if isinstance( parsed, dict ) else { "answers": parsed }
+    except ( json.JSONDecodeError, TypeError ) as e:
+        logger.warning( f"Could not parse {label} response: {e}" )
+        return { "answers": { "response": response_value } }
+
+
 def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
     """
     Parse the response from multiple choice notification.
@@ -2327,17 +2352,7 @@ def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
     Returns:
         dict: Parsed answers or error
     """
-    if not response_value:
-        return { "answers": {} }
-
-    try:
-        import json
-        parsed = json.loads( response_value )
-        return parsed if isinstance( parsed, dict ) else { "answers": parsed }
-    except ( json.JSONDecodeError, TypeError ) as e:
-        logger.warning( f"Could not parse multiple choice response: {e}" )
-        # Return raw value wrapped in answers
-        return { "answers": { "response": response_value } }
+    return _parse_answers_response( response_value, "multiple choice" )
 
 
 @mcp.tool
@@ -2458,16 +2473,7 @@ def _parse_open_ended_batch_response( response_value: Optional[ str ] ) -> dict:
     Returns:
         dict: Parsed answers or error
     """
-    if not response_value:
-        return { "answers": {} }
-
-    try:
-        import json
-        parsed = json.loads( response_value )
-        return parsed if isinstance( parsed, dict ) else { "answers": parsed }
-    except ( json.JSONDecodeError, TypeError ) as e:
-        logger.warning( f"Could not parse open-ended batch response: {e}" )
-        return { "answers": { "response": response_value } }
+    return _parse_answers_response( response_value, "open-ended batch" )
 
 
 @mcp.tool
@@ -2957,7 +2963,7 @@ def request_persona( name: Optional[ str ] = None ) -> dict:
 # orchestration lives in session_spawner (100% unit-covered); these wrappers
 # only resolve the manager's identity + config and delegate.
 #
-# See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
+# See: the "Manager-Spawned Headless Reviewer Sessions" doc (removed by 8420e8b0a; recover it from 8420e8b0a^)
 
 def _spawn_script_path() -> str:  # pragma: no cover  # trivial path join; exercised live, not in units
     return os.path.join( os.environ.get( "LUPIN_ROOT", "" ), "src", "scripts", "start-cc-with-tmux.sh" )
@@ -3031,7 +3037,7 @@ def spawn_sessions(
     # Resolve the child's model: explicit param wins; else the per-role INI key;
     # else the INI `default` key (covers unknown/new roles); else None (no flag →
     # inherit the user default, fail-open). See ruling #2 (2026-07-02): managers
-    # get Fable-5 via Rick's user default, zero code — no `manager` INI key ships;
+    # inherit Rick's user default (Opus 5.5 on 13 Nov 2026), zero code — no `manager` INI key ships;
     # the cost goal is met entirely by the worker-side flag.
     spawn_models   = cfg[ "spawn_models" ]
     resolved_model = model or spawn_models.get( role ) or spawn_models.get( "default" )
@@ -3163,6 +3169,8 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     Kills each target's tmux session (idempotent), drops it from the lineage manifest, frees its persona slot. `session_names` names the tmux sessions; None reaps ALL sessions this manager spawned. `reason` is recorded. Returns `dismissed`, `remaining`.
 
     Re-spinning? Pass `respin_personas=["cheech","rio"]` for every seat you are bringing back; their rows keep owner. By default a reap moves each worker's open store rows off them (closed if receipted, else reassigned to the accountable or reaping manager), so a re-spin that omits the name leaves its rows on YOU. The result echoes `retained_owner_personas` (skipped) and `retained_unmatched` (named but not reaped in this batch: a typo protects nothing: check it). A named seat that does not return leaves its rows on a persona with no live session, and nothing checks. Retention is keyed on the persona NAME and freed names are re-granted, so a re-granted name can retain the wrong seat's rows: reap and re-spin in one batch.
+
+    Rows the reaped session never touched stay put and appear in `reconciliation.skipped_other_session`.
 
     Mementos: `write_memento` (None = INI `cc session spawn write memento default`, else a bool) makes the reap prove each seat has a fresh, complete memento at `io/mementos/<persona-slug>.md` before killing it; if none is there it DMs the live child to write one and waits (bounded). Pass that path back as `seed_memento` on respawn. Read `memento_alarm` first: names each seat killed without a proven memento, `None` if none. A seat with a fresh memento is not asked again.
 
@@ -3659,42 +3667,6 @@ def commons_ask_async(
     )
 
 
-def _derive_dm_topic( recipient: str ) -> str:
-    """
-    Derive a server-pattern-safe DM topic from a recipient persona name.
-
-    Phase 3 of the persona-name normalization plan
-    (`src/rnd/v0.1.9/2026.06.19-persona-name-normalization/`) routes this through
-    the shared `persona_slug` root so a DM topic ALWAYS equals the recipient's
-    canonical persona key with spaces → `_`: "Mr. Radio" → "dm-mr_radio",
-    "María"/"MARÍA" → "dm-maria". DM topics are always persona-derived, and the
-    store/bridges hold the canonical (accent-stripped, ASCII) pool form, so this
-    is the form that actually matches in practice.
-
-    NOTE — this REVERSES the 2026-05-17 Q8 "unicode all the way down" directive
-    that previously preserved exact unicode spelling ("María" → "dm-maría",
-    "中文" → "dm-中文", "jean-luc" → "dm-jean-luc"). Under the canonical root,
-    accents strip ("dm-maria"), non-Latin scripts reduce to "" ("中文" →
-    "dm-"), and internal separators map to a single underscore boundary
-    ("jean-luc" → "dm-jean_luc", bug 951a22be — they are NOT dropped). This
-    is intentional for real personas (all ASCII/accented-Latin pool names), but
-    it is a contract change on arbitrary input — see the Phase 3 flag.
-
-    Pairs with the server-side topic pattern at
-    `src/cosa/rest/routers/commons.py:100` (`_TOPIC_OR_QID_PATTERN`): the
-    canonical output is `[a-z0-9_-]+`, a strict subset of the accepted `[\\w-]+`.
-
-    Requires:
-        - recipient is a string or None
-
-    Ensures:
-        - return value starts with `"dm-"`
-        - the slug equals `persona_slug( recipient, sep='_' )` — canonical,
-          accent-stripped, lowercased, ASCII-only
-    """
-    return f"dm-{persona_slug( recipient, sep='_' )}"
-
-
 def _commons_ask_async_dispatch(
     topic                : str,
     body                 : str,
@@ -3899,7 +3871,7 @@ dm_send = mcp.tool( _dm_send_fn )
 # reply (POST /api/dm/respond — like dm_send but reply_to + thread_id required);
 # `dm_get` fetches one DM by id; `dm_list` lists/polls a thread or the inbox.
 # Each testable core injects HTTP (post_fn / get_fn) so unit tests need no server.
-# Design: src/rnd/v0.1.8/2026.06.16-dm-api-namespace-design.md §3 + §5
+# Design: the "DM API Namespace Design" doc §3 + §5 (removed by 8420e8b0a; recover it from 8420e8b0a^)
 #
 # NOTE (post-Phase-1 unification): once dm_send's URL becomes /api/dm/send,
 # _dm_send_impl and _dm_respond_impl can collapse into one `_dm_post_impl(path,...)`.
@@ -4807,8 +4779,11 @@ def _podcast_actor() -> str:
 @mcp.tool
 @_offloaded_tool
 def podcast_for_rick(
-    path    : str = "",
-    card_id : str = "",
+    path        : str = "",
+    card_id     : str = "",
+    script_type : str = "",
+    languages   : Union[ list[ str ], str ] = "",
+    review      : str = "",
 ) -> dict:
     """
     Ask Rick about a podcast of one file, wait for his answer, and start it on a yes.
@@ -4821,6 +4796,11 @@ def podcast_for_rick(
         path: Absolute path to a file in the main checkout of a registered repo. A file inside a
             git worktree is refused: the server cannot see it, so write it to the main checkout's io/tmp.
         card_id: A card from an earlier call, to resume instead of asking again.
+        script_type: "research_critical" (the default when empty) or "status_report", a five minute spoken status report.
+            It is recorded on the card Rick answers, so it cannot change after his yes.
+        languages: Empty for English only, or a list or comma string of codes such as ["en", "es-MX"].
+        review: Empty for the script type's own default, "ask" to stop for script review, or "one_shot" to run without any stop.
+            A status report defaults to one_shot. It is recorded on the card, so it cannot change after Rick's yes.
 
     Returns:
         { status: "started", card_id, job_id, ... } after a yes and a successful start;
@@ -4839,6 +4819,7 @@ def podcast_for_rick(
 
     Example:
         podcast_for_rick(path="/mnt/DATA01/include/www.deepily.ai/projects/lupin/io/tmp/2026.10.08-summary.md")
+        podcast_for_rick(path="/mnt/DATA01/include/www.deepily.ai/projects/lupin/io/tmp/status.md", script_type="status_report")
     """
     refusal = _refuse_borrowed_identity( "podcast_for_rick" )
     if refusal is not None: return refusal
@@ -4849,6 +4830,9 @@ def podcast_for_rick(
         actor        = _podcast_actor(),
         host_path    = path,
         card_id      = card_id,
+        script_type  = script_type,
+        languages    = languages,
+        review       = review,
     )
 
 

@@ -110,3 +110,49 @@ def test_cost_estimate_accumulates_sdk_cost_and_summarises():
         "API Calls: 2 | Tokens: 1,234 in, 5 out | Est. Cost: $0.0001 | "
         "SDK telemetry: $0.7500 (covered by Max plan — not billed per-token)"
     )
+
+
+class TestSharedAddUsage:
+    """The token tally and the price estimate that the podcast and presentation estimates share."""
+
+    def test_opus_is_priced_at_the_opus_pair( self ):
+        ce = _Cost()
+        ce.add_usage( "claude-OPUS-4", 1_000_000, 1_000_000 )
+        assert ce.estimated_cost_usd == pytest.approx( 90.0 )
+
+    def test_any_other_name_is_priced_as_sonnet( self ):
+        ce = _Cost()
+        ce.add_usage( "claude-haiku-4-5", 1_000_000, 1_000_000 )
+        assert ce.estimated_cost_usd == pytest.approx( 18.0 )
+
+    def test_tokens_calls_and_cost_accumulate_over_calls( self ):
+        ce = _Cost()
+        ce.add_usage( "sonnet", 1_000, 2_000 )
+        ce.add_usage( "opus", 3_000, 4_000 )
+        assert ( ce.total_input_tokens, ce.total_output_tokens, ce.total_api_calls ) == ( 4_000, 6_000, 2 )
+        assert ce.estimated_cost_usd == pytest.approx( 0.033 + 0.345 )
+
+
+class _NoCostClient( _Client ):
+    COST_ESTIMATE_CLASS = None
+
+
+def test_a_client_with_no_cost_estimate_class_keeps_cost_estimate_none():
+    assert _NoCostClient().cost_estimate is None
+
+
+class _OwnBannerClient( _Client ):
+    def _banner_model_line( self ):
+        return "Custom banner"
+
+
+def test_the_banner_model_line_is_the_subclass_hook( capsys ):
+    _OwnBannerClient( debug=True )
+    assert capsys.readouterr().out.splitlines() == [
+        "[StubClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)",
+        "[StubClient] Custom banner",
+    ]
+
+
+def test_the_default_banner_model_line_names_the_noun_and_the_field_model():
+    assert _Client()._banner_model_line() == "Fast model: FAST"

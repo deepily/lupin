@@ -164,7 +164,7 @@ class TestSessionEndPersonaReleaseGuard:
 # of bridge PID + cmdline-matched live listeners across ALL the session's
 # hashes.
 #
-# Per src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §4
+# Per the broadcast-miss duplicate-listener root-cause note, section 4 (removed by 8420e8b0a)
 # ═════════════════════════════════════════════════════════════════════════════
 
 import json

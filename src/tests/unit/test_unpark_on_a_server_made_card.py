@@ -617,6 +617,7 @@ def _create_notification_calls_that_pass_a_payload():
     return found, walked
 
 
+@pytest.mark.census
 def test_the_files_that_write_a_notification_payload_are_pinned():
     """Three files write a payload: the ack watcher, the un-park door and the podcast door."""
     found, walked = _create_notification_calls_that_pass_a_payload()

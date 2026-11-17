@@ -14,7 +14,7 @@ Dependency Rule:
 import json
 from typing import Optional
 
-from cosa.agents.utils.proxy_agents.base_responder import BaseResponder
+from cosa.agents.utils.proxy_agents.base_responder import BaseResponder, print_job_state_transition
 from cosa.agents.decision_proxy.base_decision_strategy import DecisionResult
 from cosa.agents.decision_proxy.config import (
     DEFAULT_ACTIVE_HOURS_START,
@@ -160,15 +160,7 @@ class DecisionResponder( BaseResponder ):
             await self._handle_decision_event( event_data )
 
         elif event_type == "job_state_transition":
-            if self.verbose:
-                # from_state / to_state are the keys emit_job_state_transition()
-                # actually sends (queue_util.py:65-71). This read from_queue /
-                # to_queue, which the event has never carried, so the "?" defaults
-                # meant this line printed "? -> ?" on every transition. Row e3417974.
-                job_id     = event_data.get( "job_id", "?" )
-                from_state = event_data.get( "from_state", "?" )
-                to_state   = event_data.get( "to_state", "?" )
-                print( f"{self.LOG_PREFIX} Job state: {job_id} {from_state} -> {to_state}" )
+            if self.verbose: print_job_state_transition( event_data, self.LOG_PREFIX )
 
         elif self.verbose:
             print( f"{self.LOG_PREFIX} Event: {event_type}" )
@@ -449,7 +441,11 @@ class DecisionResponder( BaseResponder ):
                 id                  = notification_id,
                 question            = question[ :500 ],
                 category            = result.category,
-                decision_value      = result.value or "",
+                # A shadow or defer result carries the proxy's own prediction. The case base votes on
+                # decision_value and does not filter by ratification state, so storing that guess would
+                # let the proxy cite itself as precedent: rows in state "shadow" (no ratification flag,
+                # which only shadow and defer produce) keep an empty value.
+                decision_value      = "" if ratification_state == "shadow" else ( result.value or "" ),
                 ratification_state  = ratification_state,
                 question_embedding  = embedding,
                 created_at          = datetime.now( timezone.utc ).isoformat(),

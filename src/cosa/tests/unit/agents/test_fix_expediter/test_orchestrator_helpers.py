@@ -11,7 +11,7 @@ _parse_proposal_json / _extract_last_json_array), the ClaudeAgentOptions
 builders, _apply_voice_gate_timeout_policy / _delegate_to_predictor, the
 render helpers (_render_proposal_abstract / _render_single_proposal /
 _render_git_summary / _render_validation_abstract / render_worktree_artifacts_abstract),
-_summarize_tool_use, _derive_budget_tier, _suite_abbrev,
+_derive_budget_tier, _suite_abbrev,
 _build_tfe_commit_message / _build_tfe_pr_body, _resolve_tfe_trust_level,
 _resolve_rerun_test_types.
 
@@ -520,42 +520,6 @@ class TestWorktreeAbstract:
         body = "\n".join( out )
         assert "**Branch**" not in body
         assert "**Inspect**:" in body
-
-
-# ============================================================================
-# _summarize_tool_use
-# ============================================================================
-class TestSummarizeToolUse:
-    def _block( self, name, **inp ):
-        return SimpleNamespace( name=name, input=inp )
-
-    def test_bash_with_command( self ):
-        out = TFEOrchestrator._summarize_tool_use( self._block( "Bash", command="ls -la\nsecond line" ) )
-        assert out == "Bash: ls -la"
-
-    def test_bash_empty_command( self ):
-        assert TFEOrchestrator._summarize_tool_use( self._block( "Bash", command="" ) ) == "Bash"
-
-    def test_read_with_path( self ):
-        out = TFEOrchestrator._summarize_tool_use( self._block( "Read", file_path="/a/b/c.py" ) )
-        assert out.startswith( "Read: " ) and "c.py" in out
-
-    def test_edit_empty_path( self ):
-        assert TFEOrchestrator._summarize_tool_use( self._block( "Edit", file_path="" ) ) == "Edit"
-
-    def test_grep_with_pattern( self ):
-        out = TFEOrchestrator._summarize_tool_use( self._block( "Grep", pattern="foo.*bar" ) )
-        assert out == "Grep: foo.*bar"
-
-    def test_glob_empty_pattern( self ):
-        assert TFEOrchestrator._summarize_tool_use( self._block( "Glob", pattern="" ) ) == "Glob"
-
-    def test_other_tool_name( self ):
-        assert TFEOrchestrator._summarize_tool_use( self._block( "WebFetch", url="http://x" ) ) == "WebFetch"
-
-    def test_none_input_defaults_empty( self ):
-        out = TFEOrchestrator._summarize_tool_use( SimpleNamespace( name="Bash", input=None ) )
-        assert out == "Bash"
 
 
 # ============================================================================

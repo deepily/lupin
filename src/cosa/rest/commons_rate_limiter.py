@@ -17,9 +17,10 @@ A Postgres-backed commons is the natural upgrade path if multi-worker
 becomes a need.
 """
 
-import threading
 import time
 from typing import Optional
+
+from cosa.rest.notify_rate_limiter import NotifyRateLimiter
 
 
 class CommonsBroadcastRateLimiter:
@@ -34,7 +35,7 @@ class CommonsBroadcastRateLimiter:
         - `allowed=True` means the call is within the window quota (1 per window)
         - `allowed=False` means the window's quota is exhausted; `retry_after_seconds`
           is the seconds remaining until the limiter clears for that user
-        - State is held in a process-local dict guarded by `self._lock`
+        - State is held by a `NotifyRateLimiter` (limit 1 per window), whose lock guards it
         - Entries expire lazily — only checked + pruned on the next `check_and_record`
           for that user, plus on explicit `reset()` calls
     """
@@ -52,8 +53,7 @@ class CommonsBroadcastRateLimiter:
         if window_seconds <= 0:
             raise ValueError( f"window_seconds must be positive, got {window_seconds}" )
         self.window_seconds = float( window_seconds )
-        self._last_post_by_user: dict[ str, float ] = { }
-        self._lock = threading.Lock()
+        self._core          = NotifyRateLimiter()
 
     def check_and_record( self, user_id: str ) -> tuple[ bool, Optional[ float ] ]:
         """
@@ -62,20 +62,11 @@ class CommonsBroadcastRateLimiter:
         Returns (False, retry_after_seconds) when the user is within their window.
         Otherwise it records the current time and returns (True, None).
 
-        Stale entries (older than `window_seconds`) are overwritten in place
-        when the user posts again. The dict size is therefore bounded by the
-        active-user count, not by the all-time-user count.
+        Stale entries (older than `window_seconds`) are pruned when the user
+        posts again. The state size is therefore bounded by the active-user
+        count, not by the all-time-user count.
         """
-        now = time.monotonic()
-        with self._lock:
-            last = self._last_post_by_user.get( user_id )
-            if last is not None:
-                elapsed = now - last
-                if elapsed < self.window_seconds:
-                    retry_after = self.window_seconds - elapsed
-                    return ( False, retry_after )
-            self._last_post_by_user[ user_id ] = now
-            return ( True, None )
+        return self._core.check_and_record( user_id, 1, self.window_seconds, now=time.monotonic() )
 
     def reset( self, user_id: Optional[ str ] = None ) -> None:
         """
@@ -85,13 +76,9 @@ class CommonsBroadcastRateLimiter:
         test cases). With `user_id` supplied it clears that user's entry only.
         Production code never calls it. Tests call it in setup and teardown.
         """
-        with self._lock:
-            if user_id is None:
-                self._last_post_by_user.clear()
-            else:
-                self._last_post_by_user.pop( user_id, None )
+        self._core.reset( user_id )
 
     def _peek( self, user_id: str ) -> Optional[ float ]:
         """Test-only inspection of the last-post time for a user. Returns None if unset."""
-        with self._lock:
-            return self._last_post_by_user.get( user_id )
+        hits = self._core._hits.get( user_id )
+        return hits[ -1 ] if hits else None

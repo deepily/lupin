@@ -137,7 +137,7 @@ def test_the_for_update_read_refreshes_a_row_this_session_already_holds( engine,
     goes red with `assert 'queued' == 'done'`, naming the stale value.
     """
     session = Session( engine )
-    session.autoflush = False                              # matches SessionLocal (db/database.py:247)
+    session.autoflush = False                              # matches SessionLocal (`SessionLocal` in db/database.py)
     held = session.query( TaskItem ).filter( TaskItem.id == seeded ).first()
     assert held.status == "queued"                         # the session now holds the row
 

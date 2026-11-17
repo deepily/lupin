@@ -63,12 +63,7 @@ class E2EEnv:
         return self.data / "e2e-results"
 
 
-def _write_json( path, record ):
-    """Ensures: writes the record whole or not at all."""
-    path.parent.mkdir( parents=True, exist_ok=True )
-    tmp = path.with_name( path.name + ".tmp" )
-    tmp.write_text( json.dumps( record, sort_keys=True, indent=1 ) + "\n", encoding="utf-8" )
-    os.replace( tmp, path )
+_write_json = s1._write_json
 
 
 def _check_ready( env, items ):

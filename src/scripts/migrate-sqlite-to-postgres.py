@@ -250,7 +250,7 @@ def run_migration( dry_run: bool = False ):
             print( "Starting Data Migration..." )
             print( "-" * 70 )
 
-            # Users (all)
+            # All users
             print( "\n1. Migrating users..." )
             user_count = migrate_users( sqlite_conn, session, dry_run )
             print( f"✓ Migrated {user_count} users" )

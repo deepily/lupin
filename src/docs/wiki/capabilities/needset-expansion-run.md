@@ -1,18 +1,18 @@
 ---
 capability: needset-expansion-run
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.expansion_run.read_env_file@41fa00e29a
   - lupin_mcp.reuse_needset.expansion_run.need_rows@95fc296169
-  - lupin_mcp.reuse_needset.expansion_run.control_rows@5dcd37fe81
+  - lupin_mcp.reuse_needset.expansion_run.control_rows@09f54fdafb
   - lupin_mcp.reuse_needset.expansion_run.FullResident@cfc241e68c
   - lupin_mcp.reuse_needset.expansion_run.FullResident.search@08e31de8e9
   - lupin_mcp.reuse_needset.expansion_run.FullStage@e747c07d22
   - lupin_mcp.reuse_needset.expansion_run.FullStage.__init__@6f2301c712
   - lupin_mcp.reuse_needset.expansion_run.lists_for@640a073a0b
   - lupin_mcp.reuse_needset.expansion_run.plan_of@f3155766c9
-  - lupin_mcp.reuse_needset.expansion_run.run_live@50313b9ed5
-  - lupin_mcp.reuse_needset.expansion_run.parse_args@6bdf166fcf
+  - lupin_mcp.reuse_needset.expansion_run.run_live@7785bf4f62
+  - lupin_mcp.reuse_needset.expansion_run.parse_args@89fa4cd26a
   - lupin_mcp.reuse_needset.expansion_run.collect_rows@9a2d99a23f
   - lupin_mcp.reuse_needset.expansion_run.main@cdb903d39d
   - lupin_mcp.reuse_needset.expansion_run.exit_status@e0995b5ff4

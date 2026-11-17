@@ -40,13 +40,13 @@ def repo( tmp_path ):
     return tmp_path
 
 
-LOG = [ call( "john", "j1111111", RID_A, "2026-11-02T10:00:00+00:00" ),
-        call( "john", "j2222222", RID_B, "2026-11-02T11:00:00+00:00" ),                          # a later session of the same persona
-        call( "john", "j2222222", RID_C, "2026-11-02T11:30:00+00:00", tool="fetch_similar" ),     # holds a symbol id, not a need
-        call( "john", "j2222222", RID_D, "2026-11-02T11:40:00+00:00", error="CALL_FAILED" ),     # failed
-        call( "john", "j2222222", "e" * 16, "2026-11-02T13:00:00+00:00" ),                       # after the commit
+LOG = [ call( "john", "a1111111", RID_A, "2026-11-02T10:00:00+00:00" ),
+        call( "john", "a2222222", RID_B, "2026-11-02T11:00:00+00:00" ),                          # a later session of the same persona
+        call( "john", "a2222222", RID_C, "2026-11-02T11:30:00+00:00", tool="fetch_similar" ),     # holds a symbol id, not a need
+        call( "john", "a2222222", RID_D, "2026-11-02T11:40:00+00:00", error="CALL_FAILED" ),     # failed
+        call( "john", "a2222222", "e" * 16, "2026-11-02T13:00:00+00:00" ),                       # after the commit
         call( "Chloé", "c3333333", "f" * 16, "2026-11-02T11:45:00+00:00" ),
-        call( "Mr. Radio", "m4444444", "9" * 16, "2026-11-02T11:50:00+00:00" ) ]
+        call( "Mr. Radio", "b4444444", "9" * 16, "2026-11-02T11:50:00+00:00" ) ]
 NOON = "2026-11-02T12:00:00+00:00"
 
 
@@ -60,7 +60,7 @@ def test_the_commit_facts_are_read_from_a_real_commit( repo ):
 
 def test_a_ruling_line_names_the_receipt_and_the_commit_is_never_read( tmp_path ):
     got = rt.find_tie( "m.new", [ row( ( "m.new", RID_A ) ) ], LOG, tmp_path / "not-a-repo", "0" * 40 )
-    assert got == { "tie": "ruling", "receipt_id": RID_A, "session": "j1111111", "tool": "check_exists" }, "no repository was needed, so the commit was not read"
+    assert got == { "tie": "ruling", "receipt_id": RID_A, "session": "a1111111", "tool": "check_exists" }, "no repository was needed, so the commit was not read"
 
 
 def test_a_ruling_receipt_that_is_not_in_the_log_still_ties_with_no_session( tmp_path ):
@@ -70,7 +70,7 @@ def test_a_ruling_receipt_that_is_not_in_the_log_still_ties_with_no_session( tmp
 def test_the_latest_record_wins_and_a_fetch_similar_receipt_reports_its_tool( tmp_path ):
     rows = [ row( ( "m.new", RID_A ) ), row( ( "m.other", RID_B ), ( "m.new", RID_C ) ) ]
     got  = rt.find_tie( "m.new", rows, LOG, tmp_path, "0" * 40 )
-    assert got[ "receipt_id" ] == RID_C and got[ "tool" ] == "fetch_similar" and got[ "session" ] == "j2222222", "tool tells the caller there is no need text to audit"
+    assert got[ "receipt_id" ] == RID_C and got[ "tool" ] == "fetch_similar" and got[ "session" ] == "a2222222", "tool tells the caller there is no need text to audit"
 
 
 def test_a_token_in_the_receipt_place_is_not_a_receipt_and_falls_through_to_the_heuristic( repo ):
@@ -82,7 +82,7 @@ def test_a_token_in_the_receipt_place_is_not_a_receipt_and_falls_through_to_the_
 def test_the_heuristic_takes_the_writers_latest_check_exists_receipt_before_the_commit( repo ):
     sha = commit( repo, "[LUPIN] Feat: x (John; checked and approved by Rachel)", NOON )
     got = rt.find_tie( "m.new", [], LOG, repo, sha )
-    assert got == { "tie": "heuristic", "receipt_id": RID_B, "session": "j2222222", "tool": "check_exists", "persona": "john" }
+    assert got == { "tie": "heuristic", "receipt_id": RID_B, "session": "a2222222", "tool": "check_exists", "persona": "john" }
     for other in ( "e" * 16, RID_C, RID_D, "f" * 16 ): assert got[ "receipt_id" ] != other, "not after the commit, not fetch_similar, not failed, not another persona"
 
 
@@ -91,7 +91,7 @@ def test_accents_and_spaces_are_normalised_and_a_longer_word_is_not_a_persona( r
     assert rt.find_tie( "m.new", [], LOG, repo, sha )[ "persona" ] == "chloe"
     sha = commit( repo, "[LUPIN] Fix: z (Mr. Radio)", NOON )
     got = rt.find_tie( "m.new", [], LOG, repo, sha )
-    assert got[ "persona" ] == "mr radio" and got[ "receipt_id" ] == "9" * 16 and got[ "session" ] == "m4444444"
+    assert got[ "persona" ] == "mr radio" and got[ "receipt_id" ] == "9" * 16 and got[ "session" ] == "b4444444"
     sha = commit( repo, "[LUPIN] Fix: w (Johnson)", NOON )
     assert rt.find_tie( "m.new", [], LOG, repo, sha )[ "tie" ] == "none", "a longer word that contains a persona's name is not that persona"
 

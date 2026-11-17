@@ -142,7 +142,7 @@ class TestDocViewerDirectoryVisual:
         logged_in_page.goto( f"{BASE_URL}/app/docs?path={self._FIXTURE_PATH}" )
         logged_in_page.wait_for_load_state( "networkidle" )
         # fonts.ready + 2 RAFs so the NotoColorEmoji entry-kind glyphs (📁/📄 —
-        # document-viewer.html:455/469) are loaded before the pixel snapshot
+        # the entry-kind icons in document-viewer.html) are loaded before the pixel snapshot
         # (emoji font-race, per 3c7e0aab / task_editing.py).
         logged_in_page.evaluate( "() => document.fonts.ready" )
         logged_in_page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )

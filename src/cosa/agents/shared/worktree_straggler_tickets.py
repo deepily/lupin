@@ -27,11 +27,12 @@ idle threshold, the earliest a sweep could have refused it. The row body says th
 import json
 import os
 import re
-import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from cosa.utils.atomic_json import load_json_section
+from cosa.utils.csv_text import split_csv
+from cosa.utils.main_checkout import run_git
 
 STRAGGLER_KEY_PREFIX  = "worktree:"
 STRAGGLER_AGE_HOURS   = 24.0
@@ -56,11 +57,6 @@ def straggler_key( path: str ) -> str:
 MANAGER_STAMP_KEY = "branch.{branch}.lupin-manager"
 
 
-def _plain_run( argv, cwd=None, timeout=60 ):
-    """Run argv with subprocess; the default git runner of the stamp helpers."""
-    return subprocess.run( argv, cwd=cwd, capture_output=True, text=True, timeout=timeout )
-
-
 def _manager_words( name: str ) -> str:
     """Return a persona in the store's key shape: "Mr. Radio" gives "mr radio"."""
     from lupin_mcp.persona_normalization import canonical_persona_key
@@ -78,7 +74,7 @@ def read_stamp( project_root: str, branch: str, run: Optional[ Callable ] = None
         - returns the value of git config `branch.<branch>.lupin-manager` in that repo, or None when it is
           unset, blank, or git could not be run; never raises
     """
-    run = run if run is not None else _plain_run
+    run = run if run is not None else run_git
     try:
         done = run( [ "git", "config", "--get", MANAGER_STAMP_KEY.format( branch=branch ) ], cwd=project_root, timeout=60 )
     except Exception:
@@ -96,7 +92,7 @@ def write_stamp( project_root: str, branch: str, manager: str, run: Optional[ Ca
         - returns False, changing nothing, when git fails; never raises
         - the stamp is repo config, so it outlives the worktree and the branch's move to refs/archive
     """
-    run = run if run is not None else _plain_run
+    run = run if run is not None else run_git
     try:
         done = run( [ "git", "config", MANAGER_STAMP_KEY.format( branch=branch ), manager ], cwd=project_root, timeout=60 )
     except Exception:
@@ -152,9 +148,73 @@ def spawn_registry_manager( persona: str ) -> Optional[ str ]:
         return None
 
 
+def live_unspawned_persona( persona: str ) -> Optional[ str ]:
+    """
+    Say whether a persona is held by a live seat that nobody spawned, which is a manager.
+
+    Requires:
+        - persona is a persona name in any spelling
+
+    Ensures:
+        - returns the store-shaped persona when at least one live bridge holds it, no live bridge of it
+          carries a `spawned_by`, and resolve_manager finds no lineage for any of them
+        - returns None when no live seat holds it, or any live seat of it was spawned (a worker whose
+          lineage is merely unreadable is not a manager); never raises
+    """
+    try:
+        from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager, SOURCE_UNRESOLVED
+        from lupin_cli.claude_code.hooks.lib.session_bridge import iter_live_bridges
+        key, seats = _manager_words( persona ), []
+        for _, data, _ in iter_live_bridges():
+            voice = data.get( "voice_persona" )
+            name  = voice.get( "name" ) if isinstance( voice, dict ) else None
+            sid   = data.get( "session_id" )
+            if not ( isinstance( name, str ) and sid and _manager_words( name ) == key ): continue
+            seats.append( not data.get( "spawned_by" ) and resolve_manager( sid )[ "source" ] == SOURCE_UNRESOLVED )
+        return key if seats and all( seats ) else None
+    except Exception:
+        return None
+
+
+def registered_persona_slugs() -> list:
+    """
+    The fleet's persona names, read from the key that allocates them.
+
+    Ensures:
+        - returns the names in `cc session voice persona pool` as written, e.g. ["maria", "mr radio", ...]
+        - returns [] when the config cannot be read, which leaves the first-word fallback in charge; never raises
+    """
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        pool = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( "cc session voice persona pool", default="", silent=True )
+        return split_csv( pool )
+    except Exception:
+        return []
+
+
+def leading_persona( name: str, personas: list ) -> Optional[ str ]:
+    """
+    Find the persona a tree or branch name begins with.
+
+    Requires:
+        - name is a tree name or a branch name minus its rescue stamp
+        - personas is a list of registered persona names; a space or hyphen inside one is allowed
+
+    Ensures:
+        - returns the longest persona whose slug ("mr radio" gives "mr-radio") is the whole name or is followed by a "-" in it
+        - the match is case-insensitive and is judged on whole hyphen-delimited words, so "mr" never matches "mrs-x"
+        - returns None when no persona matches
+    """
+    low = name.lower()
+    for persona in sorted( personas, key=len, reverse=True ):
+        slug = persona.strip().lower().replace( " ", "-" )
+        if slug and ( low == slug or low.startswith( slug + "-" ) ): return persona.strip().lower().replace( "-", " " )
+    return None
+
+
 def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Optional[ str ] = None,
                      run: Optional[ Callable ] = None, registry_fn: Optional[ Callable ] = None,
-                     tree_path: Optional[ str ] = None ) -> dict:
+                     tree_path: Optional[ str ] = None, personas: Optional[ list ] = None, unspawned_fn: Optional[ Callable ] = None ) -> dict:
     """
     Find the manager a tree or branch belongs to, trying each lookup in order.
 
@@ -163,16 +223,21 @@ def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Op
         - branch and project_root, when both are given, enable the stamp lookup
         - project_root, with tree_path or branch, enables the creator ledger lookup
         - registry_fn is None (spawn_registry_manager) or takes a persona and returns a manager or None
+        - unspawned_fn is None (live_unspawned_persona) or takes a persona and returns the manager that owns it or None
+        - personas is None (registered_persona_slugs) or the registered persona names the name may begin with
 
     Ensures:
         - tries, in order: the branch stamp, the creator ledger, a seat tree's own name, the spawn lineage of
-          a live worker named by the first segment of `name`
-        - returns { manager, source, tried } where source is "branch stamp", "creator ledger", "seat tree name"
-          or "spawn registry" for the lookup that answered, and manager is None with source None when none did
+          a live worker whose persona `name` begins with (longest registered persona first), then, for a registered
+          persona the registry did not place, whether a live unspawned seat holds it (a manager owns its own branches)
+        - returns { manager, source, tried } where source is "branch stamp", "creator ledger", "seat tree name",
+          "spawn registry" or "live unspawned persona" for the lookup that answered, and manager is None with
+          source None when none did
         - tried lists every lookup attempted, so a row can say what was looked up; never raises
     """
-    registry_fn = registry_fn if registry_fn is not None else spawn_registry_manager
-    tried       = []
+    registry_fn  = registry_fn if registry_fn is not None else spawn_registry_manager
+    unspawned_fn = unspawned_fn if unspawned_fn is not None else live_unspawned_persona
+    tried        = []
     if branch and project_root:
         tried.append( "branch stamp" )
         stamp = read_stamp( project_root, branch, run )
@@ -188,13 +253,21 @@ def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Op
     tried.append( "seat tree name" )
     m = SEAT_TREE_RE.match( name )
     if m: return { "manager": m.group( "manager" ).replace( "-", " " ), "source": "seat tree name", "tried": tried }
-    first = name.split( "-" )[ 0 ]
+    persona = leading_persona( name, personas if personas is not None else registered_persona_slugs() )
+    first   = persona or name.split( "-" )[ 0 ]
     tried.append( f"spawn registry for '{first}'" )
     try:
         manager = registry_fn( first ) if first else None
     except Exception:
         manager = None
     if manager: return { "manager": manager, "source": "spawn registry", "tried": tried }
+    if persona:
+        tried.append( f"live unspawned persona '{persona}'" )
+        try:
+            manager = unspawned_fn( persona )
+        except Exception:
+            manager = None
+        if manager: return { "manager": manager, "source": "live unspawned persona", "tried": tried }
     return { "manager": None, "source": None, "tried": tried }
 
 
@@ -264,6 +337,9 @@ def owner_for_branch( branch: str, project_root: Optional[ str ] = None, run: Op
     return _owner_from( resolve_creator( name, project_root=project_root, branch=branch, run=run, registry_fn=registry_fn ) )
 
 
+MAX_ROW_FILES = 30
+
+
 def compose_archive_row( outcome: dict ) -> dict:
     """
     The row fields for one archived branch whose work did not land.
@@ -275,7 +351,8 @@ def compose_archive_row( outcome: dict ) -> dict:
     Ensures:
         - returns { title, body, owner, accountable, project, correlation_key }; the key
           is "archive:" + the archive ref, one per archived tip
-        - the body names the ref, the sha, the count ahead, what landed means here, the
+        - the body names the ref, the sha, the count of commits held on no remote (the
+          ancestry count only when that count is unknown), the files they touch, the
           restore command and the 14-day deadline
     """
     branch  = outcome[ "branch" ]
@@ -286,9 +363,23 @@ def compose_archive_row( outcome: dict ) -> dict:
     ahead   = outcome.get( "commits_ahead" )
     state   = ( "could not be checked for content already on the working branch"
                 if outcome.get( "landed" ) is None else "holds commits whose content is not on the working branch" )
+    risky   = outcome.get( "unpushed_count" )
+    files   = outcome.get( "unpushed_files" )
+    target  = outcome.get( "target" )
+    if risky is None:
+        count_line = f"It is {ahead if ahead is not None else 'an unknown number of'} commits ahead of `{target}` by ancestry (the commits held on no remote could not be counted) and {state}."
+    else:
+        count_line = f"{risky} of its commits are held on neither `{target}` nor a protected remote line (main, master or a wip name), and {state}."
     lines = [
         f"The worktree janitor archived branch `{branch}` at `{ref}` (sha `{outcome.get( 'sha' )}`).",
-        f"It is {ahead if ahead is not None else 'an unknown number of'} commits ahead of `{outcome.get( 'target' )}` and {state}.",
+        count_line,
+    ]
+    if risky is not None and files is None:
+        lines.append( "The files those commits touch could not be listed." )
+    elif files:
+        lines += [ "Files those commits touch:" ] + [ f"- `{f}`" for f in files[ :MAX_ROW_FILES ] ]
+        if len( files ) > MAX_ROW_FILES: lines.append( f"- and {len( files ) - MAX_ROW_FILES} more" )
+    lines += [
         "",
         "Nothing was merged and nothing was deleted. The archive ref is removed 14 days after the day in its name.",
         f"Restore it with: `git update-ref refs/heads/{branch} {outcome.get( 'sha' )}`",
@@ -547,12 +638,14 @@ class RepositoryStragglerStore:
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.task_repository import TaskRepository
         from lupin_mcp.persona_normalization import canonical_persona_key
+        from cosa.rest.task_store_rules import filer_created_by
         with get_db() as session:
             item = TaskRepository( session ).create_item(
                 item_class          = "task",
                 title               = title,
                 project             = project,
-                created_by          = ARBITER_ACTOR,
+                # Filed by a persona, the row's chaser, with the arbiter named in brackets (row 1c56470f).
+                created_by          = filer_created_by( accountable or owner, ARBITER_ACTOR ),
                 authority           = "standing",
                 body                = body,
                 owner_persona       = canonical_persona_key( owner ) or owner,

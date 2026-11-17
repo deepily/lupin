@@ -421,7 +421,7 @@ class TestProseEmbeddingEngine( unittest.TestCase ):
         model = Mock()
         # Varied hidden values (NOT constant) so layer_norm yields a non-zero vector
         last_hidden = torch.arange( 8 ).float().reshape( 1, 1, 8 ).expand( 1, 3, 8 ).contiguous()
-        model.return_value = ( last_hidden, )                    # last_hidden_state (b, seq, hidden)
+        model.return_value = ( last_hidden, )                    # last_hidden_state, shaped batch by sequence by hidden
         engine._model = model
 
         result = engine._encode_batch( [ "search_query: hello" ] )

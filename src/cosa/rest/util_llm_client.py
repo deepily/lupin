@@ -97,9 +97,6 @@ def query_llm_in_memory( model: Any, tokenizer: Any, prompt: str, device: str="c
     tokens_per_second = len( generation_output[ 0 ][ input_length: ] ) / seconds
     print( f"Tokens per second [{round( tokens_per_second, 1 )}] input tokens [{input_length}] + xml response tokens [{len( generation_output[ 0 ][ input_length: ] )}] = total tokens i/o [{len( generation_output[ 0 ] )}]" )
     
-    # if debug and verbose:
-    #     du.print_banner( "Raw response" )
-    #     print( raw_response )
     
     # Remove the <s> and </s> tags
     response = raw_response.replace( "</s><s>", "" ).strip()

@@ -42,7 +42,7 @@ SCHEMA_VERSION               = 1
 # with markdown syntax that legitimately appears in entry bodies. The legacy
 # value `"\n---\n"` collided with markdown thematic-break syntax, silently
 # truncating any entry whose body contained `---` on its own line — see
-# src/rnd/v0.1.7/2026.05.18-body-display-truncation-investigation.md.
+# the "Body-Display Truncation in Cosa-Voice Commons" investigation (removed by 8420e8b0a; recover it from 8420e8b0a^).
 # read() supports both forms during the migration window; migration script
 # at src/scripts/migrate-commons-entry-separator.py converts legacy files.
 ENTRY_SEPARATOR              = "\n<<<__lupin_commons_entry_boundary__>>>\n"

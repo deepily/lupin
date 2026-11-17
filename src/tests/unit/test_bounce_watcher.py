@@ -13,6 +13,7 @@ src/scripts/bounce-dev-server.sh is a STUB that records its invocation — so no
 container is touched. bash + date only; no DB, no network.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -24,6 +25,8 @@ import unittest
 REPO_ROOT     = os.path.abspath( os.path.join( os.path.dirname( __file__ ), "..", "..", ".." ) )
 WATCHER       = os.path.join( REPO_ROOT, "src", "scripts", "bounce-watcher.sh" )
 POLL_SECS     = 1
+CONFIG_NAME   = "lupin-app" + ".ini"
+SWITCH_KEY    = "cron job side-services " + "enabled"
 
 
 def _wait_for( predicate, timeout=8.0, interval=0.1 ):
@@ -60,12 +63,23 @@ class TestBounceWatcher( unittest.TestCase ):
             )
         os.chmod( stub, 0o755 )
 
+        # The watcher reads the side-services switch through lupin_mcp.cron_switch_read, so the
+        # throwaway root carries the real package (a link) and a config file that holds the key.
+        for package in ( "lupin_mcp", "cosa" ): os.symlink( os.path.join( REPO_ROOT, "src", package ), os.path.join( self.root, "src", package ) )
+        self.summary  = os.path.join( self.root, "io", "jobs", "side-services", "job-summary.json" )
+        self.config   = os.path.join( self.root, "src", "conf", CONFIG_NAME )
+        self.log_file = os.path.join( self.root, "watcher.log" )
+        os.makedirs( os.path.dirname( self.config ), exist_ok=True )
+        self._set_switch( "true" )
+
         env = dict( os.environ )
-        env[ "LUPIN_ROOT" ]               = self.root
-        env[ "BOUNCE_WATCHER_POLL_SECS" ] = str( POLL_SECS )
+        env[ "LUPIN_ROOT" ]                 = self.root
+        env[ "BOUNCE_WATCHER_POLL_SECS" ]   = str( POLL_SECS )
+        env[ "BOUNCE_WATCHER_SWITCH_SECS" ] = "1"
+        self.log_handle = open( self.log_file, "w" )
         self.proc = subprocess.Popen(
             [ "bash", WATCHER ], env=env,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=self.log_handle, stderr=subprocess.STDOUT,
         )
 
     def tearDown( self ):
@@ -74,7 +88,18 @@ class TestBounceWatcher( unittest.TestCase ):
             self.proc.wait( timeout=5 )
         except subprocess.TimeoutExpired:
             self.proc.kill()
+        self.log_handle.close()
         shutil.rmtree( self.root, ignore_errors=True )
+
+    def _set_switch( self, value ):
+        """Write the config file with the switch set to value, or without the key when value is None."""
+        with open( self.config, "w" ) as f:
+            f.write( "[Lupin: Development]\n" )
+            if value is not None: f.write( f"{SWITCH_KEY} = {value}\n" )
+
+    def _log( self ):
+        with open( self.log_file ) as f:
+            return f.read()
 
     def _run_count( self ):
         if not os.path.exists( self.ran_marker ):
@@ -112,6 +137,62 @@ class TestBounceWatcher( unittest.TestCase ):
         # Exactly once — a single trigger must not re-run the bounce.
         time.sleep( POLL_SECS * 2 )
         self.assertEqual( self._run_count(), 1, "bounce ran more than once for one trigger" )
+
+    def _assert_idle_while( self, value ):
+        """With the switch at value: no heartbeat, a dropped trigger is discarded and no bounce runs."""
+        self.assertTrue( _wait_for( lambda: os.path.exists( self.heartbeat ) ) )
+        self._set_switch( value )
+        needle = "is false" if value == "false" else "is missing or holds neither"
+        self.assertTrue( _wait_for( lambda: needle in self._log(), timeout=6.0 ), self._log() )
+        time.sleep( POLL_SECS + 0.5 )
+        os.remove( self.heartbeat )
+        with open( self.trigger, "w" ) as f: f.write( str( int( time.time() ) ) )
+        self.assertTrue( _wait_for( lambda: not os.path.exists( self.trigger ) ), "trigger was left on disk" )
+        time.sleep( POLL_SECS * 2 )
+        self.assertFalse( os.path.exists( self.heartbeat ), "an idle watcher stamped a heartbeat" )
+        self.assertEqual( self._run_count(), 0, "an idle watcher ran the bounce" )
+        self.assertIn( "discarded a trigger", self._log() )
+        if value in ( "false", ):
+            self.assertFalse( os.path.exists( self.summary ), "an off switch is not a failure and wrote a failed summary" )
+        else:
+            with open( self.summary ) as f: record = json.load( f )[ "last_attempt" ]
+            self.assertEqual( ( record[ "outcome" ], record[ "stage" ] ), ( "failed", "switch" ), "an unreadable key did not turn the job's summary red" )
+
+    def test_switch_false_stamps_no_heartbeat_and_discards_a_trigger_then_true_resumes( self ):
+        self._assert_idle_while( "false" )
+        self._set_switch( "true" )
+        self.assertTrue( _wait_for( lambda: os.path.exists( self.heartbeat ), timeout=6.0 ), "the watcher did not resume" )
+        self.assertIn( "is true, so the watcher runs again", self._log() )
+        with open( self.trigger, "w" ) as f: f.write( str( int( time.time() ) ) )
+        self.assertTrue( _wait_for( lambda: self._run_count() >= 1 ), "a trigger after resuming did not bounce" )
+
+    def test_a_missing_key_idles_the_watcher_and_logs_one_error_line( self ):
+        self._assert_idle_while( None )
+        time.sleep( 2.5 )
+        self.assertEqual( self._log().count( f"ERROR: INI key '{SWITCH_KEY}'" ), 1, "the error line repeated or was absent" )
+
+    def test_a_word_that_is_neither_true_nor_false_idles_the_watcher( self ):
+        self._assert_idle_while( "yes" )
+
+
+class TestBounceWatcherWithNoConfigFile( unittest.TestCase ):
+
+    def test_an_unreadable_config_path_never_reads_as_on( self ):
+        root = tempfile.mkdtemp( prefix="watcher-test-noconfig-" )
+        try:
+            os.makedirs( os.path.join( root, "src", "scripts" ) )
+            for package in ( "lupin_mcp", "cosa" ): os.symlink( os.path.join( REPO_ROOT, "src", package ), os.path.join( root, "src", package ) )
+            env  = dict( os.environ, LUPIN_ROOT=root, BOUNCE_WATCHER_POLL_SECS="1", BOUNCE_WATCHER_SWITCH_SECS="1" )
+            proc = subprocess.Popen( [ "bash", WATCHER ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+            try:
+                time.sleep( 3 )
+                self.assertFalse( os.path.exists( os.path.join( root, "io", "bounce", "watcher-heartbeat" ) ) )
+                self.assertTrue( os.path.exists( os.path.join( root, "io", "jobs", "side-services", "job-summary.json" ) ), "a missing file did not write the failed summary" )
+            finally:
+                proc.terminate()
+                proc.wait( timeout=5 )
+        finally:
+            shutil.rmtree( root, ignore_errors=True )
 
 
 def _read_int( path ):

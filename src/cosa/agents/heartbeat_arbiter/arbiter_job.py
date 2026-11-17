@@ -32,7 +32,7 @@ import datetime
 import json
 import os
 import uuid
-from typing import Callable, List, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, List, Optional, Protocol, runtime_checkable
 
 from cosa.agents.agentic_job_base import AgenticJobBase
 # Reuse the Hook-Poker's clock seam (DRY — same SystemClock / FakeClock pattern).
@@ -96,11 +96,11 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
 # arbiter resurfaces a dark session's aged user-gate to Rick.
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path, declared_work_owed, is_honored
-from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates, derive_user_chase_until
+from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates, derive_user_chase_until, blocked_by_has_user
 # b33c8e96: cross-package SINGLE source of truth for the arbiter-poke sentinel. Both
 # poke bodies below DERIVE their prefix from this constant so the emitter (here) and
 # the Stop-hook matcher (is_heartbeat_poke_prompt) cannot drift — a wrapped arbiter
-# poke must NOT reset the recipient's Stop-hook poke-cap (user_prompt_submit.py:86).
+# poke must not reset the recipient's Stop-hook poke-cap (the reset_poke_count guard in user_prompt_submit.py).
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
 # Proactive-manager A2/A3 (fcb5dbc0): the PURE D4 operator-gate urgency router — the
 # arbiter is its single thin consumer (interrupt urgent / digest normal / queue low).
@@ -702,6 +702,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         monopolize   : bool = False,
         debug        : bool = False,
         verbose      : bool = False,
+        switch       : Optional[ Any ] = None,                        # row c38a49bd: a TickSwitch checked before every poll; None means always on
     ) -> None:
         """
         Construct the arbiter consumer job.
@@ -920,6 +921,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # sandbox worktrees; preserves WIP + keeps branches; never pushes). A
         # None seam is visibly inert, never a hidden behavior change.
         self._worktree_janitor_fn     = worktree_janitor_fn
+        self._switch                  = switch
         # ee59d5ed orphan-bridge janitor: per-poll lineage-independent reap of
         # CONFIRMED-dead orphan bridges (dual-confirm + debounce inside the seam).
         # None → visibly inert (today's behavior); the :8001 factory wires it.
@@ -2321,11 +2323,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     def _prune_recent_pings( self, now ):
         """Drop recorded pings older than the global-cap window (rolling cap)."""
-        cutoff = self.ping_cap_window_seconds
-        self._recent_pings = [
-            ts for ts in self._recent_pings
-            if ( now - ts ).total_seconds() < cutoff
-        ]
+        self._recent_pings = ping_throttle.prune_window( self._recent_pings, now, self.ping_cap_window_seconds, strict=True )
 
     # NOTE (2b-2 Part-6 #6): the per-tick roster broadcast (formerly
     # `_surface_to_manager` → post(ROSTER_TOPIC)) is DROPPED. A roster is PULL
@@ -2761,11 +2759,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return False
         if item.get( "gate_class" ) == "operator":
             return True
-        if item.get( "status" ) == "blocked":
-            for ref in ( item.get( "blocked_by" ) or [ ] ):
-                if isinstance( ref, dict ) and ref.get( "kind" ) == "user":
-                    return True
-        return False
+        return item.get( "status" ) == "blocked" and blocked_by_has_user( item.get( "blocked_by" ) )
 
     @staticmethod
     def _item_is_review_gate_hold( item ):
@@ -4590,6 +4584,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - exits on self._cancel_requested or elapsed >= max_duration_seconds
+            - with a switch, a tick where switch.allowed() is False skips the poll (and so the
+              janitor and pokes inside it) and still sleeps; the error streak is left as it was
             - a per-poll exception is swallowed (the observer invariant: one bad
               poll never kills the arbiter) and demoted to a render-sink log; it
               escalates to Rick (notify_fn) only when persistent
@@ -4605,9 +4601,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 return self._exit_summary( "hard-cap" )
 
             try:
-                self._poll_once()
-                self._poll_error_streak    = 0          # clean poll → reset the streak
-                self._poll_error_escalated = False
+                if self._switch is None or self._switch.allowed():   # row c38a49bd: a switched-off tick skips the poll and still sleeps
+                    self._poll_once()
+                    self._poll_error_streak    = 0      # clean poll → reset the streak
+                    self._poll_error_escalated = False
             except Exception as e:                      # observer invariant — never die on one poll
                 self._on_poll_error( e )
 

@@ -90,10 +90,6 @@ def _stream( text="", model="claude-sonnet-4-6", tools=( "Edit", "Edit", "Bash" 
 
 # ── small helpers ───────────────────────────────────────────────────────────────
 
-def test_ts_is_a_utc_compact_timestamp( harness ):
-    assert re.fullmatch( r"\d{8}T\d{6}Z", harness._ts() )
-
-
 def test_banner_frames_the_title_with_72_equals( harness, capsys ):
     harness._banner( "HELLO" )
     lines = capsys.readouterr().out.splitlines()

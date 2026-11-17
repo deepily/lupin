@@ -1,6 +1,6 @@
 ---
 capability: reuse-stage-two-fit-and-report
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_stage2_fit.fit_policy@60a559dd13
   - lupin_mcp.reuse_stage2_fit.fit_old@0766cedfc3

@@ -116,17 +116,24 @@ JOB_ARG_CONTRACTS = {
             # fuzzy_file_match handler below fires and asks which document was meant.
             "audience"         : "audience",
             "audience_context" : "audience_context",
+            "script_type"      : "script_type",
+            "review"           : "review",
         },
         "fallback_questions" : {
             "research"         : "Which research document should I use for the podcast? Describe it or say the filename.",
             "languages"        : "What languages for the podcast? Use ISO codes like 'en' for English, 'es-MX' for Mexican Spanish, or say the language name.",
             "audience"         : "Who is the target audience? Options: beginner, intermediate, expert, or academic.",
             "audience_context" : "Any additional context about the audience? Say 'none' to skip.",
+            "review"           : "Should I stop for your review of the podcast script? Say 'ask' to review it first, or 'one_shot' to go straight to audio.",
         },
+        # review "ask" is the research_critical profile's own default (script_types.py), so
+        # the pair ( script_type, review ) below matches what an unanswered podcast gets.
         "fallback_defaults" : {
-            "languages"        : "en,es-MX",
+            "languages"        : "en",
             "audience"         : "academic",
             "audience_context" : "none",
+            "script_type"      : "research_critical",
+            "review"           : "ask",
         },
         "special_handlers"   : {
             "research" : "fuzzy_file_match",
@@ -158,6 +165,7 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "budget",
             "audience"         : "audience",
             "audience_context" : "audience_context",
+            "script_type"      : "script_type",
             # SEED CONTEXT FOR THE RESEARCH LEG, row 5726e3c5. This command researches a
             # query and THEN builds the artefact, so `source_document` means here exactly
             # what it means on deep research -- the research leg reads it first.
@@ -184,7 +192,8 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "no limit",
             "audience"         : "academic",
             "audience_context" : "none",
-            "languages"        : "en,es-MX",
+            "languages"        : "en",
+            "script_type"      : "research_critical",
         },
         # WHERE A source_document MAY BE LOOKED FOR when the expeditor resolves one from
         # prose. Declared beside the argument it belongs to, per row a1420538.
@@ -316,6 +325,7 @@ JOB_ARG_CONTRACTS = {
         "fallback_defaults" : {
             "budget"                  : "default",
             "target_duration_minutes" : "default",
+            "target_slide_count"      : "default",
             "theme"                   : "default",
             "audience"                : "general",
             "audience_context"        : "none",
@@ -393,7 +403,7 @@ JOB_ARG_CONTRACTS = {
     "agent router go to test fix expediter" : {
         # START a fresh TFE run — SYSTEM-TRIGGERED, not voice. The test-suite
         # completion watchdog dispatches this command
-        # (test_suite_completion_watchdog.py:259) with source_test_suite_job_id =
+        # (_dispatch_tfe in test_suite_completion_watchdog.py) with source_test_suite_job_id =
         # the just-failed job's id_hash. That arg is a job hash no user can speak, so
         # this command is EXEMPT from the router prompt (the drift-guard exemption
         # carries the stated reason + the still-trained residual). It keeps a registry

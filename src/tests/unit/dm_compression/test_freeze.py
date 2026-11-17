@@ -590,8 +590,8 @@ class TestSpanResolution:
         ( "file.py:12:34",                  "file.py:12:34" ),
         ( "config.py:297,298",              "config.py:297,298" ),
         # Citations that END A SENTENCE. The closing guard used to be
-        # `(?![\w.])`, which refused to match `judge.py:572.` at all and matched
-        # `judge.py:249-256.` as `judge.py:249` — reintroducing the truncation
+        # `(?![\w.])`, which refused to match `judge.py:572.` at all and matched  doc-lint: waive line-pointer -- sample citation quoted as fixture data
+        # `judge.py:249-256.` as `judge.py:249` — reintroducing the truncation  doc-lint: waive line-pointer -- sample citation quoted as fixture data
         # bug whenever a citation landed at the end of a sentence. 21 of 647
         # corpus citations do exactly that.
         ( "the leak is at judge.py:572.",        "judge.py:572" ),

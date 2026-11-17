@@ -26,9 +26,11 @@ that allocated the memory.
 """
 
 import os
+import pathlib
 import re
 import subprocess
 import time
+from typing import Optional
 
 # Default alert threshold. Well under the 24G containment cap so the line lands
 # BEFORE the kill, leaving the transcript readable.
@@ -67,6 +69,133 @@ _CGROUP_PATH_RE = re.compile( r"^0::(?P<path>/.*)$", re.MULTILINE )
 _ANON_RE = re.compile( r"^anon\s+(\d+)$", re.MULTILINE )
 _VMRSS_RE  = re.compile( r"^VmRSS:\s+(\d+)\s+kB", re.MULTILINE )
 _PANE_RE   = re.compile( r"^TMUX_PANE=(.+)$", re.MULTILINE )
+
+
+# ── The on/off switch (row c38a49bd). This module is deployed as a lone copy and run by the system ──
+# ── python, so it cannot import lupin_mcp. It carries its own copy of the parse rule, and ───────────
+# ── test_cc_memory_watch_switch.py fails when the copy and the original differ. ──────────────
+
+SWITCH_KEY = "cron job side-services enabled"
+
+
+def parse_switch( raw ) -> Optional[ bool ]:
+    """
+    Read a switch value as on, off or unknown.
+
+    Requires:
+        - raw is whatever a reader found for the key: a string, or None when it found nothing
+
+    Ensures:
+        - returns True for `true` and False for `false`, in any case and with spaces around
+        - returns None for anything else: None, a blank value, `yes`, `1` or a non-string
+        - never raises
+    """
+    if not isinstance( raw, str ):
+        return None
+    lowered = raw.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    return None
+
+
+def read_switch( ini_path, key=SWITCH_KEY ):
+    """
+    Read the side-services switch fresh from the configuration file on disk.
+
+    Requires:
+        - ini_path names the configuration file
+
+    Ensures:
+        - returns True or False for a value `parse_switch` accepts
+        - returns None when the file is unreadable, or the key is absent, defined twice or holds another word
+        - a line defines the key only when the key starts in column 0, as in the main reader
+        - never raises
+    """
+    try:
+        with open( ini_path, "r", encoding="utf-8" ) as handle: lines = handle.read().split( "\n" )
+    except ( OSError, UnicodeDecodeError ):
+        return None
+    pattern = re.compile( r"^" + re.escape( key ) + r"([ \t]*)=(.*)$" )
+    found   = [ match.group( 2 ).strip() for match in ( pattern.match( line ) for line in lines ) if match ]
+    return parse_switch( found[ 0 ] ) if len( found ) == 1 else None
+
+
+def write_failed_summary( ini_path, runner=subprocess.run, python=None, log=print ):
+    """
+    Ask the repository to write this job's failed summary.
+
+    An unreadable switch must turn the jobs page red. This module cannot import lupin_mcp, so it runs the
+    repository's own check in a child process.
+
+    Requires:
+        - ini_path is the main configuration file, three folders below the checkout root (root/src/conf/<file>)
+        - runner takes an argv and the keywords env, capture_output, text and timeout, and returns an object with returncode
+
+    Ensures:
+        - returns True when the child exited 0
+        - returns False, and logs why, when the child cannot start, times out, exits non-zero or the path is too short to name a root
+        - never raises
+    """
+    try:
+        root     = str( pathlib.Path( ini_path ).resolve().parents[ 2 ] )
+        python   = python or ( os.path.join( root, ".venv", "bin", "python" ) if os.path.exists( os.path.join( root, ".venv", "bin", "python" ) ) else "python3" )
+        argv     = [ python, "-m", "lupin_mcp.cron_switch_read", "--job", "side-services", "--ini", str( ini_path ), "--root", root ]
+        done     = runner( argv, env={ **os.environ, "LUPIN_ROOT": root, "PYTHONPATH": os.path.join( root, "src" ) }, capture_output=True, text=True, timeout=60 )
+    except ( IndexError, OSError, subprocess.SubprocessError ) as error:
+        log( f"cc-memory-watch: could not write the failed summary: {type( error ).__name__}: {error}" )
+        return False
+    if done.returncode != 0: log( f"cc-memory-watch: the failed-summary check exited {done.returncode}" )
+    return done.returncode == 0
+
+
+class SwitchGate:
+    """
+    The check the sampling loop makes at the start of every pass.
+
+    The key is read fresh each time, so flipping it takes effect on the next pass with no restart.
+    The loop stays alive when it is off. One line is logged each time the answer changes.
+    """
+
+    def __init__( self, ini_path, log=print, report=write_failed_summary ):
+        """
+        Remember where the switch lives and where to log a change.
+
+        Requires:
+            - ini_path names the configuration file, or is None for a hand run that has no gate
+            - log takes one string
+            - report takes the file's path and writes the job's failed summary
+
+        Ensures:
+            - nothing is read until the first `allowed()` call
+        """
+        self.ini_path = ini_path
+        self.log      = log
+        self.report   = report
+        self.last     = "unread"
+
+    def allowed( self ):
+        """
+        Say whether this pass may sample.
+
+        Ensures:
+            - returns True with no gate (ini_path None)
+            - returns True when the key reads `true`; False when it reads `false`
+            - returns False when the key is missing, defined twice, unreadable or holds another word:
+              there is no default in code, and each such pass asks `report` to write the failed summary
+            - logs one line each time the answer changes
+        """
+        if self.ini_path is None: return True
+        value = read_switch( self.ini_path )
+        state = { True: "on", False: "off", None: "unreadable" }[ value ]
+        if state != self.last:
+            if state == "on" and self.last != "unread": self.log( f"cc-memory-watch: INI key '{SWITCH_KEY}' is true, so sampling resumes" )
+            if state == "off": self.log( f"cc-memory-watch: INI key '{SWITCH_KEY}' is false, so sampling is skipped until it is true" )
+            if state == "unreadable": self.log( f"cc-memory-watch: ERROR: INI key '{SWITCH_KEY}' is missing or holds neither true nor false, so sampling is skipped" )
+            self.last = state
+        if state == "unreadable": self.report( self.ini_path )
+        return value is True
 
 
 class Sample:
@@ -526,6 +655,7 @@ def main( argv=None ):
     parser.add_argument( "--log",          default=None, help="append alerts here as well as stdout" )
     parser.add_argument( "--once",         action="store_true", help="take one pass and exit" )
     parser.add_argument( "--report",       action="store_true", help="print every process seen, not just alerts" )
+    parser.add_argument( "--ini",          default=None, help="the configuration file whose `cron job side-services enabled` key gates each pass; none means no gate" )
 
     args = parser.parse_args( argv )
 
@@ -544,7 +674,18 @@ def main( argv=None ):
         if args.log:
             with open( args.log, "a" ) as handle: handle.write( line + "\n" )
 
+    gate = SwitchGate( args.ini, report=write_failed_summary )
+
     while True:
+
+        # The switch is read fresh at the start of every pass; off skips the sampling but the loop stays alive.
+        if not gate.allowed():
+            if args.once: return 0
+            try:
+                time.sleep( args.interval )
+            except KeyboardInterrupt:
+                return 0
+            continue
 
         # ONE clock read per pass, shared by the alert lines and the report lines, so
         # a pass is a single instant in both streams rather than two nearby ones.

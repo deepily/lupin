@@ -176,6 +176,7 @@ def test_ledger_has_one_row_per_path( ledger ):
     assert len( paths ) == len( set( paths ) )
 
 
+@pytest.mark.census
 def test_ledger_covers_every_rnd_doc_present_at_its_sha( root, ledger ):
     """
     The population is git's, restricted to what existed at the ledger's newest sha.

@@ -31,31 +31,12 @@ class MathAgent( AgentBase ):
         
         super().__init__( df_path_key=None, question=question, question_gist=question_gist, last_question_asked=last_question_asked, routing_command=routing_command, push_counter=push_counter, user_id=user_id, user_email=user_email, session_id=session_id, debug=debug, verbose=verbose, auto_debug=auto_debug, inject_bugs=inject_bugs )
 
-        # du.print_banner( "MathAgent.__init__()" )
         if self.debug and self.verbose: print( "¡OJO! MathAgent is using last_question_asked because it wants all the specificity contained within the voice to text transcription" )
 
         self.prompt = self.prompt_template.format( question=self.last_question_asked )
         self.xml_response_tag_names   = [ "thoughts", "brainstorm", "evaluation", "code", "example", "returns", "explanation" ]
     
-        # self.serialize_prompt_to_json = self.config_mgr.get( "agent todo list serialize prompt to json", default=False, return_type="boolean" )
-        # self.serialize_code_to_json   = self.config_mgr.get( "agent todo list serialize code to json",   default=False, return_type="boolean" )
     
-    def restore_from_serialized_state( self, file_path: str ) -> None:
-        """
-        Restore math agent state from JSON file.
-
-        Requires:
-            - file_path points to valid JSON file
-
-        Ensures:
-            - Raises NotImplementedError (not implemented)
-
-        Raises:
-            - NotImplementedError always
-        """
-
-        raise NotImplementedError( "MathAgent.restore_from_serialized_state() not implemented" )
-
     @staticmethod
     def apply_formatting( raw_output: str, config_mgr, debug: bool = False, verbose: bool = False ):
         """

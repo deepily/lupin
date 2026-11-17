@@ -18,8 +18,8 @@ This shows ONLY the changed sections. Apply to cosa_voice_mcp.py.
 # ============================================================================
 
 # --- OLD ---
-# SESSION_ID = uuid.uuid4().hex[:8]  # 8-char hex, e.g., "a1b2c3d4"
-# SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
+# SESSION_ID = uuid.uuid4().hex[:8]  # 8-char hex, e.g., "a1b2c3d4" # doc-lint: waive commented-out-code -- the OLD block this patch replaces, shown beside the NEW one
+# SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID ) # doc-lint: waive commented-out-code -- the OLD block this patch replaces, shown beside the NEW one
 
 # --- NEW ---
 from session_bridge import get_claude_session_id, get_session_metadata

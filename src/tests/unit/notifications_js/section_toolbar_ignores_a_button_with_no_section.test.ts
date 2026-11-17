@@ -280,3 +280,13 @@ test( "47759aa3 the next save drops the 'undefined' key without any migration co
     `the rewritten save still carries the polluted key: ${JSON.stringify( state )}` );
   assert.deepEqual( Object.keys( state ).sort(), [ ...SECTIONS ].sort() );
 } );
+
+
+test( "61070c08 the toolbar says it is bound only once its handlers are, so a script can wait on it", () => {
+  const toolbar = document.getElementById( "section-toolbar" )!;
+  assert.equal( toolbar.dataset.bound, undefined, "the fixture starts unbound" );
+
+  mountToolbar();
+
+  assert.equal( toolbar.dataset.bound, "true", "initToolbar must mark the toolbar bound after it binds" );
+} );

@@ -13,7 +13,7 @@ class TestDefaults:
 
     def test_default_instantiation( self ):
         config = TestFixExpediterConfig()
-        assert config.lead_model == "claude-opus-4-6"
+        assert config.lead_model == "claude-opus-5"
         assert config.worker_model == "claude-sonnet-4-6"
         # Session 1cfcdf73 (2026-04-10): default flipped from False to True.
         assert config.auto_fix_enabled is True

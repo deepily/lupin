@@ -165,7 +165,7 @@ class TestLiveNotifyDedup:
 
     def test_default_log_fn_used_on_dedup( self, capsys ):
         clk, pushed = FixedClock(), [ ]
-        live = make_live_notify_fn( _queued_transport( pushed ), dedup_window_seconds=900, clock=clk )  # log_fn=None
+        live = make_live_notify_fn( _queued_transport( pushed ), dedup_window_seconds=900, clock=clk )  # no log function passed
         live( "z" ); live( "z" )                                          # 2nd is deduped → default log
         out = capsys.readouterr().out
         assert "live_notify_deduped" in out and pushed == [ "z" ]

@@ -131,3 +131,49 @@ class TestBayesianLogisticRegression:
 
         rate = model.posterior_mean_rate()
         assert rate > 0.70, f"Expected rate > 0.70, got {rate:.4f}"
+
+
+class TestCalibrationPairs:
+    """The model logs each prediction made before it learned the point."""
+
+    def test_pair_is_the_prediction_before_the_update( self ):
+        """The first pair is the prior prediction (0.5); the second is the one made after an update."""
+        model = BayesianLogisticRegression( n_features=4 )
+        x     = _positive_feature()
+        after_none = model.predict( x )[ 0 ]
+        model.update( x, 1 )
+        after_one = model.predict( x )[ 0 ]
+        model.update( x, 0 )
+        assert model.calibration_pairs == [ ( after_none, 1 ), ( after_one, 0 ) ]
+        assert after_none == 0.5 and after_one > 0.5
+
+    def test_pairs_keep_only_the_newest( self ):
+        """Past the cap, the oldest pairs are dropped and the newest kept."""
+        model = BayesianLogisticRegression( n_features=4 )
+        for i in range( 505 ):
+            model.update( _positive_feature(), i % 2 )
+        assert len( model.calibration_pairs ) == 500
+        assert model.calibration_pairs[ -1 ][ 1 ] == 504 % 2
+
+    def test_pairs_survive_a_roundtrip( self ):
+        """to_dict then from_dict restores the pairs, JSON-safe."""
+        import json
+        model = BayesianLogisticRegression( n_features=4 )
+        for _ in range( 3 ): model.update( _positive_feature(), 1 )
+        restored = BayesianLogisticRegression.from_dict( json.loads( json.dumps( model.to_dict() ) ) )
+        assert restored.calibration_pairs == model.calibration_pairs
+
+    def test_old_saved_model_without_pairs_still_loads( self ):
+        """A dict saved before pairs existed restores with an empty list."""
+        model = BayesianLogisticRegression( n_features=4 )
+        model.update( _positive_feature(), 1 )
+        old_shape = model.to_dict()
+        del old_shape[ "calibration_pairs" ]
+        restored = BayesianLogisticRegression.from_dict( old_shape )
+        assert restored.calibration_pairs == [] and restored.n_observations == 1
+
+    def test_sample_rate_is_a_probability( self ):
+        """A posterior draw gives a rate strictly between 0 and 1."""
+        model = BayesianLogisticRegression( n_features=4 )
+        for _ in range( 5 ): model.update( _positive_feature(), 1 )
+        assert 0.0 < model.sample_rate( _positive_feature() ) < 1.0

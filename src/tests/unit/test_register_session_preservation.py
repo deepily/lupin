@@ -207,7 +207,7 @@ class TestPreservationCases:
     # register_session.py gate-3. See:
     #   - src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md §0
     #   - src/tests/unit/test_session_end.py::TestSessionEndPersonaReleaseGuard
-    #     (covers the actual fix at session_end.py:224-226)
+    #     (covers the actual fix in session_end.py)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -216,7 +216,7 @@ class TestPreservationCases:
 # The Phase 1.1 stderr prints (gate-result, gate-2-fail, preserve-check) were
 # diagnostic instrumentation added to capture which gate failed on /clear.
 # They served their purpose in Phase 1.2 (proved gate-3 fired correctly,
-# pointed to upstream session_end.py:224 release-on-clear bug). With the §0.4
+# pointed to the upstream session_end.py release-on-clear bug). With the §0.4
 # reason-guard fix landed in session_end.py and live-verified, the diagnostic
 # prints + their tests were removed in Phase 1F.
 # See: src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md §0.5
@@ -259,7 +259,7 @@ class TestReleaseAndReAssignWiring:
 # The COSA_VOICE_MANAGERS__<PROJECT> roster must reach the allocate endpoint on
 # EVERY Phase 4.5 call — chain or plain random — or the reserve only protects
 # chained boots (Tiberius's build-time check).
-# Design: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
+# Design: the fleet-roster env-file and reserve-from-random note (removed by 8420e8b0a)
 #         planning-is-prompting/src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María):
 #         the roster moved to the user-level ~/.claude/fleet-roster.env; the
 #         COSA_VOICE_MANAGERS__* VAR contract asserted here is UNCHANGED by that move.
@@ -438,7 +438,7 @@ class TestCarryForwardReadModifyWrite:
 # ═════════════════════════════════════════════════════════════════════════════
 # TestCompactionAndResumeCarryForward — 2026-05-22 carry-forward gate broadening
 # ═════════════════════════════════════════════════════════════════════════════
-# The carry-forward gate at register_session.py:789 was keyed on
+# The carry-forward gate in register_session.py was keyed on
 # is_context_clear, which is True only when the transient session UUID changes.
 # A context COMPACTION (and a plain resume / --continue double-fire) can keep
 # the same transient id, leaving is_context_clear False — so the persona was
@@ -449,7 +449,7 @@ class TestCarryForwardReadModifyWrite:
 # tests pin that behavior — the lockfile + bridge carry the SAME id that
 # read_hook_input returns, so is_context_clear stays False.
 #
-# Design: src/rnd/v0.1.7/2026.05.22-voice-persona-request-tool-and-compaction-carry-forward.md
+# Design: the voice-persona request tool and compaction carry-forward note (removed by 8420e8b0a)
 
 class TestCompactionAndResumeCarryForward:
     """Carry-forward fires on a same-transient-id lifecycle event (compaction / resume)."""

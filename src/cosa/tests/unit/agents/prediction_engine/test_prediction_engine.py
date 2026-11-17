@@ -154,10 +154,12 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine cbr top k"                     : 9,
                 "prediction engine cbr similarity threshold"      : 0.8,
                 "prediction engine confidence threshold"          : 0.65,
+                "prediction engine yes no no margin"              : 2.5,
                 "prediction engine lancedb table"                 : "tbl_x",
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
                 "prediction engine open ended cbr threshold"      : 0.9,
+                "prediction engine open ended match threshold"    : 0.66,
                 "prediction engine open ended llm spec key"       : "spec/x",
                 "prediction engine open ended prompt template"    : "/src/conf/p.txt",
                 "prediction hint vote approved weight"            : 2.0,
@@ -175,11 +177,13 @@ def test_init_with_config_mgr_reads_keys():
     assert eng.lancedb_table == "tbl_x"
     assert eng._server_port == 1234
     assert eng.open_ended_cbr_threshold == 0.9
+    assert eng.open_ended_match_threshold == 0.66
     assert eng._llm_spec_key == "spec/x"
     assert eng.hint_vote_approved_weight == 2.0
     assert eng.hint_vote_rejected_weight == 2.0
     assert eng.hint_voting_enabled is True
     assert eng.hint_vote_min_confidence_threshold == 0.5
+    assert eng.yes_no_no_margin == 2.5
     # debug = config(False) OR debug(True) = True
     assert eng.debug is True
     PredictionEngine.reset()
@@ -357,7 +361,7 @@ def test_yes_no_split_vote_confidence_and_qualifier( engine, monkeypatch ):
 
 
 # ---------------------------------------------------------------------------
-# _extract_valid_options (static)
+# _extract_valid_options, static
 # ---------------------------------------------------------------------------
 
 def test_extract_valid_options_none():
@@ -521,15 +525,16 @@ def test_mc_single_select_no_valid_vote_is_cold_start( engine, monkeypatch ):
     assert r.metadata[ "reason" ] == "no_valid_options_after_filtering"
 
 
-def test_mc_header_not_in_options_kept_as_is( engine, monkeypatch ):
-    """A predicted header absent from the options structure is preserved (backward compat)."""
+def test_mc_header_not_in_options_is_not_predicted( engine, monkeypatch ):
+    """A past header the new question lacks is never predicted."""
     cases = [ _case( 90.0, decision_value=json.dumps( { "answers": { "Cache": "Redis" } } ) ) ]
     monkeypatch.setattr( engine, "_get_embedding_store", lambda: FakeStore( cases=cases ) )
     options = { "questions": [
         { "header": "DB", "multi_select": False, "options": [ { "label": "PostgreSQL" } ] },
     ] }
     r = engine._predict_multiple_choice( "m", "approach", [ 0.1 ], options )
-    assert r.predicted_value == { "answers": { "Cache": "Redis" } }
+    assert r.predicted_value is None
+    assert r.metadata[ "reason" ] == "no_valid_mc_cases"
 
 
 def test_mc_skips_unparseable_case_then_uses_valid( engine, monkeypatch ):
@@ -545,7 +550,7 @@ def test_mc_skips_unparseable_case_then_uses_valid( engine, monkeypatch ):
 
 
 # ---------------------------------------------------------------------------
-# _tally_multi_select_votes (direct)
+# _tally_multi_select_votes, called directly
 # ---------------------------------------------------------------------------
 
 def test_tally_multi_select_threshold_and_fallback( engine ):
@@ -608,7 +613,7 @@ def test_open_ended_llm_synthesis_tier2( engine, monkeypatch ):
     r = engine._predict_open_ended( "new question", "input", [ 0.1 ] )
     assert r.strategy == cfg.STRATEGY_LLM_SYNTHESIS
     assert r.predicted_value == "use kebab-case"
-    assert r.confidence == pytest.approx( 0.7 )         # min(0.9, 0.7)
+    assert r.confidence == pytest.approx( 0.7 )         # the lower of 0.9 and 0.7
     assert r.metadata[ "tier" ] == "llm_synthesis"
 
 
@@ -909,6 +914,22 @@ def test_cosine_similarity_of_unit_vectors():
     assert PredictionEngine._cosine_similarity( [ 1.0, 0.0 ], [ 0.0, 1.0 ] ) == pytest.approx( 0.0 )
 
 
+def test_cosine_similarity_of_non_unit_vectors_is_true_cosine():
+    # Row 6a1a958f: a bare dot product gives 12.0 here, which is above 1
+    assert PredictionEngine._cosine_similarity( [ 3.0, 0.0 ], [ 4.0, 0.0 ] ) == pytest.approx( 1.0 )
+    assert PredictionEngine._cosine_similarity( [ 3.0, 4.0 ], [ 4.0, 3.0 ] ) == pytest.approx( 24.0 / 25.0 )
+    assert PredictionEngine._cosine_similarity( [ 2.0, 0.0 ], [ -5.0, 0.0 ] ) == pytest.approx( -1.0 )
+
+
+def test_cosine_similarity_zero_vector_is_zero():
+    assert PredictionEngine._cosine_similarity( [ 0.0, 0.0 ], [ 1.0, 2.0 ] ) == 0.0
+
+
+def test_cosine_similarity_clamps_rounding_overshoot():
+    v = [ 0.1, 0.2, 0.3 ]
+    assert PredictionEngine._cosine_similarity( v, v ) <= 1.0
+
+
 # ---------------------------------------------------------------------------
 # _enrich_with_embedding_similarity
 # ---------------------------------------------------------------------------
@@ -1114,6 +1135,23 @@ def test_record_outcome_open_ended_enriches( wired_engine, monkeypatch ):
     assert enriched == [ cfg.RESPONSE_TYPE_OPEN_ENDED ]
 
 
+def test_record_outcome_scores_open_ended_at_the_engine_match_threshold( wired_engine, monkeypatch ):
+    """record_outcome hands the engine's own match threshold to get_comparator."""
+    seen = {}
+    def fake_get_comparator( response_type, actual_value=None, open_ended_threshold=None ):
+        seen[ "threshold" ] = open_ended_threshold
+        return lambda predicted, actual: ( True, {} )
+    session = _FakeSession()
+    _patch_db( monkeypatch, session, [] )
+    monkeypatch.setattr( wired_engine, "_store_decision", lambda *a: None )
+    monkeypatch.setattr( wired_engine, "_enrich_with_embedding_similarity", lambda *a: None )
+    monkeypatch.setattr( "cosa.agents.prediction_engine.prediction_engine.get_comparator", fake_get_comparator )
+    wired_engine.open_ended_match_threshold = 0.66
+    pr = PredictionResult( response_type="open_ended", category="c", strategy="x", predicted_value="hi" )
+    wired_engine.record_outcome( "n9", pr, "hi", cfg.RESPONSE_TYPE_OPEN_ENDED )
+    assert seen[ "threshold" ] == 0.66
+
+
 def test_record_outcome_normalizes_non_str_non_dict_actual( wired_engine, monkeypatch ):
     session = _FakeSession()
     repos   = []
@@ -1273,3 +1311,56 @@ def test_get_accuracy_summary_exception_returns_error_dict( wired_engine, monkey
     assert out[ "total_predictions" ] == 0
     assert out[ "accuracy_rate" ] == 0.0
     assert "db-down" in out[ "error" ]
+
+
+# ---------------------------------------------------------------------------
+# Row 4e8b56e0: MC / batch answers arrive as a JSON string
+# Payloads below are the response_value strings of two dev-DB prediction_log rows
+# (read-only capture, 5 Nov 2026): MC notification 00e02924-105d-4c85-8731-bfb353e37439,
+# batch notification 70cba5ac-4759-4dbc-ad6b-6d9eea3a966d. Both stored empty_answers.
+# ---------------------------------------------------------------------------
+
+_CAPTURED_MC_RESPONSE    = '{"answers":{"Backup":"Skip"}}'
+_CAPTURED_BATCH_RESPONSE = '{"answers":{"Venv gate":"yes","Wedge fix":"yes"}}'
+
+
+def _record( engine, monkeypatch, predicted, actual, response_type ):
+    repos = []
+    _patch_db( monkeypatch, _FakeSession(), repos )
+    monkeypatch.setattr( engine, "_store_decision", lambda *a: None )
+    monkeypatch.setattr( engine, "_enrich_with_embedding_similarity", lambda *a: None )
+    pr = PredictionResult( response_type=response_type, category="c", strategy="x", predicted_value=predicted )
+    engine.record_outcome( "n5", pr, actual, response_type )
+    return repos[ 0 ].outcome
+
+
+def test_record_outcome_captured_mc_json_string_is_scored( wired_engine, monkeypatch ):
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "Backup": "Skip" } },
+                       _CAPTURED_MC_RESPONSE, cfg.RESPONSE_TYPE_MULTIPLE_CHOICE )
+    assert outcome[ "accuracy_match" ] is True
+    assert outcome[ "actual_value" ] == { "answers": { "Backup": "Skip" } }
+
+
+def test_record_outcome_captured_mc_mismatch_is_false_not_null( wired_engine, monkeypatch ):
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "Backup": "Run" } },
+                       _CAPTURED_MC_RESPONSE, cfg.RESPONSE_TYPE_MULTIPLE_CHOICE )
+    assert outcome[ "accuracy_match" ] is False
+
+
+def test_record_outcome_captured_batch_json_string_is_scored( wired_engine, monkeypatch ):
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "Venv gate": "yes", "Wedge fix": "yes" } },
+                       _CAPTURED_BATCH_RESPONSE, cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH )
+    assert outcome[ "accuracy_match" ] is True
+
+
+def test_record_outcome_mc_plain_text_answer_stays_unscored( wired_engine, monkeypatch ):
+    # A bare option label (captured shape {"value": "Approve"}) is not JSON: unchanged behavior.
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "_other": "Approve" } },
+                       "Approve", cfg.RESPONSE_TYPE_MULTIPLE_CHOICE )
+    assert outcome[ "accuracy_match" ] is None
+
+
+def test_record_outcome_mc_non_str_value_does_not_raise( wired_engine, monkeypatch ):
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "Backup": "Skip" } },
+                       { "value": 5 }, cfg.RESPONSE_TYPE_MULTIPLE_CHOICE )
+    assert outcome[ "accuracy_match" ] is None

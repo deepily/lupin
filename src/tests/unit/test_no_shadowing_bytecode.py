@@ -185,6 +185,7 @@ def test_the_scan_examined_a_meaningful_number_of_files():
     assert ok, f"{why}\nRoots scanned: {[ str( r ) for r in SCAN_ROOTS ]}"
 
 
+@pytest.mark.census
 def test_no_source_in_the_tree_is_shadowed_by_stale_bytecode():
     """
     THE ASSERTION ITSELF.

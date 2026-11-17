@@ -22,6 +22,7 @@ from cosa.crud_for_dataframes.todo_crud_agent import TodoCrudAgent
 from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.agent_base import AgentBase
 from cosa.rest.job_state import JobState
+from tests.helpers.typed_config import TypedConfigFake
 
 
 # ============================================================================
@@ -38,9 +39,7 @@ def tmp_storage_dir():
 @pytest.fixture
 def mock_config_mgr():
     """Provide a mock ConfigurationManager."""
-    mgr = MagicMock()
-    mgr.get.return_value = "true"
-    return mgr
+    return TypedConfigFake( every_key="true" )
 
 
 def _create_mock_agent( tmp_dir=None, operation="add", needs_confirm=False ):
@@ -96,7 +95,7 @@ class TestCrudQueueRouting:
 
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
-        mock_config_mgr.get.return_value = "true"
+        mock_config_mgr.set_every_key( "true" )
 
         assert queue._crud_agents_enabled() is True
 
@@ -106,7 +105,7 @@ class TestCrudQueueRouting:
 
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
-        mock_config_mgr.get.return_value = "false"
+        mock_config_mgr.set_every_key( "false" )
 
         assert queue._crud_agents_enabled() is False
 
@@ -117,17 +116,42 @@ class TestCrudQueueRouting:
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
         # Simulate missing key — default= param in get() returns "true"
-        mock_config_mgr.get.return_value = "true"
+        mock_config_mgr.set_every_key( "true" )
 
         assert queue._crud_agents_enabled() is True
 
-    def test_crud_agents_enabled_whitespace( self, mock_config_mgr ):
-        """_crud_agents_enabled() handles whitespace around value."""
+    def test_crud_agents_enabled_missing_key_defaults_to_on( self ):
+        """A key absent from the INI answers on: the read's default is "true"."""
+        from cosa.rest.todo_fifo_queue import TodoFifoQueue
+
+        queue = TodoFifoQueue.__new__( TodoFifoQueue )
+        queue.config_mgr = TypedConfigFake( {} )
+
+        assert queue._crud_agents_enabled() is True
+
+    def test_crud_agents_enabled_padded_true_reads_as_off( self, mock_config_mgr ):
+        """
+        A value padded with spaces, "  True  ", now reads as off.
+
+        The flag is read with return_type="boolean", which compares the text to "true" without
+        stripping. The old read stripped first and called it on. The INI reader strips its own
+        values, so only a padded ${ENV} expansion can reach this.
+        """
         from cosa.rest.todo_fifo_queue import TodoFifoQueue
 
         queue = TodoFifoQueue.__new__( TodoFifoQueue )
         queue.config_mgr = mock_config_mgr
-        mock_config_mgr.get.return_value = "  True  "
+        mock_config_mgr.set_every_key( "  True  " )
+
+        assert queue._crud_agents_enabled() is False
+
+    def test_crud_agents_enabled_unpadded_mixed_case_true_reads_as_on( self, mock_config_mgr ):
+        """The case does not matter, only the padding does: "TRUE" is on."""
+        from cosa.rest.todo_fifo_queue import TodoFifoQueue
+
+        queue = TodoFifoQueue.__new__( TodoFifoQueue )
+        queue.config_mgr = mock_config_mgr
+        mock_config_mgr.set_every_key( "TRUE" )
 
         assert queue._crud_agents_enabled() is True
 

@@ -86,6 +86,9 @@ class _Repo:
     def update_password( self, uid, password_hash ):
         self.calls.append( ( "update_password", uid, password_hash ) )
 
+    def update( self, uid, **fields ):
+        self.calls.append( ( "update", uid, tuple( sorted( fields.items() ) ) ) )
+
     def update_roles( self, uid, roles ):
         self.calls.append( ( "update_roles", uid, tuple( roles ) ) )
         return _User( self.existing.email, list( roles ), uid )
@@ -239,6 +242,7 @@ def test_absent_account_is_created_with_both_roles( wired, creds, capsys ):
     assert holder[ "repo" ].calls == [
         ( "get_by_email", _EMAIL ),
         ( "create_user",  _EMAIL, _HASH, ( "user", "admin" ) ),
+        ( "update",       7, ( ( "is_protected", True ), ) ),
     ]
     assert session.commits == 1
     assert "created" in capsys.readouterr().out
@@ -274,6 +278,7 @@ def test_existing_account_is_promoted_in_place( wired, creds, capsys ):
         ( "get_by_email",    _EMAIL ),
         ( "update_password", 11, _HASH ),
         ( "update_roles",    11, ( "user", "admin" ) ),
+        ( "update",          11, ( ( "is_protected", True ), ) ),
     ]
     assert session.commits == 1
     assert "promoted" in capsys.readouterr().out
@@ -289,7 +294,25 @@ def test_promotion_is_idempotent_for_an_account_already_admin( wired, creds ):
     holder[ "existing" ] = _User( _EMAIL, [ "user", "admin" ], uid=11 )
 
     assert mod.main() == 0
-    assert holder[ "repo" ].calls[ -1 ] == ( "update_roles", 11, ( "user", "admin" ) )
+    assert ( "update_roles", 11, ( "user", "admin" ) ) in holder[ "repo" ].calls
+
+
+@pytest.mark.parametrize( "existing", [ None, _User( _EMAIL, [ "user" ], uid=11 ) ] )
+def test_account_is_marked_protected_on_both_paths_before_commit( existing, wired, creds ):
+    """
+    Both paths mark the admin protected before the commit.
+
+    The integration and e2e cleanups delete every user that is not protected.
+    An unprotected smoke admin would be wiped, and :8000 smoke runs would fail with 401.
+    """
+    session, holder = wired
+    holder[ "existing" ] = existing
+
+    assert mod.main() == 0
+
+    protect = [ c for c in holder[ "repo" ].calls if c[ 0 ] == "update" ]
+    assert len( protect ) == 1 and ( "is_protected", True ) in protect[ 0 ][ 2 ]
+    assert session.commits == 1
 
 
 def test_admin_roles_constant_keeps_the_plain_user_role( wired, creds ):

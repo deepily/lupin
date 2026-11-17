@@ -1,6 +1,6 @@
 ---
 capability: reuse-stage-one-analysis-report
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_stage1_analysis.request_stats@a9edbeacb5
   - lupin_mcp.reuse_stage1_analysis.cost_per_search@2de0279a82

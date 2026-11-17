@@ -251,6 +251,16 @@ class TestQueueAndRun:
         assert ( out[ "audited" ], out[ "failed" ] ) == ( 1, 1 )
         assert len( list( ( tmp_path / "shadow-pending" ).glob( "*.json" ) ) ) == 1
 
+    def test_on_failure_hears_each_failed_item_with_its_id_and_the_exception( self, tmp_path ):
+        for need in ( "n1", "n2" ): sa.enqueue_if_sampled( tmp_path, need, "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
+        def transport( need ):
+            if need == "n1": raise TimeoutError( "no answer" )
+            return sweep_of( "NEW" )
+        heard = []
+        out   = sa.run_pending( tmp_path, transport, "2026-10-15", on_failure=lambda item_id, exc: heard.append( ( item_id, type( exc ).__name__, str( exc ) ) ) )
+        assert out[ "failed" ] == 1 and len( heard ) == 1
+        assert heard[ 0 ][ 1: ] == ( "TimeoutError", "no answer" ) and len( heard[ 0 ][ 0 ] ) == 16, "the queue file's own id, not the need"
+
     def test_limit_takes_the_oldest_queued_items_first( self, tmp_path ):
         for need, day in ( ( "n-new", "2026-10-14" ), ( "n-old", "2026-10-12" ), ( "n-mid", "2026-10-13" ) ):
             sa.enqueue_if_sampled( tmp_path, need, "py", GEN, INDEX, LIVE, day, rate=1 )

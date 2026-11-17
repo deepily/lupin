@@ -22,12 +22,13 @@ def policy_at_the_pinned_cut( monkeypatch ):
     """Pins the policy the literals below were taken at.
 
     Ensures:
-        - the threshold is 0.5 and the `no_new` and `fold_constructors` keys are gone
+        - the threshold is 0.5 and the `no_new`, `fold_constructors` and `budget_cause` keys are gone
         - the receipt carries the policy, so the shipped 0.3 and the `no_new` key would each move both hashes
     """
     monkeypatch.setitem( vd.POLICY, "threshold", 0.5 )
     monkeypatch.delitem( vd.POLICY, "no_new" )                       # the retirement of NEW (24 October) adds this key; the literals are the bytes of a receipt written before it
     monkeypatch.delitem( vd.POLICY, "fold_constructors" )            # the constructor fold (row 74d0db47) adds this key; same reason
+    monkeypatch.delitem( vd.POLICY, "budget_cause" )                 # BUDGET_SPENT (row 4e6d795d) adds this key; same reason
 
 
 def receipt_sha( rec ): return rt.sha( rt.canonical( rec ), 40 )

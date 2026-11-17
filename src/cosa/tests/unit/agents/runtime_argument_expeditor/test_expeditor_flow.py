@@ -318,7 +318,7 @@ class TestPresentButUnresolvedFixB( unittest.TestCase ):
     """
 
     def test_helper_value_is_existing_path( self ):
-        # The trigger predicate mirrors job.py:216-223. Bare topic → False (fires
+        # The trigger predicate mirrors the skip test in expeditor.collect(). Bare topic → False (fires
         # the resolve); a real path → True (leaves it); None/"" → False.
         o = _mk_expeditor()
         with patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \

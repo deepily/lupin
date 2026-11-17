@@ -162,3 +162,72 @@ def run_chained_cli( parse_args, show_dry_run, run_pipeline, user_visible_args )
     # Run the pipeline
     exit_code = asyncio.run( run_pipeline( args ) )
     sys.exit( exit_code )
+
+
+async def run_agent_and_report( args, agent, stage_label, show_success, retry_command ) -> int:
+    """
+    Run a chained agent, print how the run went, and return the exit code.
+
+    Requires:
+        - args is the parsed Namespace, with a debug flag
+        - agent has an async run_async that returns a result with is_success, is_partial,
+          state, error, research_path, research_abstract and duration_seconds
+        - stage_label names the second stage, for example "Podcast Generation"
+        - show_success is a callable taking the result, which prints the second stage's own
+          artifact lines and the cost summary
+        - retry_command is the command line that retries the second stage alone, with a
+          {research_path} placeholder
+
+    Ensures:
+        - a complete run prints the report, the abstract, the second stage's lines and the
+          duration, and returns 0
+        - a partial run prints the research report and cost, the error and the retry command,
+          and returns 1
+        - any other result prints its state and error and returns 1
+        - Ctrl-C and any exception print a line and return 1, with a traceback under args.debug
+    """
+    try:
+        # Run the pipeline
+        result = await agent.run_async()
+
+        # Show results
+        print( "\n" + "=" * 60 )
+        print( "PIPELINE RESULTS" )
+        print( "=" * 60 )
+
+        if result.is_success():
+            print( f"\n✓ Pipeline completed successfully!\n" )
+            print( f"Research Report: {result.research_path}" )
+            if result.research_abstract:
+                print( f"Abstract: {result.research_abstract[ :100 ]}..." )
+            show_success( result )
+            print( f"\nDuration: {result.duration_seconds:.1f} seconds" )
+            return 0
+
+        elif result.is_partial():
+            print( f"\n⚠ Pipeline partially completed\n" )
+            print( f"Deep Research completed successfully:" )
+            print( f"  Report: {result.research_path}" )
+            print( f"  Cost: ${result.dr_cost:.4f}" )
+            print( f"\n{stage_label} failed:" )
+            print( f"  Error: {result.error}" )
+            print( f"\nYou can retry {stage_label.lower()} separately with:" )
+            print( f"  {retry_command.format( research_path=result.research_path )}" )
+            return 1
+
+        else:
+            print( f"\n✗ Pipeline failed\n" )
+            print( f"State: {result.state.value}" )
+            print( f"Error: {result.error}" )
+            return 1
+
+    except KeyboardInterrupt:
+        print( "\n\n⚠ Interrupted by user" )
+        return 1
+
+    except Exception as e:
+        print( f"\n✗ Pipeline error: {e}" )
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        return 1

@@ -27,7 +27,7 @@ from cosa.agents.two_word_id_generator import TwoWordIdGenerator
 
 # The shape a browser session id must have to be allowed onto a WebSocket. Kept in
 # step with is_valid_session_id() in cosa/rest/routers/websocket.py, which is the
-# gate at websocket.py:228 and :380. Copied rather than imported so this file stays
+# gate in websocket_audio_endpoint and websocket_queue_endpoint. Copied rather than imported so this file stays
 # free of the router's import chain.
 BROWSER_SESSION_ID_PATTERN = r"^[a-z]+ [a-z]+$"
 

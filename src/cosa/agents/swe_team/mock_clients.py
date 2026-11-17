@@ -52,7 +52,7 @@ class MockAgentSDKSession:
     # Unit tests monkeypatch this to 0.0 to skip the legitimate ~3.4s of
     # cumulative phase sleeps. Added 2026-04-30 (Session b195a160) for the
     # TestDryRunRegression performance fix — see
-    # src/rnd/v0.1.7/2026.04.30-swe-team-orchestrator-test-perf-fix.md.
+    # the swe-team orchestrator test-perf-fix doc (removed from the tree; see 8420e8b0a^).
     DELAY_MULTIPLIER = 1.0
 
     DRY_RUN_PHASES = [

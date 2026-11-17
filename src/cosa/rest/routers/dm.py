@@ -42,6 +42,7 @@ from ..db.repositories.notification_repository import NotificationRepository
 # reader cannot tell a DM's stamp from an arbiter ping's stamp.
 from cosa.config.app_timezone import read_arbiter_journal_timezone
 from cosa.utils.edt_timestamp import format_edt_timestamp, is_already_stamped
+from cosa.utils.csv_text import split_csv
 # The notification queue dependency lives with the notifications router; reuse it
 # so /api/dm/send pushes onto the same FIFO queue as /api/notify.
 from .notifications import get_notification_queue
@@ -1152,7 +1153,7 @@ def _fabricated_paths( original, rewritten, product_names=_FAB_NOT_PATHS ):
             if candidate in low:            continue
             if candidate in product_names:  continue
             base, _, line = candidate.rpartition( ":" )
-            # An elided suffix the sender did write: "executor.py:106, :108".
+            # An elided suffix the sender did write: "executor.py:106, :108".  # doc-lint: waive line-pointer -- sample sender text, not a citation
             if base and line.isdigit() and base in low and ( ":" + line ) in low: continue
             found.add( token )
         return sorted( found )
@@ -1705,7 +1706,7 @@ def _attribution_personas():
     try:
         cm   = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         pool = cm.get( "cc session voice persona pool", default="" )
-        return [ name.strip().lower() for name in ( pool or "" ).split( "," ) if name.strip() ]
+        return split_csv( pool, lower=True )
     except Exception:
         return []
 
@@ -1787,7 +1788,7 @@ def _count_attributions( text, personas ):
 #
 # THE FOUR MEASURED INVERSIONS THIS IS BUILT AGAINST, all 2026-08-30:
 #   1. a recommendation ("the site-packages clause is LOAD-BEARING") arrived as its own
-#      opposite ("delete the site-packages clause — the exclusion is unnecessary")
+#      opposite, "delete the site-packages clause — the exclusion is unnecessary"
 #   2. a suggestion by Tiberius arrived attributed to Maya
 #   3. a verdict ("mutation six is EQUIVALENT, no test") arrived as "all six KILLED"
 #   4. a gate ("push stays Rick's call") arrived as an instruction to push
@@ -2964,7 +2965,7 @@ def _execute_experiment( *, body, assignment, arrival_utc, target_session_id, ta
     try:
         if length_gate == "rejected":
             # Undisclosed refusal: state the action, never the number (413, NOT 422 —
-            # the client maps 422 to recipient_unresolved, cosa_voice_mcp.py:3370).
+            # the client maps 422 to recipient_unresolved, the dm_send handler in lupin_mcp/cosa_voice_mcp.py).
             return {
                 "http_status" : 413,
                 "detail"      : "DM refused: too long. Cut it substantially and resend.",

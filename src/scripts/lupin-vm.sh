@@ -13,6 +13,7 @@
 # the IAP range 35.235.240.0/20 -> tcp:VM_PORT (SSH works because tcp:22 already has one; 7999 and
 # any other VM-side port may not — one rule PER port). See runbook §"Tunnel firewall" for the
 # one-time `gcloud compute firewall-rules create`, or run `lupin-vm.sh firewall open VM_PORT`.
+# The ports a fresh VM needs are listed in src/conf/vm-iap-ports.tsv; `firewall ensure` creates them all.
 #
 # Runbook: src/rnd/v0.1.9/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
 #
@@ -50,7 +51,17 @@ ENV_FILE="cloud-gpu.env"                         # requires LUPIN_MODEL_SERVER_U
 # `docker compose logs/up <name>` take the SERVICE name, NOT the container_name. The service is
 # `lupin-rest` (container_name lupin-rest-cloud-gpu) — passing the container name gives
 # "no such service". Compose subcommands here use REST_SERVICE.
+REST_CONTAINER="lupin-rest-cloud-gpu"            # the :7999 app container; it holds its own database credentials
 REST_SERVICE="lupin-rest"                        # compose service name (container_name = lupin-rest-cloud-gpu)
+# The destructive-test server (row 8d67e474) is an OVERLAY, so `svc` and `deploy`, which name the base
+# file alone, never touch it. Only the `test-server` verb names both files.
+TEST_COMPOSE_FILE="docker-compose.vm-test-overlay.yml"   # lupin-rest-test (host :8000) + lupin-pgvector-test
+TEST_SERVICES="lupin-pgvector-test lupin-rest-test"
+TEST_REST_SERVICE="lupin-rest-test"
+TEST_PGVECTOR_CONTAINER="lupin-pgvector-test"
+TEST_PORT=8000                                   # in-VM port of the test server (host side of 8000:7999)
+TEST_SECRETS_DIR="/etc/lupin/secrets"            # compose secret files; root:<host gid> 0440
+TEST_STATE_DIR="/mnt/lupin-data/projects-data/lupin"   # holds flow-ratio and sessions-test
 APP_PORT=7999                                    # in-VM app port (docker compose lupin-rest)
 # Keep idle SSH-over-IAP sessions alive. Without a keepalive, an idle interactive `shell` (or a
 # long `svc logs -f`) gets reaped by the IAP tunnel / NAT idle timeout -> "Failed to send all data
@@ -81,6 +92,7 @@ Instance lifecycle:
   vm-status              show RUNNING / STOPPED / SUSPENDED
   vm-start               resume a SUSPENDED instance or start a TERMINATED one (needed before SSH); reports which
   vm-stop                stop the instance (cost control)
+  vm-suspend             suspend a RUNNING instance, the state vm-start resumes from
 
 SSH:
   shell                  interactive SSH session (over IAP)
@@ -92,6 +104,36 @@ App services (docker compose in $VM_ROOT):
   svc down               down
   svc restart            up -d --force-recreate $REST_SERVICE
   svc logs               logs -f --tail=200 $REST_SERVICE
+
+Destructive-test server (overlay $TEST_COMPOSE_FILE: lupin-rest-test on VM :$TEST_PORT + a local pgvector database):
+  push-test-server-secrets
+                         write the compose secret files under $TEST_SECRETS_DIR (root:<host gid>, 0440):
+                         the app and test role passwords and the tester login come from Secret Manager
+                         (lupin-db-password, lupin-db-test-password, lupin-test-mock-jobs-email,
+                         lupin-test-mock-jobs-password) with your own gcloud login and travel on stdin;
+                         the pgvector admin and lupin_host passwords are generated ON the VM, once.
+                         Says only written / unchanged / kept per file. Never prints a value.
+  test-server prep       make the two host folders the test server mounts (sessions-test, flow-ratio)
+  test-server node-modules  fill the node_modules volume once: npm ci --ignore-scripts in the test image, then esbuild --version from the volume
+  test-server seed-companions [--check]
+                         copy the companion users and API keys from the :7999 database into the test database, so real
+                         logins work on :8000. Runs inside $REST_CONTAINER and pipes into the pgvector container; the :7999
+                         password never enters the test container. --check only counts and names missing companions
+  test-server up-db      up -d the pgvector container alone; do this before roles, which needs it running
+  test-server up         up -d the pgvector container and lupin-rest-test
+  test-server recreate   up -d --force-recreate --no-deps lupin-rest-test (env, groups or mounts changed)
+  test-server down       stop both containers; the database volume stays
+  test-server status     docker compose ps for both
+  test-server logs       logs -f --tail=200 lupin-rest-test
+  test-server refresh    restart lupin-rest-test and poll /health on VM :$TEST_PORT
+  test-server idle       venue_idle --port $TEST_PORT ON the VM; its exit code is the answer (0 idle, 1 busy, 2 unknown)
+  test-server roles [--apply|--check|--grants-only]
+                         db_roles against the local pgvector container (run up-db first): dry run by default; --apply
+                         creates the roles and grants, --grants-only repeats the grants after the app
+                         has created its tables, --check reads them back (exit 0 clean)
+  To reach VM :$TEST_PORT from here (submit-test-suite.py, a browser): firewall open $TEST_PORT, then
+    tunnel 18000 $TEST_PORT     (18000 because this host's own :8000 test server holds 8000)
+  and use --base-url http://127.0.0.1:18000.
 
 Tunnel:
   tunnel [PORT] [VM_PORT]
@@ -105,6 +147,11 @@ Tunnel:
 Firewall (one-time — the tunnel needs IAP allowed to the VM-side port):
   firewall status        list all VPC firewall rules (scan sourceRanges for 35.235.240.0/20)
   firewall open [PORT]   allow IAP range -> tcp:PORT (default $APP_PORT); network auto-derived
+  firewall ensure        create every missing IAP rule for the ports in src/conf/vm-iap-ports.tsv; says created / present
+                         per port and is safe to re-run. A person runs it: auto mode refuses a seat's firewall change
+  firewall check         read-only: every port in that file has an IAP rule. Exit 1 when a block-tier port lacks one
+                         (7999); a warn-tier port only warns. Prints the ensure line as the remedy. deploy and
+                         preflight run it too
 
 Deployment contract (task 47c4801b):
   preflight [pre|post|full]
@@ -114,6 +161,9 @@ Deployment contract (task 47c4801b):
                          report), and credential ACCEPTANCE with a wrong-key control.
                          Assert-only — every failure prints an executable remedy.
                          'deploy' runs the pre arm before, and the post arm after, automatically.
+  secrets-check          which Secret Manager secrets this script's verbs read (derived from the script itself), and
+                         does each have an enabled version? Prints names and the gcloud line you run; never a value.
+                         Exit 0 all present, 1 one missing, 2 could not ask. 'deploy' runs it first, as a warning.
   install-hooks          link the two git hooks (pre-commit, pre-push) on the VM's checkout; 'deploy' runs it
                          after the checkout. Safe to re-run. Leaves a file in the way alone and says so.
   push-unversioned       ship the payloads git cannot deliver (gitignored keys, personal-data maps),
@@ -144,6 +194,12 @@ Full deploy (bundle -> checkout -> restart BOTH servers -> verify) — RUN FROM 
   deploy [branch]        one-shot: push-bundle --checkout, then force-recreate :$APP_PORT $REST_SERVICE
                          (compose) + restart :$ARBITER_PORT arbiter (systemd --user), then probe
                          /health on both. Neither server hot-reloads on the VM, so both are bounced.
+                         The restart migrates the database to head at startup; the post arm then checks
+                         schema at head. It also: warns on missing Secret Manager secrets first, recreates
+                         lupin-rest-test when its container exists (skips when not), and the post arm checks
+                         the refresh cron and the overlay (/health :$TEST_PORT, schema, roles, tester login).
+                         This is the one command for a server update; push-bundle --checkout alone moves
+                         code, restarts nothing and migrates nothing.
                          Build the bundle here where the checkout + GitHub live; the other
                          subcommands (shell/tunnel/svc) are what the laptops run against the VM.
                          COMMITTED work only — the bundle ships the branch's last commit, NOT your
@@ -190,7 +246,7 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           the default) or on the VM (vm). Reads Secret Manager lupin-test-mock-jobs-email
                           and lupin-test-mock-jobs-password with your own gcloud login. The values travel
                           on stdin: they are never in a command line, a log or this verb's output. It says
-                          only set / replaced / unchanged. reuse-vector-refresh.sh --install names this
+                          only set / replaced / unchanged. The refresh cron line names this
                           file in REUSE_VECTOR_REFRESH_ENV.
   push-dist               ship the built static/dist bundles (multiplexer, console, doc-podcast) from this
                           checkout to the VM checkout, which git cannot carry. Prints each bundle's build time beside the newest
@@ -207,6 +263,8 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           Ends by printing the cron status. A person runs it, never a Claude seat.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
+     LUPIN_VM_DEV_EMAIL (push-env only, required there): the notify target address; read from the
+     git-ignored src/scripts/cloud-run.env or the shell, never from this file.
 
 Self-contained: no repo dependencies — copy this one file to any machine with gcloud + IAP access.
 EOF
@@ -246,6 +304,44 @@ runit() {
     "$@"
 }
 
+# ---- Secret Manager names this script reads (row c22e5ec1) -----------------
+# The names come from this file's own gcloud secret-flag references, not from a list somebody keeps: a verb that
+# starts reading a new secret is covered by the next check. Each variable is followed to its assignment, through a
+# `for V in $LIST` loop and a `${X:-default}` default. A reference that cannot be resolved fails the whole call,
+# so the list cannot shrink quietly. Prints one name per line, sorted, no duplicates.
+vm_secret_names() {
+    local self="${BASH_SOURCE[0]}" ref src val names="" refs
+    refs="$( grep -o -- '--secret="\$[A-Za-z_]*"' "$self" | sed 's/.*\$//; s/"//' | sort -u )" || refs=""
+    [ -n "$refs" ] || { echo "vm_secret_names: no --secret= reference found in $self" >&2; return 1; }
+    for ref in $refs; do
+        src="$( sed -n "s/^[[:space:]]*for $ref in \$\([A-Za-z_]*\);.*/\1/p" "$self" | head -1 )"
+        [ -n "$src" ] || src="$ref"
+        val="$( sed -n "s/^[[:space:]]*$src=\"\(.*\)\"[[:space:]]*\$/\1/p" "$self" | head -1 | sed 's/^\${[A-Za-z_]*:-\(.*\)}$/\1/' )"
+        [ -n "$val" ] || { echo "vm_secret_names: cannot resolve \$$ref to a name in $self" >&2; return 1; }
+        names="$names $val"
+    done
+    printf '%s\n' $names | sort -u
+}
+
+# Does each name have an ENABLED version? Names and remedy lines only, never a value. Needs your own gcloud login.
+# Returns 0 all present, 1 at least one missing, 2 could not ask (no gcloud, or the names could not be derived).
+vm_secrets_check() {
+    local names name out missing=0
+    names="$( vm_secret_names )" || return 2
+    command -v gcloud >/dev/null 2>&1 || { log "gcloud is not on this host, so the Secret Manager secrets are unchecked"; return 2; }
+    for name in $names; do
+        out="$( gcloud secrets versions list "$name" --project="$LUPIN_GCP_PROJECT_ID" --filter='state=enabled' --limit=1 --format='value(name)' 2>/dev/null )"
+        if [ -n "$out" ]; then
+            log "[OK]    Secret Manager $name has an enabled version"
+        else
+            missing=1
+            log "[FAIL]  Secret Manager $name is missing, has no enabled version, or your login cannot list it"
+            log "        remedy (you run it; the value arrives on stdin): gcloud secrets create $name --project=$LUPIN_GCP_PROJECT_ID --data-file=-   # an existing secret with no enabled version: gcloud secrets versions add $name --project=$LUPIN_GCP_PROJECT_ID --data-file=-"
+        fi
+    done
+    return $missing
+}
+
 # ---- remote compose helper ----------------------------------------------
 # Builds the `cd $VM_ROOT && sudo docker compose ...` command run over IAP SSH.
 remote_compose() {
@@ -257,6 +353,33 @@ remote_compose() {
         --tunnel-through-iap \
         $SSH_KEEPALIVE \
         --command "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE $compose_args"
+}
+
+# ---- remote compose helper for the test-server overlay ------------------
+# Same as remote_compose, but names BOTH compose files, so the overlay's services are in the graph.
+remote_test_compose() {
+    local compose_args="$*"
+    require_project
+    runit gcloud compute ssh "$VM_NAME" \
+        --zone="$VM_ZONE" \
+        --project="$LUPIN_GCP_PROJECT_ID" \
+        --tunnel-through-iap \
+        $SSH_KEEPALIVE \
+        --command "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE $compose_args"
+}
+
+# ---- run one script on the VM, or print it under --dry-run ----------------
+# $1 = label for the dry-run line, $2 = the remote command. Optional stdin is passed through.
+remote_script() {
+    require_project
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "(dry-run) would run on $VM_NAME: $1. The remote command, which holds no secret:"
+        printf '%s\n' "$2" | sed 's/^/    /'
+        return 0
+    fi
+    gcloud compute ssh "$VM_NAME" \
+        --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+        $SSH_KEEPALIVE --command "$2"
 }
 
 # ---- bundle + fetch (+optional checkout) — the shared code-sync primitive -
@@ -412,6 +535,14 @@ case "$SUBCMD" in
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
         ;;
 
+    vm-suspend)
+        # Put a RUNNING instance back to SUSPENDED, the state vm-start resumes from. The daily test
+        # promotion uses it to leave the VM as it found it.
+        require_project
+        runit gcloud compute instances suspend "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+        ;;
+
     shell)
         require_project
         runit gcloud compute ssh "$VM_NAME" \
@@ -498,7 +629,7 @@ case "$SUBCMD" in
         # read-only lookup of the VM's network (basename of the network URL); fine to run in dry-run
         NETWORK="$( gcloud compute instances describe "$VM_NAME" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
-            --format='value(networkInterfaces[0].network)' 2>/dev/null )"
+            --format='value(networkInterfaces[0].network)' 2>/dev/null )" || NETWORK=""
         NETWORK="${NETWORK##*/}"
         case "$action" in
             status)
@@ -516,7 +647,57 @@ case "$SUBCMD" in
                     --direction=INGRESS --action=ALLOW --rules="tcp:$port" \
                     --source-ranges=35.235.240.0/20
                 ;;
-            *) die "firewall needs: status | open [PORT]" ;;
+            ensure|check)
+                # The declared ports are src/conf/vm-iap-ports.tsv; the matching logic is the pure
+                # pfv_iap_port_states in the preflight lib, so the unit tests cover it without gcloud.
+                DEV_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+                IAP_PORTS_FILE="$DEV_ROOT/src/conf/vm-iap-ports.tsv"
+                [ -r "$IAP_PORTS_FILE" ] || die "IAP port list not readable: $IAP_PORTS_FILE"
+                PFV_LIB="$DEV_ROOT/src/scripts/lib/preflight-vm-lib.sh"
+                [ -r "$PFV_LIB" ] || die "preflight lib not readable: $PFV_LIB"
+                # shellcheck source=lib/preflight-vm-lib.sh
+                . "$PFV_LIB"
+                # Read-only listing, so it runs in a dry run too (the network lookup above does the same).
+                IAP_RULES="$( gcloud compute firewall-rules list --project="$LUPIN_GCP_PROJECT_ID" \
+                    --format="value(name,direction,disabled,sourceRanges.list(separator=';'),allowed[].map().firewall_rule().list(separator=';'))" )" \
+                    || die "could not list the firewall rules of project $LUPIN_GCP_PROJECT_ID"
+                iap_rc=0
+                IAP_STATES="$( pfv_iap_port_states "$IAP_PORTS_FILE" "$IAP_RULES" )" || iap_rc=$?
+                [ "$iap_rc" -le 1 ] || die "could not read the IAP port list $IAP_PORTS_FILE (pfv_iap_port_states exit $iap_rc)"
+                if [ "$action" = "ensure" ]; then
+                    [ -n "$NETWORK" ] || die "could not derive the VM network (is $VM_NAME running / correct project?)"
+                    while IFS='|' read -r iap_port iap_tier iap_state iap_rule; do
+                        [ -n "$iap_port" ] || continue
+                        if [ "$iap_state" = "PRESENT" ]; then
+                            log "firewall ensure: $iap_port present ($iap_rule)"
+                        else
+                            runit gcloud compute firewall-rules create "lupin-iap-$iap_port" \
+                                --project="$LUPIN_GCP_PROJECT_ID" --network="$NETWORK" \
+                                --direction=INGRESS --action=ALLOW --rules="tcp:$iap_port" \
+                                --source-ranges=35.235.240.0/20
+                            if [ "$DRY_RUN" -eq 1 ]; then log "firewall ensure: $iap_port would be created (lupin-iap-$iap_port)"
+                            else log "firewall ensure: $iap_port created (lupin-iap-$iap_port)"; fi
+                        fi
+                    done <<< "$IAP_STATES"
+                else
+                    iap_missing=0
+                    while IFS='|' read -r iap_port iap_tier iap_state iap_rule; do
+                        [ -n "$iap_port" ] || continue
+                        if [ "$iap_state" = "PRESENT" ]; then
+                            log "[OK]    IAP rule for tcp:$iap_port ($iap_rule)"
+                        elif [ "$iap_tier" = "block" ]; then
+                            log "[FAIL]  no IAP rule for tcp:$iap_port (blocking)"; iap_missing=1
+                        else
+                            log "[WARN]  no IAP rule for tcp:$iap_port"
+                        fi
+                    done <<< "$IAP_STATES"
+                    if grep -q '|ABSENT|' <<< "$IAP_STATES"; then
+                        log "remedy: LUPIN_GCP_PROJECT_ID=$LUPIN_GCP_PROJECT_ID src/scripts/lupin-vm.sh firewall ensure"
+                    fi
+                    [ "$iap_missing" -eq 0 ] || exit 1
+                fi
+                ;;
+            *) die "firewall needs: status | open [PORT] | ensure | check" ;;
         esac
         ;;
 
@@ -703,6 +884,13 @@ case "$SUBCMD" in
         #    the deploy; set LUPIN_SKIP_PREFLIGHT=1 to override deliberately.
         #    Running both arms is what distinguishes "the deploy broke it" from "it was
         #    already broken" — the diagnosis that cost five minutes of bisection on 07-26.
+        # 0-secrets. Secret Manager has what the later verbs read (row c22e5ec1). Advisory: a missing secret stops
+        #     no deploy step, only a later push-test-server-secrets, so it warns, names the line a person runs and goes on.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) PRE-deploy secret check: lupin-vm.sh secrets-check"
+        elif [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+            vm_secrets_check || log "WARN: the Secret Manager check above found a problem; the deploy goes on. Fix it before push-test-server-secrets."
+        fi
         # 0a. The cloud-gpu compose file requires LUPIN_GCP_PROJECT_ID and the VM runs compose with
         #     --env-file, which drops the shell's environment. A VM whose cloud-gpu.env lacks the line aborts
         #     every compose call, the preflight's own included, so write it before anything else runs.
@@ -711,6 +899,14 @@ case "$SUBCMD" in
         [ "$DRY_RUN" -eq 1 ] && PP_ARGS=( --dry-run push-project-id )
         bash "${BASH_SOURCE[0]}" "${PP_ARGS[@]}" \
             || die "could not put LUPIN_GCP_PROJECT_ID in the VM's $ENV_FILE; every compose call there would abort. Fix that, then re-run."
+        # 0b. The dev-side IAP firewall check (read-only): a VM whose :7999 rule is gone cannot be reached or tunnelled.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) PRE-deploy IAP firewall check: lupin-vm.sh firewall check"
+        elif [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+            log "PRE-deploy IAP firewall check"
+            bash "${BASH_SOURCE[0]}" firewall check \
+                || die "PRE-deploy IAP firewall check FAILED — a blocking port has no rule. Run the remedy line above, or re-run with LUPIN_SKIP_PREFLIGHT=1 to override."
+        fi
         if [ "$DRY_RUN" -eq 1 ]; then
             # --dry-run prints and runs nothing; this step goes over IAP SSH, so it must not run.
             log "(dry-run) PRE-deploy preflight on VM: bash src/scripts/preflight-vm.sh --phase pre"
@@ -780,6 +976,19 @@ for p in $APP_PORT $ARBITER_PORT; do
   done
   echo \":\$p health -> \$st (after ~\$((i*8))s)\"
 done
+echo '== test server overlay (only when its containers exist) =='
+all_names=\"\$( sudo docker ps -a --format '{{.Names}}' )\" || all_names=\"\"
+if grep -Fxq $TEST_REST_SERVICE <<< \"\$all_names\"; then
+  # Recreate, never restart: the overlay's mounts and env resolve at container create, so a restart leaves a changed overlay
+  # file unapplied (the node_modules volume never landed this way, 2026-11-11). --no-deps keeps the database container up.
+  sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE up -d --force-recreate --no-deps $TEST_REST_SERVICE
+  for i in \$(seq 1 90); do
+    if python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:$TEST_PORT/health', timeout=2)\" 2>/dev/null; then echo \"$TEST_REST_SERVICE healthy after \$i poll(s)\"; break; fi
+    sleep 2
+  done
+else
+  echo 'overlay $TEST_REST_SERVICE is not on this VM; skipped'
+fi
 echo '== install git hooks (pre-commit, pre-push) =='
 bash src/scripts/install-git-hooks.sh || echo 'WARN: git hook install reported a problem (above); the post-deploy preflight below will say which hook is missing'
 echo '== [4/4] POST-deploy preflight (--phase post) =='
@@ -792,6 +1001,14 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
                 --command "$RESTART_CMD"
+        fi
+        # POST-deploy dev-side IAP firewall check (read-only). It reports and never rolls back, like the VM-side post preflight.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) POST-deploy IAP firewall check: lupin-vm.sh firewall check"
+        elif [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+            log "POST-deploy IAP firewall check"
+            bash "${BASH_SOURCE[0]}" firewall check \
+                || log "POST-deploy IAP firewall check reported a blocking port with no rule (above). Nothing was rolled back. Run the remedy line."
         fi
         ;;
 
@@ -1019,10 +1236,19 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
             "") die "preflight: --phase given with no value. Usage: lupin-vm.sh preflight [pre|post|full]" ;;
             *)  die "preflight: unknown phase '$PF_PHASE'. Expected one of: pre, post, full (or --phase <one of those>)." ;;
         esac
+        # The dev-side IAP firewall check runs first and is read-only. It cannot run on the VM, which has no gcloud
+        # credentials. A blocking miss is remembered and the exit code is raised after the VM-side check has run.
+        PF_FW_RC=0
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) dev-side IAP firewall check: lupin-vm.sh firewall check"
+        else
+            bash "${BASH_SOURCE[0]}" firewall check || PF_FW_RC=1
+        fi
         runit gcloud compute ssh "$VM_NAME" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
             $SSH_KEEPALIVE \
-            --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase $PF_PHASE"
+            --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase $PF_PHASE" || PF_FW_RC=1
+        [ "$PF_FW_RC" -eq 0 ] || exit 1
         ;;
 
     install-hooks)
@@ -1170,6 +1396,19 @@ done"
         # shellcheck source=lib/preflight-vm-lib.sh
         source "$PFV_LIB"
 
+        # The owner's address is NOT in this file (Rick, 16 Nov 2026): it comes from LUPIN_VM_DEV_EMAIL in the
+        # git-ignored src/scripts/cloud-run.env. A variable already exported wins over the file. No fallback.
+        PUSH_ENV_CLOUD_FILE="$DEV_ROOT/src/scripts/cloud-run.env"
+        if [ -z "${LUPIN_VM_DEV_EMAIL:-}" ] && [ -r "$PUSH_ENV_CLOUD_FILE" ]; then
+            LUPIN_VM_DEV_EMAIL="$( sed -n 's/^LUPIN_VM_DEV_EMAIL=//p' "$PUSH_ENV_CLOUD_FILE" | tail -1 | tr -d "\"'\r" )"
+        fi
+        [ -n "${LUPIN_VM_DEV_EMAIL:-}" ] || die "LUPIN_VM_DEV_EMAIL is not set. Add the line LUPIN_VM_DEV_EMAIL=<the notify target address> to $PUSH_ENV_CLOUD_FILE (git-ignored) or export it, then re-run push-env."
+        case "$LUPIN_VM_DEV_EMAIL" in
+            *[!A-Za-z0-9._%+@-]*|*@*@*|@*|*@) die "LUPIN_VM_DEV_EMAIL is not a plain address (letters, digits and . _ % + - around one @); it is pasted into a remote shell line, so it is refused." ;;
+            *@*) ;;
+            *)   die "LUPIN_VM_DEV_EMAIL has no @ in it." ;;
+        esac
+
         # VM-side VALUES, keyed by contract var name. Single-quoted entries stay
         # LITERAL all the way to the VM (\$HOME must expand THERE, not here).
         declare -A PUSH_ENV_VALUES=(
@@ -1178,7 +1417,7 @@ done"
             [DEEPILY_PROJECTS_DIR]="$VM_DEEPILY_PROJECTS_DIR"
             [DEEPILY_DATA_DIR]="$VM_DEEPILY_DATA_DIR"
             [LUPIN_CC_VENV]='$HOME/.venv-lupin-mcp'
-            [LUPIN_DEV_EMAIL]='ricardo.felipe.ruiz@gmail.com'
+            [LUPIN_DEV_EMAIL]="$LUPIN_VM_DEV_EMAIL"
         )
 
         CONTRACT_NAMES="$( pfv_contract_push_env_names "$CONTRACT_FILE" )" \
@@ -1201,7 +1440,7 @@ done"
 
         # Direction 2 — no value may exist without a contract row declaring it.
         for ev_name in "${!PUSH_ENV_VALUES[@]}"; do
-            printf '%s\n' "$CONTRACT_NAMES" | grep -qxF "$ev_name" || die \
+            grep -qxF "$ev_name" <<< "$CONTRACT_NAMES" || die \
                 "lupin-vm.sh would export $ev_name, but no row in $CONTRACT_FILE declares it as push-env-written (surface HOST/BOTH + writer mentioning push-env). Add the contract row, or drop it from PUSH_ENV_VALUES."
         done
 
@@ -1213,8 +1452,8 @@ done"
             # VALUES cannot catch the failure this verb actually produces on a VM —
             # a right var carrying a dev-box path. \$HOME must appear UNEXPANDED here;
             # if it reads as /home/rruiz, it will be baked in on the VM too.
-            log "(dry-run) would append these lines to the VM ~/.bashrc (if absent):"
-            printf '%s' "$EXPORT_BLOCK" | sed 's/^/    /'
+            log "(dry-run) would append these lines to the VM ~/.bashrc (if absent); the notify address shows as <LUPIN_VM_DEV_EMAIL>:"
+            printf '%s' "${EXPORT_BLOCK//"$LUPIN_VM_DEV_EMAIL"/<LUPIN_VM_DEV_EMAIL>}" | sed 's/^/    /'
         else
             log "scp alias files -> $VM_NAME:~/"
             gcloud compute scp "$ALIASES" "$UC_GEN" "$VM_NAME:~/" \
@@ -1228,20 +1467,24 @@ grep -qxF 'source ~/.bash_aliases_uc' ~/.bashrc || echo 'source ~/.bash_aliases_
 echo '== export contract-declared vars in ~/.bashrc (whole-line, idempotent; set derived from src/conf/env-contract.tsv) =='
 $EXPORT_BLOCK
 echo '== ensure ~/.lupin/config exists (lupin CLI: api_url + notification recipient) =='
-mkdir -p ~/.lupin
+[ -d ~/.lupin ] || mkdir -m 750 ~/.lupin
+chmod g-w,o-rwx ~/.lupin
 if [ ! -f ~/.lupin/config ]; then
-  cat > ~/.lupin/config <<'LUPINCFG'
+  ( umask 027; cat > ~/.lupin/config <<'LUPINCFG'
 [environments]
 default = local
 
 [local]
 api_url = http://localhost:7999
-global_notification_recipient = ricardo.felipe.ruiz@gmail.com
+global_notification_recipient = $LUPIN_VM_DEV_EMAIL
 LUPINCFG
+  )
   echo '   created ~/.lupin/config'
 else
   echo '   ~/.lupin/config already present — left as-is'
 fi
+echo '== tighten ~/.lupin modes: directory at most 750, config and notification key at most 640 (never loosened) =='
+for lf in ~/.lupin/config ~/.lupin/notification-api.key; do [ -e \"\$lf\" ] && chmod g-wx,o-rwx \"\$lf\"; done; true
 echo '== done — open a fresh shell (or: source ~/.bashrc) to pick up aliases + roots =='"
             log "regenerating uc aliases + wiring ~/.bashrc on VM"
             gcloud compute ssh "$VM_NAME" \
@@ -1382,7 +1625,7 @@ $RCMD_TM"
                 { printf '%s\n' "$tm_email"; printf '%s\n' "$tm_password"; } | bash -c "$RCMD_TM"
             fi
             unset tm_email tm_password
-            log "done. Install the cron lines on that host with: src/scripts/reuse-vector-refresh.sh --install (a person runs it)."
+            log "done. Install the cron lines on that host with: src/scripts/lupin-vm.sh install-refresh-cron (a person runs it)."
         fi
         ;;
 
@@ -1406,13 +1649,35 @@ $RCMD_TM"
             [ -n "$PD_BUILT" ] && [ "$PD_SRC_TIME" != unknown ] && [[ "$PD_BUILT" < "$PD_SRC_TIME" ]] && PD_NOTE="  WARN: older than the newest source; run npm run build"
             log "bundle $PD_B: built ${PD_BUILT:-unknown}, newest source $PD_SRC_TIME$PD_NOTE"
         done
+        # Judge the bundles by bytes, not by file times (row 8d67e474): check_bundle_freshness.py rebuilds into a temp
+        # directory and compares. STALE (exit 1) -> npm run build, then judge again. Anything but FRESH after that
+        # refuses, because a stale bundle shipped to the VM serves old code over new source (measured 16 Nov 2026).
+        PD_ROOT="$( dirname "$PD_LOCAL" )/../../.."
+        PD_ROOT="$( cd "$PD_ROOT" && pwd )"
+        PD_FRESH=( python3 "$PD_ROOT/src/scripts/check_bundle_freshness.py" --quiet )
+        PD_RC=0; "${PD_FRESH[@]}" || PD_RC=$?
+        if [ "$PD_RC" -eq 1 ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log "(dry-run) bundles are STALE; would run: npm run build, then judge them again"
+            else
+                log "bundles are STALE against the source; running npm run build"
+                ( cd "$PD_ROOT" && npm run build ) || die "push-dist: npm run build failed. Nothing was sent."
+                PD_RC=0; "${PD_FRESH[@]}" || PD_RC=$?
+            fi
+        fi
+        if [ "$DRY_RUN" -ne 1 ] || [ "$PD_RC" -ne 1 ]; then
+            [ "$PD_RC" -eq 0 ] || die "push-dist: the bundles are not FRESH against the source (check_bundle_freshness.py exit $PD_RC). Nothing was sent."
+        fi
+        # The stamp says which commit the bundles were judged FRESH at; the VM preflight compares it to the VM's HEAD.
+        PD_STAMP_SHA="$( git -C "$PD_ROOT" rev-parse HEAD 2>/dev/null || true )"
         PD_DEST="$VM_ROOT/src/lupin_app/static/dist"
         if [ "$DRY_RUN" -eq 1 ]; then
-            log "(dry-run) would: tar -czf dist.tar.gz $DIST_BUNDLES; gcloud compute scp -> VM:/tmp; sudo mkdir -p $PD_DEST; sudo tar -xzf -C $PD_DEST; chown 1001"
+            log "(dry-run) would: tar -czf dist.tar.gz $DIST_BUNDLES .dist-stamp; gcloud compute scp -> VM:/tmp; sudo mkdir -p $PD_DEST; sudo tar -xzf -C $PD_DEST; chown 1001"
         else
             PD_TAR="$( mktemp -t "lupin-dist-XXXXXX.tar.gz" )"
             # shellcheck disable=SC2086
-            tar -czf "$PD_TAR" -C "$PD_LOCAL" $DIST_BUNDLES || die "push-dist: tar failed"
+            printf '%s\n' "$PD_STAMP_SHA" > "$PD_LOCAL/.dist-stamp"
+            tar -czf "$PD_TAR" -C "$PD_LOCAL" $DIST_BUNDLES .dist-stamp || die "push-dist: tar failed"
             gcloud compute scp "$PD_TAR" "$VM_NAME:/tmp/lupin-dist.tar.gz" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
             rm -f "$PD_TAR"
@@ -1429,7 +1694,7 @@ $RCMD_TM"
         require_project
         IR_WHERE="${1:-local}"
         case "$IR_WHERE" in local|vm) ;; *) die "install-refresh-cron takes local or vm, not '$IR_WHERE'" ;; esac
-        IR_PREP=""
+        IR_PREP=""; IR_BACKUP=""
         if [ "$IR_WHERE" = vm ]; then
             IR_ROOT="$VM_ROOT"; IR_DATA="$VM_DEEPILY_DATA_DIR"; IR_PIP="$VM_PIP_ROOT"
             # The purpose-line hand-off folder sits inside the checkout, which the container user (uid 1001) owns, so
@@ -1438,6 +1703,14 @@ $RCMD_TM"
             IR_PREP="HANDOFF=\"\$( sed -n 's/^reuse candidate purpose handoff subdir *= *//p' src/conf/lupin-app.ini | head -1 )\"
 [ -n \"\$HANDOFF\" ] || { echo 'ERROR: src/conf/lupin-app.ini has no reuse candidate purpose handoff subdir'; exit 1; }
 sudo install -d -m 2775 -o 1001 -g \"\$( id -g )\" \"$IR_ROOT/\$HANDOFF\""
+            # cron_generate writes its crontab backup under the checkout, in folders the ssh user cannot create (Permission
+            # denied on io/jobs, 2026-11-11). Ask cron_generate for the folder, so the path has one home, and create each level
+            # below io the same way as the hand-off folder. No backup means no write, so this must exist first.
+            IR_BACKUP="BDIR=\"\$( PYTHONPATH=\"\$LUPIN_ROOT/src\" \"\$CGPY\" -m lupin_mcp.cron_generate --backup-dir )\"
+[ -n \"\$BDIR\" ] || { echo 'ERROR: cron_generate --backup-dir printed nothing'; exit 1; }
+IFS=/ read -ra BPARTS <<< \"\$BDIR\"
+BPATH=\"$IR_ROOT/\${BPARTS[0]}\"
+for BPART in \"\${BPARTS[@]:1}\"; do BPATH=\"\$BPATH/\$BPART\"; sudo install -d -m 2775 -o 1001 -g \"\$( id -g )\" \"\$BPATH\"; done"
             # The vector build imports numpy late, and ~/.venv-lupin-mcp has none and no pip (cron runs died at
             # vector_build.py on 2026-10-29 and 10-30). Install the pinned file with uv, else ensurepip plus pip.
             IR_PREP="$IR_PREP
@@ -1455,10 +1728,17 @@ fi"
         fi
         RCMD_IR="set -e
 export LUPIN_ROOT='$IR_ROOT' DEEPILY_DATA_DIR='$IR_DATA' PLANNING_IS_PROMPTING_ROOT='$IR_PIP'
+# cron_generate builds a ConfigurationManager, which needs this variable; the job registry carries the value the cron jobs run with.
+LUPIN_CONFIG_MGR_CLI_ARGS=\"\$( python3 -c \"import json; print( json.load( open( '$IR_ROOT/src/conf/job-registry.json' ) )[ 'defaults' ][ 'run_env' ][ 'LUPIN_CONFIG_MGR_CLI_ARGS' ] )\" )\"
+[ -n \"\$LUPIN_CONFIG_MGR_CLI_ARGS\" ] || { echo 'ERROR: no LUPIN_CONFIG_MGR_CLI_ARGS in $IR_ROOT/src/conf/job-registry.json'; exit 1; }
+export LUPIN_CONFIG_MGR_CLI_ARGS
 [ -r \"\$HOME/.lupin/reuse-vector-refresh.env\" ] || echo \"WARN: \$HOME/.lupin/reuse-vector-refresh.env is missing, so the refresh cannot log in; run lupin-vm.sh push-test-mock-login $IR_WHERE\"
 cd '$IR_ROOT'
 $IR_PREP
-bash src/scripts/reuse-vector-refresh.sh --install
+# cron_generate writes the one job's lines (--only leaves every other crontab line alone). The VM has no .venv.
+CGPY=\"\$LUPIN_ROOT/.venv/bin/python\"; [ -x \"\$CGPY\" ] || CGPY=\"\$HOME/.venv-lupin-mcp/bin/python\"
+$IR_BACKUP
+PYTHONPATH=\"\$LUPIN_ROOT/src\" \"\$CGPY\" -m lupin_mcp.cron_generate --only vector-refresh --install
 bash src/scripts/reuse-vector-refresh.sh --status"
         if [ "$DRY_RUN" -eq 1 ]; then
             log "(dry-run) would run on the $IR_WHERE host:"
@@ -1470,6 +1750,134 @@ bash src/scripts/reuse-vector-refresh.sh --status"
         else
             bash -c "$RCMD_IR"
         fi
+        ;;
+
+    secrets-check)
+        # Row c22e5ec1. Which Secret Manager secrets do this script's verbs read, and does each have an enabled
+        # version? Detects and prints the line a person runs; it never writes a secret.
+        require_project
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would ask Secret Manager, with your gcloud login, whether each of these has an enabled version:"
+            vm_secret_names | sed 's/^/    /'
+        else
+            vm_secrets_check
+        fi
+        ;;
+
+    push-test-server-secrets)
+        # Row 8d67e474. The secret files the overlay mounts. Values ride on ssh stdin (four lines); the remote
+        # command below holds no secret, so it is safe to log and to show in a process list.
+        require_project
+        TS_SECRETS="lupin-db-password lupin-db-test-password lupin-test-mock-jobs-email lupin-test-mock-jobs-password"
+        read -r -d '' RCMD_TS <<'TSEOF' || true
+set -e
+umask 077
+sudo test -f "$envfile" || { echo "no $envfile on the VM; create it first" >&2; exit 3; }
+IFS= read -r app || true; IFS= read -r tst || true; IFS= read -r em || true; IFS= read -r pw || true
+[ -n "$app" ] && [ -n "$tst" ] && [ -n "$em" ] && [ -n "$pw" ] || { echo "a value did not arrive on stdin" >&2; exit 4; }
+gid="$(sudo sed -n 's/^LUPIN_BRIDGE_GID=//p' "$envfile" | tail -1)"
+[ -n "$gid" ] || { echo "LUPIN_BRIDGE_GID is not in $envfile" >&2; exit 5; }
+sudo install -d -m 0750 -o root -g "$gid" "$dir"
+put() {
+  new="$(mktemp)"; cat > "$new"
+  if sudo test -f "$dir/$1" && sudo cmp -s "$new" "$dir/$1"; then echo "$1: unchanged"
+  else sudo install -o root -g "$gid" -m 0440 "$new" "$dir/$1"; echo "$1: written"; fi
+  rm -f "$new"
+}
+printf '%s\n' "$app" | put db_app_password
+printf '%s\n' "$tst" | put db_test_password
+printf "export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='%s'\nexport LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='%s'\n" "$em" "$pw" | put test_env.sh
+for n in db_admin_password db_host_password; do
+  if sudo test -s "$dir/$n"; then echo "$n: kept"; else openssl rand -hex 24 | put "$n"; fi
+done
+TSEOF
+        RCMD_TS="envfile='$VM_ROOT/$ENV_FILE'; dir='$TEST_SECRETS_DIR'
+$RCMD_TS"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would read Secret Manager $TS_SECRETS with your gcloud login, then send the four values on stdin over IAP ssh to $VM_NAME. The remote command, which holds no secret:"
+            printf '%s\n' "$RCMD_TS" | sed 's/^/    /'
+        else
+            ts_vals=""
+            for ts_name in $TS_SECRETS; do
+                ts_one="$( gcloud secrets versions access latest --secret="$ts_name" --project="$LUPIN_GCP_PROJECT_ID" | tr -d '\r\n' )" \
+                    || die "could not read Secret Manager $ts_name (needs your IAM access to it)"
+                [ -n "$ts_one" ] || die "Secret Manager $ts_name has no value; add one first"
+                # The two role passwords go through psql's \set and a compose secret file: hex-safe characters only.
+                # The tester login is written inside single quotes into a sourced file: no single quote.
+                case "$ts_name" in
+                    lupin-db-*) case "$ts_one" in *[!A-Za-z0-9._~@%+=/-]*) die "the value of $ts_name has characters a psql variable may misread; use letters, digits and . _ ~ @ % + = / -" ;; esac ;;
+                    *) case "$ts_one" in *\'*) die "the value of $ts_name holds a single quote, which the sourced env file cannot carry" ;; esac ;;
+                esac
+                ts_vals="${ts_vals}${ts_one}"$'\n'
+            done
+            printf '%s' "$ts_vals" | gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_TS"
+            unset ts_vals ts_one
+            log "done. Next: test-server prep, then test-server up, then test-server roles --apply."
+        fi
+        ;;
+
+    test-server)
+        # Row 8d67e474. Everything here is a person's command; nothing starts by itself.
+        action="${1:-}"
+        case "$action" in
+            prep)
+                # The same one-time setup the flow-ratio folder needs: group-writable and setgid, so the container
+                # (uid 1001 plus the host gid) and the host user both write. create_host_path is false in the overlay.
+                remote_script "make $TEST_STATE_DIR/sessions-test and $TEST_STATE_DIR/flow-ratio (2775)" \
+                    "set -e; for d in sessions-test flow-ratio; do mkdir -p '$TEST_STATE_DIR'/\$d; chmod 2775 '$TEST_STATE_DIR'/\$d; done; ls -ld '$TEST_STATE_DIR'/sessions-test '$TEST_STATE_DIR'/flow-ratio"
+                ;;
+            node-modules)
+                # Row 8d67e474. The volume starts empty and root-owned, so the one-shot runs as root; --ignore-scripts
+                # keeps install scripts from running, --no-deps leaves the database container alone, and the npm cache
+                # goes to /tmp so nothing lands in the checkout. The last command is the proof: esbuild runs from the volume.
+                remote_test_compose "run --rm --no-deps -u root $TEST_REST_SERVICE sh -c 'cd /var/lupin && npm ci --ignore-scripts --no-audit --no-fund --cache /tmp/npm-cache && node_modules/.bin/esbuild --version'"
+                ;;
+            seed-companions)
+                shift
+                TS_SEED_ARG="${1:-}"
+                case "$TS_SEED_ARG" in ""|--check) ;; *) die "test-server seed-companions takes --check or nothing, not '$TS_SEED_ARG'" ;; esac
+                # Row 8d67e474. The export runs where the :7999 credentials already are; its output is credential hashes, so it
+                # is only ever piped (never echoed) and psql runs quiet. One transaction: all rows or none.
+                TS_EXPORT="sudo docker exec -e LUPIN_ROOT=/var/lupin $REST_CONTAINER python3 /var/lupin/src/scripts/export_test_companions.py"
+                if [ "$TS_SEED_ARG" = "--check" ]; then
+                    remote_script "count the companions in the :7999 database (read-only, no value printed)" "$TS_EXPORT --check"
+                else
+                    remote_script "copy the companions from the :7999 database into $TEST_PGVECTOR_CONTAINER (lupin_db_test)" \
+                        "set -o pipefail; $TS_EXPORT | sudo docker exec -i $TEST_PGVECTOR_CONTAINER psql -U lupin_dev -d lupin_db_test -v ON_ERROR_STOP=1 -q && echo 'companions copied'"
+                fi
+                ;;
+            up-db)    remote_test_compose "up -d $TEST_PGVECTOR_CONTAINER" ;;   # roles needs this container running, before the app
+            up)       remote_test_compose "up -d $TEST_SERVICES" ;;
+            # --no-deps: the database container is already up and a recreate of the app must not touch it.
+            recreate) remote_test_compose "up -d --force-recreate --no-deps $TEST_REST_SERVICE" ;;
+            down)     remote_test_compose "stop $TEST_SERVICES" ;;
+            status)   remote_test_compose "ps $TEST_SERVICES" ;;
+            logs)     remote_test_compose "logs -f --tail=200 $TEST_REST_SERVICE" ;;
+            refresh)
+                # Poll /health on the VM itself, so the IAP tunnel and the firewall rule are not needed.
+                remote_script "restart $TEST_REST_SERVICE and poll /health on :$TEST_PORT" \
+                    "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE -f $TEST_COMPOSE_FILE --env-file $ENV_FILE restart $TEST_REST_SERVICE && for i in \$(seq 1 180); do if python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:$TEST_PORT/health', timeout=2)\" 2>/dev/null; then echo \"OK: $TEST_REST_SERVICE healthy after \$i poll(s)\"; exit 0; fi; sleep 1; done; echo 'ERROR: /health did not answer within 180s' >&2; sudo docker logs --tail 50 $TEST_REST_SERVICE >&2; exit 1"
+                ;;
+            idle)
+                # venue_idle is standard library only; the exit code rides back through ssh.
+                remote_script "venue_idle --port $TEST_PORT" \
+                    "cd $VM_ROOT && PYTHONPATH=src python3 -m cosa.rest.venue_idle --port $TEST_PORT"
+                ;;
+            roles)
+                shift
+                TS_ROLE_ARG="${1:-}"
+                case "$TS_ROLE_ARG" in
+                    ""|--apply|--check|--grants-only) ;;
+                    *) die "test-server roles takes --apply, --check or --grants-only (no argument is a dry run), not '$TS_ROLE_ARG'" ;;
+                esac
+                # Needs root only to read the password files; the psql step is `docker exec` into the local pgvector.
+                remote_script "db_roles $TS_ROLE_ARG against $TEST_PGVECTOR_CONTAINER" \
+                    "cd $VM_ROOT && sudo env LUPIN_ROOT=$VM_ROOT PYTHONPATH=src python3 -m cosa.utils.db_roles --app-pw-file $TEST_SECRETS_DIR/db_app_password --host-pw-file $TEST_SECRETS_DIR/db_host_password --test-pw-file $TEST_SECRETS_DIR/db_test_password --psql 'docker exec -i $TEST_PGVECTOR_CONTAINER psql -U lupin_dev -d lupin_db_dev' $TS_ROLE_ARG"
+                ;;
+            *) die "test-server needs one of: prep | node-modules | seed-companions | up-db | up | recreate | down | status | logs | refresh | idle | roles" ;;
+        esac
         ;;
 
     -h|--help|help)

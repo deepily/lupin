@@ -96,6 +96,12 @@ class TestParseMultipleChoiceResponse:
         assert got == { "answers": { "response": "PostgreSQL" } }
         assert "Could not parse multiple choice response" in caplog.text
 
+    def test_a_value_json_cannot_read_takes_the_type_error_arm_and_names_the_label( self, caplog ):
+        with caplog.at_level( "WARNING", logger=cv.logger.name ):
+            got = cv._parse_answers_response( 42, "open-ended batch" )
+        assert got == { "answers": { "response": 42 } }
+        assert "Could not parse open-ended batch response" in caplog.text
+
 
 # ── _notify_impl fallbacks ────────────────────────────────────────────────────
 

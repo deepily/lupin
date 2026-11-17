@@ -10,11 +10,11 @@ Handles both "diagram" and "chart" visual types since Mermaid supports
 flowcharts, sequence diagrams, pie charts, gantt charts, etc.
 """
 
-import re
 import logging
 from typing import Optional
 
 from .visual_registry import VisualRenderer
+from cosa.agents.presentation_generator.renderers.fenced_block import extract_fenced_block
 
 logger = logging.getLogger( __name__ )
 
@@ -122,9 +122,8 @@ class MermaidRenderer( VisualRenderer ):
             return None
 
         # Try fenced block first (with or without "mermaid" label)
-        match = re.search( r"```(?:mermaid)?\s*\n(.*?)```", response_content, re.DOTALL )
-        if match:
-            return match.group( 1 ).strip()
+        fenced = extract_fenced_block( response_content, "mermaid" )
+        if fenced is not None: return fenced
 
         # Try bare Mermaid (starts with known directive)
         mermaid_starts = [

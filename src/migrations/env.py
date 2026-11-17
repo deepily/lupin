@@ -44,9 +44,7 @@ from cosa.rest.postgres_models import Base
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+# are read with config.get_main_option, passing the option name.
 
 
 def run_migrations_offline() -> None:

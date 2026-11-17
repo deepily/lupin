@@ -25,6 +25,9 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
+// The page loads the shared approve-link module before it uses the legacy href normalizer, which now delegates to it.
+import "../../../lupin_app/static/js/shared/approve-link.js";
+
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
 

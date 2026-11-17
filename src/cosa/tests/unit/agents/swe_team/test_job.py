@@ -183,6 +183,8 @@ class TestExecuteLive( unittest.TestCase ):
         self.assertEqual( config.worker_model, "sonnet" )
         self.assertEqual( config.budget_usd, 9.0 )
         self.assertEqual( config.wall_clock_timeout_secs, 600 )
+        # D2 (row 251f26fb): the job's user keys the persisted trust rows, so it must reach the orchestrator.
+        self.assertEqual( orch_cls.call_args.kwargs[ "user_email" ], "u@x.ai" )
         snc.assert_called_once()
         client.stop_sync.assert_called_once()   # finally cleanup
         vio.clear_job_id.assert_called_once()

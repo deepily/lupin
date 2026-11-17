@@ -20,7 +20,9 @@ def test_the_vm_install_sets_all_three_variables_from_the_known_vm_paths_and_not
     assert done.returncode == 0
     assert "export LUPIN_ROOT='/mnt/lupin-data/lupin' DEEPILY_DATA_DIR='/mnt/lupin-data/projects-data' PLANNING_IS_PROMPTING_ROOT='/mnt/lupin-data/planning-is-prompting'" in done.stderr + done.stdout
     assert "/dev/box" not in done.stdout + done.stderr
-    assert "reuse-vector-refresh.sh --install" in done.stdout + done.stderr and "reuse-vector-refresh.sh --status" in done.stdout + done.stderr
+    text = done.stdout + done.stderr
+    assert "lupin_mcp.cron_generate --only vector-refresh --install" in text and "reuse-vector-refresh.sh --status" in text
+    assert "reuse-vector-refresh.sh --install" not in text and ".venv-lupin-mcp/bin/python" in text
 
 
 def test_the_install_warns_when_the_test_login_file_is_missing_and_names_the_verb_that_writes_it():
@@ -46,7 +48,45 @@ def test_the_vm_install_creates_the_handoff_folder_for_both_users_before_install
     text = vm( "install-refresh-cron", "vm" ).stderr + vm( "install-refresh-cron", "vm" ).stdout
     create = 'sudo install -d -m 2775 -o 1001 -g "$( id -g )" "/mnt/lupin-data/lupin/$HANDOFF"'
     assert create in text and "reuse candidate purpose handoff subdir" in text
-    assert text.index( create ) < text.index( "reuse-vector-refresh.sh --install" )
+    assert text.index( create ) < text.index( "cron_generate --only vector-refresh --install" )
+
+
+def _backup_step():
+    lines = vm( "install-refresh-cron", "vm" ).stdout.splitlines()
+    start = next( i for i, l in enumerate( lines ) if l.strip().startswith( "BDIR=" ) )
+    end   = next( i for i, l in enumerate( lines ) if i > start and l.strip().startswith( "for BPART" ) )
+    return "\n".join( l.strip() for l in lines[ start : end + 1 ] )
+
+
+def test_the_vm_install_creates_the_crontab_backup_folders_before_cron_generate_installs():
+    text = vm( "install-refresh-cron", "vm" ).stdout
+    assert "cron_generate --backup-dir" in text and "cron-generate" not in _backup_step()
+    assert text.index( "cron_generate --backup-dir" ) < text.index( "sudo install -d -m 2775 -o 1001", text.index( "BPARTS" ) ) < text.index( "cron_generate --only vector-refresh --install" )
+
+
+def test_the_backup_step_creates_each_level_below_io_group_writable_and_setgid( tmp_path ):
+    # Run the printed step with sudo stubbed and a fake interpreter that answers like cron_generate --backup-dir.
+    ( tmp_path / "bin" ).mkdir()
+    ( tmp_path / "bin" / "sudo" ).write_text( '#!/bin/bash\necho "SUDO $*"\n' )
+    ( tmp_path / "bin" / "sudo" ).chmod( 0o755 )
+    fake = tmp_path / "py"
+    fake.write_text( '#!/bin/bash\necho io/jobs/crontab-backups\n' )
+    fake.chmod( 0o755 )
+    script = f'LUPIN_ROOT=/x; CGPY={fake}\n' + _backup_step()
+    done = subprocess.run( [ "bash", "-ec", script ], capture_output=True, text=True, env={ "PATH": f"{tmp_path / 'bin'}:{os.environ[ 'PATH' ]}" } )
+    paths = [ l.rsplit( " ", 1 )[ 1 ] for l in done.stdout.splitlines() ]
+    assert done.returncode == 0 and paths == [ "/mnt/lupin-data/lupin/io/jobs", "/mnt/lupin-data/lupin/io/jobs/crontab-backups" ]
+    assert all( l.startswith( "SUDO install -d -m 2775 -o 1001 -g " ) for l in done.stdout.splitlines() )
+    empty = tmp_path / "py2"
+    empty.write_text( "#!/bin/bash\n:\n" )
+    empty.chmod( 0o755 )
+    bad = subprocess.run( [ "bash", "-ec", script.replace( str( fake ), str( empty ) ) ], capture_output=True, text=True, env={ "PATH": f"{tmp_path / 'bin'}:{os.environ[ 'PATH' ]}" } )
+    assert bad.returncode == 1 and "printed nothing" in bad.stdout and "SUDO" not in bad.stdout
+
+
+def test_the_local_install_creates_no_backup_folders():
+    done = vm( "install-refresh-cron", "local", env={ "DEEPILY_DATA_DIR": "/d", "PLANNING_IS_PROMPTING_ROOT": "/p" } )
+    assert "BPARTS" not in done.stdout + done.stderr
 
 
 def test_the_handoff_step_reads_the_real_ini_key_and_refuses_when_it_is_absent( tmp_path ):
@@ -94,7 +134,7 @@ def _run_numpy_step( tmp_path, with_numpy, with_uv ):
 
 def test_the_vm_install_puts_numpy_in_the_venv_before_installing_the_cron_lines():
     text = vm( "install-refresh-cron", "vm" ).stdout
-    assert text.index( "requirements-reuse-vector-refresh.txt" ) < text.index( "reuse-vector-refresh.sh --install" )
+    assert text.index( "requirements-reuse-vector-refresh.txt" ) < text.index( "cron_generate --only vector-refresh --install" )
 
 
 def test_the_numpy_step_uses_uv_with_the_pinned_file_when_the_venv_lacks_numpy( tmp_path ):

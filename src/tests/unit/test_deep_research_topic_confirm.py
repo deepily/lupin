@@ -290,6 +290,8 @@ def test_the_toggle_means_CANCEL_when_the_key_is_absent_and_the_shipped_ini_sets
         def get( self, key, default=None, silent=False, return_type="string" ):
             if return_type == "boolean": return str( default ).strip().lower() == "true"
             return default
+        def get_required( self, key, silent=False, return_type="string" ):
+            return f"model-for[{key}]"           # the two model ids have no default; every other key stays absent
     assert ResearchConfig.from_config( _Absent() ).cancel_when_no_topics_ticked is True
 
     ini = configparser.ConfigParser( interpolation=None, strict=False )

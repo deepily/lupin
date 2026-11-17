@@ -113,7 +113,7 @@ def print_test_header( test_name ):
 # AUTHENTICATION — and WHICH DOOR each test walks through is a deliberate
 # choice, not a convenience.
 #
-# `require_api_key_or_jwt` (api_key_auth.py:207) accepts EITHER an X-API-Key
+# `require_api_key_or_jwt` (api_key_auth.py) accepts EITHER an X-API-Key
 # header OR `Authorization: Bearer <jwt>`. Row c46ba7c0 measured the API-key
 # side as a THREE-STEP STAIRCASE, every step answering 401:
 #
@@ -128,7 +128,7 @@ def print_test_header( test_name ):
 # ⇒ THE TWO VALIDATION TESTS BELOW TAKE THE JWT DOOR INSTEAD. Their subject is
 #   the endpoint's response_type VALIDATION, not authentication; they need only
 #   to be let in, and any accepted credential does that. This is the documented
-#   pattern for :7999 smoke — test_bfe_phase6_repair_loop_smoke.py:73 and five
+#   pattern for :7999 smoke — test_bfe_phase6_repair_loop_smoke.py and five
 #   other files in this directory authenticate exactly this way, with the
 #   credentials CLAUDE.md § Test credentials already prescribes.
 #
@@ -347,7 +347,7 @@ def test_an_invalid_response_type_is_rejected():
 # A single `test_response_submission` sent `notification_id` as a QUERY PARAM:
 #
 #     requests.post( ".../api/notify/response",
-#                    params={"notification_id": "nonexistent-uuid-12345"},
+#                    params={"notification_id": "nonexistent-uuid-12345"}, # doc-lint: waive commented-out-code -- quotes the defective old call this test replaced
 #                    json={"answer": "yes"} )
 #
 # The handler reads `request_body.get( "notification_id" )` — the BODY. So the
@@ -486,7 +486,7 @@ def test_a_malformed_notification_id_is_a_client_error_not_a_server_error():
     # assertion, and the wrong one satisfied it.
     #
     # The malformed detail is the landed fix's own wording at
-    # routers/notifications.py:640 — `f"notification_id is not a valid UUID:
+    # routers/notifications.py — `f"notification_id is not a valid UUID:
     # {notification_id!r}"` — so the id we SENT appears in it. The missing-id
     # 422 cannot name a value it never received.
     assert "not-a-uuid" in response.text, (

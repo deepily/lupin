@@ -25,6 +25,7 @@ from typing import Optional, List
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.podcast_generator.script_types import apply_script_type, get_profile, validate_review
 from cosa.rest.job_state import JobState
 
 
@@ -65,6 +66,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
         force_failure_mode: Optional[ str ] = None,
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
+        script_type: Optional[ str ] = None,
+        review: Optional[ str ] = None,
         debug: bool = False,
         verbose: bool = False
     ) -> None:
@@ -91,9 +94,16 @@ class PodcastGeneratorJob( AgenticJobBase ):
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
             audience_context: Custom audience description
+            script_type: Script type name (research_critical or status_report); None means research_critical
+            review: Review mode (ask or one_shot); None means the script type's default
             debug: Enable debug output
             verbose: Enable verbose output
+
+        Raises:
+            - ValueError when script_type or review is unknown
         """
+        get_profile( script_type )
+        validate_review( review )
         super().__init__(
             user_id    = user_id,
             user_email = user_email,
@@ -110,6 +120,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
         self.force_failure_mode = force_failure_mode
         self.audience           = audience
         self.audience_context   = audience_context
+        self.script_type        = script_type
+        self.review             = review
 
         # Results (populated after execution)
         self.audio_path    = None
@@ -223,8 +235,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             raise FileNotFoundError( f"Research document not found: {self.research_path}" )
 
         # Set sender_id and target_user for notifications
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
+        self._set_chain_identity( cosa_interface )
 
         # Set job_id for auto-injection into all orchestrator notify() calls
         voice_io.set_job_id( self.id_hash )
@@ -246,13 +257,16 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # Create config from INI
             from cosa.config.configuration_manager import ConfigurationManager
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+            # Request beats script-type profile beats INI
             config = PodcastConfig.from_config( config_mgr, debug=self.debug )
-
-            # Job args override INI values
-            if self.audience:
-                config.audience = self.audience
-            if self.audience_context:
-                config.audience_context = self.audience_context
+            apply_script_type(
+                config,
+                config_mgr,
+                script_type      = self.script_type,
+                review           = self.review,
+                audience         = self.audience,
+                audience_context = self.audience_context,
+            )
 
             # Create orchestrator
             agent = PodcastOrchestratorAgent(
@@ -278,24 +292,18 @@ class PodcastGeneratorJob( AgenticJobBase ):
             self.audio_path  = state.get( "final_audio_path" )
             self.script_path = state.get( "final_script_path" )
 
-            # Every run generates one artifact pair PER language (default en,es-MX).
+            # Every run generates one artifact pair per language (default en).
             # The orchestrator stores them keyed by language; thread ALL of them into
             # the card, not just the English primary (bug 00e6aba1).
             audio_by_lang  = dict( state.get( "audio_paths_by_language" )  or {} )
             script_by_lang = dict( state.get( "script_paths_by_language" ) or {} )
 
             # Build relative paths under io/ for URL generation + UI job-card metadata.
-            # Mirrors presentation_generator/job.py:301-341 — match the receiving
-            # logic in cosa/rest/routers/io_files.py:88-98 (handles abs / "io/" / "/" prefixes).
+            # Mirrors PresentationGeneratorJob._execute in presentation_generator/job.py — match the receiving
+            # logic in get_io_file in cosa/rest/routers/io_files.py (handles abs / "io/" / "/" prefixes).
             from cosa.agents.podcast_generator.config import LANGUAGE_NAMES
-            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
+            from cosa.agents.podcast_generator.play_links import io_relative, language_card_lines, ordered_languages, source_ref
             io_base = cu.get_project_root() + "/io/"
-
-            def _to_rel( p ):
-                if not p: return None
-                if p.startswith( io_base ): return p[ len( io_base ): ]
-                if p.startswith( "io/" ):   return p[ 3: ]
-                return p.lstrip( "/" )
 
             languages  = getattr( self, "target_languages", [] ) or [ "en" ]
 
@@ -309,24 +317,21 @@ class PodcastGeneratorJob( AgenticJobBase ):
 
             # Ordered language list: requested order first, then any extra languages
             # that actually produced an artifact but were not in target_languages.
-            ordered_langs = [ l for l in languages if l in audio_by_lang or l in script_by_lang ]
-            for l in list( audio_by_lang ) + list( script_by_lang ):
-                if l not in ordered_langs:
-                    ordered_langs.append( l )
+            ordered_langs = ordered_languages( languages, audio_by_lang, script_by_lang )
 
-            audio_rel  = _to_rel( self.audio_path )
-            script_rel = _to_rel( self.script_path )
+            audio_rel  = io_relative( self.audio_path, io_base )
+            script_rel = io_relative( self.script_path, io_base )
 
             # Store relative paths in artifacts so the UI job-card builds correct URLs
-            # (matches presentation_generator convention at job.py:336-341). Primary
+            # (matches presentation_generator convention in PresentationGeneratorJob._execute). Primary
             # (English) stays under the historical keys; the full per-language maps are
             # added so any downstream consumer can reach every artifact.
             self.artifacts[ "audio_path" ]  = audio_rel
             self.artifacts[ "script_path" ] = script_rel
             self.artifacts[ "report_path" ] = script_rel
             self.artifacts[ "podcast_id" ]  = agent.podcast_id
-            self.artifacts[ "audio_paths_by_language" ]  = { l: _to_rel( p ) for l, p in audio_by_lang.items() }
-            self.artifacts[ "script_paths_by_language" ] = { l: _to_rel( p ) for l, p in script_by_lang.items() }
+            self.artifacts[ "audio_paths_by_language" ]  = { l: io_relative( p, io_base ) for l, p in audio_by_lang.items() }
+            self.artifacts[ "script_paths_by_language" ] = { l: io_relative( p, io_base ) for l, p in script_by_lang.items() }
 
             # Optional Google Drive copy (flag off = no-op and no Google import). full_path is the
             # resolved source document path computed above, never the possibly-relative research_path.
@@ -348,7 +353,10 @@ class PodcastGeneratorJob( AgenticJobBase ):
             script_minutes = script.estimated_duration_minutes
             elapsed_sec   = round( time.time() - self._start_time, 1 )
             has_audio     = bool( self.audio_path )
-            n_langs       = len( languages )
+            # A language whose translation failed is not produced: name it, and do not count it.
+            failed_langs  = dict( agent._failed_translations )
+            produced_langs = [ l for l in languages if l not in failed_langs ]
+            n_langs       = len( produced_langs )
 
             # Three-variant TTS
             if has_audio and n_segments > 0:
@@ -372,25 +380,14 @@ class PodcastGeneratorJob( AgenticJobBase ):
             source_rel = source_ref( full_path, cu.get_project_root() )
 
             # One line per language: "**Mexican Spanish**: 📝 Script | ▶️ Play Here | 🎧 Listen | ⬇️ Download"
-            per_language_lines = []
-            for lang in ordered_langs:
-                label  = LANGUAGE_NAMES.get( lang, lang )
-                a_rel  = _to_rel( audio_by_lang.get( lang ) )
-                s_rel  = _to_rel( script_by_lang.get( lang ) )
-                parts  = []
-                s_link = script_link( s_rel )
-                if s_link: parts.append( s_link )
-                if a_rel:
-                    title = read_script_title( io_base + s_rel ) if s_rel else None
-                    parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
-                if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
-                if parts:
-                    per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
+            per_language_lines = language_card_lines( ordered_langs, LANGUAGE_NAMES, audio_by_lang, script_by_lang, source_rel, io_base, drive[ "language_links" ] )
 
             # Rich markdown abstract
             lines = [ "**Podcast Activity Report**", "" ]
             lines.append( f"**Segments**: {n_segments} (~{script_minutes:.1f} min)" )
-            lines.append( f"**Languages**: {', '.join( languages )}" )
+            lines.append( f"**Languages**: {', '.join( produced_langs )}" )
+            for lang, reason in failed_langs.items():
+                lines.append( f"**Translation failed (not produced)**: {LANGUAGE_NAMES.get( lang, lang )}. {reason}" )
             lines.extend( per_language_lines )
             lines.extend( drive[ "extra_lines" ] )
             if self.cost_summary:  # pragma: no branch - cost_summary is set unconditionally (3-key dict) earlier, so it is always truthy here; the False arc is unreachable
@@ -400,7 +397,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             completion_abstract = "\n".join( lines )
 
             # Store the abstract in artifacts so it rides the running→done
-            # job_state_transition (running_fifo_queue.py:567 reads
+            # job_state_transition (running_fifo_queue.py reads
             # artifacts.get("abstract")). Without this the promoted done card
             # renders with no abstract → "loading…" + no Play Here until a page
             # reload re-fetches from the persisted notification (bug 9b481811).
@@ -446,8 +443,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
         import urllib.parse
 
         # Set sender_id and target_user for notifications
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
+        self._set_chain_identity( cosa_interface )
 
         filename = os.path.basename( self.research_path )
 
@@ -493,7 +489,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
         self.artifacts[ "script_path" ] = self.script_path
         self.artifacts[ "podcast_id" ]  = f"dry-run-{self.id_hash}"
 
-        # Clickable audio links — same shape as the real path (job.py:346-348):
+        # Clickable audio links — same shape as the real path (the audio_triplet call in _execute):
         #   Play Here → &embed=1 floating overlay (auto-starts) · Listen → standalone
         #   tab · Download → raw mp3 attachment.
         from cosa.agents.podcast_generator.play_links import audio_triplet

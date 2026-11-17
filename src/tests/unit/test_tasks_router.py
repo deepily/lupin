@@ -443,7 +443,7 @@ def test_create_queued_default_never_consults_manager_guard( client, repo, monke
         raise AssertionError( "manager guard consulted on the queued default path" )
     monkeypatch.setattr( tasks, "is_manager_figure", _boom )
     repo.create_item.return_value = make_item()
-    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, created_by="no-sid-here" ) )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, created_by="krishna (a tool with no session)" ) )
     assert r.status_code == 201                                # queued path untouched
     assert repo.create_item.call_args.kwargs[ "status" ] == "queued"
 
@@ -1101,7 +1101,7 @@ def test_breakdown_NEVER_reaches_the_full_row_response( client, repo ):
     consumers.
     """
     repo.query_tasks.return_value = [ ]
-    r = client.get( "/api/tasks", params={ "owner_persona": "krishna" } )   # count_only=False
+    r = client.get( "/api/tasks", params={ "owner_persona": "krishna" } )   # count_only is off
 
     assert r.status_code == 200
     assert "breakdown" not in r.json(), "breakdown leaked into the full-row shape the multiplexer parses"
@@ -2405,7 +2405,7 @@ def test_amend_rejects_overlong_fields( client, repo, field, limit ):
 # Persona-key follow-on policy (2026-07-11, task c03d1870):
 #   (2) class-scoped owner default on CREATE, and
 #   (1) unknown-persona soft-flag on the CREATE and reassign(PATCH) paths.
-# Design: src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# Design: the persona-key follow-on policy note (removed by 8420e8b0a)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize( "ownerless_class", [ "decision", "gate" ] )
@@ -2455,6 +2455,32 @@ def test_create_off_roster_default_owner_flagged( client, repo ):
     assert r.status_code == 201
     assert r.json()[ "persona_flag" ] == { "owner_persona": "ziggy" }
     assert repo.create_item.call_args.kwargs[ "owner_persona" ] == "ziggy"
+
+
+@pytest.mark.parametrize( "created_by", [ "wiki-librarian tick", "duplicate-check-daily", "heartbeat-arbiter@lupin.deepily.ai" ] )
+def test_create_refuses_a_tool_name_as_creator_and_writes_nothing( client, repo, created_by ):
+    # Every row is filed by a persona (Rick, 9 Nov 2026, row 1c56470f). These three are the
+    # stamps the automated filers used before; with no session id and no persona they are refused.
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, created_by=created_by ) )
+    assert r.status_code == 422, r.text
+    assert "does not name a persona" in r.json()[ "detail" ]
+    repo.create_item.assert_not_called()
+
+
+def test_create_takes_a_tool_filing_for_a_persona_and_defaults_the_owner_to_it( client, repo ):
+    repo.create_item.return_value = make_item()
+    body = { k: v for k, v in _CREATE_BODY.items() if k != "owner_persona" }
+    r    = client.post( "/api/tasks", json=dict( body, created_by="krishna (wiki-librarian tick)" ) )
+    assert r.status_code == 201, r.text
+    kw = repo.create_item.call_args.kwargs
+    assert kw[ "created_by" ] == "krishna (wiki-librarian tick)" and kw[ "owner_persona" ] == "krishna"
+
+
+def test_create_from_a_login_is_not_judged_on_its_declared_creator( repo, monkeypatch ):
+    # A login's creator is stamped from its validated account, so the declared string is not the creator.
+    repo.create_item.return_value = make_item()
+    r = _client_as( "someone@example.com", monkeypatch ).post( "/api/tasks", json=dict( _CREATE_BODY, created_by="New Ticket card" ) )
+    assert r.status_code == 201, r.text
 
 
 def test_create_off_roster_manager_flagged( client, repo ):

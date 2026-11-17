@@ -68,8 +68,8 @@ _QUOTE      = re.compile( r"^\s*>\s?" )
 # A POINTER TOKEN — the single reference this module recognises, in FOUR shapes.
 # WIDENED 2026-08-13 (row a74f2176) from URLs + slashed paths to also cover the two
 # shapes the fleet writes constantly and the old pattern could not see:
-#   · a BARE filename with an extension and an optional :line — "job.py:1163",
-#     "running_fifo_queue.py:422" — a path the house style writes without a slash;
+#   · a bare filename with an extension and an optional :line — "job.py:1163",  # doc-lint: waive line-pointer -- example shape this module matches
+#     "running_fifo_queue.py:422" — a path the house style writes without a slash;  # doc-lint: waive line-pointer -- example shape this module matches
 #   · a BARE 8-hex row id — "e0bb5a94" — the task-store handle, which carries no slash
 #     and no extension at all.
 # The token is used TWO ways that must never disagree: as the body of the whole-line

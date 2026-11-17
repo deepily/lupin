@@ -34,6 +34,7 @@ from cosa.repo.symindex.candidates import storage_paths as sp
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates.errors import CandidateError, BUILD_LOCK_HELD
 from cosa.repo.symindex.paths import data_dir
+from lupin_mcp import job_summary_adapters as jsa
 
 CRON_TAG       = "# reuse-vector-refresh"
 CRON_SCHEDULE  = "47 10 * * *"
@@ -249,6 +250,22 @@ def cron_lines( root, python, log_path, env_path, carried=None ):
     return lt.cron_lines_for( run, CRON_SCHEDULE, 240 )
 
 
+def write_status( root, now, environ, log ):
+    """
+    Write vector-status.json beside the state file, and file no row.
+
+    Requires:
+        - log is a callable taking one line
+
+    Ensures:
+        - calls vector_status.check with no librarian, so the status file is rewritten and no store row is filed
+        - an OSError, ValueError or CandidateError from the check is logged and never raised
+    """
+    from cosa.repo.symindex import vector_status                       # imported here because vector_status imports this module
+    try: vector_status.check( root, now, environ=environ, log=log )
+    except ( OSError, ValueError, CandidateError ) as error: log( f"vector status check failed: {error}" )
+
+
 def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, crontab_cmd=None, writer_factory=None, client=None, enabled_fn=None ):
     """
     Run the command line.
@@ -260,9 +277,12 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
         - with no mode flag, runs one refresh and returns its exit code
         - a job that is switched off logs one line and returns EXIT_DISABLED before the index is built
         - --print-install prints the cron lines and changes nothing
-        - --install, --uninstall and --status go through the librarian's locked crontab editor with this job's tag
+        - --install is retired: it prints the cron_generate command and returns 1
+        - --uninstall and --status go through the librarian's locked crontab editor with this job's tag
         - an InstallRefused or a RuntimeError prints one line to err and returns 1
         - a worktree root or a missing credential prints the named error as JSON and returns EXIT_NAMED
+        - writes vector-status.json beside the state file and files no row on every exit past the folder lookup: a run, a switched-off exit, a worktree or credential refusal, and a run_refresh exception (written before it is re-raised); a check that fails is logged and leaves the exit code alone
+        - the one exit that writes nothing is a refresh_dir refusal, because the status file's folder is what failed
     """
     environ = os.environ if environ is None else environ
     now     = now or datetime.datetime.now()
@@ -275,7 +295,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     parser.add_argument( "--base-url", default=environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" ) )
     args    = parser.parse_args( argv )
     root    = args.root or environ.get( "LUPIN_ROOT" ) or os.getcwd()
-    cmd     = crontab_cmd or [ environ.get( "REUSE_VECTOR_REFRESH_CRONTAB", "crontab" ) ]
+    cmd     = crontab_cmd or lt.crontab_command( environ, "REUSE_VECTOR_REFRESH_CRONTAB" )
     try:
         folder = refresh_dir( root )
     except CandidateError as e:
@@ -285,10 +305,13 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return EXIT_OK
+    if args.install:
+        print( lt.install_moved_text( root ), file=err )                # every cron line is cron_generate's now; the VM runs it with --only vector-refresh
+        return 1
     try:
-        if args.install or args.uninstall:
-            lt.edit_crontab( [] if args.uninstall else lines, environ, cmd, os.path.join( folder, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
-            print( "uninstalled" if args.uninstall else "installed: 2 lines", file=out )
+        if args.uninstall:
+            lt.edit_crontab( [], environ, cmd, os.path.join( folder, "crontab-backups" ), now, tag=CRON_TAG, owner=LOCK_OWNER )
+            print( "uninstalled", file=out )
             return EXIT_OK
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
@@ -302,17 +325,28 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     if not ( enabled_fn or ( lambda: lt.read_enabled( errors=read_errors, key=ENABLED_KEY ) ) )():
         log( f"refresh could not read {ENABLED_KEY}, so it stays off: {read_errors[ 0 ]}" if read_errors else f"refresh is switched off: {ENABLED_KEY} is not true" )
         print( json.dumps( { "ran": False, "reason": "switched off" }, sort_keys=True ), file=out )
+        jsa.record_refresh( folder, { "ran": False, "reason": "switched off" }, EXIT_DISABLED, {}, now, environ )
+        write_status( root, now, environ, log )
         return EXIT_DISABLED
     try:
         writer = ( writer_factory or ( lambda a: cb.make_job_writer( root, a.base_url, environ ) ) )( args )
     except ValueError as error:
         print( json.dumps( { "error": "WORKTREE_ROOT", "detail": str( error ) } ), file=out )
+        write_status( root, now, environ, log )
         return EXIT_NAMED
     except CandidateError as error:
         print( json.dumps( { "error": error.code, "detail": error.detail } ), file=out )
+        write_status( root, now, environ, log )
         return EXIT_NAMED
-    code, summary = run_refresh( root, writer, client if client is not None else cb.vb.EndpointClient(),
-                                 os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, environ=environ )
+    try:
+        code, summary = run_refresh( root, writer, client if client is not None else cb.vb.EndpointClient(),
+                                     os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, environ=environ )
+    except Exception as error:                                         # the job's own record says it failed; the exception still ends the run
+        jsa.record_refresh( folder, { "ran": False, "reason": f"{type( error ).__name__}: {error}" }, EXIT_FAILED, lt.read_state( os.path.join( folder, STATE_NAME ) ), now, environ )
+        write_status( root, now, environ, log )
+        raise
+    jsa.record_refresh( folder, summary, code, lt.read_state( os.path.join( folder, STATE_NAME ) ), now, environ )
+    write_status( root, now, environ, log )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
 

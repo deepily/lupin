@@ -1,13 +1,13 @@
 ---
 capability: mcp-session-spawn-and-reap
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.session_spawner.spawn_sessions@b171adfb7f
+  - lupin_mcp.session_spawner.spawn_sessions@eb7d475f75
   - lupin_mcp.session_spawner.default_fleet_gate@2ee57b8598
-  - lupin_mcp.session_spawner.dismiss_sessions@9c1f2ed21e
+  - lupin_mcp.session_spawner.dismiss_sessions@5a0fcfbaba
   - lupin_mcp.session_spawner.list_spawned_sessions@47ba7c5ac6
   - lupin_mcp.reap_memento.seats_to_withhold@253ba85cda
-  - lupin_mcp.self_respin_core.perform_self_respin@7b69144c56
+  - lupin_mcp.self_respin_core.perform_self_respin@26c890bc9e
 ---
 # MCP session spawn and reap
 
@@ -17,7 +17,7 @@ A manager seat starts, lists and ends Claude Code seats through four MCP tools s
 - `spawn_sessions` refuses a count below 1, a count over the spawn cap (code default 8), a fleet-cap breach, or any spawn under skeleton crew. The tool returns `status: "error"`. A one-for-one re-spin that holds a credit is not refused for skeleton crew.
 - `default_fleet_gate` answers the skeleton crew switch first. With it on, it refuses every spawn except a re-spin that holds a fresh credit, which goes on to the cap check. Otherwise it allows a spawn when current total plus requested fits the fleet cap. If its census raises, the spawn is allowed.
 - On a real spawn each child gets its own seat worktree. A falsy `project` puts the seat in the caller's cwd. Otherwise `project` resolves to a root: the caller's own tree for its own project, a sibling of the main checkout for any other. A missing provisioning script, a refused root or a provisioning failure leaves it in that resolved project root. An occupied slot skips to the next index. A dry run provisions nothing. An unresolvable `project` is refused, dry runs included.
-- A child whose launch script exits non-zero is reported `failed`; the rest still launch, and only successes enter the manifest.
+- Each child's environment carries `COSA_VOICE_WORKER_VOICE_MODE`: the INI key `cc session worker default voice mode`, or `inherit` for a role equal to `manager`. A bad key value refuses the whole spawn, naming the key, after the project check. See [[quiet-workers-by-default]]. A child whose launch script exits non-zero is reported `failed`; the rest still launch, and only successes enter the manifest.
 - Model is the `model` argument, else the INI per-role key, else the INI default key, else no `--model` flag.
 - `seed_memento` is appended to the brief as text; the spawner never opens it. A truthy seed on a real spawn also arms a wake watch.
 
@@ -28,7 +28,7 @@ A manager seat starts, lists and ends Claude Code seats through four MCP tools s
 - `seats_to_withhold` keeps a seat alive on `prior_holder_present`, `unparseable_present` or `timeout_no_memento`. `unproven_present` is killed with a warning.
 - A reap that killed a seat whose persona is in `respin_personas` mints one re-spin credit for it. The credit is keyed by the manager's session id, valid for 15 minutes and listed as `respin_credits_minted`. A spawn of exactly one named persona with a seed memento can spend it.
 - A raising memento re-check disables the withhold, and the MCP tool has no `force_kill` parameter. The branch probe reports unmerged commits but never withholds a kill; read `memento_alarm` and `withhold_notice` first.
-- Only reaped seats' non-terminal store rows are reconciled, except for personas named in `respin_personas`. A row is closed on a positive receipt. Otherwise it goes to its accountable manager, unless that manager is among the seats reaped in this batch, else to the reaping manager. A row that fits none is surfaced as unclassifiable. A seat with no resolvable bridge is not reconciled. If a withheld seat's persona was named in `respin_personas`, its slug lands in `retained_unmatched`.
+- Only reaped seats' non-terminal store rows are reconciled, except for personas named in `respin_personas`. A row is closed on a positive receipt. Otherwise it goes to its accountable manager, unless that manager is among the seats reaped in this batch, else to the reaping manager. A row that fits none is surfaced as unclassifiable. A row that shares a reaped persona's name but was never touched by that session is skipped and listed under `skipped_other_session`. It is never moved or closed. A seat with no resolvable bridge is not reconciled. If a withheld seat's persona was named in `respin_personas`, its slug lands in `retained_unmatched`.
 
 ## List and self re-spin
 - `list_spawned_sessions` probes tmux for liveness and reads [[cc-session-bridge]] files for identity. Address a seat by persona only when `persona_state` is `allocated`.

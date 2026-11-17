@@ -56,7 +56,7 @@ from cosa.agents.utils.voice_io import read_gate_answer
 # it landed in (measured n=143: min 6.59s, median 6.91s, max 18.76s).
 #
 # 🔴 WHY THIS MODULE IS EXPOSED — an earlier pass excluded it, twice. Reached
-# via `agentic_job_factory.py:135` -> `SweTeamJob` it runs in the CJ Flow
+# via `create_agentic_job` in agentic_job_factory.py -> `SweTeamJob` it runs in the CJ Flow
 # agentic pool INSIDE `:7999`, where a reload tears the caller down alongside
 # the callee and a bigger budget buys nothing. That exclusion was verified by
 # asking which OTHER package imports this module — the one question that cannot
@@ -66,14 +66,14 @@ from cosa.agents.utils.voice_io import read_gate_answer
 # call site; any package with a `__main__.py` is dual-mode by construction and
 # must be classified per entry point.
 #
-# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+# Full derivation: the dev-server-reload-availability doc, section 9(a), removed from the tree; see 8420e8b0a^.
 #
 # 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
 # inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
-# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+# (Cited by symbol, not by line: this used to cite a line range in notify_user_async.py and a
 #  seven-line fix above it silently repointed every copy at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
@@ -169,6 +169,7 @@ class SweTeamOrchestrator:
         config            : SweTeamConfig = None,
         session_id        : str = None,
         job_id            : str = None,
+        user_email        : str = None,
         on_state_change   = None,
         debug             : bool = False,
         verbose           : bool = False,
@@ -199,64 +200,25 @@ class SweTeamOrchestrator:
 
         # Proxy notification state (Phase 7)
         self._proxy_pending_count = 0
-        self._user_email          = None    # Set from job context when available
+        self._user_email          = user_email    # The job's user; keys the persisted trust rows
 
         # Decision proxy (Phase 4 + Phase 5 INI integration)
         self.proxy          = None
         self._ask_before_act = False
         if self.config.trust_mode != "disabled":
             try:
-                from .proxy import EngineeringStrategy
-                from cosa.agents.decision_proxy.trust_tracker import TrustTracker
-                from cosa.agents.decision_proxy.circuit_breaker import CircuitBreaker
+                from .strategy_builder import build_ini_engineering_strategy
 
-                # Read INI config via factory functions (non-fatal fallback to defaults)
-                proxy_cfg = {}
-                swe_cfg   = {}
-                try:
-                    from cosa.config.configuration_manager import ConfigurationManager
-                    from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
-                    from cosa.agents.swe_team.proxy.config import swe_proxy_config_from_config_mgr
-
-                    cfg_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-                    proxy_cfg = trust_proxy_config_from_config_mgr( cfg_mgr )
-                    swe_cfg   = swe_proxy_config_from_config_mgr( cfg_mgr )
-                except Exception as e:
-                    logger.warning( f"INI config read failed, using defaults: {e}" )
-
-                self._ask_before_act = swe_cfg.get( "ask_before_act", False )
-
-                # Build TrustTracker with INI values
-                trust_tracker = TrustTracker(
-                    rolling_window_days  = proxy_cfg.get( "rolling_window_days", 30 ),
-                    decay_half_life_days = proxy_cfg.get( "decay_half_life_days", 14 ),
-                    l2_threshold         = proxy_cfg.get( "l2_threshold", 50 ),
-                    l3_threshold         = proxy_cfg.get( "l3_threshold", 200 ),
-                    l4_threshold         = proxy_cfg.get( "l4_threshold", 500 ),
-                    l5_threshold         = proxy_cfg.get( "l5_threshold", 1000 ),
-                    debug                = self.debug,
-                )
-
-                # Build CircuitBreaker with INI values
-                circuit_breaker = CircuitBreaker(
-                    trust_tracker                 = trust_tracker,
-                    error_rate_threshold          = proxy_cfg.get( "cb_error_rate_threshold", 0.15 ),
-                    confidence_collapse_threshold = proxy_cfg.get( "cb_confidence_collapse_threshold", 0.3 ),
-                    auto_demotion_levels          = proxy_cfg.get( "cb_auto_demotion_levels", 2 ),
-                    recovery_cooldown_seconds     = proxy_cfg.get( "cb_recovery_cooldown_seconds", 3600 ),
-                    on_trip_callback              = self._on_circuit_breaker_trip,
-                    debug                         = self.debug,
-                )
-
-                self.proxy = EngineeringStrategy(
-                    trust_tracker    = trust_tracker,
-                    circuit_breaker  = circuit_breaker,
-                    accepted_senders = swe_cfg.get( "accepted_senders" ),
+                self.proxy, swe_cfg  = build_ini_engineering_strategy(
                     trust_mode       = self.config.trust_mode,
                     debug            = self.debug,
+                    on_trip_callback = self._on_circuit_breaker_trip,
                 )
+                self._ask_before_act = swe_cfg.get( "ask_before_act", False )
             except ImportError:
                 logger.warning( "Decision proxy requested but proxy module unavailable" )
+
+        self._load_trust_state()
 
         # Metrics
         self.start_time   = None
@@ -351,7 +313,9 @@ class SweTeamOrchestrator:
                     role     = role,
                     priority = "low",
                 )
-                self.proxy.trust_tracker.record_decision( proxy_result.category, success=True )
+                # No trust feedback here: no human has answered, and an auto-approval that scored
+                # itself a success would let the proxy grade its own work (row 0bba595e).
+                self._persist_proxy_decision( role, question, proxy_result, None )
                 return proxy_result.value == "approved"
 
             if proxy_result.action == "suggest" and proxy_result.value:
@@ -366,12 +330,19 @@ class SweTeamOrchestrator:
             try:
                 proxy_would_approve = ( proxy_result.value == "approved" )
                 agreement           = ( proxy_would_approve == user_answer )
-                self.proxy.trust_tracker.record_decision( proxy_result.category, success=agreement )
+                if self.proxy.trust_tracker.trust_model == "blr":
+                    # Row cfc7dd01: the BLR model learns only from decisions that carry features
+                    self.proxy.trust_tracker.record_decision_with_features( proxy_result.category, agreement, question )
+                else:
+                    self.proxy.trust_tracker.record_decision( proxy_result.category, success=agreement )
                 if self.debug:
                     print( f"[Proxy Feedback] mode={self.proxy.trust_mode}, cat={proxy_result.category}, proxy={'approve' if proxy_would_approve else 'review'}, user={'yes' if user_answer else 'no'}, agree={agreement}" )
 
                 # Persist trust state to DB (non-fatal)
                 self._persist_trust_feedback( proxy_result.category, agreement )
+
+                # Row 5ac3d5d7: the ratify page reads proxy_decisions, and this path wrote none
+                self._persist_proxy_decision( role, question, proxy_result, user_answer )
 
                 # Phase 7: Emit proxy summary notification for pending ratification decisions
                 # "suggest" and "defer" actions produce pending ratification decisions;
@@ -392,6 +363,82 @@ class SweTeamOrchestrator:
 
         return user_answer
 
+    def _load_trust_state( self ):
+        """
+        Load the user's persisted trust rows into the in-memory tracker (non-fatal).
+
+        Requires:
+            - self.proxy is an EngineeringStrategy or None
+
+        Ensures:
+            - returns the number of categories restored
+            - returns 0 without touching the DB when there is no proxy or no user email
+            - a DB failure is logged and returns 0; it never propagates
+        """
+        if self.proxy is None or self._user_email is None: return 0
+
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.proxy_decision_repository import TrustStateRepository
+
+            restored = 0
+            with get_db() as session:
+                for row in TrustStateRepository( session ).get_all_for_user( self._user_email, domain="swe" ):
+                    if self.proxy.trust_tracker.restore_category(
+                        row.category, row.successful_decisions, row.rejected_decisions, row.updated_at.timestamp(),
+                        trip=row.circuit_breaker_state, history=row.decision_history, blr_state=row.blr_state
+                    ):
+                        restored += 1
+            return restored
+        except Exception as e:
+            logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
+            return 0
+
+    def _persist_proxy_decision( self, role, question, proxy_result, user_answer ):
+        """
+        Write one organic proxy_decisions row for a gated confirmation (non-fatal best-effort).
+
+        Requires:
+            - role is a string; question is a string
+            - proxy_result has action, value, category, confidence, trust_level, reason
+            - user_answer is the user's bool answer, or None when the proxy auto-approved
+
+        Ensures:
+            - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
+            - the row carries data_origin "organic"
+            - failure is logged and never propagates
+        """
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
+
+            common = {
+                "notification_id" : str( uuid.uuid4() ),
+                "domain"          : "swe",
+                "category"        : proxy_result.category,
+                "question"        : question[ :500 ],
+                "sender_id"       : get_sender_id( role, self.session_id ),
+                "confidence"      : proxy_result.confidence,
+                "trust_level"     : proxy_result.trust_level,
+                "reason"          : proxy_result.reason or "",
+                "metadata_json"   : { "job_id": self.job_id, "user_answer": user_answer },
+                "data_origin"     : "organic",
+            }
+            with get_db() as session:
+                repo = ProxyDecisionRepository( session )
+                if proxy_result.action == "shadow":
+                    repo.log_shadow( **common )
+                else:
+                    repo.log_decision(
+                        action                = proxy_result.action,
+                        decision_value        = proxy_result.value,
+                        requires_ratification = proxy_result.action in ( "suggest", "defer" ),
+                        **common
+                    )
+                session.commit()
+        except Exception as e:
+            logger.warning( f"Proxy decision DB persistence failed (non-fatal): {e}" )
+
     def _persist_trust_feedback( self, category, approved ):
         """
         Persist trust feedback to the database (non-fatal best-effort).
@@ -404,7 +451,8 @@ class SweTeamOrchestrator:
             - approved is a bool (True if user agreed with proxy)
 
         Ensures:
-            - Trust state updated in DB on success
+            - Counters updated in DB on success; the stored level follows in a separate transaction
+            - with the "blr" trust model the category's BLR state is stored in the same write
             - Failure logged but never propagates
         """
         try:
@@ -414,6 +462,11 @@ class SweTeamOrchestrator:
             # Use job user_email if available, fallback to session_id
             user_email = getattr( self, '_user_email', None ) or f"{self.session_id}@swe.deepily.ai"
 
+            # Row 5bb93a7b: the BLR posterior is stored with the counters; other models keep the stored value
+            extra = {}
+            if self.proxy is not None and self.proxy.trust_tracker.trust_model == "blr":
+                extra[ "blr_state" ] = self.proxy.trust_tracker.blr_state_for( category )
+
             with get_db() as session:
                 repo = TrustStateRepository( session )
                 repo.update_after_ratification(
@@ -421,9 +474,48 @@ class SweTeamOrchestrator:
                     domain     = "swe",
                     category   = category,
                     approved   = approved,
+                    **extra,
                 )
         except Exception as e:
             logger.warning( f"Trust state DB persistence failed (non-fatal): {e}" )
+
+        # The level goes in its own transaction, so a failure here cannot roll back the counters.
+        self._persist_trust_level( category )
+
+    def _persist_trust_level( self, category ):
+        """
+        Store the tracker's current level for a category (non-fatal best-effort).
+
+        Nothing else writes the level, so the dashboard showed the lowest level for every row.
+        The circuit breaker demotes the tracker without any feedback, so its trip callback calls this too.
+
+        Requires:
+            - category is a string (decision category)
+
+        Ensures:
+            - the stored level equals self.proxy.trust_tracker.get_level( category ) on success
+            - the stored circuit_breaker_state is the active trip, or None once it is earned back
+            - does nothing when there is no proxy
+            - a DB failure is logged and never propagates
+        """
+        if self.proxy is None: return
+
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.proxy_decision_repository import TrustStateRepository
+
+            user_email = self._user_email or f"{self.session_id}@swe.deepily.ai"
+
+            tracker = self.proxy.trust_tracker
+            with get_db() as session:
+                repo = TrustStateRepository( session )
+                repo.update_trust_level( user_email, "swe", category, tracker.get_level( category ) )
+                cat = tracker.categories.get( category )
+                if cat is not None:
+                    # A trip is stored while it caps the level and cleared once the level is earned back.
+                    repo.update_circuit_breaker_state( user_email, "swe", category, cat.trip_state() )
+        except Exception as e:
+            logger.warning( f"Trust level DB persistence failed (non-fatal): {e}" )
 
     def _on_circuit_breaker_trip( self, category, reason ):
         """
@@ -436,9 +528,13 @@ class SweTeamOrchestrator:
             - reason is a human-readable string
 
         Ensures:
+            - Records the trip and stores the demoted level, because the demotion happens in memory with no feedback to carry it
             - Sends one alert notification with high priority
             - Non-fatal: logs warning on failure, never raises
         """
+        if self.proxy is not None: self.proxy.trust_tracker.record_trip( category )
+        self._persist_trust_level( category )
+
         try:
             import requests as http_requests
 

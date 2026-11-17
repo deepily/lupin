@@ -116,7 +116,7 @@ def test_peek_returns_None_for_a_row_without_a_pledge_and_for_a_missing_row():
 
 
 # ---------------------------------------------------------------------------
-# pledge_facts_for_id (RB-2)
+# pledge_facts_for_id, requirement RB-2
 # ---------------------------------------------------------------------------
 
 def test_pledge_facts_returns_the_named_rows_status_and_owner_in_that_order():

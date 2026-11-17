@@ -92,6 +92,7 @@ class TestEmitCallSitesUseJobStates:
             f"{len( UNPARSEABLE )} file(s) under {COSA_ROOT} did not parse, so this guard "
             f"did not audit them:\n  " + "\n  ".join( UNPARSEABLE ) )
 
+    @pytest.mark.census
     def test_no_call_site_passes_a_container_name( self ):
         """The specific confusion: 'todo', 'run', 'done', 'dead' are containers."""
         container_names = set( STATE_TO_UI_CONTAINER.values() )

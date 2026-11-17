@@ -60,13 +60,13 @@ from .conftest import (
 #
 # Two further consequences of that silence, both fixed here:
 #   - #clock-display was the real element #clock, off by a suffix
-#     (notifications.html:100). /app/multiplexer builds a SECOND element with the
-#     same id at runtime (NotificationsHeaderRenderer.ts:173-175), but that page
+#     (notifications.html). /app/multiplexer builds a SECOND element with the
+#     same id at runtime (NotificationsHeaderRenderer.ts), but that page
 #     is not in PAGE_URLS, so it is out of this suite's scope — noted so the next
 #     reader does not re-derive it.
 #   - [data-testid="session-id"] exists only on scratch pages under static/html/test/.
 #     The live session ids on /app/notifications are #queue-session and
-#     #audio-session (notifications.js:2510-2511), and nothing was normalizing them.
+#     #audio-session (notifications.js), and nothing was normalizing them.
 #
 # Each spec: sel, text, pages. `pages` names PAGE_URLS keys and is checked
 # statically by test_normalize_specs_name_real_pages.
@@ -130,9 +130,9 @@ NORMALIZE_SPECS = (
 #
 # admin-users   Created / Last Login render via formatDate() as relative times
 #               ("Just now", "3 hours ago") that drift every run.
-# admin-ratify  proxy-ratify.js:192, column 7 — formatRelativeTime( created_at ).
-# admin-trust   proxy-dashboard.js:343, column 0 — the SAME function, a
-#               byte-identical second copy at proxy-dashboard.js:429.
+# admin-ratify  proxy-ratify.js, column 7 — formatRelativeTime( created_at ).
+# admin-trust   proxy-dashboard.js, column 0 — the SAME function, a
+#               byte-identical second copy later in proxy-dashboard.js.
 #
 # MEASURED at :7999 on 2026-09-15, read-only, no capture. admin-trust:
 #   50 of 50 column-0 cells drifting — "52m ago" x28, "53m ago" x7, "1h ago" x15
@@ -276,7 +276,7 @@ def normalize_table_columns( browser_page, page_name ):
 #
 # Clear-and-inject keeps the pane IN FRAME and makes it deterministic, so a later
 # change to the feed can still redden something. The pattern is not invented here —
-# test_dm_recent_activity.py:162-168 already does exactly this: empty the live
+# test_dm_recent_activity.py already does exactly this: empty the live
 # container, append one entry with a frozen timestamp, wait on a testid of its own.
 #
 # ── COVERAGE LEDGER ─────────────────────────────────────────────────────────────
@@ -297,7 +297,7 @@ def normalize_table_columns( browser_page, page_name ):
 # suspects from pixel bands and then measured directly — all text-stable across six
 # loads. Freezing them would have cost monitoring and bought no determinism.
 # ⇒ Residual pixel variance below the comparator's threshold is not a defect.
-# `playwright_visual_snapshot_threshold = 0.1` (pytest.ini:92) is the gate; a raw
+# `playwright_visual_snapshot_threshold = 0.1` (in pytest.ini) is the gate; a raw
 # pixel count taken with a stricter instrument is not (Mr. Radio 🦉's ruling).
 
 _FREEZE_COMMONS_FEED_JS = """
@@ -387,6 +387,99 @@ def freeze_live_feeds( browser_page, page_name ):
     return report
 
 
+# ---------------------------------------------------------------------------
+# Clear-and-inject: the admin USERS table (row b72bb412)
+# ---------------------------------------------------------------------------
+#
+# The admin-users snapshot captured whatever users the test database held, so any
+# test or job that added, removed or verified a user reddened it. Measured 2026-11-07,
+# e2e_b run ts-1941b715: 565 passed, 0 failed, 1 error, the error being this snapshot,
+# differing in the user rows (about y 360 to 670).
+#
+# Same ruling as the commons feed above: no mask, because a mask stops watching the
+# table. The page's OWN renderUsersTable() is called with fixed users, so the real row
+# markup, badges and pagination text stay in frame and stay under test.
+#
+# ── COVERAGE LEDGER ─────────────────────────────────────────────────────────────
+#   NO LONGER MONITORED: which users the database holds, and the /admin/users
+#   response itself (the E2E tests in test_admin_users.py cover that).
+#   STILL MONITORED: the table chrome and every row's rendering for an admin, an
+#   active user, an inactive user and a not-verified user, plus the pager text.
+
+_FREEZE_USERS_TABLE_JS = """
+( users ) => {
+    const tbody = document.getElementById( "users-tbody" );
+    if ( !tbody ) return { container: false, injected: 0 };
+
+    renderUsersTable( users );
+    totalUsers  = users.length;
+    currentPage = 1;
+    updatePagination();
+
+    // A live fetch that returned no users leaves the table hidden and shows the
+    // empty-state panel, so the freeze must not depend on the database having users.
+    hideElement( "loading" );
+    hideElement( "no-results" );
+    showElement( "users-table-container" );
+
+    return { container: true, injected: tbody.children.length };
+}
+"""
+
+# Fixed content. Dates are old, so formatDate() takes its absolute branch, and the
+# column normalizer pins them anyway.
+_FROZEN_USERS = (
+    { "id": "frozen-1", "email": "frozen-admin@example.test", "roles": [ "admin" ],
+      "is_active": True,  "email_verified": True,  "created_at": "2026-01-01T12:00:00Z",
+      "last_login_at": "2026-01-01T12:00:00Z" },
+    { "id": "frozen-2", "email": "frozen-user@example.test", "roles": [ "user" ],
+      "is_active": True,  "email_verified": True,  "created_at": "2026-01-01T12:00:00Z",
+      "last_login_at": None },
+    { "id": "frozen-3", "email": "frozen-inactive@example.test", "roles": [ "user" ],
+      "is_active": False, "email_verified": True,  "created_at": "2026-01-01T12:00:00Z",
+      "last_login_at": None },
+    { "id": "frozen-4", "email": "frozen-unverified@example.test", "roles": [ "user" ],
+      "is_active": True,  "email_verified": False, "created_at": "2026-01-01T12:00:00Z",
+      "last_login_at": None },
+)
+
+_USERS_TABLE_PAGES = ( "admin-users", )
+
+
+def freeze_users_table( browser_page, page_name ):
+    """
+    Replace the live users table with fixed users, keeping the table in frame.
+
+    Requires:
+        - browser_page is navigated and settled (the table renders from a fetch)
+        - page_name is a key in PAGE_URLS
+
+    Ensures:
+        - pages outside _USERS_TABLE_PAGES are skipped, not failed
+        - a missing #users-tbody fails rather than returning a quiet zero
+        - the injected row count equals the number of frozen users
+        - returns the report dict
+
+    Raises:
+        - AssertionError if the tbody is absent, or the wrong row count landed
+    """
+    if page_name not in _USERS_TABLE_PAGES:
+        return {}
+
+    report = browser_page.evaluate( _FREEZE_USERS_TABLE_JS, list( _FROZEN_USERS ) )
+
+    assert report[ "container" ], (
+        f"{page_name}: #users-tbody is ABSENT. Either the table moved — fix the id "
+        f"here — or this page no longer carries it, in which case drop it from "
+        f"_USERS_TABLE_PAGES. An unfrozen users table goes straight into the snapshot."
+    )
+    assert report[ "injected" ] == len( _FROZEN_USERS ), (
+        f"{page_name}: injected {report[ 'injected' ]} rows, expected {len( _FROZEN_USERS )}"
+    )
+
+    return report
+
+
 def normalize_dynamic_content( browser_page, page_name ):
     """
     Normalize this page's dynamic text to stable placeholders before capture.
@@ -423,6 +516,42 @@ def normalize_dynamic_content( browser_page, page_name ):
     return report
 
 
+# Where the mouse rests for every visual capture: the page corner, which is where a fresh page's
+# pointer already sits. A form login leaves the pointer wherever its submit button was, and that
+# point can be over a table row or a card, so its hover style then lands in the baseline (row d336bc7e).
+CAPTURE_MOUSE_PARK = ( 0, 0 )
+
+# Only animations that can end are awaited: an endless one (a spinner, a pulse) never resolves `.finished`,
+# and waiting on it hung the notifications page for 16+ minutes (ts-c3d9fd54). The race against a timer
+# bounds even a finite animation that is very long.
+CAPTURE_SETTLE_TIMEOUT_MS = 2000
+
+_SETTLE_TRANSITIONS_JS = (
+    "() => {"
+    " const finishable = document.getAnimations().filter( a => a.effect !== null"
+    " && Number.isFinite( a.effect.getComputedTiming().iterations ) );"
+    " const settled = Promise.allSettled( finishable.map( a => a.finished ) );"
+    f" const timeout = new Promise( resolve => setTimeout( resolve, {CAPTURE_SETTLE_TIMEOUT_MS} ) );"
+    " return Promise.race( [ settled, timeout ] ).then( () => undefined );"
+    " }"
+)
+
+
+def park_mouse_for_capture( browser_page ):
+    """
+    Move the pointer to CAPTURE_MOUSE_PARK and let the hover transitions it ends finish.
+
+    Requires:
+        - browser_page is a Playwright page
+
+    Ensures:
+        - the pointer is at CAPTURE_MOUSE_PARK, whatever the test did before
+        - running animations and transitions have finished, so no hover style is caught mid-fade
+    """
+    browser_page.mouse.move( *CAPTURE_MOUSE_PARK )
+    browser_page.evaluate( _SETTLE_TRANSITIONS_JS )
+
+
 def prepare_page_for_capture( browser_page, page_name ):
     """
     Freeze, normalize and settle the page, then normalize AGAIN as the last step.
@@ -440,6 +569,8 @@ def prepare_page_for_capture( browser_page, page_name ):
     Ensures:
         - live feeds are frozen before any text is pinned (the freeze rewrites
           whole entries, so pinning first would pin text about to be replaced)
+        - the pointer is parked at CAPTURE_MOUSE_PARK before the settle waits, so no
+          hover style from an earlier login click or test reaches the snapshot
         - the final browser round-trip is the dynamic-content normalizer
         - both normalizer passes matched the same count per selector
         - returns the final {selector: match_count} report
@@ -449,6 +580,8 @@ def prepare_page_for_capture( browser_page, page_name ):
           yields no rows, or a selector's count moved between the two passes
     """
     freeze_live_feeds( browser_page, page_name )
+    freeze_users_table( browser_page, page_name )
+    park_mouse_for_capture( browser_page )
 
     first = normalize_dynamic_content( browser_page, page_name )
 
@@ -1028,7 +1161,7 @@ def test_no_admin_decision_table_spec_while_the_fixture_empties_the_table():
 #
 # ⚠️ WHAT IT STILL CANNOT SEE: an element the page builds at RUNTIME is absent from
 # the template and present in the DOM. /app/multiplexer's clock is exactly that
-# (NotificationsHeaderRenderer.ts:173) — it is not in PAGE_URLS, so no spec claims
+# (NotificationsHeaderRenderer.ts) — it is not in PAGE_URLS, so no spec claims
 # it, but a future spec on a JS-rendered element would need an exemption here with
 # a stated reason, NOT a relaxed assertion.
 
@@ -1364,6 +1497,90 @@ def test_freeze_live_feeds_fails_on_a_short_injection():
         freeze_live_feeds( page, "notifications" )
 
 
+def test_freeze_users_table_fails_when_the_tbody_is_absent():
+    """
+    A missing users tbody fails, naming the id and both repairs.
+
+    Ensures:
+        - AssertionError names #users-tbody and _USERS_TABLE_PAGES
+    """
+    page = _StubPage( {} )
+    page.evaluate = lambda js, users=None: { "container": False, "injected": 0 }
+
+    with pytest.raises( AssertionError ) as exc:
+        freeze_users_table( page, "admin-users" )
+
+    message = str( exc.value )
+    assert "#users-tbody" in message, f"tbody not named: {message}"
+    assert "_USERS_TABLE_PAGES" in message, f"the second repair is not named: {message}"
+
+
+def test_freeze_users_table_fails_on_a_short_injection():
+    """
+    Injecting fewer rows than frozen users fails rather than passing quietly.
+
+    Ensures:
+        - AssertionError when the reported count does not match
+    """
+    page = _StubPage( {} )
+    page.evaluate = lambda js, users=None: { "container": True, "injected": 0 }
+
+    with pytest.raises( AssertionError ):
+        freeze_users_table( page, "admin-users" )
+
+
+def test_freeze_users_table_hands_the_browser_the_frozen_users_and_skips_other_pages():
+    """
+    The browser receives the frozen users and no others on admin-users, and nothing elsewhere.
+
+    Ensures:
+        - the payload equals _FROZEN_USERS, with 4 users covering admin, inactive,
+          not-verified and never-logged-in
+        - a page outside _USERS_TABLE_PAGES never reaches evaluate()
+    """
+    seen = []
+    page = _StubPage( {} )
+    page.evaluate = lambda js, users=None: seen.append( users ) or { "container": True, "injected": len( users ) }
+
+    assert freeze_users_table( page, "admin-users" ) == { "container": True, "injected": 4 }
+    assert seen == [ list( _FROZEN_USERS ) ]
+    assert len( _FROZEN_USERS ) == 4
+
+    assert freeze_users_table( page, "login" ) == {}
+    assert len( seen ) == 1, "evaluated on a page with no users table"
+
+
+def test_prepare_page_for_capture_freezes_the_users_table_on_admin_users():
+    """
+    The capture path hands the frozen users to the browser, before the column pins.
+
+    Without this, deleting the freeze call from prepare_page_for_capture leaves every
+    helper-level test green while the snapshot goes back to live users.
+
+    Ensures:
+        - evaluate() receives the users-freeze script with the frozen users
+        - that call comes before the table-column normalizer's call
+    """
+    calls = []
+
+    class _CapturePage:
+        mouse = _RecordingMouse( [] )
+
+        def evaluate( self, js, payload=None ):
+            calls.append( ( js, payload ) )
+            if js == _FREEZE_USERS_TABLE_JS: return { "container": True, "injected": len( payload ) }
+            if js == _NORMALIZE_TABLE_JS:    return { spec[ "sel" ]: 4 for spec in payload }
+            if js == _NORMALIZE_JS:          return { spec[ "sel" ]: 1 for spec in payload }
+            return None
+
+    prepare_page_for_capture( _CapturePage(), "admin-users" )
+
+    scripts = [ js for js, _ in calls ]
+    assert _FREEZE_USERS_TABLE_JS in scripts, "the capture path never froze the users table"
+    assert dict( calls )[ _FREEZE_USERS_TABLE_JS ] == list( _FROZEN_USERS )
+    assert scripts.index( _FREEZE_USERS_TABLE_JS ) < scripts.index( _NORMALIZE_TABLE_JS )
+
+
 def test_freeze_live_feeds_skips_a_page_that_has_no_feed():
     """
     A page outside _COMMONS_FEED_PAGES is skipped, not failed.
@@ -1572,6 +1789,16 @@ def test_table_column_indices_are_within_the_row_they_index():
 # animation frames. A push landing in that window put the live clock back into the
 # snapshot. prepare_page_for_capture normalizes again after the waits.
 
+class _RecordingMouse:
+    """A stand-in mouse that appends each move to the page's call list, so order is visible."""
+
+    def __init__( self, calls ):
+        self.calls = calls
+
+    def move( self, x, y ):
+        self.calls.append( ( "mouse.move", x, y ) )
+
+
 class _PushedClockPage:
     """
     A stand-in page with one live clock that a simulated server push repaints.
@@ -1585,9 +1812,12 @@ class _PushedClockPage:
     def __init__( self ):
         self.dom   = { s[ "sel" ]: "live" for s in NORMALIZE_SPECS if "notifications" in s[ "pages" ] }
         self.calls = []
+        self.mouse = _RecordingMouse( self.calls )
 
     def evaluate( self, js, arg=None ):
         self.calls.append( js )
+        if js is _SETTLE_TRANSITIONS_JS:
+            return None
         if js is _NORMALIZE_JS:
             for spec in arg:
                 self.dom[ spec[ "sel" ] ] = spec[ "text" ]
@@ -1642,6 +1872,116 @@ def test_prepare_fails_when_the_second_pass_matches_a_different_count():
     with pytest.raises( AssertionError ) as exc:
         prepare_page_for_capture( _ShrinkingPage(), "notifications" )
     assert "#auth-status" in str( exc.value )
+
+
+def test_the_pointer_is_parked_and_settled_before_the_final_normalize():
+    """
+    The pointer is parked and transitions settle before the final normalize.
+
+    Ensures:
+        - exactly one move, to CAPTURE_MOUSE_PARK
+        - the transition wait runs right after the move
+        - both come before the first normalizer pass, so nothing hovered survives into the capture
+    """
+    page = _PushedClockPage()
+
+    prepare_page_for_capture( page, "notifications" )
+
+    moves = [ i for i, call in enumerate( page.calls ) if isinstance( call, tuple ) ]
+    assert [ page.calls[ i ] for i in moves ] == [ ( "mouse.move", *CAPTURE_MOUSE_PARK ) ]
+    assert page.calls[ moves[ 0 ] + 1 ] is _SETTLE_TRANSITIONS_JS, "the hover transition was not awaited after the move"
+    assert moves[ 0 ] < page.calls.index( _NORMALIZE_JS ), "the pointer moved after the normalizer had already run"
+
+
+_ENDLESS_PAGE = """<style>
+  @keyframes spin { to { transform: rotate( 360deg ); } }
+  .spin  { animation: spin 1s linear infinite; }
+  .once  { animation: spin 100ms linear 1; }
+  .fade  { transition: opacity 700ms linear; opacity: 1; }
+  .fade.out { opacity: 0.2; }
+  .long  { animation: spin 30s linear 1; }
+</style>
+<div class="spin">a</div><div class="spin">b</div><div class="once">c</div><div class="fade">d</div>"""
+
+
+def test_the_settle_script_filters_to_animations_that_can_finish():
+    """
+    Pin the settle script's text: it keeps finishable animations only and races a timer.
+
+    Ensures:
+        - it no longer maps `.finished` over every animation
+        - it keeps animations by a finite-iterations check, which also covers transitions
+        - it carries a timeout
+    """
+    js = _SETTLE_TRANSITIONS_JS
+    assert "Number.isFinite" in js and "iterations" in js
+    assert "Promise.race" in js and str( CAPTURE_SETTLE_TIMEOUT_MS ) in js
+    assert "document.getAnimations().map" not in js, "every animation is awaited again, endless ones included"
+
+
+def test_the_settle_script_returns_on_a_page_with_endless_animations_in_a_real_browser( browser ):
+    """
+    Run the settle script in Chromium on a page with two endless spinners and a transition.
+
+    Requires:
+        - browser is pytest-playwright's browser fixture, so the session's running loop is shared
+
+    Ensures:
+        - the endless animations are really present (so the old script would have hung)
+        - the script returns well inside the timeout, having awaited the finite ones
+        - the finite animation and the transition have finished by then
+    """
+    import time
+
+    page = browser.new_page()
+    try:
+        page.set_content( _ENDLESS_PAGE )
+        page.evaluate( "() => { document.querySelector( '.fade' ).classList.add( 'out' ); }" )
+        counts = page.evaluate( "() => ( { total: document.getAnimations().length,"
+                                " endless: document.getAnimations().filter( a => !Number.isFinite( a.effect.getComputedTiming().iterations ) ).length } )" )
+        assert counts[ "endless" ] == 2, counts
+        running = page.evaluate( "() => document.getAnimations().filter( a => a instanceof CSSTransition && a.playState === 'running' ).length" )
+        assert running == 1, "the 700 ms hover transition must still be running when the script starts, or this test cannot fail"
+
+        started = time.monotonic()
+        page.evaluate( _SETTLE_TRANSITIONS_JS )
+        elapsed = time.monotonic() - started
+
+        assert elapsed < CAPTURE_SETTLE_TIMEOUT_MS / 1000 * 0.8, f"waited {elapsed:.2f}s: it sat on the endless animations"
+        assert elapsed > 0.4, f"returned in {elapsed:.2f}s: it did not wait for the 700 ms transition"
+        assert page.evaluate( "() => getComputedStyle( document.querySelector( '.fade' ) ).opacity" ) == "0.2", "the transition had not finished when the script returned"
+        states = page.evaluate( "() => document.getAnimations().filter( a => Number.isFinite( a.effect.getComputedTiming().iterations ) ).map( a => a.playState )" )
+        assert states == [] or set( states ) == { "finished" }, states
+    finally:
+        page.close()
+
+
+def test_the_settle_script_stops_waiting_at_the_timeout_on_a_finite_animation_that_outlasts_it( browser ):
+    """
+    Run the settle script in Chromium on a page whose only finishable animation lasts 30 s.
+
+    Requires:
+        - browser is pytest-playwright's browser fixture, so the session's running loop is shared
+
+    Ensures:
+        - the animation is still running when the script starts
+        - the script returns at the timeout, no sooner and not much later
+    """
+    import time
+
+    cap  = CAPTURE_SETTLE_TIMEOUT_MS / 1000
+    page = browser.new_page()
+    try:
+        page.set_content( _ENDLESS_PAGE.replace( 'class="once"', 'class="long"' ) )
+        assert page.evaluate( "() => document.querySelector( '.long' ).getAnimations()[ 0 ].playState" ) == "running"
+
+        started = time.monotonic()
+        page.evaluate( _SETTLE_TRANSITIONS_JS )
+        elapsed = time.monotonic() - started
+
+        assert cap * 0.9 <= elapsed < cap * 1.8, f"returned after {elapsed:.2f}s, the cap is {cap:.1f}s"
+    finally:
+        page.close()
 
 
 def test_the_visual_test_captures_straight_after_prepare_page_for_capture():

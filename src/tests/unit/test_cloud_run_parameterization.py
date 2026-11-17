@@ -15,7 +15,7 @@ import cosa.utils.util as cu
 
 PROJECT_ROOT = cu.get_project_root()
 
-# src/scripts/cloud-run-deploy.sh retired 2026-07-11 (monolith-on-Cloud-Run path,
+# The cloud-run-deploy script (removed by 1fa05b16c) retired (monolith-on-Cloud-Run path,
 # Rick ruled; triggered by audit finding F1) — dropped from the coverage list.
 CLOUD_RUN_SCRIPTS = [
     "src/scripts/cloud-run-build.sh",

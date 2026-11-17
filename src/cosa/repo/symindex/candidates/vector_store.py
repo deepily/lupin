@@ -12,6 +12,7 @@ import pathlib
 import secrets
 import shutil
 
+from cosa.utils.file_hash import file_sha256
 from cosa.repo.symindex.candidates.errors import (
     CandidateError, DEPENDENCY_MISSING, ENGINE_MISMATCH, ENGINE_NOT_LOADED, VECTOR_SET_UNAVAILABLE, VECTOR_SET_CORRUPT )
 
@@ -36,19 +37,6 @@ def canonical( obj ):
     return json.dumps( obj, sort_keys=True, separators=( ",", ":" ), ensure_ascii=True )
 
 
-def file_sha256( path ):
-    """
-    Hash a file in chunks.
-
-    Ensures:
-        - returns the hex sha256 of the file's bytes
-    """
-    h = hashlib.sha256()
-    with open( path, "rb" ) as f:
-        for chunk in iter( lambda: f.read( 1 << 20 ), b"" ): h.update( chunk )
-    return h.hexdigest()
-
-
 def manifest_hash( manifest ):
     """
     Return the hash that names a vector set.
@@ -64,23 +52,13 @@ def manifest_hash( manifest ):
     return hashlib.sha256( canonical( body ).encode( "utf-8" ) ).hexdigest()
 
 
-def text_hash( text ):
-    """
-    Name one embedded text.
-
-    Ensures:
-        - returns the hex sha256 of the text's utf-8 bytes
-    """
-    return hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()
-
-
 def write_row_texts( out_dir, ids, hashes ):
     """
     Write the sidecar that names the text each matrix row was embedded from.
 
     Requires:
         - ids is the sorted list of entry ids, one per matrix row
-        - hashes maps each matrix name (prose, code, concat) to the list of text_hash values, in id order
+        - hashes maps each matrix name (prose, code, concat) to the list of sha256 hashes of the texts, in id order
 
     Ensures:
         - writes one JSON line per id: { id, prose, code, concat }, each a text hash
@@ -240,7 +218,7 @@ def check_engines( manifest, info ):
 
     Requires:
         - manifest holds engines, document_roles and query_roles as the build wrote them
-        - info is the body of GET /api/embeddings/info, with its engines block
+        - info is the body of the service's info read, with its engines block
 
     Ensures:
         - returns None when model, revision, dtype, device, device class, prefixes, dimensions and roles all agree

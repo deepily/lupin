@@ -6,36 +6,33 @@ The narratives for earlier releases are archived at the end of [VERSION-HISTORY.
 
 ---
 
-## What's New in v0.2.2 — check for existing code before writing new code
+## What's New in v0.2.3 — a decision proxy that learns, the reuse backlog judged, and the background jobs under one switchboard
 
-v0.2.2 ran from 30 September to 3 November 2026. It asked one question: **before a seat writes a new function, can it find out whether one already exists**? The answer has three parts: a map of the code, tools that search it, and a merge gate that holds every seat to using them. The branch also measured how well the checker works, and it reports the weak spots as found.
+v0.2.3 ran from 4 to 17 November 2026: 1,098 commits (823 without merges) across 2,027 files. It took three things v0.2.2 left open and finished them. The decision proxy's 18 known defects were fixed, and its trust model became a setting. The reuse checker's backlog was judged and acted on, with the last of it still being judged. Every background job was put behind a switch the owner can see and flip.
 
-**Reuse before you write**
+**The decision proxy**
 
-- **A wiki of the code, written from the code**. About 670 capability pages now describe what each package does and how its parts fit together. A lint check fails when a page falls out of step with the code it describes.
-- **Lookup tools every seat can call**. Before writing a definition, a seat asks whether something like it already exists. The tools search an index of every symbol and rank the candidates by meaning. A judging model then picks the ones that do the same job.
-- **A merge gate that enforces it**. Every new function, method or class needs a short record of the lookup and its decision. The decision is duplicate, extend an existing symbol, or distinct and why. The gate refuses a merge without one, runs in seconds, and is switched on.
-- **A nightly duplicate check**. Each night a job compares the day's new definitions against the rest of the tree, and files what it finds for triage. Its first pass found 41 candidates, and 4 were real duplicates, fixed the same day.
+- **Eighteen defects fixed**. All 18 numbered defects from the list in the v0.2.2 explainer are closed, each reviewed before it landed. They include organic decision rows, and an error-rate feature and demotion for the regression model. Calibration is conformal on out-of-sample predictions, free-text accuracy is true cosine, and multiple-choice and batch answers are scored. The admin guide now matches the code.
+- **A trust model you can choose**. The trust model is a setting with three choices: a plain count, a beta model, or a Bayesian logistic regression. The default is still the plain count. The regression is fed from decisions a person has ratified, and its state is kept in the database.
+- **Accuracy not yet re-measured**. Nobody has re-run the accuracy report since the fixes, so this release claims no new accuracy figure. The [online preference-learning explainer](src/rnd/v0.2.3/2026.11.16-online-preference-learning-pm-explainer.md) says what is and is not measured.
+- **One strategy builder**. The SWE team, the bug-fix expediter and the decision proxy now build their strategies through the same code.
 
-**Measuring the checker against ground truth**
+**The reuse backlog judged**
 
-- **Ground truth labelled by a person**. A labelling page let the owner mark 222 pairs of definitions as the same job or not. Every claim about the checker is scored against that set.
-- **What helps, and what does not**. A one-line statement of purpose on each definition is what lets a duplicate be found at all. The judging model is the weak stage. On real pairs it ranks well enough to use. Inside a full candidate list, though, it cannot yet tell a duplicate from a look-alike, and that finding sets the next round of experiments.
+- **Rulings for the backlog**. Rulings already saved were rescued first. Opus then judges the remaining definitions under a daily budget, and that work continues after this release. Every ruling names the model that made it. A back-fill closed the gap of definitions that had no outcome line.
+- **The duplicate-check findings triaged**. Seats worked through 274 functions on 14 November and 356 findings on 16 November. Of the 356, 323 were distinct, 14 were duplicates and 19 should extend an existing symbol. The fixes for those 33 follow this release.
+- **A wider search**. The reuse search now expands each need before it searches, with 128 candidates per query and a fusion depth of 512. On whole lists it finds between 101 and 122 of the 124 known answers.
 
-**Code and docs that stay clean**
+**Background jobs under one switchboard**
 
-- **Docstrings rewritten, and kept that way**. Older model output had filled the docstrings with emphasis, history and references nobody could follow. The [documentation rewrite plan](src/rnd/v0.2.2/2026.09.30-lupin-af-documentation-rewrite-plan/2026.09.30-lupin-af-documentation-rewrite-plan.md) measures how often, with before-and-after examples. A sweep rewrote 3,485 docstrings and took lint findings from 29,838 to 0. A commit gate now stops them coming back.
-- **Copy-pasted code merged**. Near-identical copies became shared helpers, which cut the exact clone groups from 129 to 34.
-- **A higher test floor**. Coverage was measured at 100% across the whole frame. The unit suite grew from about 27,700 tests to about 43,200, and now runs in parallel. Documentation lint, the reuse check and the Docker smoke tests joined the merge gates.
+- **A switch on every job**. All 24 jobs in the registry have a switch, and the running job honours it. This was checked live on 14 November.
+- **Plain descriptions**. Every job's card opens with a short description of what the job does.
+- **One jobs list**. Both web clients show one merged list of jobs, in place of the separate scheduled-jobs list.
+- **Quieter workers**. Worker seats no longer speak routine updates by default. Urgent notices are still spoken.
 
-**Following the project, and steering it**
+**Platform and operations**
 
-- **Any document becomes a podcast in one click**. The doc viewer turns an explainer into a narrated episode, so the code and its plans can be followed by ear. Episodes can also be published to Google Drive.
-- **One click to approve**. Cards carry links that approve a held task, approve a whole list, or raise one task to top priority. Each link shows a preview first. The fleet's skeleton-crew mode is now a switch in the web clients.
-- **Smaller fixes in the clients**. Keep place now holds your scroll inside every card, and audio can no longer play for the wrong request.
-
-**Platform**
-
-- **One server image, on the current agent SDK**. Both servers run one rebuilt image. It carries the current Claude Agent SDK and the same Claude Code version as the host.
-- **Tighter access**. The app reaches the database through its own role, with no password in its environment, and the database listens only locally. Guards stop one session from killing another's processes or answering another user's card.
-- **A cloud test machine on Vertex**. The cloud test machine now reaches Claude through Google's Vertex service.
+- **A test server on the cloud machine** for tests that change data, with a deploy that checks itself.
+- **A smaller backup**. The backup went from 22.3 GB to 5.3 GB. The database dump is compressed, input and output rows no longer store embeddings, and notification vectors are cleared.
+- **A merge queue for managers**.
+- **Self-cleaning job worktrees**. A test-fix job's worktree removes itself once git no longer records it.

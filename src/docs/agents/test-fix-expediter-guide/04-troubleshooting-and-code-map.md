@@ -88,6 +88,14 @@ sudo apt install gh
 gh auth login
 ```
 
+### A `tfe-<id>` folder is left under `.claude/worktrees` after the job ended
+
+**Cause (measured 16 Nov 2026: 42 folders, 26 Oct to 14 Nov).** A job makes its worktree inside the container. Git's record then names a container path, `/var/lupin/.git/worktrees/tfe-<id>`. A host-side `git worktree prune` reads that path as missing and drops the record. At job end, `WorktreeContext.__aexit__` calls `drain_then_remove`. `git rev-parse` fails in the folder, so the reaper answers `skipped_reason="broken_or_not_a_worktree"` and removes nothing. The janitor walks git's list, so it never sees the folder.
+
+**Fix.** On that refusal, `WorktreeContext._remove_dangling_sandbox` deletes the folder. It does so only when `has_dangling_git_link( path )` is true. That means `.git` is a file whose `gitdir:` target no longer exists. Symlinked artifacts such as `.venv` are unlinked, never followed. A folder with no such link is kept and a warning is logged. This runs after success, failure and cancel, because `__aexit__` runs for all three. Commits made by `FixExecutor` and `GitStrategist` are already on the branch. Only uncommitted edits in a folder git no longer tracks are lost.
+
+**Guard.** `src/tests/unit/test_worktree_context.py`, class `TestFinishedJobLeavesNoFolder` (drops git's record inside the job, then checks the folder is gone after success, failure and cancel).
+
 ### Infinite rerun loop (should never happen)
 
 If you see TFE dispatching on the completion of its own validation rerun, the

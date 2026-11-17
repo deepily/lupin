@@ -40,6 +40,8 @@ import logging
 import os
 import subprocess
 
+from cosa.utils.main_checkout import main_checkout_of
+
 logger = logging.getLogger( __name__ )
 
 # The script, resolved from the TARGET repo rather than from LUPIN_ROOT. A script
@@ -64,14 +66,8 @@ def _main_checkout_of( path ):
           still refuses the refused root handed in directly
         - never raises
     """
-    try:
-        out = subprocess.run( [ "git", "-C", str( path ), "rev-parse", "--path-format=absolute", "--git-common-dir" ],
-                              capture_output=True, text=True, timeout=10 )
-        if out.returncode == 0 and out.stdout.strip():
-            return os.path.realpath( os.path.dirname( out.stdout.strip().rstrip( "/" ) ) )
-    except ( OSError, subprocess.SubprocessError ):
-        pass
-    return os.path.realpath( str( path ) )
+    owner = main_checkout_of( path )
+    return os.path.realpath( owner if owner is not None else str( path ) )
 
 
 def _parse_keys( stdout ):

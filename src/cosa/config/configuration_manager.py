@@ -48,11 +48,7 @@ def singleton( cls: type ) -> Callable[..., Any]:
                 print( "No ConfigurationManager() singleton instance to reset" )
         
         if cls not in instances:
-            # print( "Instantiating ConfigurationManager() singleton...", end="\n\n" )
             instances[ cls ] = cls( *args, **kwargs )
-        # else:
-        #     if instances[ cls ].get( "app debug", default=False, return_type="boolean" ):
-        #         print( "Reusing ConfigurationManager() singleton..." )
             
         return instances[ cls ]
     
@@ -399,14 +395,12 @@ class ConfigurationManager():
                         if self.debug and self.verbose: print(
                             "[{0}]th block id [{1}] [{2}]=[{3}]".format( idx, block_id, key, key_value_pairs[ key ] ) )
 
-            # print()
             self._scan_and_update_keys( key_value_pairs, parent_block_keys )
 
         else:
 
             if not self.silent: print( "No inheritance flag found" )
 
-        # print()
 
     def _load_key_value_pairs_from_file( self, config_path: str, key_value_pairs: dict[str, str] ) -> dict[str, str]:
         """
@@ -527,8 +521,6 @@ class ConfigurationManager():
             # TODO: Why is this necessary? block ID was being added twice to this list!?!
             if block_id not in inheritance_list:
                 inheritance_list.append( block_id )
-            # else:
-                # print( "Skipping adding [{0}], it's already in the inheritance list?!?".format( block_id ) )
 
             return inheritance_list
 
@@ -804,7 +796,6 @@ class ConfigurationManager():
 
             # Get the value
             value = self.config.get( self.config_block_id, key )
-            # value = self.config.get( key )
 
             # Resolve ${ENV_VAR} patterns in config values
             value = os.path.expandvars( value )
@@ -974,9 +965,6 @@ class ConfigurationManager():
         du.print_banner( f"Loading splainer file [{self.splainer_path}]..." )
         splainer = configparser.ConfigParser()
         splainer.read( du.get_project_root() + self.splainer_path )
-        # print( len( splainer ) )
-        # print( splainer.sections() )
-        # print( du.get_file_as_string( self.splainer_path ) )
         
         self.splainer = splainer
     

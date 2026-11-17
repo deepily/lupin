@@ -266,8 +266,8 @@ def test_s5_flag_off_negative_control( clean_tasks, drive_oracle, tmp_path ):
 def test_s6a_lupin_session_reads_only_lupin_rows( clean_tasks, drive_oracle, tmp_path ):
     """Cross-project store; a lupin session counts ONLY its lupin rows (no plan leak)."""
     persona = "arnold"
-    seed_store_rows( persona, "lupin", n_queued=6 )     # K = 6
-    seed_store_rows( persona, "plan",  n_queued=9 )     # J = 9
+    seed_store_rows( persona, "lupin", n_queued=6 )     # K is 6
+    seed_store_rows( persona, "plan",  n_queued=9 )     # J is 9
     tp = tmp_path / "s6a.jsonl"
     write_transcript( tp, n_owed=0 )
 

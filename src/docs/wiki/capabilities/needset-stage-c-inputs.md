@@ -1,11 +1,11 @@
 ---
 capability: needset-stage-c-inputs
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.stage_c.norm_text@fde4150a11
   - lupin_mcp.reuse_needset.stage_c.text_index@f0867ba7b2
   - lupin_mcp.reuse_needset.stage_c.git_source_lines@87d436d86a
-  - lupin_mcp.reuse_needset.stage_c.check_pins@7755ad59ee
+  - lupin_mcp.reuse_needset.stage_c.check_pins@6e5b39f0e1
   - lupin_mcp.reuse_needset.stage_c.read_pairs@aebbcd7cce
   - lupin_mcp.reuse_needset.stage_c.prepare_side@51ce9ec8a8
   - lupin_mcp.reuse_needset.stage_c.split_pairs@0faf262a52

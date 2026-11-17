@@ -1,6 +1,6 @@
 ---
 capability: worktree-creator-record
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.worktree_creator_record.ledger_path@d5a3b547ed
   - lupin_cli.claude_code.hooks.lib.worktree_creator_record.parse_worktree_adds@19e1929832

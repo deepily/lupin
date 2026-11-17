@@ -5,7 +5,7 @@ import pytest
 
 from cosa.repo.duplicate_check import body_vectors as bv
 from cosa.repo.duplicate_check import extract as ex
-from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE
+from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, SERVICE_SATURATED
 
 VOCAB = [ "alpha", "beta", "gamma", "delta", "epsilon", "zeta" ]
 
@@ -186,11 +186,42 @@ def test_a_crash_part_way_keeps_the_vectors_of_the_batches_already_done_and_the_
     monkeypatch.setattr( bv.vb, "BATCH_SIZE", 2 )
     defs   = [ definition( f"f{n}", f"alpha {'beta ' * n}" ) for n in range( 1, 7 ) ]
     client = DiesOnBatch( die_on=3 )
-    with pytest.raises( ConnectionError ):
+    with pytest.raises( CandidateError ) as caught:
         bv.ensure_vectors( defs, client, tmp_path, 1000, sleep=lambda s: None )
+    assert caught.value.code == SERVICE_SATURATED and isinstance( caught.value.__cause__, ConnectionError ), "a lost server is reported as the service refusing, with its own error on the chain"
     folder = next( p for p in tmp_path.iterdir() if p.is_dir() )
     assert len( list( folder.glob( "*.json" ) ) ) == 4, "two batches of two were written before the third failed"
     assert list( folder.glob( "*.tmp" ) ) == []
     again = FakeClient()
     out   = bv.ensure_vectors( defs, again, tmp_path, 1000, sleep=lambda s: None )
     assert ( out[ "embedded" ], out[ "reused" ] ) == ( 2, 4 ) and sum( len( c[ 0 ] ) for c in again.calls ) == 2
+
+
+class RefusesBatches:
+    """A crowded service: it refuses any batch of two or more texts and takes a single text."""
+
+    def __init__( self ): self.inner = FakeClient()
+
+    def embed( self, texts, content_type, role ):
+        if len( texts ) > 1: raise RuntimeError( "HTTP 500" )
+        return self.inner.embed( texts, content_type, role )
+
+    def info( self ): return self.inner.info()
+
+
+def test_a_crowded_service_stops_ensure_vectors_after_the_refusal_limit_with_the_service_named_and_keeps_the_batches_done(tmp_path):
+    defs = [ definition( f"f{n}", f"alpha {'beta ' * n}" ) for n in range( 1, 49 ) ]    # three batches of 16; each refuses 15 calls, so the third passes 32
+    with pytest.raises( CandidateError ) as caught:
+        bv.ensure_vectors( defs, RefusesBatches(), tmp_path, 1000, sleep=lambda s: None )
+    assert caught.value.code == SERVICE_SATURATED and "embeddings service" in str( caught.value ) and "refused 33 calls" in str( caught.value )
+    assert "free" not in str( caught.value ).lower() and "GPU memory" not in str( caught.value )
+    folder = next( p for p in tmp_path.iterdir() if p.is_dir() )
+    assert len( list( folder.glob( "*.json" ) ) ) == 32, "the two batches that came back whole are cached"
+
+
+def test_the_refusal_limit_is_passed_to_every_embed_pass(tmp_path, monkeypatch):
+    seen = []
+    real = bv.vb.embed_all
+    monkeypatch.setattr( bv.vb, "embed_all", lambda *a, **k: seen.append( k.get( "refusal_limit" ) ) or real( *a, **k ) )
+    bv.ensure_vectors( [ definition( "a", "alpha" ) ], FakeClient(), tmp_path, 1000 )
+    assert seen == [ 32 ], "a literal, so a change to the limit is a deliberate edit"

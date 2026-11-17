@@ -613,7 +613,7 @@ class TestResponseDefaultPlumbedToRequest:
 # there", and both MCP return sites discarded it.
 #
 # ⚠️ THE TRACE FOUND TWO DROP SITES, NOT ONE. The filed row names only the
-# is_timeout branch (:1653). notify_user_sync.py:295-303 maps an OfflineEvent to
+# is_timeout branch (:1653). notify_user_sync.py maps an OfflineEvent to
 # exit_code=0 / default_used=True — commented "Offline with default = success" —
 # so a PROVABLY OFFLINE user returns through the SUCCESS branch (:1637), is
 # parsed as an answer, and never reaches the timeout branch at all.
@@ -772,7 +772,7 @@ class TestDefaultUsedLaundering:
 # `== "yes"` was already broken by a qualifier comment.
 #
 # Verified before changing it: the hooks that compare `== "yes"`
-# (stop.py:843, idle_waiter.py:285, permission_request.py:169) call
+# (`_ask_anything_else` in stop.py, `run_waiter` in idle_waiter.py, `_forward_to_user` in permission_request.py) call
 # notify_user_sync DIRECTLY and never touch this verb's return.
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -967,7 +967,7 @@ class TestAskYesNoValidationFailure:
 # ═════════════════════════════════════════════════════════════════════════════
 # TestTheDocstringDoesNotAdvertiseAfkSafety
 #
-# `workflow/decision-walkthrough.md:96` ends its correction with an instruction:
+# `workflow/decision-walkthrough.md` ends its correction with an instruction:
 # "do not let it creep back in BECAUSE THE TOOL DOCSTRING STILL ADVERTISES IT."
 #
 # That instruction had already failed when it was written. The docstring carried

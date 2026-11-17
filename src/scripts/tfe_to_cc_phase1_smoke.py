@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 
@@ -28,6 +28,7 @@ from pathlib import Path
 _PROJECT_ROOT = Path( __file__ ).resolve().parent.parent.parent
 sys.path.insert( 0, str( _PROJECT_ROOT / "src" ) )
 
+from cosa.utils.utc_stamp import utc_compact_stamp
 from cosa.agents.tfe_to_cc.prompts.bundle_phase1 import build_diagnosis_bundle_prompt
 from cosa.agents.tfe_to_cc.prompts.output_contract import (
     parse_diagnosis_block,
@@ -75,10 +76,6 @@ CLUSTER_C6 = {
 # Helpers
 # ────────────────────────────────────────────────────────────────────────
 
-def _ts() -> str:
-    return datetime.now( timezone.utc ).strftime( "%Y%m%dT%H%M%SZ" )
-
-
 def _banner( title: str ) -> None:
     print( "", flush=True )
     print( "=" * 72, flush=True )
@@ -88,7 +85,7 @@ def _banner( title: str ) -> None:
 
 def _write_prompt_to_container( container: str, host_scratch: Path, prompt: str ) -> str:
     """Copy prompt into the container at a known /tmp path; returns the container path."""
-    container_path = f"/tmp/tfe_to_cc_phase1_prompt_{_ts()}.md"
+    container_path = f"/tmp/tfe_to_cc_phase1_prompt_{utc_compact_stamp()}.md"
     proc = subprocess.run(
         [ "docker", "exec", "-i", container, "sh", "-c", f"cat > {container_path}" ],
         input=prompt.encode( "utf-8" ),
@@ -100,7 +97,7 @@ def _write_prompt_to_container( container: str, host_scratch: Path, prompt: str 
             f"Failed to write prompt into container: rc={proc.returncode} stderr={proc.stderr!r}"
         )
     # Also save on host for inspection
-    host_copy = host_scratch / f"tfe_to_cc_phase1_prompt_{_ts()}.md"
+    host_copy = host_scratch / f"tfe_to_cc_phase1_prompt_{utc_compact_stamp()}.md"
     host_copy.write_text( prompt )
     print( f"[SMOKE] Prompt: {len( prompt )} bytes  →  host: {host_copy}  |  container: {container_path}", flush=True )
     return container_path
@@ -287,8 +284,8 @@ def main() -> int:
 
     # Scratch dir on host
     scratch_root = Path( "/tmp" )
-    stream_path  = scratch_root / f"tfe-to-cc-phase1-stream-{_ts()}.jsonl"
-    stderr_path  = scratch_root / f"tfe-to-cc-phase1-stderr-{_ts()}.log"
+    stream_path  = scratch_root / f"tfe-to-cc-phase1-stream-{utc_compact_stamp()}.jsonl"
+    stderr_path  = scratch_root / f"tfe-to-cc-phase1-stderr-{utc_compact_stamp()}.log"
 
     # 1. Build prompt
     prompt = build_diagnosis_bundle_prompt(

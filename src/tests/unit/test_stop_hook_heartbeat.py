@@ -481,7 +481,7 @@ class TestRunHeartbeat:
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_emit_persona_and_awaiting_from_hold( self, mock_load, mock_read, mock_count, mock_incr ):
         self.mock_persona.return_value = { "name": "Rachel" }
-        mock_read.return_value         = _stale_owed_hold()      # awaiting="none"
+        mock_read.return_value         = _stale_owed_hold()      # its awaiting field is the word none
         # Oracle-owed so it POKES (Lever A: a stale declared hold with an EMPTY
         # oracle is now suppressed; the persona/awaiting emit is exercised on the
         # surviving oracle-owed poke path). awaiting still comes from the hold.
@@ -872,30 +872,6 @@ class TestGatherUnansweredInbound:
              patch( "lupin_mcp.commons_store.CommonsStore",
                     side_effect=RuntimeError( "store exploded" ) ):
             assert _gather_unanswered_inbound_questions( MY_SID ) == { "owed": [ ], "stale": [ ] }
-
-
-class TestDmTopicFor:
-
-    def test_space_collapses_to_underscore( self ):
-        from lupin_cli.claude_code.hooks.stop import _dm_topic_for
-        assert _dm_topic_for( "mr radio" ) == "dm-mr_radio"
-
-    def test_lowercases_and_strips( self ):
-        from lupin_cli.claude_code.hooks.stop import _dm_topic_for
-        assert _dm_topic_for( " Tiberius " ) == "dm-tiberius"
-
-    def test_accent_stripped_to_canonical( self ):
-        """Phase 3 CONTRACT CHANGE + FLIP guard: `_dm_topic_for` now routes
-        through `persona_slug`, so the accent strips to the canonical store form
-        ("María" → "dm-maria", was the accent-leaky "dm-maría"). Revert the seam
-        to the old `re.sub` UNICODE slugger and this assertion fails."""
-        from lupin_cli.claude_code.hooks.stop import _dm_topic_for
-        assert _dm_topic_for( "María" ) == "dm-maria"
-
-    def test_punctuation_persona_canonicalized( self ):
-        """"Mr. Radio" (period) → "dm-mr_radio" via the canonical key."""
-        from lupin_cli.claude_code.hooks.stop import _dm_topic_for
-        assert _dm_topic_for( "Mr. Radio" ) == "dm-mr_radio"
 
 
 class TestIsSameSession:

@@ -229,7 +229,7 @@ def test_multiplexer_phase5_notifications_pane_visual(
     # before the color-emoji font is ready captures a FALLBACK glyph → intermittent
     # visual FAIL. `networkidle` does NOT gate font loading. Await
     # document.fonts.ready + two animation frames so the final glyph is committed
-    # before capture. Mirrors test_multiplexer_task_editing.py:316-318. Pure load
+    # before capture. Mirrors `test_task_editing_controls_visual` in test_multiplexer_task_editing.py. Pure load
     # barrier — comparators/tolerances untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )

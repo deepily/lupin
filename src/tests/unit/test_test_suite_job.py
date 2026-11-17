@@ -562,7 +562,7 @@ class TestArtifacts:
         # in the project filesystem (OOS-4 Finding D, fixed 2026-04-29).
         mock_root.return_value = str( tmp_path )
         # Include failure_details in the mock so the writer's iteration at
-        # job.py:511-515 produces a consistent snapshot (failed count matches
+        # the iteration in test_suite/job.py produces a consistent snapshot (failed count matches
         # the failures[] array length). Previously omitted, which produced the
         # inconsistent "failed=4, failures=[]" file shape.
         mock_run_suite.return_value = {

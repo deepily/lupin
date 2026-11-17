@@ -358,6 +358,44 @@ test( "UNticking one box does not tick the other", () => {
   h.renderer.unmount();
 } );
 
+test( "podcast choices show only while the podcast box is ticked, and one-shot only for a status report", () => {
+  const h = setup();
+  const podcast = h.q<HTMLInputElement>( "multiplexer-research-podcast-checkbox" );
+  const options = h.q<HTMLElement>( "multiplexer-research-podcast-options" );
+  const type    = h.q<HTMLSelectElement>( "multiplexer-research-podcast-type" );
+  const oneShot = h.q<HTMLInputElement>( "multiplexer-research-podcast-oneshot" ).parentElement as HTMLElement;
+  assert.equal( options.hidden, true );
+
+  podcast.checked = true;
+  podcast.dispatchEvent( new Event( "change" ) );
+  assert.equal( options.hidden, false );
+  assert.equal( oneShot.hidden, true );
+
+  type.value = "status_report";
+  type.dispatchEvent( new Event( "change" ) );
+  assert.equal( oneShot.hidden, false );
+
+  const presentation = h.q<HTMLInputElement>( "multiplexer-research-presentation-checkbox" );
+  presentation.checked = true;
+  presentation.dispatchEvent( new Event( "change" ) );
+  assert.equal( options.hidden, true );
+  h.renderer.unmount();
+} );
+
+test( "the submit click hands the store the type, Spanish and one-shot choices", async () => {
+  const h = setup();
+  h.q<HTMLInputElement>( "multiplexer-research-topic-input" ).value = "q";
+  h.q<HTMLSelectElement>( "multiplexer-research-podcast-type" ).value = "status_report";
+  h.q<HTMLInputElement>( "multiplexer-research-podcast-spanish" ).checked = true;
+  h.q<HTMLButtonElement>( "multiplexer-research-submit-btn" ).dispatchEvent( new Event( "click" ) );
+  await settle();
+  const sent = h.store.research[ 0 ];
+  assert.equal( sent.scriptType, "status_report" );
+  assert.equal( sent.spanish, true );
+  assert.equal( sent.oneShot, true );
+  h.renderer.unmount();
+} );
+
 // ---------------------------------------------------------------------------
 // Card 3 — Test Suite
 // ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ from typing    import List, Optional, Set, Dict, Any
 # pulls only re+typing, and cosa→lupin_mcp imports are precedented
 # (e.g. cosa/rest/routers/commons.py).
 from lupin_mcp.persona_normalization import canonical_persona_key
+from cosa.utils.csv_text import split_csv
 
 
 PoolPersona = Dict[ str, Any ]
@@ -129,7 +130,7 @@ def load_persona_pool_from_config( config_mgr ) -> List[ PoolPersona ]:
     if not pool_csv:
         return []
 
-    names = [ n.strip() for n in pool_csv.split( "," ) if n.strip() ]
+    names = split_csv( pool_csv )
     pool  = []
 
     for name in names:

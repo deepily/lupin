@@ -323,7 +323,7 @@ def compare_pngs_structure_only(
 # 36 visual tests import it through conftest and must not gain a hard scipy dep.
 #
 # EMPIRICAL VERDICT for THIS card (task d90dcfc2, measured 2026-07-01 — see
-# src/rnd/v0.1.9/2026.07.01-spatial-aa-comparator-feasibility-verdict-sam.md):
+# the "Spatial AA-Comparator Feasibility Verdict" doc, removed by 8420e8b0a; recover it from 8420e8b0a^):
 # this comparator is PROVEN (28 tests, 100% line+branch, RED-first: it fails a
 # 400px block a count-budget would false-green) BUT it CANNOT safely restore
 # pixel coverage on `test_task_editing_controls_visual`. The card's real

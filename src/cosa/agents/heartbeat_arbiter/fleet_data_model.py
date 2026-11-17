@@ -24,6 +24,8 @@ Design: src/docs/decisions/2026.06.04-heartbeat-arbiter-v2-design.md (arbiter fl
 """
 import datetime
 
+from cosa.utils.iso_timestamp import parse_iso
+
 # Outcome vocabulary referenced from the emitting side (one-name-everywhere:
 # the hook's constants are the single source of truth for outcome VALUES, so
 # value renames — e.g. poke→poked, 2026-06-09 — ride through for free).
@@ -59,25 +61,12 @@ STUCK_REPEAT_THRESHOLD = 2
 #               fresh — from caps he had recovered from 8 hours earlier).
 # EXCLUDED, deliberately: `poked` (owed + under cap — the session is still IN the wedge);
 # `not_owed` (dead vocabulary — never written; the writer emits `idle` instead, see
-# heartbeat_events.py:441); `suppressed_stale_declared_owed` (an ARBITER-side suppression
+# emit_outcome in heartbeat_events.py); `suppressed_stale_declared_owed` (an ARBITER-side suppression
 # marker, not a session-emitted beacon — it fails the membership rule).
 RECOVERY_OUTCOMES = frozenset( { OUTCOME_HONORED, EVENT_IDLE } )
 
 
-def _parse_iso( value ):
-    """Parse an ISO-8601 timestamp → aware datetime, or None. Never raises."""
-    if not value or not isinstance( value, str ):
-        return None
-    text = value.strip()
-    if text.endswith( "Z" ):
-        text = text[ :-1 ] + "+00:00"
-    try:
-        parsed = datetime.datetime.fromisoformat( text )
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace( tzinfo=datetime.timezone.utc )
-    return parsed
+_parse_iso = parse_iso
 
 
 def _age_seconds( ts, now ):

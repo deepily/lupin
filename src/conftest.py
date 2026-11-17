@@ -330,7 +330,7 @@ def pytest_runtest_setup( item ):
 # They now live in `cosa.utils.tree_state`, which this file imports and which
 # `src/scripts/lib/tree-state.sh` runs directly, so both paths render the SAME line from
 # the SAME code rather than drifting apart. Design: §6b of
-# `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, written before the code. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md
+# the "Every green states the tree it was earned on" doc, written before the code. — REMOVED by 8420e8b0a (2026-09-30); recover it from 8420e8b0a^
 #
 # `_coarse_age` comes along because it has three call sites, not one: the fetch age, the
 # coverage-file age, and the module itself.
@@ -439,7 +439,7 @@ _COVERAGE_FILE_AT_START = _coverage_file_at_start()
 #
 # ONE git call, not a second full probe. The gap is a SHA question; branch/behind/ahead/
 # fetched/dirty at start answer questions nobody asked at eight times the cost. Design:
-# `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
+# the "Gap 1 — a run states the tree it STARTED on as well as the one it ended on" doc §2. — REMOVED by 8420e8b0a (2026-09-30); recover it from 8420e8b0a^
 _TREE_STATE_START_SHA = capture_start_sha( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
 # Row 105ff244: the served-bundle hash at the same moment. dist/ is gitignored, so the sha above is
 # blind to a bundle rebuild inside the run; this is what makes `bundle-span=` in the line.
@@ -731,21 +731,34 @@ def _evict_real_fastapi_main_after_test():
     the code under test gets the real, un-started module whose `config_mgr` /
     `jobs_todo_queue` are None, and fails depending ONLY on suite run-order.
 
-    Evicting after every test makes each test start able to mock `lupin_app.main`
+    Evicting around every test makes each test start able to mock `lupin_app.main`
     cleanly, regardless of which earlier test imported the real app. Tests that
     legitimately use the real app hold their own module-level `app` reference, which
     is a live object unaffected by this `sys.modules` eviction.
 
+    The real module is set aside before the test and put back after it.
+    Dropping it for good meant the next import built a second copy, so a class defined
+    in `lupin_app.main` could have two identities across files.
+
     Ensures:
-        - after each test, `sys.modules['lupin_app.main']` is removed (if present)
-        - after each test, the `lupin_app.main` parent-package attribute is removed
-          (if present), so it cannot shadow a future `sys.modules` patch
+        - during each test, `sys.modules['lupin_app.main']` is absent and the
+          `lupin_app.main` parent-package attribute is absent, so neither can shadow
+          a `sys.modules` patch
+        - after each test, whatever the test itself imported under that name is
+          discarded
+        - after each test, the module that was loaded before the test is restored, in
+          `sys.modules` and as the parent attribute, as the same object
     """
+    pkg        = sys.modules.get( "lupin_app" )
+    saved_mod  = sys.modules.pop( "lupin_app.main", None )
+    saved_attr = pkg.__dict__.pop( "main", None ) if pkg is not None else None
     yield
     sys.modules.pop( "lupin_app.main", None )
-    pkg = sys.modules.get( "lupin_app" )
-    if pkg is not None and hasattr( pkg, "main" ):
-        delattr( pkg, "main" )
+    pkg_after = sys.modules.get( "lupin_app" )
+    if pkg_after is not None and hasattr( pkg_after, "main" ):
+        delattr( pkg_after, "main" )
+    if saved_mod is not None: sys.modules[ "lupin_app.main" ] = saved_mod
+    if pkg_after is not None and saved_attr is not None: pkg_after.main = saved_attr
 
 
 @pytest.fixture( autouse=True )

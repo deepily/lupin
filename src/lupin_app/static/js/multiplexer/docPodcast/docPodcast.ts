@@ -7,7 +7,7 @@
 //
 // WHAT A CLICK DOES. The button asks the server whether the file can be podcast (`GET …/from-viewer/check`),
 // and shows itself only when it can. A click opens an in-page confirmation naming the file and its size,
-// never a browser dialog. Yes posts `{ path }` to `POST …/from-viewer`, which judges the file again, claims
+// never a browser dialog. Yes posts `{ path, script_type?, review?, languages? }` to `POST …/from-viewer`, which judges the file again, claims
 // one job per person, file and bytes, and queues it. The page never holds a list of allowed file kinds:
 // the server's answer is the list.
 //
@@ -15,7 +15,7 @@
 
 /** The two server doors the page calls. */
 export const CHECK_URL = "/api/podcast-proxy/from-viewer/check";
-/** The endpoint a confirmed click posts `{ path }` to, which queues the podcast job. */
+/** The endpoint a confirmed click posts the path and the chosen options to. */
 export const START_URL = "/api/podcast-proxy/from-viewer";
 
 /** The event the page fires, with `detail.path`, once it knows it is showing a FILE (not a listing). */
@@ -33,7 +33,43 @@ export const IDS = {
   yes     : "doc-podcast-yes",
   cancel  : "doc-podcast-cancel",
   status  : "doc-download-status",
+  type    : "doc-podcast-type",
+  spanish : "doc-podcast-spanish",
+  oneShot : "doc-podcast-oneshot",
+  oneShotRow : "doc-podcast-oneshot-row",
 } as const;
+
+/** The languages a ticked Spanish switch asks for. */
+export const SPANISH_LANGUAGES = [ "en", "es-MX" ] as const;
+
+/** The type the page pre-selects; picking it adds nothing to the request. */
+export const DEFAULT_SCRIPT_TYPE = "research_critical";
+
+/** What the confirm panel's choices add to the `{ path }` body. Every key is optional. */
+export interface PodcastChoices {
+  script_type? : "status_report";
+  review?      : "ask" | "one_shot";
+  languages?   : string[];
+}
+
+/**
+ * Turn the panel's three choices into the request's optional keys.
+ *
+ * Ensures:
+ *   - nothing picked (research critical, Spanish off) gives `{}`: no type, no review, no languages
+ *   - "status report" gives `script_type` and an explicit `review` (one_shot when ticked, else ask)
+ *   - Spanish on gives `languages` ["en", "es-MX"]; off sends no `languages` at all
+ *   - one-shot is read only for a status report; research critical never sends `review`
+ */
+export function choicesBody( type: string, spanish: boolean, oneShot: boolean ): PodcastChoices {
+  const out: PodcastChoices = {};
+  if ( type !== DEFAULT_SCRIPT_TYPE ) {
+    out.script_type = "status_report";
+    out.review      = oneShot ? "one_shot" : "ask";
+  }
+  if ( spanish ) out.languages = [ ...SPANISH_LANGUAGES ];
+  return out;
+}
 
 /**
  * Where the button is in its life.
@@ -133,6 +169,12 @@ export function createDocPodcast( deps: DocPodcastDeps ): DocPodcast {
     el( IDS.status ).classList.toggle( "is-ok", good );
   };
 
+  const readChoices = (): PodcastChoices => choicesBody(
+    ( el( IDS.type ) as HTMLSelectElement ).value,
+    ( el( IDS.spanish ) as HTMLInputElement ).checked,
+    ( el( IDS.oneShot ) as HTMLInputElement ).checked,
+  );
+
   async function post(): Promise<void> {
     state = "posting";
     ( el( IDS.yes ) as HTMLButtonElement ).disabled = true;
@@ -142,7 +184,7 @@ export function createDocPodcast( deps: DocPodcastDeps ): DocPodcast {
       const response = await deps.authedFetch( START_URL, {
         method  : "POST",
         headers : { "Content-Type": "application/json" },
-        body    : JSON.stringify( { path: deps.path } ),
+        body    : JSON.stringify( { path: deps.path, ...readChoices() } ),
       } );
       outcome = { ok: response.ok, status: response.status, body: ( await readJson( response ) ) as StartBody | null };
     } catch {
@@ -177,6 +219,10 @@ export function createDocPodcast( deps: DocPodcastDeps ): DocPodcast {
       if ( state !== "confirming" ) return;
       state = "ready";
       el( IDS.panel ).hidden = true;
+    } );
+    // One-shot only means something for a status report, so its switch shows only then.
+    el( IDS.type ).addEventListener( "change", () => {
+      el( IDS.oneShotRow ).hidden = ( el( IDS.type ) as HTMLSelectElement ).value === DEFAULT_SCRIPT_TYPE;
     } );
     el( IDS.yes ).addEventListener( "click", () => {
       if ( state !== "confirming" ) return;

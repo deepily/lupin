@@ -627,7 +627,7 @@ class TestNotifyResponseRequired:
 # It was not. The user was offline, and the calls that worked SUPPLIED A DEFAULT
 # while the calls that 503'd did not. Proven live, same verb, same minute:
 # no default -> http_error_503; with a default -> the offline default came back
-# with default_used=True. The 503 at notifications.py:1236 is by design and is
+# with default_used=True. The 503 that notifications.py raises for an offline user without a default is intended and is
 # blind to response_type; the verbs differ only in whether they pass one.
 #
 # So these tests pin BOTH directions across ALL FOUR types. A change that makes
@@ -640,7 +640,7 @@ _OFFLINE_TYPE_CASES = [
     ( "open_ended",       None ),
     ( "open_ended_batch", None ),
     # multiple_choice is refused with 400 unless response_options rides along
-    # (notifications.py:830), so the contract can only be reached with one.
+    # (the 400 in notifications.py), so the contract can only be reached with one.
     ( "multiple_choice",  json.dumps( {
         "questions": [ {
             "question"    : "which?",

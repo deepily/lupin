@@ -44,6 +44,8 @@ from visual_height_tolerance import (
 # Visual-baseline render-env constants (row f0e00f01) — shared with the pin guard
 # `test_visual_timezone_pin.py`, resolved via the same `_THIS_DIR` path guard.
 from visual_baseline_env import VISUAL_BASELINE_TIMEZONE
+# Cached browser login for logged_in_page / admin_page (row 63b1a75a).
+from cached_login import LoginCache, apply_state_to_page, capture_user_row, restore_user_row
 
 
 # ---------------------------------------------------------------------------
@@ -673,11 +675,26 @@ def clean_test_db():
         clean_job_history( conn )   # keeps pending jobs scheduled in the future (row a80630a4)
 
     with engine.connect() as conn:
-        count    = conn.execute( text( "SELECT count(*) FROM users WHERE is_protected" ) ).scalar()
+        # Every companion must be present and protected. A protected ADMIN beyond the
+        # companions is allowed: it is the smoke admin made by create_admin_test_account.py,
+        # which marks itself protected so this cleanup stops deleting it (row 77718bf0).
+        # The shared tester login is allowed too: create_test_mock_user.py protects it, because
+        # on the VM no seeded companion carries it. Any other protected row is a leftover from a
+        # prior test or a seed regression.
+        count    = conn.execute(
+            text( "SELECT count(*) FROM users WHERE is_protected AND email = ANY( :emails )" ),
+            { "emails": list( COMPANION_EMAILS ) }
+        ).scalar()
         expected = len( COMPANION_EMAILS )
         assert count == expected, (
             f"SAFETY: expected {expected} protected companions after teardown, got {count}"
         )
+        strays = conn.execute(
+            text( "SELECT email FROM users WHERE is_protected AND NOT ( email = ANY( :emails ) ) "
+                  "AND NOT ( roles @> CAST( '[\"admin\"]' AS jsonb ) )" ),
+            { "emails": list( COMPANION_EMAILS ) + [ e for e in [ os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ) ] if e ] }
+        ).fetchall()
+        assert not strays, f"SAFETY: unexpected protected non-admin users after teardown: {strays}"
 
     yield
 
@@ -775,6 +792,31 @@ ADMIN_PAGES = [ "admin-dashboard", "admin-snapshots", "admin-users", "admin-rati
 # Browser Auth Helpers
 # ---------------------------------------------------------------------------
 
+def _left_the_auth_pages( url ):
+    """
+    Say whether a URL is past the login page.
+
+    Ensures:
+        - returns True when the URL has no "/auth/" in it
+        - so the login page's own URL, which "**/app**" matches, never ends the wait early
+    """
+    return "/auth/" not in url
+
+
+def wait_for_login_redirect( page, timeout=10000 ):
+    """
+    Wait until the page has left the auth pages after a login submit.
+
+    Requires:
+        - the login form was just submitted on page
+
+    Ensures:
+        - returns once the URL has no "/auth/" in it, after the page's own redirect
+        - raises the Playwright timeout error when it does not within timeout milliseconds
+    """
+    page.wait_for_url( _left_the_auth_pages, timeout=timeout )
+
+
 def fill_login_form( page, email, password ):
     """
     Fill and submit the login form via browser.
@@ -846,12 +888,93 @@ def assert_success_message( page, expected_text ):
 # Authenticated Page Fixtures
 # ---------------------------------------------------------------------------
 
+# One saved login per role for the whole pytest process (row 63b1a75a). See cached_login.py
+# for why the user row is saved with the tokens.
+_LOGIN_CACHE = LoginCache( BASE_URL )
+
+
+def _real_login( page, email, password, make_admin ):
+    """
+    Register and log in through the browser forms, the way a person does.
+
+    Requires:
+        - page is a fresh Playwright page; the test database holds no user for email
+        - make_admin is True to give the new user the admin role through the database
+
+    Ensures:
+        - returns with the access token in localStorage and the page past the auth pages
+    """
+    page.goto( f"{BASE_URL}/app/auth/register" )
+    fill_register_form( page, email, password )
+    page.wait_for_url( "**/login**", timeout=10000 )
+
+    if make_admin:
+        # Assign admin role via DB (no API for this)
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories import UserRepository
+        from sqlalchemy.orm.attributes import flag_modified
+
+        with get_db() as session:
+            user_repo = UserRepository( session )
+            user      = user_repo.get_by_email( email )
+            if user:
+                user.roles = [ "user", "admin" ]
+                flag_modified( user, "roles" )
+
+    page.goto( f"{BASE_URL}/app/auth/login" )
+    fill_login_form( page, email, password )
+    wait_for_login_redirect( page )
+
+    # Wait for localStorage tokens to be populated
+    page.wait_for_function(
+        'localStorage.getItem( "lupin_access_token" ) !== null',
+        timeout=5000
+    )
+
+
+def _authenticated_page( page, request, role, email, password, make_admin ):
+    """
+    Return a logged-in page, from the cached login when one is usable.
+
+    Requires:
+        - clean_test_db has already run for this test, so no unprotected user exists
+        - role is "user" or "admin", the cache key
+
+    Ensures:
+        - a test marked real_login always gets a real form login and leaves the cache alone
+        - otherwise the first call per role does a real login and saves its tokens and user row
+        - later calls put the same user row back, load the saved tokens, and wait for the
+          login page's own "already authenticated" redirect, so the page lands where a real
+          login lands
+        - an entry within five minutes of token expiry is dropped and rebuilt by a real login
+    """
+    from cosa.rest.db import database as db_module
+
+    if request.node.get_closest_marker( "real_login" ) is not None:
+        _real_login( page, email, password, make_admin )
+        return page
+
+    entry = _LOGIN_CACHE.get( role )
+    if entry is None:
+        _real_login( page, email, password, make_admin )
+        with db_module.engine.connect() as conn:
+            user_row = capture_user_row( conn, email )
+        _LOGIN_CACHE.put( role, page.context.storage_state(), user_row )
+        return page
+
+    with db_module.engine.begin() as conn:
+        restore_user_row( conn, entry[ "user_row" ] )
+    apply_state_to_page( page, entry[ "state" ], BASE_URL, f"{BASE_URL}/health" )
+    page.goto( f"{BASE_URL}/app/auth/login" )
+    wait_for_login_redirect( page )
+
+    return page
+
+
 @pytest.fixture( scope="function" )
-def logged_in_page( page, clean_test_db, test_user_credentials ):
+def logged_in_page( page, request, clean_test_db, test_user_credentials ):
     """
     Provide a Playwright page logged in as a regular user.
-
-    Registers a new user via browser UI, then logs in via browser UI.
 
     Requires:
         - Server running with Testing config
@@ -860,36 +983,19 @@ def logged_in_page( page, clean_test_db, test_user_credentials ):
     Ensures:
         - Returns a Playwright page with an authenticated session
         - User tokens stored in browser localStorage
+        - The login is real for the first test and for any test marked real_login,
+          and a cached copy of it for the rest (see _authenticated_page)
     """
-    email    = test_user_credentials[ "email" ]
-    password = test_user_credentials[ "password" ]
-
-    # Register via browser
-    page.goto( f"{BASE_URL}/app/auth/register" )
-    fill_register_form( page, email, password )
-    page.wait_for_url( "**/login**", timeout=10000 )
-
-    # Login via browser
-    page.goto( f"{BASE_URL}/app/auth/login" )
-    fill_login_form( page, email, password )
-    page.wait_for_url( "**/app**", timeout=10000 )
-
-    # Wait for localStorage tokens to be populated
-    page.wait_for_function(
-        'localStorage.getItem( "lupin_access_token" ) !== null',
-        timeout=5000
+    return _authenticated_page(
+        page, request, "user",
+        test_user_credentials[ "email" ], test_user_credentials[ "password" ], False
     )
-
-    return page
 
 
 @pytest.fixture( scope="function" )
-def admin_page( page, clean_test_db, test_admin_credentials ):
+def admin_page( page, request, clean_test_db, test_admin_credentials ):
     """
     Provide a Playwright page logged in as an admin user.
-
-    Registers a new user via browser UI, assigns admin role via DB,
-    then logs in via browser UI.
 
     Requires:
         - Server running with Testing config
@@ -898,39 +1004,12 @@ def admin_page( page, clean_test_db, test_admin_credentials ):
     Ensures:
         - Returns a Playwright page with an admin-authenticated session
         - User has both 'user' and 'admin' roles
+        - Cached the same way as logged_in_page, under its own role key
     """
-    email    = test_admin_credentials[ "email" ]
-    password = test_admin_credentials[ "password" ]
-
-    # Register via browser
-    page.goto( f"{BASE_URL}/app/auth/register" )
-    fill_register_form( page, email, password )
-    page.wait_for_url( "**/login**", timeout=10000 )
-
-    # Assign admin role via DB (no API for this)
-    from cosa.rest.db.database import get_db
-    from cosa.rest.db.repositories import UserRepository
-    from sqlalchemy.orm.attributes import flag_modified
-
-    with get_db() as session:
-        user_repo = UserRepository( session )
-        user      = user_repo.get_by_email( email )
-        if user:
-            user.roles = [ "user", "admin" ]
-            flag_modified( user, "roles" )
-
-    # Login via browser
-    page.goto( f"{BASE_URL}/app/auth/login" )
-    fill_login_form( page, email, password )
-    page.wait_for_url( "**/app**", timeout=10000 )
-
-    # Wait for localStorage tokens to be populated
-    page.wait_for_function(
-        'localStorage.getItem( "lupin_access_token" ) !== null',
-        timeout=5000
+    return _authenticated_page(
+        page, request, "admin",
+        test_admin_credentials[ "email" ], test_admin_credentials[ "password" ], True
     )
-
-    return page
 
 
 # ---------------------------------------------------------------------------

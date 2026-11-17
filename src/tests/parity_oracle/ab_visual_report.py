@@ -105,7 +105,7 @@ from tests.e2e_ui.parity_oracle import (   # noqa: E402
 # align), whether any corner control renders visible (display != none). A mux-
 # visible / legacy-hidden divergence is the B5 corner-control-gate gap (the gate
 # `.notification-corner-pause-btn{display:none}` + `.tts-playing` reveal lives in
-# notifications.css:381-501, monolith-only; legacy links it, mux links only the
+# notifications.css, monolith-only; legacy links it, mux links only the
 # shared sheet → B5 MOVES it so the mux hides them too).
 CORNER_GATE_JS = r"""
 ( rootSel ) => {

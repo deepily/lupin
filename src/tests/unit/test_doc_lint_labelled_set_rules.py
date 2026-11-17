@@ -10,6 +10,7 @@ import random
 
 import pytest
 
+from cosa.utils.file_hash import file_sha256
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import labelled_set_rules as rules
 from cosa.repo.doc_lint import labelled_set_seeder as s
@@ -795,7 +796,7 @@ def test_accept_verify_refuses_a_synonym_false_alarm_and_goes_on_when_a_reader_a
     assert s.main( [ "verify", "--base", str( base ), "--split", "dev", "--accept", accept ] ) == 0
     assert "rule 1: accepted 1 pair(s)" in capsys.readouterr().out
     record = json.loads( ( base / "dev" / "rule1-accepted.json" ).read_text() )
-    assert record == { "accepted": { pid: [ "WEAK_TOKEN_MISSING" ] }, "accept_file_sha256": s.sha256_file( accept ) }
+    assert record == { "accepted": { pid: [ "WEAK_TOKEN_MISSING" ] }, "accept_file_sha256": file_sha256( accept ) }
     assert ( base / "dev" / "verify-input.jsonl" ).exists()
 
 

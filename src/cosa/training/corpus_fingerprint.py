@@ -53,8 +53,9 @@ PLAIN_MANIFESTS = (
 ENRICHED_MANIFESTS = (
     "/src/conf/training/agent-router-agentic-commands.json",
 )
-# Deliberately NOT covered: the function-mapping corpus read at
-# xml_coordinator.py:437. It passes clean=True like the others, but it is not on
+# Not covered: the function-mapping corpus read in
+# xml_coordinator.py's build_compound_function_mapping_training_prompts.
+# It passes clean=True like the others, but it is not on
 # the build_all_training_prompts path, so hashing it would refuse runs over a
 # file that cannot reach the artifact.
 

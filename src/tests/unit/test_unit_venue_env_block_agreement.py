@@ -116,7 +116,7 @@ def test_the_unit_venue_env_and_block_do_not_DISAGREE():
         "venue it exists to check, so a green here would mean nothing"
     )
 
-    # The builder's own default, not an assumption: database.py:74 reads
+    # The builder's own default, not an assumption: database.py reads
     # os.environ.get( "LUPIN_ENV", "development" ).
     effective_env = os.environ.get( "LUPIN_ENV" ) or "development"
 

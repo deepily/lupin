@@ -1,6 +1,6 @@
 ---
 capability: web-client-task-status-filter
-pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.shared.task-status-filter.activeChips@ffabf47e0a
   - src.lupin_app.static.js.shared.task-status-filter.toggleChip@30c46e77e5

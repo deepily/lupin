@@ -170,6 +170,52 @@ def persona_slug( name, sep="-" ) -> str:
     return key.replace( " ", sep ) if key else ""
 
 
+def memento_slugs( name ) -> list:
+    """
+    Every slug a persona's mementos might be filed under, best first.
+
+    Accents are why this returns a list: "María" naively slugs to "mar-a", which misses the
+    accent-folded files writers produce. The folded form comes first, and the naive form is
+    appended so legacy records stay reachable.
+
+    Requires:
+        - name is a persona name string, or anything, defensively
+
+    Ensures:
+        - returns [ ascii_slug, ... ] of lowercase [a-z0-9-] slugs, the accent-folded form first
+        - the naive form follows only when it differs from the folded one
+        - returns [] for a non-string, an empty string, or a name with no letters or digits
+        - never raises
+    """
+    if not isinstance( name, str ): return []
+    lowered = name.strip().lower()
+    folded  = "".join( ch for ch in unicodedata.normalize( "NFKD", lowered ) if not unicodedata.combining( ch ) )
+    out     = []
+    for candidate in ( folded, lowered ):
+        slug = re.sub( r"[^a-z0-9]+", "-", candidate ).strip( "-" )
+        if slug and slug not in out: out.append( slug )
+    return out
+
+
+def dm_topic_for( name ) -> str:
+    """
+    Derive the commons DM-topic name for a persona.
+
+    The one definition of the DM-topic form. The Arbiter and Poker gateways, the MCP DM layer
+    and the stop hook all call it, so a topic can never split across two spellings.
+
+    Requires:
+        - name is a string or None
+
+    Ensures:
+        - returns "dm-" followed by persona_slug( name, sep="_" )
+        - "Mr. Radio" gives "dm-mr_radio" and "María" gives "dm-maria"
+        - the slug is ASCII, so it fits the server's topic pattern [a-z0-9_-]+
+        - None, a non-string or unusable input gives "dm-"
+    """
+    return f"dm-{persona_slug( name, sep='_' )}"
+
+
 def quick_smoke_test():
     """Non-destructive smoke test for the three persona-normalization primitives."""
     import cosa.utils.util as du

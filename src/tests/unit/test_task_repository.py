@@ -312,6 +312,7 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
     ( { "project": "lupin" }, 1 ),
     ( { "item_class": "bug" }, 1 ),
     ( { "correlation_key": "cc-task:sid:5" }, 1 ),
+    ( { "correlation_key_prefix": "epic:dupcheck-" }, 1 ),
     ( { "owner_persona": "krishna", "status": "queued" }, 2 ),
 ] )
 def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filters ):
@@ -322,6 +323,15 @@ def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filter
     # filter, no guard COUNT(*) that a urgency-only unscoped case would otherwise trip).
     repo.query_tasks( include_terminal=True, unscoped_audit=True, **kwargs )
     assert query.filter.call_count == expected_filters
+
+
+def test_query_tasks_correlation_key_prefix_is_a_like_prefix_with_its_wildcards_escaped( repo, session ):
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_tasks( include_terminal=True, unscoped_audit=True, correlation_key_prefix="epic:dup_check-" )
+    clause = query.filter.call_args.args[ 0 ]
+    compiled = clause.compile( compile_kwargs={ "literal_binds": True } )
+    assert clause.left.key == "correlation_key" and "LIKE" in str( compiled ) and "'epic:dup/_check-' || '%' ESCAPE '/'" in str( compiled )
 
 
 # ---------------------------------------------------------------------------
@@ -1064,7 +1074,7 @@ def test_apply_amendment_live_row_keeps_ordinary_marker( repo, session ):
 # Persona-key follow-on policy (2026-07-11, task c03d1870) — flag_suffix folds
 # the off-roster persona marker into the EXISTING creation / patched event reason
 # (zero schema, zero new events). Design:
-# src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# the persona-key follow-on policy note (removed by 8420e8b0a)
 # ---------------------------------------------------------------------------
 
 def test_create_item_folds_flag_suffix_into_queued_event_reason( repo, session ):

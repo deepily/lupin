@@ -249,6 +249,9 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
         withPresentation : els.research.presentation.checked,
         dryRun           : els.research.dryRun.checked,
         scheduling       : schedulingOf( els.research.schedule ),
+        scriptType       : els.research.scriptType.value,
+        spanish          : els.research.spanish.checked,
+        oneShot          : els.research.oneShot.checked,
       } ).then( ( submitted ) => {
         // J15 — the topic CLEARS on success. The CC prompt does not.
         if ( submitted ) els.research.topic.value = "";
@@ -275,6 +278,15 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
     };
     els.research.podcast.addEventListener( "change", exclusive( els.research.podcast, els.research.presentation ) );
     els.research.presentation.addEventListener( "change", exclusive( els.research.presentation, els.research.podcast ) );
+
+    // The podcast choices show only while "With podcast" is ticked; one-shot only for a status report.
+    const syncPodcastOptions = (): void => {
+      els.research.podcastOptions.hidden = !els.research.podcast.checked;
+      els.research.oneShotRow.hidden     = els.research.scriptType.value !== "status_report";
+    };
+    els.research.podcast.addEventListener( "change", syncPodcastOptions );
+    els.research.presentation.addEventListener( "change", syncPodcastOptions );
+    els.research.scriptType.addEventListener( "change", syncPodcastOptions );
   }
 
   private wireTestSuite( els: SubmitJobsChromeElements ): void {

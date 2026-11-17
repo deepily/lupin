@@ -1080,13 +1080,15 @@ class TestConfirmAndIterate:
 
         assert result is None  # Cancels because user said "no"
 
-    def test_extract_comment( self ):
-        """_extract_comment() extracts comment text from annotated responses."""
-        assert RuntimeArgumentExpeditor._extract_comment( "yes [comment: change budget to 10]" ) == "change budget to 10"
-        assert RuntimeArgumentExpeditor._extract_comment( "no [comment: make it cheaper]" ) == "make it cheaper"
-        assert RuntimeArgumentExpeditor._extract_comment( "yes" ) is None
-        assert RuntimeArgumentExpeditor._extract_comment( "no" ) is None
-        assert RuntimeArgumentExpeditor._extract_comment( "" ) is None
+    def test_comment_extraction_uses_shared_qualifier_helper( self ):
+        """The confirm loop reads the comment through the shared qualifier helper."""
+        from cosa.utils.notification_utils import extract_qualifier_comment
+        assert extract_qualifier_comment( "yes [comment: change budget to 10]" )[ 1 ] == "change budget to 10"
+        assert extract_qualifier_comment( "no [comment: make it cheaper]" )[ 1 ] == "make it cheaper"
+        assert extract_qualifier_comment( "yes" )[ 1 ] is None
+        assert extract_qualifier_comment( "no" )[ 1 ] is None
+        assert extract_qualifier_comment( "" )[ 1 ] is None
+        assert not hasattr( RuntimeArgumentExpeditor, "_extract_comment" )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1691,7 +1693,7 @@ class TestBatchDefaultValues:
 
         self.expeditor._batch_collect_args(
             [ "budget", "audience" ], fallback_questions, "test@test.com",
-            fallback_defaults, None  # command_key=None
+            fallback_defaults, None  # no command key
         )
 
         # Config should never be consulted when command_key is None
@@ -2271,7 +2273,7 @@ class TestRuntimeSchedulingConfirmation:
 # =============================================================================
 #
 # The prior single-expression
-#     agent_entry.get( "display_name", agent_entry["cli_module"].split(...) )
+#     agent_entry.get( "display_name", agent_entry["cli_module"].split(...) )  # doc-lint: waive commented-out-code -- the old crashing expression, quoted as the defect
 # crashed with "'NoneType' object has no attribute 'split'" for the test_suite
 # registry entry where cli_module=None by design (test_suite is invoked
 # directly via API, not via CLI). Python evaluates dict.get(key, default)
@@ -2279,7 +2281,7 @@ class TestRuntimeSchedulingConfirmation:
 #
 # Fix at expeditor.py introduced _resolve_display_name() with the correct
 # short-circuit. These tests pin the contract.
-# See src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md §J.
+# See the all-test-run postmortem, section J (removed by 8420e8b0a).
 # =============================================================================
 
 class TestResolveDisplayName:

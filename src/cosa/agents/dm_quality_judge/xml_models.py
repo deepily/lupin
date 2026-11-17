@@ -19,6 +19,7 @@ judge, the audit counter, and the tests all read one source.
 import re
 
 from pydantic import Field, field_validator
+from cosa.agents.io_models.field_validators import none_to_empty
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 
@@ -166,9 +167,7 @@ class DmQualityJudgeResponse( BaseXMLModel ):
         Ensures:
             - returns "" for None; passes through non-None values unchanged
         """
-        if v is None:
-            return ""
-        return v
+        return none_to_empty( v )
 
     def to_xml( self, root_tag="response", pretty=True ):
         """

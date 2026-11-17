@@ -52,7 +52,7 @@ _OBSERVED_RUNTIMES_SECONDS = {
     # command line, and an explicitly-named path SURVIVES --ignore, so half A's --ignore on them was
     # inert and their 25 tests ran in BOTH halves.
     # 🔴 THE UNIT IS JOB DURATION, NOT JUnit testsuite@time. They differ (2992.7 vs 2990.0 on this
-    # run) and only one of them is the right comparand: the budget is enforced at job.py:1485 against
+    # run) and only one of them is the right comparand: the budget is enforced in test_suite/job.py against
     # `time.monotonic() - start_time` wrapped around the runner subprocess, so the guard's `budget >=
     # 1.4 x observed` is only apples-to-apples if observed is that same clock. Putting testsuite@time
     # here would understate the thing being capped by the per-run overhead every time.

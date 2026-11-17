@@ -52,7 +52,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
 # so the parent-of-parent is `/`), that directory does not exist, and a write raises
 # PermissionError [Errno 13] '/projects-data'. Every PATCH from the UI answered 500.
 #
-# `dm.py:365` already solved this and I did not copy it: resolve an env var FIRST — which
+# `routers/dm.py` already solved this and I did not copy it: resolve an env var first — which
 # the containers set, pointing at a bind mount — and fall back to fleet_data_root() only
 # on the host, where it is correct. Both names then reach the SAME physical directory —
 # which is true only because the fallback appends OVERRIDE_SUBDIR. It did not until
@@ -300,7 +300,7 @@ def get_enforcement_active():
     # `return_type == "boolean"` exactly and RAISES on anything else — and
     # `_ini_value` catches that and returns the fallback. So "bool" here would not
     # error: it would silently report enforcement OFF forever, whatever the INI said.
-    # (`src/cosa/rest/email_service.py:148,207` passes "bool" for `smtp use tls` and
+    # (`src/cosa/rest/email_service.py` passes "bool" for `smtp use tls` and
     # is presumably taking its default the same way — noted, not fixed here.)
     return bool( _ini_value( INI_KEY_ENFORCEMENT, "boolean", FALLBACK_ENFORCEMENT_ACTIVE ) )
 
