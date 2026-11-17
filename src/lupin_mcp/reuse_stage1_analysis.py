@@ -216,15 +216,18 @@ def boundary_ids( arm ):
     return sorted( i for i, o in arm[ "overlaps" ].items() if BAND[ 0 ] <= o <= BAND[ 1 ] )
 
 
-def flips( ref, other, ids, cut ):
+def flips( ref, other, ids, cut, field="overlaps" ):
     """
     List the entries that cross a cut between two arms.
 
+    Requires:
+        - field names the per-entry figure to cut: "overlaps", or "confidences" for the confidence bar
+
     Ensures:
         - returns the sorted ids, among ids answered in both arms, on opposite sides of cut
-        - an overlap equal to the cut counts as above it
+        - a figure equal to the cut counts as above it
     """
-    return sorted( i for i in ids if i in ref[ "overlaps" ] and i in other[ "overlaps" ] and ( ref[ "overlaps" ][ i ] >= cut ) != ( other[ "overlaps" ][ i ] >= cut ) )
+    return sorted( i for i in ids if i in ref[ field ] and i in other[ field ] and ( ref[ field ][ i ] >= cut ) != ( other[ field ][ i ] >= cut ) )
 
 
 PASS_THREE_SIZE = 200                                         # the probe placements are run in a pack of this size, so they gate only this size
@@ -560,11 +563,6 @@ def page_arm( stage ):
     return dict( out, state=state, set_rule=set_rule, overlap_rule=overlap_rule, pack_changes=pack_changes, noise_changes=noise_changes, pack_p99=p99, noise_floor=floor, near_floor_pages=near )
 
 
-def _confidence_flips( ref, other ):
-    """Ensures: returns the ids answered in both arms on opposite sides of the confidence bar."""
-    return [ i for i in ref[ "confidences" ] if i in other[ "confidences" ] and ( ref[ "confidences" ][ i ] >= CONFIDENCE_BAR ) != ( other[ "confidences" ][ i ] >= CONFIDENCE_BAR ) ]
-
-
 def other_boundaries( stage, size ):
     """
     Count the flips at the policy's other boundaries, recorded with no pass or fail.
@@ -580,7 +578,7 @@ def other_boundaries( stage, size ):
         if _arms_state( [ s1, s2, pack ] ) is not None: out[ q ] = None; continue
         ids = list( s1[ "overlaps" ] )
         out[ q ] = { "floor"     : { "pack": len( flips( s1, pack, ids, FLOOR ) ), "noise": len( flips( s1, s2, ids, FLOOR ) ) },
-                     "confidence": { "pack": len( _confidence_flips( s1, pack ) ), "noise": len( _confidence_flips( s1, s2 ) ) } }
+                     "confidence": { "pack": len( flips( s1, pack, list( s1[ "confidences" ] ), CONFIDENCE_BAR, "confidences" ) ), "noise": len( flips( s1, s2, list( s1[ "confidences" ] ), CONFIDENCE_BAR, "confidences" ) ) } }
     return out
 
 
