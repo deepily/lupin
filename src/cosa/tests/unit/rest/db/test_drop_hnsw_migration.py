@@ -13,6 +13,8 @@ import os
 import re
 import sys
 import unittest
+
+import pytest
 from unittest.mock import patch
 
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
@@ -49,6 +51,7 @@ class TestRevisionChain( unittest.TestCase ):
     def test_down_revision_chains_to_prior_head( self ):
         self.assertEqual( self.mig.down_revision, _HEAD_BEFORE_THIS )
 
+    @pytest.mark.census
     def test_no_two_migrations_share_a_down_revision( self ):
         """
         The chain must not FORK — no two migrations may declare the same parent.

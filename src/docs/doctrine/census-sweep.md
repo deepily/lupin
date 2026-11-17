@@ -40,7 +40,7 @@ Rerunning the scan on `f20d11273` finds 209 test functions whose own body walks 
 |---|---|---|
 | 1. The unselected walkers read one by one | 165 read, each by walk line and assertions | 11 marked. The other 154 are not tree-wide counts: they walk a temporary tree or a copy, run a function named `census` over synthetic input (the fake `/proc` of `test_stale_mcp_check`, the parse of a pytest summary line), or are positive controls for a guard (`population > 1000`, "the census finds the known sites") that go red when a site is removed, never when one is added |
 | 2. Walkers reached through a helper | 878 unit tests call a helper that walks, to three calls deep through names resolved in the same file or an imported repo module | 312 reach it through a helper under `src/tests/`; 566 through product code (`reconcile_worktrees`, `find_duplicates`, `tree_state_line` and the like). Of the 312, 33 are marked. Of the 566, 489 pass a temporary tree as a fixture and 77 take none; the 77 were read by name and 3 are marked, 74 are not (mocked arbiter factories, spawn gate, wake check) |
-| 3. `src/cosa/tests/` | 7 tests walk, directly or through a helper | measured, not marked: the runner reads `git ls-files 'src/tests/unit/*'` only, so a mark there selects nothing. Two are whole-tree counts (`test_drop_hnsw_migration.py::test_no_two_migrations_share_a_down_revision`, `test_pgvector_migration.py::test_known_successors_only`). A follow-up row in the task store, titled "Census runner: also select marked guards under src/cosa/tests", extends the runner |
+| 3. `src/cosa/tests/` | 7 tests walk, directly or through a helper | measured, then closed on 17 Nov 2026: the runner read `git ls-files 'src/tests/unit/*'` only, so a mark there selected nothing. It now also reads `src/cosa/tests/*`, and the two whole-tree counts (`test_drop_hnsw_migration.py::TestRevisionChain::test_no_two_migrations_share_a_down_revision`, `test_pgvector_migration.py::TestRevisionChain::test_known_successors_only`) are marked |
 
 Marked in this sweep, direct walkers:
 
@@ -92,6 +92,8 @@ Marked in this sweep, helper-reached. Each is the guard of its file. The helper 
 ## Census selection count
 
 `run-census-guards.sh --list` printed 454 ids on `f20d11273` before the marks, and 501 after: 55 files by name and 446 test ids. The first sweep recorded 443 before and 450 after its seven marks, on an older tree. A marked parametrized test counts once per case.
+
+On `abbf1152c` (17 Nov 2026) `--list` printed 504 ids before the runner change and 542 after: 61 files by name and 481 test ids. The 38 added are all under `src/cosa/tests/`. Four are files picked by name. The other 34 are ids: 2 are the newly marked migration tests, and 32 are `test_every_*` functions that were never selected before. The full runner passed on that selection: 2234 passed, 11 skipped, 1 xfailed.
 
 ## Named gaps still open
 
