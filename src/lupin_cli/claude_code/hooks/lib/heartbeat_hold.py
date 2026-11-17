@@ -38,9 +38,10 @@ _parse_peer_target). A cadence hold is therefore waiting on its own timer, never
 import os
 import json
 import datetime
-import subprocess
 from fnmatch import fnmatch
 from pathlib import Path
+
+from cosa.utils.main_checkout import main_checkout_of
 
 
 # Public interface constants — §0 decision #7 + 6929f4ac §9.2
@@ -131,17 +132,8 @@ def _main_repo_path( repo_root ):
         - both the repo identity and the fallback data base derive from this path, not from
           the passed tree, because a base derived from a worktree path yields `.claude/projects-data/...`
     """
-    try:
-        out = subprocess.run(
-            [ "git", "-C", str( repo_root ), "rev-parse", "--path-format=absolute", "--git-common-dir" ],
-            capture_output=True, text=True, timeout=10
-        )
-        common = out.stdout.strip()
-        if out.returncode == 0 and common:
-            return Path( common ).parent               # <repo>/.git -> <repo>
-    except ( OSError, subprocess.SubprocessError ):
-        pass                                           # git missing / not a repo
-    return Path( repo_root ).resolve()
+    owner = main_checkout_of( repo_root )              # <repo>/.git -> <repo>; None when git cannot say
+    return Path( owner ) if owner is not None else Path( repo_root ).resolve()
 
 
 def _repo_identity( repo_root ):

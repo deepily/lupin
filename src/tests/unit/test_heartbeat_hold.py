@@ -1421,12 +1421,10 @@ def test_read_hold_exact_non_object_json_returns_none( tmp_path ):
 
 
 def test_main_repo_path_git_failure_falls_back_to_resolved_repo_root( tmp_path, monkeypatch ):
-    """Covers heartbeat_hold.py 168-169: the `except (OSError, subprocess.SubprocessError)`
-    guard in _main_repo_path. When `git rev-parse --git-common-dir` cannot run (git
-    missing / not a repo), the function must NOT raise — it falls back to the resolved
-    repo_root. Force the wrapped subprocess.run to raise and assert the fallback."""
+    """When git cannot say (main_checkout_of answers None), _main_repo_path must NOT raise;
+    it falls back to the resolved repo_root. Force the shared helper's subprocess to raise."""
     import pathlib, subprocess
     def _boom( *a, **k ):
         raise subprocess.SubprocessError( "git unavailable" )
-    monkeypatch.setattr( hh.subprocess, "run", _boom )
+    monkeypatch.setattr( "cosa.utils.main_checkout.subprocess.run", _boom )
     assert hh._main_repo_path( str( tmp_path ) ) == pathlib.Path( tmp_path ).resolve()

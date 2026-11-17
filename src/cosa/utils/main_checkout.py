@@ -2,23 +2,30 @@
 The one answer to "which main checkout owns this path?" for code outside the hook library.
 
 A linked worktree shares the .git directory of its main checkout, so the owner is the parent of
-`git rev-parse --git-common-dir`. The hook library keeps its own copies, because a hook must not import cosa.
+`git rev-parse --git-common-dir`. The hook library calls it too: hook_common already imports cosa.utils, and this module reads only the standard library.
 """
+import os
 import subprocess
 from pathlib import Path
 
 
-def run_git( argv, cwd=None, timeout=10 ):
+def run_git( argv, cwd=None, timeout=10, env=None ):
     """
     Run one git command and capture its text output.
 
     Requires:
         - argv is a non-empty list whose first element is "git"
+        - env is None or a dict of variables laid over the inherited environment
 
     Ensures:
         - returns the CompletedProcess; a non-zero exit does not raise
+        - an empty or None env inherits the environment unchanged
+        - raises only on timeout or an OS error, as subprocess.run does
     """
-    return subprocess.run( argv, cwd=cwd, capture_output=True, text=True, timeout=timeout )
+    return subprocess.run(
+        argv, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+        env=( { **os.environ, **env } if env else None ),
+    )
 
 
 def main_checkout_of( path, run=None, timeout=10 ) -> str | None:

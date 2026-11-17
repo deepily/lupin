@@ -35,11 +35,11 @@ The hook is shared by every worktree, and a gate that crashes must not stop ever
 import argparse
 import json
 import os
-import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from cosa.utils import atomic_json
+from cosa.utils.main_checkout import run_git
 from lupin_cli.claude_code.hooks.lib.cron_switch_guard import INI_BASENAME, switch_lines
 
 STATE_ENV      = "LUPIN_CRON_SWITCH_STATE"
@@ -82,9 +82,7 @@ def read_state( path ) -> Dict[ str, Any ]:
 
 def _git( repo_root, *args ) -> Tuple[ int, str ]:
     """Run git in repo_root and return ( exit code, stdout )."""
-    done = subprocess.run(
-        [ "git", "-C", repo_root, *args ], capture_output=True, text=True, check=False,
-    )
+    done = run_git( [ "git", "-C", repo_root, *args ], timeout=None )
     return done.returncode, done.stdout
 
 
