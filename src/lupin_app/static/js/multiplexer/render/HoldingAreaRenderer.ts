@@ -74,7 +74,7 @@ import { BADGE_HOLDING_AREA } from "../../shared/task-request.js";
 import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
 import { createFlowRatioPanel, type FlowRatioStoreLike } from "./flowRatioPanel";
 import { renderTruncationBanner } from "./templates/truncationBanner";
-import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
+import { readBackAfterWrite, stampFreshRead, stampReadBackFailed } from "../shared/afterWriteRead";
 import { teardownScaffold, messageEl } from "./dom";
 
 /**
@@ -1112,11 +1112,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   }
 
   private stampUpdated(): void {
-    /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container.
-    if ( this.updatedEl === null ) return;
-    // A fresh read ENDS the staleness a failed read-back declared.
-    clearReadBackFailed( this.updatedEl );
-    this.updatedEl.textContent = `updated ${ formatFleetTimestamp( this.nowDateFn(), undefined ) }`;
+    stampFreshRead( this.updatedEl, `updated ${ formatFleetTimestamp( this.nowDateFn(), undefined ) }` );
   }
 
   /**

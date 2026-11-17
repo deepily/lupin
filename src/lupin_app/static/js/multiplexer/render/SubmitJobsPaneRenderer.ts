@@ -36,8 +36,7 @@ import {
   type SubmitJobsChromeElements,
 } from "./templates/submitJobsChrome";
 import {
-  renderSectionHeader,
-  wireSectionCollapse,
+  mountStaticHeaderSection,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 
@@ -136,20 +135,12 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
     this.mounted = true;
     this.root    = root;
 
-    // B7 — a static header. No count, no actions.
-    const header = renderSectionHeader( {
-      icon   : "📝",
-      title  : "Submit Agentic Jobs",
-      testid : "multiplexer-submit-jobs-header",
-    } );
-    this.header = header;
-
+    // B7 — a static header: no count, no actions. B1–B3 — open, header-click toggle, session-only, no persist key.
     const els = renderSubmitJobsChrome();
     this.els  = els;
-
-    root.replaceChildren( header.header, els.body );
-    // B1–B3 — open, header-click toggle, session-only. No persist key.
-    this.collapseOff = wireSectionCollapse( root, header );
+    const mounted    = mountStaticHeaderSection( root, { icon: "📝", title: "Submit Agentic Jobs", testid: "multiplexer-submit-jobs-header" }, els.body );
+    this.header      = mounted.header;
+    this.collapseOff = mounted.collapseOff;
 
     this.wire( els );
     this.paint();

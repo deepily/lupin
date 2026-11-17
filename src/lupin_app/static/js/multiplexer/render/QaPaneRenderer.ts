@@ -36,8 +36,7 @@ import type { TtsMode } from "../stores/AudioStore";
 import type { ActionRequiredMicHandler } from "./actionRequiredMic";
 import { renderQaChrome, type QaChromeElements } from "./templates/qaChrome";
 import {
-  renderSectionHeader,
-  wireSectionCollapse,
+  mountStaticHeaderSection,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { renderAgentSelect } from "../../shared/agent-select.js";
@@ -134,21 +133,12 @@ class QaPaneRendererImpl implements QaPaneRenderer {
     this.mounted = true;
     this.root    = root;
 
-    // B7 — a static header: no count, no actions. The chevron is the only control.
-    const header = renderSectionHeader( {
-      icon   : "❓",
-      title  : "Q&A Interface",
-      testid : "multiplexer-qa-header",
-    } );
-    this.header = header;
-
+    // B7 — a static header: no count, no actions. B1–B3 — open, header-click toggle, session-only, no persist key.
     const els = renderQaChrome();
     this.els  = els;
-
-    root.replaceChildren( header.header, els.body );
-    // B1 + B2 + B3 — open, header-click toggle, session-only. No persist key is
-    // passed, which is what B3 asks for: legacy's Q&A disclosure is not persisted.
-    this.collapseOff = wireSectionCollapse( root, header );
+    const mounted    = mountStaticHeaderSection( root, { icon: "❓", title: "Q&A Interface", testid: "multiplexer-qa-header" }, els.body );
+    this.header      = mounted.header;
+    this.collapseOff = mounted.collapseOff;
 
     this.wire( els );
     this.paint();

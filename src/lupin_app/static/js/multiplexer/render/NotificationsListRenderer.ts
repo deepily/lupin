@@ -390,16 +390,20 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     if (appTimezone === this.appTimezone) return;
     this.appTimezone = appTimezone;
 
+    this.repaintAfterSetting("NotificationsListRenderer.setAppTimezone");
+  }
+
+  // Both late-arriving settings (timezone, TTS mode) end here: none of the three caches has the
+  // setting among its inputs, so all three are dropped, then a render is scheduled. The trigger is
+  // carried only so a throwing render names this renderer as its source.
+  private repaintAfterSetting(source: string): void {
     this.cardInputs     = new WeakMap();
     this.cardSignatures = new WeakMap();
     this.historyCache.clear();
-
-    // The trigger is only carried for error reporting if the render throws, so it
-    // names this renderer as the source rather than inventing an event type.
     this.scheduleRender({
       type    : "store_notifications_changed",
       payload : undefined,
-      source  : "NotificationsListRenderer.setAppTimezone",
+      source,
     } as LupinEvent<unknown>);
   }
 
@@ -429,17 +433,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     if (mode === this.ttsInteractionMode) return;
     this.ttsInteractionMode = mode;
 
-    this.cardInputs     = new WeakMap();
-    this.cardSignatures = new WeakMap();
-    this.historyCache.clear();
-
-    // Same shape as setAppTimezone's: the trigger is carried only so a throwing render
-    // names this renderer as its source rather than inventing an event type.
-    this.scheduleRender({
-      type    : "store_notifications_changed",
-      payload : undefined,
-      source  : "NotificationsListRenderer.setTtsInteractionMode",
-    } as LupinEvent<unknown>);
+    this.repaintAfterSetting("NotificationsListRenderer.setTtsInteractionMode");
   }
 
   /**

@@ -276,3 +276,24 @@ export function wireSectionCollapse(
   handle.header.addEventListener( "click", onClick );
   return () => handle.header.removeEventListener( "click", onClick );
 }
+
+/**
+ * Paint a static-header section into `root` and wire its collapse.
+ *
+ * Requires:
+ *   - root is the section's mount element; body is the already-built content element
+ *
+ * Ensures:
+ *   - root holds the header, then the body
+ *   - the header toggles the section, session-only
+ *   - returns the header handle and the function that removes the listener
+ */
+export function mountStaticHeaderSection(
+  root : HTMLElement,
+  opts : SectionHeaderOptions,
+  body : HTMLElement,
+): { header: SectionHeaderHandle; collapseOff: () => void } {
+  const header = renderSectionHeader( opts );
+  root.replaceChildren( header.header, body );
+  return { header, collapseOff: wireSectionCollapse( root, header ) };
+}
