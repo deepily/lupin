@@ -241,3 +241,11 @@ def test_read_rows_keeps_whole_rows_first_wins_skips_blanks_and_a_torn_last_line
     assert pl.read_rows( path ) == rows and pl.load_lines( path ) == rows
     path.write_text( '{"pin": "pa"\n{"pin": "pb", "purpose": "b"}\n', encoding="utf-8" )
     with pytest.raises( ValueError ): pl.read_rows( path )
+
+
+def test_read_rows_skips_a_whitespace_only_line_mid_file_and_as_the_last_line_without_calling_it_torn(tmp_path):
+    from cosa.repo.symindex.candidates import purpose_lines as pl
+    path = tmp_path / "purpose.jsonl"
+    path.write_text( '{"pin": "pa", "purpose": "a"}\n   \n{"pin": "pb", "purpose": "b"}\n \t ', encoding="utf-8" )
+    torn = []
+    assert pl.read_rows( path, torn ) == { "pa": { "pin": "pa", "purpose": "a" }, "pb": { "pin": "pb", "purpose": "b" } } and torn == []

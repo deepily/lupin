@@ -37,3 +37,8 @@ def test_a_missing_value_is_made_stored_and_returned_and_then_served_from_the_le
 def test_without_a_ledger_make_always_runs_and_nothing_is_stored():
     calls = []
     assert asyncio.run( harness_runner.cached( None, "k", _make( calls, 5 ) ) ) == 5 and calls == [ 1 ]
+
+
+def test_a_stored_falsy_value_is_returned_without_calling_make():
+    calls, store = [], _Store( { "k": 0 } )
+    assert asyncio.run( harness_runner.cached( store, "k", _make( calls, 5 ) ) ) == 0 and calls == [] and store.puts == []
