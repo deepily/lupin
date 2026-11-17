@@ -18,10 +18,9 @@ import os
 import re
 from datetime import datetime
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 import cosa.utils.util as cu
-from cosa.config.app_timezone import get_app_timezone
+from cosa.config.app_timezone import get_app_zone
 from cosa.config.configuration_manager import ConfigurationManager
 
 
@@ -52,7 +51,7 @@ class ReportWriter:
         """
         self.user_email = user_email
         self.debug      = debug
-        self.tz         = ZoneInfo( get_app_timezone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) ) )
+        self.tz         = get_app_zone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
 
     def write( self, agent: str, slug: str, title: str, body_md: str ) -> str:
         """

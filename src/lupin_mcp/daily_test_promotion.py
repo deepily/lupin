@@ -23,9 +23,7 @@ import fcntl
 import json
 import os
 import pathlib
-import subprocess
 import sys
-import zoneinfo
 
 import cosa.utils.util as cu
 from cosa.config import app_timezone
@@ -34,6 +32,7 @@ from cosa.utils.atomic_json import load_json_dict, write_json_atomic
 from lupin_mcp import duplicate_check_daily as dcd
 from lupin_mcp import duplicate_check_filing as filing
 from lupin_mcp import job_summary as js
+from lupin_mcp.reuse_harness import commands
 from cosa.rest.task_store_rules import filer_created_by
 
 JOB            = "test-promotion"
@@ -67,13 +66,9 @@ def run_command( argv, timeout ):
 
     Ensures:
         - returns ( exit code, stdout )
-        - returns ( 127, the error text ) when the command cannot start or runs past the timeout
+        - returns ( 127, the error text ) when the command cannot start or runs past the timeout, as reuse_harness.commands.run_command with stdout_only
     """
-    try:
-        done = subprocess.run( argv, capture_output=True, text=True, timeout=timeout )
-    except ( OSError, subprocess.TimeoutExpired ) as error:
-        return 127, f"{type( error ).__name__}: {error}"
-    return done.returncode, done.stdout
+    return commands.run_command( argv, timeout=timeout, stdout_only=True )
 
 
 class Vm:
@@ -171,7 +166,7 @@ def app_zone( config=None ):
     if config is None:
         from cosa.config.configuration_manager import ConfigurationManager
         config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", silent=True, mute_splainer=True )
-    return zoneinfo.ZoneInfo( app_timezone.get_app_timezone( config ) )
+    return app_timezone.get_app_zone( config )
 
 
 def due( trigger, state, now, zone ):

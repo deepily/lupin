@@ -43,3 +43,11 @@ def test_a_timeout_keeps_what_the_command_printed_before_it_was_cut_off():
 def test_a_timeout_of_a_command_that_printed_nothing_is_only_the_error_line():
     status, output = commands.run_command( [ sys.executable, "-c", "import time; time.sleep( 30 )" ], timeout=0.5 )
     assert status == 127 and output.startswith( "TimeoutExpired:" ) and "\n" not in output
+
+
+def test_stdout_only_returns_standard_output_exactly_and_drops_the_error_stream():
+    from lupin_mcp.reuse_harness import commands
+    assert commands.run_command( [ "sh", "-c", "echo out; echo err >&2; exit 3" ], stdout_only=True ) == ( 3, "out\n" )
+    assert commands.run_command( [ "sh", "-c", "echo out; echo err >&2" ] ) == ( 0, "out\nerr" )
+    code, text = commands.run_command( [ "sh", "-c", "echo seen; echo oops >&2; sleep 5" ], timeout=0.5, stdout_only=True )
+    assert code == 127 and "TimeoutExpired" in text and text.endswith( "\nseen" )
