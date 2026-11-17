@@ -21,7 +21,7 @@ import type { TaskItem, TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor, isOpenStatus } from "../render/taskListModel";
 import type { TransitionExtras } from "../render/taskVerbs";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
-import { AWAITING_HUMAN_APPROVAL } from "./HoldingAreaStore";
+import { awaitingApproval } from "./HoldingAreaStore";
 import { alreadyAtTarget } from "./alreadyAtTarget";
 
 /**
@@ -47,21 +47,6 @@ export class AwaitingHumanApprovalError extends Error {
     this.name     = "AwaitingHumanApprovalError";
     this.ticketId = ticketId;
   }
-}
-
-/**
- * Whether a transition answer is the 202 awaiting-approval body.
- *
- * ⚠️ THE `status` FIELD, NEVER A SUBSTRING SEARCH — a row whose own reason text mentions
- * the marker is an ordinary success, and a payload-wide match would roll back a
- * transition that actually happened. The marker itself is imported from HoldingAreaStore
- * so the two browser stores cannot drift; that copy is pinned to the server's literal by
- * `src/tests/unit/test_the_browser_202_marker_matches_the_server.py`.
- */
-function awaitingApproval( body: unknown ): boolean {
-  return typeof body === "object"
-    && body !== null
-    && ( body as { status?: unknown } ).status === AWAITING_HUMAN_APPROVAL;
 }
 
 /** The slice of the API client the store needs: `get`, `patch` and `post`. */

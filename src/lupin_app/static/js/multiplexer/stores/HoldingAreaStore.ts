@@ -79,7 +79,7 @@ export const AWAITING_HUMAN_APPROVAL = "awaiting_human_approval";
  * mention the marker is an ordinary success, and a payload-wide match would call it
  * pending — a new wrong answer in place of the old one.
  */
-function awaitingApproval( body: unknown ): body is { ticket_id?: unknown } {
+export function awaitingApproval( body: unknown ): body is { ticket_id?: unknown } {
   return typeof body === "object"
     && body !== null
     && ( body as { status?: unknown } ).status === AWAITING_HUMAN_APPROVAL;

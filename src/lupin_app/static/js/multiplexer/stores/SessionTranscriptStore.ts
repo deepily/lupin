@@ -145,7 +145,7 @@ export function transcriptBlockBytes( block: TranscriptBlock ): number {
 /**
  * Tells whether a value is a plain object, not null and not an array.
  */
-function isFrame( value: unknown ): value is Record<string, unknown> {
+export function isFrame( value: unknown ): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray( value );
 }
 
