@@ -13,8 +13,8 @@ pins:
   - scripts.check_bundle_freshness.remedy@8812934aeb
   - scripts.check_bundle_freshness.format_report@a9527e455d
   - scripts.check_bundle_freshness.main@bd3361e88c
-  - scripts.bridge_pin_sweep.helper_bodies@8fa5e3b6ff
-  - scripts.bridge_pin_sweep.functions@93af722d2e
+  - scripts.bridge_pin_sweep.helper_bodies@ecddf59ec2
+  - scripts.bridge_pin_sweep.functions@4f5bd3acaf
   - scripts.bridge_pin_sweep.classify@3a6cb5c350
   - scripts.bridge_pin_sweep.self_test@76e82c55a6
 ---

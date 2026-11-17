@@ -9,7 +9,7 @@ pins:
   - scripts.presentation-gate-silence-proof.prove_gate_silence.pool_status@a8b314a563
   - scripts.presentation-gate-silence-proof.prove_gate_silence.require_lock_clear@e21741ac3e
   - scripts.presentation-gate-silence-proof.prove_gate_silence.lock_clear_banner@9229bdf3aa
-  - scripts.presentation-gate-silence-proof.prove_gate_silence.poll_until_terminal@354413a79f
+  - scripts.presentation-gate-silence-proof.prove_gate_silence.poll_until_terminal@b0d088cf5b
   - scripts.presentation-gate-silence-proof.prove_gate_silence.build_verdict_direction_a@a4be911f58
   - scripts.presentation-gate-silence-proof.prove_gate_silence.main@fcc81978f7
 ---
@@ -26,7 +26,7 @@ Proves that presentation review gates reach a connected user, who answers them. 
 - `register_and_login` registers a fresh user and returns the token, email and user id. If the email exists, it logs in instead.
 - A fresh non-service user is both submitter and gate target. The tester account is a configured gate service account, and delivering to the operator's real inbox is off limits.
 - `SilentConnectedUser` holds an authenticated queue WebSocket open, records every gate ask as delivery proof and samples liveness. In answer mode it posts a response for each gate.
-- `submit_build` submits a real presentation build through `/api/v2/submit`. `poll_until_terminal` polls the run, done and dead queues until the job is done or dead, or time runs out.
+- `submit_build` submits a real presentation build through `/api/v2/submit`. `poll_until_terminal` polls the run, done and dead queues until the job is done or dead, or time runs out. The done-then-dead look is `probe_job_terminal` of the cache dump, and a non-200 skips that tick.
 - `read_notification_state` reads one gate notification's state and response value without changing anything.
 
 ## Precondition and venue

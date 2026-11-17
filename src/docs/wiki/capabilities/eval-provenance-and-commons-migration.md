@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - scripts.eval_provenance.compute_sample_signature@3a3151d3e2
   - scripts.eval_provenance.make_provenance@864e4bb74a
-  - scripts.migrate-commons-entry-separator.migrate_directory@8cd89cb9b3
+  - scripts.migrate-commons-entry-separator.migrate_directory@bc82d6705c
   - scripts.migrate-commons-entry-separator.main@0d4ea59a18
 ---
 # Eval provenance and commons separator migration
@@ -20,5 +20,5 @@ Two small utilities, one for eval results and one for the commons store.
 ## Commons separator migration
 - `migrate_directory` converts the legacy entry separator in commons topic files to the canonical boundary marker, which does not collide with markdown thematic breaks. The old separator once made the store drop everything after the first break inside a body.
 - It scans the commons folder and its archive. It replaces a separator only when a valid entry header follows immediately, and leaves front matter and body breaks alone.
-- It returns a summary of files scanned and changed and the replacement count. It copies each changed file to a backup folder first, unless backups are off. A dry run writes nothing.
+- It returns a summary of files scanned and changed and the replacement count. It copies each changed file to a backup folder first, unless backups are off, which passes no backup folder to the one file migrator. A dry run writes nothing.
 - Re-running on a migrated tree is a no-op. `main` returns 0 on success and 1 on a usage error.

@@ -5,9 +5,9 @@ pins:
   - scripts.router_label_audit.unit_tokens@a82bf30105
   - scripts.router_label_audit.unit_categories@c38c8274f5
   - scripts.router_label_audit.classify_bucket@7c7e8525ff
-  - scripts.router_label_audit.destination_capability@cae1583335
+  - scripts.router_label_audit.destination_capability@7430b37f1c
   - scripts.router_label_audit.destination_arithmetic@883a4436de
-  - scripts.router_label_audit.is_calculator_shaped@0985b41d3e
+  - scripts.router_label_audit.is_calculator_shaped@3753ff6872
   - scripts.router_label_audit.is_math_shaped@360fa21fb0
   - scripts.router_label_audit.read_utterances@af8e3ab761
   - scripts.router_label_audit.duplicate_check@8fdcdfa48e
