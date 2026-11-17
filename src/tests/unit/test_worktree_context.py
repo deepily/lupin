@@ -207,3 +207,105 @@ class TestWorktreeContextCleanupSafety:
                 if os.path.exists( git_dir ) and os.path.isfile( git_dir ):
                     os.remove( git_dir )
                 raise _PrimaryError( "primary raise from caller" )
+
+
+# ===========================================================================
+# Row 438a8b49: a finished job must not leave its folder when git's record is gone
+# ===========================================================================
+
+_CLEANUP_CFG = {
+    "cosa worktree sandbox root"         : ".claude/worktrees",
+    "cosa worktree base ref"             : "origin/main",
+    "cosa worktree auto cleanup"         : True,
+    "cosa worktree cleanup timeout secs" : 30,
+}
+
+
+def _drop_git_record( repo: str, job_id: str ) -> None:
+    """Delete git's record of a worktree, as a host-side prune does."""
+    record = os.path.join( repo, ".git", "worktrees", job_id )
+    os.rename( record, record + ".dropped" )
+
+
+class TestFinishedJobLeavesNoFolder:
+    """A finished job leaves no folder even when git forgot the tree."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize( "outcome", [ "success", "failure", "cancel" ] )
+    async def test_record_gone_folder_removed( self, test_repo, outcome ):
+        job_id = f"tfe-orphan-{outcome}"
+        raised = { "failure": RuntimeError, "cancel": asyncio.CancelledError }.get( outcome )
+        path   = None
+        try:
+            async with WorktreeContext( job_id=job_id, config_mgr=_StubConfig( _CLEANUP_CFG ), enabled=True ) as wt:
+                path = wt.path
+                _drop_git_record( test_repo, job_id )
+                assert os.path.isdir( path )
+                if raised: raise raised( "job ended" )
+        except ( RuntimeError, asyncio.CancelledError ):
+            assert raised is not None
+        assert path is not None
+        assert not os.path.exists( path )
+
+    @pytest.mark.asyncio
+    async def test_folder_without_git_link_is_kept( self, test_repo ):
+        """Only a folder with a dangling .git link is deleted."""
+        async with WorktreeContext( job_id="tfe-nolink", config_mgr=_StubConfig( _CLEANUP_CFG ), enabled=True ) as wt:
+            path = wt.path
+            os.remove( os.path.join( path, ".git" ) )
+        assert os.path.isdir( path )
+
+    @pytest.mark.asyncio
+    async def test_rmtree_failure_is_logged_not_raised( self, test_repo, caplog ):
+        with patch( "cosa.agents.shared.worktree_context.shutil.rmtree", side_effect=OSError( "busy" ) ):
+            async with WorktreeContext( job_id="tfe-rmfail", config_mgr=_StubConfig( _CLEANUP_CFG ), enabled=True ) as wt:
+                path = wt.path
+                _drop_git_record( test_repo, "tfe-rmfail" )
+        assert os.path.isdir( path )
+        assert "could not remove dangling sandbox" in caplog.text
+
+
+class TestHasDanglingGitLink:
+    """Edges of the predicate that gates deletion."""
+
+    def test_missing_path( self, tmp_path ):
+        from cosa.agents.shared.worktree_context import has_dangling_git_link
+        assert has_dangling_git_link( str( tmp_path / "nope" ) ) is False
+
+    def test_git_directory( self, tmp_path ):
+        from cosa.agents.shared.worktree_context import has_dangling_git_link
+        ( tmp_path / ".git" ).mkdir()
+        assert has_dangling_git_link( str( tmp_path ) ) is False
+
+    def test_not_a_gitdir_line( self, tmp_path ):
+        from cosa.agents.shared.worktree_context import has_dangling_git_link
+        ( tmp_path / ".git" ).write_text( "garbage\n" )
+        assert has_dangling_git_link( str( tmp_path ) ) is False
+
+    def test_unreadable_file( self, tmp_path ):
+        from cosa.agents.shared.worktree_context import has_dangling_git_link
+        ( tmp_path / ".git" ).write_text( "gitdir: /x\n" )
+        with patch( "builtins.open", side_effect=OSError( "denied" ) ):
+            assert has_dangling_git_link( str( tmp_path ) ) is False
+
+    def test_live_and_dangling( self, tmp_path ):
+        from cosa.agents.shared.worktree_context import has_dangling_git_link
+        live = tmp_path / "live-record"; live.mkdir()
+        ( tmp_path / ".git" ).write_text( f"gitdir: {live}\n" )
+        assert has_dangling_git_link( str( tmp_path ) ) is False
+        ( tmp_path / ".git" ).write_text( f"gitdir: {tmp_path}/gone\n" )
+        assert has_dangling_git_link( str( tmp_path ) ) is True
+
+
+class TestBrokenFolderWithoutDanglingLink:
+    @pytest.mark.asyncio
+    async def test_reaper_refusal_without_dangling_link_leaves_folder( self, test_repo, caplog ):
+        """The reaper says broken, but the folder has no .git link to judge by: keep it and warn."""
+        refusal = { "removed": False, "skipped_reason": "broken_or_not_a_worktree", "errors": [ "x" ],
+                    "wip_committed": False, "branch": None }
+        with patch( "cosa.agents.shared.worktree_context.drain_then_remove", return_value=refusal ):
+            async with WorktreeContext( job_id="tfe-nolink2", config_mgr=_StubConfig( _CLEANUP_CFG ), enabled=True, debug=True ) as wt:
+                path = wt.path
+                os.remove( os.path.join( path, ".git" ) )
+        assert os.path.isdir( path )
+        assert "no dangling link" in caplog.text
