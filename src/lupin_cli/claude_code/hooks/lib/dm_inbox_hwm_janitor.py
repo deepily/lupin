@@ -50,6 +50,8 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (
     _iter_hold_paths, _file_mtime, _resolve_base_dir,
     DEFAULT_SWEEP_MAX_DEPTH, SWEEP_SKIP_DIR_NAMES,
 )
+# One shared normalizer: the same [:8] live-prefix rule gates both janitors (dupcheck d-2ee7fbed71).
+from lupin_cli.claude_code.hooks.lib.bookmark_janitor import _live_prefixes
 
 # The family this janitor owns. Deliberately NOT folded into HOLD_GLOB — see the
 # module docstring for why one glob over two families would be a silent no-op.
@@ -99,33 +101,6 @@ def hwm_sid8( path ):
         return None
     sid8 = name[ len( HWM_PREFIX ) : -len( HWM_SUFFIX ) ]
     return sid8 or None
-
-
-def _live_prefixes( live_session_ids ):
-    """
-    Normalize an authoritative live-set to the 8-char prefixes an HWM name carries.
-
-    The truncation is not injective, and this gate depends on that being safe.
-    Distinct session ids can share a prefix (several literals truncate to `stable-s`).
-    Comparing prefixes over-matches, which is the safe direction: a collision makes more files look live.
-
-    Requires:
-        - live_session_ids is an iterable of session-id strings
-
-    Ensures:
-        - returns a set of `[:8]` prefixes, so a full uuid in the live set matches
-          the truncated fragment in a filename
-        - skips non-string / empty entries rather than raising
-
-    Notes:
-        - Do not change this into a full-id comparison. Every truncated filename would then fail to match any live id.
-        - The gate would then start reaping live sessions' cursors, so the lossy key is what keeps the gate safe.
-    """
-    out = set()
-    for sid in live_session_ids:
-        if isinstance( sid, str ) and sid:
-            out.add( sid[ :8 ] )
-    return out
 
 
 def classify_hwm_file( path, now_ts=None, grace_seconds=DEFAULT_HWM_GRACE_SECONDS,
