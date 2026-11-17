@@ -1335,8 +1335,7 @@ def _default_emit_reap( identity: Dict[ str, Any ], reason: str = "" ) -> None:
         target  = os.getenv( "LUPIN_DEV_EMAIL" ) or cfg.get( "global_notification_recipient" )
         if not target:
             return                          # can't route → skip (best-effort)
-        persona = identity.get( "persona" ) if isinstance( identity.get( "persona" ), dict ) else { }
-        name    = ( persona or { } ).get( "name" ) or "A worker"
+        name    = reap_memento.identity_bits( identity )[ 0 ] or "A worker"
         # 🔴 DELIBERATELY LEFT SHORT — excluded from the ~30s reload-window bump
         # (row 204911ca, 2026-07-20). Every other out-of-process `:7999` client
         # was raised to _SERVER_TRANSPORT_TIMEOUT_SECONDS (30) so it can outlast
@@ -1380,8 +1379,7 @@ def _default_emit_reaped_tombstone( identity: Dict[ str, Any ] ) -> None:
     session_id = identity.get( "session_id" )
     if not session_id:
         return                              # no id → fall back to the ~60-min age-out
-    persona = identity.get( "persona" )
-    name    = persona.get( "name" ) if isinstance( persona, dict ) else persona
+    name = reap_memento.identity_bits( identity )[ 0 ]
     try:
         from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_reaped
         emit_reaped( session_id, persona=name )
