@@ -404,30 +404,8 @@ def _count_on_connection( connection, path_with_query, api_key ):
           as 1/0) → ( False, 0, {} )  (the fail-safe)
         - never raises
     """
-    try:
-        connection.request( "GET", path_with_query, headers={ "X-API-Key": api_key } )
-        response = connection.getresponse()
-        status   = response.status
-        raw      = response.read().decode( "utf-8" )
-    except Exception:
-        # Transport failure (refused / timeout / DNS / socket reset) — fail safe.
-        return False, 0, { }
-
-    if not ( 200 <= status < 300 ):
-        # A received server verdict (4xx/5xx) is NOT a clean count — fail safe.
-        return False, 0, { }
-    try:
-        parsed = json.loads( raw )
-    except json.JSONDecodeError:
-        return False, 0, { }
-    if not isinstance( parsed, dict ):
-        return False, 0, { }
-    count = parsed.get( "count" )
-    # bool is a subclass of int — reject a JSON `true`/`false` count explicitly
-    # so it never slips through as 1/0 (house no-defensive rule).
-    if isinstance( count, bool ) or not isinstance( count, int ):
-        return False, 0, { }
-    return True, count, _parse_breakdown( parsed.get( "breakdown" ) )
+    ok, count, breakdown, _priority = _count_on_connection_full( connection, path_with_query, api_key )
+    return ok, count, breakdown
 
 
 def _count_on_connection_full( connection, path_with_query, api_key ):
@@ -435,7 +413,7 @@ def _count_on_connection_full( connection, path_with_query, api_key ):
     `_count_on_connection` plus the priority breakdown: one request, four values.
 
     A sibling, not a fourth return slot. `_count_on_connection` and `query_owed` are asserted as 3-tuples in
-    about 30 places. A mass edit of assertions is how a suite quietly loses the property it was pinning.
+    about 30 places and stay as thin 3-tuple wrappers over this one. A mass edit of assertions is how a suite quietly loses the property it was pinning.
 
     Ensures:
         - returns ( ok, count, breakdown, priority_breakdown )
@@ -444,8 +422,8 @@ def _count_on_connection_full( connection, path_with_query, api_key ):
         - `priority_breakdown` degrades to {} on absent/malformed data for the same
           reason `breakdown` does — it is a reporting refinement of a count that is
           already trusted, so it must never fail a read that otherwise succeeded
-        - Does not delegate to `_count_on_connection`: that would issue a second GET on the same connection for a body
-          already read, doubling the request the Stop hook fires every turn, so the four-line parse is duplicated rather than delegated
+        - The one place the GET and the parse live: `_count_on_connection` calls this and drops the priority field,
+          so a turn still costs exactly one request
         - never raises
     """
     try:
@@ -511,35 +489,15 @@ def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
         - The connection is always closed; the reused connection carries a single request, costs one handshake either way, and keeps timeout and close discipline in one place
         - never raises
     """
-    if timeout is None:
-        timeout = DEFAULT_OWED_TIMEOUT_SECONDS
-
-    connection = _open_owed_connection( settings[ "api_base_url" ], timeout )
-    if connection is None:
-        return False, 0, { }                 # bad base URL → fail safe (never raise)
-
-    try:
-        # count_only=true (O2): true COUNT(*), never a page-length saturating at
-        # the endpoint's limit cap — a session with >100 owed rows counts exactly.
-        # owed_only=true: the server owns the status set (see the docstring —
-        # a per-status loop here could neither SEE a park-expiry rejoin nor avoid
-        # double-counting one).
-        params = { owner_field: owner_persona, "owed_only": "true", "count_only": "true" }
-        if project:
-            params[ "project" ] = project
-        path = f"/api/tasks?{urllib.parse.urlencode( params )}"
-        ok, count, breakdown = _count_on_connection( connection, path, api_key )
-        if not ok:
-            return False, 0, { }
-        return True, count, breakdown
-    finally:
-        connection.close()                   # release the socket (close is idempotent)
+    ok, count, breakdown, _priority = query_owed_breakdowns( settings, api_key, owner_persona, project=project,
+                                                             timeout=timeout, owner_field=owner_field )
+    return ok, count, breakdown
 
 
 def query_owed_breakdowns( settings, api_key, owner_persona, project=None, timeout=None,
                            owner_field="owner_persona" ):
     """
-    `query_owed` plus the priority breakdown: the same one request, four values.
+    The one owed-count request, four values; `query_owed` wraps it.
 
     The Stop-hook poke needs to say which rows matter, not only how many. `query_owed` keeps its 3-tuple so its
     roughly 30 existing assertions stay as written. This is the entry point for the one caller wanting the fourth field.
