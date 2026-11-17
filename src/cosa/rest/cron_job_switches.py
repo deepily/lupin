@@ -14,7 +14,6 @@ A small attribution file beside the write lock records who flipped each switch a
 holds attribution only; the switch itself is the key in the configuration file.
 """
 import datetime
-import json
 import os
 
 from typing import Any, Dict, List, Optional
@@ -38,10 +37,7 @@ def ini_path() -> str:
         - otherwise returns the main checkout's file, the one the cron jobs read, so a seat in a
           worktree never reads or edits its own tracked copy
     """
-    override = os.environ.get( INI_OVERRIDE_ENV )
-    if override:
-        return override
-    return fleet_size_cap.main_checkout_ini_path()
+    return fleet_size_cap.main_checkout_ini_path( INI_OVERRIDE_ENV )
 
 
 def state_path() -> str:
@@ -98,14 +94,7 @@ def _write_attribution( job: str, on: bool, who: str, moment: datetime.datetime 
     """
     record      = read_attribution()
     record[ job ] = { "on": bool( on ), "at": moment.astimezone().isoformat(), "by": who }
-    path        = state_path()
-    os.makedirs( os.path.dirname( path ), exist_ok=True )
-    partial = path + ".partial"
-    with open( partial, "w", encoding="utf-8" ) as handle:
-        json.dump( record, handle )
-        handle.flush()
-        os.fsync( handle.fileno() )
-    os.replace( partial, path )
+    atomic_json.write_json_atomic( state_path(), record, fsync=True )
 
 
 def write_switch( job: str, on: bool, who: str, now: Optional[ datetime.datetime ] = None ) -> None:

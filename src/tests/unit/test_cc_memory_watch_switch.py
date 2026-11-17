@@ -279,3 +279,40 @@ def test_the_loop_asks_for_the_failed_summary_when_the_key_is_unreadable( tmp_pa
     monkeypatch.setattr( watch, "run_once", lambda tracker, emit, now=None: [] )
     assert watch.main( [ "--once", "--ini", str( tmp_path / "absent.conf" ) ] ) == 0
     assert asked == [ str( tmp_path / "absent.conf" ) ]
+
+
+# ── the vendored state machine drifts silently unless its answers are compared ────
+
+def _kind( line ):
+    """Name which of the three changes a logged line announces."""
+    if "ERROR" in line: return "unreadable"
+    if "is true" in line: return "on"
+    assert "is false" in line, line
+    return "off"
+
+
+SEQUENCES = {
+    "starts on, flips off, back on, then breaks" : [ "true", "true", "false", "false", "true", "", "", "yes", "true" ],
+    "starts off"                                 : [ "false", "false", "true", "false" ],
+    "starts unreadable then recovers"            : [ "", "", "true", "true" ],
+    "duplicate key is unreadable"                : [ "true", "dup", "dup", "false" ],
+}
+
+
+@pytest.mark.parametrize( "values", SEQUENCES.values(), ids=list( SEQUENCES ) )
+def test_the_vendored_gate_and_the_original_tick_switch_answer_and_log_alike_over_one_sequence( tmp_path, values ):
+    path          = tmp_path / "settings.conf"
+    vendored_log  = []
+    original_log  = []
+    reported      = []
+    vendored      = watch.SwitchGate( str( path ), log=vendored_log.append, report=reported.append )
+    original      = csr.TickSwitch( "side-services", lambda: str( path ), log=original_log.append )
+    for value in values:
+        text = { "dup": f"{KEY} = true\n{KEY} = false\n", "": "" }.get( value, f"{KEY} = {value}\n" )
+        path.write_text( text )
+        before = len( reported )
+        assert vendored.allowed() is original.allowed(), f"the two disagree on {value!r}"
+        unreadable = csr.read_switch( str( path ), "side-services" ) is None
+        assert ( len( reported ) - before == 1 ) is unreadable, "the vendored gate reports a failed summary on exactly the unreadable passes"
+    assert [ _kind( line ) for line in vendored_log ] == [ _kind( line ) for line in original_log ]
+    assert vendored_log, "the sequence must have changed state at least once, or nothing was compared"

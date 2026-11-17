@@ -296,3 +296,30 @@ class TestWorktreeContext( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRunCommandIn( unittest.TestCase ):
+    """run_command_in is the one async command runner; _run_git_in and GitOps._run_cmd call it."""
+
+    def test_it_runs_any_command_in_the_given_cwd( self ):
+        from cosa.agents.shared.worktree_context import run_command_in
+        proc = Mock()
+        proc.returncode = 1
+        proc.communicate = AsyncMock( return_value=( b" out \n", b" bad \n" ) )
+        spawn = AsyncMock( return_value=proc )
+        with patch( f"{_MOD}.asyncio.create_subprocess_exec", spawn ):
+            result = _run( run_command_in( "/w", "gh", "pr", "list", timeout=5 ) )
+        self.assertEqual( result, { "success": False, "stdout": "out", "stderr": "bad", "returncode": 1 } )
+        self.assertEqual( spawn.call_args.args, ( "gh", "pr", "list" ) )
+        self.assertEqual( spawn.call_args.kwargs[ "cwd" ], "/w" )
+
+    def test_the_git_method_is_the_same_runner_with_git_as_the_command( self ):
+        from cosa.agents.shared import worktree_context as wc
+        seen = {}
+        async def _fake( cwd, command, *args, timeout=60 ):
+            seen.update( cwd=cwd, command=command, args=args, timeout=timeout )
+            return { "success": True }
+        with patch.object( wc, "run_command_in", _fake ):
+            out = _run( WorktreeContext.__new__( WorktreeContext )._run_git_in( "/r", "status", timeout=9 ) )
+        self.assertEqual( out, { "success": True } )
+        self.assertEqual( seen, { "cwd": "/r", "command": "git", "args": ( "status", ), "timeout": 9 } )

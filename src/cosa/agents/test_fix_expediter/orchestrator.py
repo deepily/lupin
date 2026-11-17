@@ -20,7 +20,6 @@ Design refs:
 """
 
 import asyncio
-import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -28,12 +27,12 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from cosa.agents.shared.sdk_error_result import raise_error_result
-from cosa.agents.shared.coder_stream import read_coder_stream
+from cosa.agents.shared.coder_stream import delegate_to_coder
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
 from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
 from cosa.agents.shared.edit_agent_options import build_edit_agent_options
-from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, extract_last_balanced
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, recover_json_object
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
     TFEPhase,
@@ -846,32 +845,15 @@ class TFEOrchestrator:
         """
         Try to parse the text as a top-level JSON payload.
 
-        Attempts in order:
-          1. `json.loads(text)` on the whole text — works for clean JSON
-          2. Walk backward from the last `]` to find a matching `[` and parse that
-          3. Walk backward from the last `}` to find a matching `{` and parse that
+        Delegates to recover_json_object with arrays allowed: the whole text, then the last
+        balanced array, then the last balanced object.
 
         Returns the parsed dict/list, or None if nothing parses.
         """
         if not text:
             return None
 
-        # Attempt 1: whole text is valid JSON
-        try:
-            return json.loads( text )
-        except json.JSONDecodeError:
-            pass
-
-        # Attempts 2 and 3: the last balanced top-level array, then the last balanced object
-        for open_char, close_char in ( ( "[", "]" ), ( "{", "}" ) ):
-            candidate = extract_last_balanced( text, open_char, close_char )
-            if candidate is not None:
-                try:
-                    return json.loads( candidate )
-                except json.JSONDecodeError:
-                    pass
-
-        return None
+        return recover_json_object( text, allow_array=True )
 
     def _write_multi_cluster_plan_doc( self, proposals: list[ TFEProposedFix ] ) -> str:
         """
@@ -1401,29 +1383,15 @@ class TFEOrchestrator:
 
         options = self._build_tfe_coder_options( guard, cosa_interface_module )
 
-        try:
-            # Bug 15 WORKAROUND: claude-agent-sdk ≥ 0.1.36 rejects str prompt when
-            # can_use_tool is set on options. Upstream (unresolved as of 2026-04-17):
-            # https://github.com/anthropics/claude-code/issues/18735 — remove the
-            # wrap_prompt_for_streaming() call once upstream lands the fix.
-            coder_output, files_changed = await read_coder_stream(
-                sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ),
-                guard, self._notify, self._is_cancelled, "TFEOrchestrator coder", logger,
-                ( AssistantMessage, TextBlock, ToolUseBlock, ResultMessage, RateLimitEvent ), post_tool_hook,
-            )
-
-            if self.debug: print(
-                f"[TFEOrchestrator] Coder output: {len( coder_output )} chars, "
-                f"{len( files_changed )} files changed"
-            )
-
-            return ( coder_output, files_changed )
-
-        except SafetyLimitError:
-            raise
-        except Exception as e:
-            logger.error( f"Coder delegation failed: {e}" )
-            return ( "", [] )
+        # Bug 15 work-around: claude-agent-sdk ≥ 0.1.36 rejects a str prompt when
+        # can_use_tool is set on options. Upstream has not resolved it:
+        # https://github.com/anthropics/claude-code/issues/18735 — remove the
+        # wrap_prompt_for_streaming() call once upstream lands the fix.
+        return await delegate_to_coder(
+            lambda: sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ),
+            guard, self._notify, self._is_cancelled, "TFEOrchestrator coder", logger,
+            ( AssistantMessage, TextBlock, ToolUseBlock, ResultMessage, RateLimitEvent ), post_tool_hook, SafetyLimitError, self.debug,
+        )
 
     async def _verify_fix(
         self,
@@ -1455,8 +1423,8 @@ class TFEOrchestrator:
             collected_text = []
             test_files     = []
 
-            # Bug 15 WORKAROUND: claude-agent-sdk ≥ 0.1.36 rejects str prompt when
-            # can_use_tool is set on options. Upstream (unresolved as of 2026-04-17):
+            # Bug 15 work-around: claude-agent-sdk ≥ 0.1.36 rejects a str prompt when
+            # can_use_tool is set on options. Upstream has not resolved it:
             # https://github.com/anthropics/claude-code/issues/18735 — remove the
             # wrap_prompt_for_streaming() call once upstream lands the fix.
             async for message in sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ):

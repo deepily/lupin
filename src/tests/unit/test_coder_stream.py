@@ -15,7 +15,7 @@ if _src_path not in sys.path:
 
 import pytest
 
-from cosa.agents.shared.coder_stream import read_coder_stream
+from cosa.agents.shared.coder_stream import delegate_to_coder, read_coder_stream
 
 
 class Text:
@@ -101,3 +101,44 @@ def test_a_rate_limit_event_is_logged_and_the_read_goes_on():
     log = Log()
     out, _ = _run( [ Rate(), Text( "ok" ) ], log=log )
     assert out == "ok" and log.warnings == [ "Rate limited: retry_after=7s" ]
+
+
+class Stop( Exception ):
+    """Stands in for the safety-limit class the caller owns."""
+
+
+async def _notify( text, priority="low" ): pass
+
+async def _hook( name, input, guard ): pass
+
+async def _stream_of( *messages ):
+    for message in messages: yield message
+
+
+def _delegate( open_stream, guard=None, log=None, debug=False ):
+    return asyncio.run( delegate_to_coder( open_stream, guard or Guard(), _notify, lambda: False, "Lbl", log or Log(), TYPES, _hook, Stop, debug ) )
+
+
+def test_delegate_to_coder_returns_what_the_stream_read( capsys ):
+    out = _delegate( lambda: _stream_of( Assistant( [ ToolUse( "Edit", { "file_path": "a.py" } ), Text( "hi" ) ] ) ), debug=True )
+    assert out == ( "hi", [ "a.py" ] )
+    assert "[Lbl] Coder output: 2 chars, 1 files changed" in capsys.readouterr().out
+
+
+def test_delegate_to_coder_is_silent_without_debug( capsys ):
+    _delegate( lambda: _stream_of( Text( "x" ) ) )
+    assert capsys.readouterr().out == ""
+
+
+def test_delegate_to_coder_turns_a_failure_to_open_or_read_into_an_empty_result():
+    log = Log()
+    def _boom(): raise RuntimeError( "sdk down" )
+    assert _delegate( _boom, log=log ) == ( "", [] )
+    assert log.errors == [ "Coder delegation failed: sdk down" ]
+
+
+def test_delegate_to_coder_lets_the_safety_stop_through():
+    class Limit( Guard ):
+        def check_timeout( self ): raise Stop( "limit" )
+    with pytest.raises( Stop ):
+        _delegate( lambda: _stream_of( Text( "x" ) ), guard=Limit() )

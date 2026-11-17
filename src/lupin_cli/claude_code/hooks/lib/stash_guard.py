@@ -388,20 +388,3 @@ def stash_deny_reason(
         return None
     except Exception:                    # pragma: no cover - fail-open backstop: every statement above is total over the validated inputs, so no input reaches it; kept because a hot-path guard must never raise
         return None
-
-
-def build_stash_deny_response( reason: str ) -> dict:
-    """
-    Build the PreToolUse deny envelope (mirrors build_subagent_deny_response).
-
-    Ensures:
-        - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
-          permissionDecision: "deny", permissionDecisionReason: <reason> } }
-    """
-    return {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : reason,
-        }
-    }

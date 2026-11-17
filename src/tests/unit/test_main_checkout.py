@@ -133,4 +133,32 @@ def test_the_straggler_stamp_helpers_default_to_the_one_shared_git_runner():
     from cosa.agents.shared import worktree_straggler_tickets as st
     assert st.run_git is mc.run_git
     assert not hasattr( st, "_plain_run" )
-    assert mc.run_git.__defaults__ == ( None, 10 ), "the shared runner keeps its ten second default; the stamp helpers pass their own sixty"
+    assert mc.run_git.__defaults__ == ( None, 10, None ), "the shared runner keeps its ten second default; the stamp helpers pass their own sixty"
+
+
+def test_run_git_lays_an_env_overlay_over_the_inherited_environment_and_none_inherits( monkeypatch ):
+    """The reaper and the spawner pass an overlay; everyone else passes none."""
+    seen = []
+    monkeypatch.setattr( mc.subprocess, "run", lambda argv, **kw: seen.append( kw[ "env" ] ) )
+    monkeypatch.setenv( "KEEP_ME", "1" )
+    mc.run_git( [ "git", "status" ] )
+    mc.run_git( [ "git", "status" ], env={} )
+    mc.run_git( [ "git", "status" ], env={ "ADDED": "x" } )
+    assert seen[ 0 ] is None and seen[ 1 ] is None
+    assert seen[ 2 ][ "ADDED" ] == "x" and seen[ 2 ][ "KEEP_ME" ] == "1"
+
+
+def test_the_reaper_default_runner_goes_through_run_git_with_the_branch_guard_overlay_and_sixty_seconds( monkeypatch ):
+    import cosa.agents.shared.worktree_reaper as wr
+    got = {}
+    monkeypatch.setattr( wr, "run_git", lambda argv, cwd=None, timeout=None, env=None: got.update( argv=argv, cwd=cwd, timeout=timeout, env=env ) )
+    wr._default_run( [ "git", "x" ], cwd="/w" )
+    assert got == { "argv": [ "git", "x" ], "cwd": "/w", "timeout": 60, "env": { wr.BRANCH_GUARD_ALLOW_ENV: "reaper" } }
+
+
+def test_the_spawner_default_runner_goes_through_run_git_with_thirty_seconds( monkeypatch ):
+    import lupin_mcp.session_spawner as ss
+    got = {}
+    monkeypatch.setattr( ss, "run_git", lambda argv, timeout=None, env=None: got.update( argv=argv, timeout=timeout, env=env ) )
+    ss.default_runner( [ "git", "y" ], env={ "A": "b" } )
+    assert got == { "argv": [ "git", "y" ], "timeout": 30, "env": { "A": "b" } }

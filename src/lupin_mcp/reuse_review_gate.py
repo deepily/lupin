@@ -48,9 +48,7 @@ def ini_path():
         - returns the env override when it is set, so tests never touch the live file
         - otherwise returns the main checkout's configuration file
     """
-    override = os.environ.get( INI_OVERRIDE )
-    if override: return override
-    return fleet_size_cap.main_checkout_ini_path()
+    return fleet_size_cap.main_checkout_ini_path( INI_OVERRIDE )
 
 
 def _say( detail ):

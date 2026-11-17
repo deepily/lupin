@@ -9,10 +9,8 @@ Usage:
     from cosa.repo import code_health_settings as chs
     settings = chs.repo_settings( config_mgr, "lupin" )
 """
-import contextlib
 import pathlib
 import re
-import sys
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
 from cosa.utils.csv_text import split_csv
@@ -254,7 +252,7 @@ def model_id( key, config=None ):
         - config has a ConfigurationManager `get` method, or is None to build the process's own
 
     Ensures:
-        - returns the stripped value of the key, read when called through ConfigurationManager.get_required, so an INI edit needs no code change
+        - returns the stripped value of the key, read when called through required_model_id, so an INI edit needs no code change
         - there is no default in code: the INI file is the only place a model id is set
         - building the process's own manager writes its start-up banner to stderr, never stdout, because the callers'
           command-line tools print their result as JSON on stdout
@@ -262,11 +260,10 @@ def model_id( key, config=None ):
     Raises:
         - CodeHealthSettingError naming the key when the value is blank, absent or holds white space
     """
-    from cosa.config.configuration_manager import ConfigurationManager, MissingConfigKeyError
-    if config is None:
-        with contextlib.redirect_stdout( sys.stderr ): config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    from cosa.agents.shared.config_loader import required_model_id
+    from cosa.config.configuration_manager import MissingConfigKeyError
     try:
-        text = str( config.get_required( key, silent=True ) ).strip()
+        text = str( required_model_id( key, config ) ).strip()
     except MissingConfigKeyError as error:
         raise CodeHealthSettingError( f"{key}: {error}; this key has no default and lives only in lupin-app.ini" ) from error
     if ONE_TOKEN.fullmatch( text ) is None:

@@ -39,7 +39,7 @@ from lupin_mcp import worker_voice_mode
 from cosa.agents.shared import seat_teardown
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
-from cosa.utils.main_checkout import main_checkout_of
+from cosa.utils.main_checkout import main_checkout_of, run_git
 from cosa.utils.worktree_venv import provision_worktree_venv
 from cosa.utils.worktree_artifacts import provision_worktree_artifacts
 from cosa.utils.seat_worktree  import provision_seat_worktree, drift_disclosure
@@ -128,10 +128,7 @@ def default_runner( argv: List[ str ], env: Optional[ Dict[ str, str ] ] = None 
     Returns:
         subprocess.CompletedProcess
     """
-    return subprocess.run(
-        argv, capture_output=True, text=True, timeout=30,
-        env=( { **os.environ, **env } if env else None )
-    )
+    return run_git( argv, timeout=30, env=env )
 
 
 # ── Prompt rendering ──────────────────────────────────────────────────────────

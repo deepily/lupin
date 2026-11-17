@@ -47,6 +47,7 @@ from typing import Callable, Optional
 import cosa.utils.util as cu
 from cosa.utils.utc_stamp import utc_compact_stamp
 from cosa.utils.container_env import container_sentinel_set
+from cosa.utils.main_checkout import run_git
 
 
 WIP_COMMIT_PREFIX = "WIP: auto-saved at reap"
@@ -94,14 +95,7 @@ def _default_run( argv, cwd=None, timeout=60 ):
           lets the drain mint its wt-rescue branch — without it a detached seat's commits
           would be unreachable once its tree is removed
     """
-    return subprocess.run(
-        argv,
-        cwd            = cwd,
-        capture_output = True,
-        text           = True,
-        timeout        = timeout,
-        env            = { **os.environ, BRANCH_GUARD_ALLOW_ENV: "reaper" },
-    )
+    return run_git( argv, cwd=cwd, timeout=timeout, env={ BRANCH_GUARD_ALLOW_ENV: "reaper" } )
 
 
 def _git( run: Callable, cwd: str, *args: str, timeout: int = 60 ) -> dict:

@@ -76,3 +76,11 @@ def test_the_route_writes_the_same_file_the_reader_reads( repo, tmp_path, monkey
     fleet_cap_ini_io.write_bool_to_disk( sc.ini_path(), sc.SKELETON_CREW_KEY, True )
     assert sc.read_state_from_disk() is True
     assert "= true" in ini.read_text( encoding="utf-8" )
+
+
+def test_the_shared_path_helper_takes_the_override_variable_by_name_and_ignores_an_empty_one( monkeypatch ):
+    from lupin_mcp import fleet_size_cap
+    monkeypatch.setenv( "SOME_INI_OVERRIDE", "/x/override.ini" )
+    assert fleet_size_cap.main_checkout_ini_path( "SOME_INI_OVERRIDE" ) == "/x/override.ini"
+    monkeypatch.setenv( "SOME_INI_OVERRIDE", "" )
+    assert fleet_size_cap.main_checkout_ini_path( "SOME_INI_OVERRIDE" ) == fleet_size_cap.main_checkout_ini_path()

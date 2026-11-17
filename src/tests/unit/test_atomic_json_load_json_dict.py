@@ -33,3 +33,16 @@ def test_a_given_default_replaces_the_empty_dict_in_every_unreadable_case( tmp_p
     assert load_json_dict( tmp_path / "gone.json", default=sentinel ) is sentinel
     write_json_atomic( path, { "k": "v" } )
     assert load_json_dict( path, default=None ) == { "k": "v" }
+
+
+def test_write_json_atomic_fsyncs_the_temp_file_only_when_asked( tmp_path, monkeypatch ):
+    import json
+    from cosa.utils import atomic_json
+    synced = []
+    monkeypatch.setattr( atomic_json.os, "fsync", lambda fd: synced.append( fd ) )
+    write_json_atomic( tmp_path / "a.json", { "k": 1 } )
+    assert synced == []
+    write_json_atomic( tmp_path / "b.json", { "k": 2 }, fsync=True )
+    assert len( synced ) == 1
+    assert json.loads( ( tmp_path / "b.json" ).read_text() ) == { "k": 2 }
+    assert sorted( p.name for p in tmp_path.iterdir() ) == [ "a.json", "b.json" ]

@@ -18,7 +18,6 @@ import pytest
 
 from lupin_cli.claude_code.hooks.lib.kill_guard import (
     kill_deny_reason,
-    build_kill_deny_response,
     _guard_disabled,
     _default_comm_reader,
     _hatch_in_prefix,
@@ -375,22 +374,6 @@ def test_deny_reason_names_the_substitutes():
 def test_deny_reason_cites_the_incident_row():
 
     assert "cd332d2b" in _deny_reason_for( [] )
-
-
-# ---------------------------------------------------------------------------
-# The hook envelope
-# ---------------------------------------------------------------------------
-
-def test_build_kill_deny_response_shape():
-
-    response = build_kill_deny_response( "because" )
-    assert response == {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : "because",
-        }
-    }
 
 
 # ---------------------------------------------------------------------------

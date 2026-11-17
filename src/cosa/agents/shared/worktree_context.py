@@ -361,30 +361,48 @@ class WorktreeContext:
         Returns:
             dict with keys: success (bool), stdout (str), stderr (str), returncode (int)
         """
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", *args,
-                stdout = asyncio.subprocess.PIPE,
-                stderr = asyncio.subprocess.PIPE,
-                cwd    = cwd,
-            )
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return { "success": False, "stdout": "", "stderr": f"timeout after {timeout}s", "returncode": -1 }
+        return await run_command_in( cwd, "git", *args, timeout=timeout )
 
-            return {
-                "success"    : proc.returncode == 0,
-                "stdout"     : stdout_bytes.decode( "utf-8", errors="replace" ).strip(),
-                "stderr"     : stderr_bytes.decode( "utf-8", errors="replace" ).strip(),
-                "returncode" : proc.returncode,
-            }
-        except Exception as e:
-            return { "success": False, "stdout": "", "stderr": str( e ), "returncode": -1 }
+
+async def run_command_in( cwd, command: str, *args: str, timeout: int = 60 ) -> dict:
+    """
+    Run `<command> <args>` in a cwd with a timeout, without blocking the event loop.
+
+    Requires:
+        - command is an executable name or path
+        - cwd is None (inherit) or a directory path
+        - timeout is the seconds the command may take
+
+    Ensures:
+        - returns { success, stdout, stderr, returncode }; stdout and stderr are decoded and stripped
+        - a command that outlives the timeout is killed and answers returncode -1 and "timeout after <n>s"
+        - an exception from spawning answers returncode -1 with the exception text
+        - never raises
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            command, *args,
+            stdout = asyncio.subprocess.PIPE,
+            stderr = asyncio.subprocess.PIPE,
+            cwd    = cwd,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return { "success": False, "stdout": "", "stderr": f"timeout after {timeout}s", "returncode": -1 }
+
+        return {
+            "success"    : proc.returncode == 0,
+            "stdout"     : stdout_bytes.decode( "utf-8", errors="replace" ).strip(),
+            "stderr"     : stderr_bytes.decode( "utf-8", errors="replace" ).strip(),
+            "returncode" : proc.returncode,
+        }
+    except Exception as e:
+        return { "success": False, "stdout": "", "stderr": str( e ), "returncode": -1 }
 
 
 @asynccontextmanager

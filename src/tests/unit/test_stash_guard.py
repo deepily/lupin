@@ -14,7 +14,6 @@ import pytest
 
 from lupin_cli.claude_code.hooks.lib.stash_guard import (
     stash_deny_reason,
-    build_stash_deny_response,
     _guard_disabled,
     _first_subcommand,
     _deny_reason_for,
@@ -241,22 +240,6 @@ def test_deny_reason_carries_the_substitutes_and_the_escape_hatch():
 def test_readonly_verbs_are_named_as_still_allowed():
 
     assert "git stash list" in _deny_reason_for( "pop" )
-
-
-# ---------------------------------------------------------------------------
-# The deny envelope
-# ---------------------------------------------------------------------------
-
-def test_build_stash_deny_response_shape():
-
-    envelope = build_stash_deny_response( "because" )
-    assert envelope == {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : "because",
-        }
-    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════

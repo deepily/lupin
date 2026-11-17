@@ -3,7 +3,6 @@ capability: cc-hook-cron-switch-guard
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.cron_switch_guard.cron_switch_deny_reason@9e59b458ba
-  - lupin_cli.claude_code.hooks.lib.cron_switch_guard.build_cron_switch_deny_response@d273703a47
   - lupin_cli.claude_code.hooks.lib.cron_switch_guard.switch_lines@644739db30
   - lupin_cli.claude_code.hooks.lib.cron_switch_guard.changed_jobs@3a0672557b
   - lupin_cli.claude_code.hooks.lib.cron_switch_guard.refused_changes@6497644fdf

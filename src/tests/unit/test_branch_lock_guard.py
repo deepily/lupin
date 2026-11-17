@@ -26,7 +26,6 @@ from lupin_cli.claude_code.hooks.lib.branch_lock_guard import (
     DENY_HOOKSPATH,
     DENY_HOOKS_WRITE,
     branch_lock_deny_reason,
-    build_branch_lock_deny_response,
     configured_hooks_dirs,
 )
 
@@ -297,15 +296,6 @@ class TestTheDenyText:
             reason = _deny( command )
             assert reason is not None
             assert "LUPIN_ALLOW" not in reason and "BYPASS" not in reason
-
-    def test_the_envelope_is_a_pretooluse_deny( self ):
-        assert build_branch_lock_deny_response( "why" ) == {
-            "hookSpecificOutput": {
-                "hookEventName"            : "PreToolUse",
-                "permissionDecision"       : "deny",
-                "permissionDecisionReason" : "why",
-            }
-        }
 
 
 # ─── Reading core.hooksPath ──────────────────────────────────────────────────────────

@@ -306,3 +306,14 @@ class TestRawResponseDump( unittest.TestCase ):
 if __name__ == "__main__":
     logging.basicConfig( level=logging.ERROR )
     unittest.main()
+
+
+def test_allow_array_returns_a_list_of_objects_whole_and_the_default_still_returns_the_last_object():
+    text = 'Here: [ {"a": 1}, {"b": 2} ] done'
+    assert recover_json_object( text, allow_array=True ) == [ { "a": 1 }, { "b": 2 } ]
+    assert recover_json_object( text ) == { "b": 2 }
+
+
+def test_allow_array_falls_through_to_the_object_when_the_array_does_not_parse():
+    assert recover_json_object( 'x [not json] {"a": 1}', allow_array=True ) == { "a": 1 }
+    assert recover_json_object( "[not json]", allow_array=True ) is None

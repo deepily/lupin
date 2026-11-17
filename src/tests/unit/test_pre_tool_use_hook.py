@@ -322,24 +322,21 @@ def _run( payload=None, gov=None, stash=None, kill=None, merge=None, branch_lock
         _p( f"{MODULE}.get_claude_session_id", return_value="s1" )
 
         _p( f"{GOV}.subagent_deny_reason",  return_value=gov )
-        _p( f"{GOV}.build_subagent_deny_response", side_effect=lambda r: { "denied": "gov", "reason": r } )
         _p( f"{STASH}.stash_deny_reason",   return_value=stash )
-        _p( f"{STASH}.build_stash_deny_response", side_effect=lambda r: { "denied": "stash", "reason": r } )
         block = _p( f"{BLOCK}.branch_lock_deny_reason", return_value=branch_lock )
-        _p( f"{BLOCK}.build_branch_lock_deny_response", side_effect=lambda r: { "denied": "branch_lock", "reason": r } )
         kill_mock = _p( f"{KILL}.kill_deny_reason",     return_value=kill )
         if capture is not None: capture[ "kill" ] = kill_mock
-        _p( f"{KILL}.build_kill_deny_response", side_effect=lambda r: { "denied": "kill", "reason": r } )
         _p( f"{MERGE}.merge_head_deny_reason", return_value=merge )
-        _p( f"{MERGE}.build_merge_head_deny_response", side_effect=lambda r: { "denied": "merge", "reason": r } )
         _p( f"{SCOPE}.evaluate_commit_scope", return_value=verdict )
-        _p( f"{SCOPE}.build_commit_scope_deny_response", side_effect=lambda r: { "denied": "scope", "reason": r } )
         _p( f"{SCOPE}.build_commit_scope_notice_response", side_effect=lambda n: { "notice": n } )
 
         drain = _p( f"{MODULE}.drain_and_acknowledge", return_value=messages or [] )
         _p( f"{MODULE}.format_voice_context", return_value=voice_ctx )
         _p( f"{MODULE}.build_voice_deny_response", side_effect=lambda c, m: { "voice": c } )
         _p( f"{MODULE}.emit_json", emit )
+        # One shared builder now serves every guard, so the tag comes from the reason each one was armed with.
+        tags = { gov: "gov", stash: "stash", branch_lock: "branch_lock", kill: "kill", merge: "merge", deny_reason: "scope" }
+        _p( f"{MODULE}.build_deny_response", side_effect=lambda r: { "denied": tags[ r ], "reason": r } )
 
         try:
             ptu.main()

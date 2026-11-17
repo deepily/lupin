@@ -13,7 +13,6 @@ import pytest
 from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
     git_commit_match,
     commit_scope_deny_reason,
-    build_commit_scope_deny_response,
     _blank_quoted_spans,
     _human_size,
     _size_of,
@@ -431,20 +430,6 @@ def test_the_real_reader_is_used_when_none_is_injected( tmp_path, monkeypatch ):
 
     # tmp_path is not a repo, so the real reader returns None -> fail-open allow.
     assert commit_scope_deny_reason( tool, payload ) is None
-
-
-# ── The deny envelope ────────────────────────────────────────────────────────
-
-def test_deny_response_shape():
-    out = build_commit_scope_deny_response( "because" )
-
-    assert out == {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : "because",
-        }
-    }
 
 
 # ── Row 292dd3d8 — `git commit -a` writes what the INDEX NEVER HELD ───────────

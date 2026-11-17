@@ -158,11 +158,6 @@ def test_reading_or_naming_the_ini_is_allowed( command ):
     assert cg.cron_switch_deny_reason( "Bash", { "command": command } ) is None
 
 
-def test_the_deny_envelope_has_the_hook_shape():
-    out = cg.build_cron_switch_deny_response( "why" )
-    assert out == { "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "why" } }
-
-
 # ---------------------------------------------------------------- the guard, through the real hook
 
 def _hook( payload ):

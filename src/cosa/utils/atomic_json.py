@@ -13,7 +13,7 @@ from pathlib import Path
 _UNSET = object()
 
 
-def write_json_atomic( path, data, indent=None, trailing_newline=False, sort_keys=False ) -> None:
+def write_json_atomic( path, data, indent=None, trailing_newline=False, sort_keys=False, fsync=False ) -> None:
     """
     Write `data` to `path` as JSON, replacing the file whole.
 
@@ -22,8 +22,10 @@ def write_json_atomic( path, data, indent=None, trailing_newline=False, sort_key
         - data is JSON-serialisable, or str() of each non-serialisable value is acceptable
         - indent is None for compact JSON, or the spaces per level
         - sort_keys is a bool
+        - fsync is a bool
 
     Ensures:
+        - with fsync true the temp file is flushed to disk before the rename, so a crash cannot leave the renamed file empty
         - the file holds exactly `data`, one newline after it when trailing_newline is true
         - with sort_keys true every object's keys are written in sorted order, so equal data gives equal bytes
         - the parent directory is created if absent
@@ -45,6 +47,9 @@ def write_json_atomic( path, data, indent=None, trailing_newline=False, sort_key
     try:
         with open( tmp, "w" ) as f:
             f.write( text )
+            if fsync:
+                f.flush()
+                os.fsync( f.fileno() )
         tmp.replace( path )
     except BaseException:
         tmp.unlink( missing_ok=True )

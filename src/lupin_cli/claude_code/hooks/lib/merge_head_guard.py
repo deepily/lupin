@@ -393,20 +393,3 @@ def merge_head_deny_reason(
         # reach it; here the reader is a seam, so the branch is real and a pragma
         # would be a claim in place of a measurement.
         return None
-
-
-def build_merge_head_deny_response( reason: str ) -> dict:
-    """
-    Build the PreToolUse deny envelope (mirrors build_stash_deny_response).
-
-    Ensures:
-        - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
-          permissionDecision: "deny", permissionDecisionReason: <reason> } }
-    """
-    return {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : reason,
-        }
-    }

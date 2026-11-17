@@ -61,8 +61,10 @@ def test_ini_path_env_override( monkeypatch ):
 
 def test_ini_path_default_is_main_checkout( monkeypatch ):
     monkeypatch.delenv( gate.INI_OVERRIDE, raising=False )
-    monkeypatch.setattr( gate.fleet_size_cap, "main_checkout_ini_path", lambda: "/main/lupin-app.ini" )
+    asked = []
+    monkeypatch.setattr( gate.fleet_size_cap, "main_checkout_ini_path", lambda override_env=None: asked.append( override_env ) or "/main/lupin-app.ini" )
     assert gate.ini_path() == "/main/lupin-app.ini"
+    assert asked == [ gate.INI_OVERRIDE ]
 
 
 def test_read_gating_default_path_uses_ini_path( tmp_path, monkeypatch ):

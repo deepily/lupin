@@ -962,6 +962,27 @@ def enrich_voice_context( voice_ctx, messages=None ):
     return f"{voice_ctx}\n\n{VOICE_ACK_RIDER}"
 
 
+def build_deny_response( reason ):
+    """
+    Build the plain PreToolUse deny envelope every guard answers with.
+
+    Requires:
+        - reason is a string naming why the tool call is refused
+
+    Ensures:
+        - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
+          permissionDecision: "deny", permissionDecisionReason: <reason> } }
+        - carries no additionalContext; build_voice_deny_response adds that
+    """
+    return {
+        "hookSpecificOutput": {
+            "hookEventName"            : "PreToolUse",
+            "permissionDecision"       : "deny",
+            "permissionDecisionReason" : reason,
+        }
+    }
+
+
 def build_voice_deny_response( voice_ctx, messages=None ):
     """
     Build PreToolUse deny response when voice buffer has content.
