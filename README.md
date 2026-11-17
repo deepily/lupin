@@ -34,7 +34,7 @@ I can't type. That constraint is why this isn't a position paper. Since March 20
 
 - **The workflow corpus** -- 51 canonical workflow documents in [planning-is-prompting](https://github.com/deepily/planning-is-prompting/tree/main/workflow), the methodology repo this one runs on. In-repo: [agentic-voice-workflow.md](src/workflow/agentic-voice-workflow.md).
 - **The SWE team role definitions** -- `.claude/skills/spin-up-swe-team/SKILL.md` is the activation. The per-role charters it slices from are [workflow/swe-team-roles.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/swe-team-roles.md).
-- **Escalation and human-in-the-loop** -- two different ladders. The agent one is the Decision Proxy's five trust levels, in the [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md) (deprecated; replaced in v0.2.3). The fleet one -- what a manager may do without asking me, and what it may never do -- is [workflow/manager-autonomy.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/manager-autonomy.md).
+- **Escalation and human-in-the-loop** -- two different ladders. The agent one is the Decision Proxy's five trust levels, in the [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md). The fleet one -- what a manager may do without asking me, and what it may never do -- is [workflow/manager-autonomy.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/manager-autonomy.md).
 - **The cascade reviews** -- [plan-review-cascaded.md](.claude/commands/plan-review-cascaded.md) is the procedure; the transcripts of real cascades, findings and all, are in [src/rnd/v0.2.0/](src/rnd/v0.2.0/).
 
 ---
@@ -90,7 +90,7 @@ flowchart TD
     end
 
     SYNC --> TTS
-    ASYNC --> PROXY["Decision Proxy<br/>(deprecated; replaced in v0.2.3)"]
+    ASYNC --> PROXY["Decision Proxy"]
     PROXY --> TTS
 
     TTS --> WS["WebSocket<br/>(queue + audio channels)"]
@@ -111,7 +111,7 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 
 ## What's new in v0.2.3
 
-v0.2.3 ran from 4 to 17 November 2026. It finished three things v0.2.2 left open. The decision proxy's sixteen known defects were fixed. Its trust model became a setting, including a Bayesian logistic regression fed from ratified decisions. The reuse backlog was judged: saved rulings were rescued, Opus judges the rest under a daily budget, and seats triaged 356 duplicate-check findings. All 24 background jobs got a switch the running job honours, and both web clients show one merged jobs list. The backup shrank from 22.3 GB to 5.3 GB.
+v0.2.3 ran from 4 to 17 November 2026. It finished three things v0.2.2 left open. The decision proxy's 18 known defects were fixed. Its trust model became a setting, though plain counting stays the default. The reuse backlog was judged: saved rulings were rescued, Opus judges the rest under a daily budget, and seats triaged 356 duplicate-check findings. All 24 background jobs got a switch the running job honours, and both web clients show one merged jobs list. The backup shrank from 22.3 GB to 5.3 GB.
 
 Full highlights: [WHATS-NEW.md](WHATS-NEW.md) · per-version summaries: [VERSION-HISTORY.md](VERSION-HISTORY.md) · per-feature detail: [CHANGELOG.md](CHANGELOG.md)
 
@@ -147,7 +147,7 @@ One counting note, because the articles use a different unit. The 23 below are a
 | PresentationGeneratorAgent | Multi-phase pipeline: outline → elaborate → render → deliver (eight phases) |
 | ResearchToPresentationAgent | Chained research-to-presentation pipeline |
 | ClaudeCodeAgent | Claude Agent SDK tasks (bounded or interactive mode) |
-| SWETeamAgent | 4-phase dev team: Lead, Coder, Tester, Trust Proxy (the Trust Proxy phase is deprecated; replaced in v0.2.3) |
+| SWETeamAgent | 4-phase dev team: Lead, Coder, Tester, Trust Proxy |
 
 ### Auto-recovery agents (self-healing via Claude Agent SDK + worktree isolation)
 
@@ -162,7 +162,7 @@ One counting note, because the articles use a different unit. The 23 below are a
 | Agent | Purpose |
 |-------|---------|
 | NotificationProxyAgent | Phi-4 fuzzy script matching for automated interactive testing |
-| DecisionProxyAgent (deprecated; replaced in v0.2.3) | Bayesian trust decision proxy with five-level escalation and a circuit breaker |
+| DecisionProxyAgent | Bayesian trust decision proxy with five-level escalation and a circuit breaker |
 | HeartbeatArbiter | Fleet liveness detectors — session staleness, tap-ACK, whole-fleet stall — with per-family advisory cooldown |
 | DMQualityJudge | Scores peer-to-peer session messages to drive down cross-session token burn |
 
@@ -211,9 +211,9 @@ Local GPU embeddings (CodeRankEmbed + nomic-embed-text-v1.5) vs OpenAI API:
 | Batch (3) | prose | 8 ms | 2,989 ms | **374x** |
 | Batch (3) | code | 8 ms | 3,183 ms | **398x** |
 
-### Decision proxy -- deprecated
+### Decision proxy -- fixed in v0.2.3, not replaced
 
-The Bayesian trust decision proxy is deprecated and is replaced in the v0.2.3 series. The code still ships in v0.2.2, and its admin guide is linked under [For operators](#for-operators).
+v0.2.3 fixed the decision proxy instead of replacing it. All 18 of its numbered defects are closed. The Beta and Bayesian logistic regression trust models can now be selected, but the default is still plain counting. Accuracy has not been re-measured since the fixes, so no post-fix figure is claimed here. The full account is the [online preference-learning explainer](src/rnd/v0.2.3/2026.11.16-online-preference-learning-pm-explainer.md). The admin guide is linked under [For operators](#for-operators).
 
 ### Coming Soon: Context-Aware Online Preference Learning
 
@@ -300,7 +300,7 @@ Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure aut
 
 ### For operators
 
-- [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md) (deprecated; replaced in v0.2.3) — Trust Dashboard and ratification how-to
+- [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md) — Trust Dashboard and ratification how-to
 - [Automated Interactive Testing](src/docs/automated-interactive-testing.md) — proxy auto-answer testing guide
 - [WebSocket Troubleshooting](src/docs/websocket-troubleshooting.md) — common issues and debugging procedures
 
