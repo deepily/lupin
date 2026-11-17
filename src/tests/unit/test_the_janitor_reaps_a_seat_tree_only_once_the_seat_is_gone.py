@@ -203,3 +203,22 @@ def test_list_worktrees_carries_the_lock_reason():
     assert recs[ ROOT ][ "lock_reason" ] is None and recs[ ROOT ][ "is_main" ]
     assert recs[ SEAT ][ "locked" ] and recs[ SEAT ][ "lock_reason" ] == REASON
     assert recs[ f"{LANE}/bare-lock" ][ "locked" ] and recs[ f"{LANE}/bare-lock" ][ "lock_reason" ] is None
+
+
+# ---------------------------------------------------------------------------
+# A job lock (row 07afc29a): protected while young, swept as stale once idle
+# ---------------------------------------------------------------------------
+def test_a_stale_job_lock_is_unlocked_then_drained_once_idle():
+    out, drained, git = _reconcile( _seat( reason=wr.JOB_LOCK_PREFIX + "tfe-1" ), age=10.0 )
+    assert drained == [ SEAT ]
+    assert git.verbs() == [ "worktree unlock" ]
+
+
+def test_a_young_job_lock_is_left_alone():
+    out, drained, git = _reconcile( _seat( reason=wr.JOB_LOCK_PREFIX + "tfe-1" ), age=0.5 )
+    assert drained == [] and out[ "skipped" ][ 0 ][ "reason" ].startswith( "active_" )
+
+
+def test_a_job_lock_is_relocked_when_the_drain_does_not_remove_it():
+    out, drained, git = _reconcile( _seat( reason=wr.JOB_LOCK_PREFIX + "tfe-1" ), age=10.0, removed=False )
+    assert git.verbs() == [ "worktree unlock", "worktree lock" ]
