@@ -57,9 +57,8 @@ def dotted_id( rec ):
     """
     own = rec[ "id" ].split( "#" )[ 0 ]
     if not all( k in rec for k in ( "lang", "file", "name" ) ) or rec[ "lang" ] != "py": return own
-    parts = list( pathlib.PurePosixPath( rec[ "file" ] ).with_suffix( "" ).parts )
-    if parts[ -1 ] == "__init__": parts.pop()
-    return ".".join( ( parts[ 1: ] if parts[ 0 ] == "src" else parts ) + [ rec[ "name" ] ] )
+    from lupin_mcp.reuse_needset.judge_probe import shaped_id    # local: judge_probe imports this module at load time
+    return shaped_id( rec )
 
 
 def python_text( rec, root ):
