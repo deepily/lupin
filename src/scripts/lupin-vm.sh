@@ -32,6 +32,8 @@ set -euo pipefail
 VM_NAME="${LUPIN_VM_NAME:-lupin-host-test}"
 VM_ZONE="${LUPIN_VM_ZONE:-us-central1-a}"
 VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout
+VM_DISCARD_DIR="/mnt/lupin-data/deploy-discards"  # where a reset deploy saves the VM's uncommitted edits as a patch before discarding them (row 41b836a5)
+DISCARD_VM_CHANGES=0                              # --discard-vm-changes on `deploy` sets it; without it a dirty VM tree refuses the reset
 VM_PIP_ROOT="/mnt/lupin-data/planning-is-prompting"  # sibling PIP checkout on the VM (push-env exports PLANNING_IS_PROMPTING_ROOT)
 VM_DEEPILY_PROJECTS_DIR="/mnt/lupin-data"       # parent of the on-VM checkouts; push-env exports DEEPILY_PROJECTS_DIR (referenced by the shipped alias library)
 # Per-machine state deliberately kept OUT of every repo (Rick 2026-08-04). On dev this is a
@@ -191,7 +193,8 @@ Update lupin ON the VM (refresh its bundle 'remote' from THIS dev checkout):
                          Code-sync ONLY — does NOT restart the servers.
 
 Full deploy (bundle -> checkout -> restart BOTH servers -> verify) — RUN FROM THE DEV BOX:
-  deploy [branch]        one-shot: push-bundle --checkout, then force-recreate :$APP_PORT $REST_SERVICE
+  deploy [branch] [--discard-vm-changes]
+                         one-shot: push-bundle --checkout, then force-recreate :$APP_PORT $REST_SERVICE
                          (compose) + restart :$ARBITER_PORT arbiter (systemd --user), then probe
                          /health on both. Neither server hot-reloads on the VM, so both are bounced.
                          The restart migrates the database to head at startup; the post arm then checks
@@ -419,7 +422,7 @@ do_push_bundle() {
     local move_desc=""
     case "$mode" in
         checkout) move_desc="; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree; stamp $VM_ROOT/.deployed-ref = '<vm HEAD sha> <utc ts> push-bundle-checkout'" ;;
-        reset)    move_desc="; sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree; stamp $VM_ROOT/.deployed-ref = '<vm HEAD sha> <utc ts> push-bundle-reset'" ;;
+        reset)    move_desc="; refuse if the VM tree has uncommitted tracked edits (unless --discard-vm-changes: save patch under $VM_DISCARD_DIR); sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree; stamp $VM_ROOT/.deployed-ref = '<vm HEAD sha> <utc ts> push-bundle-reset'" ;;
     esac
     if [ "$DRY_RUN" -eq 1 ]; then
         log "(dry-run) git bundle create <tmp> $branch; scp -> VM:/tmp; cp -> $vm_bundle; sudo git fetch origin $branch; chown 1001 .git$move_desc"
@@ -469,6 +472,15 @@ do_push_bundle() {
     # answer this row exists to remove. Readers that want the SHA are unaffected: every one of
     # them takes field 1 — today that is preflight check B6 (pfv_deployed_ref_status).
     local stamp_ref="echo \$( git $safe rev-parse HEAD ) \$( date -u +%FT%TZ ) push-bundle-$mode | sudo tee $VM_ROOT/.deployed-ref >/dev/null && sudo chown 1001:1001 $VM_ROOT/.deployed-ref && echo REF_STAMPED && cat $VM_ROOT/.deployed-ref"
+    # DIRTY-TREE GUARD for `reset` (row 41b836a5, 2026-11-17). `git reset --hard` discards every
+    # uncommitted edit to a tracked file with no warning: on 2026-11-16 a deploy wiped a doc-viewer
+    # scope diff a VM session had applied live, and the repo dropped out of the viewer for 40 minutes.
+    # Runs ON THE VM before the reset. Clean tree: no output, the chain goes on. Dirty tree:
+    # names each file; WITHOUT --discard-vm-changes it exits non-zero (the &&-chain stops before
+    # the reset, nothing is touched); WITH it, it saves `git diff HEAD` (staged + unstaged tracked
+    # edits) under $VM_DISCARD_DIR/<utc ts>.diff, names that path, and lets the reset go on.
+    # Untracked files are not listed: reset does not remove them, and the VM keeps data/env/keys there.
+    local dirty_guard="dirty=\"\$( sudo git $safe status --porcelain --untracked-files=no )\"; if [ -n \"\$dirty\" ]; then echo \"VM_DIRTY_TREE: uncommitted changes in $VM_ROOT that a reset would discard:\"; echo \"\$dirty\"; if [ \"$DISCARD_VM_CHANGES\" = 1 ]; then ts=\"\$( date -u +%Y%m%dT%H%M%SZ )\" && sudo mkdir -p $VM_DISCARD_DIR && sudo git $safe diff HEAD | sudo tee $VM_DISCARD_DIR/\$ts.diff >/dev/null && echo \"VM_DIRTY_SAVED: patch at $VM_DISCARD_DIR/\$ts.diff; discarding because --discard-vm-changes was given\"; else echo \"VM_DIRTY_REFUSED: deploy stopped before the reset; commit them, or re-run with --discard-vm-changes to save a patch and discard\"; false; fi; fi"
     local rcmd="cp /tmp/lupin-wip.bundle $vm_bundle && rm -f /tmp/lupin-wip.bundle && cd $VM_ROOT && sudo git $safe fetch origin $branch && sudo chown -R 1001:1001 .git && echo FETCHED && git $safe log --oneline -1 FETCH_HEAD"
     case "$mode" in
         checkout)
@@ -478,7 +490,7 @@ do_push_bundle() {
             # tracked edits, overwrites colliding untracked), then checkout -B relabels HEAD onto
             # the branch (now clean, so it can't abort). No `git clean` — untracked non-colliding
             # files (data/env/keys) survive.
-            rcmd="$rcmd && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && $stamp_ref && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+            rcmd="$rcmd && $dirty_guard && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && $stamp_ref && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
     esac
     log "refreshing bundle + fetch on VM$( [ -n "$mode" ] && echo " (+$mode)" )"
     gcloud compute ssh "$VM_NAME" \
@@ -875,9 +887,16 @@ case "$SUBCMD" in
         #   3. restart :8001 arbiter (host `systemd --user` unit — reload=False by design),
         #   4. verify: print the checked-out HEAD and probe /health on :7999 and :8001.
         #
-        #   deploy [branch]        branch defaults to this repo's current branch
+        #   deploy [branch] [--discard-vm-changes]   branch defaults to this repo's current branch
         require_project
-        DEPLOY_BRANCH="${1:-}"
+        DEPLOY_BRANCH=""
+        for a in "$@"; do
+            case "$a" in
+                --discard-vm-changes) DISCARD_VM_CHANGES=1 ;;
+                --*)                  die "deploy: unknown flag $a" ;;
+                *)                    DEPLOY_BRANCH="$a" ;;
+            esac
+        done
         # 0. PRE-flight (Rick's ruling 2026-07-26 — run BOTH arms). Answers "is this VM fit
         #    to deploy onto?" BEFORE anything is touched. Skips B-parity (HEAD is about to
         #    change) and D (the server is about to restart). A blocking failure here aborts
