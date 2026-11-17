@@ -17,7 +17,7 @@ import {
   type NewTicketPayload,
   type NewTicketTransportResult,
 } from "../../shared/task-create.js";
-import { insertTranscriptionText } from "./insertTranscriptionText";
+import { toggleDictation } from "./dictationToggle";
 import type { TaskRowRecorderLike } from "./taskRowController";
 
 /**
@@ -75,33 +75,9 @@ export function makeNewTicketDictationHook(
 
   return ( { field, button, input } ) => {
     const contextId = newTicketMicContextId( field );
-    if ( processing.has( contextId ) ) return;
-
-    if ( recorder.getActiveContextId() === contextId ) {
-      processing.add( contextId );
-      button.classList.remove( "recording" );
-      button.classList.add( "processing" );
-      void recorder.stopRecording( contextId );
-      return;
-    }
-
-    const stash  = { text: input.value, selStart: input.selectionStart, selEnd: input.selectionEnd };
-    const settle = (): void => {
-      processing.delete( contextId );
-      button.classList.remove( "recording", "processing" );
-    };
-    button.classList.add( "recording" );
-    void recorder.startRecording( {
-      contextId,
-      authToken  : getAuthToken === undefined ? null : getAuthToken(),
-      onComplete : ( transcription ) => {
-        settle();
-        const spliced = insertTranscriptionText( stash.text, stash.selStart, stash.selEnd, transcription );
-        input.value = spliced.value;
-        if ( spliced.caret !== null ) input.setSelectionRange( spliced.caret, spliced.caret );
-      },
-      onError    : settle,
-      onCancel   : settle,
+    toggleDictation( {
+      recorder, contextId, button, input, processing,
+      authToken : () => getAuthToken === undefined ? null : getAuthToken(),
     } );
   };
 }

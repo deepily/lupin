@@ -14,7 +14,7 @@
 // stays free of the recorder; the renderer builds the handler with the recorder it was given.
 
 import type { RecordingManagerStartOptions } from "../audio/recordingManager";
-import { insertTranscriptionText } from "./insertTranscriptionText";
+import { toggleDictation } from "./dictationToggle";
 
 /** The slice of `recordingManager` a card mic drives. */
 export interface ActionRequiredRecorderLike {
@@ -47,35 +47,6 @@ export function createActionRequiredMic(
   getAuthToken : () => string | null,
 ): ActionRequiredMicHandler {
   return ( contextId, button, input ) => {
-    if ( button.classList.contains( "processing" ) ) return;
-    const active = recorder.getActiveContextId();
-    if ( active === contextId ) {
-      button.classList.remove( "recording" );
-      button.classList.add( "processing" );
-      void recorder.stopRecording( contextId );
-      return;
-    }
-    // Legacy `if ( isRecording() ) stopRecording()`: another mic's recording is stopped — it
-    // uploads into its own field — and nothing starts. Starting here would make the recorder
-    // CANCEL it (single-active), throwing that dictation away (row 2ebf322f review finding 2).
-    if ( active !== null ) {
-      void recorder.stopRecording( active );
-      return;
-    }
-    const reset = (): void => { button.classList.remove( "recording", "processing" ); };
-    button.classList.add( "recording" );
-    void recorder.startRecording( {
-      contextId,
-      authToken  : getAuthToken(),
-      onComplete : ( transcription ) => {
-        reset();
-        const spliced = insertTranscriptionText( input.value, input.selectionStart, input.selectionEnd, transcription );
-        input.value = spliced.value;
-        if ( spliced.caret !== null ) input.setSelectionRange( spliced.caret, spliced.caret );
-        input.dispatchEvent( new Event( "input", { bubbles: true } ) );
-      },
-      onError    : reset,
-      onCancel   : reset,
-    } );
+    toggleDictation( { recorder, authToken: getAuthToken, contextId, button, input, stopOther: true, liveCaret: true } );
   };
 }

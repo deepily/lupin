@@ -85,8 +85,8 @@ function setup(opts: { sessions?: StripSession[]; storage?: FakeStorage; notific
   const renderer = createSessionStripRenderer({
     eventBus : bus,
     stores   : opts.notifications === false
-      ? { strip: { list: () => sessions } }
-      : { strip: { list: () => sessions }, notifications: { list: () => notifs } },
+      ? { strip: { list: () => sessions, get: (id: string) => sessions.find(s => s.sender_id === id) } }
+      : { strip: { list: () => sessions, get: (id: string) => sessions.find(s => s.sender_id === id) }, notifications: { list: () => notifs } },
     storage  : storage,
   });
   renderer.mount(root);
@@ -302,7 +302,7 @@ test("storage: null persists nothing and restores nothing", () => {
   const root = document.createElement("main");
   root.innerHTML = `<div id="cc-session-strip"><div id="cc-strip-icons"></div><button id="cc-strip-toggle"></button><button id="cc-hide-inactive-toggle"></button></div>`;
   document.body.appendChild(root);
-  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: { list: () => [ session("a", 1) ] } }, storage: null });
+  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: { list: () => [ session("a", 1) ], get: () => session("a", 1) } }, storage: null });
   r.mount(root);
   root.querySelector<HTMLElement>(".cc-strip-icon")!.dispatchEvent(new Event("click", { bubbles: true }));
   assert.equal(root.querySelector("#cc-strip-toggle")!.getAttribute("data-focus-active"), "true");

@@ -34,6 +34,7 @@ beforeEach(() => {
 
 interface MutableStore {
   list(): ReadonlyArray<StripSession>;
+  get(senderId: string): StripSession | undefined;
   setList(next: StripSession[]): void;
 }
 
@@ -41,6 +42,7 @@ function makeStore(initial: StripSession[] = []): MutableStore {
   let backing = [...initial];
   return {
     list    : () => backing as ReadonlyArray<StripSession>,
+    get     : (senderId) => backing.find(s => s.sender_id === senderId),
     setList : (next) => { backing = [...next]; },
   };
 }

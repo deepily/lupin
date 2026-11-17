@@ -102,7 +102,7 @@ function mountMux(notifs: Notification[] = []) {
   const bus = createEventBusForTesting();
   const r   = createSessionStripRenderer({
     eventBus : bus,
-    stores   : { strip: { list: () => IDS.map((id, i) => session(id, i + 1)) }, notifications: { list: () => notifs } },
+    stores   : { strip: { list: () => IDS.map((id, i) => session(id, i + 1)), get: (sid: string) => IDS.map((id, i) => session(id, i + 1)).find(s => s.sender_id === sid) }, notifications: { list: () => notifs } },
   });   // no `storage`: the localStorage default, the same object legacy writes to
   r.mount(root);
   const icon = (id: string) => root.querySelector<HTMLElement>(`#cc-strip-icons .cc-strip-icon[data-sender-id="${id}"]`)!;
