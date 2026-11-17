@@ -10,6 +10,7 @@ pins:
   - cosa.config.app_timezone.read_arbiter_journal_timezone@2890049c0e
   - cosa.config.app_timezone.get_decision_proxy_timezone@e3b9b8e3bd
   - cosa.config.app_timezone.read_decision_proxy_timezone@118c715055
+  - cosa.config.app_timezone.get_app_zone@f262347138
 ---
 # Time zone keys and their one reader
 
@@ -21,6 +22,7 @@ pins:
 - It raises `MissingConfigKeyError` for an absent or blank key. It raises `InvalidAppTimezoneError` for a name `zoneinfo` does not know.
 
 ## Wrappers
+- `get_app_zone( config_mgr )` returns the `get_app_timezone` zone as a `ZoneInfo`.
 - `get_app_timezone`, `get_arbiter_journal_timezone` and `get_decision_proxy_timezone` fix the key for a manager the caller holds.
 - `read_arbiter_journal_timezone` and `read_decision_proxy_timezone` build the manager from `LUPIN_CONFIG_MGR_CLI_ARGS` first. They raise `ValueError` when no configuration is loaded.
 - `process_config_mgr( started_config_mgr )` returns the app's manager when startup has set it. Before startup `lupin_app.main.config_mgr` is `None`, as in a test process or a smoke block, so it loads the process configuration instead. The notification queue and the notifications router use it before calling `get_app_timezone`. It raises `ValueError` when no configuration is loaded.
