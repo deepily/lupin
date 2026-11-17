@@ -30,6 +30,7 @@ import type { SessionTranscriptApiClient, SessionTranscriptStore } from "../stor
 import { createSessionTranscriptRenderer } from "../render/SessionTranscriptRenderer";
 import type { ReadingPaneConsoleLike, SessionTranscriptRenderer } from "../render/SessionTranscriptRenderer";
 import { parseConsolePageQuery } from "./consolePageUrl";
+import { attachLifecycleEvents } from "../shared/lifecycleEvents";
 
 /** The queue transport surface this page drives. */
 export interface ConsoleQueueTransport {
@@ -198,27 +199,10 @@ export function bootConsolePage( deps: ConsolePageDeps ): ConsolePageResult {
   renderer.mount( mountEl );
   renderer.openSeat( query.seat, query.title );
 
-  attachLifecycle( deps );
+  attachLifecycleEvents( deps.bus, deps.doc, deps.win, "consolePage" );
   const sessionId = deps.newSessionId();
   queue.start( sessionId );
   return { status : "watching", seat : query.seat, sessionId, store, renderer };
-}
-
-/**
- * Forwards page visibility and network online or offline events onto the event bus.
- *
- * The queue transport's reconnect logic listens for these to reconnect sooner.
- */
-function attachLifecycle( deps: ConsolePageDeps ): void {
-  const emit = ( type: "page_hidden" | "page_visible" | "network_online" | "network_offline" ): void => {
-    const ts = Date.now();
-    deps.bus.emit( { type, payload : { ts }, source : "consolePage", ts } );
-  };
-  deps.doc.addEventListener( "visibilitychange", () => {
-    emit( deps.doc.visibilityState === "hidden" ? "page_hidden" : "page_visible" );
-  } );
-  deps.win.addEventListener( "online",  () => emit( "network_online" ) );
-  deps.win.addEventListener( "offline", () => emit( "network_offline" ) );
 }
 
 /**

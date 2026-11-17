@@ -32,6 +32,7 @@ import { createPokeMuteSwitch } from "./render/pokeMuteSwitch";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
+import { attachLifecycleEvents } from "./shared/lifecycleEvents";
 import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrator";
 import { createSessionTranscriptStore } from "./stores/SessionTranscriptStore";
 import { createSessionTranscriptRoster } from "./stores/SessionTranscriptRoster";
@@ -170,16 +171,7 @@ function emitLifecycle(type: "page_hidden" | "page_visible" | "network_online" |
  * Turns visibility, online, offline and page restore events into lifecycle events.
  */
 function attachLifecycleListeners(): void {
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
-      emitLifecycle("page_hidden");
-    } else {
-      emitLifecycle("page_visible");
-    }
-  });
-
-  window.addEventListener("online", () => emitLifecycle("network_online"));
-  window.addEventListener("offline", () => emitLifecycle("network_offline"));
+  attachLifecycleEvents(eventBus, document, window, "boot");
 
   // bfcache restore — see implementation deviation note in this file's
   // header comment.
