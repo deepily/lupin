@@ -64,3 +64,35 @@ async def read_coder_stream( stream, guard, notify, is_cancelled, label, logger,
 
     guard.check_iteration()
     return "".join( collected_text ).strip(), files_changed
+
+
+async def delegate_to_coder( open_stream, guard, notify, is_cancelled, label, logger, message_types, post_tool_hook, reraise, debug=False ):
+    """
+    Run one Coder delegation; any failure but the safety stop becomes an empty result.
+
+    Requires:
+        - open_stream() returns the async iterator `sdk_query` returns; it is called inside the guarded block, so a failure to open is caught like a failure to read
+        - reraise is the safety-limit exception class, which the caller owns because the safety primitives are an optional import
+        - every other argument is the one read_coder_stream takes
+        - debug is a bool
+
+    Ensures:
+        - returns ( coder_output, files_changed ) as read_coder_stream does
+        - returns ( "", [] ) and logs `Coder delegation failed` when anything but `reraise` is raised
+        - prints the output and file counts under `label` when debug is true
+
+    Raises:
+        - reraise, unchanged
+    """
+    try:
+        coder_output, files_changed = await read_coder_stream( open_stream(), guard, notify, is_cancelled, label, logger, message_types, post_tool_hook )
+
+        if debug: print( f"[{label}] Coder output: {len( coder_output )} chars, {len( files_changed )} files changed" )
+
+        return ( coder_output, files_changed )
+
+    except reraise:
+        raise
+    except Exception as e:
+        logger.error( f"Coder delegation failed: {e}" )
+        return ( "", [] )

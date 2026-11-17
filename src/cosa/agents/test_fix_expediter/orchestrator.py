@@ -28,7 +28,7 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from cosa.agents.shared.sdk_error_result import raise_error_result
-from cosa.agents.shared.coder_stream import read_coder_stream
+from cosa.agents.shared.coder_stream import delegate_to_coder
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
 from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
@@ -1401,29 +1401,15 @@ class TFEOrchestrator:
 
         options = self._build_tfe_coder_options( guard, cosa_interface_module )
 
-        try:
-            # Bug 15 WORKAROUND: claude-agent-sdk ≥ 0.1.36 rejects str prompt when
-            # can_use_tool is set on options. Upstream (unresolved as of 2026-04-17):
-            # https://github.com/anthropics/claude-code/issues/18735 — remove the
-            # wrap_prompt_for_streaming() call once upstream lands the fix.
-            coder_output, files_changed = await read_coder_stream(
-                sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ),
-                guard, self._notify, self._is_cancelled, "TFEOrchestrator coder", logger,
-                ( AssistantMessage, TextBlock, ToolUseBlock, ResultMessage, RateLimitEvent ), post_tool_hook,
-            )
-
-            if self.debug: print(
-                f"[TFEOrchestrator] Coder output: {len( coder_output )} chars, "
-                f"{len( files_changed )} files changed"
-            )
-
-            return ( coder_output, files_changed )
-
-        except SafetyLimitError:
-            raise
-        except Exception as e:
-            logger.error( f"Coder delegation failed: {e}" )
-            return ( "", [] )
+        # Bug 15 work-around: claude-agent-sdk ≥ 0.1.36 rejects a str prompt when
+        # can_use_tool is set on options. Upstream has not resolved it:
+        # https://github.com/anthropics/claude-code/issues/18735 — remove the
+        # wrap_prompt_for_streaming() call once upstream lands the fix.
+        return await delegate_to_coder(
+            lambda: sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ),
+            guard, self._notify, self._is_cancelled, "TFEOrchestrator coder", logger,
+            ( AssistantMessage, TextBlock, ToolUseBlock, ResultMessage, RateLimitEvent ), post_tool_hook, SafetyLimitError, self.debug,
+        )
 
     async def _verify_fix(
         self,
@@ -1455,8 +1441,8 @@ class TFEOrchestrator:
             collected_text = []
             test_files     = []
 
-            # Bug 15 WORKAROUND: claude-agent-sdk ≥ 0.1.36 rejects str prompt when
-            # can_use_tool is set on options. Upstream (unresolved as of 2026-04-17):
+            # Bug 15 work-around: claude-agent-sdk ≥ 0.1.36 rejects a str prompt when
+            # can_use_tool is set on options. Upstream has not resolved it:
             # https://github.com/anthropics/claude-code/issues/18735 — remove the
             # wrap_prompt_for_streaming() call once upstream lands the fix.
             async for message in sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ):
