@@ -572,3 +572,12 @@ def test_without_an_evidence_path_the_file_lands_beside_the_script( run_main ):
     run_main( "--force" )
     written = [ p for p in run_main.tmp.iterdir() if p.name.startswith( "evidence-" ) ]
     assert len( written ) == 1 and written[ 0 ].name.endswith( "Z.json" )
+
+
+def test_loading_without_lupin_root_refuses_and_says_how_to_fix_it( monkeypatch ):
+    path = os.path.join( os.environ[ "LUPIN_ROOT" ], "src", "scripts", "presentation-gate-silence-proof", "prove_gate_silence.py" )
+    monkeypatch.delenv( "LUPIN_ROOT" )
+    spec = importlib.util.spec_from_file_location( "prove_gate_silence_no_root", path )
+    mod  = importlib.util.module_from_spec( spec )
+    with pytest.raises( RuntimeError, match="LUPIN_ROOT not set" ):
+        spec.loader.exec_module( mod )
