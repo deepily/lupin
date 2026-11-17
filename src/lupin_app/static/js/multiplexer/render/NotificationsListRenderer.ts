@@ -33,7 +33,7 @@ import type {
   StoreViewStateChangedPayload,
   AudioPlaybackState,
 } from "../shared/types";
-import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
+import { castPredictionVote as castVote, type PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
 import { keyedListMerge, cssEscape } from "./dom";
 import { formatDateKey } from "./time";
@@ -765,17 +765,12 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     /* c8 ignore next */ // defensive: the control is painted only for an in-list prediction_hint row.
     if (notification?.prediction_hint === undefined) return;
     const hint = notification.prediction_hint;
-    store.setContext(id, {
+    castVote(store, id, dir, {
       question        : notification.message,
       predicted_value : hint.predicted_value,
       category        : hint.category,
       response_type   : notification.response_type ?? "",
-    });
-    void store.vote(id, dir).then((ok) => {
-      if (!ok) this.rebuildAllCards();
-    }).catch(() => {
-      this.rebuildAllCards();
-    });
+    }, () => { this.rebuildAllCards(); });
   }
 
   // P0 8cb5c22e — a re-render that must UNDO an in-place change to a live card

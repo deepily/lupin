@@ -39,6 +39,7 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreSendersChangedPayload } from "../shared/types";
 import { recordingManager } from "../audio/recordingManager";
 import { insertTranscriptionText } from "./insertTranscriptionText";
+import { setValueFocusCaret } from "./dom";
 
 /**
  * The behavior of the voice input row on each sender card.
@@ -315,13 +316,7 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     const input = voiceInput.querySelector<HTMLInputElement>(".cc-session-msg-input");
     /* c8 ignore next */ // defensive: the static row always renders the input before a record can complete.
     if (input === null) return;
-    input.value = value;
-    input.focus();
-    // caret === null ⇒ the source exposed no caret (append path) → focus only,
-    // skip setSelectionRange (legacy parity — it would otherwise throw).
-    if (caret !== null) {
-      input.setSelectionRange(caret, caret);
-    }
+    setValueFocusCaret(input, value, caret);
   }
 
   // -------------------------------------------------------------------------

@@ -68,7 +68,7 @@ import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
 import { projectBadge, personaBadge, abstractIndicator, abstractBlock, predictionHintBox } from "./templates/actionRequiredChrome";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
-import type { PredictionVoteStore } from "../stores/PredictionVoteStore";
+import { castPredictionVote as castVote, type PredictionVoteStore } from "../stores/PredictionVoteStore";
 import type { PredictionVoteDir } from "../shared/types";
 import { cssEscape } from "./dom";
 
@@ -352,14 +352,12 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     /* c8 ignore next */ // defensive: the control is painted only for a card in the list that carries a hint.
     if (item === undefined || item.prediction_hint == null) return;
     const hint = item.prediction_hint;
-    store.setContext(id, {
+    castVote(store, id, dir, {
       question        : item.prompt,
       predicted_value : hint.predicted_value,
       category        : hint.category,
       response_type   : item.response_type,
-    });
-    const revert = (): void => { this.renderAll(); };
-    void store.vote(id, dir).then((ok) => { if (!ok) revert(); }).catch(revert);
+    }, () => { this.renderAll(); });
   }
 
   // -------------------------------------------------------------------------

@@ -30,6 +30,7 @@ import type { BroadcastRequest, BroadcastResult } from "../api/ApiClient";
 import { recordingManager } from "../audio/recordingManager";
 import type { RecordingManagerStartOptions } from "../audio/recordingManager";
 import { insertTranscriptionText } from "./insertTranscriptionText";
+import { setValueFocusCaret } from "./dom";
 import { renderBroadcastCard } from "./templates/broadcastCard";
 import type { BroadcastAckTallyRenderer } from "./BroadcastAckTallyRenderer";
 
@@ -523,10 +524,7 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
   private applyInputValueAndCaret( value: string, caret: number | null ): void {
     /* c8 ignore next */ // defensive: textarea is present before a record can complete.
     if ( this.textarea === null ) return;
-    this.textarea.value = value;
-    this.textarea.focus();
-    // caret === null ⇒ source exposed no caret (append path) → focus only.
-    if ( caret !== null ) this.textarea.setSelectionRange( caret, caret );
+    setValueFocusCaret( this.textarea, value, caret );
   }
 
   // -------------------------------------------------------------------------

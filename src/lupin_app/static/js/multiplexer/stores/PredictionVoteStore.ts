@@ -148,3 +148,27 @@ export function createPredictionVoteStore(
 ): PredictionVoteStore {
   return new PredictionVoteStoreImpl( opts );
 }
+
+/**
+ * Stash a card's hint context, cast the vote, and call `revert` when it is not recorded.
+ *
+ * Shared by the notification list and the Action Required card.
+ *
+ * Requires:
+ *   - store is a PredictionVoteStore, or a test double of its setContext and vote
+ *
+ * Ensures:
+ *   - the context is set before the vote is sent
+ *   - `revert` runs once when the vote is refused or the call throws
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function castPredictionVote(
+  store  : Pick<PredictionVoteStore, "setContext" | "vote">,
+  id     : string,
+  dir    : PredictionVoteDir,
+  ctx    : PredictionVoteContext,
+  revert : () => void,
+): void {
+  store.setContext( id, ctx );
+  void store.vote( id, dir ).then( ( ok ) => { if ( !ok ) revert(); } ).catch( revert );
+}
