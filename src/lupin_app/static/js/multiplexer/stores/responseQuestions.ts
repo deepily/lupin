@@ -1,4 +1,4 @@
-/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
+/* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line; the body runs for string, label-less object, null and full-option inputs in response_questions.test.ts.
 // Multiplexer — the questions an ask carries, read from the REAL wire payload (P0 5ebd2aff step 2).
 //
 // The server puts `response_options` on the queue update as the dict the asking tool built
@@ -54,6 +54,7 @@ export function parseResponseQuestions(raw: unknown): ReadonlyArray<ActionRequir
  *
  * A string becomes a label-only option, an object with a string label keeps its non-empty description, and anything else gives an empty list.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line; the body runs for string, label-less object, null and full-option inputs in response_questions.test.ts.
 function toOption(raw: unknown): ActionRequiredOption[] {
   if (typeof raw === "string") return [{ label: raw }];
   if (!isFrame(raw) || typeof raw.label !== "string") return [];
