@@ -36,7 +36,7 @@ import sys
 
 from cosa.repo.duplicate_check import errors as dc_errors
 from cosa.repo.duplicate_check import extract
-from cosa.repo.symindex import build, py_index, spec as sp
+from cosa.repo.symindex import build, js_index, py_index, spec as sp
 from lupin_mcp import duplicate_check_daily as daily
 from lupin_mcp import fleet_cap_ini_io
 from lupin_mcp import reuse_exit_gate as eg
@@ -181,6 +181,7 @@ def added_definition_ids( root, base_sha ):
         - the window and the changed files are the daily check's own (`window_of`, `changed_files`)
         - a file the symbol index does not hold (a test file, a skipped folder) lists nothing, by the indexer's own rule (`is_indexed`)
         - a definition is new when its file and name are absent at base_sha; a definition whose text changed is not new
+        - a script definition the symbol index's own extractor does not report (a member of an object literal, say) is not listed, because no lookup or search can name it and no outcome line could cover it
         - a definition whose qualified name holds `<locals>` is not listed, because a helper nested in a function cannot be reused from another file
         - a renamed file is read against the path it had at base_sha, so a function counts as new only when it is absent under the old path
         - ids follow the symbol index's rule (module and name, the repository prefix, `#2` for a repeat), so they match a ruling's symbol
@@ -202,11 +203,13 @@ def added_definition_ids( root, base_sha ):
         if report[ "skipped_python" ]: raise ValueError( f"{', '.join( report[ 'skipped_python' ] )} did not parse, so its definitions cannot be listed" )
         extract.completeness( report )
         found = report[ "definitions" ]
+        scripts = [ pathlib.Path( tree ) / f for f in files if f.endswith( sp.SCRIPT_SUFFIXES ) ]
+        in_index = { ( d[ "file" ], d[ "name" ] ) for d in js_index.extract_js( tree, scripts ) }
     finally: daily.release( root, tree )
     spec    = sp.spec_for( root )
     records = [ { "lang": d[ "lang" ], "file": d[ "file" ], "name": d[ "name" ], "line": d[ "line" ],
                   "module": py_index.module_name( spec, spec.root / d[ "file" ] ) if d[ "lang" ] == "py" else "" }
-                for d in found if ( d[ "file" ], d[ "name" ] ) not in held and LOCALS_MARK not in d[ "name" ] ]
+                for d in found if ( d[ "file" ], d[ "name" ] ) not in held and LOCALS_MARK not in d[ "name" ] and ( d[ "lang" ] == "py" or ( d[ "file" ], d[ "name" ] ) in in_index ) ]
     records.sort( key=lambda r: ( r[ "file" ], r[ "line" ] ) )
     build._assign_ids( spec, records )
     return sorted( r[ "id" ] for r in records )
