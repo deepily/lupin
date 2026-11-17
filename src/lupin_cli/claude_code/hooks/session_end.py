@@ -154,7 +154,6 @@ def _release_voice_persona( session_id ):
         from lupin_cli.claude_code.hooks.lib.session_bridge import (
             find_session_path_by_id, get_voice_persona
         )
-        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
         from cosa.agents.utils.sender_id import detect_project
 
         path = find_session_path_by_id( session_id )
@@ -176,36 +175,11 @@ def _release_voice_persona( session_id ):
         except Exception:
             project = "lupin"
 
-        email, password = get_hook_credentials( project )
-        server_url      = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+        server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
 
-        # Step 1: login
-        login_body = json.dumps( { "email": email, "password": password } ).encode()
-        login_req  = urllib.request.Request(
-            f"{server_url}/auth/login",
-            data    = login_body,
-            method  = "POST",
-            headers = { "Content-Type": "application/json" }
-        )
-        with urllib.request.urlopen( login_req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
-            login_data = json.loads( resp.read().decode() )
-        access_token = login_data.get( "tokens", {} ).get( "access_token" )
-        if not access_token:
-            return False
-
-        # Step 2: release
-        release_req = urllib.request.Request(
-            f"{server_url}/api/cosa-voice/voice-persona/{sid}/release",
-            data    = b"",
-            method  = "POST",
-            headers = {
-                "Content-Type"  : "application/json",
-                "Authorization" : f"Bearer {access_token}"
-            }
-        )
-        with urllib.request.urlopen( release_req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ):
-            pass
-        return True
+        # Login + POST /release live in register_session; reused here, not copied (dupcheck d-8b3d22610a)
+        from lupin_cli.claude_code.hooks.register_session import _release_voice_persona_via_http
+        return _release_voice_persona_via_http( server_url, project, sid )
 
     except ( urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError,
              KeyError, FileNotFoundError, OSError, ValueError ) as e:
