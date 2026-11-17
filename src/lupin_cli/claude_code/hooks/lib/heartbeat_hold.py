@@ -853,29 +853,10 @@ def _probe_dir_for_holds( root, max_depth, glob_pat=None ):
         - Returns the list of matching Paths found under root within max_depth
         - Never descends into a nested skipped dir; never raises (OSError gives [])
     """
-    if glob_pat is None: glob_pat = HOLD_GLOB
-    found = [ ]
-    stack = [ ( root, 0 ) ]
-    while stack:
-        current, depth = stack.pop()
-        try:
-            entries = list( os.scandir( current ) )
-        except OSError:
-            continue                                   # unreadable → nothing to report here
-        for entry in entries:
-            try:
-                is_dir = entry.is_dir( follow_symlinks=False )
-            except OSError:
-                continue
-            if is_dir:
-                if depth < max_depth and not _is_skipped_dir( Path( entry.path ), SWEEP_SKIP_DIR_NAMES ):
-                    stack.append( ( Path( entry.path ), depth + 1 ) )
-            elif fnmatch( entry.name, glob_pat ):
-                found.append( Path( entry.path ) )
-    return found
+    return _walk_hold_files( root, max_depth, SWEEP_SKIP_DIR_NAMES, glob_pat=glob_pat, probe_skipped=False )[ 0 ]
 
 
-def _walk_hold_files( root, max_depth, skip_dir_names, glob_pat=None ):
+def _walk_hold_files( root, max_depth, skip_dir_names, glob_pat=None, probe_skipped=True ):
     """
     Depth-bounded recursive scan of one root for hold files.
 
@@ -883,6 +864,7 @@ def _walk_hold_files( root, max_depth, skip_dir_names, glob_pat=None ):
         - root is a Path; max_depth is a non-negative int; skip_dir_names is a
           container of directory names
         - glob_pat is an fnmatch pattern, or None for the default `HOLD_GLOB`
+        - probe_skipped is False to step over skip-listed dirs without probing them (the probe's own scan)
 
     Ensures:
         - Returns ( hold_paths, skipped_dirs ) where skipped_dirs is a list of
@@ -909,7 +891,7 @@ def _walk_hold_files( root, max_depth, skip_dir_names, glob_pat=None ):
             if is_dir:
                 child = Path( entry.path )
                 if _is_skipped_dir( child, skip_dir_names ):
-                    holds = _probe_dir_for_holds( child, max_depth, glob_pat=glob_pat )
+                    holds = _probe_dir_for_holds( child, max_depth, glob_pat=glob_pat ) if probe_skipped else [ ]
                     if holds:
                         skipped.append( { "dir": str( child ), "hold_count": len( holds ) } )
                 elif depth < max_depth:
@@ -1370,7 +1352,7 @@ def get_pending_user_gates( hold ):
     return value if isinstance( value, list ) else [ ]
 
 
-def get_last_looked_in_ts( hold ):
+def get_last_looked_in_ts( hold, field_name=LAST_LOOKED_IN_FIELD ):
     """
     Return the manager's latest worker-verification look-in stamp, or None.
 
@@ -1380,15 +1362,16 @@ def get_last_looked_in_ts( hold ):
 
     Requires:
         - hold is a dict or None
+        - field_name names another optional str stamp on the hold; the two sibling getters below read theirs through this one
 
     Ensures:
-        - Returns the str value of hold["last_looked_in_on_workers_ts"] when present
+        - Returns the str value of hold[field_name] (default "last_looked_in_on_workers_ts") when present
         - Returns None when there is no hold, the field is absent, or it is non-str
         - Never raises
     """
     if not hold:
         return None
-    value = hold.get( LAST_LOOKED_IN_FIELD )
+    value = hold.get( field_name )
     return value if isinstance( value, str ) else None
 
 
@@ -1408,10 +1391,7 @@ def get_last_spinup_check_ts( hold ):
         - Returns None when there is no hold, the field is absent, or it is non-str
         - Never raises
     """
-    if not hold:
-        return None
-    value = hold.get( LAST_SPINUP_CHECK_FIELD )
-    return value if isinstance( value, str ) else None
+    return get_last_looked_in_ts( hold, LAST_SPINUP_CHECK_FIELD )
 
 
 def get_last_surfaced_questions_ts( hold ):
@@ -1430,10 +1410,7 @@ def get_last_surfaced_questions_ts( hold ):
         - Returns None when there is no hold, the field is absent, or it is non-str
         - Never raises
     """
-    if not hold:
-        return None
-    value = hold.get( LAST_SURFACED_QUESTIONS_FIELD )
-    return value if isinstance( value, str ) else None
+    return get_last_looked_in_ts( hold, LAST_SURFACED_QUESTIONS_FIELD )
 
 
 def quick_smoke_test():
