@@ -243,23 +243,29 @@ class FleetStatusStoreImpl implements FleetStatusStore {
    */
   async setSizeCap( cap: number ): Promise<void> {
     this.savingCap = cap;
+    return this.putAndAdopt( FLEET_SIZE_CAP_ENDPOINT, { cap }, "Fleet cap", () => { this.savingCap = null; } );
+  }
+
+  /**
+   * Puts one setting and adopts the server's answer, or re-reads on a refusal.
+   *
+   * The answer is the server's re-read of the file, not the value sent (legacy :9323-9326).
+   * So a control that drifted from what was persisted corrects itself on this paint.
+   * On a refusal the live state is re-read, so the control snaps back to what is enforced.
+   * The caller has set its saving flag; `clearSaving` clears it before the answer is adopted.
+   */
+  private async putAndAdopt( endpoint: string, body: object, label: string, clearSaving: () => void ): Promise<void> {
     this.emitSizeCapChanged();
     let persisted: FleetSizeCap | null = null;
     try {
-      // 🔴 THE ANSWER IS THE SERVER'S RE-READ OF THE FILE, NOT THE VALUE SENT
-      // (legacy :9323-9326), so a dial that drifted from what was persisted
-      // corrects itself on this paint.
-      persisted = await this.api.put<FleetSizeCap>( FLEET_SIZE_CAP_ENDPOINT, { cap } );
+      persisted = await this.api.put<FleetSizeCap>( endpoint, body );
     } catch ( err ) {
       const status = ( err as { status?: number } ).status;
       this.errorFn( typeof status === "number"
-        ? `Fleet cap not saved: ${serverDetail( err, status )}`
-        : `Fleet cap save failed: ${err}` );
+        ? `${label} not saved: ${serverDetail( err, status )}`
+        : `${label} save failed: ${err}` );
     }
-    this.savingCap = null;
-    // On a refusal, re-read the live state so the handle snaps back to the cap that is
-    // actually enforced rather than sitting at a number the operator never got
-    // (legacy :9383-9388). refreshSizeCap emits; the success path emits here.
+    clearSaving();
     if ( persisted === null ) {
       await this.refreshSizeCap();
       return;
@@ -280,26 +286,7 @@ class FleetStatusStoreImpl implements FleetStatusStore {
    */
   async setSkeletonCrew( on: boolean ): Promise<void> {
     this.savingCrew = on;
-    this.emitSizeCapChanged();
-    let persisted: FleetSizeCap | null = null;
-    try {
-      // The answer is the server's re-read of the configuration file, not the value sent,
-      // so the switch cannot show a state the spawn path is not enforcing.
-      persisted = await this.api.put<FleetSizeCap>( FLEET_SKELETON_CREW_ENDPOINT, { on } );
-    } catch ( err ) {
-      const status = ( err as { status?: number } ).status;
-      this.errorFn( typeof status === "number"
-        ? `Skeleton crew not saved: ${serverDetail( err, status )}`
-        : `Skeleton crew save failed: ${err}` );
-    }
-    this.savingCrew = null;
-    // A refusal re-reads, so the switch snaps back to the state that is actually enforced.
-    if ( persisted === null ) {
-      await this.refreshSizeCap();
-      return;
-    }
-    this.lastSizeCap = persisted;
-    this.emitSizeCapChanged();
+    return this.putAndAdopt( FLEET_SKELETON_CREW_ENDPOINT, { on }, "Skeleton crew", () => { this.savingCrew = null; } );
   }
 
   /**
