@@ -40,6 +40,28 @@ BUDGET      = call_cap.BUDGET_HIT
 FAILED      = call_cap.FAILED
 
 
+def run_then_close( ctx, close, work ):
+    """
+    Run work, then close the spend-ledger run whatever happened.
+
+    Requires:
+        - work takes no arguments and returns the run's report
+        - close takes ctx and returns what the ledger says about the closed run
+
+    Ensures:
+        - returns ( report, closed_run, close_error ); a close that fails after a good run is returned as repr( error ) and never raised
+        - when work raises, the run is still closed, a failing close is printed, and the original error propagates
+    """
+    try: report = work()
+    except BaseException:
+        try: close( ctx )
+        except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
+        raise
+    try: closed, close_error = close( ctx ), None
+    except Exception as error: closed, close_error = None, repr( error )
+    return report, closed, close_error
+
+
 def read_env_file( path ):
     """
     Read the exported reuse settings of a run's environment file.

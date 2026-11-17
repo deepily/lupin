@@ -112,6 +112,16 @@ class TestSpawningTheSuccessor:
         cmd = popen.call_args.args[ 0 ]
         assert cmd[ cmd.index( "--sleep-secs" ) + 1 ] == "5"
 
+    def test_a_cwd_reaches_the_child_as_cc_hook_cwd( self ):
+        # The Stop hook's first arm goes through here; the waiter reads CC_HOOK_CWD.
+        _, popen = self._spawn( cwd="/some/dir" )
+        assert popen.call_args.kwargs[ "env" ][ "CC_HOOK_CWD" ] == "/some/dir"
+
+    def test_no_cwd_leaves_cc_hook_cwd_untouched( self, monkeypatch ):
+        monkeypatch.delenv( "CC_HOOK_CWD", raising=False )
+        _, popen = self._spawn()
+        assert "CC_HOOK_CWD" not in popen.call_args.kwargs[ "env" ]
+
     def test_no_override_omits_the_flag_entirely( self ):
         _, popen = self._spawn()
         assert "--sleep-secs" not in popen.call_args.args[ 0 ]

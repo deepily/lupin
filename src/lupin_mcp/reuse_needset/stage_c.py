@@ -535,17 +535,10 @@ def live( args, rows, refused, plan, deps ):
     try:
         ctx   = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( root )
         close = deps[ "close_run" ] if "close_run" in deps else rt.close_run
-        try:
+        def work():
             rt.prepare( ctx )
-            report, undrafted = judge_all( args, rows, refused, plan[ "budgets" ], root, ctx, deps )
-        except BaseException:
-            try: close( ctx )
-            except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
-            raise
-        try:
-            closed, close_error = close( ctx ), None
-        except Exception as error:
-            closed, close_error = None, repr( error )
+            return judge_all( args, rows, refused, plan[ "budgets" ], root, ctx, deps )
+        ( report, undrafted ), closed, close_error = expansion_run.run_then_close( ctx, close, work )
         return { "live": True, "mode": "stage_c", "plan": plan, "undrafted": undrafted, "report": report, "closed_run": closed, "close_error": close_error }
     finally:
         if made: source_at.unlock( args.root, root )

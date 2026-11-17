@@ -145,16 +145,19 @@ def _was_reset_during_sleep( session_id: str, started_at_iso: str ) -> bool:
     return last_dt > started_dt
 
 
-def _spawn_successor( session_id: str, cc_pid: int, backoff_index: int, sleep_secs_override: int = None ) -> int:
+def _spawn_successor( session_id: str, cc_pid: int, backoff_index: int, sleep_secs_override: int = None,
+                      cwd: str = None ) -> int:
     """
     Spawn a successor idle_waiter at the next backoff index (detached).
 
     Mirrors the `_spawn_listener` pattern from register_session.py: detached
     subprocess with start_new_session=True, stdout/stderr redirected to log
-    files, PID returned (caller stores it on the bridge).
+    files, PID returned (caller stores it on the bridge). The Stop hook's first
+    arm (`stop._arm_idle_waiter`) calls this too, passing `cwd`, which the
+    waiter reads from CC_HOOK_CWD. The log dir is read at call time.
     """
     short    = session_id[ :8 ] if session_id else "unknown"
-    log_path = _LOG_DIR / f"cc-idle-waiter-{short}.log"
+    log_path = sessions_dir() / f"cc-idle-waiter-{short}.log"
     cmd      = [
         sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
         "--session-id"   , session_id,
@@ -168,6 +171,8 @@ def _spawn_successor( session_id: str, cc_pid: int, backoff_index: int, sleep_se
     env[ "PYTHONUNBUFFERED" ] = "1"
     if _src_path and _src_path not in env.get( "PYTHONPATH", "" ):
         env[ "PYTHONPATH" ] = _src_path + ":" + env.get( "PYTHONPATH", "" )
+    if cwd:
+        env[ "CC_HOOK_CWD" ] = cwd
 
     try:
         log_file = open( log_path, "a" )

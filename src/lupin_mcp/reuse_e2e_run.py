@@ -38,7 +38,7 @@ QUESTION_NAMES   = ( "old", "new" )
 ASK_NAMES        = QUESTION_NAMES + ( "candidates", )         # "candidates" is the old question through the candidate stage; the stage-two driver keeps QUESTION_NAMES
 
 
-class E2EEnv:
+class E2EEnv( s1.Stage1Env ):
     """
     Everything the runner needs from outside, injectable for tests.
 
@@ -51,11 +51,8 @@ class E2EEnv:
     """
 
     def __init__( self, root, data, ledger, asks, transport_factory=None, pack_size=50, workers=rp.WORKERS_DEFAULT, model=rt.JEV_MODEL, clock=None ):
-        self.root, self.data, self.ledger = pathlib.Path( root ), pathlib.Path( data ), ledger
-        self.asks, self.pack_size, self.workers, self.model = asks, pack_size, workers, model
-        self.transport_factory = transport_factory or ( lambda budget: rt.LiveJevTransport( budget=budget, transient=True ) )
-        self.live  = transport_factory is None
-        self.clock = clock or ( lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) )
+        super().__init__( root, data, ledger, transport_factory=transport_factory, workers=workers, model=model, clock=clock )
+        self.asks, self.pack_size = asks, pack_size
 
     @property
     def results_dir( self ):
@@ -328,18 +325,24 @@ FIRST_LINE = ( "100 searches, one per twin group, drawn from 151 groups of Pytho
                "no conceptual duplicates. This measures recall on clones, an upper bound for the harder case." )
 
 
-def _asks( names ):
+def _asks( names, valid=None, table=None ):
     """
     Turn the question names into asks, in order.
+
+    Requires:
+        - valid is the tuple of names this runner accepts, default ASK_NAMES
+        - table maps each name to its ask, with None for new while it is unwired; default is this runner's three asks
 
     Raises:
         - DriverRefused for a name that is not old or new, or for new while the new question is not wired
     """
-    out = {}
+    valid = ASK_NAMES if valid is None else valid
+    table = { "candidates": ask_candidates, "old": ask_old, "new": NEW_ASK } if table is None else table
+    out   = {}
     for name in names:
-        if name not in ASK_NAMES: raise s1.DriverRefused( f"question {name!r} is not one of {ASK_NAMES}" )
-        if name == "new" and NEW_ASK is None: raise s1.DriverRefused( "the new question is not wired yet; run old only" )
-        out[ name ] = ask_candidates if name == "candidates" else ask_old if name == "old" else NEW_ASK
+        if name not in valid: raise s1.DriverRefused( f"question {name!r} is not one of {valid}" )
+        if name == "new" and table[ "new" ] is None: raise s1.DriverRefused( "the new question is not wired yet; run old only" )
+        out[ name ] = table[ name ]
     return out
 
 
@@ -431,13 +434,7 @@ def _parser():
 
 def _open_env( root, data, ledger, live, asks, pack_size ):
     """Ensures: returns the environment; a stand-in run gets a marked folder and the stand-in."""
-    data, ledger = rr.check_paths( root, data, ledger, live )
-    factory      = None
-    if not live:
-        data.mkdir( parents=True, exist_ok=True )
-        ( data / rr.STAND_IN_MARKER ).write_text( "written by a stand-in run; never read by a live one\n", encoding="utf-8" )
-        factory = rr.StandIn
-    return E2EEnv( root, data, rl.AccountLedger( ledger ), asks, transport_factory=factory, pack_size=pack_size )
+    return rr.open_env( root, data, ledger, live, None, build=lambda r, d, led, factory: E2EEnv( r, d, led, asks, transport_factory=factory, pack_size=pack_size ) )
 
 
 def main( argv=None ):

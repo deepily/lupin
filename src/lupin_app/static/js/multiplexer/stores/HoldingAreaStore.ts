@@ -26,7 +26,7 @@
 
 import type { EventBus } from "../shared/EventBus";
 import { apiErrorDetail } from "../api/ApiClient";
-import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
+import { createPushPoller, createSingleFlightRead, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor } from "../render/taskListModel";
@@ -79,7 +79,7 @@ export const AWAITING_HUMAN_APPROVAL = "awaiting_human_approval";
  * mention the marker is an ordinary success, and a payload-wide match would call it
  * pending — a new wrong answer in place of the old one.
  */
-function awaitingApproval( body: unknown ): body is { ticket_id?: unknown } {
+export function awaitingApproval( body: unknown ): body is { ticket_id?: unknown } {
   return typeof body === "object"
     && body !== null
     && ( body as { status?: unknown } ).status === AWAITING_HUMAN_APPROVAL;
@@ -221,7 +221,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   private readonly actorProvider : () => string | null;
 
   private lastComposite : TaskListComposite | null = null;
-  private inFlight      : Promise<void> | null = null;
+  private readonly flight = createSingleFlightRead( () => this.readHeld(), true );
 
   /**
    * Builds the store from a bus, an API client and optional runtime hooks.
@@ -255,26 +255,20 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   /**
    * Fetches the held-task list and emits a change event.
    */
-  async refresh(): Promise<void> {
-    if ( this.inFlight !== null ) return this.inFlight;   // JOIN: one fetch, but the await still waits
-    const run = ( async () => {
-      try {
-        this.lastComposite = await this.fetchState();
-        this.emitChanged();
-      } finally {
-        this.inFlight = null;
-      }
-    } )();
-    this.inFlight = run;
-    return run;
+  refresh(): Promise<void> {
+    return this.flight.refresh();   // JOIN: one fetch, but the await still waits
+  }
+
+  private async readHeld(): Promise<void> {
+    this.lastComposite = await this.fetchState();
+    this.emitChanged();
   }
 
   /**
    * Waits for any fetch in flight, then fetches again after the caller's write.
    */
-  async refreshAfterWrite(): Promise<void> {
-    if ( this.inFlight !== null ) await this.inFlight;
-    return this.refresh();
+  refreshAfterWrite(): Promise<void> {
+    return this.flight.refreshAfterWrite();
   }
 
   /**

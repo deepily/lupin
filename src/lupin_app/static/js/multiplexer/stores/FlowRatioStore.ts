@@ -22,7 +22,7 @@
 // (Defect 5, the colour's threshold, is fixed in render/flowRatioModel.ts.)
 
 import type { EventBus } from "../shared/EventBus";
-import { resolveRuntimeDefaults } from "./polling";
+import { createSingleFlightRead, resolveRuntimeDefaults } from "./polling";
 import type { StoreFlowRatioChangedPayload } from "../shared/types";
 import {
   flowRatioSettingsUsable,
@@ -115,7 +115,7 @@ class FlowRatioStoreImpl implements FlowRatioStore {
   private lastSettings : FlowRatioSettings | null = null;
   private lastPull     : ManagerPullState | null  = null;
   private message      : string | null            = null;
-  private inFlight     = false;
+  private readonly flight = createSingleFlightRead( () => this.readAll(), false );
   private pollHandle   : number | null = null;
 
   /**
@@ -154,20 +154,18 @@ class FlowRatioStoreImpl implements FlowRatioStore {
    *
    * Settings and manager pull state are re-read only while they are missing or unusable. Overlapping calls are ignored.
    */
-  async refresh(): Promise<void> {
-    if ( this.inFlight ) return;   // a manual refresh landing on a tick cannot double-fetch
-    this.inFlight = true;
-    try {
-      await this.readRatio();
-      // The settings are re-read only until they are usable: once painted, a tick must
-      // not move a slider out from under the operator's finger. Unusable — never read,
-      // or a failed re-read — is retried on every tick (defect 4).
-      if ( !flowRatioSettingsUsable( this.lastSettings ) ) await this.readSettings();
-      if ( this.lastPull === null ) await this.readManagerPull();   // retried until read (defect 6)
-      this.emit();
-    } finally {
-      this.inFlight = false;
-    }
+  refresh(): Promise<void> {
+    return this.flight.refresh();   // a manual refresh landing on a tick cannot double-fetch
+  }
+
+  private async readAll(): Promise<void> {
+    await this.readRatio();
+    // The settings are re-read only until they are usable: once painted, a tick must
+    // not move a slider out from under the operator's finger. Unusable — never read,
+    // or a failed re-read — is retried on every tick (defect 4).
+    if ( !flowRatioSettingsUsable( this.lastSettings ) ) await this.readSettings();
+    if ( this.lastPull === null ) await this.readManagerPull();   // retried until read (defect 6)
+    this.emit();
   }
 
   /**

@@ -15,6 +15,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { StoreRequestBadgesChangedPayload } from "../shared/types";
 import { holdingRefusalMessage } from "./HoldingAreaStore";
+import { createSingleFlightRead } from "./polling";
 import { readBackAfterWrite } from "../shared/afterWriteRead";
 import {
   REQUEST_BADGES_PATH,
@@ -112,7 +113,7 @@ class TaskRequestStoreImpl implements TaskRequestStore {
   private readonly clearIntervalFn : ( handle: number ) => void;
 
   private lastCounts : RequestBadgeCounts = null;
-  private inFlight   : Promise<void> | null = null;
+  private readonly flight = createSingleFlightRead( () => this.readBadges(), true );
   private pollHandle : number | null = null;
   private readonly details = new Map<string, RequestFiledDetail>();
 
@@ -143,38 +144,32 @@ class TaskRequestStoreImpl implements TaskRequestStore {
    *
    * When a read is already in flight it returns that read and starts none. A failed read clears the counts to null instead of keeping the old ones and never rejects; the event then reports the counts as unknown.
    */
-  async refresh(): Promise<void> {
-    if ( this.inFlight !== null ) return this.inFlight;
-    const run = ( async () => {
-      try {
-        // ⚠️ A FAILED READ CLEARS THE COUNTS RATHER THAN KEEPING THE LAST ONES. A stale "2
-        // requests" after the store stopped answering tells Rick something is waiting that
-        // may already be answered; each pane's own sentinel reports the outage itself.
-        try {
-          this.lastCounts = await this.api.get<RequestBadgeCounts>( REQUEST_BADGES_PATH );
-        } catch {
-          this.lastCounts = null;
-        }
-        this.bus.emit<StoreRequestBadgesChangedPayload>( {
-          type    : "store_request_badges_changed",
-          payload : { known: this.lastCounts !== null },
-          source  : "TaskRequestStore",
-          ts      : this.nowFn(),
-        } );
-      } finally {
-        this.inFlight = null;
-      }
-    } )();
-    this.inFlight = run;
-    return run;
+  refresh(): Promise<void> {
+    return this.flight.refresh();
+  }
+
+  private async readBadges(): Promise<void> {
+    // ⚠️ A FAILED READ CLEARS THE COUNTS RATHER THAN KEEPING THE LAST ONES. A stale "2
+    // requests" after the store stopped answering tells Rick something is waiting that
+    // may already be answered; each pane's own sentinel reports the outage itself.
+    try {
+      this.lastCounts = await this.api.get<RequestBadgeCounts>( REQUEST_BADGES_PATH );
+    } catch {
+      this.lastCounts = null;
+    }
+    this.bus.emit<StoreRequestBadgesChangedPayload>( {
+      type    : "store_request_badges_changed",
+      payload : { known: this.lastCounts !== null },
+      source  : "TaskRequestStore",
+      ts      : this.nowFn(),
+    } );
   }
 
   /**
    * Waits for any read in flight, then reads fresh so the write is visible.
    */
-  async refreshAfterWrite(): Promise<void> {
-    if ( this.inFlight !== null ) await this.inFlight;
-    return this.refresh();
+  refreshAfterWrite(): Promise<void> {
+    return this.flight.refreshAfterWrite();
   }
 
   /**

@@ -546,19 +546,12 @@ def variant( args, records, undrafted, deps, root ):
     os.environ.update( { **expansion_run.read_env_file( f"{args.from_run}/run-env.sh" ), rt.RUN_NAME_VARIABLE: args.run_name, rt.CEILING_VARIABLE: str( args.ceiling ) } )
     ctx   = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( root )
     close = deps[ "close_run" ] if "close_run" in deps else rt.close_run
-    try:
+    def work():
         rt.prepare( ctx )
         dump   = rating_dump( records, rt.JevCache( args.data_dir ) )
         budget = ctx.transport.budget
-        report = run_variant( args.run_dir, requests, lambda request: ask_request( ctx.transport, request, budget ), args.limit, args.budget, dump )
-    except BaseException:
-        try: close( ctx )
-        except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
-        raise
-    try:
-        closed, close_error = close( ctx ), None
-    except Exception as error:
-        closed, close_error = None, repr( error )
+        return run_variant( args.run_dir, requests, lambda request: ask_request( ctx.transport, request, budget ), args.limit, args.budget, dump )
+    report, closed, close_error = expansion_run.run_then_close( ctx, close, work )
     return { "live": True, "mode": "variant", "plan": plan, "report": report, "closed_run": closed, "close_error": close_error }
 
 

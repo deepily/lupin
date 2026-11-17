@@ -52,6 +52,7 @@ from lupin_cli.claude_code.hooks.lib.idle_settings import load_idle_settings
 from cosa.config.configuration_manager import ConfigurationManager
 from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
     fire_anything_else_ask, summarize_task as _shared_summarize_task,
+    get_session_context as _shared_get_session_context,
 )
 # ── Heartbeat Hook (Branch-C self-poke) — additive, gated, downstream of the
 #    stop_hook_active loop guard; voice always wins. Leaf modules are pure +
@@ -101,27 +102,8 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_task_state import (
 )
 
 
-def _summarize_task( last_assistant_message ):
-    """
-    Summarize the last assistant message using Gister (default mode).
-
-    Requires:
-        - last_assistant_message is a string or None
-
-    Ensures:
-        - Returns a concise gist string on success
-        - Returns None on any failure or empty input
-    """
-    if not last_assistant_message or not last_assistant_message.strip():
-        return None
-
-    try:
-        from cosa.memory.gister import Gister
-        gister = Gister( debug=False, verbose=False )
-        gist   = gister.get_gist( last_assistant_message, prompt_key="prompt template for stop hook gist" )
-        return gist if gist else None
-    except Exception:
-        return None
+# One gist implementation (dupcheck d-aae095e42b): the shared one, under the name the call site and its tests use.
+_summarize_task = _shared_summarize_task
 
 
 # Note: classify_qualifier() was removed because its synchronous LLM
@@ -170,42 +152,8 @@ def _should_ask_anything_else( last_assistant_message, session_id ):
     return True
 
 
-def _get_session_context( cwd ):
-    """
-    Read session topic from bridge file + git branch name.
-
-    Requires:
-        - cwd is a string path or None
-
-    Ensures:
-        - Returns (topic, branch) tuple
-        - topic is a string or None (from bridge file's session_topic)
-        - branch is a string or None (from git rev-parse)
-        - Never raises exceptions
-    """
-    topic  = None
-    branch = None
-
-    # Session topic from bridge file
-    try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
-        meta  = get_session_metadata()
-        topic = meta.get( "session_topic" )
-    except Exception:
-        pass
-
-    # Git branch
-    if cwd:
-        try:
-            import subprocess
-            branch = subprocess.check_output(
-                [ "git", "rev-parse", "--abbrev-ref", "HEAD" ],
-                cwd=cwd, text=True, timeout=5
-            ).strip()
-        except Exception:
-            pass
-
-    return topic, branch
+# One session-context reader (dupcheck d-98cbf9e195): the shared one, under the name the call site and its tests use.
+_get_session_context = _shared_get_session_context
 
 
 DEFAULT_IDLE_BEHAVIOR = "idle_announce"
@@ -695,7 +643,6 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
         int or None: Spawned waiter PID, or None on failure
     """
     import datetime
-    import subprocess
     from pathlib import Path
 
     # Pre-compute gist while we have last_assistant_message (waiter doesn't)
@@ -724,48 +671,21 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
         last_task_cwd       = cwd,
     )
 
-    # Spawn the waiter — mirrors register_session.py:_spawn_listener pattern
-    short    = session_id[ :8 ] if session_id else "unknown"
-    log_path = sessions_dir() / f"cc-idle-waiter-{short}.log"   # row 8ccc20ab: the one seam
-
-    cmd = [
-        sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
-        "--session-id"   , session_id,
-        "--cc-pid"       , str( cc_pid ),
-        "--backoff-index", str( current_index ),
-    ]
     # Test-mode hook: if env tells us to use a short sleep, propagate it
     test_sleep = os.environ.get( "LUPIN_IDLE_WAITER_TEST_SLEEP_SECS" )
-    if test_sleep:
-        cmd.extend( [ "--sleep-secs", test_sleep ] )
 
-    env = os.environ.copy()
-    env[ "PYTHONUNBUFFERED" ] = "1"
-    if _src_path and _src_path not in env.get( "PYTHONPATH", "" ):
-        env[ "PYTHONPATH" ] = _src_path + ":" + env.get( "PYTHONPATH", "" )
-    if cwd:
-        env[ "CC_HOOK_CWD" ] = cwd
+    from lupin_cli.claude_code.hooks.lib.idle_waiter import _spawn_successor
 
     try:
-        log_file = open( log_path, "a" )
-    except OSError:
-        log_file = subprocess.DEVNULL
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout            = log_file if log_file is not subprocess.DEVNULL else subprocess.DEVNULL,
-            stderr            = log_file if log_file is not subprocess.DEVNULL else subprocess.DEVNULL,
-            env               = env,
-            start_new_session = True,
-        )
+        waiter_pid = _spawn_successor( session_id, cc_pid, current_index,
+                                       sleep_secs_override=test_sleep if test_sleep else None, cwd=cwd )
         log_to_stream( "stop", {}, extra={
             "phase"         : "idle_waiter_armed",
-            "waiter_pid"    : proc.pid,
+            "waiter_pid"    : waiter_pid,
             "backoff_index" : current_index,
             "cc_pid"        : cc_pid,
         } )
-        return proc.pid
+        return waiter_pid
     except Exception as e:
         log_to_stream( "stop", {}, extra={
             "phase" : "idle_waiter_spawn_failed",

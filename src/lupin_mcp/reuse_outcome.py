@@ -17,7 +17,7 @@ import pathlib
 import re
 
 from cosa.repo.symindex.spec import SCRIPT_SUFFIXES, skipped, spec_for
-from lupin_mcp.reuse_exit_gate import EXCLUDED_PREFIX, EXCLUDED_TOKEN
+from lupin_mcp.reuse_exit_gate import EXCLUDED_PREFIX, EXCLUDED_TOKEN, unparsed_ruling_lines
 
 UNINDEXED_TOKEN  = "unindexed"                                      # the receipt and search token for a file outside the index
 KIND_PAIRS      = { "DUPLICATE": "REUSED", "EXTEND": "EXTENDED", "DISTINCT": "WROTE_NEW" }   # a ruling kind and the outcome kind that goes with it (reviewer skill, step 4)
@@ -66,7 +66,7 @@ def unparsed_outcome_lines( text ):
         - a template line is one whose receipt slot and search slot are both the template text; a line with only one placeholder is refused and listed
         - a line that does not open with the keyword is never returned
     """
-    return [ line.strip() for line in text.splitlines() if OUTCOME_LEAD_RE.match( line ) and not TEMPLATE_RE.match( line ) and not OUTCOME_RE.match( line ) ]
+    return unparsed_ruling_lines( text, OUTCOME_LEAD_RE, ( TEMPLATE_RE, OUTCOME_RE ) )
 
 
 def is_indexed( path, root ):

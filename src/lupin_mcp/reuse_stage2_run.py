@@ -146,12 +146,7 @@ def write_rows( path, rows ):
 
 def _asks( names ):
     """Ensures: returns the asks in order; refuses an unknown name, and new while it is unwired."""
-    asks = {}
-    for name in names:
-        if name not in e2r.QUESTION_NAMES: raise s1.DriverRefused( f"question {name!r} is not one of {e2r.QUESTION_NAMES}" )
-        if name == "new" and NEW_PAIR_ASK is None: raise s1.DriverRefused( "the new question is not wired yet; run old only" )
-        asks[ name ] = ask_old_pairs if name == "old" else ask_new_pairs
-    return asks
+    return e2r._asks( names, e2r.QUESTION_NAMES, { "old": ask_old_pairs, "new": None if NEW_PAIR_ASK is None else ask_new_pairs } )
 
 
 def _parser():

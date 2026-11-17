@@ -36,6 +36,7 @@
 // 2026-09-19: that is a defect in the lead and is NOT back-ported. Every card here
 // sends the queue session id.
 
+import { resolveRuntimeDefaults } from "./polling";
 import { choicesBody } from "../docPodcast/docPodcast";
 import type { EventBus } from "../shared/EventBus";
 import type { StoreSubmitJobsChangedPayload } from "../shared/types";
@@ -246,8 +247,7 @@ class SubmitJobsStoreImpl implements SubmitJobsStore {
     this.api       = opts.api;
     this.sessionId = opts.sessionId;
     this.onCcSubmitted = opts.onCcSubmitted ?? null;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject nowFn.
-    this.nowFn     = opts.nowFn ?? ( () => Date.now() );
+    this.nowFn     = resolveRuntimeDefaults( opts ).nowFn;
   }
 
   /**

@@ -1,4 +1,4 @@
-/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
+/* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line; the body runs for string, label-less object, null and full-option inputs in response_questions.test.ts.
 // Multiplexer — the questions an ask carries, read from the REAL wire payload (P0 5ebd2aff step 2).
 //
 // The server puts `response_options` on the queue update as the dict the asking tool built
@@ -17,6 +17,7 @@
 // Pinned against the real builders by src/tests/unit/test_multiplexer_questions_fixture_matches_the_asking_tools.py.
 
 import type { ActionRequiredOption, ActionRequiredQuestion } from "../shared/types";
+import { isFrame } from "./SessionTranscriptStore";
 
 /**
  * Read the questions out of a notification's `response_options`.
@@ -32,10 +33,10 @@ import type { ActionRequiredOption, ActionRequiredQuestion } from "../shared/typ
  *   - an option given as a bare string is read as its label
  */
 export function parseResponseQuestions(raw: unknown): ReadonlyArray<ActionRequiredQuestion> {
-  if (!isRecord(raw) || !Array.isArray(raw.questions)) return [];
+  if (!isFrame(raw) || !Array.isArray(raw.questions)) return [];
   const out: ActionRequiredQuestion[] = [];
   raw.questions.forEach((entry: unknown, idx: number) => {
-    if (!isRecord(entry)) return;
+    if (!isFrame(entry)) return;
     const question: ActionRequiredQuestion = {
       question    : typeof entry.question === "string" ? entry.question : "",
       header      : typeof entry.header === "string" && entry.header !== "" ? entry.header : `Question ${String(idx + 1)}`,
@@ -53,20 +54,12 @@ export function parseResponseQuestions(raw: unknown): ReadonlyArray<ActionRequir
  *
  * A string becomes a label-only option, an object with a string label keeps its non-empty description, and anything else gives an empty list.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line; the body runs for string, label-less object, null and full-option inputs in response_questions.test.ts.
 function toOption(raw: unknown): ActionRequiredOption[] {
   if (typeof raw === "string") return [{ label: raw }];
-  if (!isRecord(raw) || typeof raw.label !== "string") return [];
+  if (!isFrame(raw) || typeof raw.label !== "string") return [];
   const option: ActionRequiredOption = { label: raw.label };
   if (typeof raw.description === "string" && raw.description !== "") option.description = raw.description;
   return [option];
 }
 
-/**
- * Tells whether a value is a plain object, excluding null and arrays.
- *
- * Acts as a type guard for string-keyed records.
- */
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: c8's JSON puts the only uncovered arm on the function NAME, and null, array, scalar and record inputs all run the body (response_questions.test.ts).
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}

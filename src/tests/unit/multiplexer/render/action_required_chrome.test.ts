@@ -301,3 +301,15 @@ test( "a hint below the vote gate draws the box but no controls", () => {
   assert.equal( el.className, "prediction-hint" );
   assertAbsent( el.querySelector( ".prediction-hint-vote" ), "no vote controls below the gate" );
 } );
+
+test( "the indicator takes an extra class, a test id and a title from its options, and the title can be left off", () => {
+  const custom = abstractIndicator( "details", { className: "jobs-abstract", title: "View details", testid: "jobs-abstract" } )!;
+  assert.equal( custom.className, "abstract-indicator jobs-abstract" );
+  assert.equal( custom.getAttribute( "title" ), "View details" );
+  assert.equal( custom.getAttribute( "data-testid" ), "jobs-abstract" );
+  const plain = abstractIndicator( "details" )!;
+  assert.equal( plain.getAttribute( "title" ), "View full abstract", "the default title stays" );
+  assert.equal( plain.getAttribute( "data-testid" ), null, "no test id unless asked" );
+  const untitled = abstractIndicator( "details", { title: null } )!;
+  assert.equal( untitled.getAttribute( "title" ), null, "title: null leaves the attribute off" );
+} );

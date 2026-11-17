@@ -161,32 +161,44 @@ class StorageServiceImpl implements StorageService {
    * Returns the saved page session ID, or null when none is stored.
    */
   getSessionId(): string | null {
-    const env = this.getJSON<SessionIdEnvelope>(SESSION_ID_KEY, SESSION_ID_SCHEMA);
-    return env ? env.sessionId : null;
+    return this.readSessionId(SESSION_ID_KEY);
   }
 
   /**
    * Saves a session ID with the time it was generated.
    */
   setSessionId(sessionId: string): void {
-    const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
-    this.setJSON<SessionIdEnvelope>(SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
+    this.writeSessionId(SESSION_ID_KEY, sessionId);
   }
 
   /**
    * Returns the saved ID for the audio socket's own session, or null when none is stored.
    */
   getAudioSessionId(): string | null {
-    const env = this.getJSON<SessionIdEnvelope>(AUDIO_SESSION_ID_KEY, SESSION_ID_SCHEMA);
-    return env ? env.sessionId : null;
+    return this.readSessionId(AUDIO_SESSION_ID_KEY);
   }
 
   /**
    * Saves the ID for the audio socket's own session with the time it was generated.
    */
   setAudioSessionId(sessionId: string): void {
+    this.writeSessionId(AUDIO_SESSION_ID_KEY, sessionId);
+  }
+
+  /**
+   * Reads the session ID stored under one key, or null when none is stored.
+   */
+  private readSessionId(key: string): string | null {
+    const env = this.getJSON<SessionIdEnvelope>(key, SESSION_ID_SCHEMA);
+    return env ? env.sessionId : null;
+  }
+
+  /**
+   * Stores a session ID under one key with the time it was generated.
+   */
+  private writeSessionId(key: string, sessionId: string): void {
     const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
-    this.setJSON<SessionIdEnvelope>(AUDIO_SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
+    this.setJSON<SessionIdEnvelope>(key, env, SESSION_ID_SCHEMA);
   }
 
   /**

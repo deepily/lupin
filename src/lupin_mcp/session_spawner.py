@@ -1335,8 +1335,7 @@ def _default_emit_reap( identity: Dict[ str, Any ], reason: str = "" ) -> None:
         target  = os.getenv( "LUPIN_DEV_EMAIL" ) or cfg.get( "global_notification_recipient" )
         if not target:
             return                          # can't route → skip (best-effort)
-        persona = identity.get( "persona" ) if isinstance( identity.get( "persona" ), dict ) else { }
-        name    = ( persona or { } ).get( "name" ) or "A worker"
+        name    = reap_memento.identity_bits( identity )[ 0 ] or "A worker"
         # 🔴 DELIBERATELY LEFT SHORT — excluded from the ~30s reload-window bump
         # (row 204911ca, 2026-07-20). Every other out-of-process `:7999` client
         # was raised to _SERVER_TRANSPORT_TIMEOUT_SECONDS (30) so it can outlast
@@ -1380,8 +1379,7 @@ def _default_emit_reaped_tombstone( identity: Dict[ str, Any ] ) -> None:
     session_id = identity.get( "session_id" )
     if not session_id:
         return                              # no id → fall back to the ~60-min age-out
-    persona = identity.get( "persona" )
-    name    = persona.get( "name" ) if isinstance( persona, dict ) else persona
+    name = reap_memento.identity_bits( identity )[ 0 ]
     try:
         from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_reaped
         emit_reaped( session_id, persona=name )
@@ -1419,18 +1417,6 @@ def _default_clear_hold( identity: Dict[ str, Any ] ) -> bool:
         return True
     except Exception:
         return False
-
-
-def _identity_persona_name( identity ):
-    """
-    Extract the persona NAME from a captured reap identity. `voice_persona` may be
-    a dict ({name, ...}) or a bare string; returns the name string, or None when
-    absent. Mirrors the dict-or-string handling in `_default_emit_reaped_tombstone`.
-    """
-    persona = identity.get( "persona" ) if identity else None
-    if isinstance( persona, dict ):
-        return persona.get( "name" )
-    return persona
 
 
 def _resolve_session_persona_name( session_dir, session_id ):
@@ -1578,7 +1564,7 @@ def _default_reconcile_store_items( identity, dead_owner_slugs, reaping_manager,
         - never raises
     """
     summary    = { "closed": [], "reassigned": [], "unclassifiable": [], "skipped_other_session": [] }
-    owner_name = _identity_persona_name( identity )
+    owner_name = reap_memento.identity_bits( identity )[ 0 ]
     if not owner_name:
         return summary                          # no owner key → nothing to query
     owner_key  = persona_slug( owner_name )
@@ -1965,7 +1951,7 @@ def dismiss_sessions(
     dead_owner_slugs = set()
     if reconcile_items_fn is not None:
         for name in reaped_names:
-            name_persona = _identity_persona_name( identities.get( name ) )
+            name_persona = reap_memento.identity_bits( identities.get( name ) )[ 0 ]
             if name_persona:
                 dead_owner_slugs.add( persona_slug( name_persona ) )
 
@@ -2002,7 +1988,7 @@ def dismiss_sessions(
     respin_slugs     = { persona_slug( p ) for p in ( respin_personas or [] ) if p and persona_slug( p ) }
     retained_slugs   = []
     for name in reaped_names:
-        name_persona = _identity_persona_name( identities.get( name ) )
+        name_persona = reap_memento.identity_bits( identities.get( name ) )[ 0 ]
         if name_persona and persona_slug( name_persona ) in respin_slugs:
             retained_slugs.append( persona_slug( name_persona ) )
     retained_unmatched = sorted( respin_slugs - set( retained_slugs ) )
@@ -2016,7 +2002,7 @@ def dismiss_sessions(
     for entry in dismissed:
         if entry[ "status" ] != "killed":
             continue
-        killed_persona = _identity_persona_name( identities.get( entry[ "session_name" ] ) )
+        killed_persona = reap_memento.identity_bits( identities.get( entry[ "session_name" ] ) )[ 0 ]
         if killed_persona and persona_slug( killed_persona ) in respin_slugs:
             killed_slugs.add( persona_slug( killed_persona ) )
     respin_credits_minted = []
@@ -2061,7 +2047,7 @@ def dismiss_sessions(
         # Reap-reconcile (d647b531): reconcile this worker's non-terminal store
         # items, aggregating the summary. Fail-safe — a raising reconciler NEVER
         # breaks the reap (same posture as the bridge unlink / emit / hold-clear).
-        if reconcile_items_fn is not None and persona_slug( _identity_persona_name( ident ) or "" ) not in respin_slugs:
+        if reconcile_items_fn is not None and persona_slug( reap_memento.identity_bits( ident )[ 0 ] or "" ) not in respin_slugs:
             try:
                 summary = reconcile_items_fn( ident, dead_owner_slugs, reaping_manager, reason )
                 if isinstance( summary, dict ):
