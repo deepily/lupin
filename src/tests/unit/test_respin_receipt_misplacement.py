@@ -175,6 +175,14 @@ def test_another_seats_stray_receipt_is_not_mine( zone ):
                                         persona="Sam", tmux_session="sam-pane" ) == []
 
 
+def test_the_same_persona_in_another_pane_is_not_mine( zone ):
+    """The persona matches but the tmux session does not, so the stray belongs to another seat."""
+    _write( str( zone[ "sibling" ] ), "sidY", persona="Sam", tmux="sam-other-pane" )
+    assert rwc.find_misplaced_receipts( str( zone[ "correct" ] ),
+                                        persona="Sam", tmux_session="sam-pane" ) == []
+    assert len( rwc.find_misplaced_receipts( str( zone[ "correct" ] ), persona="Sam" ) ) == 1
+
+
 def test_a_stray_from_before_the_respin_is_not_this_cycles( zone ):
     """The recency floor: an old stray is somebody's earlier problem, not evidence
     about the re-spin that just fired."""

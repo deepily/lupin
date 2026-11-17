@@ -883,3 +883,16 @@ def test_a_ledger_that_cannot_be_written_warns_but_the_delivery_still_counts( tm
     err          = _Err()
     rc           = hlt.main( [ _file( tmp_path, FINDING ) ], { "HOOK_LINK_STATE": str( blocker / "s.json" ) }, NOW, _Err(), err, **seams )
     assert rc == 2 and "could not write the send ledger" in err.text
+
+
+# ── post_query in process: the tick's own shell tests run it in a child, so these keep its two failure paths measured ──
+
+def test_post_query_returns_the_error_status_and_body_when_the_server_refuses( stub ):
+    bad            = stub( notify_status=500 )
+    status, text   = hlt.post_query( bad.base, "k", "/api/notify", { "message": "m" } )
+    assert ( status, text ) == ( 500, "{}" ) and bad.seen and bad.seen[ 0 ][ 0 ].startswith( "/api/notify?message=m" )
+
+
+def test_post_query_returns_zero_and_the_reason_when_nothing_answers():
+    status, text = hlt.post_query( "http://127.0.0.1:9", "k", "/api/notify", { "message": "m" } )
+    assert status == 0 and "refused" in text.lower()

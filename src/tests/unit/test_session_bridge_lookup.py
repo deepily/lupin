@@ -190,6 +190,22 @@ class TestFindSessionByIdWithoutPidCheck:
                 assert find_session_by_id( sid, exact=True, check_pid=False )[ "transcript_path" ] == "/old.jsonl", \
                     "the ORDER decides, not the pid number or the glob order"
 
+    def test_without_the_check_a_corrupt_and_a_foreign_bridge_are_passed_over( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid     = "e14bd712-700e-46ce-88ea-8db62604ceb4"
+            mine    = _write_session_file( sessions_dir, 111, { **_make_session_data( sid ), "transcript_path": "/mine.jsonl" } )
+            foreign = _write_session_file( sessions_dir, 222, _make_session_data( "0badc0de-0000-4000-8000-000000000000" ) )
+            corrupt = sessions_dir / "cc-333.json"
+            corrupt.write_text( "{ not json" )
+            os.utime( mine, ( 1000, 1000 ) )
+            os.utime( foreign, ( 2000, 2000 ) )
+            os.utime( corrupt, ( 3000, 3000 ) )
+            with patch( self.DIR, sessions_dir ), patch( self.DEAD, return_value=False ):
+                assert find_session_by_id( sid, exact=True, check_pid=False )[ "transcript_path" ] == "/mine.jsonl", \
+                    "the newest file is corrupt and the next names another session, so the oldest is the match"
+                assert find_session_by_id( "f00dfeed-0000-4000-8000-000000000000", exact=True, check_pid=False ) is None
+
     def test_a_file_that_vanishes_mid_scan_sorts_last_rather_than_raising( self ):
         from lupin_cli.claude_code.hooks.lib.session_bridge import _mtime_or_zero
         assert _mtime_or_zero( Path( "/definitely/not/here/cc-1.json" ) ) == 0.0

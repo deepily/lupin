@@ -241,6 +241,20 @@ def test_a_server_error_with_a_body_that_is_not_json_is_a_search_failure( world 
     assert e.value.code == rcand.CANDIDATE_SEARCH_FAILED and "502" in e.value.detail
 
 
+def test_a_success_status_with_a_body_that_is_not_json_is_a_search_failure( world ):
+    make, _, _, _, _, _ = world
+    def garbled( request, timeout=None ):
+        class Out:
+            status  = 200
+            headers = {}
+            def read( self ): return b"<html>"
+            def __enter__( self ): return self
+            def __exit__( self, *a ): return False
+        return Out()
+    with pytest.raises( CandidateError ) as e: lookup( make( urlopen=garbled ) )
+    assert e.value.code == rcand.CANDIDATE_SEARCH_FAILED and "JSONDecodeError" in e.value.detail and "200" not in e.value.detail
+
+
 def test_a_server_that_answers_a_named_failure_has_it_carried_in_the_detail( world, monkeypatch ):
     make, _, _, root, *_ = world
     class Corrupt( ResidentSearch ):
