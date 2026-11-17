@@ -410,6 +410,19 @@ class TestMigrateDirectory:
         assert summary[ "files_mutated" ] == 1
         assert summary[ "total_replaced" ] == 1
 
+    def test_the_backup_dir_in_the_summary_holds_the_pre_migration_text( self, tmp_path ):
+        commons = tmp_path / "commons"
+        commons.mkdir()
+        entries = [ _entry( "2026-05-18T00:00:01.000000+00:00", "Tiberius", "🌑", "s1", "Body" ) ]
+        _legacy_topic_file( commons / "legacy.md", "legacy", entries )
+        before = ( commons / "legacy.md" ).read_text( encoding="utf-8" )
+
+        summary = migrate_module.migrate_directory( commons, dry_run=False, with_backup=True )
+
+        saved = summary[ "backup_dir" ] / "legacy.md"
+        assert saved.read_text( encoding="utf-8" ) == before
+        assert ( commons / "legacy.md" ).read_text( encoding="utf-8" ) != before
+
     def test_idempotent_re_run( self, tmp_path ):
         commons = tmp_path / "commons"
         commons.mkdir()

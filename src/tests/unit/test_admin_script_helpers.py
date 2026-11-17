@@ -216,3 +216,10 @@ def test_the_key_report_prints_banner_account_key_next_steps_and_notes_in_that_o
     assert capsys.readouterr().out == (
         "==========\n  DONE\n==========\n\nAccount: a\n\n🔑 API Key (save this - shown only once):\n----------\nKEY\n----------\n\n"
         "Key saved to: /f\n\nNext steps:\n  1. one\n\n  2. two\n\n⚠️  IMPORTANT:\n  - note\n\n" )
+
+
+def test_the_key_is_framed_by_the_rule_character_the_caller_gives_at_the_width_it_gives( capsys ):
+    h.print_key_report( "DONE", 7, "~", [], "KEY", "/f", [], [] )
+    lines = capsys.readouterr().out.split( "\n" )
+    key_at = lines.index( "KEY" )
+    assert ( lines[ key_at - 1 ], lines[ key_at + 1 ] ) == ( "~" * 7, "~" * 7 )

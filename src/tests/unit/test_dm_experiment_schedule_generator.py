@@ -512,6 +512,13 @@ def test_block_invariants_refuse_wrong_hours_and_long_runs_by_date():
         GEN._assert_block_invariants( long_run, total, expected, "demo", "the demo" )
 
 
+def test_week2_invariants_name_week_2_when_an_hour_has_one_arm():
+    slots = GEN.build_week2_slots()
+    one_armed = [ dict( s, arm=GEN.BLIND ) if s[ "local_hour" ] == 10 else dict( s, arm=GEN.REJECTING ) if s[ "local_hour" ] == 11 else s for s in slots ]
+    with pytest.raises( AssertionError, match="hour 10 lacks both arms in week 2$" ):
+        GEN._assert_week2_invariants( one_armed )
+
+
 def test_week2_invariants_keep_their_own_opening_time_check():
     slots = GEN.build_week2_slots()
     GEN._assert_week2_invariants( slots )
