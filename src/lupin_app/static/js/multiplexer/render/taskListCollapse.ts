@@ -12,6 +12,7 @@
 // Plan: src/rnd/v0.1.8/2026.06.17-task-list-accordion/01-design-and-build-plan.md
 // A JS↔TS parity-checklist test asserts these constants match the JS card.
 
+import { slugifySenderId } from "./templates/slugify";
 import type { TaskGroup } from "./taskListModel";
 
 /** localStorage key holding the JSON array of collapsed owner keys. */
@@ -40,7 +41,7 @@ export function ownerKeyForGroup( group: TaskGroup ): string {
  *   - "task-group-" + ownerKey with non [A-Za-z0-9_-] chars → "-"
  */
 export function taskGroupIdSlug( ownerKey: string ): string {
-  return "task-group-" + String( ownerKey ).replace( /[^a-zA-Z0-9_-]/g, "-" );
+  return "task-group-" + slugifySenderId( String( ownerKey ) );
 }
 
 /**

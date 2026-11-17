@@ -32,7 +32,6 @@ import { createPokeMuteSwitch } from "./render/pokeMuteSwitch";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
-import type { SchedulableAudioContext } from "./stores";
 import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrator";
 import { createSessionTranscriptStore } from "./stores/SessionTranscriptStore";
 import { createSessionTranscriptRoster } from "./stores/SessionTranscriptRoster";
@@ -313,18 +312,6 @@ function bootMultiplexer(): void {
     // B-3 F3 — the admin gate on the view-mode switch. Read per-call, not captured:
     // the token (and so the roles claim) can be refreshed after the stores are built.
     isAdmin             : () => authManager.isCurrentUserAdmin(),
-    audioContextFactory : (): SchedulableAudioContext => {
-      // Production AudioContext factory. Browser autoplay policy may throw
-      // if no user gesture preceded — AudioStore catches and emits
-      // store_audio_state_change { state: "error", reason: "audiocontext-blocked" }.
-      // Chrome-only mux (Rick 2026-06-27) — no `webkitAudioContext` vendor
-      // prefix (Krishna-C2: the vestigial fallback was dead under Chrome-only).
-      const Ctor = (window as unknown as {
-        AudioContext ?: { new (opts?: { sampleRate?: number }): SchedulableAudioContext };
-      }).AudioContext;
-      if (!Ctor) throw new Error("AudioContext is not available");
-      return new Ctor({ sampleRate: 24000 });
-    },
   });
 
   // F0-d — wire the TTS producer seam. NotificationStore emits
