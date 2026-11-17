@@ -6,6 +6,7 @@ runner, the same table-shape check and the same key-file writer. Each script kee
 function names and passes its own table name, banner text or project root.
 """
 
+import argparse
 import sqlite3
 import sys
 import traceback
@@ -176,6 +177,58 @@ def validate_table( conn, table, expected_fields, expected_indexes ):
             "success": False,
             "error": f"Validation query failed: {e}"
         }
+
+
+def parse_service_account_args( description, epilog ):
+    """
+    Read the command line the two service-account scripts share.
+
+    Requires:
+        - description and epilog are the script's own help text; the epilog is printed as written
+
+    Ensures:
+        - returns the parsed arguments, with email (default claude.code@deepily.ai), description (default empty) and env (dev, staging or prod; default dev)
+        - --help prints the description, the options and the epilog as written, then exits 0
+    """
+    parser = argparse.ArgumentParser( description=description, formatter_class=argparse.RawDescriptionHelpFormatter, epilog=epilog )
+    parser.add_argument( "--email", default="claude.code@deepily.ai", help="Service account email (default: claude.code@deepily.ai)" )
+    parser.add_argument( "--description", default="", help="Key description (optional)" )
+    parser.add_argument( "--env", default="dev", choices=[ "dev", "staging", "prod" ],
+                         help="Environment (dev, staging, prod) - determines key file name (default: dev)" )
+    return parser.parse_args()
+
+
+def print_key_report( title, width, key_rule, account_lines, api_key, key_file, next_steps, notes ):
+    """
+    Print the success report of a service-account script, with the key shown once.
+
+    Requires:
+        - title is the success line, width the banner width and key_rule the character that frames the key
+        - account_lines, next_steps and notes are lists of lines; an empty line in next_steps prints a blank line
+
+    Ensures:
+        - prints the banner, the account lines, the key framed by key_rule, where it was saved, the next steps and the notes
+        - the order and the blank lines are the order the two scripts printed before they shared this
+    """
+    print( "=" * width )
+    print( f"  {title}" )
+    print( "=" * width )
+    print()
+    for line in account_lines: print( line )
+    print()
+    print( "🔑 API Key (save this - shown only once):" )
+    print( key_rule * width )
+    print( api_key )
+    print( key_rule * width )
+    print()
+    print( f"Key saved to: {key_file}" )
+    print()
+    print( "Next steps:" )
+    for line in next_steps: print( line )
+    print()
+    print( "⚠️  IMPORTANT:" )
+    for line in notes: print( line )
+    print()
 
 
 def write_key_file( project_root, api_key, env ):

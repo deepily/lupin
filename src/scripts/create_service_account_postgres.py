@@ -22,7 +22,6 @@ Usage:
 
 import os
 import sys
-import argparse
 import secrets
 import bcrypt
 import uuid
@@ -44,7 +43,7 @@ if src_path not in sys.path:
 
 # Now cosa is importable
 import cosa.utils.util as cu
-from cosa.utils.admin_script_helpers import write_key_file
+from cosa.utils.admin_script_helpers import parse_service_account_args, print_key_report, write_key_file
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import UserRepository, ApiKeyRepository
 
@@ -228,17 +227,7 @@ def write_key_to_file( api_key: str, env: str ) -> Path:
 
 
 
-def main():
-    """
-    Main entry point for service account creation (PostgreSQL).
-
-    Returns:
-        int: Exit code (0 = success, 1 = error)
-    """
-    parser = argparse.ArgumentParser(
-        description='Create service account and generate API key (PostgreSQL)',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+EPILOG = """
 Examples:
   # Create with defaults (dev environment)
   python src/scripts/create_service_account_postgres.py
@@ -256,28 +245,16 @@ Environment Variables:
   LUPIN_ROOT     - Project root directory (required)
   LUPIN_ENV      - development/testing/production (determines PostgreSQL connection)
         """
-    )
 
-    parser.add_argument(
-        '--email',
-        default='claude.code@deepily.ai',
-        help='Service account email (default: claude.code@deepily.ai)'
-    )
 
-    parser.add_argument(
-        '--description',
-        default='',
-        help='Key description (optional)'
-    )
+def main():
+    """
+    Main entry point for service account creation (PostgreSQL).
 
-    parser.add_argument(
-        '--env',
-        default='dev',
-        choices=['dev', 'staging', 'prod'],
-        help='Environment (dev, staging, prod) - determines key file name (default: dev)'
-    )
-
-    args = parser.parse_args()
+    Returns:
+        int: Exit code (0 = success, 1 = error)
+    """
+    args = parse_service_account_args( "Create service account and generate API key (PostgreSQL)", EPILOG )
 
     # Display header
     print()
@@ -326,41 +303,25 @@ Environment Variables:
         print()
 
         # Step 5: Display success + key (ONCE)
-        print( "=" * 70 )
-        print( "  ✅ SUCCESS: Service Account Created in PostgreSQL" )
-        print( "=" * 70 )
-        print()
-        print( f"Service Account: {args.email}" )
-        print( f"User ID: {user_id}" )
-        print( f"Environment: {args.env}" )
-        print( f"API Key ID: {key_id}" )
-        print()
-        print( "🔑 API Key (save this - shown only once):" )
-        print( "━" * 70 )
-        print( api_key )
-        print( "━" * 70 )
-        print()
-        print( f"Key saved to: {key_file}" )
-        print()
-        print( "Next steps:" )
-        print( f"  1. Verify key file exists:" )
-        print( f"     cat {key_file}" )
-        print()
-        print( f"  2. Verify PostgreSQL registration:" )
-        print( f"     docker exec -it lupin-postgres psql -U lupin_dev -d lupin_auth -c \\" )
-        print( f'       "SELECT id, email, roles FROM users WHERE email = \'{args.email}\';"' )
-        print()
-        print( f"  3. Test notification:" )
-        print( f'     notify-claude-async "[LUPIN] Test message" --type=custom --priority=low' )
-        print()
-        print( "⚠️  IMPORTANT:" )
-        print( "  - This key will not be shown again" )
-        print( "  - Keep it secure (file permissions: 600)" )
-        print( "  - Add to .gitignore (keys should never be committed)" )
-        print( "  - For production: Store in GCP Secret Manager" )
-        print( "  - The bcrypt hash is stored in PostgreSQL for validation" )
-        print()
-
+        print_key_report(
+            "✅ SUCCESS: Service Account Created in PostgreSQL", 70, "━",
+            [ f"Service Account: {args.email}", f"User ID: {user_id}", f"Environment: {args.env}", f"API Key ID: {key_id}" ],
+            api_key, key_file,
+            [ "  1. Verify key file exists:",
+              f"     cat {key_file}",
+              "",
+              "  2. Verify PostgreSQL registration:",
+              "     docker exec -it lupin-postgres psql -U lupin_dev -d lupin_auth -c \\",
+              f'       "SELECT id, email, roles FROM users WHERE email = \'{args.email}\';"',
+              "",
+              "  3. Test notification:",
+              '     notify-claude-async "[LUPIN] Test message" --type=custom --priority=low' ],
+            [ "  - This key will not be shown again",
+              "  - Keep it secure (file permissions: 600)",
+              "  - Add to .gitignore (keys should never be committed)",
+              "  - For production: Store in GCP Secret Manager",
+              "  - The bcrypt hash is stored in PostgreSQL for validation" ]
+        )
         return 0
 
     except Exception as e:

@@ -17,7 +17,6 @@ Usage:
 
 import os
 import sys
-import argparse
 import secrets
 import sqlite3
 from pathlib import Path
@@ -38,7 +37,7 @@ if src_path not in sys.path:
 
 # Now cosa is importable
 import cosa.utils.util as cu
-from cosa.utils.admin_script_helpers import write_key_file
+from cosa.utils.admin_script_helpers import parse_service_account_args, print_key_report, write_key_file
 from cosa.rest.sqlite_database import get_auth_db_connection
 from cosa.rest.password_service import hash_password
 
@@ -244,17 +243,7 @@ def write_key_to_file( api_key: str, env: str ) -> Path:
 
 
 
-def main():
-    """
-    Main entry point for service account creation.
-
-    Returns:
-        int: Exit code (0 = success, 1 = error)
-    """
-    parser = argparse.ArgumentParser(
-        description='Create service account and generate API key',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+EPILOG = """
 Examples:
   # Create with defaults (dev environment)
   python src/scripts/create_service_account.py
@@ -268,28 +257,16 @@ Examples:
     --description="CI/CD pipeline key" \\
     --env=staging
         """
-    )
 
-    parser.add_argument(
-        '--email',
-        default='claude.code@deepily.ai',
-        help='Service account email (default: claude.code@deepily.ai)'
-    )
 
-    parser.add_argument(
-        '--description',
-        default='',
-        help='Key description (optional)'
-    )
+def main():
+    """
+    Main entry point for service account creation.
 
-    parser.add_argument(
-        '--env',
-        default='dev',
-        choices=['dev', 'staging', 'prod'],
-        help='Environment (dev, staging, prod) - determines key file name (default: dev)'
-    )
-
-    args = parser.parse_args()
+    Returns:
+        int: Exit code (0 = success, 1 = error)
+    """
+    args = parse_service_account_args( "Create service account and generate API key", EPILOG )
 
     print( "=" * 60 )
     print( "  Service Account & API Key Generation" )
@@ -320,33 +297,18 @@ Examples:
         print()
 
         # Step 5: Display key (ONCE)
-        print( "=" * 60 )
-        print( "  ✓ SUCCESS: Service Account Created" )
-        print( "=" * 60 )
-        print()
-        print( f"Service Account: {args.email}" )
-        print( f"Environment: {args.env}" )
-        print( f"Key ID: {key_id}" )
-        print()
-        print( "🔑 API Key (save this - shown only once):" )
-        print( "─" * 60 )
-        print( api_key )
-        print( "─" * 60 )
-        print()
-        print( f"Key saved to: {key_file}" )
-        print()
-        print( "Next steps:" )
-        print( f"  1. Verify key file exists: cat {key_file}" )
-        print( f"  2. Test configuration: lupin-config test {args.env}" )
-        print( f"  3. Send test notification: notify-claude-async 'Test message'" )
-        print()
-        print( "⚠️  IMPORTANT:" )
-        print( "  - This key will not be shown again" )
-        print( "  - Keep it secure (file permissions: 600)" )
-        print( "  - Add to .gitignore (keys should never be committed)" )
-        print( f"  - For production: Store in GCP Secret Manager" )
-        print()
-
+        print_key_report(
+            "✓ SUCCESS: Service Account Created", 60, "─",
+            [ f"Service Account: {args.email}", f"Environment: {args.env}", f"Key ID: {key_id}" ],
+            api_key, key_file,
+            [ f"  1. Verify key file exists: cat {key_file}",
+              f"  2. Test configuration: lupin-config test {args.env}",
+              "  3. Send test notification: notify-claude-async 'Test message'" ],
+            [ "  - This key will not be shown again",
+              "  - Keep it secure (file permissions: 600)",
+              "  - Add to .gitignore (keys should never be committed)",
+              "  - For production: Store in GCP Secret Manager" ]
+        )
         return 0
 
     except Exception as e:

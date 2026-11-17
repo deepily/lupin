@@ -186,3 +186,33 @@ def test_a_connect_that_raises_is_reported_and_there_is_nothing_to_close( capsys
     def no_connection(): raise RuntimeError( "no database" )
     assert h.create_table_with_indexes( no_connection, "widgets", CREATE_WIDGETS, [], _ok ) is False
     assert "  ✗ Unexpected error: no database\n" == capsys.readouterr().err
+
+
+# ── parse_service_account_args and print_key_report ───────────────────────────────────────
+
+def test_the_service_account_arguments_default_and_take_each_option( monkeypatch ):
+    monkeypatch.setattr( sys, "argv", [ "x" ] )
+    args = h.parse_service_account_args( "desc", "epi" )
+    assert ( args.email, args.description, args.env ) == ( "claude.code@deepily.ai", "", "dev" )
+
+    monkeypatch.setattr( sys, "argv", [ "x", "--email=a@b.c", "--description=CI key", "--env=prod" ] )
+    args = h.parse_service_account_args( "desc", "epi" )
+    assert ( args.email, args.description, args.env ) == ( "a@b.c", "CI key", "prod" )
+
+
+def test_an_unknown_environment_is_refused_and_help_prints_the_epilog_as_written( monkeypatch, capsys ):
+    monkeypatch.setattr( sys, "argv", [ "x", "--env=qa" ] )
+    with pytest.raises( SystemExit ) as refused: h.parse_service_account_args( "desc", "epi" )
+    assert refused.value.code == 2 and "invalid choice: 'qa'" in capsys.readouterr().err
+
+    monkeypatch.setattr( sys, "argv", [ "x", "--help" ] )
+    with pytest.raises( SystemExit ) as helped: h.parse_service_account_args( "My description", "\nExamples:\n  line one\n    line two" )
+    out = capsys.readouterr().out
+    assert helped.value.code == 0 and "My description" in out and "\nExamples:\n  line one\n    line two" in out
+
+
+def test_the_key_report_prints_banner_account_key_next_steps_and_notes_in_that_order( capsys ):
+    h.print_key_report( "DONE", 10, "-", [ "Account: a" ], "KEY", "/f", [ "  1. one", "", "  2. two" ], [ "  - note" ] )
+    assert capsys.readouterr().out == (
+        "==========\n  DONE\n==========\n\nAccount: a\n\n🔑 API Key (save this - shown only once):\n----------\nKEY\n----------\n\n"
+        "Key saved to: /f\n\nNext steps:\n  1. one\n\n  2. two\n\n⚠️  IMPORTANT:\n  - note\n\n" )
