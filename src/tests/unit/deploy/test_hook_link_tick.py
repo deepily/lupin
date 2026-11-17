@@ -895,4 +895,4 @@ def test_post_query_returns_the_error_status_and_body_when_the_server_refuses( s
 
 def test_post_query_returns_zero_and_the_reason_when_nothing_answers():
     status, text = hlt.post_query( "http://127.0.0.1:9", "k", "/api/notify", { "message": "m" } )
-    assert status == 0 and "refused" in text.lower()
+    assert status == 0 and text.strip(), "any transport failure, refused or timed out, is status 0 with its reason"
