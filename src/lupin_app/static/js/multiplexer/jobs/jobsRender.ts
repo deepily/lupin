@@ -8,11 +8,11 @@
 // clock or the network.
 
 import {
-  NOT_REPORTED, badgeText, clearsText, fixText, lastFinishedText, lastRunText, scanText, sortJobs, nextSort, DEFAULT_SORT,
+  badgeText, clearsText, fixText, lastFinishedText, lastRunText, scanText, sortJobs, nextSort, DEFAULT_SORT,
 } from "./jobsFormat";
 import type { JobSort } from "./jobsFormat";
 import { abstractMarkdown } from "./abstractText";
-import { CRON_CONFIRM_TEXT, CRON_DRIFT_TEXT, CRON_UNREADABLE_TEXT, cronChangedText, cronInsideText, cronReadsText, cronStateText } from "./cronFormat";
+import { CRON_DRIFT_TEXT, CRON_UNREADABLE_TEXT, cronChangedText, cronInsideText, cronReadsText, cronStateText } from "./cronFormat";
 import type { CronJobRow } from "./cronFormat";
 import type { JobEntry, JobsSummary } from "./types";
 import { renderDiscloseToggle } from "../render/templates/rowDisclosure";
