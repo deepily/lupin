@@ -52,10 +52,9 @@ _SRC_PATH = os.path.join( _LUPIN_ROOT, "src" )
 if _SRC_PATH not in sys.path:                                          # pragma: no cover
     sys.path.insert( 0, _SRC_PATH )                                    # pragma: no cover
 
+from lupin_mcp.commons_archival import _entries_to_text
 from lupin_mcp.commons_store import (
     ENTRY_SEPARATOR,
-    _format_entry,
-    _frontmatter_block,
     _parse_entry_block,
     _split_frontmatter,
 )
@@ -160,7 +159,7 @@ def _rebuild_topic_file_text( topic: str, entries: List[ dict ] ) -> str:
     """
     Build the full topic-file text content from frontmatter + entries.
 
-    Uses the same `_format_entry` and `ENTRY_SEPARATOR` the live store uses,
+    Delegates to `commons_archival._entries_to_text`, which uses the same `_format_entry` and `ENTRY_SEPARATOR` the live store uses,
     so post-migration files round-trip through `CommonsStore.read` identically
     to natively-written files.
     """
@@ -168,19 +167,7 @@ def _rebuild_topic_file_text( topic: str, entries: List[ dict ] ) -> str:
         first_ts = entries[ 0 ].get( "ts" ) or datetime.now( timezone.utc ).isoformat( timespec="microseconds" )
     else:
         first_ts = datetime.now( timezone.utc ).isoformat( timespec="microseconds" )
-    parts = [ _frontmatter_block( topic, False, first_ts ) ]
-    for entry in entries:
-        parts.append( ENTRY_SEPARATOR )
-        parts.append( _format_entry(
-            ts            = entry[ "ts" ],
-            session_id    = entry[ "sender_session_id" ],
-            persona_name  = entry[ "persona_name" ],
-            persona_icon  = entry[ "persona_icon" ],
-            persona_color = entry[ "persona_color" ],
-            body          = entry[ "body" ],
-            metadata      = entry[ "metadata" ],
-        ) )
-    return "".join( parts )
+    return _entries_to_text( topic, entries, False, first_ts )
 
 
 def _backup_files( files: List[ Path ], backup_dir: Path ) -> None:
