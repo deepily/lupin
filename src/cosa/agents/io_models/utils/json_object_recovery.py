@@ -186,7 +186,7 @@ def save_raw_response( body: str, label: str ) -> Optional[ str ]:
 
 
 def recover_json_object(
-    response_content: str, label: Optional[ str ] = None, dump_info: Optional[ dict ] = None
+    response_content: str, label: Optional[ str ] = None, dump_info: Optional[ dict ] = None, allow_array: bool = False
 ) -> Optional[ Any ]:
     """
     Best-effort recovery of a JSON value from a (possibly chatty) completion.
@@ -195,9 +195,12 @@ def recover_json_object(
         - response_content is a string
         - label is None, or a short tag naming the caller's job, used in the dump file name
         - dump_info is None or a dict
+        - allow_array is a bool
 
     Ensures:
         - returns the parsed JSON value, or None if nothing can be recovered
+        - with allow_array true, the last balanced [...] array in the prose is tried before the last {...} object,
+          so a list of objects is returned whole and not as its last member
         - never raises and never substitutes a default
         - on None with a label, the full raw response is saved by `save_raw_response`, the path is
           logged beside the bounded body, and the path (or None) is stored in dump_info[ "path" ]
@@ -233,6 +236,14 @@ def recover_json_object(
         return _loads_whitespace_tolerant( content )
     except json.JSONDecodeError:
         pass
+
+    if allow_array:
+        array_text = extract_last_balanced( content, "[", "]" )
+        if array_text is not None:
+            try:
+                return _loads_whitespace_tolerant( array_text )
+            except json.JSONDecodeError:
+                pass
 
     extracted = extract_json_object( content )
     if extracted is not None:

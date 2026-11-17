@@ -20,7 +20,6 @@ Design refs:
 """
 
 import asyncio
-import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -33,7 +32,7 @@ from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
 from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
 from cosa.agents.shared.edit_agent_options import build_edit_agent_options
-from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, extract_last_balanced
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, recover_json_object
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
     TFEPhase,
@@ -846,32 +845,15 @@ class TFEOrchestrator:
         """
         Try to parse the text as a top-level JSON payload.
 
-        Attempts in order:
-          1. `json.loads(text)` on the whole text — works for clean JSON
-          2. Walk backward from the last `]` to find a matching `[` and parse that
-          3. Walk backward from the last `}` to find a matching `{` and parse that
+        Delegates to recover_json_object with arrays allowed: the whole text, then the last
+        balanced array, then the last balanced object.
 
         Returns the parsed dict/list, or None if nothing parses.
         """
         if not text:
             return None
 
-        # Attempt 1: whole text is valid JSON
-        try:
-            return json.loads( text )
-        except json.JSONDecodeError:
-            pass
-
-        # Attempts 2 and 3: the last balanced top-level array, then the last balanced object
-        for open_char, close_char in ( ( "[", "]" ), ( "{", "}" ) ):
-            candidate = extract_last_balanced( text, open_char, close_char )
-            if candidate is not None:
-                try:
-                    return json.loads( candidate )
-                except json.JSONDecodeError:
-                    pass
-
-        return None
+        return recover_json_object( text, allow_array=True )
 
     def _write_multi_cluster_plan_doc( self, proposals: list[ TFEProposedFix ] ) -> str:
         """
