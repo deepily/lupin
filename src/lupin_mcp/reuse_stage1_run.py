@@ -117,9 +117,12 @@ def check_paths( root, data, ledger, live ):
     return data, ledger
 
 
-def open_env( root, data, ledger, live, entries_in_index ):
+def open_env( root, data, ledger, live, entries_in_index, build=None ):
     """
     Build the driver environment, or refuse before anything is created.
+
+    Requires:
+        - build is None, or takes ( root, data, ledger, transport_factory ) and returns the environment, for a runner whose environment is not a Stage1Env
 
     Ensures:
         - refuses as check_paths does
@@ -134,6 +137,7 @@ def open_env( root, data, ledger, live, entries_in_index ):
         data.mkdir( parents=True, exist_ok=True )
         ( data / STAND_IN_MARKER ).write_text( "written by a stand-in run; never read by a live one\n", encoding="utf-8" )
         factory = StandIn
+    if build is not None: return build( root, data, rl.AccountLedger( ledger ), factory )
     return s1.Stage1Env( root, data, rl.AccountLedger( ledger ), transport_factory=factory, entries_in_index=entries_in_index )
 
 
