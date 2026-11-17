@@ -704,7 +704,7 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 **URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The `?scope=` query param is **retired**: its presence answers HTTP 400 with a pointer to this section.
 
 - **Lupin files**: `/app/docs?path=lupin/<rel>` — e.g. `/app/docs?path=lupin/bug-fix-queue.md`, `/app/docs?path=lupin/src/rnd/foo.md`. Whitelist authority is `lupin/.docview.yml` at repo root.
-- **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile` — same URL shape, scope name is the project name.
+- **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile`, `unified-headless-wrapper` — same URL shape, scope name is the project name.
 - **Source of truth**: `src/conf/lupin-app.ini` § `external repos` plus each repo's `.docview.yml` (when present).
 
 The floor blocklist and upload are described in `src/docs/wiki/capabilities/doc-viewer.md`. Runtime discovery, supported file types, Folder/Roots/Upload and the example URLs are in `src/docs/doctrine/claude-md-receipts-archive.md` § "Doc viewer scope (unified path-prefix routing)".
