@@ -30,7 +30,7 @@ pins:
 - `drain_and_acknowledge` drains the buffer. `acknowledge_drained` is a no-op kept for API compatibility.
 - `format_backlog_header` discloses how deep a drained backlog is. `format_voice_context` formats drained messages for injection.
 - `build_additional_context` builds the `additionalContext` output. `enrich_voice_context` appends a notification reminder.
-- `build_voice_deny_response` denies a PreToolUse call when the buffer has content. `is_mcp_voice_tool` spots cosa-voice tools.
+- `build_deny_response` is the plain PreToolUse deny envelope every guard uses. `build_voice_deny_response` denies a PreToolUse call when the buffer has content. `is_mcp_voice_tool` spots cosa-voice tools.
 - `build_peer_dm_reminder` builds the peer-DM reminder block. `is_injected_peer_dm` tells an injected envelope from user typing.
 - `inject_qualifier_via_tmux` types text into the tmux input from a detached process.
 - `deliver_pending_peer_dms` drains the buffer and delivers pending peer DMs by tmux, with no voice rider.
