@@ -8,6 +8,8 @@ The current release's full narrative is in [WHATS-NEW.md](WHATS-NEW.md); the nar
 
 ---
 
+**v0.2.2** (30 September – 3 November 2026) — check for existing code before writing new code. Before a seat writes a new function, can it find out whether one exists? It built a wiki of 696 capability pages written from the code, and lookup tools that search it. It also built a **reuse gate** that refuses a merge whose new definitions carry no lookup record. Enforcement began on 3 November. A daily duplicate check now files what it finds, and coverage reached 100% across the whole frame. A docstring sweep took 29,838 lint findings to 0 behind a new `doclint` gate. The measurements of the checker itself were reported as found, including the negative ones.
+
 **v0.2.0** (August 2026, in progress) — drove the vague-request demo path end to end -- "make me a podcast about that thing I was researching". It also gave podcast and presentation approval gates a **fail-open** timeout that discloses up front that silence continues. Its second half turned the instruments on themselves. Every test tier now names the tree its green was earned on. The coverage frame widened from `cosa` alone to six packages entered by directory path, pulling ~40,581 previously invisible lines into the denominator. A `--cov` run that cannot attribute its own number is refused outright.
 
 **v0.1.9** (June–August 2026) — LanceDB → PostgreSQL + pgvector cutover across four lanes (models/Alembic, eight per-table repositories behind a runtime backend flag, consumer routing, ~202k-vector backfill), with dual-engine equivalence proven and exact scan chosen over HNSW; a 90.46 GB → 1.07 GB LanceDB rebuild reclaiming ~89 GB beforehand. GCP deployment made operator-usable: CPU-VM app restore verified end to end, GPU model server split onto Cloud Run, IAP browser tunnel, live fleet arbiter on the VM, bring-up runbook, and a 38-hour embeddings outage closed by decoupling one key file serving two incompatible authorities. Fleet liveness hardened against a notification flood, a tmux fleet-killer, a Stop-phase turn wedge, and a family of arbiter false positives. Task store gained `task_edit`, `task_reassign`, post-terminal amendment of closed rows, self-expiring row parking, and an unscoped-query guard. TypeScript multiplexer reached legacy parity (724 TS test cases, 100% c8). Instrument rigor formalized: hash-chained tier-run attestation ledger, first execution of 8,799 previously-ungated CoSA tests, bridge-contact and import-discipline guards. Mistral Small 3.2 24B stood up on GPU1; `DEEPILY_DATA_DIR` moved runtime state out of the repo; embedding-regeneration pipeline built for all 578,364 logged texts. 24,042 tests.
@@ -29,6 +31,42 @@ The current release's full narrative is in [WHATS-NEW.md](WHATS-NEW.md); the nar
 ## Full release narratives
 
 The narrative highlights for earlier releases, newest first, as they were written.
+
+### What's New in v0.2.2 — check for existing code before writing new code
+
+v0.2.2 ran from 30 September to 3 November 2026. It asked one question: **before a seat writes a new function, can it find out whether one already exists**? The answer has three parts: a map of the code, tools that search it, and a merge gate that holds every seat to using them. The branch also measured how well the checker works, and it reports the weak spots as found.
+
+**Reuse before you write**
+
+- **A wiki of the code, written from the code**. About 670 capability pages now describe what each package does and how its parts fit together. A lint check fails when a page falls out of step with the code it describes.
+- **Lookup tools every seat can call**. Before writing a definition, a seat asks whether something like it already exists. The tools search an index of every symbol and rank the candidates by meaning. A judging model then picks the ones that do the same job.
+- **A merge gate that enforces it**. Every new function, method or class needs a short record of the lookup and its decision. The decision is duplicate, extend an existing symbol, or distinct and why. The gate refuses a merge without one, runs in seconds, and is switched on.
+- **A nightly duplicate check**. Each night a job compares the day's new definitions against the rest of the tree, and files what it finds for triage. Its first pass found 41 candidates, and 4 were real duplicates, fixed the same day.
+
+**Measuring the checker against ground truth**
+
+- **Ground truth labelled by a person**. A labelling page let the owner mark 222 pairs of definitions as the same job or not. Every claim about the checker is scored against that set.
+- **What helps, and what does not**. A one-line statement of purpose on each definition is what lets a duplicate be found at all. The judging model is the weak stage. On real pairs it ranks well enough to use. Inside a full candidate list, though, it cannot yet tell a duplicate from a look-alike, and that finding sets the next round of experiments.
+
+**Code and docs that stay clean**
+
+- **Docstrings rewritten, and kept that way**. Older model output had filled the docstrings with emphasis, history and references nobody could follow. The [documentation rewrite plan](src/rnd/v0.2.2/2026.09.30-lupin-af-documentation-rewrite-plan/2026.09.30-lupin-af-documentation-rewrite-plan.md) measures how often, with before-and-after examples. A sweep rewrote 3,485 docstrings and took lint findings from 29,838 to 0. A commit gate now stops them coming back.
+- **Copy-pasted code merged**. Near-identical copies became shared helpers, which cut the exact clone groups from 129 to 34.
+- **A higher test floor**. Coverage was measured at 100% across the whole frame. The unit suite grew from about 27,700 tests to about 43,200, and now runs in parallel. Documentation lint, the reuse check and the Docker smoke tests joined the merge gates.
+
+**Following the project, and steering it**
+
+- **Any document becomes a podcast in one click**. The doc viewer turns an explainer into a narrated episode, so the code and its plans can be followed by ear. Episodes can also be published to Google Drive.
+- **One click to approve**. Cards carry links that approve a held task, approve a whole list, or raise one task to top priority. Each link shows a preview first. The fleet's skeleton-crew mode is now a switch in the web clients.
+- **Smaller fixes in the clients**. Keep place now holds your scroll inside every card, and audio can no longer play for the wrong request.
+
+**Platform**
+
+- **One server image, on the current agent SDK**. Both servers run one rebuilt image. It carries the current Claude Agent SDK and the same Claude Code version as the host.
+- **Tighter access**. The app reaches the database through its own role, with no password in its environment, and the database listens only locally. Guards stop one session from killing another's processes or answering another user's card.
+- **A cloud test machine on Vertex**. The cloud test machine now reaches Claude through Google's Vertex service.
+
+---
 
 ### What's New in v0.2.0 (dev) — the demo that had to survive a real room
 

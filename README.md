@@ -14,7 +14,7 @@
 
 `FastAPI` | `Voice I/O` | `PEFT/LoRA` | `PostgreSQL + pgvector` | `Claude Agent SDK` | `MCP Protocol`
 
-Current version: **v0.2.2** (dev) | License: Apache 2.0 (the `LICENSE` file)
+Current version: **v0.2.3** (dev) | License: Apache 2.0 (the `LICENSE` file)
 
 ---
 
@@ -109,9 +109,9 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 
 ---
 
-## What's new in v0.2.2
+## What's new in v0.2.3
 
-v0.2.2 ran from 30 September to 3 November 2026. It asked one question: before a seat writes a new function, can it find out whether the code base already has one? It built a wiki of 696 capability pages written from the code, and lookup tools that search it. It also built a **reuse gate** that refuses a merge whose new definitions carry no lookup record. Enforcement began on 3 November. A daily duplicate check now files what it finds, and coverage reached 100% across the whole frame. A docstring sweep took 29,838 lint findings to 0 behind a new `doclint` gate. The measurements of the checker itself were reported as found, including the negative ones.
+v0.2.3 ran from 4 to 17 November 2026. It finished three things v0.2.2 left open. The decision proxy's sixteen known defects were fixed. Its trust model became a setting, including a Bayesian logistic regression fed from ratified decisions. The reuse backlog was judged: saved rulings were rescued, Opus judges the rest under a daily budget, and seats triaged 356 duplicate-check findings. All 24 background jobs got a switch the running job honours, and both web clients show one merged jobs list. The backup shrank from 22.3 GB to 5.3 GB.
 
 Full highlights: [WHATS-NEW.md](WHATS-NEW.md) · per-version summaries: [VERSION-HISTORY.md](VERSION-HISTORY.md) · per-feature detail: [CHANGELOG.md](CHANGELOG.md)
 
@@ -324,7 +324,7 @@ Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure aut
 
 ## Project status
 
-Lupin is an active research platform at v0.2.2 (dev). Developed by a solo engineer, it combines voice-first agent orchestration and PEFT fine-tuning into a production-grade stack. The stack is backed by 62,368 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle). It has full CI discipline and a FastAPI + PostgreSQL + pgvector architecture. Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP. The refactorings were ambitious and were made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology.
+Lupin is an active research platform at v0.2.3 (dev). Developed by a solo engineer, it combines voice-first agent orchestration and PEFT fine-tuning into a production-grade stack. The stack is backed by 62,368 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle). It has full CI discipline and a FastAPI + PostgreSQL + pgvector architecture. Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP. The refactorings were ambitious and were made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology.
 
 ---
 
