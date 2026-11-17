@@ -39,6 +39,9 @@ import os
 import urllib.parse
 from pathlib import Path
 
+# One order-stable dedup-and-tail-cap (dupcheck d-b2ed222193): the DM reconcile's.
+from lupin_cli.claude_code.hooks.lib.dm_inbox_reconcile import _dedup_tail
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -68,25 +71,6 @@ def _max_iso( a, b ):
     if b is None:
         return a
     return a if a >= b else b
-
-
-def _dedup_tail( seq, cap ):
-    """
-    De-duplicate `seq` keeping first-occurrence order, then keep only the last `cap` entries.
-
-    Ensures:
-        - Order-stable dedup, tail-capped when cap > 0 and len > cap (0 means no cap)
-    """
-    seen = set()
-    out  = []
-    for x in seq:
-        if x in seen:
-            continue
-        seen.add( x )
-        out.append( x )
-    if cap and len( out ) > cap:
-        return out[ -cap: ]
-    return out
 
 
 def _format_answer_block( row ):
