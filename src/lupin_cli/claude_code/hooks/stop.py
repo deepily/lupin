@@ -695,7 +695,6 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
         int or None: Spawned waiter PID, or None on failure
     """
     import datetime
-    import subprocess
     from pathlib import Path
 
     # Pre-compute gist while we have last_assistant_message (waiter doesn't)
@@ -724,48 +723,21 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
         last_task_cwd       = cwd,
     )
 
-    # Spawn the waiter — mirrors register_session.py:_spawn_listener pattern
-    short    = session_id[ :8 ] if session_id else "unknown"
-    log_path = sessions_dir() / f"cc-idle-waiter-{short}.log"   # row 8ccc20ab: the one seam
-
-    cmd = [
-        sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
-        "--session-id"   , session_id,
-        "--cc-pid"       , str( cc_pid ),
-        "--backoff-index", str( current_index ),
-    ]
     # Test-mode hook: if env tells us to use a short sleep, propagate it
     test_sleep = os.environ.get( "LUPIN_IDLE_WAITER_TEST_SLEEP_SECS" )
-    if test_sleep:
-        cmd.extend( [ "--sleep-secs", test_sleep ] )
 
-    env = os.environ.copy()
-    env[ "PYTHONUNBUFFERED" ] = "1"
-    if _src_path and _src_path not in env.get( "PYTHONPATH", "" ):
-        env[ "PYTHONPATH" ] = _src_path + ":" + env.get( "PYTHONPATH", "" )
-    if cwd:
-        env[ "CC_HOOK_CWD" ] = cwd
+    from lupin_cli.claude_code.hooks.lib.idle_waiter import _spawn_successor
 
     try:
-        log_file = open( log_path, "a" )
-    except OSError:
-        log_file = subprocess.DEVNULL
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout            = log_file if log_file is not subprocess.DEVNULL else subprocess.DEVNULL,
-            stderr            = log_file if log_file is not subprocess.DEVNULL else subprocess.DEVNULL,
-            env               = env,
-            start_new_session = True,
-        )
+        waiter_pid = _spawn_successor( session_id, cc_pid, current_index,
+                                       sleep_secs_override=test_sleep if test_sleep else None, cwd=cwd )
         log_to_stream( "stop", {}, extra={
             "phase"         : "idle_waiter_armed",
-            "waiter_pid"    : proc.pid,
+            "waiter_pid"    : waiter_pid,
             "backoff_index" : current_index,
             "cc_pid"        : cc_pid,
         } )
-        return proc.pid
+        return waiter_pid
     except Exception as e:
         log_to_stream( "stop", {}, extra={
             "phase" : "idle_waiter_spawn_failed",
