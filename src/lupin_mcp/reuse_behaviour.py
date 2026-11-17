@@ -236,6 +236,44 @@ def count_audits( receipts, week ):
     return { AUDIT_ROWS[ 0 ]: sum( 1 for r in held if r[ sa.NEW_FIELD ] ), AUDIT_ROWS[ 1 ]: sum( 1 for r in held if not r[ sa.NEW_FIELD ] ) }
 
 
+def check_documents( folder ):
+    """
+    Read the result files of the daily duplicate check, whatever they hold.
+
+    Requires:
+        - folder is the check's result folder, and exists
+
+    Ensures:
+        - returns ( path, document ) for each file in folder whose name is a result file's, in name order
+        - the document is the JSON object the file holds, or None when the file cannot be read or is not a JSON object
+        - a file whose name is not a result file's, such as last-success.json, is not read
+    """
+    docs = []
+    for path in sorted( p for p in pathlib.Path( folder ).iterdir() if CHECK_NAME.match( p.name ) ):
+        try: doc = json.loads( path.read_text( encoding="utf-8" ) )
+        except ( OSError, ValueError ): doc = None
+        docs.append( ( path, doc if isinstance( doc, dict ) else None ) )
+    return docs
+
+
+def check_run_of( path, doc ):
+    """
+    Summarise one result file's document as read_check_run does.
+
+    Requires:
+        - path is the file the document came from; doc is its JSON object, or None for an unreadable file
+
+    Ensures:
+        - returns the dict read_check_run describes, or None when doc is None or lacks a readable date, trigger, judge_calls or elapsed_seconds
+    """
+    if doc is None: return None
+    try:
+        return { "day": datetime.date.fromisoformat( doc[ "date" ] ), "trigger": str( doc[ "trigger" ] ), "stem": path.stem, "commits": int( doc.get( "window", { } ).get( "commits", 0 ) ), "judged": int( doc.get( "judged", 0 ) ), "calls": int( doc[ "judge_calls" ] ),
+                 "seconds": float( doc[ "elapsed_seconds" ] ), "findings": [ ( f.get( "verdict" ), f.get( "correlation_key" ), f.get( "id" ) ) for f in doc.get( "findings", [] ) ] }
+    except ( ValueError, KeyError, TypeError, AttributeError ):
+        return None
+
+
 def read_check_run( path ):
     """
     Read one result file of the daily duplicate check.
@@ -249,12 +287,9 @@ def read_check_run( path ):
         - a run that judged nothing, or never reached judging, has judged 0 and no findings
         - returns None when the file cannot be read, is not a JSON object, or lacks a readable date, trigger, judge_calls or elapsed_seconds
     """
-    try:
-        doc = json.loads( path.read_text( encoding="utf-8" ) )
-        return { "day": datetime.date.fromisoformat( doc[ "date" ] ), "trigger": str( doc[ "trigger" ] ), "stem": path.stem, "commits": int( doc.get( "window", { } ).get( "commits", 0 ) ), "judged": int( doc.get( "judged", 0 ) ), "calls": int( doc[ "judge_calls" ] ),
-                 "seconds": float( doc[ "elapsed_seconds" ] ), "findings": [ ( f.get( "verdict" ), f.get( "correlation_key" ), f.get( "id" ) ) for f in doc.get( "findings", [] ) ] }
-    except ( OSError, ValueError, KeyError, TypeError, AttributeError ):
-        return None
+    try: doc = json.loads( path.read_text( encoding="utf-8" ) )
+    except ( OSError, ValueError ): return None
+    return check_run_of( path, doc )
 
 
 def read_check_runs( folder, week ):
@@ -270,7 +305,7 @@ def read_check_runs( folder, week ):
     """
     folder = pathlib.Path( folder )
     if not folder.is_dir(): return [], 0
-    read = [ read_check_run( p ) for p in sorted( folder.glob( "*.json" ) ) if CHECK_NAME.match( p.name ) ]
+    read = [ check_run_of( p, d ) for p, d in check_documents( folder ) ]
     return [ r for r in read if r is not None and week[ 0 ] <= r[ "day" ] <= week[ 1 ] ], sum( 1 for r in read if r is None )
 
 
