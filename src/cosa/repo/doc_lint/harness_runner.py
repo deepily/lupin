@@ -320,6 +320,25 @@ def unquotable_seeds( pairs ):
              if p.get( "seed_span" ) is not None and claim_extractor.locate_quote( p[ "old" ][ p[ "seed_span" ][ 0 ]:p[ "seed_span" ][ 1 ] ], p[ "old" ] ) is None ]
 
 
+async def cached( ledger, key, make ):
+    """
+    Get a value from the ledger, or compute it, store it and return it.
+
+    Requires:
+        - ledger is None, or has get( key ) returning None for a missing key and put( key, value )
+        - make is an async function of no arguments
+
+    Ensures:
+        - returns the ledger's value for key when it holds one, without calling make
+        - otherwise returns make()'s value, stored under key first when there is a ledger
+    """
+    stored = ledger.get( key ) if ledger is not None else None
+    if stored is not None: return stored
+    value = await make()
+    if ledger is not None: ledger.put( key, value )
+    return value
+
+
 async def run_parallel( items, run_one, parallel, key ):
     """
     Run one async call per item and return the results in input order.
