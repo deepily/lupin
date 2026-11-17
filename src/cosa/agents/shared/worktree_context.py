@@ -35,7 +35,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import cosa.utils.util as cu
-from cosa.agents.shared.worktree_reaper import drain_then_remove
+from cosa.agents.shared.worktree_reaper import drain_then_remove, JOB_LOCK_PREFIX
 from cosa.utils.worktree_venv import provision_worktree_venv
 from cosa.utils.worktree_artifacts import provision_worktree_artifacts
 
@@ -182,6 +182,14 @@ class WorktreeContext:
 
         self.path = target_path
 
+        # Lock the record while the job runs (row 07afc29a). A tree made inside the container records a
+        # gitdir under /var/lupin that a host `git worktree prune` reads as missing; git skips locked records.
+        # Fail open: an unlocked job still runs, and the end-of-job cleanup already copes with a dropped record.
+        lock = await self._run_git_in( project_root, "worktree", "lock", "--reason", f"{JOB_LOCK_PREFIX}{self.job_id}", target_path )
+        self._locked = lock[ "success" ]
+        if not self._locked:
+            logger.warning( f"[WorktreeContext] could not lock {target_path}; a host prune could drop its record: {lock[ 'stderr' ]}" )
+
         # ── Give the new worktree a .venv (row 9b2abfb7) ──────────────────────────
         #
         # `.venv` is gitignored, so the `git worktree add` above CANNOT have produced
@@ -236,6 +244,11 @@ class WorktreeContext:
         """
         if not self.enabled:
             return False
+
+        if self._locked:
+            # A locked tree cannot be removed. A failure here means the record is already gone, which the cleanup handles.
+            await self._run_git_in( cu.get_project_root(), "worktree", "unlock", self.path )
+            self._locked = False
 
         if not self._auto_cleanup:
             if self.debug: print( f"[WorktreeContext] auto_cleanup=false — preserving {self.path}" )

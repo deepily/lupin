@@ -1181,6 +1181,12 @@ def sweep_merged_branches(
 # Every uncertainty counts as ALIVE: a janitor that cannot tell must not reap.
 
 SEAT_LOCK_PREFIX = "lupin-seat:"
+
+# A BFE/TFE job locks its own sandbox for as long as it runs (row 07afc29a): a container-made tree
+# records a gitdir under /var/lupin that a host `git worktree prune` reads as missing, and git
+# never prunes a locked record. A hard-killed job leaves the lock behind, so the janitor treats
+# this prefix as stale once the tree is idle past the age threshold (no liveness probe exists).
+JOB_LOCK_PREFIX  = "lupin-job:"
 TMUX_ABSENT_MARKS = ( "can't find session", "no server running", "error connecting" )
 
 
@@ -1363,7 +1369,8 @@ def reconcile_worktrees(
                 out[ "skipped" ].append( { "path": path, "reason": "outside_sandbox" } ); continue
             lock_reason = rec.get( "lock_reason" ) or ""
             seat_lock   = rec.get( "locked" ) and lock_reason.startswith( SEAT_LOCK_PREFIX )
-            if rec.get( "locked" ) and not seat_lock:
+            own_lock    = seat_lock or ( rec.get( "locked" ) and lock_reason.startswith( JOB_LOCK_PREFIX ) )
+            if rec.get( "locked" ) and not own_lock:
                 out[ "skipped" ].append( { "path": path, "reason": "locked" } ); continue
             if seat_lock and seat_alive_fn( lock_reason[ len( SEAT_LOCK_PREFIX ): ], path ):
                 out[ "skipped" ].append( { "path": path, "reason": "seat_alive" } ); continue
@@ -1375,12 +1382,12 @@ def reconcile_worktrees(
             age = age_fn( path )
             if age < age_threshold_hours:
                 out[ "skipped" ].append( { "path": path, "reason": f"active_{round( age, 2 )}h" } ); continue
-            if seat_lock:
+            if own_lock:
                 unlock = _git( run, project_root, "worktree", "unlock", path )
                 if not unlock[ "success" ]:
                     out[ "errors" ].append( f"{path}: unlock failed, not drained: {unlock[ 'stderr' ]}" ); continue
             result = drain_fn( path, project_root=project_root, run=run, now=now_dt, debug=debug )
-            if seat_lock and not result.get( "removed" ):
+            if own_lock and not result.get( "removed" ):
                 relock = _git( run, project_root, "worktree", "lock", "--reason", lock_reason, path )
                 if not relock[ "success" ]:
                     out[ "errors" ].append( f"{path}: drain did not remove it AND re-lock failed — "

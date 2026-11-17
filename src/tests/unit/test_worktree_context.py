@@ -16,7 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
-from cosa.agents.shared.worktree_context import WorktreeContext, WorktreeCollisionError
+from cosa.agents.shared.worktree_context import WorktreeContext, WorktreeCollisionError, has_dangling_git_link
+from cosa.agents.shared.worktree_reaper import JOB_LOCK_PREFIX
 
 
 # ---------------------------------------------------------------------------
@@ -309,3 +310,61 @@ class TestBrokenFolderWithoutDanglingLink:
                 os.remove( os.path.join( path, ".git" ) )
         assert os.path.isdir( path )
         assert "no dangling link" in caplog.text
+
+
+# ===========================================================================
+# A host-side prune must not drop a running job's record (row 07afc29a)
+# ===========================================================================
+
+def _point_gitdir_at_container_path( repo: str, job_id: str ) -> str:
+    """Make git's record name a path the host cannot see, as a container-made tree does."""
+    record = os.path.join( repo, ".git", "worktrees", job_id )
+    with open( os.path.join( record, "gitdir" ), "w", encoding="utf-8" ) as f:
+        f.write( f"/var/lupin-absent-{job_id}/.claude/worktrees/{job_id}/.git\n" )
+    return record
+
+
+def _host_prune( repo: str ) -> None:
+    subprocess.run( [ "git", "worktree", "prune" ], cwd=repo, check=True, capture_output=True )
+
+
+class TestHostPruneLeavesRunningJobAlone:
+    """A prune while the job runs keeps its record; the lock is gone once the job ends."""
+
+    @pytest.mark.asyncio
+    async def test_record_survives_prune_during_job( self, test_repo ):
+        job_id = "tfe-prune-live"
+        async with WorktreeContext( job_id=job_id, config_mgr=_StubConfig( _CLEANUP_CFG ), enabled=True ) as wt:
+            record = _point_gitdir_at_container_path( test_repo, job_id )
+            _host_prune( test_repo )
+            assert os.path.isdir( record ), "prune dropped the running job's record"
+            assert not has_dangling_git_link( wt.path )
+
+    @pytest.mark.asyncio
+    async def test_lock_reason_names_the_job_and_is_released_on_exit( self, test_repo ):
+        job_id = "tfe-lock-life"
+        async with WorktreeContext( job_id=job_id, config_mgr=_StubConfig( _CLEANUP_CFG ), enabled=True ) as wt:
+            listing = subprocess.run( [ "git", "worktree", "list", "--porcelain" ], cwd=test_repo, capture_output=True, text=True ).stdout
+            assert f"locked {JOB_LOCK_PREFIX}{job_id}" in listing
+            path = wt.path
+        assert not os.path.exists( path ), "unlock must precede the reaper, or the locked tree is never removed"
+
+    @pytest.mark.asyncio
+    async def test_preserved_tree_is_unlocked_when_cleanup_is_off( self, test_repo ):
+        cfg = { **_CLEANUP_CFG, "cosa worktree auto cleanup": False }
+        async with WorktreeContext( job_id="tfe-keep", config_mgr=_StubConfig( cfg ), enabled=True ) as wt:
+            path = wt.path
+        listing = subprocess.run( [ "git", "worktree", "list", "--porcelain" ], cwd=test_repo, capture_output=True, text=True ).stdout
+        assert os.path.isdir( path ) and "locked" not in listing
+
+    @pytest.mark.asyncio
+    async def test_lock_failure_warns_and_the_job_still_runs( self, test_repo, caplog ):
+        real = WorktreeContext._run_git_in
+        async def fail_lock( self, cwd, *args, **kw ):
+            if args[ :2 ] == ( "worktree", "lock" ): return { "success": False, "stdout": "", "stderr": "no lock", "returncode": 1 }
+            return await real( self, cwd, *args, **kw )
+        with patch.object( WorktreeContext, "_run_git_in", fail_lock ):
+            with caplog.at_level( "WARNING" ):
+                async with WorktreeContext( job_id="tfe-nolock", config_mgr=_StubConfig( _CLEANUP_CFG ), enabled=True ) as wt:
+                    assert os.path.isdir( wt.path )
+        assert "could not lock" in caplog.text

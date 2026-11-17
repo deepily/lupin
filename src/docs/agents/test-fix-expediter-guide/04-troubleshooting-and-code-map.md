@@ -96,6 +96,8 @@ gh auth login
 
 **Guard.** `src/tests/unit/test_worktree_context.py`, class `TestFinishedJobLeavesNoFolder` (drops git's record inside the job, then checks the folder is gone after success, failure and cancel).
 
+**Prevention.** `WorktreeContext` locks the record (`git worktree lock --reason lupin-job:<id>`) once the worktree exists, and unlocks it first thing in `__aexit__`. Git's prune skips locked records, so a host prune during the job leaves it alone. Host code that runs prune: `worktree_reaper.drain_then_remove` (only after a failed `worktree remove`) and `range_gate` cleanup (every range-gate run). A hard-killed job leaves its lock; the janitor (`reconcile_worktrees`) treats a `lupin-job:` lock as stale once the tree is idle past the age threshold. Guard: `TestHostPruneLeavesRunningJobAlone`.
+
 ### Infinite rerun loop (should never happen)
 
 If you see TFE dispatching on the completion of its own validation rerun, the
