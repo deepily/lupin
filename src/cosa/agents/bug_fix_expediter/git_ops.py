@@ -18,6 +18,8 @@ import os
 import shutil
 from typing import Optional
 
+from cosa.agents.shared.worktree_context import run_command_in
+
 
 class GitOps:
     """
@@ -57,33 +59,7 @@ class GitOps:
     async def _run_cmd( self, cmd: str, *args: str ) -> dict:
         """Generic async subprocess runner with timeout."""
         if self.debug: print( f"[GitOps] {cmd} {' '.join( args )}" )
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                cmd, *args,
-                stdout = asyncio.subprocess.PIPE,
-                stderr = asyncio.subprocess.PIPE,
-                cwd    = self.cwd,
-            )
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout = self.timeout_secs,
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return { "success": False, "stdout": "", "stderr": f"timeout after {self.timeout_secs}s", "returncode": -1 }
-
-            stdout = stdout_bytes.decode( "utf-8", errors="replace" ).strip()
-            stderr = stderr_bytes.decode( "utf-8", errors="replace" ).strip()
-            return {
-                "success"    : proc.returncode == 0,
-                "stdout"     : stdout,
-                "stderr"     : stderr,
-                "returncode" : proc.returncode,
-            }
-        except Exception as e:
-            return { "success": False, "stdout": "", "stderr": str( e ), "returncode": -1 }
+        return await run_command_in( self.cwd, cmd, *args, timeout=self.timeout_secs )
 
     async def get_current_branch( self ) -> str:
         """
