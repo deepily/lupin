@@ -4,7 +4,8 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.seat_worktree.provision_seat_worktree@eed42d08b9
   - cosa.utils.worktree_artifacts.provision_worktree_artifacts@fd62ae8430
-  - cosa.agents.shared.worktree_context.WorktreeContext@f26451f4ff
+  - cosa.agents.shared.worktree_context.WorktreeContext@fb18787a16
+  - cosa.agents.shared.worktree_context.has_dangling_git_link@e5e3ce902c
   - cosa.agents.shared.seat_teardown.retire_seat_worktree@dd06d0a3d6
   - cosa.agents.shared.worktree_reaper.drain_then_remove@3d4638ca10
   - cosa.agents.shared.worktree_reaper.reconcile_worktrees@d7ff867a1c
@@ -21,7 +22,7 @@ Git worktrees are made for each spawned seat and for each BFE or TFE job. They a
 - It reuses a registered tree but answers `occupied` when a process has its working directory inside, or the tree is dirty with no newer memento. `spawn_sessions` then tries the next index.
 - If provisioning fails, the seat runs in the spawn's own work directory.
 - `provision_worktree_artifacts` symlinks `node_modules`, `src/scripts/cloud-run.env` and the Terraform providers cache from the main checkout. Nothing else is linked, and a missing source is reported but does not fail the script.
-- `WorktreeContext` is an async context manager that BFE and TFE use. It adds `<sandbox root>/<job id>` from the base ref, raises `WorktreeCollisionError` if that path exists, and then links the venv and artifacts.
+- `WorktreeContext` is an async context manager that BFE and TFE use. It adds `<sandbox root>/<job id>` from the base ref, raises `WorktreeCollisionError` if that path exists, and then links the venv and artifacts. When `auto cleanup` is on and the reaper refuses the folder as `broken_or_not_a_worktree`, `has_dangling_git_link` decides what happens next. Only a folder whose `.git` file points at a missing git record is deleted. Any other folder is left in place.
 - The INI ships `cosa worktree enabled` true and `auto cleanup` false. So these job trees stay after exit, and the exit never swallows the caller's exception.
 
 ## Retiring a seat's tree

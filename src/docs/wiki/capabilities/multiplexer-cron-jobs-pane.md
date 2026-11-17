@@ -7,7 +7,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.jobs.cronFormat.cronReadsText@7ed455436b
   - src.lupin_app.static.js.multiplexer.jobs.cronFormat.cronInsideText@353dbb9fae
   - src.lupin_app.static.js.multiplexer.jobs.cronFormat.cronChangedText@a85f1e3b0b
-  - src.lupin_app.static.js.multiplexer.jobs.cronFormat.refusalDetail@5a9e6a97f7
+  - src.lupin_app.static.js.multiplexer.jobs.cronFormat.refusalDetail@a62008f7e6
   - src.lupin_app.static.js.multiplexer.jobs.cronFormat.cronFlipFailureText@e66046b8ff
 ---
 # Job switch text (the Scheduled Jobs pane, merged into the jobs list)
@@ -20,7 +20,7 @@ The words a job's on/off switch shows in the multiplexer's jobs list. The Schedu
 - `cronReadsText` says when the job reads its switch, at each run or every tick.
 - `cronInsideText` notes a job that runs inside another job's tick, when that other job is off.
 - `cronChangedText` is who flipped the switch and when, or `not reported`.
-- `cronFlipFailureText` turns a refused flip into one sentence for the row. It uses `refusalDetail` to take the server's `detail`; the Run now refusal text in [[web-client-jobs-pane]] uses it too.
+- `cronFlipFailureText` turns a refused flip into one sentence for the row. It uses `refusalDetail` to take the server's `detail`. `refusalDetail` cuts the body out of the `ApiError` message and hands it to `apiErrorDetail` ([[web-client-auth-and-api]]). The Run now refusal text in [[web-client-jobs-pane]] uses it too.
 
 ## Turning a job off
 - Turning off an alarm job takes a second, confirming click, and any redraw cancels a half-finished confirmation.
