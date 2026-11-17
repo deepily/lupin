@@ -101,6 +101,10 @@ class TestDeriveCanonicalStem:
         with pytest.raises( ValueError ):
             migrate_dm_topic_case._derive_canonical_stem( "dm-tiberius.txt" )
 
+    def test_empty_stem_raises( self ):
+        with pytest.raises( ValueError, match="Not a DM topic filename" ):
+            migrate_dm_topic_case._derive_canonical_stem( "dm-.md" )
+
 
 # ─── TestGroupTopicsByCanonical ────────────────────────────────────────────
 

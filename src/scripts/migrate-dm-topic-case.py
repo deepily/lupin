@@ -61,6 +61,7 @@ from lupin_mcp.commons_store import (
 )
 from lupin_mcp.cosa_voice_mcp import _derive_dm_topic
 from cosa.utils.utc_stamp import utc_compact_stamp
+from scripts.sweep_persona_slug_canonicalization import topic_stem
 
 
 # Short-form aliases that don't auto-derive via `_derive_dm_topic`. Keys are
@@ -86,9 +87,9 @@ def _derive_canonical_stem( filename: str ) -> str:
     Returns the stem only (no `dm-` prefix). Assumes filename starts with
     `dm-` and ends with `.md`; otherwise raises ValueError.
     """
-    if not filename.startswith( "dm-" ) or not filename.endswith( ".md" ):
+    stem = topic_stem( filename )   # "" when the name is not `dm-*.md`
+    if not stem:
         raise ValueError( f"Not a DM topic filename: {filename!r}" )
-    stem = filename[ 3:-3 ]   # strip `dm-` prefix + `.md` suffix
     # Check alias first — alias keys are the LEGACY stem, mapped to canonical
     if stem in ALIAS_MAP:
         return ALIAS_MAP[ stem ]
