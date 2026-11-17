@@ -288,6 +288,7 @@ export function wireSectionCollapse(
  *   - the header toggles the section, session-only
  *   - returns the header handle and the function that removes the listener
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function-type return annotation.
 export function mountStaticHeaderSection(
   root : HTMLElement,
   opts : SectionHeaderOptions,
