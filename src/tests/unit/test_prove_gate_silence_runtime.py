@@ -387,13 +387,25 @@ def clock( pg, monkeypatch ):
     return clk
 
 
+class _Reply:
+    def __init__( self, status, body ):
+        self.status_code = status
+        self.text        = "not ok" if status != 200 else ""
+        self._body       = body
+
+    def json( self ): return self._body
+
+
 def _queues( monkeypatch, pg, per_call ):
-    """per_call(name, n) -> the list the nth read of that queue returns."""
+    """per_call(name, n) gives the nth read of a queue: a list, or an int for a bare status."""
     counts = { }
-    def fake( base, jwt, name ):
+    def get( url, headers=None, timeout=None ):
+        name = url.rsplit( "/", 1 )[ -1 ]
         counts[ name ] = counts.get( name, 0 ) + 1
-        return per_call( name, counts[ name ] )
-    monkeypatch.setattr( pg, "_queue", fake )
+        got = per_call( name, counts[ name ] )
+        if isinstance( got, int ): return _Reply( got, None )
+        return _Reply( 200, { f"{name}_jobs_metadata": got } )
+    monkeypatch.setattr( pg, "requests", types.SimpleNamespace( get=get ) )
     return counts
 
 
@@ -401,6 +413,12 @@ def test_polling_returns_done_as_soon_as_the_job_is_in_the_done_queue( pg, monke
     _queues( monkeypatch, pg, lambda name, n: [ { "job_id": "j" } ] if name == "done" else [ ] )
     assert pg.poll_until_terminal( "b", "j", "j", 100 )[ 0 ] == "done"
     assert clock.now == 0.0
+
+
+def test_a_non_200_queue_read_is_skipped_for_that_tick_and_the_next_tick_asks_again( pg, monkeypatch, clock ):
+    counts = _queues( monkeypatch, pg, lambda name, n: 503 if name == "done" and n == 1 else ( [ { "job_id": "j" } ] if name == "done" else [ ] ) )
+    assert pg.poll_until_terminal( "b", "j", "j", 100 )[ 0 ] == "done"
+    assert counts[ "done" ] == 2 and clock.now == 5.0
 
 
 def test_polling_returns_dead_when_the_job_dies( pg, monkeypatch, clock ):

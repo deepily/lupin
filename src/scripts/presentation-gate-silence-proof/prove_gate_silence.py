@@ -45,6 +45,14 @@ from datetime import datetime, timezone
 
 import requests
 
+lupin_root = os.environ.get( "LUPIN_ROOT" )
+if lupin_root is None:
+    raise RuntimeError( "LUPIN_ROOT not set — export LUPIN_ROOT=/path/to/project" )
+src_path = os.path.join( lupin_root, "src" )
+if src_path not in sys.path: sys.path.insert( 0, src_path )
+
+from scripts.dump_solution_cache import probe_job_terminal
+
 
 # ── module facts ──────────────────────────────────────────────────────────────
 DEFAULT_BASE      = "http://localhost:8000"
@@ -421,16 +429,17 @@ def poll_until_terminal( base, jwt, job_id, overall_timeout, on_tick=None ):
     Poll the run, done and dead queues until the job is done or dead, or time runs out.
 
     Returns a tuple of the state ("done", "dead" or "timeout") and the job dict or None.
+    The done-then-dead look is probe_job_terminal's. A queue read that answers non-200 is skipped for that tick.
     """
     deadline = time.monotonic() + overall_timeout
     seen_running = False
     while time.monotonic() < deadline:
-        done = _find( _queue( base, jwt, "done" ), job_id )
-        if done:
-            return ( "done", done )
-        dead = _find( _queue( base, jwt, "dead" ), job_id )
-        if dead:
-            return ( "dead", dead )
+        try:
+            terminal = probe_job_terminal( base, jwt, job_id, requests )
+        except RuntimeError:
+            terminal = None   # a non-200 from a queue read is not a verdict; the next tick asks again
+        if terminal is not None:
+            return terminal
         running = _find( _queue( base, jwt, "run" ), job_id )
         if running and not seen_running:
             seen_running = True
