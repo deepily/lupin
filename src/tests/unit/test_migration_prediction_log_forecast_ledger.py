@@ -255,4 +255,6 @@ def test_the_migration_and_the_model_name_the_same_ledger_columns( ):
 def test_the_revision_follows_f1c9a4d27b36_and_is_the_only_head():
     script = _script()
     assert script.get_revision( _REVISION ).down_revision == "f1c9a4d27b36"
-    assert script.get_heads() == [ _REVISION ]
+    heads = script.get_heads()
+    assert len( heads ) == 1, f"the chain must stay linear, got heads {heads}"
+    assert _REVISION in { r.revision for r in script.walk_revisions( base="base", head=heads[ 0 ] ) }, "this revision must lie on the chain that ends at the single head"

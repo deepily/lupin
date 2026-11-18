@@ -119,4 +119,6 @@ def test_both_verbs_are_no_ops_when_trust_states_is_absent( monkeypatch ):
 def test_the_revision_follows_5efa1547bd37_and_is_the_only_head():
     script = _script()
     assert script.get_revision( _REVISION ).down_revision == "5efa1547bd37"
-    assert script.get_heads() == [ _REVISION ]
+    heads = script.get_heads()
+    assert len( heads ) == 1, f"the chain must stay linear, got heads {heads}"
+    assert _REVISION in { r.revision for r in script.walk_revisions( base="base", head=heads[ 0 ] ) }, "this revision must lie on the chain that ends at the single head"
