@@ -17,6 +17,8 @@ from datetime import timezone
 
 from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
 from cosa.agents.prediction_engine.ask_family import classify_asks
+from cosa.agents.prediction_engine.config import RESPONSE_TYPE_MULTIPLE_CHOICE, RESPONSE_TYPE_OPEN_ENDED_BATCH
+from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.utils.iso_timestamp import parse_iso
 from cosa.utils.notification_utils import extract_qualifier_comment
@@ -101,7 +103,7 @@ def predicted_value_for( result ):
     return result._wrap_predicted_value()
 
 
-def _actual_dict( actual_value ):
+def _actual_dict( actual_value, response_type=None ):
     """
     Wrap an answer the way the engine does before comparing.
 
@@ -110,9 +112,13 @@ def _actual_dict( actual_value ):
 
     Ensures:
         - returns a dict; a bare value is stored under "value"
+        - for a multiple-choice or batch ask, a JSON string holding answers is decoded, as the engine does
     """
-    if isinstance( actual_value, dict ): return actual_value
-    return { "value": actual_value if isinstance( actual_value, str ) else str( actual_value ) }
+    actual = actual_value if isinstance( actual_value, dict ) else { "value": actual_value if isinstance( actual_value, str ) else str( actual_value ) }
+    if response_type in ( RESPONSE_TYPE_MULTIPLE_CHOICE, RESPONSE_TYPE_OPEN_ENDED_BATCH ) and isinstance( actual.get( "value" ), str ):
+        decoded = PredictionEngine._parse_mc_decision_value( actual[ "value" ] )
+        if decoded is not None: return decoded
+    return actual
 
 
 def _score( response_type, predicted, actual_value, response_options ):
@@ -126,7 +132,7 @@ def _score( response_type, predicted, actual_value, response_options ):
         - returns True only when the comparator says match; no forecast and an unscored answer read False,
           so an abstention is charged as a miss
     """
-    match, _ = get_comparator( response_type, response_options=response_options )( predicted, _actual_dict( actual_value ) )
+    match, _ = get_comparator( response_type, response_options=response_options )( predicted, _actual_dict( actual_value, response_type ) )
     return match is True
 
 
@@ -239,7 +245,10 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
                         "forecast"      : predicted,
                     },
                 } )
-            records[ ENGINE_ARM ][ -1 ][ "meta" ][ "neighbour_ids" ] = list( result.metadata.get( "evidence_ids", [] ) )
+            engine_meta = records[ ENGINE_ARM ][ -1 ][ "meta" ]
+            engine_meta[ "neighbour_ids" ] = list( result.metadata.get( "evidence_ids", [] ) )
+            engine_meta[ "confidence" ]    = result.confidence if isinstance( result, PredictionResult ) else None
+            engine_meta[ "strategy" ]      = result.strategy if isinstance( result, PredictionResult ) else None
     finally:
         engine._embedding_store = saved_store
     return {

@@ -6,6 +6,7 @@ replaced by a function that fails, so a test that passes proves the stored vecto
 tests plant a late answer, a later revision and a retry copy, and assert none of them reaches a forecast.
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -116,6 +117,61 @@ def test_the_value_a_case_had_at_the_ask_is_what_the_store_gets():
     assert ( later[ 0 ][ "decision_value" ], later[ 0 ][ "ratification_state" ] ) == ( "no", "rejected" ), "control: after the revision the new value shows"
 
 
+def test_a_version_at_the_ask_instant_counts_and_one_just_after_does_not():
+    """The rule is at or before the ask, on both the answer time and the version time."""
+    at_ask = { "id": "c", "responded_at": NOON, "decision_value": "later", "ratification_state": "x",
+               "versions": [ { "at": NOON, "answer": "yes", "ratification_state": "not_required" } ] }
+    rows, lost = rows_as_of( [ at_ask ], NOON )
+    assert lost == [] and rows[ 0 ][ "decision_value" ] == "yes"
+    after = dict( at_ask, versions=[ { "at": NOON + timedelta( microseconds=1 ), "answer": "yes", "ratification_state": "not_required" } ] )
+    rows, lost = rows_as_of( [ after ], NOON )
+    assert rows == [] and lost == [ "c" ], "a case answered at the ask whose only version is later cannot be rebuilt"
+    unanswered = dict( after, responded_at=NOON + timedelta( microseconds=1 ) )
+    rows, lost = rows_as_of( [ unanswered ], NOON )
+    assert lost == [] and len( rows ) == 1, "control: answered after the ask is left to the store, not counted lost"
+
+
+def test_a_case_answered_exactly_at_the_ask_is_visible_and_one_microsecond_later_is_not( engine ):
+    """The visibility edge: responded_at equal to asked_at counts."""
+    for offset, expected in ( ( timedelta( 0 ), [ "other" ] ), ( timedelta( microseconds=1 ), [] ) ):
+        other  = _ask( engine, "other", 5, 0, "yes" )
+        target = _ask( engine, "target", 5, 10, "no" )
+        other[ "responded_at" ] = target[ "asked_at" ] + offset
+        asks = [ other, target ]
+        run  = replay( asks, engine, SHA )
+        assert _neighbours( run, "target", asks ) == expected, offset
+
+
+def test_a_baseline_sees_a_case_answered_at_the_ask_instant_and_not_one_a_microsecond_later( engine ):
+    """The baselines read the same at-or-before edge as the store."""
+    for offset, expected in ( ( timedelta( 0 ), { "value": "no" } ), ( timedelta( microseconds=1 ), None ) ):
+        other  = _ask( engine, "other", 5, 0, "no" )
+        target = _ask( engine, "target", 5, 10, "yes" )
+        other[ "responded_at" ] = target[ "asked_at" ] + offset
+        run = replay( [ other, target ], engine, SHA )
+        assert run[ "records" ][ "prior_majority" ][ 1 ][ "meta" ][ "forecast" ] == expected, offset
+
+
+def test_the_engine_record_carries_the_forecasts_confidence_and_strategy( engine ):
+    """Only the engine arm carries confidence and strategy; a cold start reads 0.0."""
+    run = replay( [ _ask( engine, "a", 8, 0, "yes" ), _ask( engine, "b", 8, 10, "yes" ) ], engine, SHA )
+    first, second = [ r[ "meta" ] for r in run[ "records" ][ ENGINE_ARM ] ]
+    assert ( first[ "confidence" ], first[ "strategy" ] ) == ( 0.0, first[ "strategy" ] ) and isinstance( first[ "strategy" ], str )
+    assert second[ "confidence" ] > 0.0 and isinstance( second[ "strategy" ], str )
+    assert "confidence" not in run[ "records" ][ "always_yes" ][ 0 ][ "meta" ]
+
+
+def test_records_follow_ask_order_whatever_order_the_asks_arrive_in( engine ):
+    """Asks given out of order are replayed by asked_at; a tie keeps the input order."""
+    late, early = _ask( engine, "late", 6, 20, "yes" ), _ask( engine, "early", 6, 0, "yes" )
+    tie_a, tie_b = _ask( engine, "tie-a", 7, 40, "yes" ), _ask( engine, "tie-b", 7, 40, "yes", message="Should another synthetic worker go?" )
+    run = replay( [ late, early, tie_b, tie_a ], engine, SHA )
+    records = run[ "records" ][ ENGINE_ARM ]
+    assert [ r[ "meta" ][ "notification_id" ] for r in records ] == [ "early", "late", "tie-b", "tie-a" ]
+    assert [ r[ "frozen_index" ] for r in records ] == [ 1, 0, 2, 3 ]
+    assert [ r[ "row_index" ] for r in records ] == [ 0, 1, 2, 3 ]
+
+
 def test_a_case_with_no_versions_key_passes_through_unchanged():
     """Only a case that carries a history is rebuilt."""
     case = { "id": "plain", "responded_at": NOON, "decision_value": "yes", "ratification_state": "not_required" }
@@ -212,6 +268,18 @@ def test_an_answer_that_is_not_text_or_a_dict_is_scored_by_its_string_form( engi
     assert replay_loop._score( "yes_no", { "value": "yes" }, 5, None ) is False
 
 
+def test_a_json_answer_under_value_is_decoded_for_multiple_choice_and_batch_asks_only():
+    """The engine decodes the JSON string a router stores; the replay must read the same answer."""
+    wrapped = json.dumps( { "answers": { "Pick": [ "a" ] } } )
+    for kind in ( "multiple_choice", "open_ended_batch" ):
+        assert replay_loop._actual_dict( { "value": wrapped }, kind ) == { "answers": { "Pick": [ "a" ] } }
+        assert replay_loop._actual_dict( wrapped, kind ) == { "answers": { "Pick": [ "a" ] } }
+        assert replay_loop._actual_dict( { "value": "not json" }, kind ) == { "value": "not json" }
+        assert replay_loop._actual_dict( { "answers": { "Pick": [ "b" ] } }, kind ) == { "answers": { "Pick": [ "b" ] } }
+    assert replay_loop._actual_dict( { "value": wrapped }, "yes_no" ) == { "value": wrapped }
+    assert replay_loop._actual_dict( { "value": wrapped } ) == { "value": wrapped }
+
+
 def test_the_family_count_counts_distinct_families( engine ):
     """Two asks of one family and one of another make two."""
     asks = [ _ask( engine, "a", 1, 0, "yes", title="Restart worker 1?" ), _ask( engine, "b", 1, 600, "yes", title="Restart worker 2?" ),
@@ -249,6 +317,18 @@ def test_the_verdict_at_the_floor_follows_mcnemar():
     assert summarize( run_for( 6, 6 ), "b", 10 )[ "verdict" ] == "no difference"
     assert summarize( run_for( 0, 12 ), "b", 10 )[ "verdict" ] == "baseline better"
     assert summarize( run_for( 12, 0 ), "b", 10 )[ "floor_met" ] is True
+
+
+def test_the_floor_and_the_mcnemar_cut_each_flip_at_one_pair():
+    """The floor flips between 9 and 10 discordant pairs, the McNemar cut between 8-2 and 9-1."""
+    def run_for( wins, losses ):
+        engine   = [ True ] * wins + [ False ] * losses
+        baseline = [ False ] * wins + [ True ] * losses
+        return { "records": _records( { ENGINE_ARM: engine, "b": baseline } ), "not_replayable": 0, "unrebuildable_cases": 0, "families": 1 }
+    assert ( summarize( run_for( 9, 1 ), "b", 10 )[ "floor_met" ], summarize( run_for( 9, 1 ), "b", 10 )[ "verdict" ] ) == ( True, "engine better" )
+    assert summarize( run_for( 8, 2 ), "b", 10 )[ "verdict" ] == "no difference"
+    short = summarize( run_for( 9, 0 ), "b", 10 )
+    assert ( short[ "mcnemar" ][ "n_discordant" ], short[ "floor_met" ], short[ "verdict" ] ) == ( 9, False, "not decisive" )
 
 
 def test_the_floor_is_required_before_the_run_is_summarised():
