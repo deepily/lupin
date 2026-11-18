@@ -918,7 +918,7 @@ def test_record_outcome_str_actual_value():
     gdb, repo = _patch_db()
     with gdb as mock_gdb, repo as MockRepo:
         eng.record_outcome( "nid-1", pr, "yes", "yes_no" )
-        MockRepo.return_value.log_prediction.assert_called_once()
+        MockRepo.return_value.log_prediction.assert_not_called()   # the forecast row was written at ask time
         MockRepo.return_value.update_outcome.assert_called_once()
 
 
