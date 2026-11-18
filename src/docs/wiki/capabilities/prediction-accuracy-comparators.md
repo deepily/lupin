@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.prediction_engine.accuracy_comparators.compare_yes_no@4c818a6d76
   - cosa.agents.prediction_engine.accuracy_comparators.score_field@927816eaeb
-  - cosa.agents.prediction_engine.accuracy_comparators.compare_multiple_choice@33dc502acd
+  - cosa.agents.prediction_engine.accuracy_comparators.compare_multiple_choice@8eca2d79f0
   - cosa.agents.prediction_engine.accuracy_comparators.confidence_band@18f122aed8
   - cosa.agents.prediction_engine.accuracy_comparators.get_comparator@b9d301e658
   - cosa.agents.prediction_engine.accuracy_comparators.compare_open_ended@dfa4cf30bb
@@ -24,7 +24,7 @@ One comparator exists for each question type the prediction engine ([[prediction
 - Every comparator returns `(None, {})` when either side is `None`. No match is claimed for a missing answer.
 - `compare_yes_no` matches on the base yes or no value. A trailing comment in the value is kept as qualifier detail, not compared.
 - `score_field` scores one field by the mode its schema names. A single select is exact on an equal pick. A multi-select is exact on equal sets and carries their Jaccard overlap.
-- `compare_multiple_choice` loops `score_field` over the answered fields and matches only when every field is exact. `detail[ "matches" ]` and `detail[ "total" ]` count the exact fields, so a half-right card is 1 of 2. `get_comparator` binds it to the card's stored `response_options`, and with none every field is a single select.
+- `compare_multiple_choice` loops `score_field` over the answered fields and matches only when every field is exact. `detail[ "matches" ]` and `detail[ "total" ]` count the exact fields, so a half-right card is 1 of 2. `get_comparator` binds it to the card's stored `response_options`, and with none every field is a single select. A malformed stored schema is scored the same way and adds `schema_reason`.
 - `confidence_band` names the forecast band by its lower edge: [0, 0.4), [0.4, 0.6), [0.6, 0.8) and [0.8, 1.0]. No confidence, NaN or a value outside 0 to 1 gives `None`.
 - `compare_open_ended` uses embedding similarity when the actual response carries one, and matches at 0.75 or more. The engine passes the cut-off in from the INI key `prediction engine open ended match threshold`. The built-in default is also 0.75. Otherwise it compares the strings, ignoring case and outer whitespace.
 - `compare_open_ended_batch` does the same per header. The match is the average similarity across headers meeting the threshold. Both take an optional `threshold` and record the one applied in `detail[ "threshold" ]`.

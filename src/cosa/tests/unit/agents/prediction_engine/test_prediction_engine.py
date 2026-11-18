@@ -1152,6 +1152,15 @@ def test_record_outcome_scores_a_half_right_mixed_card_by_the_stored_schema( wir
     assert ( by_header[ "DB" ][ "mode" ], by_header[ "Features" ][ "mode" ], by_header[ "Features" ][ "jaccard" ] ) == ( "single", "multi", 0.333 )
 
 
+@pytest.mark.parametrize( "schema", [ { "questions": "not a list" }, [ { "header": "DB" } ], { "questions": [ { "multi_select": True } ] } ] )
+def test_record_outcome_with_a_malformed_stored_schema_still_records_and_scores_the_outcome( wired_engine, monkeypatch, schema ):
+    outcome = _record_mixed_card( wired_engine, monkeypatch, schema )
+    assert outcome[ "notification_id" ] == "n-mixed"
+    assert outcome[ "accuracy_match" ] is False
+    assert ( outcome[ "accuracy_detail" ][ "matches" ], outcome[ "accuracy_detail" ][ "total" ] ) == ( 1, 2 )
+    assert outcome[ "accuracy_detail" ][ "schema_reason" ] == "malformed_schema"
+
+
 def test_record_outcome_with_no_stored_schema_scores_every_field_as_a_single_select( wired_engine, monkeypatch ):
     outcome = _record_mixed_card( wired_engine, monkeypatch, None )
     assert outcome[ "accuracy_match" ] is False

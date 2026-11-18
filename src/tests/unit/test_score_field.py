@@ -119,3 +119,28 @@ def test_a_confidence_outside_zero_to_one_has_no_band( confidence ):
 @pytest.mark.parametrize( "confidence", [ None, float( "nan" ), float( "inf" ), float( "-inf" ) ] )
 def test_a_confidence_that_is_missing_or_not_finite_has_no_band( confidence ):
     assert confidence_band( confidence ) is None
+
+
+@pytest.mark.parametrize( "schema", [
+    "not a dict", [ { "header": "DB" } ], 7,
+    { "questions": "DB" }, { "questions": { "header": "DB" } },
+    { "questions": [ "DB" ] }, { "questions": [ { "multi_select": True } ] }, { "questions": [ { "header": 3 } ] },
+    { "questions": [ { "header": "DB" }, None ] },
+] )
+def test_a_malformed_stored_schema_still_scores_the_card_and_names_the_reason( schema ):
+    answers = { "answers": { "DB": "PG" } }
+    match, detail = compare_multiple_choice( answers, answers, schema )
+    assert ( match, detail[ "schema_reason" ], detail[ "fields" ][ 0 ][ "mode" ] ) == ( True, "malformed_schema", "single" )
+
+
+@pytest.mark.parametrize( "schema", [ "not a dict", { "questions": "DB" }, { "questions": [ { "multi_select": True } ] } ] )
+def test_a_malformed_schema_does_not_hide_a_wrong_answer( schema ):
+    match, detail = compare_multiple_choice( { "answers": { "DB": "PG" } }, { "answers": { "DB": "MySQL" } }, schema )
+    assert ( match, detail[ "matches" ], detail[ "total" ] ) == ( False, 0, 1 )
+
+
+@pytest.mark.parametrize( "schema", [ {}, { "questions": [] }, { "other": 1 } ] )
+def test_a_schema_with_no_questions_is_valid_and_scores_every_field_as_a_single_select( schema ):
+    answers = { "answers": { "DB": "PG" } }
+    match, detail = compare_multiple_choice( answers, answers, schema )
+    assert ( match, "schema_reason" in detail ) == ( True, False )

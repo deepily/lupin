@@ -278,10 +278,13 @@ def compare_multiple_choice( predicted, actual, response_options ):
     Requires:
         - predicted and actual are dicts with an "answers" map, or None
         - response_options is a dict whose "questions" list gives each field's "header"
-          and "multi_select"
+          and "multi_select", or anything else, which is reported rather than raised
 
     Ensures:
         - Returns ( match, detail ); ( None, reason ) when a side is missing or has no answers
+        - When response_options is not a dict, or its "questions" is not a list of dicts that each
+          carry a string "header", the card is scored with every field as a single select and
+          detail["schema_reason"] is "malformed_schema"; the answer is never dropped
         - match is the strict whole-card result: every field exact
         - detail["matches"] and detail["total"] count the exact fields over the fields
           scored, so a half-right card is 1 of 2 with match False
@@ -296,14 +299,18 @@ def compare_multiple_choice( predicted, actual, response_options ):
     if not predicted_answers or not actual_answers:
         return ( None, { "reason": "empty_answers" } )
 
-    schemas = { q[ "header" ]: q for q in response_options.get( "questions", [] ) }
+    questions = response_options.get( "questions", [] ) if isinstance( response_options, dict ) else None
+    malformed = not isinstance( questions, list ) or not all( isinstance( q, dict ) and isinstance( q.get( "header" ), str ) for q in questions )
+    schemas   = {} if malformed else { q[ "header" ]: q for q in questions }
     fields  = [
         score_field( schemas.get( header, { "header": header } ), predicted_answers.get( header ), value )
         for header, value in actual_answers.items()
     ]
     matches = sum( 1 for f in fields if f[ "exact" ] )
+    detail  = { "matches": matches, "total": len( fields ), "fields": fields }
+    if malformed: detail[ "schema_reason" ] = "malformed_schema"
 
-    return ( matches == len( fields ), { "matches": matches, "total": len( fields ), "fields": fields } )
+    return ( matches == len( fields ), detail )
 
 
 def get_comparator( response_type: str, open_ended_threshold: Optional[float] = None, response_options: Optional[Dict] = None ):
