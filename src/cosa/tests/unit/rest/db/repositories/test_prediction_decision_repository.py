@@ -6,6 +6,8 @@ Unit tests for PredictionDecisionRepository (question_embedding ANN, HNSW dot).
 
 import os
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -90,15 +92,34 @@ def test_update_ratification_state( db_session ):
     assert repo.update_ratification_state( "missing", "x" ) is None
 
 
+def _block( name ):
+    """Stand in for the server's config manager, answering with one config block name."""
+    return patch( "cosa.rest.db.repositories.prediction_decision_repository.ConfigurationManager",
+                  return_value=SimpleNamespace( config_block_id=name ) )
+
+
+def test_delete_all_refuses_outside_the_testing_block_and_keeps_every_row( db_session ):
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "d1", _vec( 1.0 ) )
+    _add( repo, "d2", _vec( 1.0 ) )
+    db_session.flush()
+    for name in ( "default", "Lupin: Production", "Lupin: Development" ):
+        with _block( name ):
+            with pytest.raises( PermissionError, match="Lupin: Testing" ):
+                repo.delete_all()
+        assert repo.count() == 2, name
+
+
 def test_delete_all_clears_table( db_session ):
     repo = PredictionDecisionRepository( db_session )
     _add( repo, "d1", _vec( 1.0 ) )
     _add( repo, "d2", _vec( 1.0 ) )
     db_session.flush()
     assert repo.count() == 2
-    assert repo.delete_all() == 2
-    assert repo.count() == 0
-    assert repo.delete_all() == 0          # empty table → 0
+    with _block( "Lupin: Testing" ):
+        assert repo.delete_all() == 2
+        assert repo.count() == 0
+        assert repo.delete_all() == 0          # empty table → 0
 
 
 def _add_sourced( repo, id, owner, source ):

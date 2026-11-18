@@ -28,9 +28,10 @@ import requests
 import pytest
 
 import cosa.utils.util as cu
+from tests.helpers.dev_server_guard import refuse_dev_server
 
 # Test server
-BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
+BASE_URL = refuse_dev_server( os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" ) )
 
 # Test-specific LanceDB table name (prevents contaminating production data)
 TEST_LANCEDB_TABLE = "prediction_decisions_test"
