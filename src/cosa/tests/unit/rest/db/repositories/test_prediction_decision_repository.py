@@ -7,6 +7,8 @@ Unit tests for PredictionDecisionRepository (question_embedding ANN, HNSW dot).
 import os
 import sys
 
+import pytest
+
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
@@ -126,3 +128,41 @@ def test_only_a_human_answer_from_the_owner_casts_a_personal_vote( db_session ):
     hits = repo.find_similar( _vec( 1.0 ), threshold=0.0, owner_user_id="owner-1", answer_source="human" )
     assert [ entity.id for _, entity in hits ] == [ "mine" ]
     assert len( repo.find_similar( _vec( 1.0 ), threshold=0.0, limit=10 ) ) == 7
+
+
+def test_find_similar_cosine_ignores_vector_length( db_session ):
+    """Scaling a stored vector changes neither its rank nor its cosine score."""
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "short-close", _vec( 1.0, 0.1 ) )                 # norm 1, nearly parallel to the query
+    _add( repo, "long-far",    _vec( 20.0, 20.0 ) )               # norm 28, 45 degrees off
+    _add( repo, "long-close",  _vec( 40.0, 4.0 ) )                # the short-close vector times 40
+    db_session.flush()
+    hits = repo.find_similar( _vec( 1.0, 0.0 ), threshold=0.0, metric="cosine" )
+    by_id = { e.id: pct for pct, e in hits }
+    assert [ e.id for _, e in hits ][ -1 ] == "long-far"
+    assert abs( by_id[ "short-close" ] - by_id[ "long-close" ] ) < 1e-4
+    assert abs( by_id[ "long-far" ] - 70.7107 ) < 1e-2            # cos 45 degrees, not clamped to 100
+
+
+def test_find_similar_dot_default_still_clamps_long_vectors( db_session ):
+    """The default path keeps the old scale: a long far vector reads 100 percent on dot."""
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "long-far", _vec( 20.0, 20.0 ) )
+    db_session.flush()
+    default = repo.find_similar( _vec( 1.0, 0.0 ), threshold=0.0 )
+    assert default[ 0 ][ 0 ] == 100.0
+    assert repo.find_similar( _vec( 1.0, 0.0 ), threshold=0.0, metric="dot" ) == default
+
+
+def test_find_similar_cosine_applies_threshold_after_ordering( db_session ):
+    """The cosine score is compared with the floor, so a 70.7 percent case fails a 0.75 floor."""
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "long-far", _vec( 20.0, 20.0 ) )
+    db_session.flush()
+    assert repo.find_similar( _vec( 1.0, 0.0 ), threshold=0.75, metric="cosine" ) == []
+
+
+def test_find_similar_unknown_metric_raises( db_session ):
+    repo = PredictionDecisionRepository( db_session )
+    with pytest.raises( ValueError, match="metric" ):
+        repo.find_similar( _vec( 1.0 ), metric="euclid" )

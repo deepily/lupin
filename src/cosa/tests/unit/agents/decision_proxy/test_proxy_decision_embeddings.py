@@ -126,6 +126,16 @@ def test_find_similar_forwards_every_filter():
     assert kw[ "data_origin" ] == "organic" and kw[ "response_type" ] == "yes_no"
 
 
+def test_find_similar_metric_defaults_to_dot_and_is_forwarded():
+    store = ProxyDecisionEmbeddings()
+    with _repo() as repo:
+        repo.find_similar.return_value = []
+        store.find_similar( _EMB )
+        assert repo.find_similar.call_args.kwargs[ "metric" ] == "dot"
+        store.find_similar( _EMB, metric="cosine" )
+        assert repo.find_similar.call_args.kwargs[ "metric" ] == "cosine"
+
+
 def test_find_similar_null_embedding_and_non_fatal( capsys ):
     store = ProxyDecisionEmbeddings( debug=True )
     entity = MagicMock( id="id1", question="q", category="c", decision_value="v",

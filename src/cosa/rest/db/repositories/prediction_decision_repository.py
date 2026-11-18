@@ -67,19 +67,25 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
                       data_origin: Optional[str] = None,
                       response_type: Optional[str] = None,
                       owner_user_id: Optional[str] = None,
-                      answer_source: Optional[str] = None ) -> List[Tuple[float, PredictionDecision]]:
+                      answer_source: Optional[str] = None,
+                      metric: str = "dot" ) -> List[Tuple[float, PredictionDecision]]:
         """
-        Dot nearest-k over question_embedding with optional scalar filters.
+        Nearest-k over question_embedding with optional scalar filters.
 
         Requires:
             - query_embedding is a dim-768 list; limit is a positive int
             - threshold is a fraction in [0,1] (compared as threshold * 100)
+            - metric is "dot" (the default, used by the decision proxy) or "cosine"
 
         Ensures:
             - returns up to limit ``( similarity_pct, entity )`` tuples, strongest
-              dot first, similarity_pct clamped to [0,100] and kept only when
+              first, similarity_pct clamped to [0,100] and kept only when
               >= threshold * 100 (mirrors ProxyDecisionEmbeddings.find_similar)
             - category / data_origin / response_type / owner_user_id / answer_source are ANDed as exact filters
+            - with metric "dot" the query is exactly what it was before the parameter existed
+
+        Raises:
+            - ValueError if metric is neither "dot" nor "cosine"
         """
         exclude_filter = None
         conditions = []
@@ -95,7 +101,7 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
         return dot_topk(
             self.session, PredictionDecision, PredictionDecision.question_embedding,
             query_embedding, limit=limit, exclude_filter=exclude_filter,
-            threshold_pct=threshold * 100.0, clamp=True,
+            threshold_pct=threshold * 100.0, clamp=True, metric=metric,
         )
 
     def delete_all( self ) -> int:

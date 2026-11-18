@@ -117,7 +117,7 @@ class ProxyDecisionEmbeddings:
             if self.debug: print( f"[ProxyDecisionEmbeddings] add_decision failed (non-fatal): {e}" )
 
     def find_similar( self, query_embedding, category=None, limit=5, threshold=0.75, data_origin=None, response_type=None,
-                      owner_user_id=None, answer_source=None ):
+                      owner_user_id=None, answer_source=None, metric="dot" ):
         """
         Find similar decisions by vector search.
 
@@ -142,6 +142,7 @@ class ProxyDecisionEmbeddings:
             response_type: Optional response type filter (e.g., "multiple_choice", "yes_no")
             owner_user_id: Optional owner filter (exact match)
             answer_source: Optional answer-source filter (exact match, e.g. "human")
+            metric: "dot" (default, the decision proxy's scale) or "cosine" (preference retrieval)
 
         Returns:
             list[ tuple[ float, dict ] ]: ( similarity_pct, record ) pairs
@@ -153,7 +154,7 @@ class ProxyDecisionEmbeddings:
                 hits = PredictionDecisionRepository( session ).find_similar(
                     query_embedding, category=category, limit=limit, threshold=threshold,
                     data_origin=data_origin, response_type=response_type,
-                    owner_user_id=owner_user_id, answer_source=answer_source,
+                    owner_user_id=owner_user_id, answer_source=answer_source, metric=metric,
                 )
                 return [ ( pct, self._record_to_dict( entity ) ) for pct, entity in hits ]
         except Exception as e:
