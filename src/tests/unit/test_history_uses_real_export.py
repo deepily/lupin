@@ -17,24 +17,26 @@ from cosa.utils.local_data_tier import require_local_file
 
 pytestmark = pytest.mark.local_data
 
-WINDOW_START = "2026-11-04"
+WINDOW_START   = "2026-11-04"
+LAST_ROW_TAKEN = "2026-11-18T20:16:37.173818Z"
 
 
 def _lines( name ):
-    """The rows of one export file."""
-    return [ json.loads( line ) for line in open( require_local_file( name ) ) ]
+    """The rows of one export file up to the 7,862nd ask; the files grow."""
+    rows = [ json.loads( line ) for line in open( require_local_file( name ) ) ]
+    return [ r for r in rows if r[ "created_at" ] <= LAST_ROW_TAKEN ]
 
 
-def test_the_535_real_asks_in_the_context_window_get_these_uses():
+def test_the_534_real_asks_in_the_context_window_get_these_uses():
     asks       = _lines( "2026.11.18-notification-asks-raw.jsonl" )
     pool       = _lines( "2026.11.18-notification-nonasks-raw.jsonl" ) + asks
     recent     = [ a for a in asks if a[ "created_at" ] >= WINDOW_START ]
     derived    = { d[ "notification_id" ]: d for d in derive_dataset( asks )[ 0 ] }
     states     = { a[ "id" ]: rebuild_context( a, pool )[ "context_state" ] for a in recent }
     assignments, counts = assign_uses( [ derived[ a[ "id" ] ] for a in recent ], states )
-    assert len( recent ) == 535
-    assert collections.Counter( states.values() ) == { "reconstructed": 529, "no_context": 3, "ambiguous_only": 3 }
-    assert { use: sum( reasons.values() ) for use, reasons in counts.items() } == { "train_or_test": 349, "prompt_only": 5, "sensitivity": 0, "vocabulary_only": 181 }
+    assert len( recent ) == 534
+    assert collections.Counter( states.values() ) == { "reconstructed": 528, "no_context": 3, "ambiguous_only": 3 }
+    assert { use: sum( reasons.values() ) for use, reasons in counts.items() } == { "train_or_test": 349, "prompt_only": 5, "sensitivity": 0, "vocabulary_only": 180 }
     assert [ a for a in assignments if a[ "frozen_cohort" ] ] == []
 
 
