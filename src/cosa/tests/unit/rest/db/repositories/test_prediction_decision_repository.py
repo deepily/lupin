@@ -145,6 +145,21 @@ def test_find_similar_cosine_ignores_vector_length( db_session ):
     assert abs( by_id[ "long-far" ] - 70.7107 ) < 1e-2            # cos 45 degrees, not clamped to 100
 
 
+@pytest.mark.parametrize( "factor", [ 0.5, 2.0 ] )
+def test_find_similar_cosine_ignores_query_length_too( db_session, factor ):
+    """Scaling the query by a positive factor changes neither the order nor any score."""
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "a", _vec( 20.0, 1.0 ) )
+    _add( repo, "b", _vec( 20.0, 12.0 ) )
+    _add( repo, "c", _vec( 3.0, 20.0 ) )
+    db_session.flush()
+    base   = repo.find_similar( _vec( 20.0, 4.0 ), threshold=0.0, metric="cosine" )
+    scaled = repo.find_similar( _vec( 20.0 * factor, 4.0 * factor ), threshold=0.0, metric="cosine" )
+    assert [ e.id for _, e in scaled ] == [ e.id for _, e in base ] == [ "a", "b", "c" ]
+    assert [ round( p, 4 ) for p, _ in scaled ] == [ round( p, 4 ) for p, _ in base ]
+    assert len( { round( p, 4 ) for p, _ in base } ) == 3          # the three scores differ, so order is meaningful
+
+
 def test_find_similar_dot_default_still_clamps_long_vectors( db_session ):
     """The default path keeps the old scale: a long far vector reads 100 percent on dot."""
     repo = PredictionDecisionRepository( db_session )
@@ -172,7 +187,7 @@ def test_find_similar_unknown_metric_raises( db_session ):
 @pytest.mark.parametrize( "query, fragment", [
     ( None,                                  "embedder returned nothing" ),
     ( [ 1.0, 2.0, 3.0 ],                     "wrong dimension 3" ),
-    ( [ 0.0 ] * EMBEDDING_DIM,               "classified 'normalized'" ),
+    ( [ 0.0 ] * EMBEDDING_DIM,               "query vector has zero norm" ),
     ( [ float( "nan" ) ] + [ 20.0 ] * ( EMBEDDING_DIM - 1 ), "non-finite" ),
     ( _vec( 1.0 ),                           "classified 'normalized'" ),
     ( _vec( 500.0 ),                         "classified 'suspect'" ),

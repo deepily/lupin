@@ -15,7 +15,7 @@ from cosa.rest.db.embedding_regeneration import validate_fresh_vector
 from cosa.rest.db.repositories.base import BaseRepository
 from cosa.rest.db.repositories.vector_search import dot_topk
 from cosa.rest.db.vector_errors import QueryVectorRefused
-from cosa.rest.db.vector_store_models import PredictionDecision
+from cosa.rest.db.vector_store_models import EMBEDDING_DIM, PredictionDecision
 
 
 class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
@@ -92,10 +92,12 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
         Raises:
             - ValueError if metric is neither "dot" nor "cosine"
             - QueryVectorRefused on the cosine path when the query vector is missing,
-              of the wrong dimension, non-finite, zero-norm or out of the current model's band
+              of the wrong dimension, non-finite, zero-norm (named so) or out of the current model's band
         """
         if metric == "cosine":
             reason = validate_fresh_vector( query_embedding )
+            if reason is not None and query_embedding is not None and len( query_embedding ) == EMBEDDING_DIM and not any( query_embedding ):
+                reason = "query vector has zero norm"   # the validator files a zero vector under the retired unit-norm model
             if reason is not None: raise QueryVectorRefused( reason )
         exclude_filter = None
         conditions = []
