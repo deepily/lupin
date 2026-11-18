@@ -56,8 +56,9 @@ class TestMultiplexerForecastFold:
 
     def test_yes_no_card_opens_folded_and_each_state_renders_its_text( self, logged_in_page ):
         page = logged_in_page
-        _open_multiplexer( page )
         for n, ( state, text ) in enumerate( STATE_TEXT.items() ):
+            # Only the first card in the queue is painted, so each state gets a fresh page.
+            _open_multiplexer( page )
             nid = f"e2efold-state-{ n }"
             _emit( page, { "id_hash": nid, "response_type": "yes_no", "prediction_hint": _hint( state ) } )
             fold = _card( page, nid ).locator( 'details[data-testid="prediction-hint-fold"]' )
@@ -96,10 +97,20 @@ class TestMultiplexerForecastFold:
         _emit( page, { "id_hash": "e2efold-repaint", "response_type": "yes_no", "prediction_hint": _hint( "ready" ) } )
         card = _card( page, "e2efold-repaint" )
         card.locator( "summary" ).click()
-        # The same id again with a new message makes the store rebuild the active card.
-        _emit( page, { "id_hash": "e2efold-repaint", "response_type": "yes_no", "message": "Deploy to prod? (updated)", "prediction_hint": _hint( "ready" ) } )
+        assert card.locator( 'details[data-testid="prediction-hint-fold"]' ).evaluate( "el => el.open" ) is True
+        # A store change for the active card makes the renderer build the card again. The same id arriving
+        # twice does not, because the store drops the repeat, so the change is sent the way the store sends it.
+        page.evaluate( "() => { window.__e2eOldCard = document.querySelector('[data-id-hash=\"e2efold-repaint\"]'); }" )
+        page.evaluate(
+            """() => window.__multiplexerTestHook.eventBus.emit( {
+                type    : 'store_action_required_changed',
+                payload : { changeKind: 'added', id_hash: 'e2efold-repaint' },
+                source  : 'fold-e2e',
+                ts      : 1789790400000,
+            } )"""
+        )
         page.wait_for_function(
-            "() => document.querySelector('[data-id-hash=\"e2efold-repaint\"] .action-required-prompt')?.textContent.includes('(updated)')",
+            "() => { const now = document.querySelector('[data-id-hash=\"e2efold-repaint\"]'); return now !== null && now !== window.__e2eOldCard; }",
             timeout=10000,
         )
         assert card.locator( 'details[data-testid="prediction-hint-fold"]' ).evaluate( "el => el.open" ) is True, "the repaint closed a fold the reader had opened"
