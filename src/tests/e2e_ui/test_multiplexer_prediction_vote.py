@@ -153,7 +153,7 @@ _SEED_PREDICTION_NOTIFICATION_JS = """
             sender_id       : args.sender,
             timestamp       : "2026-06-22T14:00:00.000Z",
             response_type   : "yes_no",
-            prediction_hint : { confidence: args.confidence, predicted_value: "yes", category: "calendar" },
+            prediction_hint : { state: "ready", retrieval_metric: "dot", confidence: args.confidence, predicted_value: "yes", category: "calendar" },
         } },
         source : "test",
         ts     : 1750600000000,

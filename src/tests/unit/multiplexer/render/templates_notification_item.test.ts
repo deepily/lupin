@@ -171,15 +171,24 @@ test("notificationItem: no prediction_hint → no vote controls", () => {
 
 test("notificationItem: prediction_hint below the gate → no vote controls", () => {
   const el = renderNotificationItem(
-    makeNotification({ prediction_hint: { confidence: 0.49, predicted_value: "yes", category: "calendar" } }),
+    makeNotification({ prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.49, predicted_value: "yes", category: "calendar" } }),
     { appTimezone: "UTC" },
   );
   assert.ok( el.querySelector(".prediction-hint-vote") === null );
 });
 
+test("notificationItem: a hint with no confidence (any state but ready) → no vote controls", () => {
+  const el = renderNotificationItem(
+    makeNotification({ prediction_hint: { state: "below_threshold", retrieval_metric: "dot", category: "calendar" } }),
+    { appTimezone: "UTC" },
+  );
+  assert.ok( el.querySelector(".message-text, .notification-message, *") !== null, "the item itself rendered" );
+  assert.ok( el.querySelector(".prediction-hint-vote") === null );
+});
+
 test("notificationItem: prediction_hint at/above the gate mounts the vote controls (pure-data, no integration)", () => {
   const el = renderNotificationItem(
-    makeNotification({ prediction_hint: { confidence: 0.5, predicted_value: "yes", category: "calendar" } }),
+    makeNotification({ prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.5, predicted_value: "yes", category: "calendar" } }),
     { appTimezone: "UTC" },
   );
   const controls = el.querySelector(".prediction-hint-vote");
@@ -192,7 +201,7 @@ test("notificationItem: prediction_hint at/above the gate mounts the vote contro
 
 test("notificationItem: vote controls render AFTER the message text (appended to .sender-message)", () => {
   const el = renderNotificationItem(
-    makeNotification({ prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "calendar" } }),
+    makeNotification({ prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "calendar" } }),
     { appTimezone: "UTC" },
   );
   const kids = Array.from(el.children);
@@ -204,7 +213,7 @@ test("notificationItem: vote controls render AFTER the message text (appended to
 test("notificationItem: integration.onVote is forwarded with the notification id_hash + dir on click", () => {
   const { integration, calls } = makeIntegration();
   const el = renderNotificationItem(
-    makeNotification({ id_hash: "pred-7", prediction_hint: { confidence: 0.8, predicted_value: "no", category: "calendar" } }),
+    makeNotification({ id_hash: "pred-7", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.8, predicted_value: "no", category: "calendar" } }),
     { appTimezone: "UTC", predictionVote: integration },
   );
   el.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click();
@@ -215,7 +224,7 @@ test("notificationItem: integration.onVote is forwarded with the notification id
 test("notificationItem: integration.getVote drives the cast-vote highlight on render", () => {
   const { integration } = makeIntegration("down");
   const el = renderNotificationItem(
-    makeNotification({ prediction_hint: { confidence: 0.8, predicted_value: "no", category: "calendar" } }),
+    makeNotification({ prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.8, predicted_value: "no", category: "calendar" } }),
     { appTimezone: "UTC", predictionVote: integration },
   );
   const controls = el.querySelector(".prediction-hint-vote")!;
@@ -226,7 +235,7 @@ test("notificationItem: integration.getVote drives the cast-vote highlight on re
 
 test("notificationItem: prediction controls also mount on a progress-group message", () => {
   const el = renderNotificationItem(
-    makeNotification({ progress_group_id: "pg_1", prediction_hint: { confidence: 0.8, predicted_value: "yes", category: "calendar" } }),
+    makeNotification({ progress_group_id: "pg_1", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.8, predicted_value: "yes", category: "calendar" } }),
     { appTimezone: "UTC" },
   );
   assert.ok( el.querySelector(".progress-group-head") !== null );

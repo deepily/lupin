@@ -226,7 +226,7 @@ test( "prediction hint: a predicted answer's header renders as text", () => {
   const html = ui.buildPredictionHintSection( {
     id            : "n-pred-1",
     response_type : "multiple_choice",
-    prediction_hint : { confidence: 0.9, strategy: "cbr_retrieval", predicted_value: { answers: { [ TAG_PAYLOAD ]: "a" } } },
+    prediction_hint : { state: "ready", retrieval_metric: "dot", confidence: 0.9, strategy: "cbr_retrieval", predicted_value: { answers: { [ TAG_PAYLOAD ]: "a" } } },
   } );
   const host = document.createElement( "div" );
   host.innerHTML = html;

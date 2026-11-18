@@ -38,6 +38,12 @@ export const PREDICTION_VOTE_MIN_PCT = 50;
 /** The path prefix of the prediction vote endpoint. */
 export const PREDICTION_VOTE_ENDPOINT_PREFIX = "/api/notify/prediction-vote/";
 
+/** The path prefix of the endpoint that records a hint was rendered or its fold opened. */
+export const PREDICTION_SEEN_ENDPOINT_PREFIX = "/api/notify/prediction-seen/";
+
+/** The two client events the seen route records. */
+export type PredictionSeenEvent = "rendered" | "fold_opened";
+
 /** The hint context of each notification and the vote cast on it, and the call that votes. */
 export interface PredictionVoteStore {
   /** Stash the hint context for a notification id (renderer paint-time call). */
@@ -50,6 +56,16 @@ export interface PredictionVoteStore {
    * the caller, which swallows it — the control stays unhighlighted for retry).
    */
   vote( notificationId: string, dir: PredictionVoteDir ): Promise<boolean>;
+  /** True when the fold of this notification's hint was opened. */
+  isFoldOpen( notificationId: string ): boolean;
+  /**
+   * Report a render or a fold-open of a hint.
+   *
+   * Each event is sent once per notification and a repeat is dropped. A fold-open is also
+   * remembered for `isFoldOpen`. A failed call is forgotten, so the next report retries, and
+   * it never throws.
+   */
+  reportSeen( notificationId: string, event: PredictionSeenEvent ): Promise<void>;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -71,6 +87,10 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
 
   private readonly contexts = new Map<string, PredictionVoteContext>();
   private readonly votes    = new Map<string, PredictionVoteDir>();
+  // Which seen events were sent, keyed "<id>|<event>". A fold-open is kept even when the
+  // call fails, because the reader did open it and the card must stay open on a repaint.
+  private readonly seenSent  = new Set<string>();
+  private readonly foldOpens = new Set<string>();
 
   /**
    * Stores the bus and API client and the clock, which defaults to the current time.
@@ -131,12 +151,40 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
   }
 
   /**
+   * Returns true when the fold of the notification's hint was opened.
+   */
+  isFoldOpen( notificationId: string ): boolean {
+    return this.foldOpens.has( notificationId );
+  }
+
+  /**
+   * Sends one seen event per notification and forgets it when the call fails.
+   */
+  async reportSeen( notificationId: string, event: PredictionSeenEvent ): Promise<void> {
+    if ( !notificationId ) return;
+    if ( event === "fold_opened" ) this.foldOpens.add( notificationId );
+    const key = `${ notificationId }|${ event }`;
+    if ( this.seenSent.has( key ) ) return;
+    this.seenSent.add( key );
+    try {
+      await this.api.post<unknown>(
+        PREDICTION_SEEN_ENDPOINT_PREFIX + encodeURIComponent( notificationId ),
+        event === "rendered" ? { rendered: true } : { fold_opened: true },
+      );
+    } catch ( _err ) {
+      this.seenSent.delete( key );
+    }
+  }
+
+  /**
    * Clears all saved contexts and votes; used by tests.
    */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.contexts.clear();
     this.votes.clear();
+    this.seenSent.clear();
+    this.foldOpens.clear();
   }
   /* c8 ignore stop */
 }

@@ -44,7 +44,7 @@ function makeItem( id: string, confidence: number ): ActionRequiredItem {
     expires_at      : Date.now() + 30_000,
     timeout_seconds : 30,
     state           : "pending",
-    prediction_hint : { confidence, predicted_value: "yes", category: "deploy", strategy: "history" },
+    prediction_hint : { state: "ready", retrieval_metric: "dot", confidence, predicted_value: "yes", category: "deploy", strategy: "history" },
   };
 }
 
@@ -100,7 +100,8 @@ test( "a click POSTs the vote to the prediction-vote endpoint with the item id a
   const h = setup( AT_GATE );
   ( h.root.querySelector( '[data-testid="prediction-vote-down"]' ) as HTMLElement ).click();
   await flush();
-  assert.deepEqual( h.posts, [ {
+  // The card also reports that it rendered; this test is about the vote POST alone.
+  assert.deepEqual( h.posts.filter( ( p ) => p.path.startsWith( "/api/notify/prediction-vote/" ) ), [ {
     path : "/api/notify/prediction-vote/ar-1",
     body : {
       vote            : "down",
@@ -147,7 +148,7 @@ test( "a cast the store declines (resolves false) drops the optimistic highlight
   const renderer = createActionRequiredRenderer( {
     eventBus : bus,
     stores   : { actionRequired: { list: () => items, getById: () => items[ 0 ], respondAndAwait: async () => {} } },
-    predictionVoteStore : { getVote: () => undefined, setContext: () => {}, vote: async () => false },
+    predictionVoteStore : { getVote: () => undefined, setContext: () => {}, vote: async () => false, isFoldOpen: () => false, reportSeen: async () => {} },
   } );
   renderer.mount( root );
   ( root.querySelector( '[data-testid="prediction-vote-up"]' ) as HTMLElement ).click();
@@ -172,6 +173,62 @@ test( "an explicit integration wins over the store: the click goes to it and not
   renderer.mount( root );
   ( root.querySelector( '[data-testid="prediction-vote-up"]' ) as HTMLElement ).click();
   assert.deepEqual( calls, [ [ "ar-1", "up" ] ] );
+  renderer.unmount();
+} );
+
+// Phase 5: the forecast sits in a fold that starts closed, and the card reports what the reader did.
+const seenPosts = ( h: { posts: Post[] } ): Post[] => h.posts.filter( ( p ) => p.path.startsWith( "/api/notify/prediction-seen/" ) );
+
+function openFold( root: HTMLElement ): HTMLDetailsElement {
+  const fold = root.querySelector( 'details[data-testid="prediction-hint-fold"]' ) as HTMLDetailsElement;
+  fold.open = true;   // the DOM fires `toggle` itself
+  return fold;
+}
+
+test( "the forecast fold starts closed and the card reports one rendered event, not a fold-open", async () => {
+  const h = setup( AT_GATE );
+  await flush();
+  const fold = h.root.querySelector( 'details[data-testid="prediction-hint-fold"]' ) as HTMLDetailsElement;
+  assert.equal( fold !== null && fold.open, false, "the fold must start closed" );
+  h.renderer.forceRenderForTesting();
+  await flush();
+  assert.deepEqual( seenPosts( h ), [ { path: "/api/notify/prediction-seen/ar-1", body: { rendered: true } } ],
+    "one rendered report, however many repaints, and no fold-open" );
+  h.renderer.unmount();
+} );
+
+test( "opening the fold reports it once, and an opened fold stays open through a repaint", async () => {
+  const h = setup( AT_GATE );
+  openFold( h.root );
+  await flush();
+  h.renderer.forceRenderForTesting();
+  const again = h.root.querySelector( 'details[data-testid="prediction-hint-fold"]' ) as HTMLDetailsElement;
+  assert.equal( again.open, true, "the repaint closed a fold the reader had opened" );
+  openFold( h.root );
+  await flush();
+  const opens = seenPosts( h ).filter( ( p ) => ( p.body as { fold_opened?: boolean } ).fold_opened === true );
+  assert.equal( opens.length, 1, "the fold-open was reported more than once" );
+  assert.equal( opens[ 0 ]!.path, "/api/notify/prediction-seen/ar-1" );
+  h.renderer.unmount();
+} );
+
+test( "a card with no hint reports nothing", async () => {
+  document.body.replaceChildren();
+  const bus   = createEventBusForTesting();
+  const posts : string[] = [];
+  const item  = { ...makeItem( "ar-2", AT_GATE ) } as ActionRequiredItem;
+  delete ( item as { prediction_hint?: unknown } ).prediction_hint;
+  const root = document.createElement( "div" );
+  document.body.appendChild( root );
+  const renderer = createActionRequiredRenderer( {
+    eventBus : bus,
+    stores   : { actionRequired: { list: () => [ item ], getById: () => item, respondAndAwait: async () => {} } },
+    predictionVoteStore : createPredictionVoteStore( { bus, api: { post: async <T,>( path: string ): Promise<T> => { posts.push( path ); return {} as T; } } } ),
+  } );
+  renderer.mount( root );
+  await flush();
+  assert.deepEqual( posts, [], "a card with no forecast has nothing to report" );
+  assert.equal( root.querySelector( '[data-hint-state="insufficient_evidence"]' ) !== null, true, "the ghost state still shows, in the fold" );
   renderer.unmount();
 } );
 

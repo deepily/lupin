@@ -313,7 +313,7 @@ const SAME_TURN_CHANGES: ReadonlyArray<[ string, (h: Harness) => void ]> = [
 for (const [ name, change ] of SAME_TURN_CHANGES) {
   test(`an arrival in the same turn as ${name} replaces the card, which matches a fresh render`, async () => {
     const h = setup(3);
-    await arrive(h, "hint-1", idFor(1), T0 + 50_000, { prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } });
+    await arrive(h, "hint-1", idFor(1), T0 + 50_000, { prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } });
     assert.deepEqual(h.patched, [ idFor(1) ], "precondition: an appended hint row patches");
     const card = cardOf(h, idFor(1));
     h.patched.length = 0;
@@ -623,13 +623,13 @@ test("parity: after every step of a seeded sequence of every change kind, every 
       }
       case "hint-row": {
         const idHash = `h${serial++}`;
-        h.notifs.push(note(idHash, rec.sender_id, clock, { prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } }));
+        h.notifs.push(note(idHash, rec.sender_id, clock, { prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } }));
         emitNotifications(h, "added", idHash);
         break;
       }
       case "vote": {
         if (!h.notifs.some(n => n.prediction_hint !== undefined)) {
-          h.notifs.push(note(`h${serial++}`, rec.sender_id, clock, { prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } }));
+          h.notifs.push(note(`h${serial++}`, rec.sender_id, clock, { prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } }));
           emitNotifications(h, "added");
         }
         const target = pick(h.notifs.filter(n => n.prediction_hint !== undefined));

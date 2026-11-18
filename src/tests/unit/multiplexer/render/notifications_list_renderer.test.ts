@@ -797,7 +797,7 @@ function predNotification(over: Partial<Notification> = {}): Notification {
     message         : "Schedule the meeting?",
     action_required : false,
     response_type   : "yes_no",
-    prediction_hint : { confidence: 0.9, predicted_value: "yes", category: "calendar" },
+    prediction_hint : { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "calendar" },
     ...over,
   };
 }

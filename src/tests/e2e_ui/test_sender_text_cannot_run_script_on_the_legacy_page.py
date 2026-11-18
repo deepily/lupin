@@ -80,7 +80,7 @@ SITES = [
     ( "prediction_hint_header", "tag", """
         const host = mount( "pred" );
         host.innerHTML = ui.buildPredictionHintSection( { id: "p1", response_type: "multiple_choice",
-            prediction_hint: { confidence: 0.9, strategy: "cbr_retrieval", predicted_value: { answers: { [ P ]: "a" } } } } );
+            prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, strategy: "cbr_retrieval", predicted_value: { answers: { [ P ]: "a" } } } } );
         return host;""" ),
     ( "expired_badge_default", "tag", """
         const card = mount( "action-required-e1" ); card.innerHTML = `<div class="response-buttons"></div>`;

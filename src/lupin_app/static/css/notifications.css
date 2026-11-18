@@ -844,6 +844,18 @@
             font-style: italic;
         }
 
+        /* The forecast sits in a native details fold that starts closed (decision 2). */
+        .prediction-hint-summary {
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .prediction-hint-confidence,
+        .prediction-hint-always-yes {
+            font-size: 0.9em;
+            color: #5a4e8c;
+        }
+
         .prediction-hint-cold {
             background: #faf9ff;
             border-left: 3px dashed #b8b0d8;

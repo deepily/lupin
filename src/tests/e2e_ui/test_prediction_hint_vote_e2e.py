@@ -32,7 +32,7 @@ _RENDER_HINT_JS = """( args ) => {
         id              : args.id,
         message         : args.message,
         response_type   : 'yes_no',
-        prediction_hint : { predicted_value: 'yes', confidence: 0.9,
+        prediction_hint : { state: 'ready', retrieval_metric: 'dot', predicted_value: 'yes', confidence: 0.9,
                             strategy: 'cbr_majority_vote', category: 'deploy',
                             vote_min_confidence_threshold: 0.5 },
     };
@@ -41,6 +41,8 @@ _RENDER_HINT_JS = """( args ) => {
     host.setAttribute( 'data-testid', 'e2e-hint-host' );
     host.innerHTML = html;
     document.body.appendChild( host );
+    // The forecast sits in a fold that starts closed; open it the way a reader does.
+    host.querySelector( 'summary' ).click();
     return 'ok';
 }"""
 
