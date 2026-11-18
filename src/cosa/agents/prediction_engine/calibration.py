@@ -1,6 +1,5 @@
 """Confidence calibration for the prediction engine: fit, store, load and apply."""
 
-import json
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -8,6 +7,7 @@ from sklearn.calibration import calibration_curve
 from sklearn.isotonic import IsotonicRegression
 
 import cosa.utils.util as cu
+from cosa.utils.atomic_json import write_json_atomic
 
 MIN_ROWS_PER_CELL = 50
 CALIBRATION_PATH  = "/src/conf/prediction-calibration.json"
@@ -51,7 +51,7 @@ def fit_cell( confidences: Sequence[float], correct: Sequence[bool] ) -> Dict:
     n = len( confidences )
     if n < MIN_ROWS_PER_CELL:
         return { "status": STATUS_REFUSED, "n": n, "needed": MIN_ROWS_PER_CELL }
-    model = IsotonicRegression( y_min=0.0, y_max=1.0, out_of_bounds="clip" )
+    model = IsotonicRegression( out_of_bounds="clip" )
     model.fit( np.asarray( confidences, dtype=float ), np.asarray( correct, dtype=float ) )
     return {
         "status" : STATUS_FIT,
@@ -139,13 +139,12 @@ def write_calibration( document: Dict, path: Optional[str] = None ) -> str:
         - document came from fit_calibration or empty_document
 
     Ensures:
-        - writes sorted, indented JSON ending in a newline to path, or the committed location
+        - writes sorted, indented JSON ending in a newline to path, or the committed location,
+          replacing the file whole
         - returns the path written
     """
     path = path if path is not None else cu.get_project_root() + CALIBRATION_PATH
-    with open( path, "w" ) as handle:
-        json.dump( document, handle, indent=2, sort_keys=True )
-        handle.write( "\n" )
+    write_json_atomic( path, document, indent=2, trailing_newline=True, sort_keys=True )
     return path
 
 
@@ -164,8 +163,7 @@ def load_calibration( path: Optional[str] = None ) -> Dict:
         - ValueError if the stored version is not FORMAT_VERSION
     """
     path = path if path is not None else cu.get_project_root() + CALIBRATION_PATH
-    with open( path ) as handle:
-        document = json.load( handle )
+    document = cu.get_file_as_json( path )
     if document.get( "version" ) != FORMAT_VERSION:
         raise ValueError( f"{path} has version {document.get( 'version' )!r}, expected {FORMAT_VERSION}" )
     return document
