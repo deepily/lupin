@@ -136,6 +136,19 @@ test( "render fills each input from the PREDICTION when the gate opens", () => {
     "the weak expeditor default must be overridden by the prediction" );
 } );
 
+// The committed INI value is false (pinned in Python), so the server stamps
+// auto_submit_enabled false on every hint: the batch view then applies no predicted answer.
+test( "switch off — a confident hint prefills nothing and the form keeps the expeditor defaults", () => {
+  const ui   = makeUI();
+  const hint = { ...OPEN_HINT, auto_submit_enabled: false, confidence: 1.0 };
+  const n    = batchNotification( hint );
+  assert.equal( ui._batchPredictedAnswers( n ), null );
+  const html = ui.renderOpenEndedBatchUI( n );
+  assert.ok( html.includes( 'value="make me a podcast"' ), "the expeditor default must stand" );
+  assert.ok( !html.includes( "the KISS explainer in docs/explainer" ), "no predicted answer may appear" );
+  assert.ok( !html.includes( 'value="no limit"' ), "no predicted answer may appear" );
+} );
+
 test( "render falls back to the expeditor default_value when the gate is closed", () => {
   const ui   = makeUI();
   const html = ui.renderOpenEndedBatchUI( batchNotification( null ) );

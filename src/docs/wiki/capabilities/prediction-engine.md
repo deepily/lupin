@@ -35,6 +35,6 @@ A process-wide singleton that guesses how the user will answer a notification be
 
 ## How it is used
 - `lupin_app.main` builds the singleton with the config at startup. The notify route calls `predict` off the event loop and shows the hint only when confidence reaches `prediction engine confidence threshold`.
-- The same route stamps the vote gate and the auto-submit keys into the hint, so the client reads them from the server. Auto-submit is off unless `expeditor prediction auto submit enabled` is true.
+- The same route stamps the vote gate and the auto-submit keys into the hint, so the client reads them from the server. Auto-submit and batch prefill are **Dormant**: `expeditor prediction auto submit enabled` is false and a unit test pins it. The keys and the client code stay.
 - The response route calls `record_outcome`. The vote route calls `record_hint_vote`.
 - Thresholds, `top k`, the LanceDB table and the open-ended LLM key are `prediction engine ...` INI keys, with code defaults in `config.py`. A hot reload drops the singleton through `PredictionEngine.reset`.
