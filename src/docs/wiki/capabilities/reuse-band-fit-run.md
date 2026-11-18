@@ -21,7 +21,7 @@ pins:
   - lupin_mcp.reuse_band_fit_run.check_ceiling@5b78eb8e98
   - lupin_mcp.reuse_band_fit_run.derive_needs@12d94938e7
   - lupin_mcp.reuse_band_fit_run.main@557c4dca08
-  - lupin_mcp.reuse_band_fit_run.cli@9c68818622
+  - lupin_mcp.reuse_band_fit_run.cli@febb7f078c
 ---
 # Reuse band-fit run
 The band fit measures how far Jev's per-entry overlap moves between repeats, to set the uncertain band of the verdict. Each need gets one candidates-route lookup, then five live replays of its receipt. A canary of five needs is read first. See [[reuse-flip-rate-measure]].

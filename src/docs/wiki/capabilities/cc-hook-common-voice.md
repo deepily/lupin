@@ -11,7 +11,7 @@ pins:
   - lupin_cli.claude_code.hooks.lib.hook_common.format_voice_context@f50cd6e199
   - lupin_cli.claude_code.hooks.lib.hook_common.build_additional_context@760fd3a960
   - lupin_cli.claude_code.hooks.lib.hook_common.enrich_voice_context@e56f50338a
-  - lupin_cli.claude_code.hooks.lib.hook_common.build_voice_deny_response@556f303a37
+  - lupin_cli.claude_code.hooks.lib.hook_common.build_voice_deny_response@55f4e72dee
   - lupin_cli.claude_code.hooks.lib.hook_common.is_mcp_voice_tool@9b92303f1a
   - lupin_cli.claude_code.hooks.lib.hook_common.build_peer_dm_reminder@91a7f32b68
   - lupin_cli.claude_code.hooks.lib.hook_common.is_injected_peer_dm@525e625907

@@ -36,6 +36,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[memento-slots-claims-and-audit]] — where a seat's memento must live, how a path is checked against its slots, and how a false merge claim is refuted. `lupin_mcp` (memento_slot, memento_repo_root, memento_merge_claim, memento_slot_audit)
 - [[respin-credit-and-reap-branch-check]] — the credit that lets a one-for-one re-spin through skeleton crew, and the reap check that names a seat's unmerged commits. `lupin_mcp` (respin_credit, reap_branch)
 - [[reap-memento-checks]] — how a reap asks each seat for a memento, proves it is usable and reports the seats that lack one. `lupin_mcp` (reap_memento)
+- [[reap-memento-identity]] — the persona and session a reap reads from a captured identity. `lupin_mcp` (reap_memento)
 - [[mcp-tool-index]] — a map of the cosa-voice server's tools to the pages that describe them. `lupin_mcp` (cosa_voice_mcp)
 
 ## Auth, data and platform
@@ -236,6 +237,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[duplicate-check-filing]] — the one triage row a daily run files: a persona owner from the roster and a title that says why. It also holds the finding keys, the retry spool and the live store client. `lupin_mcp` (duplicate_check_filing)
 - [[duplicate-check-daily-window]] — the daily check's commit window, the definitions new in it, the pool without their earlier versions, and how far a run advanced. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-daily-run]] — one daily run: prerequisites, result file, filing, cron lines and the live parts. `lupin_mcp` (duplicate_check_daily)
+- [[duplicate-check-daily-carry]] — `--carry-progress`: move the recorded progress to another branch and commit. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-run-history]] — one JSON line per daily run in runs.jsonl, the backfill, the rising-backlog test and the table reader. `lupin_mcp` (duplicate_check_history)
 - [[duplicate-check-test-code]] — the daily check leaves test code out of the backlog and the comparison pool. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-daily-slots]] — the daily check's hourly slots, rate-limit back-off, alerts, store row count, run lock and exit code. `lupin_mcp` (duplicate_check_daily)
@@ -484,6 +486,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[doc-lint-jev-transport]] — Jev HTTP door and budget. `cosa.repo.doc_lint` (jev_transport)
 - [[doc-lint-model-transport]] — model call door, agy, budget. `cosa.repo.doc_lint` (model_transport)
 - [[doc-lint-harness-runner]] — runner, ledger, schedule, cli. `cosa.repo.doc_lint` (harness_runner, harness_schedule, harness_cli)
+- [[doc-lint-ledger-cached]] — the ledger-backed `cached` helper of the harness runner. `cosa.repo.doc_lint` (harness_runner)
 - [[doc-lint-harness-report]] — exit-gate figures. `cosa.repo.doc_lint` (harness_report)
 - [[doc-lint-judge-comparison-ledger]] — rebuild from a ledger. `cosa.repo.doc_lint` (judge_comparison)
 - [[doc-lint-judge-comparison-report]] — per-judge tables. `cosa.repo.doc_lint` (judge_comparison)
@@ -545,6 +548,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[expeditor-cli-and-mock-submit]] — Expeditor response models, CLI help builder and the mock job submit command. `cosa.agents` (runtime_argument_expeditor, test_harness)
 - [[fix-git-operations]] — GitOps command wrapper and the GitStrategist trust-to-git strategy. `cosa.agents` (bug_fix_expediter, shared)
 - [[fix-run-outputs-and-guards]] — Plan and report writers, resume guard, SDK error shaping, timeout brake. `cosa.agents` (shared)
+- [[fix-stream-delegates]] — the Coder and Tester stream wrappers both expediters call. `cosa.agents` (shared)
 - [[generator-voice-bridges]] — Podcast and presentation cosa_interface and voice_io wrappers over the shared voice layer. `cosa.agents` (podcast_generator, presentation_generator)
 - [[heartbeat-arbiter-plumbing]] — Arbiter commons gateway, journal logger, per-edge ledger, event tail offsets, lineage carry file. `cosa.agents` (heartbeat_arbiter)
 - [[arbiter-app-service]] — the standalone 8001 arbiter app: /health, /state, loop wiring and the DM-push hop. `lupin_arbiter_app` (app)
