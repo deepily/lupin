@@ -19,6 +19,10 @@ DEFAULT_CONFIDENCE_THRESHOLD   = 0.60
 DEFAULT_RETRIEVAL_METRIC       = "dot"
 VALID_RETRIEVAL_METRICS        = ( "dot", "cosine" )
 
+# Whether the display gate reads calibrated confidence (from the committed calibration file)
+# instead of raw confidence. False in the foundation; a measured change turns it on.
+DEFAULT_CALIBRATION_ENABLED    = False
+
 # Yes/no prior-weighted vote. "no" is predicted only when the
 # no tally beats the yes tally by at least this margin (in vote-weight units; an
 # ordinary neighbour counts 1.0). 1.35 = ln( 527 / 137 ), the log-odds of the 79.4%

@@ -34,6 +34,7 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_CBR_SIMILARITY_THRESHOLD,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_RETRIEVAL_METRIC,
+    DEFAULT_CALIBRATION_ENABLED,
     VALID_RETRIEVAL_METRICS,
     DEFAULT_YES_NO_NO_MARGIN,
     DEFAULT_LANCEDB_TABLE,
@@ -125,6 +126,7 @@ class PredictionEngine:
             self.confidence_threshold = config_mgr.get( "prediction engine confidence threshold", default=str( DEFAULT_CONFIDENCE_THRESHOLD ), return_type="float" )
             self.yes_no_no_margin     = config_mgr.get( "prediction engine yes no no margin", default=str( DEFAULT_YES_NO_NO_MARGIN ), return_type="float" )
             self.retrieval_metric     = config_mgr.get( "prediction engine retrieval metric", default=DEFAULT_RETRIEVAL_METRIC )
+            self.calibration_enabled  = config_mgr.get( "prediction engine calibration enabled", default=str( DEFAULT_CALIBRATION_ENABLED ), return_type="boolean" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -146,6 +148,7 @@ class PredictionEngine:
             self.confidence_threshold = DEFAULT_CONFIDENCE_THRESHOLD
             self.yes_no_no_margin     = DEFAULT_YES_NO_NO_MARGIN
             self.retrieval_metric     = DEFAULT_RETRIEVAL_METRIC
+            self.calibration_enabled  = DEFAULT_CALIBRATION_ENABLED
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
