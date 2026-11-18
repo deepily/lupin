@@ -110,3 +110,19 @@ def test_a_file_that_fails_its_check_is_refused_by_name( tmp_path, monkeypatch )
     monkeypatch.setattr( hd, "verify_snapshot", lambda snapshot, manifest: ( False, "row count 1 != manifest 2" ) )
     with pytest.raises( ValueError, match="originals.jsonl failed its check: row count" ):
         write_dataset( [ raw( value=None ) ], str( tmp_path ) )
+
+
+def test_the_asked_at_of_an_example_is_the_created_at_of_its_row():
+    row = raw( created_at="2026-11-02T08:30:00Z", value=answered( "yes" ) )
+    row[ "responded_at" ] = "2026-11-02T09:45:00Z"
+    assert derive_dataset( [ row ] )[ 0 ][ 0 ][ "asked_at" ] == "2026-11-02T08:30:00Z"
+
+
+@pytest.mark.parametrize( "options, expected", [ ( None, False ), ( {}, False ), ( { "timeout": 5 }, False ), ( { "questions": [] }, False ), ( { "questions": [ { "header": "h" } ] }, True ) ] )
+def test_an_offered_schema_needs_questions_not_just_options( options, expected ):
+    assert derive_dataset( [ raw( response_options=options, value=answered( "yes" ) ) ] )[ 0 ][ 0 ][ "has_offered_schema" ] is expected
+
+
+def test_answered_counts_every_stored_answer_readable_or_not():
+    rows = [ raw( id="a", value=answered( "yes" ) ), raw( id="b", message="B?", value=answered( "perhaps" ) ), raw( id="c", message="C?", value=None ) ]
+    assert derive_dataset( rows )[ 1 ][ "answered" ] == 2
