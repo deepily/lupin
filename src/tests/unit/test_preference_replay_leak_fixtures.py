@@ -114,7 +114,17 @@ def test_later_status_a_case_first_answered_after_the_ask_is_forbidden():
     asked = _when( entry[ "target" ][ "asked_at" ] )
     case  = [ c for c in entry[ "cases" ] if c[ "id" ] == "status-answered-after-the-ask" ][ 0 ]
     assert _when( case[ "versions" ][ 0 ][ "at" ] ) > asked
-    assert entry[ "forbidden_ids" ] == [ "status-answered-after-the-ask" ]
+    assert entry[ "store_forbidden_ids" ] == [ "status-answered-after-the-ask" ]
+    assert entry[ "forbidden_ids" ] == [ "status-answered-after-the-ask", "status-unrebuildable" ]
+
+
+def test_later_status_an_unrebuildable_case_was_answered_before_the_ask_and_has_no_history():
+    entry = _load()[ "classes" ][ "later_status" ]
+    asked = _when( entry[ "target" ][ "asked_at" ] )
+    case  = [ c for c in entry[ "cases" ] if c[ "id" ] == "status-unrebuildable" ][ 0 ]
+    assert _when( case[ "responded_at" ] ) <= asked
+    assert case[ "versions" ] == [] and case[ "ratification_state_final" ] == "rejected"
+    assert entry[ "loader_excluded_and_counted_ids" ] == [ "status-unrebuildable" ]
 
 
 def test_final_state_sentinels_all_sit_in_the_targets_final_state_and_nowhere_else():
