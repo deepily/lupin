@@ -33,6 +33,8 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_CBR_TOP_K,
     DEFAULT_CBR_SIMILARITY_THRESHOLD,
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_RETRIEVAL_METRIC,
+    VALID_RETRIEVAL_METRICS,
     DEFAULT_YES_NO_NO_MARGIN,
     DEFAULT_LANCEDB_TABLE,
     DEFAULT_EMBEDDING_FALLBACK_PORT,
@@ -121,6 +123,7 @@ class PredictionEngine:
             self.similarity_threshold = config_mgr.get( "prediction engine cbr similarity threshold", default=str( DEFAULT_CBR_SIMILARITY_THRESHOLD ), return_type="float" )
             self.confidence_threshold = config_mgr.get( "prediction engine confidence threshold", default=str( DEFAULT_CONFIDENCE_THRESHOLD ), return_type="float" )
             self.yes_no_no_margin     = config_mgr.get( "prediction engine yes no no margin", default=str( DEFAULT_YES_NO_NO_MARGIN ), return_type="float" )
+            self.retrieval_metric     = config_mgr.get( "prediction engine retrieval metric", default=DEFAULT_RETRIEVAL_METRIC )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -141,6 +144,7 @@ class PredictionEngine:
             self.similarity_threshold = DEFAULT_CBR_SIMILARITY_THRESHOLD
             self.confidence_threshold = DEFAULT_CONFIDENCE_THRESHOLD
             self.yes_no_no_margin     = DEFAULT_YES_NO_NO_MARGIN
+            self.retrieval_metric     = DEFAULT_RETRIEVAL_METRIC
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -154,9 +158,11 @@ class PredictionEngine:
             self.hint_voting_enabled                = DEFAULT_HINT_VOTING_ENABLED
             self.hint_vote_min_confidence_threshold = DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD
 
-        # Settings the forecast row's config_version names beside the thresholds. Phase 3 reads the
-        # retrieval metric from the INI and phase 9 the calibration switch; until then they hold today's values.
-        self.retrieval_metric     = "dot"
+        if self.retrieval_metric not in VALID_RETRIEVAL_METRICS:
+            raise ValueError( f"prediction engine retrieval metric must be one of {VALID_RETRIEVAL_METRICS}, got {self.retrieval_metric!r}" )
+
+        # The forecast row's config_version names the calibration switch beside the thresholds;
+        # the INI read for it lands with the calibration module, until then it holds today's value.
         self.calibration_enabled  = False
 
         # Retained for _get_embedding_store. None is legitimate — the store then
@@ -484,7 +490,8 @@ class PredictionEngine:
                 limit           = self.cbr_top_k,
                 threshold       = self.similarity_threshold,
                 response_type   = RESPONSE_TYPE_YES_NO,
-                **self._personal_vote_filter( owner_user_id )
+                **self._personal_vote_filter( owner_user_id ),
+                metric          = self.retrieval_metric
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error: {e}" )
@@ -726,7 +733,8 @@ class PredictionEngine:
                 limit           = self.cbr_top_k,
                 threshold       = self.similarity_threshold,
                 response_type   = RESPONSE_TYPE_MULTIPLE_CHOICE,
-                **self._personal_vote_filter( owner_user_id )
+                **self._personal_vote_filter( owner_user_id ),
+                metric          = self.retrieval_metric
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error (MC): {e}" )
@@ -1034,7 +1042,8 @@ class PredictionEngine:
                 limit           = self.open_ended_cbr_top_k,
                 threshold       = self.open_ended_cbr_threshold,
                 response_type   = response_type,
-                **self._personal_vote_filter( owner_user_id )
+                **self._personal_vote_filter( owner_user_id ),
+                metric          = self.retrieval_metric
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error ({label}): {e}" )
