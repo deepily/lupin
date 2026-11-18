@@ -118,3 +118,30 @@ def test_the_logged_correctness_in_the_artifact_matches_the_exports_match_flag()
     differing = [ row[ "prediction_log_id" ] for row in _artifact()[ "rows" ]
                   if bool( row[ "logged_right" ] ) != bool( asks[ row[ "prediction_log_id" ] ][ "match" ] ) ]
     assert differing == []
+
+
+def _audit_cutoffs_of( response_type ):
+    """Read the two instants of one response type's window clause out of the audit query."""
+    sql     = open( require_local_file( AUDIT_SQL_FILE_NAME ) ).read()
+    pattern = r"predicted_at <= '([^']+)'\s+THEN '[^']*'\s+WHEN (?:p\.)?predicted_at <\s+'([^']+)'"
+    found   = re.findall( pattern, sql )
+    # The yes/no clause is written twice and the multiple-choice clause once, and the yes/no clause comes first.
+    pair    = found[ 0 ] if response_type == "yes_no" else found[ -1 ]
+    return _instant( pair[ 0 ] ), _instant( pair[ 1 ] )
+
+
+@pytest.mark.parametrize( "response_type", [ "yes_no", "multiple_choice" ] )
+def test_the_harness_cutovers_are_the_instants_the_audit_query_names( response_type ):
+    """The constants in cohorts.py equal the instants read out of the audit query."""
+    from cosa.research.preference_replay.cohorts import CUTOVERS
+    assert CUTOVERS[ response_type ] == _audit_cutoffs_of( response_type )
+
+
+@pytest.mark.parametrize( "response_type,expected", [ ( "yes_no", 139 ), ( "multiple_choice", 140 ) ] )
+def test_the_harness_window_function_matches_the_export_label_for_every_ask( response_type, expected ):
+    """window_of puts every ask in the window the export labels it with."""
+    from cosa.research.preference_replay.cohorts import window_of
+    predictions = json.load( open( require_local_file( EXPORT_FILE_NAME ) ) )[ "predictions" ]
+    asks        = [ p for p in predictions if p[ "response_type" ] == response_type ]
+    assert len( asks ) == expected
+    assert [ p[ "ref" ][ "prediction_log_id" ] for p in asks if window_of( _instant( p[ "predicted_at" ] ), response_type ) != p[ "window" ] ] == []
