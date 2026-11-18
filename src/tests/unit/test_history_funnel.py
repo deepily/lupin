@@ -6,6 +6,7 @@ The rows are shaped like stored notifications; the real-data check is in the `lo
 
 import pytest
 
+import cosa.agents.prediction_engine.history_funnel as hf
 from cosa.agents.prediction_engine.history_funnel import OUTSIDE_WINDOW, format_funnel, prove_import, reproduce_inventory, yield_funnel
 
 RECIPIENT = "0cf47e2d-d5a1-4cd4-addf-79810fd32b15"
@@ -114,3 +115,22 @@ def test_a_family_with_no_rows_cannot_be_proved( tmp_path ):
 def test_the_printout_names_every_stage_and_reason():
     out = format_funnel( yield_funnel( ROWS, {}, "yes_no" ) )
     for needle in ( "asks", "usable answers", "independent families", "dropped", "before the context window" ): assert needle in out
+
+
+def test_a_row_created_exactly_at_the_run_time_is_counted():
+    rows = [ raw( "edge", "Q edge?", None, state="expired", created_at="2026-11-18T12:00:00Z" ) ]
+    got  = reproduce_inventory( rows, INVENTORY, "2026-11-18T12:00:00Z", "yes_no" )
+    assert got[ "reproduced" ] == { "expired": 1 }
+
+
+@pytest.mark.parametrize( "changed", [ "originals_sha256", "derived_sha256" ] )
+def test_hashes_agree_is_false_when_either_hash_differs_on_the_second_run( tmp_path, monkeypatch, changed ):
+    runs = [ { "originals_sha256": "o1", "derived_sha256": "d1", "counts": {} }, { "originals_sha256": "o1", "derived_sha256": "d1", "counts": {} } ]
+    runs[ 1 ][ changed ] = "different"
+    monkeypatch.setattr( hf, "write_dataset", lambda rows, out_dir: runs.pop( 0 ) )
+    assert prove_import( ROWS, INVENTORY, "2026-11-18T23:00:00Z", "yes_no", {}, str( tmp_path ) )[ "hashes_agree" ] is False
+
+
+def test_hashes_agree_is_true_when_both_hashes_are_equal_on_both_runs( tmp_path, monkeypatch ):
+    monkeypatch.setattr( hf, "write_dataset", lambda rows, out_dir: { "originals_sha256": "o1", "derived_sha256": "d1", "counts": {} } )
+    assert prove_import( ROWS, INVENTORY, "2026-11-18T23:00:00Z", "yes_no", {}, str( tmp_path ) )[ "hashes_agree" ] is True
