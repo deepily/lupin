@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, Mock
 
 from sqlalchemy.dialects import postgresql
 
-from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository, legacy_similarity_clause, legacy_confidence_clause
+from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository, OutcomeAlreadyRecorded, LEDGER_COLUMNS, legacy_similarity_clause, legacy_confidence_clause
 from cosa.rest.postgres_models import PredictionLog
 
 
@@ -68,6 +68,7 @@ class TestLogPrediction( _PLRTestBase ):
 class TestUpdateOutcome( _PLRTestBase ):
     def test_found_sets_fields_flushes_and_returns( self ):
         prediction = MagicMock( name="prediction" )
+        prediction.responded_at = None
         self.repo.get_by_notification_id = Mock( return_value=prediction )
         result = self.repo.update_outcome(
             _NID, actual_value={ "answer": "no" }, accuracy_match=False,
@@ -287,3 +288,40 @@ class TestRecordSeen( _PLRTestBase ):
     def test_a_non_uuid_id_raises_value_error( self ):
         with self.assertRaises( ValueError ):
             self.repo.record_seen( "not-a-uuid", rendered=True )
+
+
+class TestLedgerWrites( _PLRTestBase ):
+    """log_prediction's ledger kwargs and update_outcome's refusal of a second outcome."""
+
+    def test_ledger_values_reach_create_beside_the_prediction_fields( self ):
+        self.repo.create = Mock( return_value=object() )
+        self.repo.log_prediction( notification_id=_NID, response_type="yes_no", category="c", predicted_value=None,
+                                  prediction_confidence=0.0, prediction_strategy="error",
+                                  ledger={ "abstention_reason": "predictor_error: X", "forecast_source": "foundation_sync" } )
+        kwargs = self.repo.create.call_args.kwargs
+        self.assertEqual( kwargs[ "abstention_reason" ], "predictor_error: X" )
+        self.assertEqual( kwargs[ "forecast_source" ], "foundation_sync" )
+        self.assertEqual( kwargs[ "prediction_strategy" ], "error" )
+
+    def test_a_column_outside_the_ledger_is_refused_before_any_write( self ):
+        self.repo.create = Mock()
+        with self.assertRaises( ValueError ) as caught:
+            self.repo.log_prediction( notification_id=_NID, response_type="yes_no", category="c", predicted_value=None,
+                                      prediction_confidence=0.0, prediction_strategy="x", ledger={ "accuracy_match": True } )
+        self.assertIn( "accuracy_match", str( caught.exception ) )
+        self.repo.create.assert_not_called()
+
+    def test_every_ledger_column_is_a_real_prediction_log_column( self ):
+        names = { c.name for c in PredictionLog.__table__.columns }
+        self.assertTrue( LEDGER_COLUMNS <= names )
+        self.assertEqual( len( LEDGER_COLUMNS ), 18 )
+
+    def test_a_second_outcome_is_refused_and_the_first_is_untouched( self ):
+        prediction = types.SimpleNamespace( actual_value={ "value": "yes" }, accuracy_match=True, accuracy_detail=None,
+                                            responded_at=datetime( 2020, 1, 1, tzinfo=timezone.utc ) )
+        self.repo.get_by_notification_id = Mock( return_value=prediction )
+        with self.assertRaises( OutcomeAlreadyRecorded ):
+            self.repo.update_outcome( _NID, { "value": "no" }, False, None )
+        self.assertEqual( prediction.actual_value, { "value": "yes" } )
+        self.assertTrue( prediction.accuracy_match )
+        self.session.flush.assert_not_called()

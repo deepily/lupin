@@ -48,6 +48,13 @@ STRATEGY_CBR_RETRIEVAL         = "cbr_retrieval"
 STRATEGY_LLM_SYNTHESIS         = "llm_synthesis"
 STRATEGY_OPTION_SCORING        = "option_embedding_scoring"
 STRATEGY_COLD_START            = "cold_start"
+STRATEGY_ERROR                 = "error"
+STRATEGY_TEST_OVERRIDE         = "test_override"
+
+# Forecast ledger: who made the forecast row, and which build of the predictor
+FORECAST_SOURCE_FOUNDATION     = "foundation_sync"
+FORECAST_SOURCE_TEST_OVERRIDE  = "test_override"
+PREDICTOR_VERSION              = "foundation-sync-1"
 
 # Accuracy comparison thresholds
 # Default for INI key "prediction engine open ended match threshold" (Rick's ruling 6 Nov 2026, row 35a79890;

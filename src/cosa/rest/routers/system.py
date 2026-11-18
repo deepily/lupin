@@ -396,7 +396,7 @@ async def init( config_block_id: Optional[ str ] = None, admin_user: Dict = Depe
         401 : { "description": "Unauthorized — no valid API key or bearer token" }
     }
 )
-async def reset_prediction_engine( drop_table: bool = False ):
+async def reset_prediction_engine( drop_table: bool = False, clear_pending: bool = False ):
     """
     Lightweight endpoint to reset the PredictionEngine singleton.
 
@@ -407,6 +407,9 @@ async def reset_prediction_engine( drop_table: bool = False ):
         - No config reinit, DB swap, or snapshot reload (use /api/init for those)
         - drop_table=True with a failed clear still resets the singleton, but answers status "error"
           with table_dropped false and the cause in message, so a caller never reads it as success
+        - clear_pending=True (test-only) empties the notification router's in-memory pending_responses map,
+          which is the state a server restart loses, and reports how many entries it dropped as pending_cleared;
+          the default leaves the map alone
     """
     try:
         from cosa.agents.prediction_engine.prediction_engine import PredictionEngine, get_prediction_engine
@@ -433,12 +436,19 @@ async def reset_prediction_engine( drop_table: bool = False ):
         PredictionEngine.reset()
         engine = get_prediction_engine( config_mgr=config_mgr )
 
+        pending_cleared = 0
+        if clear_pending:
+            from cosa.rest.routers import notifications
+            pending_cleared = len( notifications.pending_responses )
+            notifications.pending_responses.clear()
+
         if clear_error is not None:
             return {
                 "status"           : "error",
                 "message"          : f"PredictionEngine reset ran, but the decision store was not cleared: {clear_error}",
                 "prediction_table" : engine.lancedb_table,
                 "table_dropped"    : False,
+                "pending_cleared"  : pending_cleared,
                 "timestamp"        : du.get_current_datetime_iso()
             }
 
@@ -446,6 +456,7 @@ async def reset_prediction_engine( drop_table: bool = False ):
             "status"           : "success",
             "prediction_table" : engine.lancedb_table,
             "table_dropped"    : table_dropped,
+            "pending_cleared"  : pending_cleared,
             "timestamp"        : du.get_current_datetime_iso()
         }
     except Exception as e:

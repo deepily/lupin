@@ -18,6 +18,9 @@ Architecture:
     - Writes outcomes to prediction_log table via PredictionLogRepository
 """
 
+import hashlib
+import json
+import time
 from threading import Lock
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -45,6 +48,10 @@ from cosa.agents.prediction_engine.config import (
     STRATEGY_CBR_RETRIEVAL,
     STRATEGY_LLM_SYNTHESIS,
     STRATEGY_COLD_START,
+    STRATEGY_ERROR,
+    STRATEGY_TEST_OVERRIDE,
+    FORECAST_SOURCE_FOUNDATION,
+    PREDICTOR_VERSION,
     RESPONSE_TYPE_YES_NO,
     RESPONSE_TYPE_MULTIPLE_CHOICE,
     RESPONSE_TYPE_OPEN_ENDED,
@@ -52,6 +59,8 @@ from cosa.agents.prediction_engine.config import (
 )
 from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
+from cosa.agents.prediction_engine import evidence_recorder
+from cosa.rest.code_identity import get_code_identity
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
 from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
 from cosa.utils.notification_utils import extract_qualifier_comment
@@ -185,6 +194,29 @@ class PredictionEngine:
         return self._embedding_store
 
     def predict( self, notification_dict: Dict[str, Any] ) -> PredictionResult:
+        """
+        Generate a prediction and stamp what the forecast row stores about how it was made.
+
+        Requires:
+            - notification_dict as _predict_core requires
+
+        Ensures:
+            - returns the PredictionResult _predict_core returns
+            - its metadata gains evidence_ids and evidence_scores (the cases this ask retrieved, in
+              retrieval order, two lists of one length) and latency_ms (wall time of the prediction)
+            - never raises, as _predict_core never raises
+        """
+        evidence_recorder.begin()
+        started = time.monotonic()
+        result  = self._predict_core( notification_dict )
+        ids, scores = evidence_recorder.collect()
+        if result.metadata is None: result.metadata = {}
+        result.metadata[ "evidence_ids" ]    = ids
+        result.metadata[ "evidence_scores" ] = scores
+        result.metadata[ "latency_ms" ]      = round( ( time.monotonic() - started ) * 1000.0, 1 )
+        return result
+
+    def _predict_core( self, notification_dict: Dict[str, Any] ) -> PredictionResult:
         """
         Generate a prediction for a notification response.
 
@@ -452,6 +484,7 @@ class PredictionEngine:
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error: {e}" )
             similar_cases = []
+        evidence_recorder.note( similar_cases )
 
         # Blank shadow/deferred rows cast no vote (they would otherwise count as "no")
         similar_cases = [ ( sim, record ) for sim, record in similar_cases if not is_blank_case( record ) ]
@@ -693,6 +726,7 @@ class PredictionEngine:
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error (MC): {e}" )
             similar_cases = []
+        evidence_recorder.note( similar_cases )
 
         if not similar_cases:
             return PredictionResult(
@@ -1000,6 +1034,7 @@ class PredictionEngine:
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error ({label}): {e}" )
             similar_cases = []
+        evidence_recorder.note( similar_cases )
 
         if not similar_cases:
             return PredictionResult(
@@ -1329,10 +1364,192 @@ class PredictionEngine:
         except ( json.JSONDecodeError, TypeError ):
             return None
 
+    def config_version( self ) -> str:
+        """
+        Name the settings the forecast ran under.
+
+        Ensures:
+            - returns the first 12 hex characters of a sha256 over the retrieval and display settings
+            - the same settings give the same string, and a changed setting gives a different one
+        """
+        settings = { "cbr_top_k": self.cbr_top_k, "similarity_threshold": self.similarity_threshold,
+                     "confidence_threshold": self.confidence_threshold, "yes_no_no_margin": self.yes_no_no_margin,
+                     "open_ended_cbr_top_k": self.open_ended_cbr_top_k,
+                     "open_ended_cbr_threshold": self.open_ended_cbr_threshold }
+        return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
+
+    def record_forecast( self, notification_id: str, notification_dict: Dict[str, Any],
+                         prediction_result: Optional[PredictionResult] = None,
+                         forecast_source: str = FORECAST_SOURCE_FOUNDATION,
+                         strategy: str = STRATEGY_ERROR, abstention_reason: Optional[str] = None,
+                         display_decision: Optional[str] = None, asked_at: Optional[datetime] = None,
+                         owner_email: Optional[str] = None ) -> bool:
+        """
+        Write the ask-time forecast row for a notification, before the hint is sent.
+
+        Requires:
+            - notification_id: UUID string of the notification
+            - notification_dict: the dict predict() was given (message, response_type, sender_id)
+            - prediction_result: what predict() returned, or None when no forecast was made
+            - strategy, abstention_reason: used only when prediction_result is None
+            - display_decision: "shown" or "withheld", as the caller decided
+
+        Ensures:
+            - writes exactly one prediction_log row with the ledger columns filled
+            - with a result: its strategy, category, value, confidence, case count, evidence and latency
+              are stored, and abstention_reason is the result's metadata reason (None for a forecast)
+            - without a result: confidence and case count are 0, predicted_value is None, the strategy
+              and abstention_reason are the arguments, and the category is the classifier's, or "unknown"
+            - the row carries the code identity, config version and predictor version
+            - returns True when the row was written, and False on any failure or when the notification
+              already has a row; never raises
+        """
+        try:
+            message = notification_dict.get( "message", "" )
+            meta    = ( prediction_result.metadata if prediction_result is not None else None ) or {}
+
+            if prediction_result is not None:
+                response_type = prediction_result.response_type
+                category      = prediction_result.category
+                predicted     = prediction_result._wrap_predicted_value()
+                confidence    = prediction_result.confidence
+                count         = prediction_result.similar_case_count
+                strategy      = prediction_result.strategy
+                reason        = meta.get( "reason" ) if abstention_reason is None else abstention_reason
+            else:
+                response_type = notification_dict.get( "response_type", "" )
+                try:
+                    category, _ = self.classifier.classify( message, sender_id=notification_dict.get( "sender_id", "" ) )
+                except Exception:
+                    category = "unknown"
+                predicted  = None
+                confidence = 0.0
+                count      = 0
+                reason     = abstention_reason
+
+            now    = datetime.now( timezone.utc )
+            ledger = {
+                "asked_at"           : asked_at or now,
+                "forecast_ready_at"  : now,
+                "forecast_source"    : forecast_source,
+                "predictor_version"  : PREDICTOR_VERSION,
+                "config_version"     : self.config_version(),
+                "owner_email"        : owner_email,
+                "evidence_ids"       : meta.get( "evidence_ids" ),
+                "evidence_scores"    : meta.get( "evidence_scores" ),
+                "abstention_reason"  : reason,
+                "latency_ms"         : meta.get( "latency_ms" ),
+                "display_decision"   : display_decision,
+                "original_message"   : message,
+                "batch_question_key" : meta.get( "batch_question_key" ),
+                "code_identity"      : get_code_identity(),
+            }
+
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
+
+            with get_db() as session:
+                PredictionLogRepository( session ).log_prediction(
+                    notification_id       = notification_id,
+                    response_type         = response_type,
+                    category              = category,
+                    predicted_value       = predicted,
+                    prediction_confidence = confidence,
+                    prediction_strategy   = strategy,
+                    similar_case_count    = count,
+                    sender_id             = notification_dict.get( "sender_id" ),
+                    ledger                = ledger,
+                )
+                session.commit()
+            return True
+
+        except Exception as e:
+            if self.debug: print( f"[PredictionEngine] record_forecast error: {e}" )
+            return False
+
+    @staticmethod
+    def _result_from_row( row ) -> PredictionResult:
+        """
+        Rebuild the PredictionResult a forecast row was written from.
+
+        Requires:
+            - row is a prediction_log row written by record_forecast
+
+        Ensures:
+            - strategy, category, response_type, confidence and case count come from their columns
+            - predicted_value and predicted_qualifier are un-wrapped from the stored predicted_value
+              (a { "value": x } wrapper gives x; any other dict is kept; a "qualifier" key becomes the qualifier)
+            - metadata carries original_message, batch_question_key, evidence_ids and evidence_scores
+        """
+        stored    = dict( row.predicted_value ) if row.predicted_value is not None else None
+        qualifier = stored.pop( "qualifier", None ) if stored is not None else None
+        if stored is not None and set( stored ) == { "value" }: stored = stored[ "value" ]
+        return PredictionResult(
+            response_type       = row.response_type,
+            category            = row.category,
+            strategy            = row.prediction_strategy,
+            predicted_value     = stored,
+            confidence          = row.prediction_confidence,
+            similar_case_count  = row.similar_case_count,
+            predicted_qualifier = qualifier,
+            metadata            = {
+                "original_message"   : row.original_message,
+                "batch_question_key" : row.batch_question_key,
+                "evidence_ids"       : row.evidence_ids,
+                "evidence_scores"    : row.evidence_scores,
+            }
+        )
+
+    def record_outcome_from_ledger( self, notification_id: str, actual_value: Any,
+                                    answered_by: Optional[Dict[str, Any]] = None ) -> bool:
+        """
+        Attach an answer to the forecast row stored at ask time, with no help from memory.
+
+        Requires:
+            - notification_id: UUID string of the notification
+            - actual_value, answered_by: as record_outcome takes them
+
+        Ensures:
+            - looks the forecast up with PredictionLogRepository.get_by_notification_id and rebuilds
+              what record_outcome needs from the row, so a restart between ask and answer loses nothing
+            - a forecast row runs record_outcome, which attaches the answer once and stores the case
+            - a test_override row gets the answer attached with no accuracy figure and stores no case,
+              because an injected hint is not a prediction
+            - returns True when a row was found and handled, False when the notification has no row
+            - never raises
+        """
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository, OutcomeAlreadyRecorded
+
+            override = False
+            with get_db() as session:
+                repo   = PredictionLogRepository( session )
+                row    = repo.get_by_notification_id( notification_id )
+                result = self._result_from_row( row ) if row is not None else None
+                override = result is not None and result.strategy == STRATEGY_TEST_OVERRIDE
+
+                if override:
+                    actual = actual_value if isinstance( actual_value, dict ) else { "value": str( actual_value ) }
+                    try:
+                        repo.update_outcome( notification_id, actual, None, None )
+                        session.commit()
+                    except OutcomeAlreadyRecorded:
+                        pass
+
+            if result is None: return False
+            if not override:
+                self.record_outcome( notification_id, result, actual_value, result.response_type, answered_by )
+            return True
+
+        except Exception as e:
+            if self.debug: print( f"[PredictionEngine] record_outcome_from_ledger error: {e}" )
+            return False
+
     def record_outcome( self, notification_id: str, prediction_result: PredictionResult,
                         actual_value: Any, response_type: str, answered_by: Optional[Dict[str, Any]] = None ) -> None:
         """
-        Record the prediction outcome to the prediction_log table.
+        Record the prediction outcome on the notification's prediction_log row.
 
         Requires:
             - notification_id: UUID string of the notification
@@ -1342,7 +1559,8 @@ class PredictionEngine:
             - answered_by: the server's { user_id, account_email, method } for the answer, or None
 
         Ensures:
-            - Writes a complete prediction_log row with prediction + outcome
+            - Attaches the outcome to the forecast row written at ask time, once; a second call changes nothing
+            - When the notification has no forecast row, writes the row and the outcome together
             - Stores embedding in LanceDB for future CBR retrieval
             - Accuracy comparison computed and logged
             - Never raises exceptions (graceful degradation)
@@ -1376,29 +1594,42 @@ class PredictionEngine:
 
             # Write to prediction_log
             from cosa.rest.db.database import get_db
-            from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
+            from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository, OutcomeAlreadyRecorded
 
             with get_db() as session:
                 repo = PredictionLogRepository( session )
 
-                repo.log_prediction(
-                    notification_id       = notification_id,
-                    response_type         = prediction_result.response_type,
-                    category              = prediction_result.category,
-                    predicted_value       = predicted_dict,
-                    prediction_confidence = prediction_result.confidence,
-                    prediction_strategy   = prediction_result.strategy,
-                    similar_case_count    = prediction_result.similar_case_count,
-                    sender_id             = None,  # Filled by caller if needed
-                )
+                # The forecast row was written at ask time; attach the answer to it.
+                try:
+                    stored = repo.update_outcome(
+                        notification_id = notification_id,
+                        actual_value    = db_actual,
+                        accuracy_match  = accuracy_match,
+                        accuracy_detail = accuracy_detail
+                    )
+                except OutcomeAlreadyRecorded:
+                    # A duplicate callback: the first answer stands, and it already wrote its case.
+                    if self.debug: print( f"[PredictionEngine] record_outcome: outcome already recorded for {notification_id}" )
+                    return
 
-                # Update with outcome
-                repo.update_outcome(
-                    notification_id = notification_id,
-                    actual_value    = db_actual,
-                    accuracy_match  = accuracy_match,
-                    accuracy_detail = accuracy_detail
-                )
+                if stored is None:
+                    # No forecast row: the ask predates the ledger, so write the pair the old way.
+                    repo.log_prediction(
+                        notification_id       = notification_id,
+                        response_type         = prediction_result.response_type,
+                        category              = prediction_result.category,
+                        predicted_value       = predicted_dict,
+                        prediction_confidence = prediction_result.confidence,
+                        prediction_strategy   = prediction_result.strategy,
+                        similar_case_count    = prediction_result.similar_case_count,
+                        sender_id             = None,  # Filled by caller if needed
+                    )
+                    repo.update_outcome(
+                        notification_id = notification_id,
+                        actual_value    = db_actual,
+                        accuracy_match  = accuracy_match,
+                        accuracy_detail = accuracy_detail
+                    )
 
                 session.commit()
 
