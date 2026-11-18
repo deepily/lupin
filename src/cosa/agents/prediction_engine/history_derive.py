@@ -74,6 +74,20 @@ def derive_answer( raw ):
     return { "kind": "text", "text": text }, None
 
 
+def asks_of( raws ):
+    """
+    Shape notification rows as the ask dicts classify_asks reads.
+
+    Requires:
+        - raws is a list of notification rows as dicts, each with response_type, title, message, sender_id and created_at
+
+    Ensures:
+        - Returns one ask dict per row, in order, with category None and asked_at taken from created_at
+    """
+    return [ { "response_type": r[ "response_type" ], "category": None, "title": r[ "title" ], "message": r[ "message" ],
+               "sender_id": r[ "sender_id" ], "asked_at": r[ "created_at" ] } for r in raws ]
+
+
 def derive_dataset( raws ):
     """
     Derive one example per original row, and count what could not be read.
@@ -89,8 +103,7 @@ def derive_dataset( raws ):
         - A retry copy stays in the set, flagged; no row is dropped
         - counts holds rows, answered, unread_by_reason and tiers, so a parse failure is visible
     """
-    groups  = classify_asks( [ { "response_type": r[ "response_type" ], "category": None, "title": r[ "title" ], "message": r[ "message" ],
-                                 "sender_id": r[ "sender_id" ], "asked_at": r[ "created_at" ] } for r in raws ] )
+    groups  = classify_asks( asks_of( raws ) )
     derived = []
     counts  = { "rows": len( raws ), "answered": 0, "unread_by_reason": {}, "tiers": {} }
     for raw, group in zip( raws, groups ):
