@@ -63,6 +63,7 @@ from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.agents.prediction_engine import evidence_recorder
 from cosa.rest.code_identity import get_code_identity
+from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
 from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
 from cosa.utils.notification_utils import extract_qualifier_comment
@@ -493,6 +494,13 @@ class PredictionEngine:
                 **self._personal_vote_filter( owner_user_id ),
                 metric          = self.retrieval_metric
             )
+        except QueryVectorRefused as refusal:
+            return PredictionResult(
+                response_type = RESPONSE_TYPE_YES_NO,
+                category      = category,
+                strategy      = STRATEGY_COLD_START,
+                metadata      = { "reason": f"query_vector_refused: {refusal.reason}" }
+            )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error: {e}" )
             similar_cases = []
@@ -735,6 +743,13 @@ class PredictionEngine:
                 response_type   = RESPONSE_TYPE_MULTIPLE_CHOICE,
                 **self._personal_vote_filter( owner_user_id ),
                 metric          = self.retrieval_metric
+            )
+        except QueryVectorRefused as refusal:
+            return PredictionResult(
+                response_type = RESPONSE_TYPE_MULTIPLE_CHOICE,
+                category      = category,
+                strategy      = STRATEGY_COLD_START,
+                metadata      = { "reason": f"query_vector_refused: {refusal.reason}" }
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error (MC): {e}" )
@@ -1044,6 +1059,13 @@ class PredictionEngine:
                 response_type   = response_type,
                 **self._personal_vote_filter( owner_user_id ),
                 metric          = self.retrieval_metric
+            )
+        except QueryVectorRefused as refusal:
+            return PredictionResult(
+                response_type = response_type,
+                category      = category,
+                strategy      = STRATEGY_COLD_START,
+                metadata      = { "reason": f"query_vector_refused: {refusal.reason}" }
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error ({label}): {e}" )

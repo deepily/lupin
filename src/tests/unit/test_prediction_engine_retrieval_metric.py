@@ -95,3 +95,33 @@ class TestRetrievalMetricSwitch:
         engine = _recording_engine( metric )
         engine._predict_open_ended_batch( "q", "general", [ 0.1 ] )
         assert engine._embedding_store.find_similar.call_args.kwargs[ "metric" ] == metric
+
+
+class TestQueryVectorRefusedBecomesTheAbstentionReason:
+
+    def _refusing_engine( self ):
+        """Engine on the cosine metric whose store refuses the query vector."""
+        from cosa.rest.db.vector_errors import QueryVectorRefused
+        engine = _engine_with_metric( "cosine" )
+        engine._embedding_store = MagicMock()
+        engine._embedding_store.find_similar.side_effect = QueryVectorRefused( "wrong dimension 3 (expected 768)" )
+        return engine
+
+    @pytest.mark.parametrize( "call, response_type", [
+        ( lambda e: e._predict_yes_no( "q", "general", [ 0.1 ] ),                          "yes_no" ),
+        ( lambda e: e._predict_multiple_choice( "q", "general", [ 0.1 ], [ { "label": "a" } ] ), "multiple_choice" ),
+        ( lambda e: e._predict_open_ended( "q", "general", [ 0.1 ] ),                      "open_ended" ),
+        ( lambda e: e._predict_open_ended_batch( "q", "general", [ 0.1 ] ),                "open_ended_batch" ),
+    ] )
+    def test_each_call_site_abstains_with_the_named_reason( self, call, response_type ):
+        result = call( self._refusing_engine() )
+        assert result.strategy == "cold_start"
+        assert result.response_type == response_type
+        assert result.metadata[ "reason" ] == "query_vector_refused: wrong dimension 3 (expected 768)"
+        assert result.predicted_value is None
+
+    def test_an_ordinary_store_error_still_reads_as_no_similar_cases( self ):
+        engine = _engine_with_metric( "cosine" )
+        engine._embedding_store = MagicMock()
+        engine._embedding_store.find_similar.side_effect = RuntimeError( "boom" )
+        assert engine._predict_yes_no( "q", "general", [ 0.1 ] ).metadata[ "reason" ] == "no_similar_cases"
