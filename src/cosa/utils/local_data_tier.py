@@ -16,7 +16,6 @@ The hooks are wired from `src/conftest.py`; the logic lives here so it can be un
 tested without importing a conftest.
 """
 
-import hashlib
 import os
 
 import pytest
@@ -68,23 +67,6 @@ def require_local_file( file_name ):
     if not os.path.isfile( path ):
         pytest.skip( f"local data file absent: {path}" )
     return path
-
-
-def sha256_of_file( path ):
-    """
-    Hex sha256 of a file's bytes.
-
-    Requires:
-        - path names a readable file
-
-    Ensures:
-        - returns the 64-character lowercase hex digest
-    """
-    digest = hashlib.sha256()
-    with open( path, "rb" ) as handle:
-        for block in iter( lambda: handle.read( 1024 * 1024 ), b"" ):
-            digest.update( block )
-    return digest.hexdigest()
 
 
 def skip_reason( report ):
