@@ -38,8 +38,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { StoreSendersChangedPayload } from "../shared/types";
 import { recordingManager } from "../audio/recordingManager";
-import { insertTranscriptionText } from "./insertTranscriptionText";
-import { setValueFocusCaret } from "./dom";
+import { startDictation } from "./dictationToggle";
 
 /**
  * The behavior of the voice input row on each sender card.
@@ -253,49 +252,43 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     }
     /* c8 ignore stop */
 
-    // F5 (insert-at-caret): snapshot the live input value + selection BEFORE
-    // recording, so the new transcription splices at the caret instead of
+    // F5 (insert-at-caret): startDictation snapshots the live input value + selection
+    // BEFORE recording, so the new transcription splices at the caret instead of
     // clobbering. ALWAYS stash — an empty input splices "" at caret 0 (plain
     // fill); a non-empty input gets the caret splice. (Legacy always inserts at
     // the caret; there is no separate "first record" code path.)
-    let stash: RerecordStash | undefined;
     const input = voiceInput.querySelector<HTMLInputElement>(".cc-session-msg-input");
-    /* c8 ignore next */ // defensive: the static CC row always renders the input; a row without it is not produced by senderCard.ts.
-    if (input !== null) {
-      stash = { text: input.value, selStart: input.selectionStart, selEnd: input.selectionEnd };
-    }
+    const mic   = voiceInput.querySelector<HTMLButtonElement>(".cc-session-stt");
+    /* c8 ignore next */ // defensive: the static CC row always renders the input and the mic button; senderCard.ts never produces a row without them.
+    if (input === null || mic === null) return;
 
-    this.states.set(sessionHash, { recording: true, stash });
-    voiceInput.setAttribute("data-recorder-state", "recording");
-    this.setMicRecordingClass(voiceInput, true);
-
-    void recordingManager.startRecording({
-      contextId : sessionHash,
-      authToken : this.getAuthToken(),
-      // onComplete: transcription succeeded. Splice it into the stashed input
-      // text at the caret (replace selected range / insert at caret / append
-      // when caret unknown), write the result onto the live input, drop back to
-      // idle, and restore focus+caret. Unit-tested via a stubbed recordingManager
-      // (the real mic→STT round-trip is the smoke tier).
-      onComplete: (transcription, _blob) => {
-        const pending = this.states.get(sessionHash)?.stash;
-        /* c8 ignore next */ // defensive: a stash is always set above before startRecording runs; the undefined arm guards an out-of-band onComplete.
-        const base    = pending ?? { text: "", selStart: null, selEnd: null };
-        const spliced = insertTranscriptionText(
-          base.text, base.selStart, base.selEnd, transcription ?? "",
-        );
+    startDictation({
+      recorder         : recordingManager,
+      authToken        : () => this.getAuthToken(),
+      contextId        : sessionHash,
+      button           : mic,
+      input,
+      focusAfterInsert : true,
+      onStart          : (stash) => {
+        this.states.set(sessionHash, { recording: true, stash });
+        voiceInput.setAttribute("data-recorder-state", "recording");
+      },
+      // The base the transcription splices into is the row's own record, which a send resets
+      // mid-recording; an unset stash splices into "" (an out-of-band onComplete).
+      /* c8 ignore next */ // defensive: a stash is always set by onStart before the recorder starts; the undefined arm guards an out-of-band onComplete.
+      currentStash     : () => this.states.get(sessionHash)?.stash ?? { text: "", selStart: null, selEnd: null },
+      // Splice result: remember the value + caret on the row's record, drop back to idle.
+      // Unit-tested via a stubbed recordingManager (the real mic→STT round-trip is the smoke tier).
+      afterInsert      : (spliced) => {
         this.states.set(sessionHash, { recording: false, value: spliced.value, caret: spliced.caret });
         voiceInput.setAttribute("data-recorder-state", "idle");
-        this.setMicRecordingClass(voiceInput, false);
-        this.applyInputValueAndCaret(voiceInput, spliced.value, spliced.caret);
       },
-      onError   : (err) => {
+      onError          : (err) => {
         // Drop the stash (state→idle) so the next record is a clean snapshot,
         // THEN surface the error. The order matters only for the data-recorder-
         // state attribute; renderError appends a child and never wipes the row.
         this.states.set(sessionHash, { recording: false });
         voiceInput.setAttribute("data-recorder-state", "idle");
-        this.setMicRecordingClass(voiceInput, false);
         this.renderError(voiceInput, err.message);
       },
       // ESC (or auto-cancel by a new recording) fires neither onComplete nor
@@ -303,20 +296,12 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
       // red. Cancel discards only the in-flight take: the pre-record text
       // (stashed at record start) is preserved as the row's value so it
       // survives a subsequent card re-create+replace (reapplyVoiceInput).
-      onCancel  : () => {
+      onCancel         : () => {
         const preRecord = this.states.get(sessionHash)?.stash?.text;
         this.states.set(sessionHash, { recording: false, value: preRecord });
         voiceInput.setAttribute("data-recorder-state", "idle");
-        this.setMicRecordingClass(voiceInput, false);
       },
     });
-  }
-
-  private applyInputValueAndCaret(voiceInput: HTMLElement, value: string, caret: number | null): void {
-    const input = voiceInput.querySelector<HTMLInputElement>(".cc-session-msg-input");
-    /* c8 ignore next */ // defensive: the static row always renders the input before a record can complete.
-    if (input === null) return;
-    setValueFocusCaret(input, value, caret);
   }
 
   // -------------------------------------------------------------------------

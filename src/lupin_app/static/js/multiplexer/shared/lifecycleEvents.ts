@@ -6,6 +6,7 @@
 // this translation. The queue transport's reconnect logic listens for these events.
 
 import type { EventBus } from "./EventBus";
+import type { LifecyclePayload } from "./types";
 
 /** The slice of a window the network events need. */
 export interface NetworkEvents {
@@ -14,6 +15,23 @@ export interface NetworkEvents {
 
 /** The lifecycle event types the queue transport listens for. */
 export type LifecycleEventType = "page_hidden" | "page_visible" | "network_online" | "network_offline";
+
+/**
+ * Emit one lifecycle event on the bus, stamped with the current time.
+ *
+ * Requires:
+ *   - source names the caller on the event
+ *
+ * Ensures:
+ *   - the payload holds the time, and `bfcache: true` when the page came back from the back-forward cache
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function emitLifecycleEvent( bus: EventBus, type: LifecycleEventType, source: string, extra?: { bfcache?: true } ): void {
+  const ts = Date.now();
+  const payload: LifecyclePayload = { ts };
+  if ( extra?.bfcache ) payload.bfcache = true;
+  bus.emit<LifecyclePayload>( { type, payload, source, ts } );
+}
 
 /**
  * Forward visibility, online and offline events to the bus.
@@ -27,10 +45,7 @@ export type LifecycleEventType = "page_hidden" | "page_visible" | "network_onlin
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function attachLifecycleEvents( bus: EventBus, doc: Document, win: NetworkEvents, source: string ): void {
-  const emit = ( type: LifecycleEventType ): void => {
-    const ts = Date.now();
-    bus.emit( { type, payload : { ts }, source, ts } );
-  };
+  const emit = ( type: LifecycleEventType ): void => emitLifecycleEvent( bus, type, source );
   doc.addEventListener( "visibilitychange", () => {
     emit( doc.visibilityState === "hidden" ? "page_hidden" : "page_visible" );
   } );

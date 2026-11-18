@@ -120,3 +120,62 @@ test( "an error resets the button and calls onError when given; without onError 
   b.opts().onError!( { type: "t", message: "boom", originalError: null } );
   assert.ok( !b.button.classList.contains( "recording" ) );
 } );
+
+// ── startDictation: the hooks a mic card that keeps its own recording record uses (row 70528378, d-a0cce1038e / d-4b7f35afbe) ──
+
+import { startDictation } from "../../../../lupin_app/static/js/multiplexer/render/dictationToggle";
+
+test( "startDictation hands the stash to onStart before the recorder starts, and shows recording", () => {
+  const r = rig( null );
+  r.input.value = "ab";
+  r.input.setSelectionRange( 1, 1 );
+  const order: string[] = [];
+  const recorder = { startRecording: async ( opts: RecordingManagerStartOptions ) => { order.push( "start" ); r.recorder.startRecording( opts ); } };
+  startDictation( { recorder, authToken: () => "t", contextId: "c1", button: r.button, input: r.input, onStart: ( s ) => order.push( `stash:${ s.text }:${ s.selStart }` ) } );
+  assert.deepEqual( order, [ "stash:ab:1", "start" ] );
+  assert.ok( r.button.classList.contains( "recording" ) );
+} );
+
+test( "currentStash names the text the words splice into; focusAfterInsert focuses the input; afterInsert sees the result", () => {
+  const r = rig( null );
+  r.input.value = "ab";
+  document.body.appendChild( r.input );
+  let seen: { value: string; caret: number | null } | null = null;
+  startDictation( {
+    recorder: r.recorder, authToken: () => null, contextId: "c1", button: r.button, input: r.input,
+    focusAfterInsert: true,
+    currentStash: () => ( { text: "xy", selStart: 1, selEnd: 1 } ),
+    afterInsert: ( s ) => { seen = s; },
+  } );
+  r.opts().onComplete!( "Z" );
+  assert.equal( r.input.value, "xZy" );
+  assert.equal( document.activeElement, r.input );
+  assert.deepEqual( seen, { value: "xZy", caret: 2 } );
+  assert.ok( !r.button.classList.contains( "recording" ) );
+  r.input.remove();
+} );
+
+test( "a missing transcription splices as empty text", () => {
+  const r = rig( null );
+  r.input.value = "ab";
+  r.input.setSelectionRange( 2, 2 );
+  startDictation( { recorder: r.recorder, authToken: () => null, contextId: "c1", button: r.button, input: r.input } );
+  r.opts().onComplete!( undefined as unknown as string );
+  assert.equal( r.input.value, "ab" );
+  const live = rig( null );
+  live.input.value = "cd";
+  startDictation( { recorder: live.recorder, authToken: () => null, contextId: "c1", button: live.button, input: live.input, liveCaret: true } );
+  live.opts().onComplete!( undefined as unknown as string );
+  assert.equal( live.input.value, "cd" );
+} );
+
+test( "a cancel resets the button and gives the start stash to onCancel", () => {
+  const r = rig( null );
+  r.input.value = "keep";
+  let got: string | null = null;
+  startDictation( { recorder: r.recorder, authToken: () => null, contextId: "c1", button: r.button, input: r.input, onCancel: ( s ) => { got = s.text; } } );
+  r.input.value = "changed";
+  r.opts().onCancel!();
+  assert.equal( got, "keep" );
+  assert.ok( !r.button.classList.contains( "recording" ) );
+} );

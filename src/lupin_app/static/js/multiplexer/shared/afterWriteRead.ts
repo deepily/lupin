@@ -136,7 +136,7 @@ export function clearReadBackFailed( el: HTMLElement ): void {
 /**
  * Stamp a pane's "updated" label after a fresh read, ending any read-back-failed marking.
  *
- * Shared by the holding area, the epic board and the task list.
+ * Shared by the holding area, the epic board, the task list, the fleet status pane and the finished tasks pane.
  *
  * Requires:
  *   - text is the finished label, such as `updated 10:42`
