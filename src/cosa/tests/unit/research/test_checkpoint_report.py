@@ -148,3 +148,27 @@ def test_main_returns_the_refusal_code( tmp_path ):
     records    = tmp_path / "r.json"
     records.write_text( json.dumps( [ { "snapshot_sha256": "0" * 64 } ] ) )
     assert cr.main( [ "--records", str( records ), "--checkpoint", checkpoint ], printer=lambda message: None ) == 3
+
+
+def test_label_metrics_score_a_label_nobody_used_as_zero():
+    """A label in neither list scores 0 on every metric, never 1.
+
+    It has no support, so precision, recall, f-score and Jaccard all read 0.
+    """
+    scored = cr.label_metrics( [ "yes", "no" ], [ "yes", "no" ], [ "yes", "no", "maybe" ] )
+    assert scored[ "support" ] == [ 1, 1, 0 ]
+    assert scored[ "precision" ][ 2 ] == 0.0 and scored[ "recall" ][ 2 ] == 0.0
+    assert scored[ "f_score" ][ 2 ] == 0.0 and scored[ "jaccard" ][ 2 ] == 0.0
+
+
+def test_types_baselines_and_calibration_cells_are_written_in_name_order_whatever_the_insert_order():
+    """Everything is inserted z-first; the text lists it a-first.
+
+    Two runs over one cohort then read alike.
+    """
+    cells = { "z|s": { "status": "not fitted" }, "a|s": { "status": "not fitted" } }
+    text  = _report( summaries={ "yes_no": { "zeta": _summary(), "alpha": _summary() } },
+                     final_window_asks={ "yes_no": 30, "batch": 6 }, calibration=dict( CAL, cells=cells ) )
+    assert text.index( "## batch" ) < text.index( "## yes_no" )
+    assert text.index( "against alpha" ) < text.index( "against zeta" )
+    assert text.index( "- a|s:" ) < text.index( "- z|s:" )

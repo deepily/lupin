@@ -81,3 +81,18 @@ def test_a_generator_input_is_read_once_and_counted():
     """The sizes come from the rows given, even when they arrive as a one-shot iterator."""
     _, report = fit_and_evaluate( iter( TUNE ), iter( FINAL ), SHA, TIME )
     assert ( report[ "tune_size" ], report[ "final_size" ] ) == ( 200, 100 )
+
+
+def test_the_reliability_tables_use_the_bin_count_asked_for():
+    """Nine spread confidences fill five bins by default and three when asked.
+
+    Both reliability tables follow the count.
+    """
+    levels = [ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 ]
+    spread = _rows( "yes_no", "cbr_majority_vote", [ ( level, 20, int( round( 20 * level ) ) ) for level in levels ] )
+    _, default = fit_and_evaluate( spread, spread, SHA, TIME )
+    _, three   = fit_and_evaluate( spread, spread, SHA, TIME, n_bins=3 )
+    cell_5     = default[ "cells" ][ "yes_no|cbr_majority_vote" ]
+    cell_3     = three[ "cells" ][ "yes_no|cbr_majority_vote" ]
+    assert ( len( cell_5[ "reliability_raw" ] ), len( cell_5[ "reliability_calibrated" ] ) ) == ( 5, 5 )
+    assert ( len( cell_3[ "reliability_raw" ] ), len( cell_3[ "reliability_calibrated" ] ) ) == ( 3, 3 )
