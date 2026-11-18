@@ -110,6 +110,29 @@ def test_delete_all_refuses_outside_the_testing_block_and_keeps_every_row( db_se
         assert repo.count() == 2, name
 
 
+def _session_on( database ):
+    """A session double bound to one named database; a query on it fails the test."""
+    def query( *args, **kwargs ):
+        raise AssertionError( "delete_all queried a database it should have refused" )
+    engine = SimpleNamespace( url=SimpleNamespace( database=database ) )
+    return SimpleNamespace( get_bind=lambda: SimpleNamespace( engine=engine ), query=query )
+
+
+@pytest.mark.parametrize( "database", [ "lupin_db_dev", "lupin_db_v1baseline", "lupin_db_testing", "contest", None ] )
+def test_delete_all_refuses_a_database_that_is_not_a_test_one_even_under_the_testing_block( database ):
+    with _block( "Lupin: Testing" ):
+        with pytest.raises( PermissionError, match="test database" ):
+            PredictionDecisionRepository( _session_on( database ) ).delete_all()
+
+
+@pytest.mark.parametrize( "database", [ "lupin_db_test", "lupin_lane_b_test_4017390", "test" ] )
+def test_delete_all_gets_past_both_checks_on_a_test_database( database ):
+    """The double's query fails the test, so reaching it proves both checks passed."""
+    with _block( "Lupin: Testing" ):
+        with pytest.raises( AssertionError, match="should have refused" ):
+            PredictionDecisionRepository( _session_on( database ) ).delete_all()
+
+
 def test_delete_all_clears_table( db_session ):
     repo = PredictionDecisionRepository( db_session )
     _add( repo, "d1", _vec( 1.0 ) )
