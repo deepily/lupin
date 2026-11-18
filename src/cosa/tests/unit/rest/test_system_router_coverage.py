@@ -191,6 +191,59 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( result[ "status" ], "success" )
         self.assertFalse( result[ "table_dropped" ] )
 
+    async def test_clear_pending_empties_the_routers_pending_map_and_counts_it( self ):
+        import cosa.rest.routers.notifications as notifications
+        cfg, pe_cls, get_pe = self._common_patches()
+        cfg.config_block_id = "Lupin: Testing"
+        notifications.pending_responses.clear()          # other tests leave entries in this module-level map
+        notifications.pending_responses[ "n-a" ] = { "event": None }
+        notifications.pending_responses[ "n-b" ] = { "event": None }
+        try:
+            with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
+                 patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
+                result = await reset_prediction_engine( drop_table=False, clear_pending=True )
+            self.assertEqual( result[ "pending_cleared" ], 2 )
+            self.assertEqual( notifications.pending_responses, {} )
+        finally:
+            notifications.pending_responses.clear()
+
+    async def test_clear_pending_is_refused_outside_the_testing_block_and_nothing_is_reset( self ):
+        import cosa.rest.routers.notifications as notifications
+        cfg, pe_cls, get_pe = self._common_patches()
+        cfg.config_block_id = "Lupin: Production"
+        notifications.pending_responses.clear()
+        notifications.pending_responses[ "n-live" ] = { "event": None }
+        try:
+            with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
+                 patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
+                result = await reset_prediction_engine( drop_table=True, clear_pending=True )
+            self.assertEqual( result[ "status" ], "error" )
+            self.assertIn( "Lupin: Testing", result[ "message" ] )
+            self.assertIn( "n-live", notifications.pending_responses )
+            pe_cls.reset.assert_not_called()
+        finally:
+            notifications.pending_responses.clear()
+
+    async def test_the_default_leaves_the_pending_map_alone( self ):
+        import cosa.rest.routers.notifications as notifications
+        cfg, pe_cls, get_pe = self._common_patches()
+        notifications.pending_responses.clear()
+        notifications.pending_responses[ "n-keep" ] = { "event": None }
+        try:
+            with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
+                 patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
+                result = await reset_prediction_engine( drop_table=False )
+            self.assertEqual( result[ "pending_cleared" ], 0 )
+            self.assertIn( "n-keep", notifications.pending_responses )
+        finally:
+            notifications.pending_responses.clear()
+
     async def test_outer_exception_returns_error( self ):
         with patch( "cosa.rest.routers.system.ConfigurationManager", side_effect=Exception( "cfg boom" ) ), \
              patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
@@ -238,6 +291,7 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
         self.assertIn( "pg down", result[ "message" ] )
         self.assertIn( "not cleared", result[ "message" ] )
         self.assertFalse( result[ "table_dropped" ] )
+        self.assertEqual( result[ "pending_cleared" ], 0 )
         self.assertEqual( result[ "prediction_table" ], "prediction_decisions" )
         pe_cls.reset.assert_called_once()                      # the singleton was still reset
 

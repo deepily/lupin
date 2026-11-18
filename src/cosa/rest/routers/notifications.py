@@ -1506,7 +1506,10 @@ async def notify_user(
 
         # ---- Prediction Engine Hook: Generate prediction BEFORE WebSocket push ----
         # Override takes priority (testing/debug), then PredictionEngine, then None (cold start)
-        prediction_hint = None
+        prediction_hint   = None
+        forecast_result   = None    # what predict() returned, when it ran
+        forecast_failure  = None    # the exception class name, when predict() or its hook raised
+        forecast_engine   = None    # the engine that writes the forecast row
         if parsed_prediction_hint_override is not None:
             prediction_hint = parsed_prediction_hint_override
             print( f"[PREDICTION] Using override hint for {notification_id}: {prediction_hint}" )
@@ -1514,6 +1517,7 @@ async def notify_user(
             try:
                 from cosa.agents.prediction_engine import get_prediction_engine
                 prediction_engine = get_prediction_engine()
+                forecast_engine   = prediction_engine
                 if prediction_engine.enabled:
                     # FM-7 event-loop offload: predict() runs GPU embedding +
                     # LanceDB search synchronously; run it OFF the event loop via
@@ -1526,6 +1530,7 @@ async def notify_user(
                         "recipient_id"     : str( target_system_id ),
                         "response_options" : parsed_response_options,
                     } )
+                    forecast_result = prediction_result
                     # Store prediction result for later outcome recording
                     pending_responses[ notification_id ][ "prediction_result" ] = prediction_result
                     # Store original message in metadata for LanceDB storage
@@ -1538,7 +1543,42 @@ async def notify_user(
                            f"type={response_type}, category={prediction_result.category}, "
                            f"conf={prediction_result.confidence:.3f}, hint={'yes' if prediction_hint else 'no'}" )
             except Exception as pred_error:
+                forecast_failure = pred_error.__class__.__name__
                 print( f"[PREDICTION] ⚠️ Prediction hook error (non-fatal): {pred_error}" )
+
+        # ---- Forecast ledger: one row per ask, written before the hint is sent ----
+        # Every path writes: a forecast, a cold start, a disabled engine, a predictor error and a
+        # test override. Only the ones with a result carry a predicted value.
+        try:
+            if forecast_engine is None:
+                from cosa.agents.prediction_engine import get_prediction_engine
+                forecast_engine = get_prediction_engine()
+            from cosa.agents.prediction_engine.config import (
+                STRATEGY_COLD_START, STRATEGY_ERROR, STRATEGY_TEST_OVERRIDE, FORECAST_SOURCE_TEST_OVERRIDE )
+            forecast_kwargs = {
+                "display_decision" : "shown" if prediction_hint is not None else "withheld",
+                "owner_email"      : target_user,
+            }
+            if parsed_prediction_hint_override is not None:
+                forecast_kwargs.update( forecast_source=FORECAST_SOURCE_TEST_OVERRIDE, strategy=STRATEGY_TEST_OVERRIDE,
+                                        abstention_reason="test_override" )
+            elif forecast_result is not None:
+                forecast_kwargs.update( prediction_result=forecast_result )
+            elif forecast_failure is not None:
+                forecast_kwargs.update( strategy=STRATEGY_ERROR, abstention_reason=f"predictor_error: {forecast_failure}" )
+            else:
+                forecast_kwargs.update( strategy=STRATEGY_COLD_START, abstention_reason="engine_disabled" )
+            await asyncio.to_thread(
+                forecast_engine.record_forecast, notification_id,
+                {
+                    "message"       : message.strip(),
+                    "response_type" : response_type,
+                    "sender_id"     : resolved_sender_id,
+                },
+                **forecast_kwargs
+            )
+        except Exception as ledger_error:
+            print( f"[PREDICTION] ⚠️ Forecast ledger error (non-fatal): {ledger_error}" )
 
         # Stage 3 (Krishna's drift-fix): the client gates its 👍🏼/👎🏼 vote controls on the
         # INI vote gate — carry it IN the hint payload so notifications.js cannot drift
@@ -1836,27 +1876,29 @@ async def submit_notification_response(
         print(f"[NOTIFY] ✓ Updated database with response for {notification_id}")
 
         # ---- Prediction Engine Hook 2: Record outcome on response ----
+        # The forecast row written at ask time is the source, so a restart between ask and answer
+        # loses nothing. The in-memory result is read only for an ask that predates the ledger.
         try:
-            if notification_id in pending_responses and "prediction_result" in pending_responses[notification_id]:
-                from cosa.agents.prediction_engine import get_prediction_engine
-                prediction_engine = get_prediction_engine()
+            from cosa.agents.prediction_engine import get_prediction_engine
+            prediction_engine = get_prediction_engine()
+
+            # FM-7 event-loop offload: record_outcome() does 3-5 GPU
+            # embeddings + a LanceDB write; run it away from the event loop so the
+            # response path (and /health) can't stall under embedding latency.
+            from_ledger = await asyncio.to_thread(
+                prediction_engine.record_outcome_from_ledger, notification_id, response_value, answered_by
+            )
+            if not from_ledger and notification_id in pending_responses and "prediction_result" in pending_responses[notification_id]:
                 prediction_result = pending_responses[notification_id]["prediction_result"]
-
-                # Determine response type from the prediction result
-                resp_type = prediction_result.response_type
-
-                # FM-7 event-loop offload: record_outcome() does 3-5 GPU
-                # embeddings + a LanceDB write; run it OFF the event loop so the
-                # response path (and /health) can't stall under embedding latency.
                 await asyncio.to_thread(
                     prediction_engine.record_outcome,
                     notification_id   = notification_id,
                     prediction_result = prediction_result,
                     actual_value      = response_value,
-                    response_type     = resp_type,
+                    response_type     = prediction_result.response_type,
                     answered_by       = answered_by
                 )
-                print( f"[PREDICTION] ✓ Recorded outcome for {notification_id}" )
+            if from_ledger or notification_id in pending_responses: print( f"[PREDICTION] ✓ Recorded outcome for {notification_id}" )
         except Exception as pred_error:
             print( f"[PREDICTION] ⚠️ Outcome recording error (non-fatal): {pred_error}" )
         # ---- End Prediction Engine Hook 2 ----

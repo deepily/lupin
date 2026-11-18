@@ -295,11 +295,13 @@ class TestThePredictionHookIsNonFatal:
     class _Prediction:
         response_type = "RESPONSE-TYPE-VALUE"
 
-    def test_an_outcome_is_recorded_when_a_prediction_was_pending( self, harness, wired, monkeypatch ):
+    def test_an_outcome_is_recorded_from_memory_when_the_ledger_has_no_row( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine as pe
         seen = []
 
         class _Engine:
+            def record_outcome_from_ledger( self, *a ):
+                return False
             def record_outcome( self, **kwargs ):
                 seen.append( kwargs )
 
@@ -311,23 +313,62 @@ class TestThePredictionHookIsNonFatal:
         assert seen[ 0 ][ "actual_value" ]  == "ANSWER-VALUE"
         assert seen[ 0 ][ "response_type" ] == "RESPONSE-TYPE-VALUE"
 
-    def test_no_pending_prediction_means_no_engine_call( self, harness, wired, monkeypatch ):
+    def test_the_stored_forecast_row_is_used_first_and_memory_is_not_read( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine as pe
+        ledger_calls, memory_calls = [], []
 
-        def _never():
-            raise AssertionError( "the prediction engine was reached with nothing pending" )
+        class _Engine:
+            def record_outcome_from_ledger( self, *a ):
+                ledger_calls.append( a )
+                return True
+            def record_outcome( self, **kwargs ):
+                memory_calls.append( kwargs )
 
-        monkeypatch.setattr( pe, "get_prediction_engine", _never )
+        monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
+        _add_waiter( wired, prediction_result=self._Prediction() )
+        harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert ledger_calls == [ ( _NID, "ANSWER-VALUE", ledger_calls[ 0 ][ 2 ] ) ]
+        assert memory_calls == []
+
+    def test_a_restart_that_emptied_memory_still_reaches_the_ledger( self, harness, wired, monkeypatch ):
+        """No waiter and no in-memory result: the state a restart leaves. The ledger is still asked."""
+        import cosa.agents.prediction_engine as pe
+        ledger_calls, memory_calls = [], []
+
+        class _Engine:
+            def record_outcome_from_ledger( self, *a ):
+                ledger_calls.append( a )
+                return True
+            def record_outcome( self, **kwargs ):
+                memory_calls.append( kwargs )
+
+        monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
+        r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert r.status_code == 200
+        assert len( ledger_calls ) == 1 and memory_calls == []
+
+    def test_no_row_and_nothing_in_memory_means_no_record_outcome_call( self, harness, wired, monkeypatch ):
+        import cosa.agents.prediction_engine as pe
+        memory_calls = []
+
+        class _Engine:
+            def record_outcome_from_ledger( self, *a ):
+                return False
+            def record_outcome( self, **kwargs ):
+                memory_calls.append( kwargs )
+
+        monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
         _add_waiter( wired )   # a waiter, but no prediction_result on it
         r = harness.client.post( _URL, json={ "notification_id": _NID,
                                               "response_value" : "ANSWER-VALUE" } )
         assert r.status_code == 200
+        assert memory_calls == []
 
     def test_an_exploding_prediction_engine_does_not_lose_the_answer( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine as pe
 
         class _Boom:
-            def record_outcome( self, **_kw ):
+            def record_outcome_from_ledger( self, *_a ):
                 raise RuntimeError( "embedding service down" )
 
         monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Boom() )

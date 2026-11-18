@@ -998,7 +998,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None }
         pred_res = Mock(); pred_res.response_type = "yes_no"
         N.pending_responses[ UID_STR ][ "prediction_result" ] = pred_res
-        engine = Mock()
+        engine = Mock(); engine.record_outcome_from_ledger.return_value = False   # no forecast row: the in-memory fallback runs
         ws = _ws_manager()
         try:
             with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
@@ -1031,6 +1031,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None,
                                            "prediction_result": Mock( response_type="yes_no" ) }
         engine = Mock(); engine.record_outcome.side_effect = _capture_record
+        engine.record_outcome_from_ledger.return_value = False
         try:
             with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
                  patch.object( N, "NotificationRepository", return_value=repo ), \
@@ -1056,6 +1057,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None,
                                            "prediction_result": Mock( response_type="yes_no" ) }
         engine = Mock(); engine.record_outcome.side_effect = Exception( "record down" )
+        engine.record_outcome_from_ledger.return_value = False
         try:
             with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
                  patch.object( N, "NotificationRepository", return_value=repo ), \

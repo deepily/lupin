@@ -286,10 +286,10 @@ def test_predict_dispatches_to_each_type( wired_engine, monkeypatch ):
         metadata      = {},
     )
     monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a, **k: oeb_result )
-    assert wired_engine.predict( { "message": "m", "response_type": "yes_no" } ) == "YN"
-    assert wired_engine.predict( { "message": "m", "response_type": "multiple_choice" } ) == "MC"
-    assert wired_engine.predict( { "message": "m", "response_type": "open_ended" } ) == "OE"
-    assert wired_engine.predict( { "message": "m", "response_type": "open_ended_batch" } ) is oeb_result
+    assert wired_engine._predict_core( { "message": "m", "response_type": "yes_no" } ) == "YN"
+    assert wired_engine._predict_core( { "message": "m", "response_type": "multiple_choice" } ) == "MC"
+    assert wired_engine._predict_core( { "message": "m", "response_type": "open_ended" } ) == "OE"
+    assert wired_engine._predict_core( { "message": "m", "response_type": "open_ended_batch" } ) is oeb_result
     assert "batch_question_key" in oeb_result.metadata
 
 
@@ -818,7 +818,7 @@ def test_predict_batch_metadata_none_skips_stamp( wired_engine, monkeypatch ):
     monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a, **k: no_meta )
     monkeypatch.setattr( wired_engine.classifier, "classify",
                          lambda m, sender_id=None: ( "uncategorized", 1.0 ) )
-    result = wired_engine.predict( {
+    result = wired_engine._predict_core( {
         "message"          : _BATCH_PREAMBLE,
         "response_type"    : cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH,
         "response_options" : _PODCAST_OPTS,
@@ -1086,6 +1086,7 @@ class _FakeRepo:
         self.logged = kwargs
     def update_outcome( self, **kwargs ):
         self.outcome = kwargs
+        return object()
     def get_accuracy_summary( self, **kwargs ):
         return { "total_predictions": 3, "accuracy_rate": 0.66, "kwargs": kwargs }
 
@@ -1115,7 +1116,8 @@ def test_record_outcome_happy_path_writes_and_stores( wired_engine, monkeypatch 
     wired_engine.debug = True
     wired_engine.record_outcome( "notif-1", pr, "yes", "yes_no" )
     assert session.committed is True
-    assert repos[ 0 ].logged[ "notification_id" ] == "notif-1"
+    assert repos[ 0 ].logged is None, "the forecast row already exists, so no second row is written"
+    assert repos[ 0 ].outcome[ "notification_id" ] == "notif-1"
     assert repos[ 0 ].outcome[ "accuracy_match" ] is True
     assert stored                                   # _store_decision invoked
 
