@@ -160,7 +160,7 @@ class TestPredictStampsTheEvidence:
 
     def test_a_result_with_no_metadata_gets_a_dict( self, engine, monkeypatch ):
         bare = PredictionResult( response_type="yes_no", category="c", strategy=cfg.STRATEGY_COLD_START, metadata=None )
-        monkeypatch.setattr( engine, "_predict_core", lambda nd: bare )
+        monkeypatch.setattr( engine, "_predict_core", lambda nd, query_vector=None: bare )
         assert engine.predict( _ND ).metadata[ "evidence_ids" ] == []
 
     def test_the_second_ask_on_a_thread_does_not_inherit_the_first_asks_evidence( self, engine, monkeypatch ):
