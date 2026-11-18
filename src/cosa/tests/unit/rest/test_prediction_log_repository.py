@@ -11,7 +11,9 @@ All DB access is boundary-mocked: the SQLAlchemy Session is a MagicMock; real
 PredictionLog column expressions are built but never executed. ZERO real DB.
 """
 
+import types
 import unittest
+from datetime import datetime, timezone
 import uuid
 from unittest.mock import MagicMock, Mock
 
@@ -240,3 +242,48 @@ def isolated_unit_test():
 if __name__ == "__main__":
     ok, secs, msg = isolated_unit_test()
     print( f"\n{'✅ PASS' if ok else '❌ FAIL'} PredictionLogRepository tests in {secs:.3f}s — {msg}" )
+
+
+class TestRecordSeen( _PLRTestBase ):
+    """record_seen: first rendered / first fold-open time, never overwritten, row-locked read."""
+
+    def _row( self, rendered_at=None, fold_opened_at=None ):
+        row = types.SimpleNamespace( rendered_at=rendered_at, fold_opened_at=fold_opened_at )
+        self.session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = row
+        return row
+
+    def test_missing_row_returns_none_and_flushes_nothing( self ):
+        self.session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = None
+        self.assertIsNone( self.repo.record_seen( _NID, rendered=True ) )
+        self.session.flush.assert_not_called()
+
+    def test_reads_under_a_row_lock( self ):
+        self._row()
+        self.repo.record_seen( _NID, rendered=True )
+        self.session.query.return_value.filter.return_value.with_for_update.assert_called_once_with()
+
+    def test_first_rendered_call_stores_the_time_and_leaves_fold_open_null( self ):
+        row = self._row()
+        out = self.repo.record_seen( _NID, rendered=True )
+        self.assertEqual( out, { "rendered_recorded": True, "fold_opened_recorded": False } )
+        self.assertIsNotNone( row.rendered_at )
+        self.assertIsNone( row.fold_opened_at )
+        self.session.flush.assert_called_once_with()
+
+    def test_first_fold_open_call_stores_the_time_and_leaves_rendered_alone( self ):
+        row = self._row()
+        out = self.repo.record_seen( _NID, fold_opened=True )
+        self.assertEqual( out, { "rendered_recorded": False, "fold_opened_recorded": True } )
+        self.assertIsNone( row.rendered_at )
+        self.assertIsNotNone( row.fold_opened_at )
+
+    def test_later_calls_keep_both_stored_times( self ):
+        first = datetime( 2020, 1, 1, tzinfo=timezone.utc )
+        row   = self._row( rendered_at=first, fold_opened_at=first )
+        out   = self.repo.record_seen( _NID, rendered=True, fold_opened=True )
+        self.assertEqual( out, { "rendered_recorded": False, "fold_opened_recorded": False } )
+        self.assertEqual( ( row.rendered_at, row.fold_opened_at ), ( first, first ) )
+
+    def test_a_non_uuid_id_raises_value_error( self ):
+        with self.assertRaises( ValueError ):
+            self.repo.record_seen( "not-a-uuid", rendered=True )

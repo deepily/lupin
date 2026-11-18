@@ -2516,6 +2516,70 @@ async def vote_on_prediction_hint(
         raise HTTPException( status_code=500, detail=f"Failed to record prediction vote: {str( e )}" )
 
 
+class PredictionSeenRequest( BaseModel ):
+    """
+    Body for POST /api/notify/prediction-seen/{notification_id}.
+
+    Each flag reports one client event. The server stamps the time, never the client.
+
+    """
+
+    rendered    : bool = False
+    fold_opened : bool = False
+
+
+@router.post(
+    "/notify/prediction-seen/{notification_id}",
+    summary     = "Record that a prediction hint was rendered and/or its fold opened",
+    description = "Stores the first rendered time and the first fold-open time on the notification's forecast row. A later call never overwrites a stored time; a time never reported stays null."
+)
+async def record_prediction_seen(
+    notification_id: str,
+    body: PredictionSeenRequest,
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)]
+):
+    """
+    Record the first rendered and first fold-open times of a prediction hint.
+
+    Requires:
+        - a valid API key or Bearer JWT
+        - notification_id is a UUID
+
+    Ensures:
+        - stores each reported time once, on the first call that reports it
+        - shape: { status, notification_id, rendered_recorded, fold_opened_recorded, timestamp }
+
+    Raises:
+        - HTTPException 422 if notification_id is not a UUID
+        - HTTPException 404 if no forecast row exists for the notification
+        - HTTPException 500 on record failure
+    """
+    try:
+        uuid.UUID( notification_id )
+    except ValueError:
+        raise HTTPException( status_code=422, detail=f"notification_id is not a UUID: {notification_id}" )
+
+    from ..db.repositories.prediction_log_repository import PredictionLogRepository
+    try:
+        with get_db() as session:
+            recorded = PredictionLogRepository( session ).record_seen(
+                notification_id, rendered=body.rendered, fold_opened=body.fold_opened )
+    except Exception as e:
+        print( f"[NOTIFY] Prediction-seen error for {notification_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to record prediction seen: {str( e )}" )
+
+    if recorded is None:
+        raise HTTPException( status_code=404, detail=f"no forecast row for notification {notification_id}" )
+
+    return {
+        "status"               : "success",
+        "notification_id"      : notification_id,
+        "rendered_recorded"    : recorded[ "rendered_recorded" ],
+        "fold_opened_recorded" : recorded[ "fold_opened_recorded" ],
+        "timestamp"            : get_local_timestamp()
+    }
+
+
 def _project_broadcast_ack( n ) -> dict:
     """
     Project one saved `commons_broadcast_ack` row to the per-broadcast read's wire shape.
