@@ -73,7 +73,7 @@ class TestMultipleChoiceQuestionHeaders:
 
     def test_real_row_answers_new_header_and_overlaps_actual( self ):
         """A real stored row yields the actual answer's header, so the comparator can compare."""
-        from cosa.agents.prediction_engine.accuracy_comparators import compare_multiple_choice_single
+        from cosa.agents.prediction_engine.accuracy_comparators import compare_multiple_choice
 
         engine  = self._engine( [ _case( REAL_PAST_ANSWERS ) ] )
         options = _options( ( "Rename vs freeze", [ "Pin the strings first (Recommended)", "Rename now" ], False ) )
@@ -82,8 +82,8 @@ class TestMultipleChoiceQuestionHeaders:
 
         assert result.strategy == "cbr_majority_vote"
         assert result.predicted_value == { "answers": { "Rename vs freeze": "Pin the strings first (Recommended)" } }
-        match, detail = compare_multiple_choice_single( result.predicted_value, REAL_ACTUAL_VALUE )
-        assert detail[ "mismatches" ][ 0 ][ "predicted" ] == "Pin the strings first (Recommended)"
+        match, detail = compare_multiple_choice( result.predicted_value, REAL_ACTUAL_VALUE, options )
+        assert detail[ "fields" ][ 0 ][ "predicted" ] == [ "Pin the strings first (Recommended)" ]
         assert detail[ "total" ] == 1
 
     def test_real_row_before_fix_shape_never_overlapped( self ):

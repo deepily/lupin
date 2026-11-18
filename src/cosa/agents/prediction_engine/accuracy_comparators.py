@@ -14,7 +14,6 @@ from cosa.agents.prediction_engine.config import (
     RESPONSE_TYPE_MULTIPLE_CHOICE,
     RESPONSE_TYPE_OPEN_ENDED,
     RESPONSE_TYPE_OPEN_ENDED_BATCH,
-    MULTI_SELECT_JACCARD_THRESHOLD,
     OPEN_ENDED_SIMILARITY_THRESHOLD,
 )
 from cosa.utils.notification_utils import extract_qualifier_comment, parse_field_selections
@@ -69,114 +68,6 @@ def compare_yes_no( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple
     # A qualifier-only difference: the stance is right, the comment is not the same.
     # It is reported apart from stance errors, which are the `match` key.
     detail[ "qualifier_match" ] = ( predicted_qualifier or None ) == ( actual_qualifier or None )
-
-    return ( match, detail )
-
-
-def compare_multiple_choice_single( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple[Optional[bool], Dict[str, Any]]:
-    """
-    Compare single-select multiple choice prediction against actual.
-
-    Requires:
-        - predicted and actual are dicts with "answers" key containing {"Header": "OptionLabel"}
-        - Or None
-
-    Ensures:
-        - Returns (match_bool, detail_dict)
-        - match is True if all header→option pairs match exactly
-        - Returns (None, {}) if either is None
-    """
-    if predicted is None or actual is None:
-        return ( None, { "reason": "missing_data" } )
-
-    predicted_answers = predicted.get( "answers", {} )
-    actual_answers    = actual.get( "answers", {} )
-
-    if not predicted_answers or not actual_answers:
-        return ( None, { "reason": "empty_answers" } )
-
-    matches     = 0
-    total       = 0
-    mismatches  = []
-
-    for header, actual_option in actual_answers.items():
-        total += 1
-        predicted_option = predicted_answers.get( header )
-        if predicted_option == actual_option:
-            matches += 1
-        else:
-            mismatches.append( {
-                "header"    : header,
-                "predicted" : predicted_option,
-                "actual"    : actual_option,
-            } )
-
-    match = matches == total and total > 0
-
-    detail = {
-        "matches"    : matches,
-        "total"      : total,
-        "mismatches" : mismatches,
-    }
-
-    return ( match, detail )
-
-
-def compare_multiple_choice_multi( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple[Optional[bool], Dict[str, Any]]:
-    """
-    Compare multi-select multiple choice prediction against actual using Jaccard similarity.
-
-    Requires:
-        - predicted and actual are dicts with "answers" key containing {"Header": ["A", "B"]}
-        - Or None
-
-    Ensures:
-        - Returns (match_bool, detail_dict)
-        - match is True if Jaccard similarity >= MULTI_SELECT_JACCARD_THRESHOLD (0.5)
-        - detail includes per-header Jaccard scores
-    """
-    if predicted is None or actual is None:
-        return ( None, { "reason": "missing_data" } )
-
-    predicted_answers = predicted.get( "answers", {} )
-    actual_answers    = actual.get( "answers", {} )
-
-    if not predicted_answers or not actual_answers:
-        return ( None, { "reason": "empty_answers" } )
-
-    header_scores = {}
-    overall_jaccard_sum = 0.0
-    header_count        = 0
-
-    for header, actual_options in actual_answers.items():
-        predicted_options = predicted_answers.get( header, [] )
-
-        # Normalize to sets
-        actual_set    = set( actual_options ) if isinstance( actual_options, list ) else { actual_options }
-        predicted_set = set( predicted_options ) if isinstance( predicted_options, list ) else { predicted_options }
-
-        intersection = actual_set & predicted_set
-        union        = actual_set | predicted_set
-
-        jaccard = len( intersection ) / len( union ) if len( union ) > 0 else 0.0
-
-        header_scores[ header ] = {
-            "jaccard"   : round( jaccard, 3 ),
-            "predicted" : sorted( predicted_set ),
-            "actual"    : sorted( actual_set ),
-        }
-
-        overall_jaccard_sum += jaccard
-        header_count += 1
-
-    avg_jaccard = overall_jaccard_sum / header_count if header_count > 0 else 0.0
-    match       = avg_jaccard >= MULTI_SELECT_JACCARD_THRESHOLD
-
-    detail = {
-        "avg_jaccard"   : round( avg_jaccard, 3 ),
-        "threshold"     : MULTI_SELECT_JACCARD_THRESHOLD,
-        "header_scores" : header_scores,
-    }
 
     return ( match, detail )
 
@@ -415,41 +306,28 @@ def compare_multiple_choice( predicted, actual, response_options ):
     return ( matches == len( fields ), { "matches": matches, "total": len( fields ), "fields": fields } )
 
 
-def get_comparator( response_type: str, actual_value: Any = None, open_ended_threshold: Optional[float] = None, response_options: Optional[Dict] = None ):
+def get_comparator( response_type: str, open_ended_threshold: Optional[float] = None, response_options: Optional[Dict] = None ):
     """
     Return the appropriate comparator function for a given response type.
 
     Requires:
         - response_type is a valid response type string
-        - actual_value: optional actual response dict for data-driven dispatch
-          (used to detect multi-select multiple_choice)
         - open_ended_threshold: float in [0, 1] or None (None keeps OPEN_ENDED_SIMILARITY_THRESHOLD)
-        - response_options: the notification's stored schema, or None for a row that has none
+        - response_options: the notification's stored schema, or None for a card that has none
 
     Ensures:
         - Returns a callable (predicted, actual) -> (match, detail)
-        - For multiple_choice with response_options: compare_multiple_choice bound to them,
-          whatever shape the answers have
+        - For multiple_choice: compare_multiple_choice bound to response_options, whatever shape
+          the answers have; with no schema every field is scored as a single select
         - When open_ended_threshold is given, the open-ended and batch comparators
           (including the unknown-type fallback) are bound to it
-        - For multiple_choice: inspects actual_value answers for list values
-          to choose compare_multiple_choice_multi vs compare_multiple_choice_single
         - Returns compare_open_ended as fallback for unknown types
     """
-    # Schema dispatch: the stored response_options say each field's mode, so the answer's shape is ignored
-    if response_type == RESPONSE_TYPE_MULTIPLE_CHOICE and response_options is not None:
-        return partial( compare_multiple_choice, response_options=response_options )
-
-    # Legacy dispatch for rows with no stored schema: detect multi-select from answer values
-    if response_type == RESPONSE_TYPE_MULTIPLE_CHOICE and actual_value is not None:
-        answers = actual_value.get( "answers", {} ) if isinstance( actual_value, dict ) else {}
-        for v in answers.values():
-            if isinstance( v, list ):
-                return compare_multiple_choice_multi
+    if response_type == RESPONSE_TYPE_MULTIPLE_CHOICE:
+        return partial( compare_multiple_choice, response_options={} if response_options is None else response_options )
 
     comparators = {
         RESPONSE_TYPE_YES_NO           : compare_yes_no,
-        RESPONSE_TYPE_MULTIPLE_CHOICE  : compare_multiple_choice_single,
         RESPONSE_TYPE_OPEN_ENDED       : compare_open_ended,
         RESPONSE_TYPE_OPEN_ENDED_BATCH : compare_open_ended_batch,
     }
@@ -510,51 +388,25 @@ def quick_smoke_test():
         assert match is None
         print( "✓ None handling works" )
 
-        # Test 5: multiple choice single
-        print( "Testing multiple_choice single comparator..." )
-        match, detail = compare_multiple_choice_single(
-            { "answers": { "Database": "PostgreSQL" } },
-            { "answers": { "Database": "PostgreSQL" } }
+        # Test 5: multiple choice scored by schema
+        print( "Testing multiple_choice schema comparator..." )
+        card = { "questions": [ { "header": "DB" }, { "header": "Features", "multi_select": True } ] }
+        match, detail = compare_multiple_choice(
+            { "answers": { "DB": "PG", "Features": [ "Auth", "Caching" ] } },
+            { "answers": { "DB": "PG", "Features": [ "Auth", "Logging" ] } },
+            card
         )
-        assert match is True
-        print( "✓ multiple_choice single match works" )
-
-        # Test 6: multiple choice multi (Jaccard)
-        print( "Testing multiple_choice multi comparator..." )
-        match, detail = compare_multiple_choice_multi(
-            { "answers": { "Features": [ "Auth", "Caching" ] } },
-            { "answers": { "Features": [ "Auth", "Logging" ] } }
-        )
-        # Jaccard = 1/3 ≈ 0.333 < 0.5, so match should be False
+        # One field of two is exact, so the card is not a match
         assert match is False
-        assert detail[ "avg_jaccard" ] < 0.5
-        print( "✓ multiple_choice multi Jaccard works" )
+        assert ( detail[ "matches" ], detail[ "total" ] ) == ( 1, 2 )
+        print( "✓ multiple_choice half-right card scores 1 of 2" )
 
-        # Test 7: get_comparator dispatch
+        # Test 6: get_comparator dispatch
         print( "Testing get_comparator dispatch..." )
-        comp = get_comparator( "yes_no" )
-        assert comp is compare_yes_no
-        comp = get_comparator( "unknown_type" )
-        assert comp is compare_open_ended
+        assert get_comparator( "yes_no" ) is compare_yes_no
+        assert get_comparator( "unknown_type" ) is compare_open_ended
+        assert get_comparator( "multiple_choice", response_options=card ).func is compare_multiple_choice
         print( "✓ get_comparator dispatch works" )
-
-        # Test 8: get_comparator with multi-select actual (data-driven dispatch)
-        print( "Testing get_comparator multi-select dispatch..." )
-        comp = get_comparator( "multiple_choice", actual_value={ "answers": { "Features": [ "A", "B" ] } } )
-        assert comp is compare_multiple_choice_multi
-        print( "✓ get_comparator multi-select dispatch works" )
-
-        # Test 9: get_comparator with single-select actual (backward compat)
-        print( "Testing get_comparator single-select dispatch..." )
-        comp = get_comparator( "multiple_choice", actual_value={ "answers": { "DB": "PG" } } )
-        assert comp is compare_multiple_choice_single
-        print( "✓ get_comparator single-select dispatch works" )
-
-        # Test 10: get_comparator with no actual_value (backward compat)
-        print( "Testing get_comparator no actual_value..." )
-        comp = get_comparator( "multiple_choice" )
-        assert comp is compare_multiple_choice_single
-        print( "✓ get_comparator backward compat works" )
 
         # Test 11: compare_open_ended with embedding similarity
         print( "Testing compare_open_ended with embedding similarity..." )

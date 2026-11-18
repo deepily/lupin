@@ -96,7 +96,7 @@ def test_a_missing_or_empty_side_is_not_scored( predicted, actual, reason ):
 
 
 def test_the_schema_dispatch_ignores_the_shape_of_the_answers():
-    comparator = get_comparator( "multiple_choice", actual_value={ "answers": { "DB": "PG" } }, response_options=CARD )
+    comparator = get_comparator( "multiple_choice", response_options=CARD )
     assert comparator.func is compare_multiple_choice
     assert comparator( { "answers": { "DB": "PG" } }, { "answers": { "DB": "PG" } } )[ 0 ] is True
 

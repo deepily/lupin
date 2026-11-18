@@ -76,7 +76,7 @@ def classify( actual_value, predicted_value ):
     decoded = PredictionEngine._parse_mc_decision_value( value ) if isinstance( value, str ) else None
     if decoded is None: return "skipped", "not_json_answers", None, None
     if not isinstance( predicted_value, dict ) or not predicted_value: return "skipped", "no_prediction", None, None
-    match, detail = get_comparator( RESPONSE_TYPE, actual_value=decoded )( predicted_value, decoded )
+    match, detail = get_comparator( RESPONSE_TYPE )( predicted_value, decoded )
     if match is None: return "skipped", "comparator_unscored", None, None
     return "would_score", decoded, match, detail
 
