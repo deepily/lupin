@@ -27,6 +27,7 @@ from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt, a
 from ..middleware.path_identity import require_path_identity_owner
 from ..db.database import get_db
 from ..db.repositories.notification_repository import NotificationRepository
+from cosa.agents.prediction_engine.prediction_result import PredictionResult
 
 # Per-session voice persona lookup (see Phase 7 of voice persona R&D)
 # Bridge file is canonical state; lookup is best-effort and fail-soft.
@@ -1510,6 +1511,7 @@ async def notify_user(
         forecast_result   = None    # what predict() returned, when it ran
         forecast_failure  = None    # the exception class name, when predict() or its hook raised
         forecast_engine   = None    # the engine that writes the forecast row
+        forecast_always_yes = None  # the always-yes label shown on a yes/no card
         if parsed_prediction_hint_override is not None:
             prediction_hint = parsed_prediction_hint_override
             print( f"[PREDICTION] Using override hint for {notification_id}: {prediction_hint}" )
@@ -1536,15 +1538,29 @@ async def notify_user(
                     # Store original message in metadata for LanceDB storage
                     if prediction_result.metadata is not None:
                         prediction_result.metadata[ "original_message" ] = message.strip()
-                    # Only show hint if confidence exceeds threshold
-                    if prediction_result.confidence >= prediction_engine.confidence_threshold:
-                        prediction_hint = prediction_result.to_hint_dict()
+                    # The card always gets a payload; its state says whether a value is in it.
+                    if response_type == "yes_no":
+                        forecast_always_yes = await asyncio.to_thread( prediction_engine.always_yes_rate, str( target_system_id ) )
+                    prediction_hint = prediction_result.to_hint_dict(
+                        prediction_engine.confidence_threshold, prediction_engine.retrieval_metric, forecast_always_yes )
                     print( f"[PREDICTION] Generated prediction for {notification_id}: "
                            f"type={response_type}, category={prediction_result.category}, "
-                           f"conf={prediction_result.confidence:.3f}, hint={'yes' if prediction_hint else 'no'}" )
+                           f"conf={prediction_result.confidence:.3f}, state={prediction_hint[ 'state' ]}" )
             except Exception as pred_error:
                 forecast_failure = pred_error.__class__.__name__
                 print( f"[PREDICTION] ⚠️ Prediction hook error (non-fatal): {pred_error}" )
+
+        # No result to build a payload from: the engine is off or the hook failed. The card still gets one.
+        if prediction_hint is None:
+            from cosa.agents.prediction_engine.config import STRATEGY_COLD_START, STRATEGY_ERROR, DEFAULT_RETRIEVAL_METRIC
+            stand_in = PredictionResult(
+                response_type = response_type,
+                category      = "unknown",
+                strategy      = STRATEGY_ERROR if forecast_failure is not None else STRATEGY_COLD_START,
+                metadata      = { "reason": "prediction_error" if forecast_failure is not None else "engine_disabled" }
+            )
+            prediction_hint = stand_in.to_hint_dict(
+                0.0, forecast_engine.retrieval_metric if forecast_engine is not None else DEFAULT_RETRIEVAL_METRIC )
 
         # ---- Forecast ledger: one row per ask, written before the hint is sent ----
         # Every path writes: a forecast, a cold start, a disabled engine, a predictor error and a
@@ -1556,8 +1572,9 @@ async def notify_user(
             from cosa.agents.prediction_engine.config import (
                 STRATEGY_COLD_START, STRATEGY_ERROR, STRATEGY_TEST_OVERRIDE, FORECAST_SOURCE_TEST_OVERRIDE )
             forecast_kwargs = {
-                "display_decision" : "shown" if prediction_hint is not None else "withheld",
+                "display_decision" : prediction_hint.get( "state", "ready" ),   # an override hint names no state
                 "owner_email"      : target_user,
+                "always_yes_rate"  : forecast_always_yes,
             }
             if parsed_prediction_hint_override is not None:
                 forecast_kwargs.update( forecast_source=FORECAST_SOURCE_TEST_OVERRIDE, strategy=STRATEGY_TEST_OVERRIDE,
@@ -1584,7 +1601,7 @@ async def notify_user(
         # INI vote gate — carry it IN the hint payload so notifications.js cannot drift
         # from the server config. Voting disabled → gate not stamped → no controls offered.
         # An override hint may pre-set the key (to e2e-test both sides of the gate).
-        if prediction_hint is not None and "vote_min_confidence_threshold" not in prediction_hint:
+        if prediction_hint.get( "state", "ready" ) == "ready" and "vote_min_confidence_threshold" not in prediction_hint:
             try:
                 from cosa.agents.prediction_engine import get_prediction_engine
                 vote_engine = get_prediction_engine()
@@ -1597,8 +1614,8 @@ async def notify_user(
         # IN the hint payload — SAME drift-proofing as the vote gate above — so the
         # client cannot diverge from server config. The client uses these to decide
         # whether a high-confidence prediction may prefill the batch (Option D) and
-        # auto-submit after a grace window (Option C). Stamped only when a hint exists.
-        if prediction_hint is not None and "auto_submit_min_confidence_threshold" not in prediction_hint:
+        # auto-submit after a grace window (Option C). Stamped only on a ready hint.
+        if prediction_hint.get( "state", "ready" ) == "ready" and "auto_submit_min_confidence_threshold" not in prediction_hint:
             try:
                 import lupin_app.main as main_module
                 cfg = main_module.config_mgr

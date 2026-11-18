@@ -58,20 +58,24 @@ def test_is_cold_start_false_when_confidence_nonzero():
 # --------------------------------------------------------------------------- #
 # to_hint_dict
 # --------------------------------------------------------------------------- #
-def test_to_hint_dict_returns_none_on_cold_start():
+def test_to_hint_dict_names_the_state_on_cold_start_and_carries_no_value():
     r = PredictionResult( response_type="yes_no", category="permission", strategy="cold_start" )
-    assert r.to_hint_dict() is None
+    hint = r.to_hint_dict( 0.5, "dot" )
+    assert hint[ "state" ] == "insufficient_evidence"
+    assert "predicted_value" not in hint and "confidence" not in hint
 
 
 def test_to_hint_dict_rounds_confidence_and_omits_qualifier():
     r = PredictionResult( response_type="yes_no", category="permission", strategy="cbr_majority_vote",
                           predicted_value="yes", confidence=0.123456, similar_case_count=5 )
-    hint = r.to_hint_dict()
+    hint = r.to_hint_dict( 0.1, "dot" )
     assert hint == {
-        "predicted_value" : "yes",
-        "confidence"      : 0.123,   # rounded to 3 places
-        "strategy"        : "cbr_majority_vote",
-        "category"        : "permission",
+        "state"            : "ready",
+        "retrieval_metric" : "dot",
+        "predicted_value"  : "yes",
+        "confidence"       : 0.123,   # rounded to 3 places
+        "strategy"         : "cbr_majority_vote",
+        "category"         : "permission",
     }
     assert "predicted_qualifier" not in hint
 
@@ -79,7 +83,7 @@ def test_to_hint_dict_rounds_confidence_and_omits_qualifier():
 def test_to_hint_dict_includes_qualifier_when_present():
     r = PredictionResult( response_type="yes_no", category="permission", strategy="cbr_majority_vote",
                           predicted_value="yes", confidence=0.9, predicted_qualifier="only old files" )
-    hint = r.to_hint_dict()
+    hint = r.to_hint_dict( 0.5, "dot" )
     assert hint[ "predicted_qualifier" ] == "only old files"
 
 

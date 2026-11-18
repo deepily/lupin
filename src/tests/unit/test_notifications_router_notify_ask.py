@@ -95,6 +95,8 @@ def wired( harness, monkeypatch ):
     class _Engine:
         enabled = False
         hint_voting_enabled = False
+        retrieval_metric    = "dot"
+        def record_forecast( self, *a, **k ): return True
 
     monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
 
@@ -262,13 +264,17 @@ class TestTheAskItself:
         assert hint == { "predicted_value": "yes" }
         assert "auto-submit gate stamp error" in capsys.readouterr().out.lower().replace( "⚠️ ", "" )
 
-    def test_no_override_and_a_disabled_engine_leaves_the_card_hintless( self, harness, wired ):
+    def test_no_override_and_a_disabled_engine_sends_an_unavailable_payload_with_no_value_and_no_stamps( self, harness, wired ):
         """
-        The other side: with the engine off and nothing supplied there is no hint at
-        all, and the auto-submit stamping must not manufacture one out of None.
+        The other side: with the engine off and nothing supplied the card still gets a payload,
+        in the state unavailable. It carries no forecast, and no vote or auto-submit gate is stamped
+        onto it, because there is nothing to vote on or submit.
         """
         harness.client.post( _url( response_default="D" ) )
-        assert harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ] is None
+        hint = harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ]
+        assert hint[ "state" ] == "unavailable" and hint[ "retrieval_metric" ] == "dot"
+        assert "predicted_value" not in hint and "confidence" not in hint
+        assert not any( key.startswith( "auto_submit" ) or key.startswith( "vote_" ) for key in hint )
 
 
 class TestTheOfflineAsk:

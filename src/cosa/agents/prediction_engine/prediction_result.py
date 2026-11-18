@@ -8,6 +8,14 @@ for both UI rendering (hint dict) and database logging.
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
+from cosa.agents.prediction_engine.config import (
+    STRATEGY_ERROR,
+    HINT_STATE_READY,
+    HINT_STATE_INSUFFICIENT_EVIDENCE,
+    HINT_STATE_BELOW_THRESHOLD,
+    HINT_STATE_UNAVAILABLE,
+)
+
 
 @dataclass
 class PredictionResult:
@@ -22,7 +30,7 @@ class PredictionResult:
     Ensures:
         - predicted_value is None for cold_start predictions
         - confidence is 0.0 for cold_start predictions
-        - to_hint_dict() returns a JSON-serializable dict for WebSocket push
+        - to_hint_dict() returns a JSON-serializable payload for WebSocket push, in every state
         - to_log_dict() returns a dict suitable for prediction_log insertion
     """
 
@@ -40,30 +48,63 @@ class PredictionResult:
         """True when no prediction could be made (insufficient data)."""
         return self.predicted_value is None and self.confidence == 0.0
 
-    def to_hint_dict( self ) -> Optional[Dict[str, Any]]:
+    def hint_state( self, confidence_threshold: float ) -> str:
         """
-        Convert to a lightweight dict for WebSocket push to the UI.
+        Name the state the forecast card is in.
+
+        Requires:
+            - confidence_threshold is the display threshold, a float from 0.0 to 1.0
+
+        Ensures:
+            - unavailable when the predictor failed (strategy error, reason prediction_error), the engine is
+              off (reason engine_disabled) or its query vector was refused (a reason that starts with
+              query_vector_refused)
+            - insufficient_evidence for a cold start with any other reason
+            - below_threshold when there is a forecast and its confidence is under the threshold
+            - ready otherwise
+        """
+        reason = ( self.metadata or {} ).get( "reason" ) or ""
+        if self.strategy == STRATEGY_ERROR or reason in ( "prediction_error", "engine_disabled" ) or reason.startswith( "query_vector_refused" ):
+            return HINT_STATE_UNAVAILABLE
+        if self.is_cold_start:
+            return HINT_STATE_INSUFFICIENT_EVIDENCE
+        if self.confidence < confidence_threshold:
+            return HINT_STATE_BELOW_THRESHOLD
+        return HINT_STATE_READY
+
+    def to_hint_dict( self, confidence_threshold: float, retrieval_metric: str,
+                      always_yes_rate: Optional[Dict[str, Any]] = None ) -> Dict[str, Any]:
+        """
+        Convert to the payload the card renders, in every state.
 
         Requires:
             - self is a valid PredictionResult
+            - confidence_threshold is the display threshold; retrieval_metric is "dot" or "cosine"
+            - always_yes_rate is { yes, n, rate } for a yes/no ask, or None
 
         Ensures:
-            - Returns None if cold_start (no hint to show)
-            - Returns dict with keys: predicted_value, confidence, strategy, category
-            - All values are JSON-serializable
+            - never returns None: the payload always carries state, retrieval_metric, strategy and category
+            - state is hint_state( confidence_threshold )
+            - predicted_value, confidence and predicted_qualifier appear only when state is ready
+            - always_yes_rate appears only for a yes/no forecast whose rate is given
+            - all values are JSON-serializable
         """
-        if self.is_cold_start:
-            return None
-
-        hint = {
-            "predicted_value" : self.predicted_value,
-            "confidence"      : round( self.confidence, 3 ),
-            "strategy"        : self.strategy,
-            "category"        : self.category,
+        state = self.hint_state( confidence_threshold )
+        hint  = {
+            "state"            : state,
+            "retrieval_metric" : retrieval_metric,
+            "strategy"         : self.strategy,
+            "category"         : self.category,
         }
 
-        if self.predicted_qualifier:
-            hint[ "predicted_qualifier" ] = self.predicted_qualifier
+        if state == HINT_STATE_READY:
+            hint[ "predicted_value" ] = self.predicted_value
+            hint[ "confidence" ]      = round( self.confidence, 3 )
+            if self.predicted_qualifier:
+                hint[ "predicted_qualifier" ] = self.predicted_qualifier
+
+        if self.response_type == "yes_no" and always_yes_rate is not None:
+            hint[ "always_yes_rate" ] = always_yes_rate
 
         return hint
 
@@ -126,7 +167,7 @@ def quick_smoke_test():
             strategy="cold_start"
         )
         assert cold.is_cold_start
-        assert cold.to_hint_dict() is None
+        assert cold.to_hint_dict( 0.5, "dot" )[ "state" ] == "insufficient_evidence"
         log = cold.to_log_dict()
         assert log[ "prediction_confidence" ] == 0.0
         print( "✓ Cold start result works correctly" )
@@ -142,7 +183,7 @@ def quick_smoke_test():
             similar_case_count = 5
         )
         assert not active.is_cold_start
-        hint = active.to_hint_dict()
+        hint = active.to_hint_dict( 0.5, "dot" )
         assert hint[ "predicted_value" ] == "yes"
         assert hint[ "confidence" ] == 0.85
         log = active.to_log_dict()

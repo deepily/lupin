@@ -164,7 +164,7 @@ class TestPredictYesNoQualifier:
         ]
 
         result = engine._predict_yes_no( "Deploy?", "permission", [ 0.1 ] * 768 )
-        hint   = result.to_hint_dict()
+        hint   = result.to_hint_dict( 0.5, "dot" )
 
         assert hint[ "predicted_qualifier" ] == "after review"
 
@@ -177,7 +177,7 @@ class TestPredictYesNoQualifier:
         ]
 
         result = engine._predict_yes_no( "Skip?", "workflow", [ 0.1 ] * 768 )
-        hint   = result.to_hint_dict()
+        hint   = result.to_hint_dict( 0.5, "dot" )
 
         assert "predicted_qualifier" not in hint
 
