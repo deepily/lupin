@@ -1126,6 +1126,39 @@ def test_record_outcome_happy_path_writes_and_stores( wired_engine, monkeypatch 
     assert stored                                   # _store_decision invoked
 
 
+_MIXED_CARD = { "questions": [ { "header": "DB", "multi_select": False }, { "header": "Features", "multi_select": True } ] }
+
+
+def _record_mixed_card( engine, monkeypatch, response_options ):
+    """Record a half-right mixed card and return what the engine wrote."""
+    session = _FakeSession()
+    repos   = []
+    _patch_db( monkeypatch, session, repos )
+    monkeypatch.setattr( engine, "_store_decision", lambda *a: None )
+    pr = PredictionResult(
+        response_type="multiple_choice", category="c", strategy="cbr_majority_vote",
+        predicted_value={ "answers": { "DB": "PG", "Features": [ "A", "B" ] } },
+    )
+    answer = json.dumps( { "answers": { "DB": "PG", "Features": [ "A", "C" ] } } )
+    engine.record_outcome( "n-mixed", pr, answer, cfg.RESPONSE_TYPE_MULTIPLE_CHOICE, None, response_options )
+    return repos[ 0 ].outcome
+
+
+def test_record_outcome_scores_a_half_right_mixed_card_by_the_stored_schema( wired_engine, monkeypatch ):
+    outcome = _record_mixed_card( wired_engine, monkeypatch, _MIXED_CARD )
+    assert outcome[ "accuracy_match" ] is False
+    assert ( outcome[ "accuracy_detail" ][ "matches" ], outcome[ "accuracy_detail" ][ "total" ] ) == ( 1, 2 )
+    by_header = { f[ "header" ]: f for f in outcome[ "accuracy_detail" ][ "fields" ] }
+    assert ( by_header[ "DB" ][ "mode" ], by_header[ "Features" ][ "mode" ], by_header[ "Features" ][ "jaccard" ] ) == ( "single", "multi", 0.333 )
+
+
+def test_record_outcome_with_no_stored_schema_scores_every_field_as_a_single_select( wired_engine, monkeypatch ):
+    outcome = _record_mixed_card( wired_engine, monkeypatch, None )
+    assert outcome[ "accuracy_match" ] is False
+    assert ( outcome[ "accuracy_detail" ][ "matches" ], outcome[ "accuracy_detail" ][ "total" ] ) == ( 1, 2 )
+    assert { f[ "mode" ] for f in outcome[ "accuracy_detail" ][ "fields" ] } == { "single" }
+
+
 def test_record_outcome_open_ended_enriches( wired_engine, monkeypatch ):
     session = _FakeSession()
     repos   = []
@@ -1144,7 +1177,7 @@ def test_record_outcome_open_ended_enriches( wired_engine, monkeypatch ):
 def test_record_outcome_scores_open_ended_at_the_engine_match_threshold( wired_engine, monkeypatch ):
     """record_outcome hands the engine's own match threshold to get_comparator."""
     seen = {}
-    def fake_get_comparator( response_type, actual_value=None, open_ended_threshold=None ):
+    def fake_get_comparator( response_type, open_ended_threshold=None, response_options=None ):
         seen[ "threshold" ] = open_ended_threshold
         return lambda predicted, actual: ( True, {} )
     session = _FakeSession()

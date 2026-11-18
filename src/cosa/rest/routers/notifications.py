@@ -726,7 +726,8 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
           period when expired
         - persists the response (wrapping plain strings as {value, source}), with the
           server's `answered_by` stamped into it when one is passed
-        - returns ( recipient_id, job_id ) for the WebSocket broadcast
+        - returns a dict with recipient_id, job_id, sender_id, sender_persona and the stored
+          response_options (the card's schema, or None), for the broadcast and the outcome hook
 
     Raises:
         - HTTPException 422 if notification_id is not a well-formed UUID. This
@@ -828,6 +829,7 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
         notification_job_id = notification.job_id
         sender_id           = notification.sender_id
         sender_persona      = notification.sender_persona
+        response_options    = notification.response_options
 
         # Update database with response (pass dict, not JSON string); a plain string is wrapped under "value"
         response_dict = _stored_response_dict( response_value, answered_by )
@@ -843,10 +845,11 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
         # A dict, not the old 2-tuple (§4.3 step 1) — carries the asking session's
         # sender_id + sender_persona for the handback routing/catch-up keys.
         return {
-            "recipient_id"   : recipient_id,
-            "job_id"         : notification_job_id,
-            "sender_id"      : sender_id,
-            "sender_persona" : sender_persona,
+            "recipient_id"     : recipient_id,
+            "job_id"           : notification_job_id,
+            "sender_id"        : sender_id,
+            "sender_persona"   : sender_persona,
+            "response_options" : response_options,
         }
 
 
@@ -1886,7 +1889,7 @@ async def submit_notification_response(
             # embeddings + a LanceDB write; run it away from the event loop so the
             # response path (and /health) can't stall under embedding latency.
             from_ledger = await asyncio.to_thread(
-                prediction_engine.record_outcome_from_ledger, notification_id, response_value, answered_by
+                prediction_engine.record_outcome_from_ledger, notification_id, response_value, answered_by, submit_result[ "response_options" ]
             )
             if not from_ledger and notification_id in pending_responses and "prediction_result" in pending_responses[notification_id]:
                 prediction_result = pending_responses[notification_id]["prediction_result"]
@@ -1896,7 +1899,8 @@ async def submit_notification_response(
                     prediction_result = prediction_result,
                     actual_value      = response_value,
                     response_type     = prediction_result.response_type,
-                    answered_by       = answered_by
+                    answered_by       = answered_by,
+                    response_options  = submit_result[ "response_options" ]
                 )
             if from_ledger or notification_id in pending_responses: print( f"[PREDICTION] ✓ Recorded outcome for {notification_id}" )
         except Exception as pred_error:

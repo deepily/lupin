@@ -45,13 +45,14 @@ class Row:
     """A notification row; only `update_response` changes it, the way the real repository does."""
 
     def __init__( self, state="delivered", expires_at=None, recipient_id=ADDRESSEE ):
-        self.state          = state
-        self.expires_at     = expires_at
-        self.recipient_id   = recipient_id
-        self.job_id         = None
-        self.sender_id      = "claude.code@x#abcd1234"
-        self.sender_persona = "tiberius"
-        self.response_value = None
+        self.state            = state
+        self.expires_at       = expires_at
+        self.recipient_id     = recipient_id
+        self.job_id           = None
+        self.sender_id        = "claude.code@x#abcd1234"
+        self.sender_persona   = "tiberius"
+        self.response_options = None
+        self.response_value   = None
 
 
 class Store:

@@ -43,6 +43,7 @@ harness = make_harness_fixture()
 _NID    = a_uuid( "submitted-notification" )
 _URL    = "/api/notify/response"
 _SENDER = "claude.code@lupin.deepily.ai#aaaa1111"
+_CARD_SCHEMA = { "questions": [ { "header": "SCHEMA-HEADER", "multi_select": True } ] }
 
 
 @pytest.fixture
@@ -60,9 +61,10 @@ def wired( harness, monkeypatch ):
         "submit_calls"     : [],
         "answered_by_calls": [],
         "delivered_calls"  : [],
-        "submit_result"  : { "recipient_id": "RECIPIENT-VALUE",
-                             "job_id"      : None,
-                             "sender_id"   : _SENDER },
+        "submit_result"  : { "recipient_id"     : "RECIPIENT-VALUE",
+                             "job_id"           : None,
+                             "sender_id"        : _SENDER,
+                             "response_options" : _CARD_SCHEMA },
         "submit_raises"  : None,
     }
 
@@ -312,6 +314,7 @@ class TestThePredictionHookIsNonFatal:
         assert len( seen ) == 1
         assert seen[ 0 ][ "actual_value" ]  == "ANSWER-VALUE"
         assert seen[ 0 ][ "response_type" ] == "RESPONSE-TYPE-VALUE"
+        assert seen[ 0 ][ "response_options" ] == _CARD_SCHEMA
 
     def test_the_stored_forecast_row_is_used_first_and_memory_is_not_read( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine as pe
@@ -327,7 +330,7 @@ class TestThePredictionHookIsNonFatal:
         monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
         _add_waiter( wired, prediction_result=self._Prediction() )
         harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
-        assert ledger_calls == [ ( _NID, "ANSWER-VALUE", ledger_calls[ 0 ][ 2 ] ) ]
+        assert ledger_calls == [ ( _NID, "ANSWER-VALUE", ledger_calls[ 0 ][ 2 ], _CARD_SCHEMA ) ]
         assert memory_calls == []
 
     def test_a_restart_that_emptied_memory_still_reaches_the_ledger( self, harness, wired, monkeypatch ):
@@ -346,6 +349,7 @@ class TestThePredictionHookIsNonFatal:
         r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
         assert r.status_code == 200
         assert len( ledger_calls ) == 1 and memory_calls == []
+        assert ledger_calls[ 0 ][ 3 ] == _CARD_SCHEMA
 
     def test_no_row_and_nothing_in_memory_means_no_record_outcome_call( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine as pe

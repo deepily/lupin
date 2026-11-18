@@ -1543,13 +1543,14 @@ class PredictionEngine:
         )
 
     def record_outcome_from_ledger( self, notification_id: str, actual_value: Any,
-                                    answered_by: Optional[Dict[str, Any]] = None ) -> bool:
+                                    answered_by: Optional[Dict[str, Any]] = None,
+                                    response_options: Optional[Dict[str, Any]] = None ) -> bool:
         """
         Attach an answer to the forecast row stored at ask time, with no help from memory.
 
         Requires:
             - notification_id: UUID string of the notification
-            - actual_value, answered_by: as record_outcome takes them
+            - actual_value, answered_by, response_options: as record_outcome takes them
 
         Ensures:
             - looks the forecast up with PredictionLogRepository.get_by_notification_id and rebuilds
@@ -1581,7 +1582,7 @@ class PredictionEngine:
 
             if result is None: return False
             if not override:
-                self.record_outcome( notification_id, result, actual_value, result.response_type, answered_by )
+                self.record_outcome( notification_id, result, actual_value, result.response_type, answered_by, response_options )
             return True
 
         except Exception as e:
@@ -1589,7 +1590,8 @@ class PredictionEngine:
             return False
 
     def record_outcome( self, notification_id: str, prediction_result: PredictionResult,
-                        actual_value: Any, response_type: str, answered_by: Optional[Dict[str, Any]] = None ) -> None:
+                        actual_value: Any, response_type: str, answered_by: Optional[Dict[str, Any]] = None,
+                        response_options: Optional[Dict[str, Any]] = None ) -> None:
         """
         Record the prediction outcome on the notification's prediction_log row.
 
@@ -1599,8 +1601,10 @@ class PredictionEngine:
             - actual_value: The actual response from the user
             - response_type: The response type string
             - answered_by: the server's { user_id, account_email, method } for the answer, or None
+            - response_options: the notification's stored schema, or None for a card that has none
 
         Ensures:
+            - A multiple-choice answer is scored field by field by that schema
             - Attaches the outcome to the forecast row written at ask time, once; a second call changes nothing
             - When the notification has no forecast row, writes the row and the outcome together
             - Stores embedding in LanceDB for future CBR retrieval
@@ -1626,8 +1630,8 @@ class PredictionEngine:
             if response_type in ( RESPONSE_TYPE_OPEN_ENDED, RESPONSE_TYPE_OPEN_ENDED_BATCH ):
                 self._enrich_with_embedding_similarity( actual_dict, prediction_result, response_type )
 
-            # Compare prediction against actual (data-driven dispatch for multi-select MC)
-            comparator = get_comparator( response_type, actual_value=actual_dict, open_ended_threshold=self.open_ended_match_threshold )
+            # Compare prediction against actual (a multiple-choice card is scored by its stored schema)
+            comparator = get_comparator( response_type, open_ended_threshold=self.open_ended_match_threshold, response_options=response_options )
             predicted_dict = prediction_result._wrap_predicted_value()
             accuracy_match, accuracy_detail = comparator( predicted_dict, actual_dict )
 

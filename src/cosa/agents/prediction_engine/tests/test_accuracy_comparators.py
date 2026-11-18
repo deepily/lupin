@@ -13,16 +13,14 @@ quick_smoke_test (D2 pipeline) + edge cases for full branch coverage.
 import pytest
 
 from cosa.agents.prediction_engine.accuracy_comparators import (
+    compare_multiple_choice,
     compare_yes_no,
-    compare_multiple_choice_single,
-    compare_multiple_choice_multi,
     compare_open_ended,
     compare_open_ended_batch,
     get_comparator,
 )
 from cosa.agents.prediction_engine.config import (
     OPEN_ENDED_SIMILARITY_THRESHOLD,
-    MULTI_SELECT_JACCARD_THRESHOLD,
 )
 
 
@@ -79,138 +77,6 @@ def test_yes_no_no_qualifiers():
     match, detail = compare_yes_no( { "value": "yes" }, { "value": "yes" } )
     assert "actual_qualifier"    not in detail
     assert "predicted_qualifier" not in detail
-
-
-# =========================================================================== #
-# compare_multiple_choice_single
-# =========================================================================== #
-def test_mc_single_match():
-    match, detail = compare_multiple_choice_single(
-        { "answers": { "Database": "PostgreSQL" } },
-        { "answers": { "Database": "PostgreSQL" } },
-    )
-    assert match is True
-    assert detail[ "matches" ] == 1
-    assert detail[ "total" ]   == 1
-    assert detail[ "mismatches" ] == []
-
-
-def test_mc_single_mismatch():
-    match, detail = compare_multiple_choice_single(
-        { "answers": { "Database": "PostgreSQL" } },
-        { "answers": { "Database": "MySQL" } },
-    )
-    assert match is False
-    assert detail[ "matches" ] == 0
-    assert detail[ "mismatches" ][ 0 ] == { "header": "Database", "predicted": "PostgreSQL", "actual": "MySQL" }
-
-
-def test_mc_single_predicted_none():
-    match, detail = compare_multiple_choice_single( None, { "answers": { "a": "b" } } )
-    assert match is None
-    assert detail == { "reason": "missing_data" }
-
-
-def test_mc_single_actual_none():
-    match, detail = compare_multiple_choice_single( { "answers": { "a": "b" } }, None )
-    assert match is None
-
-
-def test_mc_single_empty_predicted_answers():
-    # `not predicted_answers` True
-    match, detail = compare_multiple_choice_single( { "answers": {} }, { "answers": { "a": "b" } } )
-    assert match is None
-    assert detail == { "reason": "empty_answers" }
-
-
-def test_mc_single_empty_actual_answers():
-    # `not predicted_answers` False, `not actual_answers` True
-    match, detail = compare_multiple_choice_single( { "answers": { "a": "b" } }, { "answers": {} } )
-    assert match is None
-    assert detail == { "reason": "empty_answers" }
-
-
-def test_mc_single_partial_match_is_false():
-    match, detail = compare_multiple_choice_single(
-        { "answers": { "DB": "PG", "Cache": "Redis" } },
-        { "answers": { "DB": "PG", "Cache": "Memcached" } },
-    )
-    assert match is False
-    assert detail[ "matches" ] == 1
-    assert detail[ "total" ]   == 2
-
-
-# =========================================================================== #
-# compare_multiple_choice_multi, Jaccard overlap
-# =========================================================================== #
-def test_mc_multi_partial_overlap_below_threshold():
-    match, detail = compare_multiple_choice_multi(
-        { "answers": { "Features": [ "Auth", "Caching" ] } },
-        { "answers": { "Features": [ "Auth", "Logging" ] } },
-    )
-    # Jaccard = 1/3 ≈ 0.333 < 0.5
-    assert match is False
-    assert detail[ "avg_jaccard" ] < MULTI_SELECT_JACCARD_THRESHOLD
-
-
-def test_mc_multi_identical_above_threshold():
-    match, detail = compare_multiple_choice_multi(
-        { "answers": { "Features": [ "Auth", "Caching" ] } },
-        { "answers": { "Features": [ "Auth", "Caching" ] } },
-    )
-    assert match is True
-    assert detail[ "avg_jaccard" ] == 1.0
-
-
-def test_mc_multi_predicted_none():
-    match, detail = compare_multiple_choice_multi( None, { "answers": { "F": [ "A" ] } } )
-    assert match is None
-
-
-def test_mc_multi_actual_none():
-    match, detail = compare_multiple_choice_multi( { "answers": { "F": [ "A" ] } }, None )
-    assert match is None
-
-
-def test_mc_multi_empty_predicted():
-    match, detail = compare_multiple_choice_multi( { "answers": {} }, { "answers": { "F": [ "A" ] } } )
-    assert match is None
-    assert detail == { "reason": "empty_answers" }
-
-
-def test_mc_multi_empty_actual():
-    match, detail = compare_multiple_choice_multi( { "answers": { "F": [ "A" ] } }, { "answers": {} } )
-    assert match is None
-
-
-def test_mc_multi_non_list_values_normalized_to_singleton_sets():
-    # actual_options non-list ( str ) and predicted_options non-list ( str )
-    match, detail = compare_multiple_choice_multi(
-        { "answers": { "Pick": "A" } },
-        { "answers": { "Pick": "A" } },
-    )
-    assert match is True
-    assert detail[ "header_scores" ][ "Pick" ][ "jaccard" ] == 1.0
-
-
-def test_mc_multi_empty_union_yields_zero_jaccard():
-    # both sides empty list for the header → union empty → jaccard 0.0 ( ternary else arc )
-    match, detail = compare_multiple_choice_multi(
-        { "answers": { "F": [] } },
-        { "answers": { "F": [] } },
-    )
-    assert detail[ "header_scores" ][ "F" ][ "jaccard" ] == 0.0
-    assert match is False
-
-
-def test_mc_multi_predicted_missing_header_defaults_empty():
-    # predicted_answers.get(header, []) → [] when header absent
-    match, detail = compare_multiple_choice_multi(
-        { "answers": { "Other": [ "X" ] } },
-        { "answers": { "Features": [ "A", "B" ] } },
-    )
-    assert match is False
-    assert detail[ "header_scores" ][ "Features" ][ "jaccard" ] == 0.0
 
 
 # =========================================================================== #
@@ -383,35 +249,6 @@ def test_get_comparator_open_ended():
     assert get_comparator( "open_ended" ) is compare_open_ended
 
 
-def test_get_comparator_mc_no_actual_value_is_single():
-    # actual_value is None → skip data-driven dispatch → single
-    assert get_comparator( "multiple_choice" ) is compare_multiple_choice_single
-
-
-def test_get_comparator_mc_multi_select_detected():
-    # actual has a list value → multi
-    comp = get_comparator( "multiple_choice", actual_value={ "answers": { "Features": [ "A", "B" ] } } )
-    assert comp is compare_multiple_choice_multi
-
-
-def test_get_comparator_mc_single_select_detected():
-    # actual answers all scalar → loop exhausts without a list → single
-    comp = get_comparator( "multiple_choice", actual_value={ "answers": { "DB": "PG" } } )
-    assert comp is compare_multiple_choice_single
-
-
-def test_get_comparator_mc_non_dict_actual_value():
-    # actual_value not None but not a dict → isinstance() else → answers {} → single
-    comp = get_comparator( "multiple_choice", actual_value="not a dict" )
-    assert comp is compare_multiple_choice_single
-
-
-def test_get_comparator_non_mc_with_actual_value_skips_dispatch():
-    # response_type != multiple_choice → the `and` short-circuits → normal table lookup
-    comp = get_comparator( "yes_no", actual_value={ "answers": { "F": [ "A" ] } } )
-    assert comp is compare_yes_no
-
-
 # =========================================================================== #
 # the stance the comparator reads (one parser, no copy of its own)
 # =========================================================================== #
@@ -484,4 +321,4 @@ def test_get_comparator_binds_open_ended_threshold():
 
 def test_get_comparator_threshold_does_not_touch_other_types():
     assert get_comparator( "yes_no", open_ended_threshold=0.5 ) is compare_yes_no
-    assert get_comparator( "multiple_choice", open_ended_threshold=0.5 ) is compare_multiple_choice_single
+    assert get_comparator( "multiple_choice", open_ended_threshold=0.5 ).func is compare_multiple_choice

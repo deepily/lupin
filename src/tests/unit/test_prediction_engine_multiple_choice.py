@@ -470,43 +470,28 @@ class TestPredictMultipleChoiceMultiSelect:
 # ===========================================================================
 
 class TestGetComparatorDispatch:
-    """Tests for get_comparator() data-driven dispatch."""
+    """Tests for get_comparator() dispatch by the stored schema."""
 
-    def test_single_select_actual_returns_single_comparator( self ):
-        """Single-select actual_value → compare_multiple_choice_single."""
-        from cosa.agents.prediction_engine.accuracy_comparators import (
-            get_comparator, compare_multiple_choice_single
-        )
+    def test_a_schema_binds_the_schema_comparator( self ):
+        """A stored schema → compare_multiple_choice bound to it."""
+        from cosa.agents.prediction_engine.accuracy_comparators import get_comparator, compare_multiple_choice
 
-        comp = get_comparator( "multiple_choice", actual_value={ "answers": { "DB": "PG" } } )
-        assert comp is compare_multiple_choice_single
+        schema = { "questions": [ { "header": "Features", "multi_select": True } ] }
+        comp   = get_comparator( "multiple_choice", response_options=schema )
+        assert ( comp.func, comp.keywords ) == ( compare_multiple_choice, { "response_options": schema } )
 
-    def test_multi_select_actual_returns_multi_comparator( self ):
-        """Multi-select actual_value → compare_multiple_choice_multi."""
-        from cosa.agents.prediction_engine.accuracy_comparators import (
-            get_comparator, compare_multiple_choice_multi
-        )
-
-        comp = get_comparator( "multiple_choice", actual_value={ "answers": { "Features": [ "A", "B" ] } } )
-        assert comp is compare_multiple_choice_multi
-
-    def test_no_actual_value_backward_compat( self ):
-        """No actual_value → compare_multiple_choice_single (backward compat)."""
-        from cosa.agents.prediction_engine.accuracy_comparators import (
-            get_comparator, compare_multiple_choice_single
-        )
+    def test_no_schema_still_binds_the_schema_comparator_with_an_empty_card( self ):
+        """No schema → compare_multiple_choice with an empty card, so every field is a single select."""
+        from cosa.agents.prediction_engine.accuracy_comparators import get_comparator, compare_multiple_choice
 
         comp = get_comparator( "multiple_choice" )
-        assert comp is compare_multiple_choice_single
+        assert ( comp.func, comp.keywords ) == ( compare_multiple_choice, { "response_options": {} } )
 
-    def test_yes_no_unaffected_by_actual_value( self ):
-        """yes_no type is unaffected by actual_value parameter."""
-        from cosa.agents.prediction_engine.accuracy_comparators import (
-            get_comparator, compare_yes_no
-        )
+    def test_yes_no_is_unaffected_by_a_schema( self ):
+        """yes_no type is unaffected by the schema parameter."""
+        from cosa.agents.prediction_engine.accuracy_comparators import get_comparator, compare_yes_no
 
-        comp = get_comparator( "yes_no", actual_value={ "value": "yes" } )
-        assert comp is compare_yes_no
+        assert get_comparator( "yes_no", response_options={ "questions": [] } ) is compare_yes_no
 
 
 # ===========================================================================

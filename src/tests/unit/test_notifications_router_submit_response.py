@@ -54,6 +54,7 @@ class _Row:
         self.job_id         = "JOB-VALUE"
         self.sender_id      = "SENDER-VALUE"
         self.sender_persona = "PERSONA-VALUE"
+        self.response_options = { "questions": [ { "header": "OPTIONS-VALUE" } ] }
 
 
 class _Repo:
@@ -249,15 +250,16 @@ class TestTheResponseWrapping:
 
 class TestTheHandback:
 
-    def test_all_four_fields_come_back_under_their_own_keys( self, wire ):
-        # 🔴 four DIFFERENT values, so a dict built from the wrong attribute is visible.
+    def test_all_five_fields_come_back_under_their_own_keys( self, wire ):
+        # 🔴 five DIFFERENT values, so a dict built from the wrong attribute is visible.
         wire( _Row() )
         out = notif._submit_response_sync( _NID, "yes", _BY )
         assert out == {
-            "recipient_id"   : _RECIPIENT,
-            "job_id"         : "JOB-VALUE",
-            "sender_id"      : "SENDER-VALUE",
-            "sender_persona" : "PERSONA-VALUE",
+            "recipient_id"     : _RECIPIENT,
+            "job_id"           : "JOB-VALUE",
+            "sender_id"        : "SENDER-VALUE",
+            "sender_persona"   : "PERSONA-VALUE",
+            "response_options" : { "questions": [ { "header": "OPTIONS-VALUE" } ] },
         }
 
     def test_the_recipient_id_is_stringified( self, wire ):
