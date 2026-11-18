@@ -81,7 +81,7 @@ def test_no_tie_a_tie_error_an_unreadable_receipt_and_a_measurement_receipt_are_
               "d4": ruling( "r4" ), "d5": ruling( "r5" ) }
     reads = { "r4": receipt( sweep_only=True ), "r5": receipt( candidate_stage={ "error": "x", "ids": [], "manifest_hash": "g" } ) }
     out   = da.queue_audits( [ { "id": f"d{n}" } for n in range( 1, 6 ) ], tie_of( table ), receipts_of( reads ), tmp_path, DAY, indexed )
-    assert out[ "counters" ] == { da.QUEUED: 0, da.HEURISTIC_QUEUED: 0, da.NOT_IN_INDEX: 0, da.NO_TIE: 1, da.NO_NEED_TEXT: 0, da.NO_SHORTLIST: 2, da.UNREADABLE: 1, da.TIE_ERROR: 1 }
+    assert out[ "counters" ] == { da.QUEUED: 0, da.HEURISTIC_QUEUED: 0, da.NOT_IN_INDEX: 0, da.NO_TIE: 1, da.NO_NEED_TEXT: 0, da.NO_SHORTLIST: 2, da.UNREADABLE: 1, da.TIE_ERROR: 1, da.QUEUE_FULL: 0 }
     assert out[ "reasons" ][ "d1" ] == "no persona" and "not a commit" in out[ "reasons" ][ "d2" ] and "RECEIPT_MISSING" in out[ "reasons" ][ "d3" ]
     assert queued( tmp_path ) == {}
 

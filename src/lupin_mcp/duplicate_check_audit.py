@@ -20,7 +20,8 @@ UNREADABLE      = "receipt_unreadable"
 TIE_ERROR       = "tie_error"
 NOT_IN_INDEX    = "not_in_index"
 HEURISTIC_QUEUED = "heuristic_queued"
-COUNTERS        = ( QUEUED, HEURISTIC_QUEUED, NOT_IN_INDEX, NO_TIE, NO_NEED_TEXT, NO_SHORTLIST, UNREADABLE, TIE_ERROR )
+QUEUE_FULL      = "queue_full"
+COUNTERS        = ( QUEUED, HEURISTIC_QUEUED, NOT_IN_INDEX, NO_TIE, NO_NEED_TEXT, NO_SHORTLIST, UNREADABLE, TIE_ERROR, QUEUE_FULL )
 FETCH_SIMILAR   = "fetch_similar"
 
 
@@ -46,7 +47,7 @@ def index_id_finder( entries ):
     return index_id_of
 
 
-def queue_audits( findings, tie_of, receipt_of, data_dir, today, index_id_of ):
+def queue_audits( findings, tie_of, receipt_of, data_dir, today, index_id_of, max_pending=None ):
     """
     Queue a known-miss audit for each finding whose tie gives a lookup with a need.
 
@@ -56,8 +57,10 @@ def queue_audits( findings, tie_of, receipt_of, data_dir, today, index_id_of ):
         - tie_of( finding ) returns reuse_tie.find_tie's answer for it, and may raise ValueError
         - receipt_of( receipt id ) returns the stored receipt, or raises ReuseError
         - today is an ISO date string
+        - max_pending is None for no cap, else the most items the audit queue may hold
 
     Ensures:
+        - a lookup the queue has no room for counts queue_full, is not queued, and keeps its reason
         - returns { counters, reasons }: counters has every counter name, and reasons maps a finding id to why it was not queued
         - a finding the index does not hold counts not_in_index and is neither tied nor queued, because the sweep would refuse
           its exclude_id as UNKNOWN_ENTRY before any request and drop it on the third try
@@ -88,7 +91,8 @@ def queue_audits( findings, tie_of, receipt_of, data_dir, today, index_id_of ):
         if receipt[ "tool" ] == FETCH_SIMILAR: skip( finding, NO_NEED_TEXT, f"receipt {tie[ 'receipt_id' ]} is a fetch_similar lookup" ); continue
         inputs = rs.audit_inputs( receipt )
         if inputs is None: skip( finding, NO_SHORTLIST, f"receipt {tie[ 'receipt_id' ]} is not a shortlist answer of check_exists" ); continue
-        sa.enqueue_pending( data_dir, *inputs, today, known_miss=True, exclude_id=index_id, tie=tie[ "tie" ] )
+        if sa.enqueue_pending( data_dir, *inputs, today, known_miss=True, exclude_id=index_id, tie=tie[ "tie" ], max_pending=max_pending ) is None:
+            skip( finding, QUEUE_FULL, f"the audit queue already holds {max_pending} items, what the account's headroom pays for" ); continue
         counters[ QUEUED ] += 1
         if tie[ "tie" ] == "heuristic": counters[ HEURISTIC_QUEUED ] += 1
     return { "counters": counters, "reasons": reasons }

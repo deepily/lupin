@@ -207,21 +207,21 @@ class TestLiveLookupHook:
         need = sampled_need()
         self.stub( monkeypatch, receipt_of( need ) )
         monkeypatch.setattr( lt, "read_value", lambda key, reader=None, errors=None: ON[ key ] )
-        out = reuse_tools.check_exists_impl( need, type( "Ctx", ( ), { "data": tmp_path } )(), language="py" )
+        out = reuse_tools.check_exists_impl( need, type( "Ctx", ( ), { "data": tmp_path, "ledger": type( "L", ( ), { "path": tmp_path / "no-ledger.jsonl" } )() } )(), language="py" )
         assert out == { "status": "ok", "receipt_id": "r1" } and len( queue_files( tmp_path ) ) == 1
 
     def test_nothing_is_queued_when_the_audit_is_off( self, tmp_path, monkeypatch ):
         need = sampled_need()
         self.stub( monkeypatch, receipt_of( need ) )
         monkeypatch.setattr( lt, "read_value", lambda key, reader=None, errors=None: "false" )
-        reuse_tools.check_exists_impl( need, type( "Ctx", ( ), { "data": tmp_path } )(), language="py" )
+        reuse_tools.check_exists_impl( need, type( "Ctx", ( ), { "data": tmp_path, "ledger": type( "L", ( ), { "path": tmp_path / "no-ledger.jsonl" } )() } )(), language="py" )
         assert queue_files( tmp_path ) == []
 
     def test_a_queue_failure_is_printed_and_the_answer_is_unchanged( self, tmp_path, monkeypatch, capsys ):
         self.stub( monkeypatch, receipt_of( "need" ) )
         def boom( *a, **k ): raise OSError( "disk full" )
         monkeypatch.setattr( rs, "queue_lookup", boom )
-        out = reuse_tools.check_exists_impl( "need", type( "Ctx", ( ), { "data": tmp_path } )(), language="py" )
+        out = reuse_tools.check_exists_impl( "need", type( "Ctx", ( ), { "data": tmp_path, "ledger": type( "L", ( ), { "path": tmp_path / "no-ledger.jsonl" } )() } )(), language="py" )
         assert out == { "status": "ok", "receipt_id": "r1" }
         assert "shadow audit queue failed: disk full" in capsys.readouterr().err
 
@@ -229,13 +229,13 @@ class TestLiveLookupHook:
         self.stub( monkeypatch, receipt_of( "need" ) )
         def boom( *a, **k ): raise CandidateError( sa.AUDIT_RATE_INVALID, "2" )
         monkeypatch.setattr( rs, "queue_lookup", boom )
-        reuse_tools.check_exists_impl( "need", type( "Ctx", ( ), { "data": tmp_path } )(), language="py" )
+        reuse_tools.check_exists_impl( "need", type( "Ctx", ( ), { "data": tmp_path, "ledger": type( "L", ( ), { "path": tmp_path / "no-ledger.jsonl" } )() } )(), language="py" )
         assert "AUDIT_RATE_INVALID" in capsys.readouterr().err
 
     def test_a_refused_lookup_queues_nothing_and_keeps_its_error( self, tmp_path, monkeypatch ):
         def refuse( *a, **k ): raise reuse_tools.ReuseError( "BAD_BUDGET", "x" )
         monkeypatch.setattr( reuse_tools, "run_question", refuse )
-        out = reuse_tools.check_exists_impl( "need", type( "Ctx", ( ), { "data": tmp_path } )(), language="py" )
+        out = reuse_tools.check_exists_impl( "need", type( "Ctx", ( ), { "data": tmp_path, "ledger": type( "L", ( ), { "path": tmp_path / "no-ledger.jsonl" } )() } )(), language="py" )
         assert out == { "status": "error", "error": "BAD_BUDGET", "detail": "x" } and not ( tmp_path / "receipts" ).exists()
 
 
