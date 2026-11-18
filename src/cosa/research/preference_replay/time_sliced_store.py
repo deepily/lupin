@@ -10,11 +10,14 @@ The store never reads a case's ``created_at``, which the database keeps as text.
 ``find_similar`` mirrors ``PredictionDecisionRepository.find_similar`` and ``dot_topk``. Filters apply
 before the limit. The limit applies to the raw distance order. Then the score is clamped, the threshold
 applies after the limit, and the survivors are sorted strongest first. The parity test in
-``src/cosa/tests/unit/research/test_time_sliced_store_parity.py`` holds the two paths together.
+``src/cosa/tests/unit/rest/db/repositories/test_time_sliced_store_parity.py`` holds the two paths together.
 
 Known difference on the dot path. The SQL query fails when a row with a NULL vector falls inside the limit,
 and the proxy wrapper then returns an empty list. This store leaves such a row out instead.
 Replay input has no row without a vector, so the difference is never reached.
+
+Two more differences are named, not fixed. SQL leaves tied scores in no set order. This store keeps load order.
+pgvector scores in float32 and this store in float64. A case exactly at the threshold edge could differ.
 """
 
 from datetime import datetime
