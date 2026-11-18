@@ -125,3 +125,25 @@ class TestQueryVectorRefusedBecomesTheAbstentionReason:
         engine._embedding_store = MagicMock()
         engine._embedding_store.find_similar.side_effect = RuntimeError( "boom" )
         assert engine._predict_yes_no( "q", "general", [ 0.1 ] ).metadata[ "reason" ] == "no_similar_cases"
+
+
+class TestConfigVersionCarriesBothSwitches:
+
+    def _version( self, metric, calibration ):
+        """Return config_version of an engine whose INI says `metric` and `calibration`."""
+        PredictionEngine._instance = None
+        values = { "prediction engine retrieval metric": metric, "prediction engine calibration enabled": calibration }
+        cfg    = MagicMock()
+        cfg.get.side_effect = lambda key, default=None, return_type=None: values.get( key, default )
+        return PredictionEngine( config_mgr=cfg ).config_version()
+
+    def test_each_switch_alone_changes_the_version( self ):
+        base = self._version( "dot", False )
+        assert self._version( "cosine", False ) != base, "the retrieval metric must reach config_version"
+        assert self._version( "dot", True ) != base, "the calibration switch must reach config_version"
+        assert self._version( "cosine", True ) not in ( base, self._version( "cosine", False ), self._version( "dot", True ) )
+
+    def test_the_ini_values_survive_construction( self ):
+        self._version( "cosine", True )
+        engine = PredictionEngine()
+        assert ( engine.retrieval_metric, engine.calibration_enabled ) == ( "cosine", True )

@@ -165,10 +165,6 @@ class PredictionEngine:
         if self.retrieval_metric not in VALID_RETRIEVAL_METRICS:
             raise ValueError( f"prediction engine retrieval metric must be one of {VALID_RETRIEVAL_METRICS}, got {self.retrieval_metric!r}" )
 
-        # The forecast row's config_version names the calibration switch beside the thresholds;
-        # the INI read for it lands with the calibration module, until then it holds today's value.
-        self.calibration_enabled  = False
-
         # Retained for _get_embedding_store. None is legitimate — the store then
         # resolves its own configuration.
         self._config_mgr = config_mgr
