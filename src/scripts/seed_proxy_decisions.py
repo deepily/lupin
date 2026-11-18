@@ -827,6 +827,8 @@ def seed_decisions( scenarios, dry_run=False, category_filter=None ):
                 question_embedding = embedding,
                 created_at         = now_iso,
                 data_origin        = "synthetic_seed",
+                owner_user_id      = None,
+                answer_source      = "proxy",
             )
 
             results.append( ( str( decision.id ), scenario[ "id" ] ) )

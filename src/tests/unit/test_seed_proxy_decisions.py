@@ -494,6 +494,8 @@ def test_seed_logs_a_decision_embeds_it_and_stores_the_vector( creds, http, db, 
     assert fake.added[ 0 ][ "id" ]                 == "pg-a"
     assert fake.added[ 0 ][ "question_embedding" ] == [ 0.1, 0.2, 0.3 ]
     assert fake.added[ 0 ][ "ratification_state" ] == "pending"
+    # a seeded case is the proxy's, never a person's answer, so it casts no personal vote
+    assert ( fake.added[ 0 ][ "owner_user_id" ], fake.added[ 0 ][ "answer_source" ] ) == ( None, "proxy" )
 
 
 def test_seed_marks_every_row_for_cleanup_or_it_can_never_be_removed( creds, http, db, store ):

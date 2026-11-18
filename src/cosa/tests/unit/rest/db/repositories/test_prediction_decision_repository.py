@@ -96,3 +96,33 @@ def test_delete_all_clears_table( db_session ):
     assert repo.delete_all() == 2
     assert repo.count() == 0
     assert repo.delete_all() == 0          # empty table → 0
+
+
+def _add_sourced( repo, id, owner, source ):
+    return repo.add_decision(
+        id=id, question=f"q_{id}", category="permission", decision_value="yes",
+        ratification_state="not_required", question_embedding=_vec( 1.0 ),
+        created_at="2026-07-01", response_type="yes_no", owner_user_id=owner, answer_source=source,
+    )
+
+
+def test_a_case_stored_without_a_source_is_unknown_and_has_no_owner( db_session ):
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "legacy", _vec( 1.0 ) )
+    db_session.flush()
+    stored = repo.get_by_id( "legacy" )
+    assert ( stored.owner_user_id, stored.answer_source ) == ( None, "unknown" )
+
+
+def test_only_a_human_answer_from_the_owner_casts_a_personal_vote( db_session ):
+    repo = PredictionDecisionRepository( db_session )
+    _add_sourced( repo, "mine", "owner-1", "human" )
+    for case_id, owner, source in ( ( "timeout", "owner-1", "timeout_default" ), ( "proxy", "owner-1", "proxy" ),
+                                    ( "other-user", "owner-2", "human" ), ( "unknown", None, "unknown" ),
+                                    ( "hint", None, "hint_vote" ), ( "test", "owner-1", "test" ) ):
+        _add_sourced( repo, case_id, owner, source )
+    db_session.flush()
+
+    hits = repo.find_similar( _vec( 1.0 ), threshold=0.0, owner_user_id="owner-1", answer_source="human" )
+    assert [ entity.id for _, entity in hits ] == [ "mine" ]
+    assert len( repo.find_similar( _vec( 1.0 ), threshold=0.0, limit=10 ) ) == 7

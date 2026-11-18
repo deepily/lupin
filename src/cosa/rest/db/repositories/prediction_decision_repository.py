@@ -33,16 +33,20 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
     def add_decision( self, id: str, question: str, category: str, decision_value: str,
                       ratification_state: str, question_embedding: List[float],
                       created_at: Optional[str] = None, data_origin: str = "organic",
-                      response_type: str = "" ) -> PredictionDecision:
+                      response_type: str = "", owner_user_id: Optional[str] = None,
+                      answer_source: str = "unknown" ) -> PredictionDecision:
         """
         Store a decision row.
 
         Requires:
             - id is a unique string primary key
             - question_embedding is a dim-768 list
+            - owner_user_id is the answering account's id, or None
+            - answer_source is one of human, proxy, timeout_default, test, hint_vote or unknown
 
         Ensures:
             - creates and flushes a row (caller commits); returns the entity
+            - a caller that does not say who answered stores "unknown", which casts no personal vote
         """
         return self.create(
             id                 = id,
@@ -54,12 +58,16 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
             response_type      = response_type,
             question_embedding = question_embedding,
             created_at         = created_at,
+            owner_user_id      = owner_user_id,
+            answer_source      = answer_source,
         )
 
     def find_similar( self, query_embedding: List[float], category: Optional[str] = None,
                       limit: int = 5, threshold: float = 0.75,
                       data_origin: Optional[str] = None,
-                      response_type: Optional[str] = None ) -> List[Tuple[float, PredictionDecision]]:
+                      response_type: Optional[str] = None,
+                      owner_user_id: Optional[str] = None,
+                      answer_source: Optional[str] = None ) -> List[Tuple[float, PredictionDecision]]:
         """
         Dot nearest-k over question_embedding with optional scalar filters.
 
@@ -71,13 +79,15 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
             - returns up to limit ``( similarity_pct, entity )`` tuples, strongest
               dot first, similarity_pct clamped to [0,100] and kept only when
               >= threshold * 100 (mirrors ProxyDecisionEmbeddings.find_similar)
-            - category / data_origin / response_type are ANDed as exact filters
+            - category / data_origin / response_type / owner_user_id / answer_source are ANDed as exact filters
         """
         exclude_filter = None
         conditions = []
         if category is not None:      conditions.append( PredictionDecision.category      == category )
         if data_origin is not None:   conditions.append( PredictionDecision.data_origin   == data_origin )
         if response_type is not None: conditions.append( PredictionDecision.response_type == response_type )
+        if owner_user_id is not None: conditions.append( PredictionDecision.owner_user_id == owner_user_id )
+        if answer_source is not None: conditions.append( PredictionDecision.answer_source == answer_source )
         if conditions:
             from sqlalchemy import and_
             exclude_filter = and_( *conditions )

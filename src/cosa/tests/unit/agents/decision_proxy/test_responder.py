@@ -438,6 +438,8 @@ def test_persist_embedding_pending_state():
     _, kwargs = store.add_decision.call_args
     assert kwargs[ "ratification_state" ] == "pending"
     assert kwargs[ "decision_value" ] == "yes"
+    # the proxy's own case is never a person's answer: it casts no personal vote
+    assert ( kwargs[ "owner_user_id" ], kwargs[ "answer_source" ] ) == ( None, "proxy" )
 
 
 def test_persist_embedding_autonomous_state():

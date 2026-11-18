@@ -1523,6 +1523,7 @@ async def notify_user(
                         "message"          : message.strip(),
                         "response_type"    : response_type,
                         "sender_id"        : resolved_sender_id,
+                        "recipient_id"     : str( target_system_id ),
                         "response_options" : parsed_response_options,
                     } )
                     # Store prediction result for later outcome recording
@@ -1852,7 +1853,8 @@ async def submit_notification_response(
                     notification_id   = notification_id,
                     prediction_result = prediction_result,
                     actual_value      = response_value,
-                    response_type     = resp_type
+                    response_type     = resp_type,
+                    answered_by       = answered_by
                 )
                 print( f"[PREDICTION] ✓ Recorded outcome for {notification_id}" )
         except Exception as pred_error:

@@ -200,6 +200,7 @@ class PredictionEngine:
         message       = notification_dict.get( "message", "" )
         response_type = notification_dict.get( "response_type", "" )
         sender_id     = notification_dict.get( "sender_id", "" )
+        owner_user_id = notification_dict.get( "recipient_id" )
 
         # Classify the notification
         category, class_confidence = self.classifier.classify( message, sender_id=sender_id )
@@ -230,20 +231,20 @@ class PredictionEngine:
         # Dispatch by response type
         try:
             if response_type == RESPONSE_TYPE_YES_NO:
-                return self._predict_yes_no( message, category, embedding )
+                return self._predict_yes_no( message, category, embedding, owner_user_id=owner_user_id )
 
             elif response_type == RESPONSE_TYPE_MULTIPLE_CHOICE:
                 options = notification_dict.get( "response_options" )
-                return self._predict_multiple_choice( message, category, embedding, options )
+                return self._predict_multiple_choice( message, category, embedding, options, owner_user_id=owner_user_id )
 
             elif response_type == RESPONSE_TYPE_OPEN_ENDED:
-                return self._predict_open_ended( message, category, embedding )
+                return self._predict_open_ended( message, category, embedding, owner_user_id=owner_user_id )
 
             elif response_type == RESPONSE_TYPE_OPEN_ENDED_BATCH:
                 # Pass the content key as the match text so exact-match compares
                 # batch content to batch content, and stamp it so _store_decision
                 # keys the stored case on the same content (not the preamble).
-                result = self._predict_open_ended_batch( retrieval_text, category, embedding )
+                result = self._predict_open_ended_batch( retrieval_text, category, embedding, owner_user_id=owner_user_id )
                 if result.metadata is not None:
                     result.metadata[ "batch_question_key" ] = retrieval_text
                 return result
@@ -264,6 +265,23 @@ class PredictionEngine:
                 strategy      = STRATEGY_COLD_START,
                 metadata      = { "reason": "prediction_error", "error": str( e ) }
             )
+
+    @staticmethod
+    def _personal_vote_filter( owner_user_id ) -> dict:
+        """
+        The retrieval filters that make a stored case cast a personal vote.
+
+        Requires:
+            - owner_user_id is the recipient's user id as a string, or None when the caller cannot name one
+
+        Ensures:
+            - always keeps only cases whose answer_source is "human"
+            - adds the owner filter when the recipient is known, so another account's answer,
+              a proxy's guess, a timed-out default, a hint vote and an unknown case cast no vote
+        """
+        filters = { "answer_source": "human" }
+        if owner_user_id is not None: filters[ "owner_user_id" ] = str( owner_user_id )
+        return filters
 
     def _ratified_weight( self, record ) -> float:
         """
@@ -386,7 +404,8 @@ class PredictionEngine:
             return message
         return " | ".join( parts )
 
-    def _predict_yes_no( self, message: str, category: str, embedding: Optional[list] ) -> PredictionResult:
+    def _predict_yes_no( self, message: str, category: str, embedding: Optional[list],
+                         owner_user_id: Optional[str] = None ) -> PredictionResult:
         """
         Predict yes/no response using CBR majority vote with qualifier retrieval.
 
@@ -427,7 +446,8 @@ class PredictionEngine:
                 category        = category,
                 limit           = self.cbr_top_k,
                 threshold       = self.similarity_threshold,
-                response_type   = RESPONSE_TYPE_YES_NO
+                response_type   = RESPONSE_TYPE_YES_NO,
+                **self._personal_vote_filter( owner_user_id )
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error: {e}" )
@@ -620,7 +640,8 @@ class PredictionEngine:
 
     def _predict_multiple_choice( self, message: str, category: str,
                                      embedding: Optional[list],
-                                     options: Any = None ) -> PredictionResult:
+                                     options: Any = None,
+                                     owner_user_id: Optional[str] = None ) -> PredictionResult:
         """
         Predict multiple choice response using CBR majority vote (single or multi-select).
 
@@ -666,7 +687,8 @@ class PredictionEngine:
                 category        = category,
                 limit           = self.cbr_top_k,
                 threshold       = self.similarity_threshold,
-                response_type   = RESPONSE_TYPE_MULTIPLE_CHOICE
+                response_type   = RESPONSE_TYPE_MULTIPLE_CHOICE,
+                **self._personal_vote_filter( owner_user_id )
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error (MC): {e}" )
@@ -910,7 +932,8 @@ class PredictionEngine:
 
         return ( predicted_answers, avg_consistency )
 
-    def _predict_open_ended( self, message: str, category: str, embedding: Optional[list] ) -> PredictionResult:
+    def _predict_open_ended( self, message: str, category: str, embedding: Optional[list],
+                             owner_user_id: Optional[str] = None ) -> PredictionResult:
         """
         Predict open-ended response using two-tier retrieval + LLM synthesis.
 
@@ -925,10 +948,12 @@ class PredictionEngine:
             - Falls back to cold_start if no embedding, store, or similar cases
             - Falls back to retrieval if LLM call fails
         """
-        return self._predict_two_tier( message, category, embedding, RESPONSE_TYPE_OPEN_ENDED, "OE", lambda value: value )
+        return self._predict_two_tier( message, category, embedding, RESPONSE_TYPE_OPEN_ENDED, "OE", lambda value: value,
+                                       owner_user_id=owner_user_id )
 
     def _predict_two_tier( self, message: str, category: str, embedding: Optional[list],
-                           response_type: str, label: str, convert ) -> PredictionResult:
+                           response_type: str, label: str, convert,
+                           owner_user_id: Optional[str] = None ) -> PredictionResult:
         """
         Two-tier retrieval then LLM synthesis, shared by the open-ended and batch predictors.
 
@@ -969,7 +994,8 @@ class PredictionEngine:
                 category        = category,
                 limit           = self.open_ended_cbr_top_k,
                 threshold       = self.open_ended_cbr_threshold,
-                response_type   = response_type
+                response_type   = response_type,
+                **self._personal_vote_filter( owner_user_id )
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error ({label}): {e}" )
@@ -1132,7 +1158,8 @@ class PredictionEngine:
 
         return prompt
 
-    def _predict_open_ended_batch( self, message: str, category: str, embedding: Optional[list] ) -> PredictionResult:
+    def _predict_open_ended_batch( self, message: str, category: str, embedding: Optional[list],
+                                   owner_user_id: Optional[str] = None ) -> PredictionResult:
         """
         Predict open_ended_batch response using two-tier retrieval + LLM synthesis.
 
@@ -1146,7 +1173,8 @@ class PredictionEngine:
             - Decision values are JSON-parsed to dicts when possible
             - Returns cold_start if insufficient data
         """
-        return self._predict_two_tier( message, category, embedding, RESPONSE_TYPE_OPEN_ENDED_BATCH, "OEB", self._parse_batch_decision_value )
+        return self._predict_two_tier( message, category, embedding, RESPONSE_TYPE_OPEN_ENDED_BATCH, "OEB", self._parse_batch_decision_value,
+                                       owner_user_id=owner_user_id )
 
     @staticmethod
     def _parse_batch_decision_value( decision_value: str ) -> Any:
@@ -1302,7 +1330,7 @@ class PredictionEngine:
             return None
 
     def record_outcome( self, notification_id: str, prediction_result: PredictionResult,
-                        actual_value: Any, response_type: str ) -> None:
+                        actual_value: Any, response_type: str, answered_by: Optional[Dict[str, Any]] = None ) -> None:
         """
         Record the prediction outcome to the prediction_log table.
 
@@ -1311,6 +1339,7 @@ class PredictionEngine:
             - prediction_result: The PredictionResult from predict()
             - actual_value: The actual response from the user
             - response_type: The response type string
+            - answered_by: the server's { user_id, account_email, method } for the answer, or None
 
         Ensures:
             - Writes a complete prediction_log row with prediction + outcome
@@ -1374,7 +1403,7 @@ class PredictionEngine:
                 session.commit()
 
             # Store in LanceDB for future CBR retrieval
-            self._store_decision( notification_id, prediction_result, actual_value, response_type )
+            self._store_decision( notification_id, prediction_result, actual_value, response_type, answered_by )
 
             if self.debug:
                 print( f"[PredictionEngine] Recorded outcome: id={notification_id}, match={accuracy_match}" )
@@ -1383,11 +1412,17 @@ class PredictionEngine:
             if self.debug: print( f"[PredictionEngine] record_outcome error: {e}" )
 
     def _store_decision( self, notification_id: str, prediction_result: PredictionResult,
-                         actual_value: Any, response_type: str ) -> None:
+                         actual_value: Any, response_type: str,
+                         answered_by: Optional[Dict[str, Any]] = None ) -> None:
         """
         Store the actual response in LanceDB for future CBR retrieval.
 
+        Requires:
+            - answered_by is the response route's { user_id, ... } dict, or None
+
         Ensures:
+            - owner is answered_by["user_id"]; the source is "human" when an owner is named and
+              "unknown" otherwise, so a caller that cannot say who answered casts no personal vote
             - Generates embedding for the original question
             - Stores decision_value as the actual response
             - Uses response_type-specific formatting
@@ -1408,6 +1443,7 @@ class PredictionEngine:
                 return  # Can't store without the original message
 
             embedding = provider.generate_embedding( message, content_type="prose" )
+            owner     = ( answered_by or { } ).get( "user_id" )
 
             # Format decision_value based on response type
             import json
@@ -1447,7 +1483,9 @@ class PredictionEngine:
                 question_embedding = embedding,
                 created_at         = datetime.now( timezone.utc ).isoformat(),
                 data_origin        = "organic",
-                response_type      = response_type
+                response_type      = response_type,
+                owner_user_id      = owner,
+                answer_source      = "human" if owner is not None else "unknown"
             )
 
         except Exception as e:
@@ -1529,7 +1567,9 @@ class PredictionEngine:
                 question_embedding = embedding,
                 created_at         = datetime.now( timezone.utc ).isoformat(),
                 data_origin        = "organic",
-                response_type      = response_type or ""
+                response_type      = response_type or "",
+                owner_user_id      = None,
+                answer_source      = "hint_vote"
             )
             return { "case_id": case_id, "ratification_state": ratification_state, "updated": False }
 

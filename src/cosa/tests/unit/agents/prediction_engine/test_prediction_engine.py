@@ -274,9 +274,9 @@ def test_predict_unknown_type_is_cold_start( wired_engine, monkeypatch ):
 def test_predict_dispatches_to_each_type( wired_engine, monkeypatch ):
     """Each known response_type routes to its handler (handlers stubbed to identify)."""
     monkeypatch.setattr( wired_engine, "_generate_embedding", lambda text: [ 0.1 ] )
-    monkeypatch.setattr( wired_engine, "_predict_yes_no", lambda *a: "YN" )
+    monkeypatch.setattr( wired_engine, "_predict_yes_no", lambda *a, **k: "YN" )
     monkeypatch.setattr( wired_engine, "_predict_multiple_choice", lambda *a, **k: "MC" )
-    monkeypatch.setattr( wired_engine, "_predict_open_ended", lambda *a: "OE" )
+    monkeypatch.setattr( wired_engine, "_predict_open_ended", lambda *a, **k: "OE" )
     # The batch handler's result gets a batch_question_key stamped onto its metadata,
     # so it must be a PredictionResult (not a bare sentinel string).
     oeb_result = PredictionResult(
@@ -285,7 +285,7 @@ def test_predict_dispatches_to_each_type( wired_engine, monkeypatch ):
         strategy      = cfg.STRATEGY_COLD_START,
         metadata      = {},
     )
-    monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a: oeb_result )
+    monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a, **k: oeb_result )
     assert wired_engine.predict( { "message": "m", "response_type": "yes_no" } ) == "YN"
     assert wired_engine.predict( { "message": "m", "response_type": "multiple_choice" } ) == "MC"
     assert wired_engine.predict( { "message": "m", "response_type": "open_ended" } ) == "OE"
@@ -295,7 +295,7 @@ def test_predict_dispatches_to_each_type( wired_engine, monkeypatch ):
 
 def test_predict_handler_exception_is_cold_start( wired_engine, monkeypatch ):
     monkeypatch.setattr( wired_engine, "_generate_embedding", lambda text: [ 0.1 ] )
-    def boom( *a ):
+    def boom( *a, **k ):
         raise RuntimeError( "handler-fail" )
     monkeypatch.setattr( wired_engine, "_predict_yes_no", boom )
     wired_engine.debug = True
@@ -782,7 +782,7 @@ def test_predict_batch_embeds_and_matches_on_content_key( wired_engine, monkeypa
     captured = {}
     monkeypatch.setattr( wired_engine, "_generate_embedding",
                          lambda text: captured.__setitem__( "emb", text ) or [ 0.1 ] )
-    def fake_oeb( message, category, embedding ):
+    def fake_oeb( message, category, embedding, **kwargs ):
         captured[ "msg" ] = message
         return PredictionResult(
             response_type = cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH,
@@ -815,7 +815,7 @@ def test_predict_batch_metadata_none_skips_stamp( wired_engine, monkeypatch ):
         strategy      = cfg.STRATEGY_COLD_START,
         metadata      = None,
     )
-    monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a: no_meta )
+    monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a, **k: no_meta )
     monkeypatch.setattr( wired_engine.classifier, "classify",
                          lambda m, sender_id=None: ( "uncategorized", 1.0 ) )
     result = wired_engine.predict( {
