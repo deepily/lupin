@@ -14,6 +14,7 @@ VOCABULARY_ONLY = "vocabulary_only"
 USES = ( TRAIN_OR_TEST, PROMPT_ONLY, SENSITIVITY, VOCABULARY_ONLY )
 
 WEAK_ACTOR_TIERS = ( "unknown_actor", "other_account" )
+CONTEXT_STATES   = ( "reconstructed", "ambiguous_only", "no_context" )
 
 
 def assign_use( example, context_state ):
@@ -30,8 +31,13 @@ def assign_use( example, context_state ):
         - An answer that could not be read is sensitivity: its mapping is ambiguous
         - An answer whose actor is unknown or another account is sensitivity: it is weakly attributable
         - A recipient answer with a reconstructed context is train_or_test, and with any other context state is prompt_only
-        - The first rule that applies decides, in the order above
+        - The first rule that applies decides, in the order above; an unread answer is therefore
+          reported as unread whatever its actor
+
+    Raises:
+        - ValueError naming the value when context_state is not one of the three
     """
+    if context_state not in CONTEXT_STATES: raise ValueError( f"context_state must be one of {CONTEXT_STATES}, got {context_state!r}" )
     tier = example[ "attribution_tier" ]
     kind = example[ "answer" ][ "kind" ]
     if kind == "none":            return _use( VOCABULARY_ONLY, "unanswered" )

@@ -4,7 +4,7 @@ Each derived example gets the use its evidence supports, and none joins the froz
 
 import pytest
 
-from cosa.agents.prediction_engine.history_uses import USES, assign_use, assign_uses
+from cosa.agents.prediction_engine.history_uses import CONTEXT_STATES, USES, assign_use, assign_uses
 
 
 def example( tier="recipient", kind="stance", id="n1" ):
@@ -50,3 +50,23 @@ def test_the_same_reason_is_counted_together():
 def test_an_example_with_no_context_state_is_refused_by_id():
     with pytest.raises( KeyError, match="missing-id" ):
         assign_uses( [ example( id="missing-id" ) ], {} )
+
+
+@pytest.mark.parametrize( "state", [ "reconstucted", "", None, "RECONSTRUCTED" ] )
+def test_a_context_state_outside_the_three_is_refused_by_value( state ):
+    with pytest.raises( ValueError, match="context_state must be one of" ):
+        assign_use( example(), state )
+
+
+def test_the_three_context_states_are_the_ones_rebuild_context_names():
+    assert CONTEXT_STATES == ( "reconstructed", "ambiguous_only", "no_context" )
+
+
+@pytest.mark.parametrize( "tier", [ "unknown_actor", "other_account" ] )
+def test_an_unread_answer_from_a_weak_actor_is_reported_as_unread_not_by_actor( tier ):
+    got = assign_use( example( tier, "unread" ), "reconstructed" )
+    assert ( got[ "use" ], got[ "reason" ] ) == ( "sensitivity", "answer could not be read" )
+
+
+def test_a_timeout_default_that_is_also_unread_is_reported_as_a_default():
+    assert assign_use( example( "timeout_default", "unread" ), "reconstructed" )[ "reason" ] == "timeout default, no human label"
