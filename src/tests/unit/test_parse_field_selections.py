@@ -92,7 +92,7 @@ def test_a_cancelled_answer_stored_under_value_is_an_empty_result():
 
 
 @pytest.mark.parametrize( "value", [
-    None, "", "   ", "not json", "[1, 2]", "42", json.dumps( { "value": "yes" } ), json.dumps( { "value": "not json" } ),
+    None, "", "   ", "not json", "[1, 2]", "42", json.dumps( { "value": "yes" } ), json.dumps( { "value": "not json" } ), { "value": { "answers": { "DB": "PG" } } },
     json.dumps( { "answers": "yes" } ), json.dumps( { "answers": [ "a" ] } ), 7,
 ] )
 def test_anything_that_is_not_an_answers_map_is_none( value ):
