@@ -161,3 +161,8 @@ def test_an_example_with_no_context_state_is_named_in_the_error():
     rows, derived, states = _batch()
     del states[ "b" ]
     with pytest.raises( KeyError, match="b" ): recover_by_family( rows, derived, states )
+
+
+def test_the_option_labels_keep_the_order_they_were_offered_in_not_alphabetical():
+    offer = { "questions": [ { "question": "Which first?", "header": "Order", "multi_select": False, "options": [ { "label": "Zulu" }, { "label": "Alpha" }, { "label": "Mike" } ] } ] }
+    assert offered_fields( raw( options=offer ) )[ "Order" ][ "options" ] == [ "Zulu", "Alpha", "Mike" ]
