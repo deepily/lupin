@@ -50,14 +50,12 @@ def _install_real_guard( directory ):
         _mod  = importlib.util.module_from_spec( _spec )
         _spec.loader.exec_module( _mod )
 
-        pytest_addoption        = _mod.pytest_addoption
-        pytest_runtest_setup    = _mod.pytest_runtest_setup
-        pytest_terminal_summary = _mod.pytest_terminal_summary
-        # pytest_sessionfinish carries the VERDICT — block mode sets a non-zero exit status
-        # there, because the per-socket raise is swallowed by callers that catch broadly.
-        # Re-export it or the sandbox proves a guard that is missing its enforcement half
-        # (which is what this sandbox did until 2026-08-17: it mirrored two hooks of three).
-        pytest_sessionfinish    = _mod.pytest_sessionfinish
+        # Every hook the shipped file defines is re-exported, whatever its name, so a hook added
+        # there later reaches the sandbox too. Naming them one by one left the sandbox two hooks
+        # short twice: sessionfinish, which carries the block-mode verdict, and addoption, which
+        # registers the flag the summary reads.
+        for _name in dir( _mod ):
+            if _name.startswith( "pytest_" ): globals()[ _name ] = getattr( _mod, _name )
     """ ).lstrip() )
 
 
