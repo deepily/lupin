@@ -8,6 +8,8 @@ Each calls classify_asks, so none of them keeps a rule of its own.
 import re
 from datetime import datetime, timedelta, timezone
 
+from cosa.utils.iso_timestamp import parse_iso
+
 RETRY_WINDOW    = timedelta( minutes=10 )
 UNKNOWN_PROJECT = "unknown"
 
@@ -59,7 +61,11 @@ def classify_asks( asks ):
     Raises:
         - ValueError if asked_at is not a datetime or an ISO-8601 string
     """
-    times  = [ _as_datetime( ask[ "asked_at" ] ) for ask in asks ]
+    times = []
+    for ask in asks:
+        moment = parse_iso( ask[ "asked_at" ] ) if isinstance( ask[ "asked_at" ], str ) else ask[ "asked_at" ]
+        if not isinstance( moment, datetime ): raise ValueError( f"asked_at must be a datetime or an ISO-8601 string, got {ask[ 'asked_at' ]!r}" )
+        times.append( moment if moment.tzinfo is not None else moment.replace( tzinfo=timezone.utc ) )
     result = [ None ] * len( asks )
     firsts = {}
     for index in sorted( range( len( asks ) ), key=lambda i: ( times[ i ], i ) ):
@@ -79,20 +85,3 @@ def classify_asks( asks ):
         }
     return result
 
-
-def _as_datetime( value ):
-    """
-    Read an asked_at value as a timezone-aware datetime.
-
-    Requires:
-        - value is a datetime or an ISO-8601 string
-
-    Ensures:
-        - Returns a datetime with an offset; one given without an offset is read as UTC
-
-    Raises:
-        - ValueError if value is neither
-    """
-    if isinstance( value, str ): value = datetime.fromisoformat( value.replace( "Z", "+00:00" ) )
-    if not isinstance( value, datetime ): raise ValueError( f"asked_at must be a datetime or an ISO-8601 string, got {value!r}" )
-    return value if value.tzinfo is not None else value.replace( tzinfo=timezone.utc )

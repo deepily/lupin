@@ -128,7 +128,7 @@ def test_asked_at_may_be_an_iso_string_with_z_or_a_naive_datetime_read_as_utc():
     assert [ r[ "is_retry_copy" ] for r in classify_asks( rows ) ] == [ False, True, True ]
 
 
-@pytest.mark.parametrize( "bad", [ None, 5, [ "2026-11-04" ] ] )
+@pytest.mark.parametrize( "bad", [ None, 5, [ "2026-11-04" ], "not a time", "" ] )
 def test_an_asked_at_that_is_not_a_time_is_refused_by_name( bad ):
     row = ask()
     row[ "asked_at" ] = bad
