@@ -11,6 +11,7 @@ import json
 
 import pytest
 
+from cosa.utils.notification_utils import extract_qualifier_comment
 from cosa.utils.local_data_tier import MANIFEST_FILE_NAME, require_local_file, sha256_of_file
 
 EXPORT_FILE_NAME = "2026.11.17-recent-predictions-285.json"
@@ -34,16 +35,20 @@ def test_the_real_export_holds_the_285_rows_and_139_yes_no_asks():
     assert sum( 1 for p in predictions if p[ "response_type" ] == "yes_no" ) == 139
 
 
-def test_tightening_the_parser_loses_no_stored_yes_vote():
+def test_tightening_the_parser_loses_no_yes_vote_in_the_export():
     """
-    The unrecognised stored yes/no answers, measured on the real data, are free text.
+    The parser leaves one stored answer without a stance, and it is not a yes.
 
-    The measurement file is written by a run of the parser over the stored case and answer values.
-    Each unrecognised value must not start with "yes", so the old vote counted it as "no",
-    and the tightened parser drops no yes vote.
+    Recomputed from the export itself. The export holds 139 yes/no asks and the 311 distinct yes/no cases that were their neighbours.
+    The old vote read an answer that did not start with "yes" as "no". So an unrecognised answer
+    that does not start with "yes" loses no yes vote when the parser is tightened.
     """
-    measured = json.load( open( require_local_file( "2026.11.18-f2-parser-measurement.json" ) ) )
-    assert measured[ "cases" ][ "n" ] > 0 and measured[ "notifs" ][ "n" ] > 0
-    for name, group in measured.items():
-        for value in group[ "unrecognised" ]:
-            assert not value.lower().startswith( "yes" ), name
+    export      = json.load( open( require_local_file( EXPORT_FILE_NAME ) ) )[ "predictions" ]
+    neighbours  = json.load( open( require_local_file( "2026.11.17-recent-predictions-285-neighbours.json" ) ) )[ "neighbours" ]
+    yes_no      = [ p for p in export if p[ "response_type" ] == "yes_no" ]
+    actual      = [ p[ "actual" ][ "value" ] for p in yes_no ]
+    stored      = { c[ "case_id" ]: c[ "answer" ] for p in yes_no for c in neighbours[ p[ "neighbours_ref" ] ][ "by_dot" ] }
+    assert ( len( actual ), len( stored ) ) == ( 139, 311 )
+    unrecognised = [ v for v in actual + list( stored.values() ) if extract_qualifier_comment( v )[ 0 ] is None ]
+    assert len( unrecognised ) == 1
+    assert not any( v.lower().startswith( "yes" ) for v in unrecognised )

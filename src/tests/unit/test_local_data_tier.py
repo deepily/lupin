@@ -123,14 +123,26 @@ def test_a_skipped_local_data_run_fails_with_require_local_data( tmp_path ):
     assert "[local_data] SKIPPED " in out
 
 
+def _planted_export():
+    """An invented export shaped like the real one, with one free-text neighbour answer."""
+    asks, neighbours = [ ], { }
+    for index in range( 139 ):
+        ref   = f"ask-{index}"
+        cases = [ { "case_id": f"case-{index}-{k}", "answer": "yes" } for k in range( 3 if index < 33 else 2 ) ]
+        asks.append( { "response_type": "yes_no", "neighbours_ref": ref, "actual": { "value": "yes" } } )
+        neighbours[ ref ] = { "by_dot": cases }
+    neighbours[ "ask-0" ][ "by_dot" ][ 0 ][ "answer" ] = "invented free text"
+    asks += [ { "response_type": "multiple_choice" } ] * 146
+    return { "predictions": asks }, { "neighbours": neighbours }
+
+
 def test_planted_data_runs_the_tier_and_passes_with_require_local_data( tmp_path ):
-    rows   = [ { "response_type": "yes_no" } ] * 139 + [ { "response_type": "multiple_choice" } ] * 146
-    export = json.dumps( { "predictions": rows } ).encode()
-    ( tmp_path / "2026.11.17-recent-predictions-285.json" ).write_bytes( export )
+    export, neighbours = _planted_export()
+    export_bytes       = json.dumps( export ).encode()
+    ( tmp_path / "2026.11.17-recent-predictions-285.json" ).write_bytes( export_bytes )
+    ( tmp_path / "2026.11.17-recent-predictions-285-neighbours.json" ).write_text( json.dumps( neighbours ) )
     ( tmp_path / "manifest-before.txt" ).write_text(
-        hashlib.sha256( export ).hexdigest() + "  2026.11.17-recent-predictions-285.json\n" )
-    ( tmp_path / "2026.11.18-f2-parser-measurement.json" ).write_text( json.dumps( {
-        "cases": { "n": 1, "unrecognised": { "maybe later": 1 } }, "notifs": { "n": 1, "unrecognised": { } } } ) )
+        hashlib.sha256( export_bytes ).hexdigest() + "  2026.11.17-recent-predictions-285.json\n" )
     code, out = _run_child( tmp_path, "--require-local-data" )
     assert code == 0
     assert "[local_data] ran=3 skipped=0" in out
