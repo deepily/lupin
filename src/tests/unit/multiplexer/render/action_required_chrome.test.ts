@@ -325,6 +325,9 @@ test( "each state renders its own text", () => {
   assert.equal( text( "below_threshold" ), "Forecast too uncertain to show" );
   assert.equal( text( "unavailable" ), "Forecast unavailable" );
   assert.equal( text( "not_a_state" ), "Forecast unavailable", "an unknown state falls back to unavailable" );
+  for ( const inherited of [ "toString", "constructor", "hasOwnProperty" ] ) {
+    assert.equal( text( inherited ), "Forecast unavailable", `${ inherited } is inherited from Object.prototype, not a state` );
+  }
   assert.equal( box( ready ).querySelector( ".prediction-hint-label" )!.textContent, "Yes" );
   assert.equal( box( null ).getAttribute( "data-hint-state" ), "insufficient_evidence" );
 } );

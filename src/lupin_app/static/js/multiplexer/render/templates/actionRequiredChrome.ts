@@ -25,6 +25,7 @@ import { projectFromSenderId } from "../senderProject";
 import { renderPredictionVoteControls } from "./predictionVoteControls";
 import type { PredictionVoteIntegration } from "./predictionVoteControls";
 import type { VoicePersona, PredictionHint } from "../../shared/types";
+import { ownLookup } from "../../shared/ownLookup";
 
 /**
  * Build the `[PROJECT]` badge for a card, or null when the sender id names no project.
@@ -178,7 +179,7 @@ export function predictionHintBox(
   label.className = "prediction-hint-label";
   root.appendChild( label );
   if ( hint == null || state !== "ready" ) {
-    label.textContent = HINT_STATE_TEXT[ state ] ?? "Forecast unavailable";
+    label.textContent = ownLookup<string>( HINT_STATE_TEXT, state, "Forecast unavailable" );
     if ( hint != null ) appendAlwaysYes( root, hint );
     return root;
   }
