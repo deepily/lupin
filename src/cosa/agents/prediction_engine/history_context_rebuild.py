@@ -9,9 +9,9 @@ Nothing later than the ask is read. An earlier question carries its answer only
 if the answer existed when the ask was made.
 """
 
-from datetime import timedelta, timezone
+from datetime import timedelta
 
-from cosa.utils.iso_timestamp import parse_iso
+from cosa.utils.iso_timestamp import aware_moment
 
 REBUILD_VERSION = "history-context-v1"
 
@@ -22,21 +22,6 @@ CONFIDENCE = { "parent": "certain", "thread": "certain", "job": "certain", "send
 # An assumption, not a measurement: the spec says "time-bounded session matches" and gives no figure.
 # Two hours is a guess. The gap distribution between asks on the real export is recorded beside it.
 SESSION_WINDOW = timedelta( hours=2 )
-
-
-def _moment( value ):
-    """
-    Read a time as an aware datetime.
-
-    Requires:
-        - value is a datetime, an ISO-8601 string or None; a value with no offset is read as UTC
-
-    Ensures:
-        - returns a timezone-aware datetime, or None for None
-    """
-    if value is None: return None
-    moment = parse_iso( value ) if isinstance( value, str ) else value
-    return moment if moment.tzinfo is not None else moment.replace( tzinfo=timezone.utc )
 
 
 def _session_of( sender_id ):
@@ -67,7 +52,7 @@ def _answer_as_of( candidate, asked_at ):
         - value and answer_known_at are None unless the status is "answered"
     """
     if not candidate.get( "response_requested", False ): return { "status": "not_a_question", "value": None, "answer_known_at": None }
-    responded = _moment( candidate.get( "responded_at" ) )
+    responded = aware_moment( candidate.get( "responded_at" ) )
     if responded is not None and responded <= asked_at:
         return { "status": "answered", "value": candidate.get( "response_value" ), "answer_known_at": responded.isoformat() }
     return { "status": "pending", "value": None, "answer_known_at": None }
@@ -105,7 +90,7 @@ def _link_for( target, candidate, asked_at, session_window ):
         return None, None, None
     if conflicts: return None, None, "conflicting_explicit_link"
     if same_full: return "sender", [ "same full sender_id" ], None
-    if asked_at - _moment( candidate[ "created_at" ] ) > session_window: return None, None, "session_match_outside_window"
+    if asked_at - aware_moment( candidate[ "created_at" ] ) > session_window: return None, None, "session_match_outside_window"
     if human_msg: return "session", [ "human message addressed to the session", f"within {session_window}" ], None
     return "session", [ "same sender session", f"within {session_window}" ], None
 
@@ -131,25 +116,25 @@ def rebuild_context( target, notifications, session_window=SESSION_WINDOW ):
         - context_state is reconstructed, ambiguous_only or no_context
         - the result does not depend on the order of notifications, and nothing is changed in the inputs
     """
-    asked_at     = _moment( target[ "created_at" ] )
+    asked_at     = aware_moment( target[ "created_at" ] )
     attachments  = []
     missing      = []
     unrelated    = 0
     not_earlier  = 0
     for candidate in notifications:
-        if _moment( candidate[ "created_at" ] ) >= asked_at:
+        if aware_moment( candidate[ "created_at" ] ) >= asked_at:
             not_earlier += 1
             continue
         tier, evidence, reason = _link_for( target, candidate, asked_at, session_window )
         if tier is not None:
             attachments.append( { "id": candidate[ "id" ], "tier": tier, "confidence": CONFIDENCE[ tier ], "evidence": evidence,
-                                  "first_known_at": _moment( candidate[ "created_at" ] ).isoformat(),
+                                  "first_known_at": aware_moment( candidate[ "created_at" ] ).isoformat(),
                                   "answer": _answer_as_of( candidate, asked_at ) } )
         elif reason is not None:
             missing.append( { "id": candidate[ "id" ], "reason": reason } )
         else:
             unrelated += 1
-    attachments.sort( key=lambda a: ( TIERS.index( a[ "tier" ] ), -_moment( a[ "first_known_at" ] ).timestamp(), a[ "id" ] ) )
+    attachments.sort( key=lambda a: ( TIERS.index( a[ "tier" ] ), -aware_moment( a[ "first_known_at" ] ).timestamp(), a[ "id" ] ) )
     missing.sort( key=lambda m: ( m[ "reason" ], m[ "id" ] ) )
     state = "reconstructed" if attachments else ( "ambiguous_only" if missing else "no_context" )
     return { "rebuild_version": REBUILD_VERSION, "target_id": target[ "id" ], "context_state": state,

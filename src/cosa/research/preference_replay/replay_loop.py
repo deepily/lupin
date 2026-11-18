@@ -13,14 +13,13 @@ Two rules keep the answer out of its own forecast:
 """
 
 import copy
-from datetime import timezone
 
 from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
 from cosa.agents.prediction_engine.ask_family import classify_asks
 from cosa.agents.prediction_engine.config import RESPONSE_TYPE_MULTIPLE_CHOICE, RESPONSE_TYPE_OPEN_ENDED_BATCH
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
-from cosa.utils.iso_timestamp import parse_iso
+from cosa.utils.iso_timestamp import aware_moment
 from cosa.utils.notification_utils import extract_qualifier_comment
 from cosa.research.phi4_flash_lite_study.statistics import (
     DiscordantFloorNotMet,
@@ -31,20 +30,6 @@ from cosa.research.phi4_flash_lite_study.statistics import (
 from cosa.research.preference_replay.time_sliced_store import RECORD_FIELDS, TimeSlicedDecisionStore
 
 ENGINE_ARM = "engine"
-
-
-def _moment( value ):
-    """
-    Read a time as an aware datetime.
-
-    Requires:
-        - value is a datetime or an ISO-8601 string; a value with no offset is read as UTC
-
-    Ensures:
-        - returns a timezone-aware datetime
-    """
-    moment = parse_iso( value ) if isinstance( value, str ) else value
-    return moment if moment.tzinfo is not None else moment.replace( tzinfo=timezone.utc )
 
 
 def rows_as_of( cases, asked_at, excluded_ids=() ):
@@ -67,19 +52,19 @@ def rows_as_of( cases, asked_at, excluded_ids=() ):
         - a case answered after the ask is left to the store, which hides it
         - an excluded case is in neither list
     """
-    asked_at  = _moment( asked_at )
+    asked_at  = aware_moment( asked_at )
     excluded  = set( excluded_ids )
     rows      = []
     lost      = []
     for case in cases:
         if case[ "id" ] in excluded: continue
         row = dict( case )
-        if row[ "responded_at" ] is not None: row[ "responded_at" ] = _moment( row[ "responded_at" ] )
+        if row[ "responded_at" ] is not None: row[ "responded_at" ] = aware_moment( row[ "responded_at" ] )
         if "versions" in case:
-            answered = case[ "responded_at" ] is not None and _moment( case[ "responded_at" ] ) <= asked_at
-            known    = [ v for v in case[ "versions" ] if _moment( v[ "at" ] ) <= asked_at ]
+            answered = case[ "responded_at" ] is not None and aware_moment( case[ "responded_at" ] ) <= asked_at
+            known    = [ v for v in case[ "versions" ] if aware_moment( v[ "at" ] ) <= asked_at ]
             if known:
-                latest = max( known, key=lambda v: _moment( v[ "at" ] ) )
+                latest = max( known, key=lambda v: aware_moment( v[ "at" ] ) )
                 row[ "decision_value" ]     = latest[ "answer" ]
                 row[ "ratification_state" ] = latest[ "ratification_state" ]
             elif answered:
@@ -205,7 +190,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
     classes   = classify_asks( asks )
     groups    = {}
     for index, info in enumerate( classes ): groups.setdefault( info[ "retry_group" ], [] ).append( asks[ index ][ "id" ] )
-    order     = sorted( range( len( asks ) ), key=lambda i: ( _moment( asks[ i ][ "asked_at" ] ), i ) )
+    order     = sorted( range( len( asks ) ), key=lambda i: ( aware_moment( asks[ i ][ "asked_at" ] ), i ) )
     records   = { ENGINE_ARM: [] }
     records.update( { name: [] for name in baselines } )
     not_replayable = []
@@ -219,7 +204,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             if ask[ "question_embedding" ] is None:
                 not_replayable.append( ask[ "id" ] )
                 continue
-            asked_at     = _moment( ask[ "asked_at" ] )
+            asked_at     = aware_moment( ask[ "asked_at" ] )
             rows, lost   = rows_as_of( asks, asked_at, excluded_ids=groups[ classes[ index ][ "retry_group" ] ] )
             unrebuildable.update( lost )
             store        = store_factory( rows )
@@ -227,7 +212,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             engine._embedding_store = store
             result = engine.predict( _notification_dict( ask ), query_vector=ask[ "question_embedding" ] )
             families.add( classes[ index ][ "family" ] )
-            visible = [ row for row in rows if row[ "responded_at" ] is not None and _moment( row[ "responded_at" ] ) <= asked_at ]
+            visible = [ row for row in rows if row[ "responded_at" ] is not None and aware_moment( row[ "responded_at" ] ) <= asked_at ]
             forecasts = { ENGINE_ARM: _forecast_of( result ) }
             forecasts.update( { name: arm( ask, visible ) for name, arm in baselines.items() } )
             for arm_name, predicted in forecasts.items():

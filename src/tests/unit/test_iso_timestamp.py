@@ -16,7 +16,7 @@ if _src_path not in sys.path:
 import pytest
 
 from cosa.agents.heartbeat_arbiter import dependency_graph, fleet_data_model, operator_gate_routing
-from cosa.utils.iso_timestamp import parse_iso
+from cosa.utils.iso_timestamp import aware_moment, parse_iso
 
 UTC = datetime.timezone.utc
 
@@ -48,3 +48,24 @@ def test_anything_unreadable_is_none_and_never_raises( value ):
 @pytest.mark.parametrize( "module", [ dependency_graph, fleet_data_model, operator_gate_routing ] )
 def test_the_three_arbiter_modules_call_the_shared_parser( module ):
     assert module._parse_iso is parse_iso
+
+
+def test_aware_moment_passes_none_through():
+    assert aware_moment( None ) is None
+
+
+def test_aware_moment_reads_a_zoneless_string_and_a_zoneless_datetime_as_utc():
+    expected = datetime.datetime( 2026, 6, 5, 12, 0, tzinfo=UTC )
+    assert aware_moment( "2026-06-05T12:00:00" ) == expected
+    assert aware_moment( datetime.datetime( 2026, 6, 5, 12, 0 ) ) == expected
+
+
+def test_aware_moment_keeps_an_offset_it_is_given():
+    stamp = datetime.datetime( 2026, 6, 5, 12, 0, tzinfo=datetime.timezone( datetime.timedelta( hours=5 ) ) )
+    assert aware_moment( stamp ).utcoffset() == datetime.timedelta( hours=5 )
+    assert aware_moment( "2026-06-05T12:00:00+05:00" ).utcoffset() == datetime.timedelta( hours=5 )
+
+
+def test_aware_moment_raises_on_a_string_that_does_not_parse():
+    with pytest.raises( AttributeError ):
+        aware_moment( "not a time" )
