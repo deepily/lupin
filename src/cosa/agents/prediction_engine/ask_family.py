@@ -13,8 +13,8 @@ from cosa.utils.iso_timestamp import parse_iso
 RETRY_WINDOW    = timedelta( minutes=10 )
 UNKNOWN_PROJECT = "unknown"
 
-QUOTED_PATTERN  = re.compile( r"\"[^\"]*\"|'[^']*'|`[^`]*`|“[^”]*”" )
-PATH_PATTERN    = re.compile( r"(?:~|\.{1,2})?(?:/[\w.@+-]+)+/?" )
+QUOTED_PATTERN  = re.compile( r"\"[^\"]*\"|(?<!\w)'[^']*'(?!\w)|`[^`]*`|“[^”]*”" )
+PATH_PATTERN    = re.compile( r"(?<![\w/])(?:~|\.{1,2})?(?:/[\w.@+-]+)+/?" )
 HEX_PATTERN     = re.compile( r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,}\b|\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b", re.IGNORECASE )
 DIGIT_PATTERN   = re.compile( r"\d+" )
 PROJECT_PATTERN = re.compile( r"@([^.#\s@]+)" )

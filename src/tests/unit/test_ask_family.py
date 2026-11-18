@@ -30,6 +30,8 @@ def ask( minutes=0, message="Approve the fix row?", title="Approve the fix", sen
     ( "say “hello there” now",                                          "say now" ),
     ( "feature face decade",                                            "feature face decade" ),
     ( "see ~/notes/a.md and ./b/c",                                     "see and" ),
+    ( "don't click, it's the user's row",                               "don't click, it's the user's row" ),
+    ( "use and/or here, read/write both",                               "use and/or here, read/write both" ),
     ( "",                                                               "" ),
     ( None,                                                             "" ),
     ( "42 /tmp/x \"y\"",                                                "" ),
@@ -142,3 +144,9 @@ def test_no_asks_give_no_result():
 
 def test_the_retry_window_is_ten_minutes():
     assert RETRY_WINDOW == timedelta( minutes=10 )
+
+
+def test_a_group_restarts_after_its_window_and_the_next_ask_is_a_copy_of_the_restart():
+    result = classify_asks( [ ask( minutes=0 ), ask( minutes=15 ), ask( minutes=20 ) ] )
+    assert [ r[ "is_retry_copy" ] for r in result ] == [ False, False, True ]
+    assert [ r[ "retry_group" ] for r in result ]   == [ 0, 1, 1 ]
