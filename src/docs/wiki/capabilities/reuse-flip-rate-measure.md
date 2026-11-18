@@ -13,7 +13,7 @@ pins:
   - lupin_mcp.reuse_flip_run.stale_excludes@1f226cad2d
   - lupin_mcp.reuse_flip_run.check_excludes@e0e2d169e1
   - lupin_mcp.reuse_flip_run.main@99d4d2ccf5
-  - lupin_mcp.reuse_flip_run.cli@fdb2331ed8
+  - lupin_mcp.reuse_flip_run.cli@89e5411ba4
 ---
 # Reuse flip-rate measure
 The flip-rate test asks the same need again and again and counts the needs whose answer changes. Thirty needs or more are each asked several times, with every repeat keyed apart. A canary of five needs is read by a person before the rest is paid for. See [[reuse-token-ceiling-and-spend-ledger]].

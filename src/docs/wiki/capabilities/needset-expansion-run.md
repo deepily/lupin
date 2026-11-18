@@ -17,6 +17,7 @@ pins:
   - lupin_mcp.reuse_needset.expansion_run.main@cdb903d39d
   - lupin_mcp.reuse_needset.expansion_run.exit_status@e0995b5ff4
   - lupin_mcp.reuse_needset.expansion_run.run_cli@2b9e55e56d
+  - lupin_mcp.reuse_needset.expansion_run.run_then_close@be3b6b62aa
 ---
 # Need set: expansion run
 
@@ -33,5 +34,6 @@ Wires [[needset-expansion-replay]] to the real model and the real search. The kn
 ## Running
 - `plan_of` counts the rows by group, the replies still to ask, the stage budget and the embeddings needed.
 - `run_live` runs the replay under the call cap, charges each reply to the `expansion` stage, and writes `expansion-report.json`. A cap or budget stop keeps the finished rows. Any other error writes the report and is then raised.
+- `run_then_close( ctx, close, work )` runs `work`, then closes the spend-ledger run whatever happened. It returns `( report, closed_run, close_error )`; a close that fails after a good run is returned as text, never raised. When `work` raises, the run is still closed and the original error propagates.
 - `main` without `--live` reads files only. The context gets a transport that refuses every request, so no spend-ledger run is begun. `read_env_file` takes the run name and the other settings from the earlier run's `run-env.sh`. The name is only a label, because no Jev request is made.
 - `parse_args`, `exit_status` and `run_cli` read the line, give 1 for a failure and 3 for a cap or budget stop, and print the result. `--fusion-depth` fuses each list to that many places, in place of the stage's own depth. `--probe-model` names the second model, and the `reuse need second model` INI key is used when it is left out.

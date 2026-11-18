@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_stage2_run.rows_from_run@8a9e4833ff
   - lupin_mcp.reuse_stage2_run.write_rows@02c5be4914
   - lupin_mcp.reuse_stage2_run.main@e8fe743c84
-  - lupin_mcp.reuse_stage2_run.cli@84660494d1
+  - lupin_mcp.reuse_stage2_run.cli@0e3ef11a58
 ---
 # Reuse stage-two run
 

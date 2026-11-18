@@ -23,7 +23,7 @@ pins:
   - lupin_mcp.reuse_e2e_run.ask_candidates@ab9f2ef798
   - lupin_mcp.reuse_e2e_run.report_lines@13e069b6d9
   - lupin_mcp.reuse_e2e_run.main@bba91f7d58
-  - lupin_mcp.reuse_e2e_run.cli@c35d01d01a
+  - lupin_mcp.reuse_e2e_run.cli@f788ff647b
 ---
 # Reuse end-to-end run
 The end-to-end run sweeps the whole catalogue for each of 100 sampled members, once per question, and compares the questions. A run is one ledger run with one token ceiling. See [[reuse-token-ceiling-and-spend-ledger]].
