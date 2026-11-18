@@ -40,6 +40,7 @@ import pytest
 # calls for EVERY consumer. This delegation keeps the name and the signature so
 # src/tests/unit/deploy/test_db_password_seeded_from_dotenv.py — which loads this file BY
 # PATH and reaches in for this attribute — still guards it.
+from cosa.utils.local_data_tier import LocalDataLedger, add_require_option, REQUIRE_OPTION
 from cosa.utils import dotenv_password as _dotenv_password
 from cosa.utils.dotenv_password import seed_db_password_from_dotenv as _seed_db_password_from_dotenv
 
@@ -447,6 +448,35 @@ _TREE_STATE_START_BUNDLE = capture_start_bundle( _git_reader( os.path.dirname( o
 
 
 
+_local_data_ledger = LocalDataLedger()
+
+
+def pytest_addoption( parser ):
+    """
+    Register --require-local-data, the flag that makes a skipped real-data check fail the run.
+
+    Requires:
+        - parser is the pytest Parser
+
+    Ensures:
+        - the flag is registered, boolean, off by default
+    """
+    add_require_option( parser )
+
+
+def pytest_runtest_logreport( report ):
+    """
+    Tally each `local_data` test report for the summary and the exit status.
+
+    Requires:
+        - report is the TestReport of one test phase
+
+    Ensures:
+        - the module-level ledger has seen the report; reports of other tests change nothing
+    """
+    _local_data_ledger.on_report( report )
+
+
 def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     """
     Report every outbound dial the run made, or say plainly that it made none.
@@ -461,6 +491,9 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
         terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ), _TREE_STATE_START_SHA, _TREE_STATE_START_BUNDLE ) )
     except Exception:                                    # pragma: no cover - a diagnostic may never fail a run
         terminalreporter.write_line( "[tree-state] UNKNOWN — the tree-state probe itself failed" )
+
+    # The local_data tier, zero case included: a skipped real-data check must be visible by name.
+    for line in _local_data_ledger.summary_lines(): terminalreporter.write_line( line )
 
     # SECOND, and also outside every early return: the environment that SHAPED this run.
     #
@@ -666,6 +699,9 @@ def pytest_sessionfinish( session, exitstatus ):
           verdict has to be set here, where the outcome is actually read)
     """
     if _NETWORK_MODE == "block" and _outbound_attempts:
+        session.exitstatus = 1
+
+    if _local_data_ledger.should_fail( session.config.getoption( REQUIRE_OPTION ) ):
         session.exitstatus = 1
 
     if not _collect_failures:
