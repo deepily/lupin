@@ -497,6 +497,8 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
     Requires:
         - argv holds --run-dir, up to two --labels files, optionally --rulings (a JSON file of { pair key: bool }), --third-labels,
           --export-third, --trial, --parallel, --claude-cli-path and --check
+        - --reuse-fixtures-from-other-judge accepts a run folder planted under another config_sha, so the same fixtures and labels are judged under the live config;
+          the record's provenance then names the config the fixtures were planted under; without it such a folder is refused
         - --supplement-key and two --supplement-labels files name labels for pairs outside the run's key, kept in files of their own;
           --supplement-third adds a third rater's file for the supplement's disputed pairs;
           they are read, fingerprinted and checked for unsure pairs like the reviewers' labels, and the run's own labels files are never written
@@ -535,12 +537,14 @@ def _main( argv, make_parts, run_proof, out ):
     parser.add_argument( "--claude-cli-path", default=None )
     parser.add_argument( "--check", action="store_true" )
     parser.add_argument( "--trial", action="store_true" )
+    parser.add_argument( "--reuse-fixtures-from-other-judge", action="store_true" )
     args    = parser.parse_args( argv )
     model_transport.configure( args.claude_cli_path )
     cfg     = cfg_mod.verify_frozen( frozen.frozen_path(), frozen.live_config() )
     run_dir = pathlib.Path( args.run_dir )
     key_sha = load_run( run_dir )[ "config_sha" ]
-    if key_sha != cfg[ "config_sha" ]:
+    foreign = key_sha != cfg[ "config_sha" ]
+    if foreign and not args.reuse_fixtures_from_other_judge:
         models = { d[ "config_sha" ]: d[ "model_id" ] for d in ( json.loads( f.read_text( encoding="utf-8" ) ) for f in pathlib.Path( frozen.frozen_path() ).parent.glob( frozen.FROZEN_GLOB ) ) }
         print( REFUSED_FOREIGN_RUN.format( run_dir=run_dir, run_sha=key_sha[ :12 ], run_model=models.get( key_sha, "no frozen file for it" ), live_sha=cfg[ "config_sha" ][ :12 ], live_model=cfg[ "model_id" ] ), file=sys.stderr )
         return 2
@@ -557,6 +561,7 @@ def _main( argv, make_parts, run_proof, out ):
     root    = cu.get_project_root()
     supp    = read_supplement( args.supplement_key, args.supplement_labels, args.trial, args.supplement_third )
     prints  = label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root, supp )
+    if foreign: prints = { **prints, "fixtures_planted_under_config": key_sha }
     state   = trial_state( args.labels, key ) if args.trial else label_state( args.labels, key, rulings, args.third_labels, supp )
     if not args.check and state[ "labels" ] is None:
         print( json.dumps( { "status": "refused", "owed": state[ "owed" ], "counts": state[ "counts" ] }, indent=2, sort_keys=True ), file=out )
@@ -567,7 +572,7 @@ def _main( argv, make_parts, run_proof, out ):
     parts   = make_parts( root, run_dir, cfg, args.parallel )
     spec    = build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], state[ "labels" ] or {}, state[ "failures" ],
                           prints, label_load.unsure_pair_keys( args.labels, key, supp ) )
-    if label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root, supp ) != prints:
+    if { **label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root, supp ), **( { "fixtures_planted_under_config": key_sha } if foreign else {} ) } != prints:
         raise ValueError( "a labels, rulings or key file changed while the proof was being prepared; run it again" )
     if args.check:
         pool  = proof_run.build_pool( spec, spec[ "seed" ] )

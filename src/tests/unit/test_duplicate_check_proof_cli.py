@@ -578,6 +578,24 @@ def test_a_run_planted_under_the_same_config_but_another_model_is_refused_and_na
     assert f"planted under config {older[ 'config_sha' ][ :12 ]} (claude-older-model)" in line and f"current config is {live[ 'config_sha' ][ :12 ]} ({live[ 'model_id' ]})" in line
 
 
+def test_reuse_fixtures_flag_accepts_a_run_planted_under_another_config_and_records_which( tmp_path, monkeypatch, capsys ):
+    """The flag accepts a foreign-planted run and records the config that planted it."""
+    other = World( tmp_path, config_sha="not-the-frozen-sha" )
+    monkeypatch.setattr( pc.frozen, "frozen_path", lambda: other.toy.wiring[ "frozen_path" ] )
+    monkeypatch.setattr( pc.frozen, "live_config", lambda: other.toy.cfg )
+    monkeypatch.setattr( pc.cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( model_transport, "configure", lambda cli_path=None, cwd=None: None )
+    monkeypatch.setattr( model_transport, "cli_version", lambda path: "9.9" )
+    paths, _ = other.label_both()
+    argv     = [ "--run-dir", str( other.run_dir ), *[ x for p in paths for x in ( "--labels", p ) ], "--claude-cli-path", "/bin/claude" ]
+    ran      = []
+    def run_proof( spec, wiring ): ran.append( spec ); return { "status": "complete" }
+    assert pc.main( [ *argv, "--reuse-fixtures-from-other-judge" ], make_parts=lambda *a: other.parts(), run_proof=run_proof ) == 0
+    assert capsys.readouterr().err == "" and len( ran ) == 1
+    assert ran[ 0 ][ "provenance" ][ "fixtures_planted_under_config" ] == "not-the-frozen-sha"
+    assert pc.main( argv, make_parts=no_parts, run_proof=run_proof ) == 2 and "planted under config not-the-froz" in capsys.readouterr().err and len( ran ) == 1
+
+
 # ---- the third rater ---------------------------------------------------------------------------------------------
 
 def no_parts( *a ):
