@@ -75,8 +75,18 @@ def test_an_empty_answers_map_is_an_empty_result_not_none():
     assert parse_field_selections( _answers( {} ) ) == {}
 
 
+def test_an_answers_map_stored_as_json_under_value_is_read_through_the_wrapper():
+    wrapped = json.dumps( { "value": json.dumps( { "answers": { "DB": "PG", "Tags": [ "a" ] } } ) } )
+    got     = parse_field_selections( wrapped )
+    assert ( got[ "DB" ][ "selected" ], got[ "Tags" ][ "mode" ] ) == ( [ "PG" ], "multi" )
+
+
+def test_a_cancelled_answer_stored_under_value_is_an_empty_result():
+    assert parse_field_selections( { "value": '{"cancelled":true,"answers":{}}' } ) == {}
+
+
 @pytest.mark.parametrize( "value", [
-    None, "", "   ", "not json", "[1, 2]", "42", json.dumps( { "value": "yes" } ),
+    None, "", "   ", "not json", "[1, 2]", "42", json.dumps( { "value": "yes" } ), json.dumps( { "value": "not json" } ),
     json.dumps( { "answers": "yes" } ), json.dumps( { "answers": [ "a" ] } ), 7,
 ] )
 def test_anything_that_is_not_an_answers_map_is_none( value ):

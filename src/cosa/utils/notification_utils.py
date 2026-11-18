@@ -253,6 +253,26 @@ def extract_qualifier_comment( response_value ):
     return ( match.group( 1 ).lower(), qualifier if qualifier else None )
 
 
+def _decode_json_text( value ):
+    """
+    Decode a string as JSON, passing any other value through.
+
+    Requires:
+        - value is any value
+
+    Ensures:
+        - Returns the decoded JSON for a non-blank string that is JSON
+        - Returns None for a blank string or text that is not JSON
+        - Returns any non-string value unchanged
+    """
+    if not isinstance( value, str ):
+        return value
+    try:
+        return json.loads( value ) if value.strip() else None
+    except json.JSONDecodeError:
+        return None
+
+
 def parse_field_selections( response_value ):
     """
     Read a multiple-choice or batch answer as one record per field.
@@ -267,6 +287,8 @@ def parse_field_selections( response_value ):
         - Returns None when the value is not an answers map: empty, not JSON, a JSON value
           that is not an object, an object without "answers", or an answers value that is
           not an object. An empty answers map returns {}.
+        - An object with no "answers" and a string "value" is read once more as the JSON
+          that string holds, the form the router stores under "value"
         - Otherwise returns { header: { "mode", "selected", "text" } } in the order given
         - mode is "multi" for a list and "single" for a string; any other JSON value is
           kept as its text under "single"
@@ -283,11 +305,9 @@ def parse_field_selections( response_value ):
         '{"answers": {"DB": "PostgreSQL"}}'      -> { "DB": { "mode": "single", "selected": [ "PostgreSQL" ], "text": "PostgreSQL" } }
         '{"answers": {"Tags": []}}'              -> { "Tags": { "mode": "multi", "selected": [], "text": None } }
     """
-    if isinstance( response_value, str ):
-        try:
-            response_value = json.loads( response_value ) if response_value.strip() else None
-        except json.JSONDecodeError:
-            return None
+    response_value = _decode_json_text( response_value )
+    if isinstance( response_value, dict ) and "answers" not in response_value and isinstance( response_value.get( "value" ), str ):
+        response_value = _decode_json_text( response_value[ "value" ] )
     if not isinstance( response_value, dict ):
         return None
 
