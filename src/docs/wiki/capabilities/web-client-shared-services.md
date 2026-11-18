@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.shared.EventBus.EventBusImpl@5f463260ea
   - src.lupin_app.static.js.multiplexer.shared.EventBus.createEventBusForTesting@e28a0a5730
-  - src.lupin_app.static.js.multiplexer.shared.StorageService.StorageServiceImpl@abb46ba6a9
+  - src.lupin_app.static.js.multiplexer.shared.StorageService.StorageServiceImpl@7efd1c20d9
   - src.lupin_app.static.js.multiplexer.shared.StorageService.isEnvelope@bce591d7c0
   - src.lupin_app.static.js.multiplexer.shared.StorageService.createStorageServiceForTesting@97955c4da0
   - src.lupin_app.static.js.multiplexer.shared.StorageService.InMemoryStorage@08307b51f3

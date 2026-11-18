@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.fleet_size_cap.counting_classifier_for@08282d279a
   - lupin_mcp.fleet_size_cap.default_counting_classifier@39278acff0
   - lupin_mcp.fleet_size_cap.default_disk_cap_reader@3a409acbfe
-  - lupin_mcp.fleet_size_cap.main_checkout_ini_path@12dd354226
+  - lupin_mcp.fleet_size_cap.main_checkout_ini_path@47f2c74ed1
   - lupin_mcp.fleet_size_cap.pool_size@aa9123b9d7
   - lupin_mcp.fleet_size_cap.read_counting_fields@d5da947036
   - lupin_mcp.fleet_size_cap.resolve_fleet_cap@3222e46161
@@ -25,7 +25,7 @@ pins:
 
 How many seats the fleet may hold, who counts as a manager, and the launch-time reservation that keeps two launches from taking the last seat. The page [[seat-lifecycle]] covers the whole path.
 
-- `config_file_path` and `main_checkout_ini_path` name the one configuration file the cap is read from and written to, in the container and on the host alike.
+- `config_file_path` and `main_checkout_ini_path` name the one configuration file the cap is read from and written to, in the container and on the host alike. Given an environment variable's name, `main_checkout_ini_path` returns that variable's value when it is set, so tests never touch the live file.
 - `default_disk_cap_reader` reads `cc session fleet size cap` fresh from that file, because the configuration manager is a long-lived singleton. `resolve_fleet_cap` clamps the result into 1 to the ceiling, with `disk_fn` winning over the manager.
 - `resolve_fleet_ceiling` reads `cc session fleet size cap maximum`, never below 1. `pool_size` counts the personas that carry a voice id. The pool is not a ceiling on seats.
 - `counted_as_manager( role, spawned_by )` is true for role `manager`, or for a session that declares neither a role nor a lineage. `read_counting_fields` returns None when a bridge cannot be read, not a pair of Nones.

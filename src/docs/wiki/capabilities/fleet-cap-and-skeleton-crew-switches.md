@@ -11,14 +11,14 @@ pins:
   - lupin_mcp.fleet_cap_ini_io.read_int_from_disk@470828e9b2
   - lupin_mcp.fleet_cap_ini_io.write_int_to_disk@8c0473c409
   - lupin_mcp.fleet_cap_ini_io.write_bool_to_disk@271f8efd90
-  - lupin_mcp.skeleton_crew.ini_path@0692c2e155
+  - lupin_mcp.skeleton_crew.ini_path@a8c886309f
   - lupin_mcp.skeleton_crew.read_state_from_disk@ab841679f5
   - lupin_mcp.skeleton_crew.default_disk_skeleton_reader@291437c7fe
   - lupin_mcp.skeleton_crew.refusal_text@90f978faea
   - lupin_mcp.skeleton_crew.skeleton_crew_is_on@e99353cd8b
   - lupin_mcp.skeleton_crew.skeleton_crew_refusal@c7fba702e6
   - lupin_mcp.skeleton_crew.state_path@5a36d046a9
-  - lupin_mcp.skeleton_crew.write_state_file@d9b98dc80a
+  - lupin_mcp.skeleton_crew.write_state_file@8a01cbb252
   - lupin_mcp.skeleton_crew.read_state_file@c16f1d59f6
   - lupin_mcp.skeleton_crew.settings_json_poke_muted@6606f1f1e3
   - lupin_mcp.skeleton_crew.describe@1f9a5878d3

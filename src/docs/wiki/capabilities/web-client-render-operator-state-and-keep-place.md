@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.operatorState.whichClass@ed6c67164c
   - src.lupin_app.static.js.multiplexer.render.operatorState.operatorInputKey@c806901c65
-  - src.lupin_app.static.js.multiplexer.render.operatorState.operatorInputByKey@f4a8b0ca79
+  - src.lupin_app.static.js.multiplexer.render.operatorState.operatorInputByKey@bd8a9f50c0
   - src.lupin_app.static.js.multiplexer.render.operatorState.byAttr@1c22908d70
   - src.lupin_app.static.js.multiplexer.render.operatorState.captureOperatorState@fb5a4afb38
   - src.lupin_app.static.js.multiplexer.render.operatorState.restoreOperatorState@38ade5b811
@@ -12,7 +12,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.keepPlace.keepPlaceIsOn@6eb573c5b2
   - src.lupin_app.static.js.multiplexer.render.keepPlace.paneIsOpen@3d66295cc7
   - src.lupin_app.static.js.multiplexer.render.keepPlace.captureKeepPlace@30f76b2bfc
-  - src.lupin_app.static.js.multiplexer.render.keepPlace.restoreKeepPlace@6fef938518
+  - src.lupin_app.static.js.multiplexer.render.keepPlace.restoreKeepPlace@3ea6c7d563
   - src.lupin_app.static.js.multiplexer.render.keepPlace.captureHistoryScroll@970d858c84
   - src.lupin_app.static.js.multiplexer.render.keepPlace.historyKey@3c1f8c03fd
   - src.lupin_app.static.js.multiplexer.render.keepPlace.restoreHistoryScroll@c37c593834
@@ -33,5 +33,6 @@ Two helpers carry the operator's context across a repaint. One keeps typed input
 - `paneIsOpen( doc )` is true when `.content-shell` has `pane-open`, so the left column owns the scroll.
 - `captureKeepPlace( mount, doc, win )` is null when the reader is at the top. Otherwise it remembers a few cards at or below the strip.
 - `restoreKeepPlace( mount, candidates, doc, win )` anchors on the first remembered card still listed that did not move up. It scrolls by how far that card's top moved.
+- `scrollByDelta( paneOpen, column, win, delta )` scrolls the left column when the pane is open, else the window. The reading pane calls it too.
 - `captureHistoryScroll( mount )` remembers, before the cards are merged, every `.date-accordion-messages` pane scrolled away from its top. The key is `historyKey( cardKey, dayKey )`: the card's `data-id-hash`, then the day's `data-date-key`, empty when none. An empty map means nothing is scrolled.
 - `restoreHistoryScroll( mount, remembered )` writes those offsets back after the merge, onto the pane that now stands for that card and day. Moving a card resets its scrollers. A pane that is gone is skipped.

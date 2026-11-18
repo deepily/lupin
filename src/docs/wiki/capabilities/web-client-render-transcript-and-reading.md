@@ -11,14 +11,14 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.inlineThinking@dae4212c87
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.folded@6bbcf6a191
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.createSessionTranscriptRenderer@eb73d026b3
-  - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.ReadingPaneRendererImpl@cccff45b69
+  - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.ReadingPaneRendererImpl@88a42fcc2f
   - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.req@dd208cc4ab
   - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.reqId@f912a21288
   - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.formatMetric@d058d31430
   - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.anyMetric@64cf0d7bf8
-  - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.QaPaneRendererImpl@fe60594839
+  - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.QaPaneRendererImpl@67ae81086f
   - src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.schedulingOf@5176441fd7
-  - src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.SubmitJobsPaneRendererImpl@686b1d635f
+  - src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.SubmitJobsPaneRendererImpl@7eabe9489c
 ---
 # Transcript console, reading pane, Q&A pane and submit pane renderers
 

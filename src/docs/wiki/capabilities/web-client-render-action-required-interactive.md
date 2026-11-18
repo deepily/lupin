@@ -10,7 +10,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildOpenEnded@5d390bceba
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildOpenEndedBatch@0b98fc36b7
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.appendNoQuestions@e1d1efa348
-  - src.lupin_app.static.js.multiplexer.render.actionRequiredMic.createActionRequiredMic@a226fc0930
+  - src.lupin_app.static.js.multiplexer.render.actionRequiredMic.createActionRequiredMic@d56bbb1e17
 ---
 # Action-required interactive forms
 
@@ -26,7 +26,7 @@ The answer forms of an action-required card, one per response type, and the micr
 - `buildOpenEnded` fills the input from `item.default`. Submit stays disabled until the trimmed text is non-empty, and Enter submits it.
 - `buildOpenEndedBatch` paints one input per question and sends `{ answers }` by header only when every row has text. A blank row gets `invalid`.
 - `appendNoQuestions` adds "No questions provided." and returns true when the item has no questions. The multiple-choice and batch forms stop there.
-- `createActionRequiredMic( recorder, getAuthToken )` returns the click handler a card 🎤 calls.
+- `createActionRequiredMic( recorder, getAuthToken )` returns the click handler a card 🎤 calls. The click logic is the shared `toggleDictation` in `dictationToggle.ts`.
 - A click while this context records stops it and shows `processing`. A click while `processing` does nothing. A click while another context records stops that one and starts nothing.
 - Otherwise it starts recording. A transcription goes in at the caret, an `input` event fires, and the button resets on completion, error or cancel.
 

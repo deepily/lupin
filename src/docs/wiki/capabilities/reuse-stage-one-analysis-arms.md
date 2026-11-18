@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.reuse_stage1_analysis.percentile@1ecd8c0284
   - lupin_mcp.reuse_stage1_analysis.differences@5bf7811827
   - lupin_mcp.reuse_stage1_analysis.boundary_ids@b679505833
-  - lupin_mcp.reuse_stage1_analysis.flips@fb5d8a12bd
+  - lupin_mcp.reuse_stage1_analysis.flips@29502a69b1
   - lupin_mcp.reuse_stage1_analysis.noise_floor@08a8a5a60d
 ---
 # Reuse stage-one analysis: reading the arms
@@ -26,6 +26,6 @@ The analysis of the live packing measurement is pure functions on the arm record
 - `percentile` is the nearest-rank percentile, or `None` for no values.
 - `differences` gives the absolute overlap difference per entry, over the ids validly answered in both arms.
 - `boundary_ids` lists the entries whose overlap lies in the band 0.35 to 0.65, ends included.
-- `flips` lists the entries on opposite sides of a cut between two arms. An overlap equal to the cut counts as above it.
+- `flips` lists the entries on opposite sides of a cut between two arms. It cuts the overlaps by default, or the confidences with `field="confidences"`. A figure equal to the cut counts as above it.
 - `noise_floor` is the 99th percentile of single run 1 against single run 2, pooled over the questions. The floor is the larger of that and 0.02.
 - A question with an invalid single run is left out of the pool. The state is `invalid` if all are left out, and `inconclusive` if a kept question lacks a clean single run.

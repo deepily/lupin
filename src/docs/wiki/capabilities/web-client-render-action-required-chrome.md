@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.projectBadge@76e905e73a
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.personaBadge@71e95cfe51
-  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.abstractIndicator@2c6c62bd11
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.abstractIndicator@1a884ebdef
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.abstractBlock@6b33186770
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.predictionHintBox@1429be246e
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.predictedText@f68024fe7d
@@ -18,6 +18,7 @@ Small builders for the badges, abstract and prediction hint that sit around an a
 - The project comes from an id shaped `claude.code@<project>.deepily.ai` and is upper-cased.
 - `personaBadge( persona )` returns a `.persona-badge` with the persona's icon and name, coloured through `--persona-color`. A borrowed persona also gets the `borrowed` class. A null or undefined persona gives null.
 - `abstractIndicator( abstract )` returns the 📋 `.abstract-indicator` button, or null when the abstract is undefined or blank. The raw text rides on `data-abstract`, and the tooltip reads it.
+- An optional second argument sets the document, an extra class, the title and a test id. A null title leaves it off. The notification list and the jobs pane build their 📋 with it.
 - `abstractBlock( abstract )` returns a `.action-required-abstract` block holding the abstract as sanitized markdown, or null when blank.
 - `predictionHintBox( item, vote )` always returns a box. A missing hint gives the `prediction-hint-cold` box reading "Learning, no prediction yet".
 - Otherwise the box shows the predicted value, plus the strategy when the hint has one.

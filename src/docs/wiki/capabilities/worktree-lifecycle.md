@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.seat_worktree.provision_seat_worktree@eed42d08b9
   - cosa.utils.worktree_artifacts.provision_worktree_artifacts@fd62ae8430
-  - cosa.agents.shared.worktree_context.WorktreeContext@d36aaaf402
+  - cosa.agents.shared.worktree_context.WorktreeContext@9da0f9e58e
   - cosa.agents.shared.worktree_context.has_dangling_git_link@e5e3ce902c
   - cosa.agents.shared.seat_teardown.retire_seat_worktree@dd06d0a3d6
   - cosa.agents.shared.worktree_reaper.drain_then_remove@3d4638ca10

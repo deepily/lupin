@@ -8,7 +8,7 @@ pins:
   - cosa.rest.cron_job_switches.is_honoured@b6664817f8
   - cosa.rest.cron_job_switches.build_row@0531a6c328
   - cosa.rest.cron_job_switches.build_rows@15e2e9c925
-  - cosa.rest.cron_job_switches.ini_path@0692c2e155
+  - cosa.rest.cron_job_switches.ini_path@a8c886309f
   - cosa.rest.cron_job_switches.state_path@c716314db9
   - cosa.rest.routers.cron_jobs.get_cron_jobs@f9d839ca5b
   - cosa.rest.routers.cron_jobs.put_cron_job_enabled@43257eacb6

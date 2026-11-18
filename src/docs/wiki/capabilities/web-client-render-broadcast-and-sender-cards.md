@@ -14,9 +14,9 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.SenderCardConsoleButtons.SenderCardConsoleButtonsImpl@99d87b1068
   - src.lupin_app.static.js.multiplexer.render.SenderCardConsoleButtons.setPressed@9f879b1d2f
   - src.lupin_app.static.js.multiplexer.render.SenderCardConsoleButtons.createSenderCardConsoleButtons@fd3b0632ec
-  - src.lupin_app.static.js.multiplexer.render.SenderCardRecorderRenderer.SenderCardRecorderRendererImpl@5152aba6c2
+  - src.lupin_app.static.js.multiplexer.render.SenderCardRecorderRenderer.SenderCardRecorderRendererImpl@2560ccdf84
   - src.lupin_app.static.js.multiplexer.render.SenderCardRecorderRenderer.createSenderCardRecorderRenderer@934910110c
-  - src.lupin_app.static.js.multiplexer.render.SessionStripRenderer.SessionStripRendererImpl@5e1f17ed44
+  - src.lupin_app.static.js.multiplexer.render.SessionStripRenderer.SessionStripRendererImpl@c6df7c0a20
   - src.lupin_app.static.js.multiplexer.render.SessionStripRenderer.defaultStorage@4b08cf64c8
 ---
 # Broadcast and sender card renderers

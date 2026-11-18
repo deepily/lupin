@@ -10,7 +10,7 @@ pins:
   - lupin_cli.claude_code.hooks.lib.task_store_client.query_tasks@67f912d34b
   - lupin_cli.claude_code.hooks.lib.task_store_client.query_by_correlation_key@4699227f60
   - lupin_cli.claude_code.hooks.lib.task_store_client.query_blocked_user_rows@672046a4e4
-  - lupin_cli.claude_code.hooks.lib.task_store_client.query_owed@9e73ec7e08
+  - lupin_cli.claude_code.hooks.lib.task_store_client.query_owed@ce37fe4cdd
   - lupin_cli.claude_code.hooks.lib.task_store_client.query_owed_breakdowns@5603479ccf
   - lupin_cli.claude_code.hooks.lib.task_store_client.fetch_board@a7e7282b71
   - lupin_cli.claude_code.hooks.lib.task_store_settings.load_task_store_settings@bd2a3519b6

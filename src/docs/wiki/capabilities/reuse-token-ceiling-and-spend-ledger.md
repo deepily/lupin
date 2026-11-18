@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_ceiling.input_reserve@62746caa53
   - lupin_mcp.reuse_ceiling.reserve_tokens@2bb32c8859
-  - lupin_mcp.reuse_ceiling.TokenBudget@abe6cba483
+  - lupin_mcp.reuse_ceiling.TokenBudget@a401af98db
   - lupin_mcp.reuse_ledger.LedgerUnreadable@f430780837
   - lupin_mcp.reuse_ledger.AccountLimitReached@16e94115cf
   - lupin_mcp.reuse_ledger.usd_to_tokens@003b0079f8

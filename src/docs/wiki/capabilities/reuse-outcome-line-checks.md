@@ -3,7 +3,7 @@ capability: reuse-outcome-line-checks
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_outcome.parse_outcomes@9acf747324
-  - lupin_mcp.reuse_outcome.unparsed_outcome_lines@119d9a2b7d
+  - lupin_mcp.reuse_outcome.unparsed_outcome_lines@1dc0069006
   - lupin_mcp.reuse_outcome.is_indexed@7fb4ef6444
   - lupin_mcp.reuse_outcome.token_refusals@535df456bd
   - lupin_mcp.reuse_outcome.log_refusals@e0a61bbd82

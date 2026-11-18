@@ -8,7 +8,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptRoster.SessionTranscriptRosterImpl@1773b32823
   - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptRoster.createSessionTranscriptRoster@72f103d076
   - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptStore.transcriptBlockBytes@37437380c9
-  - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptStore.isFrame@4b606c9c95
+  - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptStore.isFrame@0c7648a0cf
   - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptStore.blocksOf@2c1e6eeacc
   - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptStore.SessionTranscriptStoreImpl@a00bb61ebb
   - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptStore.createSessionTranscriptStore@8000b12bf8
@@ -21,13 +21,12 @@ pins:
   - src.lupin_app.static.js.multiplexer.stores.historyWindow.serializeHistoryWindow@eff6dc4991
   - src.lupin_app.static.js.multiplexer.stores.historyWindow.effectiveHoursForQuery@cfe5f883d3
   - src.lupin_app.static.js.multiplexer.stores.historyWindow.historyWindowLabel@7642ceb71f
-  - src.lupin_app.static.js.multiplexer.stores.responseQuestions.parseResponseQuestions@861f3de8ed
-  - src.lupin_app.static.js.multiplexer.stores.responseQuestions.toOption@29eaea2bea
-  - src.lupin_app.static.js.multiplexer.stores.responseQuestions.isRecord@f2d88db5fc
+  - src.lupin_app.static.js.multiplexer.stores.responseQuestions.parseResponseQuestions@7ac128fe48
+  - src.lupin_app.static.js.multiplexer.stores.responseQuestions.toOption@debf927a0d
 ---
 # Web client stores: transcripts and history
 
-The session transcript store and roster, the page-load history helpers and the response question parser. [[web-client-stores]] covers how they are built. `StripReconnectRehydrator.ts` imports `historyWindow.ts`. `coldHistoryHydration.ts` imports `historyWindow.ts`.
+The session transcript store and roster, the page-load history helpers and the response question parser. [[web-client-stores]] covers how they are built. `StripReconnectRehydrator.ts` imports `historyWindow.ts`. `coldHistoryHydration.ts` imports `historyWindow.ts`. `responseQuestions.ts` imports `SessionTranscriptStore.ts`.
 
 ## What it does
 - `SessionTranscriptRoster.ts`. `parseSenderId`: Split a chip's `sender_id` into its project and its 8-hex id prefix. `resolveTranscriptSeat`: Resolve a chip to exactly one watchable roster row's full id. `rowsOf`: Returns the entries of a value that look like roster rows. `SessionTranscriptRosterImpl`: Models the seats whose transcripts can be watched, for admin users. `createSessionTranscriptRoster`: Build the roster.
@@ -36,4 +35,4 @@ The session transcript store and roster, the page-load history helpers and the r
 - `awaitingResponseHydration.ts`. `createAwaitingResponseHydration`: Build the runner.
 - `coldHistoryHydration.ts`. `ColdHistoryHydrationImpl`: Loads senders and history on page open, and again on retry or change.
 - `historyWindow.ts`. `sendersVisiblePath`: The senders-visible path for a user, with an hours window. `parseStoredHistoryWindow`: Parse the legacy client's stored window value. `serializeHistoryWindow`: Serialize a window for HISTORY_WINDOW_KEY. `effectiveHoursForQuery`: The hours to send on a query; `today` counts from midnight in the server zone, UTC without one. `historyWindowLabel`: The picker's display label.
-- `responseQuestions.ts`. `parseResponseQuestions`: Read the questions out of a notification's `response_options`. `toOption`: Converts one raw option value into a list holding zero or one action-required options. `isRecord`: Tells whether a value is a plain object, excluding null and arrays.
+- `responseQuestions.ts`. `parseResponseQuestions`: Read the questions out of a notification's `response_options`. `toOption`: Converts one raw option value into a list holding zero or one action-required options. Both use `isFrame` from `SessionTranscriptStore.ts` to test for a plain object.
