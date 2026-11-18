@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from cosa.agents.prediction_engine.history_context_rebuild import (
-    CONFIDENCE, SESSION_WINDOW, TIERS, rebuild_context, reconstructable_stage,
+    CONFIDENCE, SESSION_WINDOW, TIERS, _session_of, rebuild_context, reconstructable_stage,
 )
 
 T0      = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
@@ -235,3 +235,45 @@ def test_a_time_with_no_offset_is_read_as_utc():
     target = _target( sender_id=SENDER )
     note   = { "id": "naive", "created_at": naive, "sender_id": SENDER }
     assert _ids( rebuild_context( target, [ note ] ) ) == [ "naive" ]
+
+
+def test_a_session_match_exactly_at_the_window_is_inside_and_one_second_past_it_is_missing():
+    target = _target( sender_id=SENDER )
+    other  = f"other.persona@lupin.deepily.ai#{SESSION}"
+    edge   = { "id": "edge", "created_at": ( T0 - SESSION_WINDOW ).isoformat(), "sender_id": other }
+    beyond = { "id": "beyond", "created_at": ( T0 - SESSION_WINDOW - timedelta( seconds=1 ) ).isoformat(), "sender_id": other }
+    result = rebuild_context( target, [ edge, beyond ] )
+    assert _ids( result ) == [ "edge" ]
+    assert result[ "missing" ] == [ { "id": "beyond", "reason": "session_match_outside_window" } ]
+
+
+def test_only_a_human_message_counts_as_a_message_to_the_session():
+    target = _target( sender_id=SENDER )
+    ai_msg = _note( "ai-note", -5, direction="ai_to_human", job_id=SESSION, sender_id="x@y#zzzz9999" )
+    human  = _note( "human-note", -4, direction="human_to_ai", job_id=SESSION, sender_id="rick@human" )
+    result = rebuild_context( target, [ ai_msg, human ] )
+    assert _ids( result ) == [ "human-note" ]
+    assert result[ "unrelated" ] == 1, "an AI message that merely carries the session as its job id is unrelated"
+
+
+def test_the_missing_list_is_sorted_by_reason_then_id_whatever_the_input_order():
+    target = _target( thread_id="thread-1", sender_id=SENDER )
+    other  = f"other.persona@lupin.deepily.ai#{SESSION}"
+    notes  = [ _note( "c-conflict", -5, thread_id="thread-2", sender_id=SENDER ),
+               _note( "a-conflict", -6, thread_id="thread-3", sender_id=SENDER ),
+               _note( "z-outside", -600, sender_id=other ),
+               _note( "b-outside", -601, sender_id=other ) ]
+    expected = [ { "id": "a-conflict", "reason": "conflicting_explicit_link" }, { "id": "c-conflict", "reason": "conflicting_explicit_link" },
+                 { "id": "b-outside", "reason": "session_match_outside_window" }, { "id": "z-outside", "reason": "session_match_outside_window" } ]
+    for seed in range( 6 ):
+        shuffled = list( notes )
+        random.Random( seed ).shuffle( shuffled )
+        assert rebuild_context( target, shuffled )[ "missing" ] == expected
+
+
+def test_the_session_is_everything_after_the_first_hash():
+    assert _session_of( "a@b#x#y" ) == "x#y"
+    assert _session_of( "a@b#" ) is None and _session_of( "a@b" ) is None and _session_of( None ) is None
+    target = _target( sender_id="a@b#x#y" )
+    assert _ids( rebuild_context( target, [ _note( "n", -5, sender_id="a@b#x#y" ) ] ) ) == [ "n" ]
+    assert rebuild_context( target, [ _note( "m", -5, sender_id="a@b#y" ) ] )[ "attachments" ] == [], "a session that is only the last segment is not the same session"

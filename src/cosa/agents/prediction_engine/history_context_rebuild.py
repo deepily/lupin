@@ -19,6 +19,8 @@ TIERS = ( "parent", "thread", "job", "sender", "session" )
 
 CONFIDENCE = { "parent": "certain", "thread": "certain", "job": "certain", "sender": "high", "session": "inferred" }
 
+# An assumption, not a measurement: the spec says "time-bounded session matches" and gives no figure.
+# Two hours is a guess. The gap distribution between asks on the real export is recorded beside it.
 SESSION_WINDOW = timedelta( hours=2 )
 
 
@@ -135,7 +137,7 @@ def rebuild_context( target, notifications, session_window=SESSION_WINDOW ):
     unrelated    = 0
     not_earlier  = 0
     for candidate in notifications:
-        if candidate[ "id" ] == target[ "id" ] or _moment( candidate[ "created_at" ] ) >= asked_at:
+        if _moment( candidate[ "created_at" ] ) >= asked_at:
             not_earlier += 1
             continue
         tier, evidence, reason = _link_for( target, candidate, asked_at, session_window )
