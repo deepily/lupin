@@ -175,6 +175,7 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
     def _common_patches( self, pe_side_effect=None ):
         cfg = Mock()
         cfg.get.side_effect = lambda key, default=None, **kw: "prediction_decisions"
+        cfg.config_block_id = "Lupin: Testing"
         engine = Mock()
         engine.lancedb_table = "prediction_decisions"
         pe_cls = Mock()
@@ -208,6 +209,27 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
             self.assertEqual( notifications.pending_responses, {} )
         finally:
             notifications.pending_responses.clear()
+
+    async def test_drop_table_is_refused_outside_the_testing_block_and_no_row_is_touched( self ):
+        """Off the testing block the decision rows survive.
+
+        No session is opened and the engine is not reset.
+        """
+        for block in ( "Lupin: Production", "Lupin: Development" ):
+            cfg, pe_cls, get_pe = self._common_patches()
+            cfg.config_block_id = block
+            opened = Mock( side_effect=AssertionError( "a session was opened for a refused drop_table" ) )
+            with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
+                 patch( "cosa.rest.db.database.get_db", opened ), \
+                 patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
+                result = await reset_prediction_engine( drop_table=True )
+            self.assertEqual( result[ "status" ], "error", block )
+            self.assertIn( "drop_table", result[ "message" ] )
+            self.assertIn( block, result[ "message" ] )
+            opened.assert_not_called()
+            pe_cls.reset.assert_not_called()
 
     async def test_clear_pending_is_refused_outside_the_testing_block_and_nothing_is_reset( self ):
         import cosa.rest.routers.notifications as notifications
