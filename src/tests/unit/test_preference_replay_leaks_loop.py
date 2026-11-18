@@ -196,3 +196,13 @@ def test_own_stored_case_and_its_retry_group_are_left_out_of_the_neighbours( eng
     assert neighbours == entry[ "expected_neighbour_ids_at_ask_time" ]
     assert not set( neighbours ) & set( entry[ "forbidden_ids" ] )
     assert "own-case-retry-copy" in entry[ "loop_forbidden_ids" ]
+
+
+def test_eventual_answer_the_baseline_arm_ignores_cases_answered_after_the_ask( engine ):
+    entry        = _data()[ "classes" ][ "eventual_answer" ]
+    asks, target = _asks_for( engine, "eventual_answer" )
+    run          = replay( asks, engine, SHA )
+    index        = [ ask[ "id" ] for ask in asks ].index( target )
+    record       = next( r for r in run[ "records" ][ "prior_majority" ] if r[ "frozen_index" ] == index )
+    assert record[ "meta" ][ "forecast" ] == entry[ "prior_majority_baseline_at_ask_time" ]
+    assert record[ "meta" ][ "forecast" ] != entry[ "prior_majority_baseline_if_late_answers_leaked" ]

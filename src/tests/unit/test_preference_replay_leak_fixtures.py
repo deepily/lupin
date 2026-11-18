@@ -79,7 +79,7 @@ def test_eventual_answer_expected_cases_were_answered_by_the_ask_and_forbidden_a
     by_id = { case[ "id" ]: case for case in entry[ "cases" ] }
     for case_id in entry[ "expected_neighbour_ids_at_ask_time" ]:
         assert _when( by_id[ case_id ][ "responded_at" ] ) <= asked, case_id
-    assert len( entry[ "forbidden_ids" ] ) == 2
+    assert len( entry[ "forbidden_ids" ] ) == 5
     for case_id in entry[ "forbidden_ids" ]:
         assert _when( by_id[ case_id ][ "responded_at" ] ) > asked, case_id
     boundary = by_id[ "eventual-legit-at-the-ask" ]
@@ -166,3 +166,14 @@ def test_every_axis_is_a_valid_basis_index_for_a_768_dimension_vector():
         axes.extend( case[ "axis" ] for case in entry[ "cases" ] )
     assert axes and all( 0 <= axis < 768 for axis in axes )
     assert 5.0 <= data[ "common" ][ "norm" ] <= 60.0
+
+
+def test_eventual_answer_the_late_answers_outvote_the_earlier_ones_so_a_leak_flips_the_prior_majority():
+    entry   = _load()[ "classes" ][ "eventual_answer" ]
+    asked   = _when( entry[ "target" ][ "asked_at" ] )
+    known   = [ c[ "answer" ] for c in entry[ "cases" ] if _when( c[ "responded_at" ] ) <= asked ]
+    late    = [ c[ "answer" ] for c in entry[ "cases" ] if _when( c[ "responded_at" ] ) > asked ]
+    assert known.count( "yes" ) > known.count( "no" )
+    assert late.count( "no" ) > known.count( "yes" ), "the late no answers alone outnumber every earlier yes"
+    assert ( known + late ).count( "no" ) > ( known + late ).count( "yes" ), "with the late answers in, no outvotes yes"
+    assert entry[ "prior_majority_baseline_at_ask_time" ] != entry[ "prior_majority_baseline_if_late_answers_leaked" ]

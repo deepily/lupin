@@ -18,10 +18,15 @@
                 { "id": "eventual-legit-at-the-ask",  "axis": 3, "answer": "yes", "responded_at": "2026-11-10T14:00:00+00:00" },
                 { "id": "eventual-late-by-a-millisecond", "axis": 3, "answer": "no", "responded_at": "2026-11-10T14:00:00.001000+00:00" },
                 { "id": "eventual-late-by-ten-minutes",   "axis": 3, "answer": "no", "responded_at": "2026-11-10T14:10:00+00:00" },
+                { "id": "eventual-late-by-an-hour",       "axis": 3, "answer": "no", "responded_at": "2026-11-10T15:00:00+00:00" },
+                { "id": "eventual-late-by-six-hours",     "axis": 3, "answer": "no", "responded_at": "2026-11-10T20:00:00+00:00" },
+                { "id": "eventual-late-by-a-day",         "axis": 3, "answer": "no", "responded_at": "2026-11-11T14:00:00+00:00" },
                 { "id": "eventual-decoy-other-topic",     "axis": 4, "answer": "yes", "responded_at": "2026-11-10T13:00:00+00:00" }
             ],
             "expected_neighbour_ids_at_ask_time" : [ "eventual-legit-early", "eventual-legit-just-before", "eventual-legit-at-the-ask" ],
-            "forbidden_ids"                      : [ "eventual-late-by-a-millisecond", "eventual-late-by-ten-minutes" ]
+            "forbidden_ids"                      : [ "eventual-late-by-a-millisecond", "eventual-late-by-ten-minutes", "eventual-late-by-an-hour", "eventual-late-by-six-hours", "eventual-late-by-a-day" ],
+            "prior_majority_baseline_at_ask_time": { "value": "yes" },
+            "prior_majority_baseline_if_late_answers_leaked": { "value": "no" }
         },
         "later_status": {
             "leak"   : "A case's status or answer is read as of the final row, not as of the ask: a revision or ratification that happened after the ask rewrites what the forecast sees.",
