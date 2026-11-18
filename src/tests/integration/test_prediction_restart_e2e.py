@@ -114,7 +114,7 @@ class TestPredictionSurvivesRestart:
                                  params={ "clear_pending": "true" }, headers=self.reset_headers )
         assert cleared.status_code == 200, f"clear_pending failed: {cleared.status_code} {cleared.text[ :200 ]}"
         body = cleared.json()
-        assert body.get( "status" ) == "success", f"clear_pending reported: {body}"
+        assert body.get( "status" ) == "success", f"clear_pending refused (the server must run a Lupin: Testing block): {body}"
         assert body.get( "pending_cleared", 0 ) >= 1, f"Nothing was pending to clear, so no restart was simulated: {body}"
 
         # Answer after the "restart"
