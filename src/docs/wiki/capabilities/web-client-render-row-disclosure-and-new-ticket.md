@@ -12,7 +12,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.templates.rowDisclosure.closeDisclosedRowsIn@1d499d6405
   - src.lupin_app.static.js.multiplexer.render.templates.rowDisclosure.renderRowTableHead@6c5202c885
   - src.lupin_app.static.js.multiplexer.render.newTicketCard.newTicketMicContextId@450f53df85
-  - src.lupin_app.static.js.multiplexer.render.newTicketCard.makeNewTicketDictationHook@71e88a678c
+  - src.lupin_app.static.js.multiplexer.render.newTicketCard.makeNewTicketDictationHook@a6d0450007
   - src.lupin_app.static.js.multiplexer.render.newTicketCard.renderNewTicketButton@c45aa9bccd
   - src.lupin_app.static.js.multiplexer.render.newTicketCard.bodyOfApiErrorMessage@ee9f6aa6bf
   - src.lupin_app.static.js.multiplexer.render.newTicketCard.apiPostTicket@9580197474
@@ -32,6 +32,6 @@ The shared disclosure parts of a task row, and the new-ticket button that opens 
 
 ## New ticket (`newTicketCard`)
 - `renderNewTicketButton( opts )` is one `＋ New` button. A click opens the shared card with the roster as it stands, and with a recorder the Title and Details fields carry mics.
-- `newTicketMicContextId( field )` is `new-ticket-` plus the field. `makeNewTicketDictationHook( recorder, getAuthToken )` returns the hook that records under that id and splices the text at the caret.
+- `newTicketMicContextId( field )` is `new-ticket-` plus the field. `makeNewTicketDictationHook( recorder, getAuthToken )` returns the hook that records under that id and splices the text at the caret. It calls the shared `toggleDictation` in `dictationToggle.ts`.
 - `bodyOfApiErrorMessage( message )` is the text after the first colon and space. A non-string gives an empty string, and no colon gives the message itself.
 - `apiPostTicket( post )` adapts the post call. Success is `{ status: 201, body }`. An error with a numeric `status` keeps it, and anything else is `{ status: 0 }`. It never rejects.

@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.session_spawner.spawn_sessions@eb7d475f75
   - lupin_mcp.session_spawner.default_fleet_gate@2ee57b8598
-  - lupin_mcp.session_spawner.dismiss_sessions@5a0fcfbaba
+  - lupin_mcp.session_spawner.dismiss_sessions@40ab1f24d0
   - lupin_mcp.session_spawner.list_spawned_sessions@47ba7c5ac6
   - lupin_mcp.reap_memento.seats_to_withhold@253ba85cda
   - lupin_mcp.self_respin_core.perform_self_respin@26c890bc9e

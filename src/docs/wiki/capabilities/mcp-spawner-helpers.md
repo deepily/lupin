@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.session_spawner.artifact_alarm@328d1ddec3
   - lupin_mcp.session_spawner.build_spawn_argv@f76212cac7
-  - lupin_mcp.session_spawner.default_runner@600edc9884
+  - lupin_mcp.session_spawner.default_runner@5d36f5a499
   - lupin_mcp.session_spawner.persona_chain_csv@978da6d8bc
   - lupin_mcp.session_spawner.placement_alarm@1b5b0b965a
   - lupin_mcp.session_spawner.reap_stale_spawned@0b676f3ac8

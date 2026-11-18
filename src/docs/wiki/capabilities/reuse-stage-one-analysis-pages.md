@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_stage1_analysis.analyze_pages@66e471b628
   - lupin_mcp.reuse_stage1_analysis.page_arm@624f70c6a9
-  - lupin_mcp.reuse_stage1_analysis.other_boundaries@680199ff95
+  - lupin_mcp.reuse_stage1_analysis.other_boundaries@7655e94ac1
   - lupin_mcp.reuse_stage1_analysis.old_shape_report@67ac1ea179
   - lupin_mcp.reuse_stage1_analysis.old_shape_arm@49ea56cbb6
 ---

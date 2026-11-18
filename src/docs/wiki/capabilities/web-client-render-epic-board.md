@@ -2,7 +2,7 @@
 capability: web-client-render-epic-board
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.epicBoardCollapse.epicGroupIdSlug@1ce036a66a
+  - src.lupin_app.static.js.multiplexer.render.epicBoardCollapse.epicGroupIdSlug@b5400ff132
   - src.lupin_app.static.js.multiplexer.render.epicBoardCollapse.epicDefaultExpanded@735bf68817
   - src.lupin_app.static.js.multiplexer.render.epicBoardCollapse.loadEpicGroupState@96c8bc68cb
   - src.lupin_app.static.js.multiplexer.render.epicBoardCollapse.saveEpicGroupState@2907376057

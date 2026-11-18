@@ -12,7 +12,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
   - lupin_mcp.duplicate_check_daily.live_filer@ae7b324cde
   - lupin_mcp.duplicate_check_daily.live_auditor@4cc714910e
-  - lupin_mcp.duplicate_check_daily.main@183e409cd2
+  - lupin_mcp.duplicate_check_daily.main@6e805bb499
   - lupin_mcp.duplicate_check_daily.resolve_ceiling@8514765a03
   - lupin_mcp.duplicate_check_daily.append_manifest@fe7667a045
   - lupin_mcp.duplicate_check_daily.record@0c6e420b03
@@ -37,4 +37,4 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - `cron_lines` returns a 10:00 daily line and a reboot line 300 seconds after boot, which catches up from the last successful run. `--with-baseline` adds an 11:07 line. With `adaptive` it returns an hourly line (10:00 to 22:00) and the reboot line, both with `--adaptive`. A branch other than `main` is added as `--branch`.
 - `install_mode` handles `--print-install`, `--uninstall` and `--status` through the librarian's locked crontab editor. `--install` is retired: it prints where the installer went on stderr and returns 1, because `cron_generate` writes every cron line now. The cron work is done by `manage_cron` of [[repo-tools-symindex-librarian-tick-run]].
 - `live_parts` builds the real parts without a call. `live_filer` files the run's one triage row over HTTP, with the configured `duplicate check triage owner` and the project's manager roster. It raises `NoTriageOwner` when there are findings and the owner is unset or not on the roster. The findings stay in the result file for a refile, and `run` records that as the filer's error. `live_auditor` queues known-miss audits ([[duplicate-check-audit]]) with no model call. It names each finding by its id in the symbol index the sweep reads. That is not the checker's own `d-` id, so the sweep knows every queued item.
-- `main` takes at most one of `--cap` and `--ceiling`. With neither, `resolve_ceiling` reads the lupin ceiling key; a blank or invalid key refuses the run naming it. A flag wins over the key. `--adaptive` needs a ceiling. Verdict lines are in [[duplicate-check-verdict-lines]].
+- `main` takes at most one of `--cap` and `--ceiling`. With neither, `resolve_ceiling` reads the lupin ceiling key; a blank or invalid key refuses the run naming it. A flag wins over the key. `--adaptive` needs a ceiling. Verdict lines are in [[duplicate-check-verdict-lines]]. `--carry-progress` with `--branch` and `--to-commit` runs `carry_progress` instead of a check, under the run lock, with no model call. It moves `last-success.json` and `baseline.json` to that branch and commit. It refuses unless the last judged commit's tree equals the target's, and `--allow-tree-change` overrides that.

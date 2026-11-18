@@ -2,10 +2,10 @@
 capability: web-client-notification-panes
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.NotificationsListRendererImpl@3e37d70724
-  - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@a043ea5b2c
+  - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.NotificationsListRendererImpl@539aa8f6a5
+  - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@c17fd2e052
   - src.lupin_app.static.js.multiplexer.stores.ActionRequiredStore.ActionRequiredStoreImpl.respondAndAwait@5bf13c5c25
-  - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@ffe2082dc8
+  - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@a67ee9d532
   - src.lupin_app.static.js.multiplexer.render.BroadcastAckTallyRenderer.BroadcastAckTallyRendererImpl@c827b16ffb
   - src.lupin_app.static.js.multiplexer.render.CommonsActivityRenderer.CommonsActivityRendererImpl@3c39de597e
   - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.FleetStatusRendererImpl@3c6bf1a792

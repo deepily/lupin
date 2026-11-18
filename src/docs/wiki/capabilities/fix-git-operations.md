@@ -2,7 +2,7 @@
 capability: fix-git-operations
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.bug_fix_expediter.git_ops.GitOps@d5a6829611
+  - cosa.agents.bug_fix_expediter.git_ops.GitOps@962c2db320
   - cosa.agents.shared.git_strategist.GitStrategist@d015029753
 ---
 # Fix git operations

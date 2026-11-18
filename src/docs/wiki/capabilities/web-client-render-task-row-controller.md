@@ -3,7 +3,7 @@ capability: web-client-render-task-row-controller
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.taskRowController.reasonMicContextId@c81468f4d4
-  - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController@71718237a1
+  - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController@6a73999bf0
   - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.constructor@774aeb6e6d
   - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.operatorStateHandlers@150ce9c1ca
   - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.dispose@0d27f80bea

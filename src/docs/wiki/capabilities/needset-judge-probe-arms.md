@@ -15,7 +15,7 @@ pins:
   - lupin_mcp.reuse_needset.judge_probe.tally@55ed302b3c
   - lupin_mcp.reuse_needset.judge_probe.summarize_variant@ecef601f5d
   - lupin_mcp.reuse_needset.judge_probe.parse_args@a7c12639bc
-  - lupin_mcp.reuse_needset.judge_probe.variant@2d807b295c
+  - lupin_mcp.reuse_needset.judge_probe.variant@f63ef22b0f
   - lupin_mcp.reuse_needset.judge_probe.main@2c3d0a5b41
   - lupin_mcp.reuse_needset.judge_probe.run_cli@2b9e55e56d
 ---

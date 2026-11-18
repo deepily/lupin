@@ -2,12 +2,11 @@
 capability: web-client-render-items-notification-item
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.renderNotificationItem@aa77b42126
+  - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.renderNotificationItem@dca5c43eeb
   - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.expiredBadge@fd988874c8
   - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.cornerPauseButton@35b3ce7da1
   - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.cornerStopButton@62f089c470
   - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.proxyRatifyLink@09db34d6d9
-  - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.abstractIndicator@d2d8155c26
   - src.lupin_app.static.js.multiplexer.render.templates.predictionVoteControls.renderPredictionVoteControls@54c28368e7
 ---
 # Notification item and vote controls
@@ -19,7 +18,7 @@ Builds one chat-bubble row for a notification, plus the thumbs vote buttons a pr
 - The class adds `incoming` or `outgoing` from `direction` (default incoming), and `expired-response` when `was_expired` is true.
 - It shows `time_display` or the formatted `ts`, and the message as inline markdown. A progress group wraps this in a head with a toggle and an empty history block.
 - `expiredBadge()` returns the "EXPIRED" span nested after the message text.
-- `abstractIndicator( abstract )` returns a clipboard span whose `data-abstract` holds the text. The template attaches no listener; `ReadingPaneRenderer.ts` and `abstractTooltip.ts` read it on click.
+- The 📋 comes from the shared `abstractIndicator` in `actionRequiredChrome.ts`, called with a null title. Its `data-abstract` holds the text. The template attaches no listener; `ReadingPaneRenderer.ts` and `abstractTooltip.ts` read it on click.
 - `cornerPauseButton( idHash )` and `cornerStopButton( idHash )` return buttons carrying `data-notification-id`. They are added to incoming bubbles only and carry no listener.
 - `proxyRatifyLink( groupId )` returns an "Open Ratification →" anchor with `data-batch-id`. It is added only when the progress group id starts with `pr-`.
 

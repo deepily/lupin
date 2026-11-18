@@ -2,7 +2,7 @@
 capability: reap-memento-checks
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.reap_memento.seat_memento_slot@d22d72d360
+  - lupin_mcp.reap_memento.seat_memento_slot@77bbab0d28
   - lupin_mcp.reap_memento.seat_memento_root_record@fa71113630
   - lupin_mcp.reap_memento.verify_seat_memento_at_any_readable_slot@64ea2f2109
   - lupin_mcp.reap_memento.seat_repo_root@8ab6d431cb
@@ -15,7 +15,7 @@ pins:
   - lupin_mcp.reap_memento.classify_slot_owner@47890e3d90
   - lupin_mcp.reap_memento.memento_alarm@c651cd7eaa
   - lupin_mcp.reap_memento.recheck_losing_seats@799653d989
-  - lupin_mcp.reap_memento.coordinate_mementos@157f618ff8
+  - lupin_mcp.reap_memento.coordinate_mementos@01b07495df
   - lupin_mcp.reap_memento.describe_slot@1ac9ed00f9
   - lupin_mcp.reap_memento.format_slot_report@c22bf57246
   - lupin_mcp.reap_memento.main@deb11d57f5

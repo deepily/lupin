@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.reuse_needset.stage_c.redraft_plan@e0e353d0dc
   - lupin_mcp.reuse_needset.stage_c.redraft@323be2fef0
   - lupin_mcp.reuse_needset.stage_c.redraft_in@2104c00a2f
-  - lupin_mcp.reuse_needset.stage_c.live@49ccc1b365
+  - lupin_mcp.reuse_needset.stage_c.live@2bbc75aa0e
   - lupin_mcp.reuse_needset.stage_c.exit_status@61e70b83e2
   - lupin_mcp.reuse_needset.stage_c.run_cli@2b9e55e56d
 ---

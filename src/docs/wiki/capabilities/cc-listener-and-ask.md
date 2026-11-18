@@ -5,7 +5,7 @@ pins:
   - lupin_cli.claude_code.hooks.lib.cc_notification_listener.read_self_rss_mb@9b99f68aad
   - lupin_cli.claude_code.hooks.lib.cc_notification_listener.read_proc_starttime@29fadc096c
   - lupin_cli.claude_code.hooks.lib.cc_notification_listener.owner_is_alive@98a34f4d6c
-  - lupin_cli.claude_code.hooks.lib.cc_notification_listener.CCNotificationListener@efd5358c08
+  - lupin_cli.claude_code.hooks.lib.cc_notification_listener.CCNotificationListener@6aa01696a2
   - lupin_cli.claude_code.hooks.lib.cc_notification_listener.CCNotificationListener.run@4b82f66e1c
   - lupin_cli.claude_code.hooks.lib.cc_notification_listener.parse_args@44579eee0c
   - lupin_cli.claude_code.hooks.lib.cc_notification_listener.main@042630e4cd

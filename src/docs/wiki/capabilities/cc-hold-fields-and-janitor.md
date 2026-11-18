@@ -9,9 +9,9 @@ pins:
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold.prune_stale_hold_files@2ca0ffc6af
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold.declared_work_owed@436e436c9b
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold.get_pending_user_gates@0edf9c1f57
-  - lupin_cli.claude_code.hooks.lib.heartbeat_hold.get_last_looked_in_ts@c3dda82ac2
-  - lupin_cli.claude_code.hooks.lib.heartbeat_hold.get_last_spinup_check_ts@66b8d02bf3
-  - lupin_cli.claude_code.hooks.lib.heartbeat_hold.get_last_surfaced_questions_ts@0b3bd6926b
+  - lupin_cli.claude_code.hooks.lib.heartbeat_hold.get_last_looked_in_ts@cbf3adfe8c
+  - lupin_cli.claude_code.hooks.lib.heartbeat_hold.get_last_spinup_check_ts@8653eb6232
+  - lupin_cli.claude_code.hooks.lib.heartbeat_hold.get_last_surfaced_questions_ts@35c2025ad1
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold_warn.should_warn_unusable_ttl@d7ac8d674f
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold_warn.clear_warn_state@a89269a63f
 ---

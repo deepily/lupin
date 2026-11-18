@@ -6,7 +6,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.rowSchema.rowFieldLabel@3691affc7f
   - src.lupin_app.static.js.multiplexer.render.rowSchema.disclosedFields@acbd648b3f
   - src.lupin_app.static.js.multiplexer.render.taskListCollapse.ownerKeyForGroup@d83c487b79
-  - src.lupin_app.static.js.multiplexer.render.taskListCollapse.taskGroupIdSlug@000d4464f6
+  - src.lupin_app.static.js.multiplexer.render.taskListCollapse.taskGroupIdSlug@a959963ae1
   - src.lupin_app.static.js.multiplexer.render.taskListCollapse.loadCollapsedOwners@38c9ef3b00
   - src.lupin_app.static.js.multiplexer.render.taskListCollapse.saveCollapsedOwners@6db989523a
   - src.lupin_app.static.js.multiplexer.render.taskListCollapse.toggleCollapsedOwner@46e123a293

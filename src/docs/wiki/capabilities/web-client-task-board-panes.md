@@ -2,13 +2,13 @@
 capability: web-client-task-board-panes
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.TaskListRendererImpl@73c8a939cf
-  - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.HoldingAreaRendererImpl@47a4aeedb5
-  - src.lupin_app.static.js.multiplexer.render.EpicBoardRenderer.EpicBoardRendererImpl@2a8d10c29c
+  - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.TaskListRendererImpl@de8b8ecf5b
+  - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.HoldingAreaRendererImpl@39d9a8dbaa
+  - src.lupin_app.static.js.multiplexer.render.EpicBoardRenderer.EpicBoardRendererImpl@b262ec953e
   - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.FinishedTasksRendererImpl@4a94e873fb
   - src.lupin_app.static.js.multiplexer.render.taskVerbs.verbLegality@8816df8745
   - src.lupin_app.static.js.multiplexer.render.taskVerbs.transitionExtras@cbed0f71fd
-  - src.lupin_app.static.js.multiplexer.render.epicBoardModel.groupTasksByEpic@c0346bfd19
+  - src.lupin_app.static.js.multiplexer.render.epicBoardModel.groupTasksByEpic@0a9a03573f
 ---
 # Web client: task board panes
 

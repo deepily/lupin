@@ -6,7 +6,7 @@ pins:
   - lupin_mcp.reuse_stage1_run.StandIn@7f14fd5a90
   - lupin_mcp.reuse_stage1_run.load_inputs@6b71b1cdb9
   - lupin_mcp.reuse_stage1_run.check_paths@3aec441b44
-  - lupin_mcp.reuse_stage1_run.open_env@ac428f3caa
+  - lupin_mcp.reuse_stage1_run.open_env@9c4c8df620
   - lupin_mcp.reuse_stage1_run.main@30c7223254
   - lupin_mcp.reuse_stage1_run.run_cli@d9364dc42b
   - lupin_mcp.reuse_stage1_run.cli@5cdd378f9b

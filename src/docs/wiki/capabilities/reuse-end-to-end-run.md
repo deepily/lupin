@@ -11,7 +11,7 @@ pins:
   - lupin_mcp.reuse_e2e.wilson@e1346267be
   - lupin_mcp.reuse_e2e.figures@2db02df5bd
   - lupin_mcp.reuse_e2e.paired@caf7902b28
-  - lupin_mcp.reuse_e2e_run.E2EEnv@e53f8b9208
+  - lupin_mcp.reuse_e2e_run.E2EEnv@f9dd0546f5
   - lupin_mcp.reuse_e2e_run.run_searches@7e4f74847a
   - lupin_mcp.reuse_e2e_run.run_canary@8ed6d17a54
   - lupin_mcp.reuse_e2e_run.canary_line@9a7603fa09

@@ -11,7 +11,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.taskListModel.truncateTaskTitle@d919cea055
   - src.lupin_app.static.js.multiplexer.render.taskListModel.taskBodyIsEmpty@07768a8e4e
   - src.lupin_app.static.js.multiplexer.render.taskListModel.asRows@709bdedc7a
-  - src.lupin_app.static.js.multiplexer.render.taskListModel.groupTasksByOwner@a71b8b95b7
+  - src.lupin_app.static.js.multiplexer.render.taskListModel.groupTasksByOwner@7de262dee0
   - src.lupin_app.static.js.multiplexer.render.taskListModel.taskCellOrDash@9f97737767
 ---
 # Web client: task list model
@@ -32,7 +32,7 @@ The formatters and the parked count are in [[web-client-render-task-list-formatt
 - `groupTasksByOwner( tasks )` returns `{ totalCount, groups }`. Owners sort alphabetically and the Unassigned group comes last. Rows sort by priority, then status rank, then title.
 
 ## How the parts work together
-`groupTasksByOwner` is the entry point. It uses `priorityRank`, `statusRank` and `taskTitleLabel` as its three sort keys, and `totalCount` counts every input row. It does not drop terminal rows: the caller filters with `isOpenStatus` first. The epic board reuses both ranks, and the holding area reuses `priorityRank`.
+`groupTasksByOwner` is the entry point. It sorts rows with the exported `byUrgency`, whose three keys are `priorityRank`, `statusRank` and `taskTitleLabel`. `totalCount` counts every input row. It does not drop terminal rows: the caller filters with `isOpenStatus` first. The epic board reuses `byUrgency` and `priorityRank`, and the holding area reuses `priorityRank`.
 
 ## Don't
 - Don't "resync" the 60-character title cap to the store's 120. The two caps answer different questions.
