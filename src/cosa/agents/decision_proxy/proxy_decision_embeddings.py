@@ -12,6 +12,8 @@ Dependency Rule:
 
 import threading
 
+from cosa.rest.db.vector_errors import QueryVectorRefused
+
 
 class ProxyDecisionEmbeddings:
     """
@@ -157,6 +159,8 @@ class ProxyDecisionEmbeddings:
                     owner_user_id=owner_user_id, answer_source=answer_source, metric=metric,
                 )
                 return [ ( pct, self._record_to_dict( entity ) ) for pct, entity in hits ]
+        except QueryVectorRefused:
+            raise
         except Exception as e:
             if self.debug: print( f"[ProxyDecisionEmbeddings] find_similar failed (non-fatal): {e}" )
             return []

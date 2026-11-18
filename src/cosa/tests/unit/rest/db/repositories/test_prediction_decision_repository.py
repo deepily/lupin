@@ -14,6 +14,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
+from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM
 
 
@@ -137,7 +138,7 @@ def test_find_similar_cosine_ignores_vector_length( db_session ):
     _add( repo, "long-far",    _vec( 20.0, 20.0 ) )               # norm 28, 45 degrees off
     _add( repo, "long-close",  _vec( 40.0, 4.0 ) )                # the short-close vector times 40
     db_session.flush()
-    hits = repo.find_similar( _vec( 1.0, 0.0 ), threshold=0.0, metric="cosine" )
+    hits = repo.find_similar( _vec( 20.0, 0.0 ), threshold=0.0, metric="cosine" )
     by_id = { e.id: pct for pct, e in hits }
     assert [ e.id for _, e in hits ][ -1 ] == "long-far"
     assert abs( by_id[ "short-close" ] - by_id[ "long-close" ] ) < 1e-4
@@ -159,10 +160,54 @@ def test_find_similar_cosine_applies_threshold_after_ordering( db_session ):
     repo = PredictionDecisionRepository( db_session )
     _add( repo, "long-far", _vec( 20.0, 20.0 ) )
     db_session.flush()
-    assert repo.find_similar( _vec( 1.0, 0.0 ), threshold=0.75, metric="cosine" ) == []
+    assert repo.find_similar( _vec( 20.0, 0.0 ), threshold=0.75, metric="cosine" ) == []
 
 
 def test_find_similar_unknown_metric_raises( db_session ):
     repo = PredictionDecisionRepository( db_session )
     with pytest.raises( ValueError, match="metric" ):
         repo.find_similar( _vec( 1.0 ), metric="euclid" )
+
+
+@pytest.mark.parametrize( "query, fragment", [
+    ( None,                                  "embedder returned nothing" ),
+    ( [ 1.0, 2.0, 3.0 ],                     "wrong dimension 3" ),
+    ( [ 0.0 ] * EMBEDDING_DIM,               "classified 'normalized'" ),
+    ( [ float( "nan" ) ] + [ 20.0 ] * ( EMBEDDING_DIM - 1 ), "non-finite" ),
+    ( _vec( 1.0 ),                           "classified 'normalized'" ),
+    ( _vec( 500.0 ),                         "classified 'suspect'" ),
+] )
+def test_cosine_refuses_an_untrustworthy_query_with_a_named_reason( db_session, query, fragment ):
+    repo = PredictionDecisionRepository( db_session )
+    with pytest.raises( QueryVectorRefused ) as caught:
+        repo.find_similar( query, metric="cosine" )
+    assert fragment in caught.value.reason
+    assert str( caught.value ) == caught.value.reason
+
+
+def test_dot_path_never_raises_the_refusal( db_session ):
+    """A zero query on the default path behaves as it always did: no exception."""
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "d1", _vec( 1.0 ) )
+    db_session.flush()
+    assert isinstance( repo.find_similar( [ 0.0 ] * EMBEDDING_DIM, threshold=0.0 ), list )
+
+
+def test_cosine_never_returns_a_null_or_zero_norm_stored_row( db_session ):
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "good",      _vec( 20.0, 1.0 ) )
+    _add( repo, "null-row",  None )
+    _add( repo, "zero-row",  [ 0.0 ] * EMBEDDING_DIM )
+    db_session.flush()
+    hits = repo.find_similar( _vec( 20.0, 0.0 ), threshold=0.0, metric="cosine" )
+    assert [ e.id for _, e in hits ] == [ "good" ]
+
+
+def test_cosine_filter_composes_with_the_scalar_filters( db_session ):
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "p1", _vec( 20.0 ), category="permission" )
+    _add( repo, "c1", _vec( 20.0 ), category="confirmation" )
+    _add( repo, "null-p", None, category="permission" )
+    db_session.flush()
+    hits = repo.find_similar( _vec( 20.0 ), threshold=0.0, metric="cosine", category="permission" )
+    assert [ e.id for _, e in hits ] == [ "p1" ]

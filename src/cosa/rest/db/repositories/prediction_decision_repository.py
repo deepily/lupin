@@ -8,10 +8,13 @@ mirror whose ``question_embedding`` is ANN-searched (HNSW dot). Storage only: th
 
 from typing import List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from cosa.rest.db.embedding_regeneration import validate_fresh_vector
 from cosa.rest.db.repositories.base import BaseRepository
 from cosa.rest.db.repositories.vector_search import dot_topk
+from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.rest.db.vector_store_models import PredictionDecision
 
 
@@ -83,10 +86,17 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
               >= threshold * 100 (mirrors ProxyDecisionEmbeddings.find_similar)
             - category / data_origin / response_type / owner_user_id / answer_source are ANDed as exact filters
             - with metric "dot" the query is exactly what it was before the parameter existed
+            - with metric "cosine", rows whose question_embedding is NULL or has zero norm
+              are never returned (they would make the distance conversion raise)
 
         Raises:
             - ValueError if metric is neither "dot" nor "cosine"
+            - QueryVectorRefused on the cosine path when the query vector is missing,
+              of the wrong dimension, non-finite, zero-norm or out of the current model's band
         """
+        if metric == "cosine":
+            reason = validate_fresh_vector( query_embedding )
+            if reason is not None: raise QueryVectorRefused( reason )
         exclude_filter = None
         conditions = []
         if category is not None:      conditions.append( PredictionDecision.category      == category )
@@ -94,6 +104,9 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
         if response_type is not None: conditions.append( PredictionDecision.response_type == response_type )
         if owner_user_id is not None: conditions.append( PredictionDecision.owner_user_id == owner_user_id )
         if answer_source is not None: conditions.append( PredictionDecision.answer_source == answer_source )
+        if metric == "cosine":
+            conditions.append( PredictionDecision.question_embedding.is_not( None ) )
+            conditions.append( func.vector_norm( PredictionDecision.question_embedding ) > 0 )
         if conditions:
             from sqlalchemy import and_
             exclude_filter = and_( *conditions )
