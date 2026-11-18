@@ -7,6 +7,7 @@ and the MCP server. Handles TTS message formatting, API format conversion,
 and qualifier extraction/formatting for yes/no responses.
 """
 
+import json
 import re
 
 
@@ -250,6 +251,93 @@ def extract_qualifier_comment( response_value ):
 
     qualifier = ( match.group( 2 ) or match.group( 3 ) or "" ).strip()
     return ( match.group( 1 ).lower(), qualifier if qualifier else None )
+
+
+def _decode_json_text( value ):
+    """
+    Decode a string as JSON, passing any other value through.
+
+    Requires:
+        - value is any value
+
+    Ensures:
+        - Returns the decoded JSON for a non-blank string that is JSON
+        - Returns None for a blank string or text that is not JSON
+        - Returns any non-string value unchanged
+    """
+    if not isinstance( value, str ):
+        return value
+    try:
+        return json.loads( value ) if value.strip() else None
+    except json.JSONDecodeError:
+        return None
+
+
+def parse_field_selections( response_value ):
+    """
+    Read a multiple-choice or batch answer as one record per field.
+
+    Each field is a question header. A single pick, a write-in and free text arrive as a
+    string. A multi-select arrives as a list, and an empty list is a legal answer.
+
+    Requires:
+        - response_value is a JSON string, a dict or None
+
+    Ensures:
+        - Returns None when the value is not an answers map: empty, not JSON, a JSON value
+          that is not an object, an object without "answers", or an answers value that is
+          not an object. An empty answers map returns {}.
+        - An object with no "answers" and a string "value" is read once more as the JSON
+          that string holds, the form the router stores under "value"
+        - Otherwise returns { header: { "mode", "selected", "text" } } in the order given
+        - mode is "multi" for a list and "single" for a string; any other JSON value is
+          kept as its text under "single"
+        - selected is the list of picks, stripped. A single pick or write-in is a
+          one-item list, and a blank string is an empty list.
+        - text is the string as submitted, or None for a list
+        - A string that is a recognised yes, no or neither stance also carries "stance"
+          and "qualifier" from extract_qualifier_comment; any other string has neither key
+
+    Raises:
+        - nothing
+
+    Examples:
+        '{"answers": {"DB": "PostgreSQL"}}'      -> { "DB": { "mode": "single", "selected": [ "PostgreSQL" ], "text": "PostgreSQL" } }
+        '{"answers": {"Tags": []}}'              -> { "Tags": { "mode": "multi", "selected": [], "text": None } }
+    """
+    response_value = _decode_json_text( response_value )
+    if isinstance( response_value, dict ) and "answers" not in response_value and isinstance( response_value.get( "value" ), str ):
+        response_value = _decode_json_text( response_value[ "value" ] )
+    if not isinstance( response_value, dict ):
+        return None
+
+    answers = response_value.get( "answers" )
+    if not isinstance( answers, dict ):
+        return None
+
+    fields = {}
+    for header, value in answers.items():
+        if isinstance( value, list ):
+            fields[ header ] = {
+                "mode"     : "multi",
+                "selected" : [ v.strip() if isinstance( v, str ) else v for v in value ],
+                "text"     : None
+            }
+            continue
+
+        text   = value if isinstance( value, str ) else str( value )
+        record = {
+            "mode"     : "single",
+            "selected" : [ text.strip() ] if text.strip() else [],
+            "text"     : text
+        }
+        stance, qualifier = extract_qualifier_comment( text )
+        if stance is not None:
+            record[ "stance" ]    = stance
+            record[ "qualifier" ] = qualifier
+        fields[ header ] = record
+
+    return fields
 
 
 def format_qualified_response( answer, qualifier ):

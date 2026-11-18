@@ -17,7 +17,7 @@ from cosa.agents.prediction_engine.config import (
     MULTI_SELECT_JACCARD_THRESHOLD,
     OPEN_ENDED_SIMILARITY_THRESHOLD,
 )
-from cosa.utils.notification_utils import extract_qualifier_comment
+from cosa.utils.notification_utils import extract_qualifier_comment, parse_field_selections
 
 
 def compare_yes_no( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple[Optional[bool], Dict[str, Any]]:
@@ -312,7 +312,110 @@ def compare_open_ended_batch( predicted: Optional[Dict], actual: Optional[Dict],
     return ( match, detail )
 
 
-def get_comparator( response_type: str, actual_value: Any = None, open_ended_threshold: Optional[float] = None ):
+CONFIDENCE_BAND_EDGES = ( 0.4, 0.6, 0.8, 1.0 )
+
+
+def confidence_band( confidence ):
+    """
+    Name the confidence band a forecast falls in, by the band's lower edge.
+
+    The bands are [0, 0.4), [0.4, 0.6), [0.6, 0.8) and [0.8, 1.0]. A confidence exactly on
+    an edge belongs to the band that starts there, and 1.0 closes the top band. The 0.6 edge
+    lines up with the display threshold.
+
+    Requires:
+        - confidence is a number or None
+
+    Ensures:
+        - Returns 0.0, 0.4, 0.6 or 0.8
+        - Returns None for None, NaN, or a confidence below 0 or above 1
+    """
+    if confidence is None or confidence != confidence or confidence < 0 or confidence > 1: return None
+    lower = 0.0
+    for edge in CONFIDENCE_BAND_EDGES[ :-1 ]:
+        if confidence >= edge: lower = edge
+    return lower
+
+
+def score_field( field_schema, predicted, actual ):
+    """
+    Score one answer field by the mode its schema names, ignoring the shape of the answers.
+
+    Requires:
+        - field_schema is a dict with "header" and optionally "multi_select" (the shape of
+          one entry of a notification's response_options "questions" list)
+        - predicted and actual are the field's values: a string, a list or None
+
+    Ensures:
+        - Returns { "header", "mode", "exact", "jaccard", "predicted", "actual" }
+        - mode is "multi" or "single", taken from the schema
+        - jaccard is a float for "multi" and None for "single"; two empty sets give 1.0
+        - predicted and actual are the sorted picks, so the record does not depend on order
+
+    A multi-select field is exact when the two sets of picks are equal, and carries the
+    Jaccard overlap of the sets. Any other field is exact when its single pick is equal.
+    Both sides are read through parse_field_selections, so write-ins, free text and
+    empty sets are scored the same way as listed options.
+    """
+    header = field_schema[ "header" ]
+    multi  = bool( field_schema.get( "multi_select" ) )
+    picks  = {}
+    for side, value in ( ( "predicted", predicted ), ( "actual", actual ) ):
+        fields       = parse_field_selections( { "answers": { header: [] if value is None else value } } )
+        picks[ side ] = sorted( set( fields[ header ][ "selected" ] ) )
+
+    exact   = picks[ "predicted" ] == picks[ "actual" ]
+    jaccard = None
+    if multi:
+        union   = set( picks[ "predicted" ] ) | set( picks[ "actual" ] )
+        jaccard = len( set( picks[ "predicted" ] ) & set( picks[ "actual" ] ) ) / len( union ) if union else 1.0
+
+    return {
+        "header"    : header,
+        "mode"      : "multi" if multi else "single",
+        "exact"     : exact,
+        "jaccard"   : None if jaccard is None else round( jaccard, 3 ),
+        "predicted" : picks[ "predicted" ],
+        "actual"    : picks[ "actual" ],
+    }
+
+
+def compare_multiple_choice( predicted, actual, response_options ):
+    """
+    Score a multiple-choice card field by field, by the schema stored with the notification.
+
+    Requires:
+        - predicted and actual are dicts with an "answers" map, or None
+        - response_options is a dict whose "questions" list gives each field's "header"
+          and "multi_select"
+
+    Ensures:
+        - Returns ( match, detail ); ( None, reason ) when a side is missing or has no answers
+        - match is the strict whole-card result: every field exact
+        - detail["matches"] and detail["total"] count the exact fields over the fields
+          scored, so a half-right card is 1 of 2 with match False
+        - detail["fields"] holds one score_field record per header the actual answer has;
+          a header the schema does not list is scored as single-select
+    """
+    if predicted is None or actual is None:
+        return ( None, { "reason": "missing_data" } )
+
+    predicted_answers = predicted.get( "answers", {} )
+    actual_answers    = actual.get( "answers", {} )
+    if not predicted_answers or not actual_answers:
+        return ( None, { "reason": "empty_answers" } )
+
+    schemas = { q[ "header" ]: q for q in response_options.get( "questions", [] ) }
+    fields  = [
+        score_field( schemas.get( header, { "header": header } ), predicted_answers.get( header ), value )
+        for header, value in actual_answers.items()
+    ]
+    matches = sum( 1 for f in fields if f[ "exact" ] )
+
+    return ( matches == len( fields ), { "matches": matches, "total": len( fields ), "fields": fields } )
+
+
+def get_comparator( response_type: str, actual_value: Any = None, open_ended_threshold: Optional[float] = None, response_options: Optional[Dict] = None ):
     """
     Return the appropriate comparator function for a given response type.
 
@@ -321,16 +424,23 @@ def get_comparator( response_type: str, actual_value: Any = None, open_ended_thr
         - actual_value: optional actual response dict for data-driven dispatch
           (used to detect multi-select multiple_choice)
         - open_ended_threshold: float in [0, 1] or None (None keeps OPEN_ENDED_SIMILARITY_THRESHOLD)
+        - response_options: the notification's stored schema, or None for a row that has none
 
     Ensures:
         - Returns a callable (predicted, actual) -> (match, detail)
+        - For multiple_choice with response_options: compare_multiple_choice bound to them,
+          whatever shape the answers have
         - When open_ended_threshold is given, the open-ended and batch comparators
           (including the unknown-type fallback) are bound to it
         - For multiple_choice: inspects actual_value answers for list values
           to choose compare_multiple_choice_multi vs compare_multiple_choice_single
         - Returns compare_open_ended as fallback for unknown types
     """
-    # Data-driven dispatch for multiple_choice: detect multi-select from answer values
+    # Schema dispatch: the stored response_options say each field's mode, so the answer's shape is ignored
+    if response_type == RESPONSE_TYPE_MULTIPLE_CHOICE and response_options is not None:
+        return partial( compare_multiple_choice, response_options=response_options )
+
+    # Legacy dispatch for rows with no stored schema: detect multi-select from answer values
     if response_type == RESPONSE_TYPE_MULTIPLE_CHOICE and actual_value is not None:
         answers = actual_value.get( "answers", {} ) if isinstance( actual_value, dict ) else {}
         for v in answers.values():
