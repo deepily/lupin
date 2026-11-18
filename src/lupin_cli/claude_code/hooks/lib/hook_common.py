@@ -1011,18 +1011,13 @@ def build_voice_deny_response( voice_ctx, messages=None ):
     Returns:
         dict: Hook output that denies the tool call and injects voice context
     """
-    return {
-        "hookSpecificOutput": {
-            "hookEventName"            : "PreToolUse",
-            "permissionDecision"       : "deny",
-            "permissionDecisionReason" : (
-                "A user-initiated voice message was received and takes precedence "
-                "over this tool call. You must address the user's message before "
-                "continuing. You may re-run this tool afterward if still needed."
-            ),
-            "additionalContext"        : enrich_voice_context( voice_ctx, messages )
-        }
-    }
+    response = build_deny_response(
+        "A user-initiated voice message was received and takes precedence "
+        "over this tool call. You must address the user's message before "
+        "continuing. You may re-run this tool afterward if still needed."
+    )
+    response[ "hookSpecificOutput" ][ "additionalContext" ] = enrich_voice_context( voice_ctx, messages )
+    return response
 
 
 def build_stop_block( reason ):
