@@ -18,6 +18,26 @@ from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM, PredictionDecision
 
 
+def refuse_unusable_cosine_query( query_embedding: Optional[List[float]] ) -> None:
+    """
+    Refuse a query vector that a cosine search cannot score.
+
+    Requires:
+        - query_embedding is a list of floats, or None
+
+    Ensures:
+        - returns None when the vector is usable
+        - names a zero vector as having zero norm, where the freshness check would file it under the retired unit-norm model
+
+    Raises:
+        - QueryVectorRefused when the vector is missing, of the wrong dimension, non-finite, zero-norm or out of the current model's band
+    """
+    reason = validate_fresh_vector( query_embedding )
+    if reason is not None and query_embedding is not None and len( query_embedding ) == EMBEDDING_DIM and not any( query_embedding ):
+        reason = "query vector has zero norm"
+    if reason is not None: raise QueryVectorRefused( reason )
+
+
 class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
     """Repository for prediction_decisions (question_embedding ANN-searched, HNSW dot)."""
 
@@ -94,11 +114,7 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
             - QueryVectorRefused on the cosine path when the query vector is missing,
               of the wrong dimension, non-finite, zero-norm (named so) or out of the current model's band
         """
-        if metric == "cosine":
-            reason = validate_fresh_vector( query_embedding )
-            if reason is not None and query_embedding is not None and len( query_embedding ) == EMBEDDING_DIM and not any( query_embedding ):
-                reason = "query vector has zero norm"   # the validator files a zero vector under the retired unit-norm model
-            if reason is not None: raise QueryVectorRefused( reason )
+        if metric == "cosine": refuse_unusable_cosine_query( query_embedding )
         exclude_filter = None
         conditions = []
         if category is not None:      conditions.append( PredictionDecision.category      == category )
