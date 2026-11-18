@@ -39,6 +39,17 @@ def _hint( state, **extra ):
     return hint
 
 
+def _forget_saved_queue( page ):
+    """Drop the saved prompt queue, leaving the login and every other saved key alone."""
+    page.evaluate(
+        """() => {
+            for ( const key of Object.keys( window.localStorage ) ) {
+                if ( key.includes( 'operatorState' ) ) window.localStorage.removeItem( key );
+            }
+        }"""
+    )
+
+
 def _watch_posts( page ):
     """Record every POST the page makes, so a test can say what was sent and what was not."""
     posts = []
@@ -57,7 +68,10 @@ class TestMultiplexerForecastFold:
     def test_yes_no_card_opens_folded_and_each_state_renders_its_text( self, logged_in_page ):
         page = logged_in_page
         for n, ( state, text ) in enumerate( STATE_TEXT.items() ):
-            # Only the first card in the queue is painted, so each state gets a fresh page.
+            # Only the first card in the queue is painted, and the store saves its queue and restores it on
+            # load, so a reload alone brings the last state's card back in front. Each state starts from an
+            # empty saved queue, then a fresh page.
+            _forget_saved_queue( page )
             _open_multiplexer( page )
             nid = f"e2efold-state-{ n }"
             _emit( page, { "id_hash": nid, "response_type": "yes_no", "prediction_hint": _hint( state ) } )
