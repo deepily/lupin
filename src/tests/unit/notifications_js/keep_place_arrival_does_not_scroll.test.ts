@@ -51,6 +51,8 @@ function makeUI( keepPlace: boolean, extra: Record<string, unknown> = {} ): UI {
     senderGroups             : new Map(),
     managerPersonaMap        : new Map(),
     senderPersonaMap         : new Map(),
+    _predictionFoldOpen      : new Set(),
+    _predictionSeenSent      : new Set(),
     ...extra,
   } );
   return new Proxy( target, { get: ( t, prop ) => ( prop in t ? t[ prop as string ] : noop ) } ) as unknown as UI;
