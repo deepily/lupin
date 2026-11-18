@@ -324,13 +324,13 @@ def confidence_band( confidence ):
     lines up with the display threshold.
 
     Requires:
-        - confidence is a number
+        - confidence is a number or None
 
     Ensures:
         - Returns 0.0, 0.4, 0.6 or 0.8
-        - Returns None for a confidence below 0 or above 1
+        - Returns None for None, NaN, or a confidence below 0 or above 1
     """
-    if confidence < 0 or confidence > 1: return None
+    if confidence is None or confidence != confidence or confidence < 0 or confidence > 1: return None
     lower = 0.0
     for edge in CONFIDENCE_BAND_EDGES[ :-1 ]:
         if confidence >= edge: lower = edge

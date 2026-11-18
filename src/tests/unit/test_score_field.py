@@ -114,3 +114,8 @@ def test_each_confidence_band_edge_belongs_to_the_band_that_starts_there( confid
 @pytest.mark.parametrize( "confidence", [ -0.01, 1.01 ] )
 def test_a_confidence_outside_zero_to_one_has_no_band( confidence ):
     assert confidence_band( confidence ) is None
+
+
+@pytest.mark.parametrize( "confidence", [ None, float( "nan" ), float( "inf" ), float( "-inf" ) ] )
+def test_a_confidence_that_is_missing_or_not_finite_has_no_band( confidence ):
+    assert confidence_band( confidence ) is None
