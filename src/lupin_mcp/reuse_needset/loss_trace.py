@@ -307,15 +307,17 @@ def summarize( records ):
         - not_retrieved_by_route holds, per selection route, how many routed needs there were and how many were not retrieved
         - nothing counts the nothing needs by outcome
         - misses counts the matched needs that are not found, and upper_bound is the 95 percent bound on their rate
+        - a matched need whose probe failed (PROBE_FAILED) is neither a hit nor a miss: it is left out of matched, the counts and the rate, and counted in probe_failed beside them
 
     Raises:
         - NeedsetError BAD_NEED when no record is of a matched need
     """
-    matched = [ r for r in records if r[ "kind" ] != "nothing" ]
-    if not matched: raise er.NeedsetError( er.BAD_NEED, "a summary needs at least one matched need" )
+    every   = [ r for r in records if r[ "kind" ] != "nothing" ]
+    matched = [ r for r in every if r[ "lost_at" ] != PROBE_FAILED ]
+    if not matched: raise er.NeedsetError( er.BAD_NEED, "a summary needs at least one matched need whose probe answered" )
     routed  = [ r for r in matched if r[ "selection_route" ] is not None ]
     misses  = sum( 1 for r in matched if r[ "lost_at" ] != FOUND )
-    return { "matched": len( matched ), "by_lost_at": _count( matched, "lost_at" ),
+    return { "matched": len( matched ), "probe_failed": len( every ) - len( matched ), "by_lost_at": _count( matched, "lost_at" ),
              "by_kind": { k: _count( [ r for r in matched if r[ "kind" ] == k ], "lost_at" ) for k in sorted( { r[ "kind" ] for r in matched } ) },
              "by_lang": { k: _count( [ r for r in matched if r[ "write_lang" ] == k ], "lost_at" ) for k in sorted( { r[ "write_lang" ] for r in matched } ) },
              "not_retrieved_by_route": { k: { "needs": sum( 1 for r in routed if r[ "selection_route" ] == k ),
@@ -335,17 +337,19 @@ def summarize_members( records ):
     Ensures:
         - returns the member count, the counts by lost_at and by language, the misses, the miss rate and its 95 percent bound, all over members
         - the rate is never an any-member rate
+        - the members of a need whose probe failed are left out of every count and the rate, and the needs are counted in probe_failed
         - any_member_comparison_only holds the number of matched needs and how many have at least one found member and how many have every member found
         - the comparison is there so a reader can see how much the any-member figure overstates, and it is not a result
 
     Raises:
         - NeedsetError BAD_NEED when no record is of a matched need
     """
-    matched = [ r for r in records if r[ "kind" ] != "nothing" ]
-    if not matched: raise er.NeedsetError( er.BAD_NEED, "a member summary needs at least one matched need" )
+    every   = [ r for r in records if r[ "kind" ] != "nothing" ]
+    matched = [ r for r in every if r[ "lost_at" ] != PROBE_FAILED ]
+    if not matched: raise er.NeedsetError( er.BAD_NEED, "a member summary needs at least one matched need whose probe answered" )
     rows    = [ { "write_lang": r[ "write_lang" ], "lost_at": lost } for r in matched for lost in r[ "members" ].values() ]
     misses  = sum( 1 for r in rows if r[ "lost_at" ] != FOUND )
-    return { "members": len( rows ), "by_lost_at": _count( rows, "lost_at" ),
+    return { "members": len( rows ), "probe_failed": len( every ) - len( matched ), "by_lost_at": _count( rows, "lost_at" ),
              "by_lang": { k: _count( [ r for r in rows if r[ "write_lang" ] == k ], "lost_at" ) for k in sorted( { r[ "write_lang" ] for r in rows } ) },
              "misses": misses, "miss_rate": misses / len( rows ), "upper_bound": harness_report.upper_bound( misses, len( rows ) ),
              "any_member_comparison_only": { "needs": len( matched ), "any_member_found": sum( 1 for r in matched if FOUND in r[ "members" ].values() ),

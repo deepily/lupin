@@ -248,7 +248,8 @@ def main( argv=None, deps=None ):
         - without --live returns { live False, plan } with the counts of seeds, needs and unsaved seeds; no model is contacted and no spend-ledger run is begun
         - with --live and an unsaved seed returns the plan with a stopped report and no call
         - with --live and every answer saved the needs are traced under the cap and the report is returned and written
-        - with --live the spend-ledger run is closed when the trace ends, however it ends
+        - with --live the spend-ledger run is closed when the trace ends, however it ends: an exception raised anywhere inside main closes it in a finally path
+        - a process killed outright (SIGKILL) cannot run that path and leaves its run open; reuse_orphans closes such a run once its process is dead
         - the earlier run's folder is only read; this run's folder holds every copy and every new file
 
     Raises:

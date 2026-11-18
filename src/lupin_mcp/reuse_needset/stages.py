@@ -43,11 +43,12 @@ def attribution_report( records ):
         - can_name_a_stage is True when at least one member was lost at a named stage
         - stop is True when none was, because a run in which nothing is lost shows nothing about naming the stage that lost it
         - summary is loss_trace.summarize_members over the records
+        - probe_failed counts the needs whose probe failed; they are in no other figure
     """
     summary = loss_trace.summarize_members( records )
     lost    = sum( n for k, n in summary[ "by_lost_at" ].items() if k in LOST_STAGES )
     return { "members": summary[ "members" ], "lost": lost, "found": summary[ "by_lost_at" ].get( loss_trace.FOUND, 0 ), "by_lost_at": summary[ "by_lost_at" ],
-             "can_name_a_stage": lost > 0, "stop": lost == 0, "summary": summary }
+             "can_name_a_stage": lost > 0, "stop": lost == 0, "probe_failed": summary[ "probe_failed" ], "summary": summary }
 
 
 async def run_yield( seed_ids, prepare_fn, index, k=hardness.BM25_K ):

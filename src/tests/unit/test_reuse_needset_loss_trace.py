@@ -321,6 +321,22 @@ def test_the_summary_counts_by_outcome_kind_language_route_and_gives_the_miss_ra
     assert e.value.code == er.BAD_NEED
 
 
+def test_a_probe_failed_need_is_neither_a_hit_nor_a_miss_and_is_counted_beside_the_rate():
+    base   = records_for_summary()
+    failed = [ { **base[ 0 ], "lost_at": LT.PROBE_FAILED, "members": { "m": LT.PROBE_FAILED } } ]
+    plain, s = LT.summarize( base ), LT.summarize( base + failed )
+    assert s[ "probe_failed" ] == 1 and plain[ "probe_failed" ] == 0
+    assert { k: v for k, v in s.items() if k != "probe_failed" } == { k: v for k, v in plain.items() if k != "probe_failed" }, "the rate and every count are those of the answered needs"
+    rows    = [ { "kind": "work_alike", "write_lang": "py", "lost_at": LT.FOUND, "members": { "a": LT.FOUND, "b": LT.NOT_READ } } ]
+    failed  = [ { "kind": "work_alike", "write_lang": "py", "lost_at": LT.PROBE_FAILED, "members": { "m": LT.PROBE_FAILED } } ]
+    members, plain_members = LT.summarize_members( rows + failed ), LT.summarize_members( rows )
+    assert members[ "probe_failed" ] == 1 and members[ "members" ] == plain_members[ "members" ] and members[ "miss_rate" ] == plain_members[ "miss_rate" ]
+    with pytest.raises( er.NeedsetError ) as e: LT.summarize( failed )
+    assert e.value.code == er.BAD_NEED
+    with pytest.raises( er.NeedsetError ) as e: LT.summarize_members( failed )
+    assert e.value.code == er.BAD_NEED
+
+
 def test_scipy_importable():
     import scipy.stats   # noqa: F401  (the bound below needs it; this test fails by name when the interpreter lacks it)
 
@@ -402,7 +418,7 @@ def test_changing_the_member_classifier_is_a_ledger_miss( monkeypatch ):
 
 
 def member_records():
-    def rec( kind, lang, members ): return { "kind": kind, "write_lang": lang, "members": members }
+    def rec( kind, lang, members ): return { "kind": kind, "write_lang": lang, "lost_at": LT.FOUND, "members": members }
     return [ rec( "work_alike", "py", { "a": LT.FOUND, "b": LT.NOT_RETRIEVED } ), rec( "work_alike", "ts", { "c": LT.FOUND } ),
              rec( "near_copy", "ts", { "d": LT.NOT_READ, "e": LT.NOT_READ, "f": LT.FOUND } ), rec( "nothing", "py", {} ) ]
 
@@ -413,7 +429,7 @@ def test_the_member_summary_counts_members_and_not_needs():
     assert s[ "by_lang" ] == { "py": { "FOUND": 1, "NOT_RETRIEVED": 1 }, "ts": { "FOUND": 2, "NOT_READ": 2 } }
     assert s[ "misses" ] == 3 and s[ "miss_rate" ] == 0.5 and s[ "upper_bound" ] == harness_report.upper_bound( 3, 6 )
     assert s[ "any_member_comparison_only" ] == { "needs": 3, "any_member_found": 3, "every_member_found": 1 }
-    with pytest.raises( er.NeedsetError ) as e: LT.summarize_members( [ { "kind": "nothing", "write_lang": "py", "members": {} } ] )
+    with pytest.raises( er.NeedsetError ) as e: LT.summarize_members( [ { "kind": "nothing", "write_lang": "py", "lost_at": LT.CORRECT_NO_MATCH, "members": {} } ] )
     assert e.value.code == er.BAD_NEED
 
 
