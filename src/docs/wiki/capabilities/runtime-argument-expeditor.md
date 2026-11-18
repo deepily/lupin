@@ -34,7 +34,7 @@ Sits between routing and job creation. A voice command names an agent but may le
 
 ## How it is used
 - `AskFlow.ask` calls `extract` only. It returns the first missing question and parks the request when the caller is interactive.
-- `TodoFifoQueue` calls `expedite` (`extract` then `collect`, returning the args dict or `None`). It refuses when `runtime argument expeditor enabled` is false.
+- `TodoFifoQueue` calls `expedite` (`extract` then `collect`, returning the args dict or `None`). It refuses when `runtime argument expeditor enabled` is false. Filling a batch question from a prediction and auto-submitting it is **Dormant**: `expeditor prediction auto submit enabled` is false and a unit test pins it.
 - `get_cli_help` runs `python -m <cli_module> --help` with a 10 second timeout and caches the result, including a failure. `get_user_visible_args` asks the same module for `--user-visible-args`.
 - A package with no runnable CLI answers `--help` through `run_help_for_module`, as `claude_code`, the bug-fix expediter and the test-fix expediter do.
 - To add an agent, add its `JOB_ARG_CONTRACTS` entry. See [[v2-ask-flow]].

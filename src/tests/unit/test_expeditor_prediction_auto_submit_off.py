@@ -48,11 +48,16 @@ def test_every_splainer_row_is_marked_dormant():
         assert _line( splainer, key ).startswith( "Dormant" ), f"{key!r} explainer must start with Dormant"
 
 
-def test_the_capability_page_and_the_ini_comment_say_dormant():
+def test_the_ini_comment_says_dormant():
+    with open( cu.get_project_root() + "/src/conf/lupin-app.ini" ) as handle:
+        assert "# DORMANT since 18 Nov 2026" in handle.read()
+
+
+def test_both_capability_pages_mark_the_auto_submit_keys_dormant():
+    """The expeditor guide and the prediction engine page each carry the marker beside the key."""
     root = cu.get_project_root()
-    with open( root + "/src/docs/wiki/capabilities/prediction-engine.md" ) as handle:
-        page = handle.read()
-    assert "**Dormant**" in page and "expeditor prediction auto submit enabled" in page
-    with open( root + "/src/conf/lupin-app.ini" ) as handle:
-        ini = handle.read()
-    assert "# DORMANT since 18 Nov 2026" in ini
+    for page in ( "prediction-engine.md", "runtime-argument-expeditor.md" ):
+        with open( f"{root}/src/docs/wiki/capabilities/{page}" ) as handle:
+            text = handle.read()
+        assert "**Dormant**" in text, f"{page} must carry the Dormant marker"
+        assert "expeditor prediction auto submit enabled" in text, f"{page} must name the switch"
