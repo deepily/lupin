@@ -122,3 +122,17 @@ def test_an_unknown_commit_is_an_error_only_when_the_ruling_gives_no_tie( repo )
     with pytest.raises( ValueError, match="is not a commit" ):
         rt.find_tie( "m.new", [], LOG, repo, "0" * 40 )
     assert rt.find_tie( "m.new", [ row( ( "m.new", RID_A ) ) ], LOG, repo, "0" * 40 )[ "tie" ] == "ruling"
+
+
+def test_a_baseline_finding_is_tied_by_a_ruling_only_and_the_commit_is_never_read( tmp_path ):
+    """With the heuristic off a ruling still ties; no ruling gives none."""
+    ruled = rt.find_tie( "m.new", [ row( ( "m.new", RID_A ) ) ], LOG, tmp_path / "not-a-repo", "0" * 40, heuristic=False )
+    assert ruled == { "tie": "ruling", "receipt_id": RID_A, "session": "a1111111", "tool": "check_exists" }
+    bare = rt.find_tie( "m.new", [], LOG, tmp_path / "not-a-repo", "0" * 40, heuristic=False )
+    assert bare == { "tie": "none", "reason": rt.BASELINE_REASON }
+
+
+def test_the_same_commit_that_ties_by_heuristic_gives_none_once_the_heuristic_is_off( repo ):
+    sha = commit( repo, "Merge work (john)", NOON )
+    assert rt.find_tie( "m.new", [], LOG, repo, sha )[ "tie" ] == "heuristic"
+    assert rt.find_tie( "m.new", [], LOG, repo, sha, heuristic=False )[ "tie" ] == "none"
