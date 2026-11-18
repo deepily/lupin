@@ -8,31 +8,13 @@ A cell the fit refused for want of rows is reported as not evaluated. So is a ce
 in the final window. Neither is ever scored as if it were calibrated.
 """
 
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, Tuple
 
 from sklearn.metrics import brier_score_loss
 
-from cosa.agents.prediction_engine.calibration import calibrate, cell_key, fit_calibration, reliability_report
+from cosa.agents.prediction_engine.calibration import calibrate, fit_calibration, group_by_cell, reliability_report
 
 Row = Tuple[str, str, float, bool]
-
-
-def _by_cell( rows: Iterable[Row] ) -> Dict[str, Tuple[List[float], List[bool]]]:
-    """
-    Group scored rows by calibration cell.
-
-    Requires:
-        - rows yields ( response_type, strategy, confidence, correct )
-
-    Ensures:
-        - returns cell key to ( confidences, correct ), each list in row order
-    """
-    grouped: Dict[str, Tuple[List[float], List[bool]]] = {}
-    for response_type, strategy, confidence, was_correct in rows:
-        confidences, correct = grouped.setdefault( cell_key( response_type, strategy ), ( [], [] ) )
-        confidences.append( confidence )
-        correct.append( was_correct )
-    return grouped
 
 
 def fit_and_evaluate( tune_rows: Iterable[Row], final_rows: Iterable[Row], cohort_sha: str, fit_time: str,
@@ -57,7 +39,7 @@ def fit_and_evaluate( tune_rows: Iterable[Row], final_rows: Iterable[Row], cohor
     tune_rows  = list( tune_rows )
     final_rows = list( final_rows )
     document   = fit_calibration( tune_rows, cohort_sha, fit_time )
-    final      = _by_cell( final_rows )
+    final      = group_by_cell( final_rows )
     cells      = {}
     for key in sorted( set( document[ "cells" ] ) | set( final ) ):
         fitted = document[ "cells" ].get( key )

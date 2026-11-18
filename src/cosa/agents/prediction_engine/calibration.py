@@ -61,6 +61,24 @@ def fit_cell( confidences: Sequence[float], correct: Sequence[bool] ) -> Dict:
     }
 
 
+def group_by_cell( rows: Iterable[Tuple[str, str, float, bool]] ) -> Dict[str, Tuple[List[float], List[bool]]]:
+    """
+    Group scored rows by calibration cell.
+
+    Requires:
+        - rows yields ``( response_type, strategy, confidence, correct )``
+
+    Ensures:
+        - returns cell key to ( confidences, correct ), each list in row order
+    """
+    grouped: Dict[str, Tuple[List[float], List[bool]]] = {}
+    for response_type, strategy, confidence, was_correct in rows:
+        confidences, correct = grouped.setdefault( cell_key( response_type, strategy ), ( [], [] ) )
+        confidences.append( confidence )
+        correct.append( was_correct )
+    return grouped
+
+
 def fit_calibration( rows: Iterable[Tuple[str, str, float, bool]], cohort_sha: str, fit_time: str ) -> Dict:
     """
     Fit one map per ( response type, strategy ) cell from scored rows.
@@ -73,11 +91,7 @@ def fit_calibration( rows: Iterable[Tuple[str, str, float, bool]], cohort_sha: s
         - returns the document stored in the calibration file: version, cohort_sha, fit_time, cells
         - every cell seen has an entry, a fit or an "insufficient data" refusal
     """
-    grouped: Dict[str, Tuple[List[float], List[bool]]] = {}
-    for response_type, strategy, confidence, was_correct in rows:
-        xs, ys = grouped.setdefault( cell_key( response_type, strategy ), ( [], [] ) )
-        xs.append( confidence )
-        ys.append( was_correct )
+    grouped = group_by_cell( rows )
     return {
         "version"    : FORMAT_VERSION,
         "cohort_sha" : cohort_sha,
