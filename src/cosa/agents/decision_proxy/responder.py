@@ -449,6 +449,8 @@ class DecisionResponder( BaseResponder ):
                 ratification_state  = ratification_state,
                 question_embedding  = embedding,
                 created_at          = datetime.now( timezone.utc ).isoformat(),
+                owner_user_id       = None,
+                answer_source       = "proxy",
             )
 
         except Exception as e:

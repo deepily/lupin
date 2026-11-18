@@ -65,6 +65,7 @@ class ProxyDecisionEmbeddings:
     _RECORD_FIELDS = (
         "id", "question", "category", "decision_value", "ratification_state",
         "data_origin", "response_type", "question_embedding", "created_at",
+        "owner_user_id", "answer_source",
     )
 
     @classmethod
@@ -75,7 +76,8 @@ class ProxyDecisionEmbeddings:
             record[ "question_embedding" ] = list( record[ "question_embedding" ] )
         return record
 
-    def add_decision( self, id, question, category, decision_value, ratification_state, question_embedding, created_at, data_origin="organic", response_type="" ):
+    def add_decision( self, id, question, category, decision_value, ratification_state, question_embedding, created_at, data_origin="organic", response_type="",
+                      owner_user_id=None, answer_source="unknown" ):
         """
         Insert a decision record into the store.
 
@@ -97,6 +99,8 @@ class ProxyDecisionEmbeddings:
             created_at: ISO timestamp string
             data_origin: Provenance tag (organic, synthetic_seed, synthetic_generated)
             response_type: Notification response type (yes_no, multiple_choice, open_ended, open_ended_batch)
+            owner_user_id: The answering account's id, or None
+            answer_source: human, proxy, timeout_default, test, hint_vote or unknown
         """
         try:
             from cosa.rest.db.database import get_db
@@ -106,12 +110,14 @@ class ProxyDecisionEmbeddings:
                     id=id, question=question, category=category, decision_value=decision_value,
                     ratification_state=ratification_state, question_embedding=question_embedding,
                     created_at=created_at, data_origin=data_origin, response_type=response_type,
+                    owner_user_id=owner_user_id, answer_source=answer_source,
                 )
             if self.debug: print( f"[ProxyDecisionEmbeddings] Added decision: {id}" )
         except Exception as e:
             if self.debug: print( f"[ProxyDecisionEmbeddings] add_decision failed (non-fatal): {e}" )
 
-    def find_similar( self, query_embedding, category=None, limit=5, threshold=0.75, data_origin=None, response_type=None ):
+    def find_similar( self, query_embedding, category=None, limit=5, threshold=0.75, data_origin=None, response_type=None,
+                      owner_user_id=None, answer_source=None ):
         """
         Find similar decisions by vector search.
 
@@ -134,6 +140,8 @@ class ProxyDecisionEmbeddings:
             threshold: Minimum similarity (0.0-1.0) to include
             data_origin: Optional provenance filter (e.g., "organic" to exclude synthetic)
             response_type: Optional response type filter (e.g., "multiple_choice", "yes_no")
+            owner_user_id: Optional owner filter (exact match)
+            answer_source: Optional answer-source filter (exact match, e.g. "human")
 
         Returns:
             list[ tuple[ float, dict ] ]: ( similarity_pct, record ) pairs
@@ -145,6 +153,7 @@ class ProxyDecisionEmbeddings:
                 hits = PredictionDecisionRepository( session ).find_similar(
                     query_embedding, category=category, limit=limit, threshold=threshold,
                     data_origin=data_origin, response_type=response_type,
+                    owner_user_id=owner_user_id, answer_source=answer_source,
                 )
                 return [ ( pct, self._record_to_dict( entity ) ) for pct, entity in hits ]
         except Exception as e:

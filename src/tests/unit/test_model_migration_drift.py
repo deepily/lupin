@@ -395,19 +395,24 @@ def test_every_column_creating_op_in_the_chain_is_statically_resolvable():
 
 
 def test_metadata_driven_tables_are_scoped_out_for_a_structural_reason():
-    """The scoped-out set is exactly the vector-store models, derived from the migration's own list."""
+    """The scoped-out set is the vector-store models; a later add_column on one must name a mapped column."""
     skipped = _metadata_driven_tables()
 
     assert skipped, "the metadata-driven scope-out must be non-empty or the reasoning has drifted"
 
     migrated = _collect_migration_columns( MIGRATIONS_DIR )
 
-    # The point of the scope-out: these tables have NO parseable DDL anywhere in
-    # the chain. If one ever gains real DDL, this fails and the scope-out is revisited.
+    # The point of the scope-out: the migration that creates these tables has no parseable
+    # DDL, because it builds them from the models. A later revision may still add a column
+    # to one (f1c9a4d27b36 adds two to prediction_decisions). Every column such a revision
+    # adds must be a column the model maps. A column the model does not map is real DDL
+    # drifting from the model, and the scope-out is revisited.
+    mapped = _mapped_columns()
     for table in skipped:
-        assert table not in migrated, (
-            f"{table} now has parseable migration DDL — it is no longer metadata-driven "
-            f"and must be removed from the scope-out"
+        unmapped = migrated.get( table, set() ) - mapped[ table ]
+        assert not unmapped, (
+            f"{table} has migration columns the model does not map: {sorted( unmapped )}. "
+            f"It is no longer purely metadata-driven; revisit the scope-out"
         )
 
 

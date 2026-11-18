@@ -248,6 +248,8 @@ class PredictionDecision( Base ):
     response_type:      Mapped[Optional[str]]  = mapped_column( Text )
     question_embedding: Mapped[Optional[list]] = mapped_column( Vector( EMBEDDING_DIM ) )
     created_at:         Mapped[Optional[str]]  = mapped_column( Text )   # stored as a string, not a timestamp type
+    owner_user_id:      Mapped[Optional[str]]  = mapped_column( Text )   # the account that answered
+    answer_source:      Mapped[Optional[str]]  = mapped_column( Text )   # human, proxy, timeout_default, test, hint_vote or unknown
 
     __table_args__ = (
         _hnsw_index( "idx_prediction_decisions_question_embedding_hnsw", "question_embedding" ),
