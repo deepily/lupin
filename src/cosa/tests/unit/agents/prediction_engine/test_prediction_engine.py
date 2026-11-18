@@ -1315,7 +1315,7 @@ def test_get_accuracy_summary_exception_returns_error_dict( wired_engine, monkey
     wired_engine.debug = True
     out = wired_engine.get_accuracy_summary( window_days=14 )
     assert out[ "total_predictions" ] == 0
-    assert out[ "accuracy_rate" ] == 0.0
+    assert out[ "accuracy_rate" ] is None and out[ "status" ] == "error"
     assert "db-down" in out[ "error" ]
 
 

@@ -1857,6 +1857,7 @@ class PredictionEngine:
         Ensures:
             - Returns dict with accuracy metrics
             - Safe to call even if no predictions exist
+            - A database failure returns accuracy_rate None and status "error", never a zero rate
         """
         try:
             from cosa.rest.db.database import get_db
@@ -1875,7 +1876,8 @@ class PredictionEngine:
                 "window_days"       : window_days,
                 "total_predictions" : 0,
                 "total_responded"   : 0,
-                "accuracy_rate"     : 0.0,
+                "accuracy_rate"     : None,
+                "status"            : "error",
                 "error"             : str( e )
             }
 
