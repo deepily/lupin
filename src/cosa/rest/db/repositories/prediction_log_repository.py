@@ -18,6 +18,10 @@ from cosa.rest.db.repositories.base import BaseRepository
 from cosa.rest.postgres_models import PredictionLog
 
 
+TEST_OVERRIDE_SOURCE = "test_override"   # forecast_source of a row a test planted; never counted
+STATUS_INSUFFICIENT  = "insufficient data"
+
+
 LEDGER_COLUMNS = frozenset( {
     "asked_at", "rendered_at", "fold_opened_at", "forecast_ready_at", "forecast_source", "predictor_version",
     "config_version", "encoder_version", "context_version", "owner_email", "evidence_ids", "evidence_scores",
@@ -240,7 +244,10 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         Ensures:
             - Returns dict with total_predictions, total_responded, accuracy_rate,
               and per-category/per-type breakdowns
-            - Only includes predictions with actual outcomes for accuracy calc
+            - Leaves out rows whose forecast_source is test_override, from every count
+            - accuracy_rate is total_correct over total_scored, the rows with a non-null accuracy_match
+              ( strict: every field exact ), never over answered rows
+            - with no scored row, accuracy_rate is None and status is "insufficient data"
             - Leaves out rows scored with a similarity above 1 ( see legacy_similarity_clause );
               their count is returned as excluded_legacy_similarity
             - Also leaves out rows with a stored confidence above 1 ( see legacy_confidence_clause );
@@ -250,7 +257,8 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         cutoff = datetime.now( timezone.utc ) - timedelta( days=window_days )
 
         # Base query
-        filters = [ PredictionLog.predicted_at >= cutoff ]
+        filters = [ PredictionLog.predicted_at >= cutoff,
+                    func.coalesce( PredictionLog.forecast_source, "" ) != TEST_OVERRIDE_SOURCE ]
         if category:      filters.append( PredictionLog.category == category )
         if response_type: filters.append( PredictionLog.response_type == response_type )
         if sender_id:     filters.append( PredictionLog.sender_id == sender_id )
@@ -284,13 +292,18 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             PredictionLog.actual_value.isnot( None )
         ).scalar() or 0
 
-        # Accuracy (only for responded predictions)
+        # Scored rows: the denominator of every accuracy figure
+        total_scored = self.session.query( func.count( PredictionLog.id ) ).filter(
+            combined_filter,
+            PredictionLog.accuracy_match.isnot( None )
+        ).scalar() or 0
+
         total_correct = self.session.query( func.count( PredictionLog.id ) ).filter(
             combined_filter,
             PredictionLog.accuracy_match == True
         ).scalar() or 0
 
-        accuracy_rate = ( total_correct / total_responded ) if total_responded > 0 else 0.0
+        accuracy_rate = ( total_correct / total_scored ) if total_scored > 0 else None
 
         # Average confidence
         avg_confidence = self.session.query( func.avg( PredictionLog.prediction_confidence ) ).filter(
@@ -307,8 +320,10 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             "window_days"       : window_days,
             "total_predictions" : total_predictions,
             "total_responded"   : total_responded,
+            "total_scored"      : total_scored,
             "total_correct"     : total_correct,
-            "accuracy_rate"     : round( accuracy_rate, 4 ),
+            "accuracy_rate"     : round( accuracy_rate, 4 ) if accuracy_rate is not None else None,
+            "status"            : STATUS_INSUFFICIENT if total_scored == 0 else "ok",
             "excluded_legacy_similarity" : excluded_legacy,
             "excluded_legacy_confidence" : excluded_confidence,
             "avg_confidence"    : round( float( avg_confidence ), 4 ),
@@ -325,12 +340,14 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             - group_column: Column to group by
 
         Ensures:
-            - Returns dict of group_value → {count, responded, correct, accuracy}
+            - Returns dict of group_value → {count, responded, scored, correct, accuracy}
+            - accuracy is correct over scored, or None when nothing is scored
         """
         rows = self.session.query(
             group_column,
             func.count( PredictionLog.id ).label( "count" ),
             func.count( PredictionLog.actual_value ).label( "responded" ),
+            func.count( PredictionLog.accuracy_match ).label( "scored" ),
             func.sum(
                 func.cast( PredictionLog.accuracy_match == True, sa.Integer )
             ).label( "correct" )
@@ -345,14 +362,16 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             group_value = row[0]
             count       = row[1]
             responded   = row[2]
-            correct     = row[3] or 0
-            accuracy    = ( correct / responded ) if responded > 0 else 0.0
+            scored      = row[3]
+            correct     = row[4] or 0
+            accuracy    = ( correct / scored ) if scored > 0 else None
 
             breakdown[ group_value ] = {
                 "count"    : count,
                 "responded": responded,
+                "scored"   : scored,
                 "correct"  : correct,
-                "accuracy" : round( accuracy, 4 ),
+                "accuracy" : round( accuracy, 4 ) if accuracy is not None else None,
             }
 
         return breakdown

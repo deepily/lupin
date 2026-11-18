@@ -9,7 +9,7 @@ and WebSocket session management with cleanup functionality.
 import os
 import time
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -475,6 +475,49 @@ async def reset_prediction_engine( drop_table: bool = False, clear_pending: bool
             "message" : f"PredictionEngine reset failed: {str( e )}",
             "timestamp": du.get_current_datetime_iso()
         }
+
+
+@router.get(
+    "/api/prediction-engine/accuracy",
+    response_class = JSONResponse,
+    summary        = "Prediction engine accuracy summary",
+    description    = "Accuracy of the prediction log over a window: strict whole-card correctness over scored rows, with per-category and per-type breakdowns. ADMIN ONLY, because it reports across users.",
+    # Declared so the gate shows in /docs; require_admin adds no 401/403 to the schema by itself.
+    responses      = {
+        401 : { "description": "Unauthorized — no bearer token" },
+        403 : { "description": "Forbidden — the admin role is required" }
+    }
+)
+async def prediction_engine_accuracy(
+    window_days   : int           = Query( 30, ge=1, le=3650, description="Days to look back" ),
+    category      : Optional[str] = Query( None, description="Only this category" ),
+    response_type : Optional[str] = Query( None, description="Only this response type" ),
+    sender_id     : Optional[str] = Query( None, description="Only this sender" ),
+    admin_user    : Dict          = Depends( require_admin )
+):
+    """
+    Report prediction accuracy across all users.
+
+    Requires:
+        - caller holds a JWT carrying the "admin" role (401 without a token, 403 without the role)
+
+    Ensures:
+        - returns PredictionLogRepository.get_accuracy_summary for the window and filters
+        - accuracy_rate is correct over scored rows; with none scored it is None and status
+          is "insufficient data"
+        - rows whose forecast_source is test_override are left out of every count
+        - a database failure answers 500 and never a zero that reads as an accuracy
+    """
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
+
+    with get_db() as session:
+        return PredictionLogRepository( session ).get_accuracy_summary(
+            window_days   = window_days,
+            category      = category,
+            response_type = response_type,
+            sender_id     = sender_id
+        )
 
 
 @router.get(

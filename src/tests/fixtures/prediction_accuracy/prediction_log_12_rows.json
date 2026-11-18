@@ -1,0 +1,125 @@
+{
+  "what": "Twelve synthetic prediction_log rows for the accuracy summary: mixed types, three unscored (r04, r07, r10), one test_override (r08). Every row was predicted one day before the test runs.",
+  "rows": [
+    {
+      "key": "r01",
+      "response_type": "yes_no",
+      "category": "input",
+      "prediction_strategy": "cbr_majority_vote",
+      "prediction_confidence": 0.9,
+      "answered": true,
+      "accuracy_match": true,
+      "forecast_source": null
+    },
+    {
+      "key": "r02",
+      "response_type": "yes_no",
+      "category": "input",
+      "prediction_strategy": "cbr_majority_vote",
+      "prediction_confidence": 0.8,
+      "answered": true,
+      "accuracy_match": true,
+      "forecast_source": "live"
+    },
+    {
+      "key": "r03",
+      "response_type": "yes_no",
+      "category": "permission",
+      "prediction_strategy": "cbr_majority_vote",
+      "prediction_confidence": 0.7,
+      "answered": true,
+      "accuracy_match": false,
+      "forecast_source": null
+    },
+    {
+      "key": "r04",
+      "response_type": "yes_no",
+      "category": "permission",
+      "prediction_strategy": "cbr_majority_vote",
+      "prediction_confidence": 0.6,
+      "answered": false,
+      "accuracy_match": null,
+      "forecast_source": null
+    },
+    {
+      "key": "r05",
+      "response_type": "multiple_choice",
+      "category": "workflow",
+      "prediction_strategy": "cbr_retrieval",
+      "prediction_confidence": 0.8,
+      "answered": true,
+      "accuracy_match": true,
+      "forecast_source": null
+    },
+    {
+      "key": "r06",
+      "response_type": "multiple_choice",
+      "category": "workflow",
+      "prediction_strategy": "cbr_retrieval",
+      "prediction_confidence": 0.5,
+      "answered": true,
+      "accuracy_match": false,
+      "forecast_source": null
+    },
+    {
+      "key": "r07",
+      "response_type": "multiple_choice",
+      "category": "workflow",
+      "prediction_strategy": "cbr_retrieval",
+      "prediction_confidence": 0.6,
+      "answered": true,
+      "accuracy_match": null,
+      "forecast_source": null
+    },
+    {
+      "key": "r08",
+      "response_type": "multiple_choice",
+      "category": "workflow",
+      "prediction_strategy": "cbr_retrieval",
+      "prediction_confidence": 0.9,
+      "answered": true,
+      "accuracy_match": true,
+      "forecast_source": "test_override"
+    },
+    {
+      "key": "r09",
+      "response_type": "open_ended",
+      "category": "general",
+      "prediction_strategy": "llm_synthesis",
+      "prediction_confidence": 0.7,
+      "answered": true,
+      "accuracy_match": true,
+      "forecast_source": null
+    },
+    {
+      "key": "r10",
+      "response_type": "open_ended",
+      "category": "general",
+      "prediction_strategy": "cold_start",
+      "prediction_confidence": 0.0,
+      "answered": false,
+      "accuracy_match": null,
+      "forecast_source": null
+    },
+    {
+      "key": "r11",
+      "response_type": "open_ended_batch",
+      "category": "general",
+      "prediction_strategy": "llm_synthesis",
+      "prediction_confidence": 0.6,
+      "answered": true,
+      "accuracy_match": false,
+      "forecast_source": null
+    },
+    {
+      "key": "r12",
+      "response_type": "yes_no",
+      "category": "input",
+      "prediction_strategy": "cbr_majority_vote",
+      "prediction_confidence": 1.0,
+      "answered": true,
+      "accuracy_match": true,
+      "forecast_source": null
+    }
+  ]
+}

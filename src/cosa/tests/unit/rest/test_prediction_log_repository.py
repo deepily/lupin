@@ -105,6 +105,7 @@ class TestGetAccuracySummary( _PLRTestBase ):
             414,   # excluded_legacy_confidence
             10,    # total_predictions
             4,     # total_responded
+            5,     # total_scored (a multi-select row is scored without an actual_value of its own)
             3,     # total_correct
             0.8,   # avg_confidence
         ]
@@ -115,8 +116,10 @@ class TestGetAccuracySummary( _PLRTestBase ):
         self.assertEqual( summary[ "excluded_legacy_confidence" ], 414 )
         self.assertEqual( summary[ "total_predictions" ], 10 )
         self.assertEqual( summary[ "total_responded" ], 4 )
+        self.assertEqual( summary[ "total_scored" ], 5 )
         self.assertEqual( summary[ "total_correct" ], 3 )
-        self.assertEqual( summary[ "accuracy_rate" ], 0.75 )
+        self.assertEqual( summary[ "accuracy_rate" ], 0.6 )      # 3 over the 5 scored rows, never over the 4 answered
+        self.assertEqual( summary[ "status" ], "ok" )
         self.assertEqual( summary[ "avg_confidence" ], 0.8 )
         self.assertEqual( summary[ "by_category" ], { "by_cat": 1 } )
         self.assertEqual( summary[ "by_response_type" ], { "by_type": 2 } )
@@ -128,6 +131,7 @@ class TestGetAccuracySummary( _PLRTestBase ):
             None,  # excluded_legacy_confidence → or 0
             None,  # total_predictions → or 0
             0,     # total_responded  → or 0
+            None,  # total_scored     → or 0
             None,  # total_correct    → or 0
             None,  # avg_confidence   → or 0.0
         ]
@@ -142,8 +146,29 @@ class TestGetAccuracySummary( _PLRTestBase ):
         self.assertEqual( summary[ "total_predictions" ], 0 )
         self.assertEqual( summary[ "total_responded" ], 0 )
         self.assertEqual( summary[ "total_correct" ], 0 )
-        self.assertEqual( summary[ "accuracy_rate" ], 0.0 )
+        self.assertEqual( summary[ "total_scored" ], 0 )
+        self.assertIsNone( summary[ "accuracy_rate" ] )
+        self.assertEqual( summary[ "status" ], "insufficient data" )
         self.assertEqual( summary[ "avg_confidence" ], 0.0 )
+
+
+class TestSummaryScopeFilters( _PLRTestBase ):
+    """The shared window filter drops test_override rows and keeps null forecast sources."""
+
+    def test_the_window_filter_excludes_test_override_rows_and_keeps_null_sources( self ):
+        self.session.query.return_value.filter.return_value.scalar.return_value = 0
+        self.repo._get_breakdown = Mock( return_value={} )
+        self.repo.get_accuracy_summary()
+        window = self.session.query.return_value.filter.call_args_list[ 0 ].args[ 0 ]
+        sql    = str( window.compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": True } ) )
+        self.assertIn( "coalesce(prediction_log.forecast_source, '') != 'test_override'", sql )
+
+    def test_the_scored_count_filters_on_a_non_null_accuracy_match( self ):
+        self.session.query.return_value.filter.return_value.scalar.return_value = 0
+        self.repo._get_breakdown = Mock( return_value={} )
+        self.repo.get_accuracy_summary()
+        sqls = [ str( c.args[ -1 ].compile( dialect=postgresql.dialect() ) ) for c in self.session.query.return_value.filter.call_args_list if len( c.args ) > 1 ]
+        self.assertTrue( any( "accuracy_match IS NOT NULL" in sql for sql in sqls ), sqls )
 
 
 class TestLegacySimilarityClause( unittest.TestCase ):
@@ -192,16 +217,19 @@ class TestLegacyConfidenceClause( unittest.TestCase ):
 class TestGetBreakdown( _PLRTestBase ):
     def test_groups_rows_with_both_responded_arcs( self ):
         rows = [
-            ( "permission",   5, 4, 3 ),     # responded > 0, correct truthy
-            ( "confirmation", 2, 0, None ),  # responded == 0, correct None → 0
+            ( "permission",   5, 4, 4, 3 ),     # scored > 0, correct truthy
+            ( "confirmation", 2, 0, 0, None ),  # scored == 0, correct None → 0, accuracy None
+            ( "batch",        3, 3, 2, 1 ),     # answered 3, scored 2: the rate divides by scored
         ]
         chain = self.session.query.return_value.filter.return_value.group_by.return_value
         chain.all.return_value = rows
         out = self.repo._get_breakdown( base_filter="f", group_column=PredictionLog.category )
         self.assertEqual( out[ "permission" ],
-                          { "count": 5, "responded": 4, "correct": 3, "accuracy": 0.75 } )
+                          { "count": 5, "responded": 4, "scored": 4, "correct": 3, "accuracy": 0.75 } )
         self.assertEqual( out[ "confirmation" ],
-                          { "count": 2, "responded": 0, "correct": 0, "accuracy": 0.0 } )
+                          { "count": 2, "responded": 0, "scored": 0, "correct": 0, "accuracy": None } )
+        self.assertEqual( out[ "batch" ],
+                          { "count": 3, "responded": 3, "scored": 2, "correct": 1, "accuracy": 0.5 } )
 
 
 class TestGetRecent( _PLRTestBase ):

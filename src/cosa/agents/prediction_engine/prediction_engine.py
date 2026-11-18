@@ -33,6 +33,9 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_CBR_TOP_K,
     DEFAULT_CBR_SIMILARITY_THRESHOLD,
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_RETRIEVAL_METRIC,
+    DEFAULT_CALIBRATION_ENABLED,
+    VALID_RETRIEVAL_METRICS,
     DEFAULT_YES_NO_NO_MARGIN,
     DEFAULT_LANCEDB_TABLE,
     DEFAULT_EMBEDDING_FALLBACK_PORT,
@@ -61,6 +64,7 @@ from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.agents.prediction_engine import evidence_recorder
 from cosa.rest.code_identity import get_code_identity
+from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
 from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
 from cosa.utils.notification_utils import extract_qualifier_comment
@@ -121,6 +125,8 @@ class PredictionEngine:
             self.similarity_threshold = config_mgr.get( "prediction engine cbr similarity threshold", default=str( DEFAULT_CBR_SIMILARITY_THRESHOLD ), return_type="float" )
             self.confidence_threshold = config_mgr.get( "prediction engine confidence threshold", default=str( DEFAULT_CONFIDENCE_THRESHOLD ), return_type="float" )
             self.yes_no_no_margin     = config_mgr.get( "prediction engine yes no no margin", default=str( DEFAULT_YES_NO_NO_MARGIN ), return_type="float" )
+            self.retrieval_metric     = config_mgr.get( "prediction engine retrieval metric", default=DEFAULT_RETRIEVAL_METRIC )
+            self.calibration_enabled  = config_mgr.get( "prediction engine calibration enabled", default=str( DEFAULT_CALIBRATION_ENABLED ), return_type="boolean" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -141,6 +147,8 @@ class PredictionEngine:
             self.similarity_threshold = DEFAULT_CBR_SIMILARITY_THRESHOLD
             self.confidence_threshold = DEFAULT_CONFIDENCE_THRESHOLD
             self.yes_no_no_margin     = DEFAULT_YES_NO_NO_MARGIN
+            self.retrieval_metric     = DEFAULT_RETRIEVAL_METRIC
+            self.calibration_enabled  = DEFAULT_CALIBRATION_ENABLED
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -154,10 +162,8 @@ class PredictionEngine:
             self.hint_voting_enabled                = DEFAULT_HINT_VOTING_ENABLED
             self.hint_vote_min_confidence_threshold = DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD
 
-        # Settings the forecast row's config_version names beside the thresholds. Phase 3 reads the
-        # retrieval metric from the INI and phase 9 the calibration switch; until then they hold today's values.
-        self.retrieval_metric     = "dot"
-        self.calibration_enabled  = False
+        if self.retrieval_metric not in VALID_RETRIEVAL_METRICS:
+            raise ValueError( f"prediction engine retrieval metric must be one of {VALID_RETRIEVAL_METRICS}, got {self.retrieval_metric!r}" )
 
         # Retained for _get_embedding_store. None is legitimate — the store then
         # resolves its own configuration.
@@ -484,7 +490,15 @@ class PredictionEngine:
                 limit           = self.cbr_top_k,
                 threshold       = self.similarity_threshold,
                 response_type   = RESPONSE_TYPE_YES_NO,
-                **self._personal_vote_filter( owner_user_id )
+                **self._personal_vote_filter( owner_user_id ),
+                metric          = self.retrieval_metric
+            )
+        except QueryVectorRefused as refusal:
+            return PredictionResult(
+                response_type = RESPONSE_TYPE_YES_NO,
+                category      = category,
+                strategy      = STRATEGY_COLD_START,
+                metadata      = { "reason": f"query_vector_refused: {refusal.reason}" }
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error: {e}" )
@@ -726,7 +740,15 @@ class PredictionEngine:
                 limit           = self.cbr_top_k,
                 threshold       = self.similarity_threshold,
                 response_type   = RESPONSE_TYPE_MULTIPLE_CHOICE,
-                **self._personal_vote_filter( owner_user_id )
+                **self._personal_vote_filter( owner_user_id ),
+                metric          = self.retrieval_metric
+            )
+        except QueryVectorRefused as refusal:
+            return PredictionResult(
+                response_type = RESPONSE_TYPE_MULTIPLE_CHOICE,
+                category      = category,
+                strategy      = STRATEGY_COLD_START,
+                metadata      = { "reason": f"query_vector_refused: {refusal.reason}" }
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error (MC): {e}" )
@@ -1034,7 +1056,15 @@ class PredictionEngine:
                 limit           = self.open_ended_cbr_top_k,
                 threshold       = self.open_ended_cbr_threshold,
                 response_type   = response_type,
-                **self._personal_vote_filter( owner_user_id )
+                **self._personal_vote_filter( owner_user_id ),
+                metric          = self.retrieval_metric
+            )
+        except QueryVectorRefused as refusal:
+            return PredictionResult(
+                response_type = response_type,
+                category      = category,
+                strategy      = STRATEGY_COLD_START,
+                metadata      = { "reason": f"query_vector_refused: {refusal.reason}" }
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error ({label}): {e}" )
@@ -1827,6 +1857,7 @@ class PredictionEngine:
         Ensures:
             - Returns dict with accuracy metrics
             - Safe to call even if no predictions exist
+            - A database failure returns accuracy_rate None and status "error", never a zero rate
         """
         try:
             from cosa.rest.db.database import get_db
@@ -1845,7 +1876,8 @@ class PredictionEngine:
                 "window_days"       : window_days,
                 "total_predictions" : 0,
                 "total_responded"   : 0,
-                "accuracy_rate"     : 0.0,
+                "accuracy_rate"     : None,
+                "status"            : "error",
                 "error"             : str( e )
             }
 

@@ -1,0 +1,153 @@
+{
+  "base_sha": "c78e4b592",
+  "call_kwargs": {
+    "all_pass_floor": {
+      "limit": 10,
+      "threshold": 0.0
+    },
+    "defaults": {},
+    "filtered": {
+      "category": "permission",
+      "data_origin": "organic",
+      "limit": 3,
+      "response_type": "yes_no",
+      "threshold": 0.0
+    }
+  },
+  "calls": {
+    "all_pass_floor": {
+      "results": [
+        {
+          "category": "permission",
+          "data_origin": "organic",
+          "id": "g-long-exact",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "permission",
+          "data_origin": "organic",
+          "id": "g-long-near",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "permission",
+          "data_origin": "synthetic",
+          "id": "g-unit-near",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "confirmation",
+          "data_origin": "organic",
+          "id": "g-unit-mid",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "permission",
+          "data_origin": "organic",
+          "id": "g-tiny-exact",
+          "response_type": "yes_no",
+          "similarity_pct": 19.999998808
+        },
+        {
+          "category": "confirmation",
+          "data_origin": "organic",
+          "id": "g-long-far",
+          "response_type": "multiple_choice",
+          "similarity_pct": 0.0
+        }
+      ],
+      "statements": [
+        {
+          "parameters": {
+            "param_1": 10,
+            "question_embedding_1": "vector:5dffded357c8fcd1"
+          },
+          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.owner_user_id AS prediction_decisions_owner_user_id, prediction_decisions.answer_source AS prediction_decisions_answer_source, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
+        }
+      ]
+    },
+    "defaults": {
+      "results": [
+        {
+          "category": "permission",
+          "data_origin": "organic",
+          "id": "g-long-exact",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "permission",
+          "data_origin": "organic",
+          "id": "g-long-near",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "permission",
+          "data_origin": "synthetic",
+          "id": "g-unit-near",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "confirmation",
+          "data_origin": "organic",
+          "id": "g-unit-mid",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        }
+      ],
+      "statements": [
+        {
+          "parameters": {
+            "param_1": 5,
+            "question_embedding_1": "vector:5dffded357c8fcd1"
+          },
+          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.owner_user_id AS prediction_decisions_owner_user_id, prediction_decisions.answer_source AS prediction_decisions_answer_source, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
+        }
+      ]
+    },
+    "filtered": {
+      "results": [
+        {
+          "category": "permission",
+          "data_origin": "organic",
+          "id": "g-long-exact",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "permission",
+          "data_origin": "organic",
+          "id": "g-long-near",
+          "response_type": "yes_no",
+          "similarity_pct": 100.0
+        },
+        {
+          "category": "permission",
+          "data_origin": "organic",
+          "id": "g-tiny-exact",
+          "response_type": "yes_no",
+          "similarity_pct": 19.999998808
+        }
+      ],
+      "statements": [
+        {
+          "parameters": {
+            "category_1": "permission",
+            "data_origin_1": "organic",
+            "param_1": 3,
+            "question_embedding_1": "vector:5dffded357c8fcd1",
+            "response_type_1": "yes_no"
+          },
+          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.owner_user_id AS prediction_decisions_owner_user_id, prediction_decisions.answer_source AS prediction_decisions_answer_source, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions \nWHERE prediction_decisions.category = %(category_1)s AND prediction_decisions.data_origin = %(data_origin_1)s AND prediction_decisions.response_type = %(response_type_1)s ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
+        }
+      ]
+    }
+  },
+  "note": "Captured from ProxyDecisionEmbeddings.find_similar before any phase 3 change."
+}

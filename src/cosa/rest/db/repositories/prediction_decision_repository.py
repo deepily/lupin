@@ -8,11 +8,14 @@ mirror whose ``question_embedding`` is ANN-searched (HNSW dot). Storage only: th
 
 from typing import List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from cosa.rest.db.embedding_regeneration import validate_fresh_vector
 from cosa.rest.db.repositories.base import BaseRepository
 from cosa.rest.db.repositories.vector_search import dot_topk
-from cosa.rest.db.vector_store_models import PredictionDecision
+from cosa.rest.db.vector_errors import QueryVectorRefused
+from cosa.rest.db.vector_store_models import EMBEDDING_DIM, PredictionDecision
 
 
 class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
@@ -67,20 +70,35 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
                       data_origin: Optional[str] = None,
                       response_type: Optional[str] = None,
                       owner_user_id: Optional[str] = None,
-                      answer_source: Optional[str] = None ) -> List[Tuple[float, PredictionDecision]]:
+                      answer_source: Optional[str] = None,
+                      metric: str = "dot" ) -> List[Tuple[float, PredictionDecision]]:
         """
-        Dot nearest-k over question_embedding with optional scalar filters.
+        Nearest-k over question_embedding with optional scalar filters.
 
         Requires:
             - query_embedding is a dim-768 list; limit is a positive int
             - threshold is a fraction in [0,1] (compared as threshold * 100)
+            - metric is "dot" (the default, used by the decision proxy) or "cosine"
 
         Ensures:
             - returns up to limit ``( similarity_pct, entity )`` tuples, strongest
-              dot first, similarity_pct clamped to [0,100] and kept only when
+              first, similarity_pct clamped to [0,100] and kept only when
               >= threshold * 100 (mirrors ProxyDecisionEmbeddings.find_similar)
             - category / data_origin / response_type / owner_user_id / answer_source are ANDed as exact filters
+            - with metric "dot" the query is exactly what it was before the parameter existed
+            - with metric "cosine", rows whose question_embedding is NULL or has zero norm
+              are never returned (they would make the distance conversion raise)
+
+        Raises:
+            - ValueError if metric is neither "dot" nor "cosine"
+            - QueryVectorRefused on the cosine path when the query vector is missing,
+              of the wrong dimension, non-finite, zero-norm (named so) or out of the current model's band
         """
+        if metric == "cosine":
+            reason = validate_fresh_vector( query_embedding )
+            if reason is not None and query_embedding is not None and len( query_embedding ) == EMBEDDING_DIM and not any( query_embedding ):
+                reason = "query vector has zero norm"   # the validator files a zero vector under the retired unit-norm model
+            if reason is not None: raise QueryVectorRefused( reason )
         exclude_filter = None
         conditions = []
         if category is not None:      conditions.append( PredictionDecision.category      == category )
@@ -88,6 +106,9 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
         if response_type is not None: conditions.append( PredictionDecision.response_type == response_type )
         if owner_user_id is not None: conditions.append( PredictionDecision.owner_user_id == owner_user_id )
         if answer_source is not None: conditions.append( PredictionDecision.answer_source == answer_source )
+        if metric == "cosine":
+            conditions.append( PredictionDecision.question_embedding.is_not( None ) )   # redundant with the norm check below (NULL norm is NULL); guards a future change to that check
+            conditions.append( func.vector_norm( PredictionDecision.question_embedding ) > 0 )
         if conditions:
             from sqlalchemy import and_
             exclude_filter = and_( *conditions )
@@ -95,7 +116,7 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
         return dot_topk(
             self.session, PredictionDecision, PredictionDecision.question_embedding,
             query_embedding, limit=limit, exclude_filter=exclude_filter,
-            threshold_pct=threshold * 100.0, clamp=True,
+            threshold_pct=threshold * 100.0, clamp=True, metric=metric,
         )
 
     def delete_all( self ) -> int:

@@ -16,9 +16,12 @@ opened, NO embedding API is ever called. Zero spend.
 """
 
 import contextlib
+
+import pytest
 from unittest.mock import patch, MagicMock
 
 from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
+from cosa.rest.db.vector_errors import QueryVectorRefused
 
 
 _EMB = [ 0.1 ] * 768
@@ -124,6 +127,25 @@ def test_find_similar_forwards_every_filter():
     kw = repo.find_similar.call_args.kwargs
     assert kw[ "category" ] == "c" and kw[ "limit" ] == 9 and kw[ "threshold" ] == 0.5
     assert kw[ "data_origin" ] == "organic" and kw[ "response_type" ] == "yes_no"
+
+
+def test_find_similar_metric_defaults_to_dot_and_is_forwarded():
+    store = ProxyDecisionEmbeddings()
+    with _repo() as repo:
+        repo.find_similar.return_value = []
+        store.find_similar( _EMB )
+        assert repo.find_similar.call_args.kwargs[ "metric" ] == "dot"
+        store.find_similar( _EMB, metric="cosine" )
+        assert repo.find_similar.call_args.kwargs[ "metric" ] == "cosine"
+
+
+def test_find_similar_lets_a_query_vector_refusal_through():
+    """The refusal is the one exception the catch-all must not swallow."""
+    store = ProxyDecisionEmbeddings( debug=True )
+    with _repo() as repo:
+        repo.find_similar.side_effect = QueryVectorRefused( "wrong dimension 3 (expected 768)" )
+        with pytest.raises( QueryVectorRefused, match="wrong dimension 3" ):
+            store.find_similar( _EMB, metric="cosine" )
 
 
 def test_find_similar_null_embedding_and_non_fatal( capsys ):

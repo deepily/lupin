@@ -1095,6 +1095,7 @@ def test_get_accuracy_summary_exception_returns_error_dict():
     assert result[ "window_days" ] == 7
     assert result[ "total_predictions" ] == 0
     assert "db down" in result[ "error" ]
+    assert result[ "accuracy_rate" ] is None and result[ "status" ] == "error"
 
 
 # =========================================================================== #

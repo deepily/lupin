@@ -155,6 +155,8 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine cbr similarity threshold"      : 0.8,
                 "prediction engine confidence threshold"          : 0.65,
                 "prediction engine yes no no margin"              : 2.5,
+                "prediction engine retrieval metric"              : "cosine",
+                "prediction engine calibration enabled"           : True,
                 "prediction engine lancedb table"                 : "tbl_x",
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
@@ -184,6 +186,8 @@ def test_init_with_config_mgr_reads_keys():
     assert eng.hint_voting_enabled is True
     assert eng.hint_vote_min_confidence_threshold == 0.5
     assert eng.yes_no_no_margin == 2.5
+    assert eng.retrieval_metric == "cosine"
+    assert eng.calibration_enabled is True
     # debug = config(False) OR debug(True) = True
     assert eng.debug is True
     PredictionEngine.reset()
@@ -1311,7 +1315,7 @@ def test_get_accuracy_summary_exception_returns_error_dict( wired_engine, monkey
     wired_engine.debug = True
     out = wired_engine.get_accuracy_summary( window_days=14 )
     assert out[ "total_predictions" ] == 0
-    assert out[ "accuracy_rate" ] == 0.0
+    assert out[ "accuracy_rate" ] is None and out[ "status" ] == "error"
     assert "db-down" in out[ "error" ]
 
 
