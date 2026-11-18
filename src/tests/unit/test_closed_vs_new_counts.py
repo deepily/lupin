@@ -507,3 +507,145 @@ def test_straggler_exclusion_holds_under_a_project_filter( monkeypatch ):
     created_sql, _ = _compiled_counts( monkeypatch, project="lupin" )
     assert "NOT IN (SELECT task_items.id" in created_sql
     assert "task_items.project = 'lupin'" in created_sql
+
+
+# --------------------------------------------------------------------------------------
+# A row now wont_fix or dropped was never submitted (Rick's ruling, 2026-11-18, row 173b4747)
+# --------------------------------------------------------------------------------------
+#
+# These run the REAL statement count_created_and_closed builds, compiled by SQLAlchemy for
+# SQLite, against two minimal tables carrying only the columns the statement reads. The
+# full ORM schema cannot be built on SQLite (JSONB, see the `like` fixture), and a mock
+# would answer whatever it was told, so this is the cheapest way to ask a real engine
+# whether a dismissed row's creation is counted.
+
+
+def _flow_db( monkeypatch, rows ):
+    """
+    Build an in-memory SQLite board from `rows` and route Query.scalar to it.
+
+    Requires:
+        - rows is a list of ( status, [ transition, ... ] ) or
+          ( status, [ transition, ... ], project ) tuples, one per task item
+
+    Ensures:
+        - returns a function counts( project=None ) -> ( created, closed ), computed by
+          running the real statement of TaskRepository.count_created_and_closed
+        - every event sits inside the window the function asks about
+    """
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine
+    from sqlalchemy.orm import Query, Session
+
+    engine = create_engine( "sqlite:///:memory:" )
+    meta   = MetaData()
+    items  = Table( "task_items", meta,
+                    Column( "id", String, primary_key=True ),
+                    Column( "status", String ),
+                    Column( "project", String ),
+                    Column( "correlation_key", String ) )
+    events = Table( "task_events", meta,
+                    Column( "id", Integer, primary_key=True ),
+                    Column( "item_id", String ),
+                    Column( "transition", String ),
+                    Column( "ts", DateTime( timezone=True ) ) )
+    meta.create_all( engine )
+
+    ts = datetime( 2026, 11, 18, 12, tzinfo=timezone.utc )
+    with engine.begin() as conn:
+        for row in rows:
+            status, transitions = row[ 0 ], row[ 1 ]
+            project             = row[ 2 ] if len( row ) > 2 else "lupin"
+            item_id             = str( uuid.uuid4() )
+            conn.execute( items.insert().values( id=item_id, status=status, project=project,
+                                                 correlation_key=None ) )
+            for t in transitions:
+                conn.execute( events.insert().values( item_id=item_id, transition=t, ts=ts ) )
+
+    def _scalar( self ):
+        with engine.connect() as conn:
+            return conn.execute( self.statement ).scalar()
+    monkeypatch.setattr( Query, "scalar", _scalar )
+
+    def counts( project=None ):
+        result = TaskRepository( Session() ).count_created_and_closed(
+            since=datetime( 2026, 11, 1, tzinfo=timezone.utc ), project=project )
+        return result[ "created" ], result[ "closed" ]
+    return counts
+
+
+LIVE_ROW = ( "in_progress", [ "->queued", "queued->in_progress" ] )
+
+
+def test_a_row_that_ends_wont_fix_is_in_neither_count( monkeypatch ):
+    """
+    (a) Opening a row and then won't-fixing it moves neither side of the ratio.
+
+    The live row is the positive control. The same engine and statement do count a
+    creation, so a zero for the won't-fix row is the exclusion and not a dead query.
+    """
+    counts = _flow_db( monkeypatch, [ ( "wont_fix", [ "->queued", "queued->wont_fix" ] ), LIVE_ROW ] )
+    assert counts() == ( 1, 0 ), "only the live row's creation should count"
+
+
+def test_a_row_that_ends_dropped_is_in_neither_count( monkeypatch ):
+    """(b) The same rule for dropped, with the same positive control."""
+    counts = _flow_db( monkeypatch, [ ( "dropped", [ "->queued", "in_progress->dropped" ] ), LIVE_ROW ] )
+    assert counts() == ( 1, 0 ), "only the live row's creation should count"
+
+
+def test_a_live_row_is_still_counted_as_created( monkeypatch ):
+    """(c) A row still open, even one created blocked, is counted as created."""
+    counts = _flow_db( monkeypatch, [ LIVE_ROW, ( "blocked", [ "->blocked" ] ), ( "parked", [ "->queued", "queued->parked" ] ) ] )
+    assert counts() == ( 3, 0 )
+
+
+def test_a_done_row_counts_once_in_each( monkeypatch ):
+    """
+    (d) Done rows are untouched by the rule.
+
+    One created normally and one created directly into done each count once as
+    created and once as closed.
+    """
+    counts = _flow_db( monkeypatch, [ ( "done", [ "->queued", "queued->done" ] ), ( "done", [ "->done" ] ) ] )
+    assert counts() == ( 2, 2 )
+
+
+def test_the_exclusion_holds_under_a_project_filter( monkeypatch ):
+    """The project-filtered count applies the same rule and still filters by project."""
+    counts = _flow_db( monkeypatch, [
+        ( "wont_fix", [ "->queued", "queued->wont_fix" ] ),
+        LIVE_ROW,
+        ( "queued", [ "->queued" ], "other-project" ),
+    ] )
+    assert counts( project="lupin" ) == ( 1, 0 )
+    assert counts()                  == ( 2, 0 )
+
+
+def test_the_dismissed_row_tests_can_see_the_rule_switched_off( monkeypatch ):
+    """
+    Contrast arm: with the status list emptied, dismissed rows count as created again.
+
+    Without this, the tests above could be passing on a fixture that never counts those
+    rows at all.
+    """
+    import cosa.rest.db.repositories.task_repository as tr
+    monkeypatch.setattr( tr, "FLOW_NEVER_SUBMITTED_STATUSES", () )
+    counts = _flow_db( monkeypatch, [
+        ( "wont_fix", [ "->queued", "queued->wont_fix" ] ),
+        ( "dropped",  [ "->queued", "queued->dropped" ] ),
+        LIVE_ROW,
+    ] )
+    assert counts() == ( 3, 0 )
+
+
+def test_the_closed_count_does_not_read_item_status( monkeypatch ):
+    """
+    The status exclusion is on created alone.
+
+    Closed stays done-only through its transition pattern.
+    """
+    created_sql, closed_sql = _compiled_counts( monkeypatch )
+    assert "task_items.status IN ('wont_fix', 'dropped')" in created_sql, created_sql
+    assert "task_items.status" not in closed_sql, closed_sql

@@ -3872,8 +3872,8 @@ def get_flow_ratio(
           otherwise "refuse"
         - counts come from SQL `COUNT`, never a page length (TaskRepository.count_created_and_closed)
 
-    The window can flip the verdict, so it is echoed back: one live board gave 0.77 (allow) at 24h
-    and 1.10 (refuse) at 168h. `dropped` is not a closure, so deleting evidence cannot defeat the gate.
+    The window can flip the verdict, so it is echoed back (0.77 allow at 24h, 1.10 refuse at 168h).
+    Closed is done-only; a row now `wont_fix` or `dropped` also leaves the created count.
     """
     # Resolved per-request so an operator move takes effect without a bounce. An
     # explicit ?window_hours= still wins — the caller asked a specific question.

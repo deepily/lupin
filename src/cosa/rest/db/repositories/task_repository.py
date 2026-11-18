@@ -40,6 +40,11 @@ CLOSED_TRANSITION_LIKE  = "%->done"
 # Rows under this correlation-key prefix are excluded from both counts — the worktree
 # janitor's straggler tickets (cosa.agents.shared.worktree_straggler_tickets).
 FLOW_EXCLUDED_KEY_PREFIX = "worktree:"
+# Rows whose current status is one of these are treated as never submitted: they leave the
+# created count entirely (Rick's ruling, row 173b4747). Opening a row and then
+# dismissing it moves neither side of the ratio. Closed stays done-only, so dismissal never
+# pads the closed side either.
+FLOW_NEVER_SUBMITTED_STATUSES = ( "wont_fix", "dropped" )
 from cosa.rest.task_store_rules import (
     BOARD_INVISIBLE_STATUSES,
     TERMINAL_STATUSES,
@@ -1492,7 +1497,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Count creations and closures in a time window, in SQL.
 
-        This feeds the closed-vs-new ratio gate. query_events cannot answer it. Its filters are exact-match, closures arrive as several strings, and a page length caps at 500, the limit of query_tasks and the endpoint. Created matches the prefix pattern "->%" (an empty left side). Closed matches "%->done". Patterns replace status lists, so a new status cannot undercount silently. The dropped status is excluded from closed, and the accepted cost is that legitimate board hygiene earns no credit. Otherwise dropping stale rows and minting new ones would hold the ratio forever. A row created directly into done matches both patterns and counts once in each (pinned by test_a_row_born_done_would_count_as_both).
+        This feeds the closed-vs-new ratio gate. query_events cannot answer it. Its filters are exact-match, closures arrive as several strings, and a page length caps at 500, the limit of query_tasks and the endpoint. Created matches the prefix pattern "->%" (an empty left side). Closed matches "%->done". Patterns replace status lists, so a new status cannot undercount silently. Closed is done-only: dropped and wont_fix are never closures. Otherwise dropping stale rows and minting new ones would hold the ratio forever. A row whose current status is wont_fix or dropped counts as never submitted, so it leaves the created count too. Opening and then dismissing a row therefore moves neither side. The accepted cost: a row dismissed later leaves the created count then, so a past reading can move down. A row created directly into done matches both patterns and counts once in each (pinned by test_a_row_born_done_would_count_as_both).
 
         Requires:
             - since is a datetime bounding TaskEvent.ts inclusively (>=)
@@ -1504,6 +1509,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
                         "window_end": datetime | None, "project": str | None }
             - counts come from a SQL `COUNT`, never from len() of a page, so no cap applies
             - items whose correlation_key starts with FLOW_EXCLUDED_KEY_PREFIX are excluded from both counts
+            - items whose current status is in FLOW_NEVER_SUBMITTED_STATUSES are excluded from created
             - the caller computes the ratio, because division by zero is a policy question and policy does not belong in a repository:
               closed == 0 with creations is a deny, and 0/0 is an allow
 
@@ -1513,7 +1519,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         created_pattern = CREATED_TRANSITION_LIKE
         closed_pattern  = CLOSED_TRANSITION_LIKE
 
-        def _scoped( pattern ):
+        def _scoped( pattern, never_submitted_out=False ):
             q = self.session.query( func.count( TaskEvent.id ) )
             # The janitor's straggler lane is not flow (Rick's keypress, 2026-09-29): its
             # rows are minted by the arbiter and close as `dropped`, which this count never
@@ -1521,6 +1527,12 @@ class TaskRepository( BaseRepository[TaskItem] ):
             # A NOT IN over that lane's (few) ids keeps fleet-wide free of the join.
             q = q.filter( ~TaskEvent.item_id.in_(
                 select( TaskItem.id ).where( TaskItem.correlation_key.startswith( FLOW_EXCLUDED_KEY_PREFIX ) ) ) )
+            # A row now wont_fix or dropped was never submitted, so its creation is not counted.
+            # An exclusion subquery like the one above, so fleet-wide stays join-free. Unlike the straggler
+            # lane this set is not small: it holds every wont_fix or dropped row and keeps growing.
+            if never_submitted_out:
+                q = q.filter( ~TaskEvent.item_id.in_(
+                    select( TaskItem.id ).where( TaskItem.status.in_( FLOW_NEVER_SUBMITTED_STATUSES ) ) ) )
             if project is not None:
                 q = q.join( TaskItem, TaskEvent.item_id == TaskItem.id ).filter( TaskItem.project == project )
             q = q.filter( TaskEvent.transition.like( pattern ) )
@@ -1529,7 +1541,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             return q.scalar() or 0
 
         return {
-            "created"      : _scoped( created_pattern ),
+            "created"      : _scoped( created_pattern, never_submitted_out=True ),
             "closed"       : _scoped( closed_pattern ),
             "window_start" : since,
             "window_end"   : until,
