@@ -3,7 +3,7 @@ Golden-value pin for the proxy path of ``ProxyDecisionEmbeddings.find_similar``.
 
 The retrieval repair adds an opt-in ``metric`` parameter to this wrapper and to
 ``PredictionDecisionRepository.find_similar``. The decision proxy builds the same wrapper and must
-see no change. The committed golden file was captured at base sha 13845f13e, before that code
+see no change. The committed golden file was captured at base sha c78e4b592, before that code
 was written, and records
 
     - the SQL statement the call emits (the dialect-compiled text, parameters beside it), and
@@ -31,8 +31,8 @@ from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEm
 from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM
 
-GOLDEN_PATH = os.path.join( os.path.dirname( __file__ ), "golden", "proxy_find_similar_base_13845f13e.json" )
-BASE_SHA    = "13845f13e"
+GOLDEN_PATH = os.path.join( os.path.dirname( __file__ ), "golden", "proxy_find_similar_base_c78e4b592.json" )
+BASE_SHA    = "c78e4b592"
 
 
 def _unit( *first ):

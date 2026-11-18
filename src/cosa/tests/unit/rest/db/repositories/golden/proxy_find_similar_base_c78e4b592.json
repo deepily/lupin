@@ -1,5 +1,5 @@
 {
-  "base_sha": "13845f13e",
+  "base_sha": "c78e4b592",
   "call_kwargs": {
     "all_pass_floor": {
       "limit": 10,
@@ -66,7 +66,7 @@
             "param_1": 10,
             "question_embedding_1": "vector:5dffded357c8fcd1"
           },
-          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
+          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.owner_user_id AS prediction_decisions_owner_user_id, prediction_decisions.answer_source AS prediction_decisions_answer_source, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
         }
       ]
     },
@@ -107,7 +107,7 @@
             "param_1": 5,
             "question_embedding_1": "vector:5dffded357c8fcd1"
           },
-          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
+          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.owner_user_id AS prediction_decisions_owner_user_id, prediction_decisions.answer_source AS prediction_decisions_answer_source, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
         }
       ]
     },
@@ -144,7 +144,7 @@
             "question_embedding_1": "vector:5dffded357c8fcd1",
             "response_type_1": "yes_no"
           },
-          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions \nWHERE prediction_decisions.category = %(category_1)s AND prediction_decisions.data_origin = %(data_origin_1)s AND prediction_decisions.response_type = %(response_type_1)s ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
+          "statement": "SELECT prediction_decisions.id AS prediction_decisions_id, prediction_decisions.question AS prediction_decisions_question, prediction_decisions.category AS prediction_decisions_category, prediction_decisions.decision_value AS prediction_decisions_decision_value, prediction_decisions.ratification_state AS prediction_decisions_ratification_state, prediction_decisions.data_origin AS prediction_decisions_data_origin, prediction_decisions.response_type AS prediction_decisions_response_type, prediction_decisions.question_embedding AS prediction_decisions_question_embedding, prediction_decisions.created_at AS prediction_decisions_created_at, prediction_decisions.owner_user_id AS prediction_decisions_owner_user_id, prediction_decisions.answer_source AS prediction_decisions_answer_source, prediction_decisions.question_embedding <#> %(question_embedding_1)s AS distance \nFROM prediction_decisions \nWHERE prediction_decisions.category = %(category_1)s AND prediction_decisions.data_origin = %(data_origin_1)s AND prediction_decisions.response_type = %(response_type_1)s ORDER BY (prediction_decisions.question_embedding <#> %(question_embedding_1)s) ASC \n LIMIT %(param_1)s"
         }
       ]
     }
