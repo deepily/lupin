@@ -38,6 +38,7 @@ from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest.routers._pinned_open import PinnedPathGone, landed_path_of_fd
 from cosa.rest.routers._scope_registry import _prefix_looks_like_credential, landed_relative_path
 from cosa.rest.v2.source_document import ALLOWED_SOURCE_EXTENSIONS
+from cosa.utils.notification_utils import extract_qualifier_comment
 
 _READ_CHUNK = 1024 * 1024
 
@@ -65,8 +66,6 @@ ASK_TIMEOUT_SECONDS = 60
 RESPONSE_DEFAULT    = "yes"
 UNANSWERED_MEANS    = "If you do not answer within a minute, the podcast starts: silence is a yes here (the operator's ruling of 2026-10-24)."
 
-# The answer card appends a typed comment to the chosen word: "yes [comment: …]".
-COMMENT_MARKER = "[comment:"
 DRY_RUN_KEY     = "podcast proxy dry run"
 DRY_RUN_STATUS  = "dry run"
 DRY_RUN_ENV     = "LUPIN_PODCAST_PROXY_DRY_RUN"
@@ -377,11 +376,11 @@ def answer_word( value ):
         - value is the stored answer's "value", of any type
 
     Ensures:
-        - returns the lowercased text before `COMMENT_MARKER`, stripped: "Yes [comment: go]" gives "yes"
-        - returns "" for a value that is not a string
+        - returns the stance the one parser reads: "Yes [comment: go]" gives "yes"
+        - returns "" for a value that is not a string, or has no recognised stance
     """
     if not isinstance( value, str ): return ""
-    return value.split( COMMENT_MARKER, 1 )[ 0 ].strip().lower()
+    return extract_qualifier_comment( value )[ 0 ] or ""
 
 
 def default_yes_due( card, now ):

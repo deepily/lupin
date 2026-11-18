@@ -51,6 +51,8 @@ def operator_login( monkeypatch ):
     ( "neither", "neither" ),
     ( None, "" ),
     ( 1, "" ),
+    ( "maybe later", "" ),
+    ( "Yes.", "" ),
 ] )
 def test_the_word_is_what_precedes_the_comment( value, word ):
     assert pp.answer_word( value ) == word

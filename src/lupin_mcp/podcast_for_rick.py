@@ -9,6 +9,7 @@ import os
 import time
 from datetime import datetime, timezone
 
+from cosa.utils.notification_utils import extract_qualifier_comment
 from lupin_mcp.memento_repo_root import _default_run, _git_answer, repo_root_owning
 from lupin_mcp.task_store_tools import task_store_request
 
@@ -19,7 +20,6 @@ CARD_FACTS_PATH       = "/api/podcast-proxy/card/{card_id}"
 DRY_RUN_STATUS        = "dry run"   # the start door's own word when its dry-run switch is on; the tool must not call that started
 POLL_INTERVAL_SECONDS = 3.0
 POLL_FAILURE_LIMIT    = 5
-COMMENT_MARKER        = "[comment:"   # the answer card appends a typed comment to the chosen word: "yes [comment: …]"
 WORKTREE_ADVICE       = "write it to the main checkout's io/tmp"
 CLAIMED_NO_JOB_HINT   = "A start of this card is under way, or one did not finish. Do not start it again: read the card, and if it stays so, ask afresh with the path for a new card."
 
@@ -111,7 +111,7 @@ def _verdict( answer ):
     value = value if isinstance( value, dict ) else { }
     if value.get( "source" ) == "timeout_default": return "default"
     word  = value.get( "value" )
-    word  = word.split( COMMENT_MARKER, 1 )[ 0 ].strip().lower() if isinstance( word, str ) else ""
+    word  = ( extract_qualifier_comment( word )[ 0 ] or "" ) if isinstance( word, str ) else ""
     return "yes" if word == "yes" else "no"
 
 

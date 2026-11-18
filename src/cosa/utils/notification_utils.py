@@ -209,35 +209,47 @@ def convert_open_ended_batch_for_api( questions: list ) -> dict:
     return { "questions": converted }
 
 
+STANCE_PATTERN = re.compile( r'^(yes|no|neither)\s*(?:\[comment:\s*(?:(.*)\]|([^\]]*)))?$', re.IGNORECASE | re.DOTALL )
+
+
 def extract_qualifier_comment( response_value ):
     """
-    Extract qualifier comment from a yes/no/neither response value.
+    Extract the stance and the qualifier comment from a yes/no/neither response value.
+
+    This is the one parser every stance reader goes through. A string it does not
+    recognise has no stance: it is never read as the stance its first letters spell.
 
     Requires:
         - response_value is a string or None
 
     Ensures:
         - Returns ( answer, qualifier ) tuple
-        - answer is "yes", "no", or "neither" (lowercase), or None if empty
-        - qualifier is the comment text or None
+        - answer is "yes", "no" or "neither" (lowercase), or None when the value is empty
+          or not one of the recognised shapes
+        - qualifier is the comment text, or None when there is no comment or it is blank
+        - A comment may span lines, and an unterminated comment ("yes [comment: text")
+          still gives its stance and the text after the marker
+        - Text after a closing bracket, trailing punctuation and "yes, but later" are
+          not recognised, so they give ( None, None )
 
     Examples:
         "yes [comment: fix the tests]"         -> ( "yes", "fix the tests" )
         "no [comment: not ready]"              -> ( "no", "not ready" )
         "neither [comment: re-frame please]"   -> ( "neither", "re-frame please" )
+        "yes [comment: a\\nb]"                  -> ( "yes", "a\\nb" )
+        "yes [comment: unterminated"           -> ( "yes", "unterminated" )
         "yes"                                  -> ( "yes", None )
-        "no"                                   -> ( "no", None )
-        "neither"                              -> ( "neither", None )
+        "Maybe later"                          -> ( None, None )
     """
     if not response_value:
         return ( None, None )
 
-    match = re.match( r'^(yes|no|neither)\s*(?:\[comment:\s*(.+)\])?$', response_value.strip(), re.IGNORECASE )
-    if match:
-        return ( match.group( 1 ).lower(), match.group( 2 ) )
+    match = STANCE_PATTERN.match( response_value.strip() )
+    if match is None:
+        return ( None, None )
 
-    # Fallback: treat the whole string as the answer
-    return ( response_value.strip().lower(), None )
+    qualifier = ( match.group( 2 ) or match.group( 3 ) or "" ).strip()
+    return ( match.group( 1 ).lower(), qualifier if qualifier else None )
 
 
 def format_qualified_response( answer, qualifier ):

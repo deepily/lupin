@@ -766,6 +766,30 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    def test_an_unrecognised_answer_is_no_stance_and_allows_stop( self, mock_notify, mock_sender, mock_read,
+                                        mock_log, mock_session, mock_drain, mock_emit,
+                                        mock_reset, mock_summarize, mock_resolve, mock_gate ):
+        """An answer with no recognised stance allows the stop (emit {})."""
+        mock_response = MagicMock()
+        mock_response.response_value = "Maybe later"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        main()
+
+        mock_emit.assert_called_once_with( {} )
+
+    @patch( "lupin_cli.claude_code.hooks.stop._should_ask_anything_else", return_value=True )
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
     def test_no_with_qualifier_instruction_blocks_stop( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                           mock_log, mock_session, mock_drain, mock_emit,

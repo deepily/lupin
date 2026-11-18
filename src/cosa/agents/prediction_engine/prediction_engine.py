@@ -53,7 +53,11 @@ from cosa.agents.prediction_engine.config import (
 from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
-from cosa.agents.prediction_engine.accuracy_comparators import get_comparator, _extract_qualifier
+from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
+from cosa.utils.notification_utils import extract_qualifier_comment
+
+
+REASON_NEITHER_MAJORITY = "neither_majority_abstains_until_phase_8"
 
 
 class PredictionEngine:
@@ -449,14 +453,37 @@ class PredictionEngine:
 
         for similarity_pct, record in similar_cases:
             decision_value = record.get( "decision_value", "" )
-            # Extract binary from potential qualified value
-            binary_value = "yes" if decision_value.lower().startswith( "yes" ) else "no"
-            votes[ binary_value ] = votes.get( binary_value, 0.0 ) + self._ratified_weight( record )
+            # The one stance parser: "neither" votes as "neither", and a value it does not
+            # recognise has no stance, so the case casts no vote.
+            stance, _ = extract_qualifier_comment( decision_value )
+            if stance is None: continue
+            votes[ stance ] = votes.get( stance, 0.0 ) + self._ratified_weight( record )
             max_similarity = max( max_similarity, similarity_pct / 100.0 )
+
+        if not votes:
+            return PredictionResult(
+                response_type      = RESPONSE_TYPE_YES_NO,
+                category           = category,
+                strategy           = STRATEGY_COLD_START,
+                similar_case_count = len( similar_cases ),
+                metadata           = { "reason": "no_recognised_stance" }
+            )
 
         # Winner = highest (most positive) tally; consistency bounded to [0,1] via
         # positive-mass normalization so negative (steer-away) votes can't break it.
         winner = max( votes, key=votes.get )
+
+        # A "neither" majority is counted in the vote but gives no hint: the hint card and its
+        # clients know only yes and no. The engine abstains with a named reason until phase 8
+        # (the three-way stance) lifts this; the pinned test in test_prediction_engine_stance_vote.py goes then.
+        if winner == "neither":
+            return PredictionResult(
+                response_type      = RESPONSE_TYPE_YES_NO,
+                category           = category,
+                strategy           = STRATEGY_COLD_START,
+                similar_case_count = len( similar_cases ),
+                metadata           = { "reason": REASON_NEITHER_MAJORITY, "votes": votes }
+            )
 
         # D14 prior: answers are about 79% yes, and a plain majority said "no" far too
         # often (35% right). "no" must beat "yes" by yes_no_no_margin to stand.
@@ -475,11 +502,10 @@ class PredictionEngine:
         qualifier_similarity = 0.0
 
         for similarity_pct, record in similar_cases:
-            decision_value = record.get( "decision_value", "" )
-            binary_value   = "yes" if decision_value.lower().startswith( "yes" ) else "no"
+            decision_value      = record.get( "decision_value", "" )
+            stance, qualifier   = extract_qualifier_comment( decision_value )
 
-            if binary_value == winner:
-                qualifier = _extract_qualifier( decision_value )
+            if stance == winner:
                 if qualifier and similarity_pct > qualifier_similarity:
                     winning_qualifier    = qualifier
                     qualifier_similarity = similarity_pct

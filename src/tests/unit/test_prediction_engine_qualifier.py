@@ -3,7 +3,7 @@
 Unit tests for Slice 1.5: Qualified yes/no prediction.
 
 Tests for:
-    - _extract_qualifier() edge cases
+    - the qualifier half of extract_qualifier_comment() edge cases
     - _predict_yes_no() qualifier selection from winning-side cases
     - compare_yes_no() predicted_qualifier tracking
     - _wrap_predicted_value() qualifier inclusion
@@ -16,67 +16,67 @@ from unittest.mock import MagicMock, patch
 
 
 # ===========================================================================
-# TestExtractQualifier — edge cases for _extract_qualifier()
+# TestExtractQualifier — qualifier edge cases of the one stance parser
 # ===========================================================================
 
 class TestExtractQualifier:
-    """Tests for _extract_qualifier() helper in accuracy_comparators."""
+    """Tests for the qualifier half of the one stance parser."""
 
     def test_simple_qualifier( self ):
         """Extract qualifier from standard format."""
-        from cosa.agents.prediction_engine.accuracy_comparators import _extract_qualifier
+        from cosa.utils.notification_utils import extract_qualifier_comment as _eqc
 
-        result = _extract_qualifier( "yes [comment: only the March ones]" )
+        result = _eqc( "yes [comment: only the March ones]" )[ 1 ]
         assert result == "only the March ones"
 
     def test_no_qualifier( self ):
         """Return None when no qualifier present."""
-        from cosa.agents.prediction_engine.accuracy_comparators import _extract_qualifier
+        from cosa.utils.notification_utils import extract_qualifier_comment as _eqc
 
-        result = _extract_qualifier( "yes" )
+        result = _eqc( "yes" )[ 1 ]
         assert result is None
 
     def test_empty_string( self ):
         """Return None for empty string."""
-        from cosa.agents.prediction_engine.accuracy_comparators import _extract_qualifier
+        from cosa.utils.notification_utils import extract_qualifier_comment as _eqc
 
-        result = _extract_qualifier( "" )
+        result = _eqc( "" )[ 1 ]
         assert result is None
 
     def test_none_input( self ):
         """Return None for None input."""
-        from cosa.agents.prediction_engine.accuracy_comparators import _extract_qualifier
+        from cosa.utils.notification_utils import extract_qualifier_comment as _eqc
 
-        result = _extract_qualifier( None )
+        result = _eqc( None )[ 1 ]
         assert result is None
 
     def test_missing_closing_bracket( self ):
         """Handle missing closing bracket gracefully."""
-        from cosa.agents.prediction_engine.accuracy_comparators import _extract_qualifier
+        from cosa.utils.notification_utils import extract_qualifier_comment as _eqc
 
-        result = _extract_qualifier( "yes [comment: only the old files" )
+        result = _eqc( "yes [comment: only the old files" )[ 1 ]
         assert result == "only the old files"
 
     def test_case_insensitive_marker( self ):
         """Marker lookup is case-insensitive."""
-        from cosa.agents.prediction_engine.accuracy_comparators import _extract_qualifier
+        from cosa.utils.notification_utils import extract_qualifier_comment as _eqc
 
-        result = _extract_qualifier( "yes [Comment: uppercase marker]" )
+        result = _eqc( "yes [Comment: uppercase marker]" )[ 1 ]
         assert result == "uppercase marker"
 
     def test_no_value_with_qualifier( self ):
         """Qualifier on 'no' value."""
-        from cosa.agents.prediction_engine.accuracy_comparators import _extract_qualifier
+        from cosa.utils.notification_utils import extract_qualifier_comment as _eqc
 
-        result = _extract_qualifier( "no [comment: check with team first]" )
+        result = _eqc( "no [comment: check with team first]" )[ 1 ]
         assert result == "check with team first"
 
     def test_empty_qualifier( self ):
-        """Empty comment returns empty string which is falsy."""
-        from cosa.agents.prediction_engine.accuracy_comparators import _extract_qualifier
+        """An empty comment is no qualifier."""
+        from cosa.utils.notification_utils import extract_qualifier_comment as _eqc
 
-        result = _extract_qualifier( "yes [comment: ]" )
-        assert result == ""
+        result = _eqc( "yes [comment: ]" )[ 1 ]
+        assert result is None
 
 
 # ===========================================================================

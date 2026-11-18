@@ -17,6 +17,7 @@ from cosa.agents.prediction_engine.config import (
     MULTI_SELECT_JACCARD_THRESHOLD,
     OPEN_ENDED_SIMILARITY_THRESHOLD,
 )
+from cosa.utils.notification_utils import extract_qualifier_comment
 
 
 def compare_yes_no( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple[Optional[bool], Dict[str, Any]]:
@@ -25,12 +26,15 @@ def compare_yes_no( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple
 
     Requires:
         - predicted and actual are dicts with "value" key, or None
-        - value is "yes" or "no" (possibly with "[comment: ...]" suffix)
+        - value is "yes", "no" or "neither" (possibly with "[comment: ...]" suffix)
 
     Ensures:
         - Returns (match_bool, detail_dict)
-        - match is True if base binary values match
+        - match is True only when both sides carry the same recognised stance; a value with
+          no stance reads as "" and never matches, not even another such value
         - detail includes predicted_binary, actual_binary, and qualifier info
+        - detail["qualifier_match"] says whether the two comments agree, apart from `match`,
+          so a right stance with a different comment is told from a wrong stance
         - Returns (None, {}) if either input is None
     """
     if predicted is None or actual is None:
@@ -39,11 +43,14 @@ def compare_yes_no( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple
     predicted_value = predicted.get( "value", "" )
     actual_value    = actual.get( "value", "" )
 
-    # Extract base binary value (strip "[comment: ...]" suffix)
-    predicted_binary = _extract_binary( predicted_value )
-    actual_binary    = _extract_binary( actual_value )
+    # The one stance parser. A value it does not recognise has no stance and reads as "".
+    predicted_stance, predicted_comment = extract_qualifier_comment( predicted_value )
+    actual_stance,    actual_qualifier  = extract_qualifier_comment( actual_value )
+    predicted_binary = predicted_stance or ""
+    actual_binary    = actual_stance or ""
 
-    match = predicted_binary == actual_binary
+    # A side with no recognised stance cannot be right, so two unrecognised values do not match
+    match = predicted_binary != "" and predicted_binary == actual_binary
 
     detail = {
         "predicted_binary" : predicted_binary,
@@ -51,15 +58,17 @@ def compare_yes_no( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple
         "match"            : match,
     }
 
-    # Check for qualifier (comment) in actual
-    actual_qualifier = _extract_qualifier( actual_value )
     if actual_qualifier:
         detail[ "actual_qualifier" ] = actual_qualifier
 
-    # Check for qualifier (comment) in predicted
-    predicted_qualifier = predicted.get( "qualifier" )
+    # The predictor's own qualifier arrives beside the value, as a key, not inside it
+    predicted_qualifier = predicted.get( "qualifier" ) or predicted_comment
     if predicted_qualifier:
         detail[ "predicted_qualifier" ] = predicted_qualifier
+
+    # A qualifier-only difference: the stance is right, the comment is not the same.
+    # It is reported apart from stance errors, which are the `match` key.
+    detail[ "qualifier_match" ] = ( predicted_qualifier or None ) == ( actual_qualifier or None )
 
     return ( match, detail )
 
@@ -341,51 +350,6 @@ def get_comparator( response_type: str, actual_value: Any = None, open_ended_thr
         return partial( comparator, threshold=open_ended_threshold )
 
     return comparator
-
-
-def _extract_binary( value: str ) -> str:
-    """
-    Extract binary yes/no from a value that may include a qualifier.
-
-    Examples:
-        "yes"                    → "yes"
-        "no"                     → "no"
-        "yes [comment: only old]" → "yes"
-    """
-    if not value:
-        return ""
-
-    value_lower = value.strip().lower()
-
-    if value_lower.startswith( "yes" ):
-        return "yes"
-    elif value_lower.startswith( "no" ):
-        return "no"
-
-    return value_lower
-
-
-def _extract_qualifier( value: str ) -> Optional[str]:
-    """
-    Extract qualifier comment from a yes/no response.
-
-    Example: "yes [comment: only the March ones]" → "only the March ones"
-    """
-    if not value:
-        return None
-
-    marker = "[comment:"
-    idx = value.lower().find( marker )
-    if idx == -1:
-        return None
-
-    # Extract text between "[comment:" and "]"
-    start = idx + len( marker )
-    end   = value.find( "]", start )
-    if end == -1:
-        return value[ start: ].strip()
-
-    return value[ start:end ].strip()
 
 
 def quick_smoke_test():
