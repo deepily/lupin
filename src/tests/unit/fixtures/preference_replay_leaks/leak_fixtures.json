@@ -1,0 +1,92 @@
+{
+    "schema"      : "preference-replay-leak-fixtures-v1",
+    "synthetic"   : true,
+    "note"        : "Hand-built to the export's shape. No row comes from Rick's data. Each vector is axis * norm: the case's vector is a unit basis vector on `axis` times `norm`, so two cases on one axis have cosine 1.0 and cases on different axes have cosine 0.0 (norm 20 sits inside the stored-vector band the cosine guard accepts).",
+    "common"      : {
+        "category"      : "synthetic-leak-test",
+        "response_type" : "yes_no",
+        "sender_id"     : "claude.code@lupin.deepily.ai#00000001",
+        "norm"          : 20.0
+    },
+    "classes"     : {
+        "eventual_answer": {
+            "leak"   : "The target's own eventual answer, or any case whose answer arrived after the ask, reaches the forecast.",
+            "target" : { "id": "t-eventual", "asked_at": "2026-11-10T14:00:00+00:00", "responded_at": "2026-11-10T14:00:30+00:00", "answer": "no", "axis": 3 },
+            "cases"  : [
+                { "id": "eventual-legit-early",     "axis": 3, "answer": "yes", "responded_at": "2026-11-10T13:05:00+00:00" },
+                { "id": "eventual-legit-just-before", "axis": 3, "answer": "yes", "responded_at": "2026-11-10T13:59:59.999000+00:00" },
+                { "id": "eventual-legit-at-the-ask",  "axis": 3, "answer": "yes", "responded_at": "2026-11-10T14:00:00+00:00" },
+                { "id": "eventual-late-by-a-millisecond", "axis": 3, "answer": "no", "responded_at": "2026-11-10T14:00:00.001000+00:00" },
+                { "id": "eventual-late-by-ten-minutes",   "axis": 3, "answer": "no", "responded_at": "2026-11-10T14:10:00+00:00" },
+                { "id": "eventual-decoy-other-topic",     "axis": 4, "answer": "yes", "responded_at": "2026-11-10T13:00:00+00:00" }
+            ],
+            "expected_neighbour_ids_at_ask_time" : [ "eventual-legit-early", "eventual-legit-just-before", "eventual-legit-at-the-ask" ],
+            "forbidden_ids"                      : [ "eventual-late-by-a-millisecond", "eventual-late-by-ten-minutes" ]
+        },
+        "later_status": {
+            "leak"   : "A case's status or answer is read as of the final row, not as of the ask: a revision or ratification that happened after the ask rewrites what the forecast sees.",
+            "target" : { "id": "t-status", "asked_at": "2026-11-10T14:00:00+00:00", "responded_at": "2026-11-10T14:00:30+00:00", "answer": "yes", "axis": 5 },
+            "cases"  : [
+                {
+                    "id": "status-revised-after-the-ask", "axis": 5, "answer": "no", "responded_at": "2026-11-10T13:00:00+00:00",
+                    "versions": [
+                        { "at": "2026-11-10T13:00:00+00:00", "answer": "yes", "ratification_state": "not_required" },
+                        { "at": "2026-11-10T14:20:00+00:00", "answer": "no",  "ratification_state": "rejected" }
+                    ]
+                },
+                { "id": "status-answered-after-the-ask", "axis": 5, "answer": "yes", "responded_at": "2026-11-10T14:05:00+00:00",
+                  "versions": [ { "at": "2026-11-10T14:05:00+00:00", "answer": "yes", "ratification_state": "not_required" } ] },
+                { "id": "status-legit-unchanged", "axis": 5, "answer": "yes", "responded_at": "2026-11-10T12:00:00+00:00",
+                  "versions": [ { "at": "2026-11-10T12:00:00+00:00", "answer": "yes", "ratification_state": "not_required" } ] }
+            ],
+            "expected_neighbour_ids_at_ask_time" : [ "status-revised-after-the-ask", "status-legit-unchanged" ],
+            "expected_as_of_ask_time"            : { "status-revised-after-the-ask": { "answer": "yes", "ratification_state": "not_required" } },
+            "forbidden_ids"                      : [ "status-answered-after-the-ask" ],
+            "store_visible_ids_at_ask_time"      : [ "status-revised-after-the-ask", "status-legit-unchanged" ],
+            "store_forbidden_ids"                : [ "status-answered-after-the-ask" ],
+            "loader_must_supply_as_of_values"    : "The store holds one row per case and reads only responded_at, so it cannot undo a later revision. Whoever builds its rows must pass the value as of the ask.",
+            "forbidden_final_values"             : { "status-revised-after-the-ask": { "answer": "no", "ratification_state": "rejected" } }
+        },
+        "final_notification_state": {
+            "leak"   : "The target's own notification row, read after the answer, carries its final state, response time, responder and answer into the ask-time record.",
+            "target" : {
+                "id": "t-final-state", "asked_at": "2026-11-10T14:00:00+00:00", "responded_at": "2026-11-10T14:00:30+00:00", "answer": "no", "axis": 6,
+                "notification_final_state": {
+                    "state"          : "LEAK-SENTINEL-state-responded",
+                    "responded_at"   : "LEAK-SENTINEL-responded-at-2026-11-10T14:00:30",
+                    "answered_by"    : "LEAK-SENTINEL-answered-by-rick",
+                    "response_value" : "LEAK-SENTINEL-response-value-no",
+                    "answer_delivered_at": "LEAK-SENTINEL-delivered-at"
+                }
+            },
+            "cases"  : [
+                { "id": "final-state-legit", "axis": 6, "answer": "yes", "responded_at": "2026-11-10T12:00:00+00:00" }
+            ],
+            "expected_neighbour_ids_at_ask_time" : [ "final-state-legit" ],
+            "forbidden_ids"                      : [],
+            "forbidden_sentinels"                : [
+                "LEAK-SENTINEL-state-responded", "LEAK-SENTINEL-responded-at-2026-11-10T14:00:30", "LEAK-SENTINEL-answered-by-rick",
+                "LEAK-SENTINEL-response-value-no", "LEAK-SENTINEL-delivered-at"
+            ]
+        },
+        "own_stored_case": {
+            "leak"   : "The target's own answer case (written when Rick answered, same notification id, same vector) is retrieved as the target's nearest neighbour; a retry copy of the target is counted as independent evidence.",
+            "target" : { "id": "t-own-case", "asked_at": "2026-11-10T14:00:00+00:00", "responded_at": "2026-11-10T14:00:30+00:00", "answer": "no", "axis": 7,
+                         "message": "Restart the synthetic worker now?", "title": "Restart worker 17 abc123?" },
+            "cases"  : [
+                { "id": "t-own-case",           "axis": 7, "answer": "no",  "responded_at": "2026-11-10T14:00:30+00:00", "note": "the target's own case: id equals the target notification id" },
+                { "id": "own-case-retry-copy",  "axis": 7, "answer": "no",  "responded_at": "2026-11-10T13:58:30+00:00",
+                  "ask": { "asked_at": "2026-11-10T13:58:00+00:00", "message": "Restart the synthetic worker now?", "title": "Restart worker 99 ffffff?" },
+                  "note": "same sender, same normalised message, 2 minutes before the target: a retry copy, so it counts once with the target" },
+                { "id": "own-case-legit-family-sibling", "axis": 7, "answer": "yes", "responded_at": "2026-11-10T09:00:00+00:00",
+                  "ask": { "asked_at": "2026-11-10T08:58:00+00:00", "message": "Restart the synthetic worker now?", "title": "Restart worker 3 000000?" },
+                  "note": "same family, hours earlier: independent evidence" }
+            ],
+            "expected_neighbour_ids_at_ask_time" : [ "own-case-legit-family-sibling" ],
+            "forbidden_ids"                      : [ "t-own-case", "own-case-retry-copy" ],
+            "store_visible_ids_at_ask_time"      : [ "own-case-retry-copy", "own-case-legit-family-sibling" ],
+            "store_forbidden_ids"                : [ "t-own-case" ],
+            "loop_forbidden_ids"                 : [ "own-case-retry-copy" ]
+        }
+    }
+}
