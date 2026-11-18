@@ -6,6 +6,7 @@ mirror whose ``question_embedding`` is ANN-searched (HNSW dot). Storage only: th
 ``find_similar`` does dot nearest-k, similarity clamped to [0,100], threshold applied as a percentage.
 """
 
+import re
 from typing import List, Optional, Tuple
 
 from sqlalchemy import func
@@ -19,6 +20,7 @@ from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM, PredictionDecision
 
 TESTING_BLOCK_PREFIX = "Lupin: Testing"
+TEST_DATABASE_NAME   = re.compile( r"(^|_)test(_|$)" )
 
 
 def refuse_unusable_cosine_query( query_embedding: Optional[List[float]] ) -> None:
@@ -146,16 +148,22 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
 
         Requires:
             - the server config block is [Lupin: Testing], the only block that may empty the table
+            - the session's database name has a "test" word in it, as lupin_db_test and the throwaway
+              lupin_lane_b_test_<pid> do and lupin_db_dev does not
 
         Ensures:
             - removes all rows; returns the count deleted (caller commits)
 
         Raises:
-            - PermissionError under any other config block, before any row is touched
+            - PermissionError under any other config block, or on a database that is not a test one,
+              before any row is touched
         """
         block = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", silent=True ).config_block_id
         if not str( block ).startswith( TESTING_BLOCK_PREFIX ):
             raise PermissionError( f"delete_all empties prediction_decisions and is allowed only under a [{TESTING_BLOCK_PREFIX}] config block, not {block!r}" )
+        database = self.session.get_bind().engine.url.database
+        if not TEST_DATABASE_NAME.search( str( database ) ):
+            raise PermissionError( f"delete_all empties prediction_decisions and is allowed only on a test database, not {database!r}" )
         return self.session.query( PredictionDecision ).delete( synchronize_session=False )
 
     def update_ratification_state( self, id: str, new_state: str ) -> Optional[PredictionDecision]:
