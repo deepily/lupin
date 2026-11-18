@@ -3,9 +3,9 @@ The checkpoint report and the freeze file that keeps it frozen.
 
 The report is a thin renderer. It takes the replay summaries, the calibration scores and the recorded
 findings, and writes plain Markdown. Its intervals and McNemar results come from the replay's own summaries,
-and its Brier scores from the calibration fit, so nothing is hand-computed here. ``label_metrics`` is the
-scikit-learn per-label scorer for the real run. The summaries carry counts, not label lists, so the renderer
-does not call it. It applies the pre-stated deferral rule: an interaction
+and its Brier scores from the calibration fit, so nothing is hand-computed here. ``label_metrics`` is a
+scikit-learn per-label scorer that nothing calls yet. The summaries carry counts, not label lists, so the
+renderer does not call it. It applies the pre-stated deferral rule: an interaction
 type with fewer than 20 eligible asks in the final window is deferred until the data grows.
 
 The freeze file, ``checkpoint.json``, names the report's sha256, the cohort's ``sha256_of_rows`` and the
