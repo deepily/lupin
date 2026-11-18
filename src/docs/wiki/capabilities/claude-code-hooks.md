@@ -2,9 +2,9 @@
 capability: claude-code-hooks
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_cli.claude_code.hooks.register_session.main@6bf0e792b7
+  - lupin_cli.claude_code.hooks.register_session.main@ffe82f8380
   - lupin_cli.claude_code.hooks.stop.main@9c612736e2
-  - lupin_cli.claude_code.hooks.pre_tool_use.main@e502e7a5e3
+  - lupin_cli.claude_code.hooks.pre_tool_use.main@c45a66281d
   - lupin_cli.claude_code.hooks.post_tool_use.main@dcc0e51181
   - lupin_cli.claude_code.hooks.user_prompt_submit.main@ba91d0665b
   - lupin_cli.claude_code.hooks.permission_request.main@f56dbd56a6
@@ -18,6 +18,7 @@ Each file in `src/lupin_cli/claude_code/hooks/` is one hook that Claude Code run
 ## Session lifecycle
 - `register_session.py` runs at session start. It writes the session bridge file, starts the notification listener and allocates a voice persona. See [[cc-session-bridge]].
 - It also finds the seat's saved memento and injects it as context, and emits a marker after a context clear.
+- For a spawned seat it sets the starting speakerphone mode. A mode already on the prior bridge, such as a flip made mid-session, wins over that default, so it survives a context clear.
 - `session_end.py` releases the voice persona, but not on `clear` or `compact`. It kills any idle waiter and stops the listener processes.
 - It also schedules the seat's worktree teardown and removes the voice buffer file when that file is empty.
 
