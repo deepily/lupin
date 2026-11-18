@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     Index,
     CheckConstraint,
+    UniqueConstraint,
     func,
     text
 )
@@ -1137,10 +1138,85 @@ class PredictionLog( Base ):
         index=True
     )
 
+    # Ask-time forecast ledger (phase 2): nullable, written when the forecast is made
+    asked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
+    rendered_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
+    fold_opened_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
+    forecast_ready_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
+    forecast_source: Mapped[Optional[str]] = mapped_column(
+        String( 50 ),
+        nullable=True
+    )
+    predictor_version: Mapped[Optional[str]] = mapped_column(
+        String( 100 ),
+        nullable=True
+    )
+    config_version: Mapped[Optional[str]] = mapped_column(
+        String( 100 ),
+        nullable=True
+    )
+    encoder_version: Mapped[Optional[str]] = mapped_column(
+        String( 100 ),
+        nullable=True
+    )
+    context_version: Mapped[Optional[str]] = mapped_column(
+        String( 100 ),
+        nullable=True
+    )
+    owner_email: Mapped[Optional[str]] = mapped_column(
+        String( 255 ),
+        nullable=True
+    )
+    evidence_ids: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+    evidence_scores: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+    abstention_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )
+    latency_ms: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True
+    )
+    display_decision: Mapped[Optional[str]] = mapped_column(
+        String( 50 ),
+        nullable=True
+    )
+    original_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )
+    batch_question_key: Mapped[Optional[str]] = mapped_column(
+        String( 255 ),
+        nullable=True
+    )
+    code_identity: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
     # Indexes
     __table_args__ = (
         Index( 'idx_prediction_log_response_type_category', 'response_type', 'category' ),
         Index( 'idx_prediction_log_predicted_at', 'predicted_at' ),
+        UniqueConstraint( 'notification_id', name='uq_prediction_log_notification_id' ),
     )
 
     def __repr__( self ) -> str:
