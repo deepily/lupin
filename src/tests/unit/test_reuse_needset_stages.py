@@ -124,7 +124,7 @@ def test_a_missing_stage_is_refused_before_anything_runs( tmp_path ):
     assert transport.calls == 0
 
 
-def lost_record( members ): return { "kind": "work_alike", "write_lang": "py", "members": members }
+def lost_record( members ): return { "kind": "work_alike", "write_lang": "py", "lost_at": loss_trace.FOUND, "members": members }
 
 
 def test_the_attribution_report_stops_when_no_member_was_lost_at_a_named_stage():

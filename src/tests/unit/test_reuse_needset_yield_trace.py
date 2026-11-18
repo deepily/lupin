@@ -99,7 +99,7 @@ def test_found_intervals_give_each_languages_found_share_with_its_interval():
     assert out[ "ts" ][ "found" ] == 0 and out[ "ts" ][ "members" ] == 2
 
 
-def trace_record( n, lost, lang="py" ): return { "id": f"n-{n}", "kind": "work_alike", "write_lang": lang, "members": { f"s{n}": lost } }
+def trace_record( n, lost, lang="py" ): return { "id": f"n-{n}", "kind": "work_alike", "write_lang": lang, "lost_at": lost, "members": { f"s{n}": lost } }
 
 
 def test_trace_needs_reports_where_members_were_lost_and_the_found_share_by_language():
@@ -225,6 +225,24 @@ def test_a_live_run_traces_the_needs_under_the_cap_and_closes_the_spend_run( tmp
     report = out[ "report" ]
     assert report[ "status" ] == yt.DONE and report[ "used" ] == 2 and report[ "by_stage" ] == { yt.YIELD_TRACE: 2 } and report[ "report" ][ "members" ] == 100
     assert out[ "closed_run" ] == "run-y" and yt.exit_status( out ) == 0 and ( tmp_path / "new" / yt.REPORT_FILE ).is_file()
+
+
+def test_an_error_raised_while_tracing_still_ends_the_spend_run_and_propagates( tmp_path, quiet ):
+    record, binary = quiet
+    answers = { s: need( i ) for i, s in enumerate( record[ "yield" ][ "order" ] ) }
+    async def trace( needs ): raise RuntimeError( "the trace blew up" )
+    closed = []
+    with pytest.raises( RuntimeError, match="trace blew up" ): yt.main( argv( tmp_path, "--cli-path", binary, "--live" ), deps_for( tmp_path, fake_parts( answers, trace ), close_run=lambda ctx: closed.append( ctx ) ) )
+    assert closed == [ CTX ], "the run was ended once, in the finally path"
+
+
+def test_a_probe_failed_need_is_counted_beside_the_figures_and_is_in_none_of_them( tmp_path, quiet ):
+    record, binary = quiet
+    answers = { s: need( i ) for i, s in enumerate( record[ "yield" ][ "order" ] ) }
+    async def trace( needs ): return [ trace_record( i, loss_trace.PROBE_FAILED if i < 3 else loss_trace.FOUND ) for i in range( len( needs ) ) ]
+    out = yt.main( argv( tmp_path, "--cli-path", binary, "--live" ), deps_for( tmp_path, fake_parts( answers, trace ) ) )
+    report = out[ "report" ][ "report" ]
+    assert report[ "probe_failed" ] == 3 and report[ "members" ] == 97 and report[ "found" ] == 97 and "PROBE_FAILED" not in report[ "by_lost_at" ]
 
 
 def test_a_close_that_fails_after_a_clean_run_is_reported_and_exits_one( tmp_path, quiet ):

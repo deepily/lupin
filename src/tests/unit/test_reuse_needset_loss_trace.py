@@ -207,6 +207,42 @@ def test_a_failing_probe_stops_the_pending_needs_and_keeps_the_finished_records(
     assert len( resumed ) == 8
 
 
+def ended_probe( world, ids ):
+    """Return a probe that fails with PROBE_STREAM_ENDED for the given need ids and else answers."""
+    async def probe( sentence, receipt, root, model ):
+        if receipt[ "id" ] in { f"r-{i}" for i in ids }: raise er.NeedsetError( er.PROBE_STREAM_ENDED, "the stream ended with no result message in 3 streams" )
+        return await world.probe( sentence, receipt, root, model )
+    return probe
+
+
+def test_a_need_whose_streams_all_ended_is_a_probe_failed_record_and_nothing_is_raised():
+    needs, w = matched_set()
+    got      = asyncio.run( LT.trace_need( needs[ 7 ], None, ended_probe( w, [ needs[ 7 ][ "id" ] ] ), ROOT, "m", ask=w.ask, where=where ) )
+    assert got[ "lost_at" ] == LT.PROBE_FAILED and got[ "members" ] == { "k7": LT.PROBE_FAILED } and got[ "alt" ] == [] and got[ "transcript" ] is None
+    assert "no result message" in got[ "probe_error" ] and got[ "evidence" ][ "rulings" ] is None and got[ "id" ] == needs[ 7 ][ "id" ]
+
+
+def test_a_nothing_need_whose_streams_ended_has_no_members_and_another_probe_error_still_raises():
+    needs, w = nothing_world()
+    got      = asyncio.run( LT.trace_need( needs[ 2 ], None, ended_probe( w, [ needs[ 2 ][ "id" ] ] ), ROOT, "m", ask=w.ask, where=where ) )
+    assert got[ "lost_at" ] == LT.PROBE_FAILED and got[ "members" ] == {}
+
+    async def unreadable( *a ): raise er.NeedsetError( er.PROBE_UNREADABLE, "boom" )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( LT.trace_need( needs[ 2 ], None, unreadable, ROOT, "m", ask=w.ask, where=where ) )
+    assert e.value.code == er.PROBE_UNREADABLE
+
+
+def test_trace_all_goes_on_past_a_failed_probe_records_it_and_asks_it_again_on_the_next_run( tmp_path ):
+    needs, w = matched_set()
+    ledger   = make_ledger( tmp_path )
+    bad      = needs[ 4 ][ "id" ]
+    first    = asyncio.run( LT.trace_all( needs, None, ledger, ROOT, "m", "c1", FROZEN, FROZEN, index_sha="idx1", probe=ended_probe( w, [ bad ] ), ask=w.ask, where=where, parallel=3 ) )
+    assert [ r[ "lost_at" ] for r in first ] == [ e if i != 4 else LT.PROBE_FAILED for i, e in enumerate( EXPECTED ) ] and len( ledger.entries ) == 7
+    probes_before = len( w.probes )
+    again = run_all( needs, w, harness_runner.Ledger( str( tmp_path / "trace.jsonl" ) ), model="m" )
+    assert [ r[ "lost_at" ] for r in again ] == EXPECTED and len( w.probes ) == probes_before + 1, "only the failed need was probed again"
+
+
 def test_trace_all_refuses_a_smoke_need_an_unfinished_need_and_a_set_with_nothing_matched_before_any_call( tmp_path ):
     needs, w = matched_set()
     for bad in ( [ dict( needs[ 0 ], smoke=True ) ], [ dict( needs[ 0 ], status="checked" ) ], [ final_nothing( 1 ) ] ):
@@ -282,6 +318,22 @@ def test_the_summary_counts_by_outcome_kind_language_route_and_gives_the_miss_ra
     assert s[ "not_retrieved_by_route" ] == { "sampled": { "needs": 2, "not_retrieved": 1 }, "vector": { "needs": 2, "not_retrieved": 1 } }
     assert s[ "nothing" ] == { "CORRECT_NO_MATCH": 1, "FALSE_MATCH": 1 } and s[ "misses" ] == 3 and s[ "miss_rate" ] == 3 / 7 and s[ "upper_bound" ] == harness_report.upper_bound( 3, 7 )
     with pytest.raises( er.NeedsetError ) as e: LT.summarize( [ { "kind": "nothing", "write_lang": "py", "selection_route": None, "lost_at": LT.CORRECT_NO_MATCH } ] )
+    assert e.value.code == er.BAD_NEED
+
+
+def test_a_probe_failed_need_is_neither_a_hit_nor_a_miss_and_is_counted_beside_the_rate():
+    base   = records_for_summary()
+    failed = [ { **base[ 0 ], "lost_at": LT.PROBE_FAILED, "members": { "m": LT.PROBE_FAILED } } ]
+    plain, s = LT.summarize( base ), LT.summarize( base + failed )
+    assert s[ "probe_failed" ] == 1 and plain[ "probe_failed" ] == 0
+    assert { k: v for k, v in s.items() if k != "probe_failed" } == { k: v for k, v in plain.items() if k != "probe_failed" }, "the rate and every count are those of the answered needs"
+    rows    = [ { "kind": "work_alike", "write_lang": "py", "lost_at": LT.FOUND, "members": { "a": LT.FOUND, "b": LT.NOT_READ } } ]
+    failed  = [ { "kind": "work_alike", "write_lang": "py", "lost_at": LT.PROBE_FAILED, "members": { "m": LT.PROBE_FAILED } } ]
+    members, plain_members = LT.summarize_members( rows + failed ), LT.summarize_members( rows )
+    assert members[ "probe_failed" ] == 1 and members[ "members" ] == plain_members[ "members" ] and members[ "miss_rate" ] == plain_members[ "miss_rate" ]
+    with pytest.raises( er.NeedsetError ) as e: LT.summarize( failed )
+    assert e.value.code == er.BAD_NEED
+    with pytest.raises( er.NeedsetError ) as e: LT.summarize_members( failed )
     assert e.value.code == er.BAD_NEED
 
 
@@ -366,7 +418,7 @@ def test_changing_the_member_classifier_is_a_ledger_miss( monkeypatch ):
 
 
 def member_records():
-    def rec( kind, lang, members ): return { "kind": kind, "write_lang": lang, "members": members }
+    def rec( kind, lang, members ): return { "kind": kind, "write_lang": lang, "lost_at": LT.FOUND, "members": members }
     return [ rec( "work_alike", "py", { "a": LT.FOUND, "b": LT.NOT_RETRIEVED } ), rec( "work_alike", "ts", { "c": LT.FOUND } ),
              rec( "near_copy", "ts", { "d": LT.NOT_READ, "e": LT.NOT_READ, "f": LT.FOUND } ), rec( "nothing", "py", {} ) ]
 
@@ -377,7 +429,7 @@ def test_the_member_summary_counts_members_and_not_needs():
     assert s[ "by_lang" ] == { "py": { "FOUND": 1, "NOT_RETRIEVED": 1 }, "ts": { "FOUND": 2, "NOT_READ": 2 } }
     assert s[ "misses" ] == 3 and s[ "miss_rate" ] == 0.5 and s[ "upper_bound" ] == harness_report.upper_bound( 3, 6 )
     assert s[ "any_member_comparison_only" ] == { "needs": 3, "any_member_found": 3, "every_member_found": 1 }
-    with pytest.raises( er.NeedsetError ) as e: LT.summarize_members( [ { "kind": "nothing", "write_lang": "py", "members": {} } ] )
+    with pytest.raises( er.NeedsetError ) as e: LT.summarize_members( [ { "kind": "nothing", "write_lang": "py", "lost_at": LT.CORRECT_NO_MATCH, "members": {} } ] )
     assert e.value.code == er.BAD_NEED
 
 

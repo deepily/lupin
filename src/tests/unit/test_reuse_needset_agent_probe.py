@@ -128,9 +128,38 @@ def test_an_unreadable_reply_is_asked_once_more_with_the_same_prompt_and_then_re
     assert e.value.code == er.PROBE_UNREADABLE and "'n'" in e.value.detail and len( query.calls ) == 2
 
 
-def test_an_error_result_and_a_stream_with_no_result_raise_runtime_errors():
+def test_an_error_result_raises_a_runtime_error_and_a_stream_with_no_result_is_a_stream_ended_error():
     with pytest.raises( RuntimeError ): asyncio.run( ap.run_probe( "n", RESULT, "/t", "m", query_fn=stream_of( [ done( error=True ) ] ) ) )
-    with pytest.raises( RuntimeError, match="no result message" ): asyncio.run( ap.run_probe( "n", RESULT, "/t", "m", query_fn=stream_of( [ assistant( TextBlock( text=GOOD ) ) ] ) ) )
+    with pytest.raises( ap.StreamEnded, match="no result message" ): asyncio.run( ap._stream( "p", None, stream_of( [ assistant( TextBlock( text=GOOD ) ) ] ) ) )
+    assert issubclass( ap.StreamEnded, RuntimeError )
+
+
+NO_RESULT = [ assistant( TextBlock( text=GOOD ) ) ]
+GOOD_RUN  = [ assistant( TextBlock( text=GOOD ) ), done() ]
+
+
+def test_a_stream_that_ends_with_no_result_is_asked_again_and_a_later_stream_answers():
+    query = stream_of( NO_RESULT, NO_RESULT, GOOD_RUN )
+    out   = asyncio.run( ap.run_probe( "n", RESULT, "/t", "m", query_fn=query ) )
+    assert out[ "rulings" ] and len( query.calls ) == 3 and len( { c[ 0 ] for c in query.calls } ) == 1, "the same prompt each time"
+
+
+def test_streams_that_all_end_with_no_result_give_a_named_refusal_after_the_bounded_attempts():
+    query = stream_of( *[ NO_RESULT ] * ap.STREAM_ATTEMPTS )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( ap.run_probe( "n", RESULT, "/t", "m", query_fn=query ) )
+    assert e.value.code == er.PROBE_STREAM_ENDED and "no result message" in e.value.detail and "'n'" in e.value.detail and len( query.calls ) == ap.STREAM_ATTEMPTS
+
+
+def test_every_attempt_is_charged_to_the_call_cap_the_stream_ends_included( monkeypatch ):
+    charged = []
+    monkeypatch.setattr( ap.call_cap, "charge_attempt", lambda model: charged.append( model ) )
+    with pytest.raises( er.NeedsetError ): asyncio.run( ap.run_probe( "n", RESULT, "/t", "m", query_fn=stream_of( *[ NO_RESULT ] * ap.STREAM_ATTEMPTS ) ) )
+    assert charged == [ "m" ] * ap.STREAM_ATTEMPTS
+
+
+def test_an_unreadable_reply_and_a_stream_with_no_result_are_counted_apart():
+    query = stream_of( [ assistant( TextBlock( text="no idea" ) ), done() ], NO_RESULT, GOOD_RUN )
+    assert asyncio.run( ap.run_probe( "n", RESULT, "/t", "m", query_fn=query ) )[ "rulings" ] and len( query.calls ) == 3
 
 
 CAPTURE_PATH = pathlib.Path( __file__ ).resolve().parent.parent / "fixtures" / "reuse_needset" / "probe-capture.json"

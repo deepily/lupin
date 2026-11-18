@@ -143,7 +143,7 @@ def matched_need( seed_id ): return { "id": f"n-{seed_id}", "kind": "work_alike"
 
 def trace_records( needs ):
     """Return one record per need: the first lost at a named stage, the rest found."""
-    return [ { "kind": "work_alike", "write_lang": "py", "members": { f"k{n}": loss_trace.NOT_READ if n == 0 else loss_trace.FOUND } } for n, _ in enumerate( needs ) ]
+    return [ { "kind": "work_alike", "write_lang": "py", "lost_at": loss_trace.FOUND, "members": { f"k{n}": loss_trace.NOT_READ if n == 0 else loss_trace.FOUND } } for n, _ in enumerate( needs ) ]
 
 
 def test_the_attribution_stage_reads_the_written_file_makes_a_need_per_seed_in_order_and_reports( tmp_path ):
