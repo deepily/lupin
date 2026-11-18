@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from cosa.agents.prediction_engine.config import STRATEGY_CBR_MAJORITY, STRATEGY_COLD_START
-from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+from cosa.agents.prediction_engine.prediction_engine import PredictionEngine, REASON_NEITHER_MAJORITY
 
 
 @pytest.fixture
@@ -35,7 +35,19 @@ def _vote( engine, answers ):
 def test_neither_reaches_the_vote_as_neither( engine ):
     result = _vote( engine, [ "neither [comment: re-frame it]", "neither", "yes" ] )
     assert result.metadata[ "votes" ] == { "neither": 2.0, "yes": 1.0 }
-    assert ( result.predicted_value, result.predicted_qualifier ) == ( "neither", "re-frame it" )
+
+
+def test_a_neither_majority_gives_no_hint_until_phase_8( engine ):
+    """Pinned abstention: the three-way stance work lifts it and rewrites this test."""
+    result = _vote( engine, [ "neither", "neither", "yes" ] )
+    assert result.strategy == STRATEGY_COLD_START
+    assert result.predicted_value is None
+    assert result.metadata[ "reason" ] == REASON_NEITHER_MAJORITY
+
+
+def test_a_yes_majority_with_a_neither_in_the_tally_still_hints_yes( engine ):
+    result = _vote( engine, [ "yes", "yes", "neither" ] )
+    assert ( result.predicted_value, result.metadata[ "votes" ] ) == ( "yes", { "yes": 2.0, "neither": 1.0 } )
 
 
 def test_a_case_with_no_recognised_stance_casts_no_vote( engine ):

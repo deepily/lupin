@@ -57,6 +57,9 @@ from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
 from cosa.utils.notification_utils import extract_qualifier_comment
 
 
+REASON_NEITHER_MAJORITY = "neither_majority_abstains_until_phase_8"
+
+
 class PredictionEngine:
     """
     Singleton prediction engine for notification responses.
@@ -469,6 +472,18 @@ class PredictionEngine:
         # Winner = highest (most positive) tally; consistency bounded to [0,1] via
         # positive-mass normalization so negative (steer-away) votes can't break it.
         winner = max( votes, key=votes.get )
+
+        # A "neither" majority is counted in the vote but gives no hint: the hint card and its
+        # clients know only yes and no. The engine abstains with a named reason until phase 8
+        # (the three-way stance) lifts this; the pinned test in test_prediction_engine_stance_vote.py goes then.
+        if winner == "neither":
+            return PredictionResult(
+                response_type      = RESPONSE_TYPE_YES_NO,
+                category           = category,
+                strategy           = STRATEGY_COLD_START,
+                similar_case_count = len( similar_cases ),
+                metadata           = { "reason": REASON_NEITHER_MAJORITY, "votes": votes }
+            )
 
         # D14 prior: answers are about 79% yes, and a plain majority said "no" far too
         # often (35% right). "no" must beat "yes" by yes_no_no_margin to stand.

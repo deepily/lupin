@@ -2,7 +2,7 @@
 Census guard: no stance is split out of an answer anywhere but the one parser.
 
 Scope is the three modules the Preference learning plan named: the prediction engine,
-the accuracy comparators and the podcast proxy. Other `startswith( "yes" )` tests exist
+the accuracy comparators and the podcast proxy. Rick's ruling of 18 Nov added the MCP podcast tool. Other `startswith( "yes" )` tests exist
 elsewhere in the tree. They sit outside this guard and are listed in `OUTSIDE_THE_SCOPE`.
 So the denominator is stated, not implied.
 
@@ -19,6 +19,7 @@ SCOPE = (
     "/src/cosa/agents/prediction_engine/prediction_engine.py",
     "/src/cosa/agents/prediction_engine/accuracy_comparators.py",
     "/src/cosa/rest/podcast_proxy.py",
+    "/src/lupin_mcp/podcast_for_rick.py",
 )
 
 OUTSIDE_THE_SCOPE = (
@@ -28,7 +29,6 @@ OUTSIDE_THE_SCOPE = (
     "src/cosa/agents/test_fix_expediter/orchestrator.py",
     "src/lupin_mcp/self_respin_core.py",
     "src/cosa/crud_for_dataframes/agent.py",
-    "src/lupin_mcp/podcast_for_rick.py",
 )
 
 STARTSWITH_STANCE = re.compile( r"""startswith\(\s*["'](yes|no|neither)""", re.IGNORECASE )
@@ -65,7 +65,7 @@ def test_the_detectors_find_each_shape_of_split():
 def test_every_stance_split_goes_through_the_parser():
     """No module in scope splits a stance by hand, and each one imports the parser."""
     found = { path: stance_splits( _read( path ) ) for path in SCOPE }
-    assert len( found ) == 3
+    assert len( found ) == 4
     assert found == { path: [] for path in SCOPE }
     for path in SCOPE:
         assert "extract_qualifier_comment" in _read( path ), path
