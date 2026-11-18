@@ -200,7 +200,7 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             - before: only answers recorded before this instant count; None means now
 
         Ensures:
-            - looks at the recipient's yes/no forecast rows that hold an answer, joined to the notification
+            - looks at the recipient's scored yes/no forecast rows (accuracy_match not null), joined to the notification
               through notification_id, because older rows carry no owner column
             - leaves out rows whose strategy is test_override
             - reads each stance with extract_qualifier_comment, so an answer with no recognised stance counts nowhere
@@ -211,12 +211,14 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             - ValueError if recipient_id is not a UUID
         """
         before = before or datetime.now( timezone.utc )
+        # Accepted for now: this loads the recipient's whole scored history into Python to read each stance.
         rows   = self.session.query( PredictionLog.actual_value ).join(
             Notification, Notification.id == PredictionLog.notification_id
         ).filter(
             Notification.recipient_id == uuid.UUID( recipient_id ),
             PredictionLog.response_type == "yes_no",
             PredictionLog.actual_value.isnot( None ),
+            PredictionLog.accuracy_match.isnot( None ),
             PredictionLog.responded_at < before,
             PredictionLog.prediction_strategy != "test_override",
         ).all()

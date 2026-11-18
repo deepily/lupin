@@ -1572,11 +1572,12 @@ async def notify_user(
             from cosa.agents.prediction_engine.config import (
                 STRATEGY_COLD_START, STRATEGY_ERROR, STRATEGY_TEST_OVERRIDE, FORECAST_SOURCE_TEST_OVERRIDE )
             forecast_kwargs = {
-                "display_decision" : prediction_hint.get( "state", "ready" ),   # an override hint names no state
+                "display_decision" : prediction_hint[ "state" ] if parsed_prediction_hint_override is None else "ready",
                 "owner_email"      : target_user,
                 "always_yes_rate"  : forecast_always_yes,
             }
             if parsed_prediction_hint_override is not None:
+                # An injected hint names no state of its own, so the card it draws is stored as ready, explicitly.
                 forecast_kwargs.update( forecast_source=FORECAST_SOURCE_TEST_OVERRIDE, strategy=STRATEGY_TEST_OVERRIDE,
                                         abstention_reason="test_override" )
             elif forecast_result is not None:

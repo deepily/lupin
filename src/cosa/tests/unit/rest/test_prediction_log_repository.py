@@ -376,7 +376,7 @@ class TestRowLocks( _PLRTestBase ):
 
 
 class TestAlwaysYesCounts( _PLRTestBase ):
-    """always_yes_counts reads each stance through the one parser and counts recognised answers."""
+    """always_yes_counts reads each stance through the one parser and counts scored answers."""
 
     def _rows( self, *values ):
         chain = self.session.query.return_value.join.return_value.filter.return_value
@@ -410,6 +410,7 @@ class TestAlwaysYesCounts( _PLRTestBase ):
         self.assertIn( "notifications.recipient_id =", conditions )
         self.assertIn( "prediction_log.response_type =", conditions )
         self.assertIn( "prediction_log.actual_value IS NOT NULL", conditions )
+        self.assertIn( "prediction_log.accuracy_match IS NOT NULL", conditions )
         self.assertIn( "prediction_log.responded_at <", conditions )
         self.assertIn( "prediction_log.prediction_strategy !=", conditions )
 
