@@ -50,6 +50,7 @@ def _install_real_guard( directory ):
         _mod  = importlib.util.module_from_spec( _spec )
         _spec.loader.exec_module( _mod )
 
+        pytest_addoption        = _mod.pytest_addoption
         pytest_runtest_setup    = _mod.pytest_runtest_setup
         pytest_terminal_summary = _mod.pytest_terminal_summary
         # pytest_sessionfinish carries the VERDICT — block mode sets a non-zero exit status
