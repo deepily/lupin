@@ -20,6 +20,7 @@ NOT_RATED_RELEVANT = "NOT_RATED_RELEVANT"
 NOT_READ           = "NOT_READ"
 NOT_RULED_SAME_JOB = "NOT_RULED_SAME_JOB"
 FOUND              = "FOUND"
+PROBE_FAILED       = "PROBE_FAILED"
 ALT_MATCH          = "ALT_MATCH"
 CORRECT_NO_MATCH   = "CORRECT_NO_MATCH"
 FALSE_MATCH        = "FALSE_MATCH"
@@ -165,14 +166,22 @@ async def trace_need( need, ctx, probe, root, model, ask=check_need, where=None 
     Ensures:
         - the probe runs only when its rulings can change the answer: for a matched need when a key symbol reached the shortlist, for a nothing need when the checker did not already end in reuse or extend and the shortlist is not empty
         - returns { id, kind, write_lang, selection_route, key, lost_at, alt, members, evidence, transcript }
+        - a probe whose streams all end with no result message makes a record with lost_at PROBE_FAILED, every member PROBE_FAILED and probe_error holding the detail; no other need is affected and nothing is raised
     """
     receipt = ask( need, ctx )
     key     = need[ "key" ][ "symbols" ]
     listed  = bool( set( key ) & set( asked_ids( receipt ) ) & { row[ "id" ] for row in receipt[ "shortlist" ] } )
     nothing = need[ "kind" ] == "nothing"
     wanted  = ( receipt[ "verdict" ] not in ASKED_VERDICTS and bool( receipt[ "shortlist" ] ) ) if nothing else listed
-    out     = await probe( need[ "need" ], receipt, root, model ) if wanted else None
+    failed  = None
+    try: out = await probe( need[ "need" ], receipt, root, model ) if wanted else None
+    except er.NeedsetError as error:
+        if error.code != er.PROBE_STREAM_ENDED: raise
+        out, failed = None, error.detail
     ev      = _evidence( receipt, out, root, where )
+    if failed is not None:
+        return { "id": need[ "id" ], "kind": need[ "kind" ], "write_lang": need[ "write_lang" ], "selection_route": need[ "selection_route" ], "key": list( key ),
+                 "lost_at": PROBE_FAILED, "alt": [], "members": { m: PROBE_FAILED for m in sorted( key ) } if not nothing else {}, "evidence": ev, "transcript": None, "probe_error": failed }
     return { "id": need[ "id" ], "kind": need[ "kind" ], "write_lang": need[ "write_lang" ], "selection_route": need[ "selection_route" ], "key": list( key ),
              **classify( need[ "kind" ], key, ev ), "members": classify_members( need[ "kind" ], key, ev ), "evidence": ev, "transcript": out[ "transcript" ] if out is not None else None }
 
@@ -201,6 +210,7 @@ async def trace_all( needs, ctx, ledger, root, model, checker_commit, manifest, 
     Ensures:
         - returns the records in the order of needs
         - a need the ledger holds is returned as stored, with no check and no probe call
+        - a need whose probe failed is in the returned records as PROBE_FAILED and is not stored, so the next run traces it again
         - the key of a ledger row holds the need id, the source commit, the index sha, the checker commit, the probe model and the trace version
         - so a retrieval fix, a rebuilt index or another source commit is a ledger miss
         - the probes run through run_parallel, so a failure stops the pending ones and the finished records stay in the ledger
@@ -223,7 +233,11 @@ async def trace_all( needs, ctx, ledger, root, model, checker_commit, manifest, 
     async def one( need ):
         """Ensures: returns the stored record, or traces the need and stores the result first."""
         key = harness_runner.ledger_key( TRACE_STAGE, { "old": need[ "id" ], "new": "\0".join( ( need[ "source_commit" ], index_sha, checker_commit ) ) }, version, model, 0 )
-        return await harness_runner.cached( ledger, key, lambda: trace_need( need, ctx, probe, root, model, ask, where ) )
+        stored = ledger.get( key )
+        if stored is not None: return stored
+        record = await trace_need( need, ctx, probe, root, model, ask, where )
+        if "probe_error" not in record: ledger.put( key, record )                  # a failed probe is recorded in the report but not in the ledger, so a rerun asks it again
+        return record
 
     return await harness_runner.run_parallel( needs, one, parallel, lambda n: n[ "id" ] )
 

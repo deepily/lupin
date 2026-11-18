@@ -19,6 +19,7 @@ from lupin_mcp.reuse_needset import errors as er
 
 TOOLS        = [ "Read" ]
 MAX_TURNS    = 40
+STREAM_ATTEMPTS = 3                                  # streams one probe may start when each ends with no result message
 DEFAULT_LIMIT = 2000        # lines the Read tool shows when the call gives no limit
 SAME_JOB     = ( "DUPLICATE", "EXTEND" )
 RULINGS      = SAME_JOB + ( "DISTINCT", )
@@ -178,6 +179,10 @@ def probe_options( root, model ):
                                cli_path=mt.CLI_PATH, setting_sources=list( mt.SETTING_SOURCES ), extra_args=dict( mt.ISOLATION_ARGS ) )
 
 
+class StreamEnded( RuntimeError ):
+    """The agent's stream ended with no result message."""
+
+
 async def _stream( prompt, options, query_fn ):
     """
     Run one agent stream.
@@ -187,7 +192,7 @@ async def _stream( prompt, options, query_fn ):
 
     Raises:
         - RuntimeError carrying the CLI's own text when the result is an error
-        - RuntimeError when the stream ends with no result message
+        - StreamEnded, a RuntimeError, when the stream ends with no result message
     """
     messages, done = [], False
     async for message in query_fn( prompt=prompt, options=options ):
@@ -195,7 +200,7 @@ async def _stream( prompt, options, query_fn ):
         if isinstance( message, ResultMessage ):
             if message.is_error: raise RuntimeError( error_result_text( message ) )
             done = True
-    if not done: raise RuntimeError( "the stream ended with no result message" )
+    if not done: raise StreamEnded( "the stream ended with no result message" )
     return messages
 
 
@@ -209,20 +214,27 @@ async def run_probe( need, result, root, model, query_fn=sdk_query ):
     Ensures:
         - returns { reply, rulings, reads, transcript } where reads is read_files of the stream
         - an unreadable reply is asked again once with the same prompt
+        - a stream that ends with no result message is asked again with the same prompt, up to STREAM_ATTEMPTS streams in all
         - every attempt is charged through call_cap.charge_attempt before the stream starts, so a retry counts as a call
         - the stream is the only thing run, so nothing is written
 
     Raises:
         - NeedsetError PROBE_UNREADABLE when neither reply holds a ruling
+        - NeedsetError PROBE_STREAM_ENDED when STREAM_ATTEMPTS streams in a row end with no result message
         - NeedsetError CAP_NOT_INSTALLED when a stage is running and no cap is installed
         - NeedsetError CALL_CAP_REACHED when the cap has no call left; the stream is not started
-        - RuntimeError from the stream
+        - RuntimeError from the stream when its result is an error
     """
-    prompt = build_prompt( need, result )
-    for _ in range( 2 ):
+    prompt, ended, unread = build_prompt( need, result ), 0, 0
+    while unread < 2:
         call_cap.charge_attempt( model )
-        messages = await _stream( prompt, probe_options( root, model ), query_fn )
-        text     = reply_text( messages )
-        ruled    = rulings( text )
+        try: messages = await _stream( prompt, probe_options( root, model ), query_fn )
+        except StreamEnded as error:
+            ended += 1
+            if ended >= STREAM_ATTEMPTS: raise er.NeedsetError( er.PROBE_STREAM_ENDED, f"{error} in {ended} streams for the need {need!r}" ) from error
+            continue
+        text  = reply_text( messages )
+        ruled = rulings( text )
         if ruled: return { "reply": text, "rulings": ruled, "reads": read_files( messages ), "transcript": serialize( messages ) }
+        unread += 1
     raise er.NeedsetError( er.PROBE_UNREADABLE, f"no ruling in either reply for the need {need!r}" )

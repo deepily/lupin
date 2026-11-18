@@ -207,6 +207,42 @@ def test_a_failing_probe_stops_the_pending_needs_and_keeps_the_finished_records(
     assert len( resumed ) == 8
 
 
+def ended_probe( world, ids ):
+    """Return a probe that fails with PROBE_STREAM_ENDED for the given need ids and else answers."""
+    async def probe( sentence, receipt, root, model ):
+        if receipt[ "id" ] in { f"r-{i}" for i in ids }: raise er.NeedsetError( er.PROBE_STREAM_ENDED, "the stream ended with no result message in 3 streams" )
+        return await world.probe( sentence, receipt, root, model )
+    return probe
+
+
+def test_a_need_whose_streams_all_ended_is_a_probe_failed_record_and_nothing_is_raised():
+    needs, w = matched_set()
+    got      = asyncio.run( LT.trace_need( needs[ 7 ], None, ended_probe( w, [ needs[ 7 ][ "id" ] ] ), ROOT, "m", ask=w.ask, where=where ) )
+    assert got[ "lost_at" ] == LT.PROBE_FAILED and got[ "members" ] == { "k7": LT.PROBE_FAILED } and got[ "alt" ] == [] and got[ "transcript" ] is None
+    assert "no result message" in got[ "probe_error" ] and got[ "evidence" ][ "rulings" ] is None and got[ "id" ] == needs[ 7 ][ "id" ]
+
+
+def test_a_nothing_need_whose_streams_ended_has_no_members_and_another_probe_error_still_raises():
+    needs, w = nothing_world()
+    got      = asyncio.run( LT.trace_need( needs[ 2 ], None, ended_probe( w, [ needs[ 2 ][ "id" ] ] ), ROOT, "m", ask=w.ask, where=where ) )
+    assert got[ "lost_at" ] == LT.PROBE_FAILED and got[ "members" ] == {}
+
+    async def unreadable( *a ): raise er.NeedsetError( er.PROBE_UNREADABLE, "boom" )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( LT.trace_need( needs[ 2 ], None, unreadable, ROOT, "m", ask=w.ask, where=where ) )
+    assert e.value.code == er.PROBE_UNREADABLE
+
+
+def test_trace_all_goes_on_past_a_failed_probe_records_it_and_asks_it_again_on_the_next_run( tmp_path ):
+    needs, w = matched_set()
+    ledger   = make_ledger( tmp_path )
+    bad      = needs[ 4 ][ "id" ]
+    first    = asyncio.run( LT.trace_all( needs, None, ledger, ROOT, "m", "c1", FROZEN, FROZEN, index_sha="idx1", probe=ended_probe( w, [ bad ] ), ask=w.ask, where=where, parallel=3 ) )
+    assert [ r[ "lost_at" ] for r in first ] == [ e if i != 4 else LT.PROBE_FAILED for i, e in enumerate( EXPECTED ) ] and len( ledger.entries ) == 7
+    probes_before = len( w.probes )
+    again = run_all( needs, w, harness_runner.Ledger( str( tmp_path / "trace.jsonl" ) ), model="m" )
+    assert [ r[ "lost_at" ] for r in again ] == EXPECTED and len( w.probes ) == probes_before + 1, "only the failed need was probed again"
+
+
 def test_trace_all_refuses_a_smoke_need_an_unfinished_need_and_a_set_with_nothing_matched_before_any_call( tmp_path ):
     needs, w = matched_set()
     for bad in ( [ dict( needs[ 0 ], smoke=True ) ], [ dict( needs[ 0 ], status="checked" ) ], [ final_nothing( 1 ) ] ):
