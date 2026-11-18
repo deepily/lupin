@@ -113,7 +113,7 @@ def test_add_require_option_registers_a_boolean_flag_off_by_default():
 def test_a_skipped_local_data_run_prints_the_skip_by_name_and_passes_without_the_flag( tmp_path ):
     code, out = _run_child( tmp_path )
     assert code == 0
-    assert "[local_data] ran=0 skipped=2" in out
+    assert "[local_data] ran=0 skipped=3" in out
     assert "[local_data] SKIPPED " + REAL_TEST_FILE + "::test_the_real_export_still_matches_the_manifest_sha" in out
 
 
@@ -129,9 +129,11 @@ def test_planted_data_runs_the_tier_and_passes_with_require_local_data( tmp_path
     ( tmp_path / "2026.11.17-recent-predictions-285.json" ).write_bytes( export )
     ( tmp_path / "manifest-before.txt" ).write_text(
         hashlib.sha256( export ).hexdigest() + "  2026.11.17-recent-predictions-285.json\n" )
+    ( tmp_path / "2026.11.18-f2-parser-measurement.json" ).write_text( json.dumps( {
+        "cases": { "n": 1, "unrecognised": { "maybe later": 1 } }, "notifs": { "n": 1, "unrecognised": { } } } ) )
     code, out = _run_child( tmp_path, "--require-local-data" )
     assert code == 0
-    assert "[local_data] ran=2 skipped=0" in out
+    assert "[local_data] ran=3 skipped=0" in out
 
 
 def test_the_committed_fixture_is_synthetic_and_carries_the_pilot_write_in_pattern():

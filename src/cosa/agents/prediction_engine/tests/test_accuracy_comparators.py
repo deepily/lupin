@@ -19,8 +19,6 @@ from cosa.agents.prediction_engine.accuracy_comparators import (
     compare_open_ended,
     compare_open_ended_batch,
     get_comparator,
-    _extract_binary,
-    _extract_qualifier,
 )
 from cosa.agents.prediction_engine.config import (
     OPEN_ENDED_SIMILARITY_THRESHOLD,
@@ -415,44 +413,36 @@ def test_get_comparator_non_mc_with_actual_value_skips_dispatch():
 
 
 # =========================================================================== #
-# _extract_binary
+# the stance the comparator reads (one parser, no copy of its own)
 # =========================================================================== #
-def test_extract_binary_empty_returns_empty():
-    assert _extract_binary( "" ) == ""
+def test_compare_yes_no_reads_the_stance_through_the_one_parser():
+    _, detail = compare_yes_no( { "value": "yes" }, { "value": "  YES [comment: x]" } )
+    assert ( detail[ "predicted_binary" ], detail[ "actual_binary" ], detail[ "actual_qualifier" ] ) == ( "yes", "yes", "x" )
 
 
-def test_extract_binary_yes():
-    assert _extract_binary( "yes" ) == "yes"
-    assert _extract_binary( "  YES [comment: x]" ) == "yes"
+def test_compare_yes_no_no_stance_reads_empty_and_never_matches():
+    match, detail = compare_yes_no( { "value": "Maybe" }, { "value": "Maybe" } )
+    assert ( match, detail[ "actual_binary" ] ) == ( False, "" )
 
 
-def test_extract_binary_no():
-    assert _extract_binary( "no" ) == "no"
-    assert _extract_binary( "No way" ) == "no"
+def test_compare_yes_no_no_way_is_not_a_no():
+    _, detail = compare_yes_no( { "value": "no" }, { "value": "No way" } )
+    assert detail[ "actual_binary" ] == ""
 
 
-def test_extract_binary_neither_returns_lowered_value():
-    assert _extract_binary( "Maybe" ) == "maybe"
+def test_compare_yes_no_unclosed_comment_gives_the_rest():
+    _, detail = compare_yes_no( { "value": "yes" }, { "value": "yes [comment: unclosed tail" } )
+    assert detail[ "actual_qualifier" ] == "unclosed tail"
 
 
-# =========================================================================== #
-# _extract_qualifier
-# =========================================================================== #
-def test_extract_qualifier_empty_returns_none():
-    assert _extract_qualifier( "" ) is None
+def test_compare_yes_no_reports_a_qualifier_only_difference_apart_from_the_stance():
+    match, detail = compare_yes_no( { "value": "yes", "qualifier": "March" }, { "value": "yes [comment: April]" } )
+    assert ( match, detail[ "qualifier_match" ] ) == ( True, False )
 
 
-def test_extract_qualifier_no_marker_returns_none():
-    assert _extract_qualifier( "yes" ) is None
-
-
-def test_extract_qualifier_with_closing_bracket():
-    assert _extract_qualifier( "yes [comment: only the March ones]" ) == "only the March ones"
-
-
-def test_extract_qualifier_unclosed_marker_returns_rest():
-    # marker present, no closing "]" → returns text from start to end of string
-    assert _extract_qualifier( "yes [comment: unclosed tail" ) == "unclosed tail"
+def test_compare_yes_no_a_stance_error_is_not_a_qualifier_difference():
+    match, detail = compare_yes_no( { "value": "yes" }, { "value": "no" } )
+    assert ( match, detail[ "qualifier_match" ] ) == ( False, True )
 
 
 # =========================================================================== #

@@ -32,3 +32,18 @@ def test_the_real_export_holds_the_285_rows_and_139_yes_no_asks():
     predictions = json.load( open( require_local_file( EXPORT_FILE_NAME ) ) )[ "predictions" ]
     assert len( predictions ) == 285
     assert sum( 1 for p in predictions if p[ "response_type" ] == "yes_no" ) == 139
+
+
+def test_tightening_the_parser_loses_no_stored_yes_vote():
+    """
+    The unrecognised stored yes/no answers, measured on the real data, are free text.
+
+    The measurement file is written by a run of the parser over the stored case and answer values.
+    Each unrecognised value must not start with "yes", so the old vote counted it as "no",
+    and the tightened parser drops no yes vote.
+    """
+    measured = json.load( open( require_local_file( "2026.11.18-f2-parser-measurement.json" ) ) )
+    assert measured[ "cases" ][ "n" ] > 0 and measured[ "notifs" ][ "n" ] > 0
+    for name, group in measured.items():
+        for value in group[ "unrecognised" ]:
+            assert not value.lower().startswith( "yes" ), name

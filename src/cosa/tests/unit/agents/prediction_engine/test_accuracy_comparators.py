@@ -29,8 +29,6 @@ from cosa.agents.prediction_engine.accuracy_comparators import (
     compare_open_ended,
     compare_open_ended_batch,
     get_comparator,
-    _extract_binary,
-    _extract_qualifier,
 )
 from cosa.agents.prediction_engine.config import (
     RESPONSE_TYPE_YES_NO,
@@ -75,20 +73,19 @@ def test_yes_no_predicted_and_actual_qualifiers():
     assert detail[ "actual_qualifier" ] == "only the old ones"
 
 
-# ---- _extract_binary / _extract_qualifier edge arcs -----------------------
+# ---- the stance the comparator reads: one parser, no copy of its own -------
 
-def test_extract_binary_arcs():
-    assert _extract_binary( "" ) == ""                       # empty guard
-    assert _extract_binary( "YES please" ) == "yes"          # startswith yes
-    assert _extract_binary( "Nope" ) == "no"                 # startswith no
-    assert _extract_binary( "maybe later" ) == "maybe later" # neither → lowered passthrough
+def test_compare_yes_no_stance_arcs():
+    assert compare_yes_no( { "value": "" }, { "value": "" } )[ 1 ][ "actual_binary" ] == ""         # empty guard
+    assert compare_yes_no( { "value": "yes" }, { "value": "YES [comment: x]" } )[ 0 ] is True       # recognised
+    assert compare_yes_no( { "value": "no" }, { "value": "Nope" } )[ 0 ] is False                   # "Nope" has no stance
+    assert compare_yes_no( { "value": "neither" }, { "value": "neither" } )[ 0 ] is True            # neither is a stance
 
 
-def test_extract_qualifier_arcs():
-    assert _extract_qualifier( "" ) is None                          # empty guard
-    assert _extract_qualifier( "yes, sure" ) is None                 # no marker
-    assert _extract_qualifier( "yes [comment: only March]" ) == "only March"   # closed marker
-    assert _extract_qualifier( "yes [comment: unterminated" ) == "unterminated"  # no closing ]
+def test_compare_yes_no_qualifier_arcs():
+    assert compare_yes_no( { "value": "yes" }, { "value": "yes, sure" } )[ 1 ].get( "actual_qualifier" ) is None
+    assert compare_yes_no( { "value": "yes" }, { "value": "yes [comment: only March]" } )[ 1 ][ "actual_qualifier" ] == "only March"
+    assert compare_yes_no( { "value": "yes" }, { "value": "yes [comment: unterminated" } )[ 1 ][ "actual_qualifier" ] == "unterminated"
 
 
 # ---- compare_multiple_choice_single ---------------------------------------

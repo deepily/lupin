@@ -216,10 +216,23 @@ class TestExtractQualifierComment( unittest.TestCase ):
     def test_case_normalized( self ):
         self.assertEqual( extract_qualifier_comment( "NEITHER" ), ( "neither", None ) )
 
-    def test_non_matching_falls_back_to_whole_string( self ):
-        self.assertEqual(
-            extract_qualifier_comment( "  Maybe later  " ), ( "maybe later", None )
-        )
+    def test_an_unrecognised_string_has_no_stance( self ):
+        for value in ( "  Maybe later  ", "not now", "none", "nope", "Yes.", "yes, but later",
+                       "yes [comment: x] extra", "yeah, provided it is safe" ):
+            self.assertEqual( extract_qualifier_comment( value ), ( None, None ), value )
+
+    def test_a_comment_may_span_lines( self ):
+        self.assertEqual( extract_qualifier_comment( "Yes [comment: a\nb]" ), ( "yes", "a\nb" ) )
+
+    def test_an_unterminated_comment_gives_its_stance_and_text( self ):
+        self.assertEqual( extract_qualifier_comment( "yes [comment: unterminated" ), ( "yes", "unterminated" ) )
+
+    def test_a_comment_may_hold_brackets( self ):
+        self.assertEqual( extract_qualifier_comment( "yes [comment: see [1]]" ), ( "yes", "see [1]" ) )
+
+    def test_a_blank_comment_is_no_qualifier( self ):
+        self.assertEqual( extract_qualifier_comment( "no [comment:]" ), ( "no", None ) )
+        self.assertEqual( extract_qualifier_comment( "no [comment:   ]" ), ( "no", None ) )
 
 
 class TestFormatQualifiedResponse( unittest.TestCase ):
