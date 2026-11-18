@@ -222,7 +222,8 @@ def sibling_data_dirs( root, names=None ):
     Find the call-log folders of the other registered repositories.
 
     A seat in another registered repo logs its reuse-tool calls under that repo's own data folder.
-    A gate that reads only this repo's log cannot see a receipt it minted.
+    The lookup tools search the tree they are given, so such a receipt is a search of another codebase.
+    The gate reads these folders only to name where a refused receipt was logged.
 
     Requires:
         - root is a repository root
@@ -243,6 +244,41 @@ def sibling_data_dirs( root, names=None ):
     return found
 
 
+def foreign_receipts( sibling_dirs ):
+    """
+    Map each receipt id logged in another repo to the name of that repo.
+
+    Requires:
+        - sibling_dirs is a list of folders from sibling_data_dirs, each `<fleet>/<repo name>/<data subdir>`
+
+    Ensures:
+        - returns { receipt id: repo name } over the receipts of each folder's call log
+        - a receipt logged in two repos keeps the first repo of the list
+    """
+    out = {}
+    for folder in sibling_dirs:
+        records, _bad = eg.merge_call_logs( pathlib.Path( folder ) / "call-log" )
+        for rid in eg.receipts_by_id( records ): out.setdefault( rid, pathlib.Path( folder ).parent.name )
+    return out
+
+
+def name_foreign_receipts( verdicts, receipts, foreign, root ):
+    """
+    Name the other repo on a refused line whose receipt was logged there.
+
+    Requires:
+        - verdicts comes from rr.judge; receipts is this repo's receipts_by_id; foreign is foreign_receipts
+    Ensures:
+        - a refused line whose receipt is absent here and present in `foreign` gains one reason
+        - the reason names the repo it was logged in and says to re-run check_exists with root set to `root`
+        - no verdict ever turns from refused to accepted
+    """
+    for v in verdicts:
+        m = ro.OUTCOME_RE.match( v[ "line" ] )
+        if v[ "status" ] != "refused" or m is None or m[ "receipt" ] in receipts or m[ "receipt" ] not in foreign: continue
+        v[ "reasons" ].append( f"receipt {m[ 'receipt' ]} was logged in {foreign[ m[ 'receipt' ] ]}'s call log, so it searched that repo; re-run check_exists with root set to {root}" )
+
+
 def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_since=None, sibling_dirs=() ):
     """
     Judge the outcome lines the branch adds, and the new definitions of a given diff.
@@ -258,7 +294,7 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_
         - returns { "error": text } when the gate could not check: an unreadable or ill-shaped diff file, an unreadable call log, a diff with `algorithm_changed`, no base, or a record that could not be written
         - refusals.jsonl in data_dir gains one record per judged line, once per document text
         - the call log, searches and exclusions are read once for all documents
-        - each folder of sibling_dirs adds its call log and its search records, so a receipt logged in another registered repo is found
+        - a refused line whose receipt is in the call log of a folder of sibling_dirs gains a reason naming that repo; sibling_dirs never makes a line pass
         - with `since` inside the branch, lines and definitions added before it are not read
     """
     sha = resolve_base( root, base )
@@ -270,18 +306,16 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_
         if not isinstance( diff, dict ) or not isinstance( diff.get( "added", [] ), list ): raise ValueError( f"{diff_path} is not a symbol index diff" )
         if "algorithm_changed" in diff: raise ValueError( f"{diff_path}: the pin algorithm changed, so the diff lists no definitions to check" )
         records, _bad = eg.merge_call_logs( log_dir )
-        sibling_records = [ ( d, eg.merge_call_logs( pathlib.Path( d ) / "call-log" )[ 0 ] ) for d in sibling_dirs ]
+        foreign = foreign_receipts( sibling_dirs )
     except UNREADABLE as e: return { "error": f"{type( e ).__name__}: {e}" }
     files = added_text_by_file( root, sha )
     if files is None: return { "error": f"git could not diff {sha} against HEAD" }
     receipts, searches, exclusions = eg.receipts_by_id( records ), eg.searches_by_receipt( records, data_dir ), eg.exclusions_by_symbol( records )
-    for folder, found in sibling_records:
-        for rid, tool in eg.receipts_by_id( found ).items(): receipts.setdefault( rid, tool )
-        for rid, by_search in eg.searches_by_receipt( found, folder ).items(): searches.setdefault( rid, {} ).update( by_search )
     refusals, outcomes, rulings, lines, appended = [], [], {}, 0, 0
     for path, text in files.items():
         file_rulings = eg.parse_rulings( text )
         verdicts     = rr.judge( text, receipts, searches, exclusions, file_rulings, root )
+        name_foreign_receipts( verdicts, receipts, foreign, root )
         lines       += len( verdicts )
         try:
             if verdicts: appended += rr.record( data_dir, text, verdicts )
