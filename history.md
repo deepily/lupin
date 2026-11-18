@@ -8,6 +8,18 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.17 - Session 9da01ad8 (Cheech 🌿, manager; crew Tiberius, Rio, Krishna, Sam, Maria, Rachel; peer Mr. Radio) | Duplicate-check remediation merged, 70 new findings ruled and their 7 fixes merged, TypeScript tier green at 100%
+
+**Resume here**: memento `.claude-memento-cheech-9da01ad8.md` (amended 22:20). Working-branch head is c4072524c, pushed at session end.
+1. **Merged, each reviewed**: rows 557ef00a, b9cf6490, 9cc37a94 and 44efa636, the 33 fixes from 16 Nov. Also 25f4905e (`WorktreeContext._locked` default, f59a186ff) and 9fe7d0b0 (secret-scan fixture, 7c319e9ff). Also b34a67fa and 106899b9 (79 wiki re-pins, b36bbacd3) and Mr. Radio's explainer a59f1ac3 (1ba29045b).
+2. **Duplicate check 17 Nov**: Sam and Maria ruled 70 findings on 828aaa20, 63 distinct and 7 extend. The 7 fixes merged as fc2cc64eb (Python) and c4072524c (TypeScript).
+3. **Gates at c4072524c**: census 2,237 passed; reuse gate 95 passed, 0 failed. Sam added the `SEARCHED` line missing since cf9d61c55. TypeScript tier ts-fe559c31: 6,844 passed, c8 100/100/100/100.
+4. **Held for 18 Nov**: Mr. Radio's remediation plan 4df74e3d2 (row 94a8f561, unapproved); Rick said no work on it tonight. The last two code-health phases wait on Tiffany's lupin-mobile row e1778814; Rick declined a cross-project spawn.
+5. **Lessons**: a seat's spawn index follows its session name, so slice work by persona after the spawn. Seats are denied `duplicate_check_verdicts`, so they write lines to a file and the manager runs the writer.
+6. **Memento sweep**: 302 trashed, 7 kept for Cheech and Mr. Radio. From the last two days: the guards refuse a `git restore` of the app INI, so only the jobs accordion clears a cron switch line.
+
+**Files**: src/rnd/README.md (merge resolutions); history.md
+
 ## 2026.11.16 - Session 8b134124 (Cheech 🌿, manager; crew Maya, Chloé, Pocholo, John, Clayton, Rachel, Tiberius, Sam) | Recall question measured and closed, 356 duplicate findings ruled, all three long PR suites rehearsed green
 
 **Resume here**: memento `.claude-memento-cheech-8b134124.md` (amended at closing, 22:45). Working-branch head is 81194389d or later.
