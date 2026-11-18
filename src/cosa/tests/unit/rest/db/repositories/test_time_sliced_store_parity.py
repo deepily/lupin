@@ -73,11 +73,24 @@ def _sql( session, query, **kwargs ):
              for pct, entity in PredictionDecisionRepository( session ).find_similar( query, **kwargs ) ]
 
 
+def _tie_groups( hits ):
+    """Split hits into runs of equal score, each a set of ids; SQL leaves a tie unordered."""
+    groups = []
+    for pct, record in hits:
+        if groups and groups[ -1 ][ 0 ] == pytest.approx( pct, abs=1e-3 ): groups[ -1 ][ 1 ].add( record[ "id" ] )
+        else:                                                              groups.append( ( pct, { record[ "id" ] } ) )
+    return groups
+
+
 def _assert_same( sql_hits, store_hits ):
-    """Same neighbours in the same order, scores within float32 noise, same record shape."""
-    assert [ r[ "id" ] for _, r in store_hits ] == [ r[ "id" ] for _, r in sql_hits ]
-    for ( sql_pct, sql_record ), ( store_pct, store_record ) in zip( sql_hits, store_hits ):
+    """Same neighbours, scores within float32 noise and record shape; ties compare as sets."""
+    sql_groups, store_groups = _tie_groups( sql_hits ), _tie_groups( store_hits )
+    assert [ ids for _, ids in store_groups ] == [ ids for _, ids in sql_groups ]
+    for ( sql_pct, _ ), ( store_pct, _ ) in zip( sql_groups, store_groups ):
         assert store_pct == pytest.approx( sql_pct, abs=1e-3 )
+    sql_by_id = { record[ "id" ]: record for _, record in sql_hits }
+    for _, store_record in store_hits:
+        sql_record = sql_by_id[ store_record[ "id" ] ]
         assert list( store_record.keys() ) == list( sql_record.keys() ) == list( RECORD_FIELDS )
         for field in RECORD_FIELDS:
             if field == "question_embedding":
