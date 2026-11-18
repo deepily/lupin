@@ -1123,6 +1123,18 @@ def live_filer( findings, folder ):
     return filing.file_findings( findings, folder, filing.LiveStore(), declared, pick_declared_managers_from_env( filing.PROJECT ) )
 
 
+def is_baseline_finding( finding ):
+    """
+    Say whether a finding came from a baseline sweep.
+
+    Requires:
+        - finding carries the run's window, as findings_of writes it: { start, end, commits } with commits a count
+    Ensures:
+        - returns True when the window holds no commits, which only baseline_window gives: a daily window with no commits adds no definition and so no finding
+    """
+    return finding[ "window" ][ "commits" ] == 0
+
+
 def live_auditor( findings, folder ):
     """
     Queue a known-miss audit for each finding that ties to a lookup receipt.
@@ -1131,6 +1143,7 @@ def live_auditor( findings, folder ):
         - the environment is the lookup tool's: its data folder holds the receipts, the call log and refusals.jsonl
     Ensures:
         - returns queue_audits' answer, made with find_tie over the refusal pairs and the merged call logs
+        - a baseline finding is tied by a ruling line only: its commit is the sweep's end, not the one that added the definition, so the heuristic would tie every one of them to one lookup
         - each finding is named by its id in the index the sweep reads (reuse_tools.prepare's entries), so a queued item's exclude_id is one the sweep knows
         - the audit queue and the receipts are read from and written to the lookup tool's own data folder
         - makes no model call
@@ -1139,7 +1152,7 @@ def live_auditor( findings, folder ):
     entries = rt.prepare( ctx )[ 1 ]
     records, _bad = eg.merge_call_logs( ctx.data / "call-log" )
     rows = behaviour.read_refusals( ctx.data )
-    tie  = lambda finding: tie_mod.find_tie( finding[ "id" ], rows, records, ctx.root, finding[ "commit" ] )
+    tie  = lambda finding: tie_mod.find_tie( finding[ "id" ], rows, records, ctx.root, finding[ "commit" ], heuristic=not is_baseline_finding( finding ) )
     return audit.queue_audits( findings, tie, lambda rid: rt.load_receipt( ctx, rid ), ctx.data, datetime.date.today().isoformat(), audit.index_id_finder( entries ),
                               max_pending=rs.pending_cap_for( ctx ) )
 

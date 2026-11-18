@@ -565,18 +565,34 @@ def test_the_live_auditor_ties_each_finding_with_the_lookup_tools_logs_and_queue
     monkeypatch.setattr( dd.rt, "context_from_environment", lambda: Ctx )
     monkeypatch.setattr( dd.eg, "merge_call_logs", lambda folder: ( seen.setdefault( "logs", folder ) and [ "rec" ], [] ) )
     monkeypatch.setattr( dd.behaviour, "read_refusals", lambda data: [ "row" ] )
-    monkeypatch.setattr( dd.tie_mod, "find_tie", lambda sid, rows, records, root, sha: ( sid, rows, records, root, sha ) )
+    monkeypatch.setattr( dd.tie_mod, "find_tie", lambda sid, rows, records, root, sha, heuristic: ( sid, rows, records, root, sha, heuristic ) )
     monkeypatch.setattr( dd.rt, "load_receipt", lambda ctx, rid: ( ctx, rid ) )
     monkeypatch.setattr( dd.rt, "prepare", lambda ctx: ( set(), [ { "id": "pkg.f", "file": "pkg.py", "name": "f", "line": 3 } ], "sha", "gen" ) )
     def queue( findings, tie_of, receipt_of, data_dir, today, index_id_of, max_pending ):
         seen.update( max_pending=max_pending, tie=tie_of( findings[ 0 ] ), receipt=receipt_of( "r1" ), data_dir=data_dir, today=today, index_id=index_id_of( findings[ 0 ] ) )
         return "queued"
     monkeypatch.setattr( dd.audit, "queue_audits", queue )
-    assert dd.live_auditor( [ { "id": "d1", "commit": "abc", "file": "pkg.py", "name": "f", "line": 3 } ], tmp_path ) == "queued"
+    assert dd.live_auditor( [ { "id": "d1", "commit": "abc", "file": "pkg.py", "name": "f", "line": 3, "window": { "commits": 4 } } ], tmp_path ) == "queued"
     assert seen[ "index_id" ] == "pkg.f", "the finding is named by the index the sweep reads"
-    assert seen[ "logs" ] == Ctx.data / "call-log" and seen[ "tie" ] == ( "d1", [ "row" ], [ "rec" ], Ctx.root, "abc" )
+    assert seen[ "logs" ] == Ctx.data / "call-log" and seen[ "tie" ] == ( "d1", [ "row" ], [ "rec" ], Ctx.root, "abc", True )
     assert seen[ "receipt" ] == ( Ctx, "r1" ) and seen[ "data_dir" ] == Ctx.data and seen[ "today" ] == datetime.date.today().isoformat()
     assert seen[ "max_pending" ] is None, "a host with no ledger file has no cap"
+
+
+def test_a_baseline_finding_is_tied_without_the_heuristic_and_a_daily_one_with_it( tmp_path, monkeypatch ):
+    class Ctx: root, data, ledger = tmp_path / "root", tmp_path / "data", type( "L", ( ), { "path": tmp_path / "no-ledger.jsonl" } )()
+    asked = []
+    monkeypatch.setattr( dd.rt, "context_from_environment", lambda: Ctx )
+    monkeypatch.setattr( dd.eg, "merge_call_logs", lambda folder: ( [], [] ) )
+    monkeypatch.setattr( dd.behaviour, "read_refusals", lambda data: [] )
+    monkeypatch.setattr( dd.rt, "prepare", lambda ctx: ( set(), [], "sha", "gen" ) )
+    monkeypatch.setattr( dd.tie_mod, "find_tie", lambda sid, rows, records, root, sha, heuristic: asked.append( ( sid, heuristic ) ) or { "tie": "none", "reason": "r" } )
+    monkeypatch.setattr( dd.audit, "queue_audits", lambda findings, tie_of, *a, **k: [ tie_of( f ) for f in findings ] )
+    base  = { "id": "b1", "commit": "end", "window": { "start": "s", "end": "end", "commits": 0 } }
+    daily = { "id": "d1", "commit": "c1", "window": { "start": "s", "end": "end", "commits": 3 } }
+    assert dd.is_baseline_finding( base ) and not dd.is_baseline_finding( daily )
+    dd.live_auditor( [ base, daily ], tmp_path )
+    assert asked == [ ( "b1", False ), ( "d1", True ) ]
 
 
 def test_a_failed_file_after_some_judge_calls_were_made_counts_the_calls_made( repo, tmp_path ):

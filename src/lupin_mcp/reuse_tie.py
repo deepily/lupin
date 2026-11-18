@@ -17,6 +17,7 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 RULING_TIE   = "ruling"
 HEURISTIC    = "heuristic"
 NO_TIE       = "none"
+BASELINE_REASON = "the finding comes from a baseline sweep of the whole tree, which has no commit that added the definition, so no lookup before a commit can be its search"
 HEURISTIC_TOOL = "check_exists"                                     # only this receipt holds a need text; the other lookup holds a symbol id
 
 
@@ -93,7 +94,7 @@ def _from_commit( records, facts ):
     return { "tie": HEURISTIC, "receipt_id": last[ "receipt_id" ], "session": last[ "session" ], "tool": last[ "tool" ], "persona": persona }
 
 
-def find_tie( symbol, rows, records, root, sha ):
+def find_tie( symbol, rows, records, root, sha, heuristic=True ):
     """
     Tie one duplicate to a lookup receipt and the session that made it.
 
@@ -101,12 +102,14 @@ def find_tie( symbol, rows, records, root, sha ):
         - symbol is the id of the new definition that proved a duplicate
         - rows is what reuse_behaviour.read_refusals returns; records is what merge_call_logs returns
         - root and sha name the commit that added the definition
+        - heuristic is False for a finding that has no adding commit, as one from a baseline sweep: sha is then the sweep's end commit, which says nothing about who wrote the definition
     Ensures:
         - returns { tie, receipt_id, session, tool } with tie `ruling` when a ruling line named the receipt
         - otherwise tie is `heuristic` with the persona added, or `none` with a reason when no lookup could be found
         - session is None when the call log does not hold a ruling's receipt; the commit is not read when a ruling names the receipt
         - tool tells the caller whether the receipt holds a need text: only `check_exists` does
+        - with heuristic False only a ruling can tie: the commit is not read, and no ruling gives a `none` tie with BASELINE_REASON
     Raises:
         - ValueError when the ruling gives no tie and the commit is not in the repository
     """
-    return _from_ruling( symbol, rows, records ) or _from_commit( records, commit_facts( root, sha ) )
+    return _from_ruling( symbol, rows, records ) or ( _from_commit( records, commit_facts( root, sha ) ) if heuristic else { "tie": NO_TIE, "reason": BASELINE_REASON } )
