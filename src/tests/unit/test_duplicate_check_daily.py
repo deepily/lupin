@@ -560,7 +560,7 @@ def test_a_run_with_an_auditor_records_its_answer_and_a_raising_auditor_is_recor
 
 
 def test_the_live_auditor_ties_each_finding_with_the_lookup_tools_logs_and_queues_in_its_data_folder( tmp_path, monkeypatch ):
-    class Ctx: root, data = tmp_path / "root", tmp_path / "data"
+    class Ctx: root, data, ledger = tmp_path / "root", tmp_path / "data", type( "L", ( ), { "path": tmp_path / "no-ledger.jsonl" } )()
     seen = {}
     monkeypatch.setattr( dd.rt, "context_from_environment", lambda: Ctx )
     monkeypatch.setattr( dd.eg, "merge_call_logs", lambda folder: ( seen.setdefault( "logs", folder ) and [ "rec" ], [] ) )
@@ -568,14 +568,15 @@ def test_the_live_auditor_ties_each_finding_with_the_lookup_tools_logs_and_queue
     monkeypatch.setattr( dd.tie_mod, "find_tie", lambda sid, rows, records, root, sha: ( sid, rows, records, root, sha ) )
     monkeypatch.setattr( dd.rt, "load_receipt", lambda ctx, rid: ( ctx, rid ) )
     monkeypatch.setattr( dd.rt, "prepare", lambda ctx: ( set(), [ { "id": "pkg.f", "file": "pkg.py", "name": "f", "line": 3 } ], "sha", "gen" ) )
-    def queue( findings, tie_of, receipt_of, data_dir, today, index_id_of ):
-        seen.update( tie=tie_of( findings[ 0 ] ), receipt=receipt_of( "r1" ), data_dir=data_dir, today=today, index_id=index_id_of( findings[ 0 ] ) )
+    def queue( findings, tie_of, receipt_of, data_dir, today, index_id_of, max_pending ):
+        seen.update( max_pending=max_pending, tie=tie_of( findings[ 0 ] ), receipt=receipt_of( "r1" ), data_dir=data_dir, today=today, index_id=index_id_of( findings[ 0 ] ) )
         return "queued"
     monkeypatch.setattr( dd.audit, "queue_audits", queue )
     assert dd.live_auditor( [ { "id": "d1", "commit": "abc", "file": "pkg.py", "name": "f", "line": 3 } ], tmp_path ) == "queued"
     assert seen[ "index_id" ] == "pkg.f", "the finding is named by the index the sweep reads"
     assert seen[ "logs" ] == Ctx.data / "call-log" and seen[ "tie" ] == ( "d1", [ "row" ], [ "rec" ], Ctx.root, "abc" )
     assert seen[ "receipt" ] == ( Ctx, "r1" ) and seen[ "data_dir" ] == Ctx.data and seen[ "today" ] == datetime.date.today().isoformat()
+    assert seen[ "max_pending" ] is None, "a host with no ledger file has no cap"
 
 
 def test_a_failed_file_after_some_judge_calls_were_made_counts_the_calls_made( repo, tmp_path ):

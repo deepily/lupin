@@ -1365,10 +1365,8 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
 
 
 def _finish( ctx ):
-    """Ensures: a single-use context with a token budget closes its ledger run."""
-    if not ctx.single_use or not isinstance( ctx.transport, LiveJevTransport ): return
-    from lupin_mcp import reuse_ceiling                                        # imported here: it imports this module
-    if isinstance( ctx.transport.budget, reuse_ceiling.TokenBudget ): ctx.transport.budget.end()
+    """Ensures: a single-use context closes its ledger run once, and leaves a closed run alone."""
+    if ctx.single_use: close_run( ctx )
 
 
 def close_run( ctx ):
@@ -1711,10 +1709,12 @@ def _queue_shadow_audit( ctx, receipt ):
     Ensures:
         - nothing happens while the INI key `reuse shadow audit enabled` is not true
         - a queue failure is printed to stderr and never changes or fails the lookup's answer
+        - the queue holds no more audits than the ledger's headroom pays for at the mean sweep (reuse_shadow.pending_cap)
     """
     from lupin_mcp import reuse_shadow                                          # imported here: the audit reads the INI file, and a lookup with the audit off needs none of it
     try:
-        reuse_shadow.queue_lookup( ctx.data, receipt, datetime.date.today().isoformat() )
+        cap = reuse_shadow.pending_cap_for( ctx )
+        reuse_shadow.queue_lookup( ctx.data, receipt, datetime.date.today().isoformat(), max_pending=cap )
     except ( CandidateError, OSError ) as e:
         print( f"shadow audit queue failed: {e}", file=sys.stderr )
 
@@ -1765,6 +1765,8 @@ def _need_impl( need, exclude_id, ctx, question, sweep_only, write=True, *, lang
         return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=sweep_only, question=question, write=write, language=language ) )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
+    finally:
+        _finish( ctx )                                                         # prepare opens the run, so every exit before run_question ends it too
 
 
 def fetch_similar_impl( entry, ctx, language=None, include_tests=False ):
@@ -1784,9 +1786,16 @@ def fetch_similar_impl( entry, ctx, language=None, include_tests=False ):
         - a definition that sendable() would not send answers { status: error, error, entry, detail }
           with error EXCLUDED_PREFIX or EXCLUDED_SENSITIVE_CONTENT, and no receipt
         - an id that is in no healthy index returns { status: error, error: UNKNOWN_ENTRY } and no receipt
+        - a single-use context closes its ledger run on every exit, an early error return and an exception included
     """
     bad = language_error( language )
     if bad is not None: return bad
+    try: return _fetch_similar( entry, ctx, language, include_tests )
+    finally: _finish( ctx )                                                    # prepare opens the run, so every exit before run_question ends it too
+
+
+def _fetch_similar( entry, ctx, language, include_tests ):
+    """Ensures: returns fetch_similar_impl's answer for a checked language; closes no run."""
     prepared = prepare( ctx, include_tests )
     flags, gen = prepared[ 0 ], prepared[ 3 ]
     known    = ( sx_build.read_symbols( gen, all_symbols=True ) + ( sx_build.read_symbols( ctx.tests_gen, all_symbols=True ) if ctx.tests_gen is not None else [] ) ) if gen else []

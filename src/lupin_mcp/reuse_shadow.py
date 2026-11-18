@@ -24,6 +24,7 @@ import argparse
 import datetime
 import json
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -41,6 +42,7 @@ AUDIT_LEDGER_UNREADABLE = "AUDIT_LEDGER_UNREADABLE"
 AUDIT_WEEKLY_CAP_UNSET  = "AUDIT_WEEKLY_CAP_UNSET"
 AUDIT_BUDGETS_SWITCH    = "AUDIT_BUDGETS_SWITCH"
 SWEEP_RUN_PREFIX        = "shadow-audit"
+MEAN_AUDIT_TOKENS       = 2_500_000                                   # the measured mean tokens one audit sweep holds; the queue cap divides headroom by it
 ENABLED_KEY             = "reuse shadow audit enabled"
 CEILING_KEY             = "reuse shadow audit max tokens per drain"
 LIFETIME_KEY            = "reuse shadow audit lifetime token limit"
@@ -189,7 +191,30 @@ def check_lifetime_limit( ledger, limit, ceiling ):
     return spent
 
 
-def queue_lookup( data_dir, receipt, today, reader=None ):
+def pending_cap( ledger_file ):
+    """
+    The most audits the queue may hold: what the ledger's headroom pays for.
+
+    Requires:
+        - ledger_file is the path of the spend ledger
+    Ensures:
+        - returns None for a ledger file that does not exist, so a host with no ledger has no cap
+        - returns ( limit minus total held ) // MEAN_AUDIT_TOKENS, never below 0
+        - returns 0 for a ledger that exists and cannot be read, so nothing queues that could not be paid for
+    """
+    ledger_file = pathlib.Path( ledger_file )
+    if not ledger_file.exists(): return None
+    try: limit, total = reuse_ledger.AccountLedger( ledger_file ).snapshot()
+    except reuse_ledger.LedgerUnreadable: return 0
+    return max( 0, ( limit - total ) // MEAN_AUDIT_TOKENS )
+
+
+def pending_cap_for( ctx ):
+    """Ensures: returns pending_cap of the context's ledger, or of the repository's fleet ledger."""
+    return pending_cap( ctx.ledger.path if ctx.ledger is not None else reuse_ledger.ledger_path( ctx.root ) )
+
+
+def queue_lookup( data_dir, receipt, today, reader=None, max_pending=None ):
     """
     Queue a served lookup for audit when the audit is on and the lookup is in the sample.
 
@@ -203,13 +228,14 @@ def queue_lookup( data_dir, receipt, today, reader=None ):
         - a sweep-only, test-including, pair or exclusion lookup is never queued: they are measurement runs, not live answers
         - a lookup whose candidate stage failed is never queued, because there is no shortlist to compare
         - the daily lookup count only goes up while the audit is on
+        - with max_pending, a sampled lookup that finds the queue full is counted and not queued (None)
 
     Raises:
         - CandidateError or OSError from the queue write
     """
     if not lt.read_enabled( reader=reader, key=ENABLED_KEY ): return None
     inputs = audit_inputs( receipt )
-    return None if inputs is None else sa.enqueue_if_sampled( data_dir, *inputs, today )
+    return None if inputs is None else sa.enqueue_if_sampled( data_dir, *inputs, today, max_pending=max_pending )
 
 
 def audit_inputs( receipt ):

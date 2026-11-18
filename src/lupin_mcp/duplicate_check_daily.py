@@ -35,6 +35,7 @@ from lupin_mcp import duplicate_check_history as history
 from lupin_mcp import duplicate_check_status as status_mod
 from lupin_mcp import reuse_behaviour as behaviour
 from lupin_mcp import reuse_exit_gate as eg
+from lupin_mcp import reuse_shadow as rs
 from lupin_mcp import reuse_tie as tie_mod
 from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import source_at
@@ -1139,7 +1140,8 @@ def live_auditor( findings, folder ):
     records, _bad = eg.merge_call_logs( ctx.data / "call-log" )
     rows = behaviour.read_refusals( ctx.data )
     tie  = lambda finding: tie_mod.find_tie( finding[ "id" ], rows, records, ctx.root, finding[ "commit" ] )
-    return audit.queue_audits( findings, tie, lambda rid: rt.load_receipt( ctx, rid ), ctx.data, datetime.date.today().isoformat(), audit.index_id_finder( entries ) )
+    return audit.queue_audits( findings, tie, lambda rid: rt.load_receipt( ctx, rid ), ctx.data, datetime.date.today().isoformat(), audit.index_id_finder( entries ),
+                              max_pending=rs.pending_cap_for( ctx ) )
 
 
 @contextlib.contextmanager

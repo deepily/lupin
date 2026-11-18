@@ -288,16 +288,24 @@ def count_lookup( data_dir, today ):
     return len( path.read_text( encoding="utf-8" ).splitlines() )
 
 
-def enqueue_pending( data_dir, need, language, generation, index_sha, live, today, known_miss=False, exclude_id=None, tie=None ):
+def pending_count( data_dir ):
+    """Ensures: returns the items waiting in shadow-pending/, temporary files left out."""
+    return sum( 1 for p in _folder( data_dir, "shadow-pending" ).glob( "*.json" ) if not p.name.startswith( TEMP_PREFIX ) )
+
+
+def enqueue_pending( data_dir, need, language, generation, index_sha, live, today, known_miss=False, exclude_id=None, tie=None, max_pending=None ):
     """
     Put one lookup in the audit queue, without counting it and without sampling.
 
     Requires:
         - live holds verdict and candidate_ids of the lookup that was served
         - need is the redacted need, because the queue file keeps its words so the sweep can read them
+        - max_pending is None for no cap, else a whole number of items the queue may hold
 
     Ensures:
-        - returns the queue id, a hash of the need, generation and index sha, and of the excluded id when there is one
+        - with max_pending, a lookup that is not yet queued is refused once the queue holds max_pending items: returns None and writes nothing
+        - a lookup already queued is never refused, so a known-miss upgrade still lands on a full queue
+        - otherwise returns the queue id, a hash of the need, generation and index sha, and of the excluded id when there is one
         - a file in shadow-pending/ holds the item with attempts 0 and the known_miss, exclude_id and tie given, and the same lookup queues once
         - the same lookup queued with and without an excluded id is two items, because the sweeps ask different questions
         - a known-miss call for a lookup already queued as a random-sample item upgrades that item to known-miss, keeping its attempts, so it drains first
@@ -307,6 +315,7 @@ def enqueue_pending( data_dir, need, language, generation, index_sha, live, toda
     item = { "id": key, "need": need, "language": language, "generation": generation, "index_sha": index_sha, "live": live, "queued_on": today,
              "attempts": 0, "known_miss": known_miss, "exclude_id": exclude_id, "tie": tie }
     path = _folder( data_dir, "shadow-pending" ) / f"{key}.json"
+    if max_pending is not None and not path.exists() and pending_count( data_dir ) >= max_pending: return None
     if not _write_once( path, json.dumps( item, sort_keys=True ) + "\n" ) and known_miss: _mark_known_miss( path, tie )
     return key
 
@@ -327,7 +336,7 @@ def _mark_known_miss( path, tie ):
     os.replace( temp, path )
 
 
-def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, today, rate=SAMPLE_RATE ):
+def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, today, rate=SAMPLE_RATE, max_pending=None ):
     """
     Count a served lookup and queue it for audit when it is in the sample.
 
@@ -337,7 +346,7 @@ def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, t
 
     Ensures:
         - the day's lookup count goes up by one, sampled or not
-        - returns the queue id of a sampled lookup, or None
+        - returns the queue id of a sampled lookup, or None; None also when max_pending is reached (see enqueue_pending)
         - a sampled lookup is a file in shadow-pending/ with known_miss False, and the same lookup queues once
 
     Raises:
@@ -345,7 +354,7 @@ def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, t
     """
     count_lookup( data_dir, today )
     if not is_sampled( need, generation, rate ): return None
-    return enqueue_pending( data_dir, need, language, generation, index_sha, live, today )
+    return enqueue_pending( data_dir, need, language, generation, index_sha, live, today, max_pending=max_pending )
 
 
 def audits_in_week( data_dir, today ):
