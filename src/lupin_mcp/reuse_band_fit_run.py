@@ -517,9 +517,7 @@ def cli( argv=None, stage_factory=None ):
         - returns 2 after one line on the error stream for a refusal of the runner, the driver, the frozen needs, the ledger or the receipt
         - any other error propagates untouched
     """
-    return rr.run_cli( lambda: main( argv, stage_factory ),
-                       ( rr.RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused,
-                         e2e.FrozenInputRefused, rl.AccountLimitReached, rl.LedgerUnreadable, FileExistsError ) )
+    return rr.run_cli( lambda: main( argv, stage_factory ), rr.RUN_REFUSALS + ( FileExistsError, ) )
 
 
 if __name__ == "__main__":  # pragma: no cover -- the module entry point; cli is what the tests drive

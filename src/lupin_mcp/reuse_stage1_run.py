@@ -14,6 +14,7 @@ import os
 import pathlib
 import sys
 
+from lupin_mcp import reuse_e2e as e2e
 from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_stage1 as s1
 from lupin_mcp import reuse_stage1_analysis as an
@@ -33,6 +34,11 @@ PACK_ARMS       = ( "single1", "single2", "pack10", "pack50", "pack200" )
 
 class RunnerRefused( Exception ):
     """The runner would not start a step, and opened nothing."""
+
+
+# The nine refusals a live run command answers with one line and exit code 2; a run command with more of its own adds them to this tuple.
+RUN_REFUSALS = ( RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused,
+                 e2e.FrozenInputRefused, rl.AccountLimitReached, rl.LedgerUnreadable )
 
 
 class StandIn:

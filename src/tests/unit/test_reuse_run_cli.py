@@ -18,9 +18,11 @@ if src_path not in sys.path: sys.path.insert( 0, src_path )
 
 import pytest
 
+from lupin_mcp import reuse_band_fit_run as bfr
 from lupin_mcp import reuse_e2e as e2e
 from lupin_mcp import reuse_e2e_run as e2r
 from lupin_mcp import reuse_flip_run as frun
+from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_phase5_run as p5
 from lupin_mcp import reuse_stage1 as s1
 from lupin_mcp import reuse_stage1_run as rr
@@ -73,6 +75,9 @@ def _refusal_of( module, refusal ):
     ( p5,   e2e.FrozenInputRefused( "f" ) ),
     ( s2r,  rr.RunnerRefused( "r" ) ),
     ( s2r,  e2e.FrozenInputRefused( "f" ) ),
+    ( s2r,  rl.LedgerUnreadable( "l" ) ),
+    ( bfr,  rl.AccountLimitReached( "a" ) ),
+    ( bfr,  FileExistsError( "x" ) ),
 ] )
 def test_each_cli_turns_its_own_refusals_into_exit_2( module, refusal, capsys ):
     assert _refusal_of( module, refusal ) == 2
@@ -87,3 +92,18 @@ def test_each_cli_turns_its_own_refusals_into_exit_2( module, refusal, capsys ):
 def test_a_refusal_a_cli_does_not_list_still_propagates( module, not_a_refusal ):
     with pytest.raises( type( not_a_refusal ) ):
         _refusal_of( module, not_a_refusal )
+
+
+def test_the_nine_shared_refusals_are_listed_once_and_the_band_fit_adds_only_file_exists():
+    assert [ c.__name__ for c in rr.RUN_REFUSALS ] == [ "RunnerRefused", "DriverRefused", "KeyMissing", "CanaryNotApproved", "CanaryTripped", "StageRefused",
+                                                         "FrozenInputRefused", "AccountLimitReached", "LedgerUnreadable" ]
+    assert not _refuses_a_file_exists( frun )
+    assert _refuses_a_file_exists( bfr )
+
+
+def _refuses_a_file_exists( module ):
+    try:
+        _refusal_of( module, FileExistsError( "x" ) )
+    except FileExistsError:
+        return False
+    return True

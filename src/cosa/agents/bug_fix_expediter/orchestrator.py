@@ -48,6 +48,7 @@ from cosa.agents.shared.fix_executor import FixExecutor
 from cosa.agents.shared.edit_agent_options import build_edit_agent_options
 from cosa.agents.shared.tool_use_summary import summarize_tool_use
 from cosa.agents.shared.coder_stream import delegate_to_coder
+from cosa.agents.shared.tester_stream import verify_with_tester
 from cosa.agents.shared.diagnosis_json import fallback_diagnosis_fields, parse_diagnosis_json
 from cosa.agents.io_models.utils.json_object_recovery import extract_json_object, extract_last_balanced
 
@@ -1402,63 +1403,15 @@ class BFEOrchestrator:
         prompt  = build_verification_prompt( selected_fix, coder_output, files_changed )
         options = self._build_tester_options( guard, cosa_interface )
 
-        try:
-            collected_text = []
-            test_files     = []
-
-            # Bug 15 work-around: claude-agent-sdk ≥ 0.1.36 rejects a str prompt when
-            # can_use_tool is set on options. Upstream has not resolved it:
-            # https://github.com/anthropics/claude-code/issues/18735 — remove the
-            # wrap_prompt_for_streaming() call once upstream lands the fix.
-            async for message in sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ):
-                guard.check_timeout()
-
-                if isinstance( message, AssistantMessage ):
-                    for block in message.content:
-                        if isinstance( block, TextBlock ):
-                            collected_text.append( block.text )
-                        elif isinstance( block, ToolUseBlock ):
-                            if block.name in ( "Edit", "Write" ):
-                                file_path = block.input.get( "file_path", "" )
-                                if file_path and file_path not in test_files:
-                                    test_files.append( file_path )
-                                await post_tool_hook( block.name, block.input, guard )
-                            await self._notify(
-                                voice_io, f"Tester: {block.name}", priority="low",
-                            )
-                elif isinstance( message, TextBlock ):
-                    collected_text.append( message.text )
-                elif isinstance( message, RateLimitEvent ):
-                    logger.warning( f"Rate limited: retry_after={getattr( message, 'retry_after', '?' )}s" )
-
-            tester_output = "".join( collected_text ).strip()
-            output_lower  = tester_output.lower()
-
-            # Tester self-report
-            passed = (
-                "pass" in output_lower and "fail" not in output_lower
-            ) or "all tests pass" in output_lower
-
-            # Independent pytest validation — OVERRIDES tester self-report
-            for tf in test_files:
-                if tf.endswith( ".py" ) and "test" in tf.lower():
-                    run_result = await run_pytest( tf, timeout_secs=60 )
-                    if not run_result.passed:
-                        passed = False
-                    if self.debug:
-                        print( f"[BFEOrchestrator] pytest {tf}: {'PASS' if run_result.passed else 'FAIL'} "
-                               f"({run_result.passed_count}/{run_result.total_tests})" )
-                    break  # Only validate first test file
-
-            if self.debug: print( f"[BFEOrchestrator] Verification: {'PASS' if passed else 'FAIL'}" )
-
-            return ( passed, tester_output )
-
-        except SafetyLimitError:
-            raise
-        except Exception as e:
-            logger.error( f"Verification failed: {e}" )
-            return ( False, f"Verification error: {e}" )
+        # Bug 15 work-around: claude-agent-sdk ≥ 0.1.36 rejects a str prompt when
+        # can_use_tool is set on options. Upstream has not resolved it:
+        # https://github.com/anthropics/claude-code/issues/18735 — remove the
+        # wrap_prompt_for_streaming() call once upstream lands the fix.
+        return await verify_with_tester(
+            lambda: sdk_query( prompt=wrap_prompt_for_streaming( prompt ), options=options ),
+            guard, lambda text, priority="low": self._notify( voice_io, text, priority=priority ), "BFEOrchestrator", logger,
+            ( AssistantMessage, TextBlock, ToolUseBlock, ResultMessage, RateLimitEvent ), post_tool_hook, run_pytest, SafetyLimitError, self.debug,
+        )
 
     # -------------------------------------------------------------------------
     # Worktree isolation (Bug 9, 2026-04-16)
