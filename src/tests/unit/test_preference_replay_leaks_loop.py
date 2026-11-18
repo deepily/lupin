@@ -13,43 +13,18 @@ Requires:
 
 import json
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pytest
 
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM, replay, rows_as_of
 from cosa.research.preference_replay.time_sliced_store import TimeSlicedDecisionStore
-from cosa.rest.db.vector_store_models import EMBEDDING_DIM
+from tests.helpers.preference_leak_fixture import basis_vector, load_fixture
 
-FIXTURE = Path( __file__ ).parent / "fixtures" / "preference_replay_leaks" / "leak_fixtures.json"
 SHA     = "0" * 64
 OWNER   = "synthetic-owner"
 
 
-def _data():
-    """
-    Load the fixture.
-
-    Ensures:
-        - returns the parsed fixture dict
-    """
-    return json.loads( FIXTURE.read_text() )
-
-
-def _vector( axis, norm ):
-    """
-    Build a vector that is one basis axis times a norm.
-
-    Requires:
-        - 0 <= axis < EMBEDDING_DIM and norm > 0
-
-    Ensures:
-        - returns a list of EMBEDDING_DIM floats
-    """
-    vector = [ 0.0 ] * EMBEDDING_DIM
-    vector[ axis ] = norm
-    return vector
 
 
 @pytest.fixture
@@ -74,7 +49,7 @@ def _asks_for( engine, name ):
         - a case without its own ask times is asked one minute before it was answered
         - the target carries the fixture's notification final state, if any, under final_-prefixed keys so no real field is overwritten
     """
-    data    = _data()
+    data    = load_fixture()
     entry   = data[ "classes" ][ name ]
     common  = data[ "common" ]
     target  = entry[ "target" ]
@@ -90,7 +65,7 @@ def _asks_for( engine, name ):
         ask = {
             "id": item[ "id" ], "question": message, "category": category, "decision_value": item[ "answer" ],
             "ratification_state": "not_required", "data_origin": "organic", "response_type": common[ "response_type" ],
-            "question_embedding": _vector( item[ "axis" ], common[ "norm" ] ), "created_at": "2026-11-10", "owner_user_id": OWNER,
+            "question_embedding": basis_vector( item[ "axis" ], common[ "norm" ] ), "created_at": "2026-11-10", "owner_user_id": OWNER,
             "answer_source": "human", "responded_at": responded, "title": title, "message": message,
             "sender_id": common[ "sender_id" ], "asked_at": asked, "recipient_id": OWNER, "response_options": None,
             "actual_value": item[ "answer" ],
@@ -128,7 +103,7 @@ class _CapturingStore( TimeSlicedDecisionStore ):
 
 
 def test_eventual_answer_late_answers_never_reach_the_forecast( engine ):
-    entry        = _data()[ "classes" ][ "eventual_answer" ]
+    entry        = load_fixture()[ "classes" ][ "eventual_answer" ]
     asks, target = _asks_for( engine, "eventual_answer" )
     run          = replay( asks, engine, SHA )
     neighbours   = _neighbours( run, asks, target )
@@ -139,7 +114,7 @@ def test_eventual_answer_late_answers_never_reach_the_forecast( engine ):
 
 
 def test_later_status_the_store_is_given_the_value_the_case_had_at_the_ask( engine ):
-    entry        = _data()[ "classes" ][ "later_status" ]
+    entry        = load_fixture()[ "classes" ][ "later_status" ]
     asks, target = _asks_for( engine, "later_status" )
     _CapturingStore.built = []
     replay( asks, engine, SHA, store_factory=_CapturingStore )
@@ -156,7 +131,7 @@ def test_later_status_the_store_is_given_the_value_the_case_had_at_the_ask( engi
 
 
 def test_later_status_a_case_the_loader_cannot_rebuild_is_left_out_and_counted( engine ):
-    entry        = _data()[ "classes" ][ "later_status" ]
+    entry        = load_fixture()[ "classes" ][ "later_status" ]
     asks, target = _asks_for( engine, "later_status" )
     run          = replay( asks, engine, SHA )
     neighbours   = _neighbours( run, asks, target )
@@ -170,12 +145,12 @@ def test_later_status_rows_as_of_names_the_unrebuildable_case_for_the_target_ask
     asks, target = _asks_for( engine, "later_status" )
     ask          = next( a for a in asks if a[ "id" ] == target )
     rows, lost   = rows_as_of( asks, ask[ "asked_at" ] )
-    assert lost == _data()[ "classes" ][ "later_status" ][ "loader_excluded_and_counted_ids" ]
+    assert lost == load_fixture()[ "classes" ][ "later_status" ][ "loader_excluded_and_counted_ids" ]
     assert "status-unrebuildable" not in [ row[ "id" ] for row in rows ]
 
 
 def test_final_notification_state_never_reaches_what_the_engine_is_handed( engine ):
-    entry        = _data()[ "classes" ][ "final_notification_state" ]
+    entry        = load_fixture()[ "classes" ][ "final_notification_state" ]
     asks, target = _asks_for( engine, "final_notification_state" )
     handed       = []
     real_predict = engine.predict
@@ -189,7 +164,7 @@ def test_final_notification_state_never_reaches_what_the_engine_is_handed( engin
 
 
 def test_own_stored_case_and_its_retry_group_are_left_out_of_the_neighbours( engine ):
-    entry        = _data()[ "classes" ][ "own_stored_case" ]
+    entry        = load_fixture()[ "classes" ][ "own_stored_case" ]
     asks, target = _asks_for( engine, "own_stored_case" )
     run          = replay( asks, engine, SHA )
     neighbours   = _neighbours( run, asks, target )
@@ -199,7 +174,7 @@ def test_own_stored_case_and_its_retry_group_are_left_out_of_the_neighbours( eng
 
 
 def test_eventual_answer_the_baseline_arm_ignores_cases_answered_after_the_ask( engine ):
-    entry        = _data()[ "classes" ][ "eventual_answer" ]
+    entry        = load_fixture()[ "classes" ][ "eventual_answer" ]
     asks, target = _asks_for( engine, "eventual_answer" )
     run          = replay( asks, engine, SHA )
     index        = [ ask[ "id" ] for ask in asks ].index( target )

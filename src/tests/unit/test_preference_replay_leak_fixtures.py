@@ -11,26 +11,13 @@ Requires:
 
 import json
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
-FIXTURE = Path( __file__ ).parent / "fixtures" / "preference_replay_leaks" / "leak_fixtures.json"
+from tests.helpers.preference_leak_fixture import load_fixture
 
 CLASS_NAMES = [ "eventual_answer", "later_status", "final_notification_state", "own_stored_case" ]
 
-
-def _load():
-    """
-    Load the fixture file.
-
-    Requires:
-        - the fixture file exists
-
-    Ensures:
-        - returns the parsed dict
-    """
-    return json.loads( FIXTURE.read_text() )
 
 
 def _when( text ):
@@ -47,14 +34,14 @@ def _when( text ):
 
 
 def test_the_fixture_is_synthetic_and_names_exactly_the_four_classes():
-    data = _load()
+    data = load_fixture()
     assert data[ "synthetic" ] is True
     assert sorted( data[ "classes" ].keys() ) == sorted( CLASS_NAMES )
 
 
 @pytest.mark.parametrize( "name", CLASS_NAMES )
 def test_every_class_asks_before_it_is_answered_and_names_a_leak( name ):
-    entry  = _load()[ "classes" ][ name ]
+    entry  = load_fixture()[ "classes" ][ name ]
     target = entry[ "target" ]
     assert _when( target[ "asked_at" ] ) < _when( target[ "responded_at" ] )
     assert entry[ "leak" ].strip() != ""
@@ -63,7 +50,7 @@ def test_every_class_asks_before_it_is_answered_and_names_a_leak( name ):
 
 @pytest.mark.parametrize( "name", CLASS_NAMES )
 def test_expected_and_forbidden_ids_are_cases_and_never_overlap( name ):
-    entry    = _load()[ "classes" ][ name ]
+    entry    = load_fixture()[ "classes" ][ name ]
     case_ids = [ case[ "id" ] for case in entry[ "cases" ] ]
     assert len( case_ids ) == len( set( case_ids ) ), "case ids are unique"
     expected = entry[ "expected_neighbour_ids_at_ask_time" ]
@@ -74,7 +61,7 @@ def test_expected_and_forbidden_ids_are_cases_and_never_overlap( name ):
 
 
 def test_eventual_answer_expected_cases_were_answered_by_the_ask_and_forbidden_after():
-    entry = _load()[ "classes" ][ "eventual_answer" ]
+    entry = load_fixture()[ "classes" ][ "eventual_answer" ]
     asked = _when( entry[ "target" ][ "asked_at" ] )
     by_id = { case[ "id" ]: case for case in entry[ "cases" ] }
     for case_id in entry[ "expected_neighbour_ids_at_ask_time" ]:
@@ -87,7 +74,7 @@ def test_eventual_answer_expected_cases_were_answered_by_the_ask_and_forbidden_a
 
 
 def test_eventual_answer_has_a_decoy_on_another_axis_that_is_not_expected():
-    entry  = _load()[ "classes" ][ "eventual_answer" ]
+    entry  = load_fixture()[ "classes" ][ "eventual_answer" ]
     axis   = entry[ "target" ][ "axis" ]
     decoys = [ case for case in entry[ "cases" ] if case[ "axis" ] != axis ]
     assert [ case[ "id" ] for case in decoys ] == [ "eventual-decoy-other-topic" ]
@@ -95,7 +82,7 @@ def test_eventual_answer_has_a_decoy_on_another_axis_that_is_not_expected():
 
 
 def test_later_status_the_as_of_ask_value_differs_from_the_final_value():
-    entry  = _load()[ "classes" ][ "later_status" ]
+    entry  = load_fixture()[ "classes" ][ "later_status" ]
     asked  = _when( entry[ "target" ][ "asked_at" ] )
     by_id  = { case[ "id" ]: case for case in entry[ "cases" ] }
     case   = by_id[ "status-revised-after-the-ask" ]
@@ -110,7 +97,7 @@ def test_later_status_the_as_of_ask_value_differs_from_the_final_value():
 
 
 def test_later_status_a_case_first_answered_after_the_ask_is_forbidden():
-    entry = _load()[ "classes" ][ "later_status" ]
+    entry = load_fixture()[ "classes" ][ "later_status" ]
     asked = _when( entry[ "target" ][ "asked_at" ] )
     case  = [ c for c in entry[ "cases" ] if c[ "id" ] == "status-answered-after-the-ask" ][ 0 ]
     assert _when( case[ "versions" ][ 0 ][ "at" ] ) > asked
@@ -119,7 +106,7 @@ def test_later_status_a_case_first_answered_after_the_ask_is_forbidden():
 
 
 def test_later_status_an_unrebuildable_case_was_answered_before_the_ask_and_has_no_history():
-    entry = _load()[ "classes" ][ "later_status" ]
+    entry = load_fixture()[ "classes" ][ "later_status" ]
     asked = _when( entry[ "target" ][ "asked_at" ] )
     case  = [ c for c in entry[ "cases" ] if c[ "id" ] == "status-unrebuildable" ][ 0 ]
     assert _when( case[ "responded_at" ] ) <= asked
@@ -128,7 +115,7 @@ def test_later_status_an_unrebuildable_case_was_answered_before_the_ask_and_has_
 
 
 def test_final_state_sentinels_all_sit_in_the_targets_final_state_and_nowhere_else():
-    entry     = _load()[ "classes" ][ "final_notification_state" ]
+    entry     = load_fixture()[ "classes" ][ "final_notification_state" ]
     final     = entry[ "target" ][ "notification_final_state" ]
     sentinels = entry[ "forbidden_sentinels" ]
     assert sorted( sentinels ) == sorted( final.values() )
@@ -138,7 +125,7 @@ def test_final_state_sentinels_all_sit_in_the_targets_final_state_and_nowhere_el
 
 
 def test_own_case_has_the_targets_id_and_vector_and_arrives_after_the_ask():
-    entry  = _load()[ "classes" ][ "own_stored_case" ]
+    entry  = load_fixture()[ "classes" ][ "own_stored_case" ]
     target = entry[ "target" ]
     own    = [ c for c in entry[ "cases" ] if c[ "id" ] == target[ "id" ] ][ 0 ]
     assert own[ "axis" ] == target[ "axis" ]
@@ -147,7 +134,7 @@ def test_own_case_has_the_targets_id_and_vector_and_arrives_after_the_ask():
 
 
 def test_own_case_retry_copy_is_inside_ten_minutes_and_the_sibling_is_outside():
-    entry  = _load()[ "classes" ][ "own_stored_case" ]
+    entry  = load_fixture()[ "classes" ][ "own_stored_case" ]
     target = entry[ "target" ]
     by_id  = { case[ "id" ]: case for case in entry[ "cases" ] }
     gap    = lambda case_id: ( _when( target[ "asked_at" ] ) - _when( by_id[ case_id ][ "ask" ][ "asked_at" ] ) ).total_seconds()
@@ -159,7 +146,7 @@ def test_own_case_retry_copy_is_inside_ten_minutes_and_the_sibling_is_outside():
 
 
 def test_every_axis_is_a_valid_basis_index_for_a_768_dimension_vector():
-    data = _load()
+    data = load_fixture()
     axes = []
     for entry in data[ "classes" ].values():
         axes.append( entry[ "target" ][ "axis" ] )
@@ -169,7 +156,7 @@ def test_every_axis_is_a_valid_basis_index_for_a_768_dimension_vector():
 
 
 def test_eventual_answer_the_late_answers_outvote_the_earlier_ones_so_a_leak_flips_the_prior_majority():
-    entry   = _load()[ "classes" ][ "eventual_answer" ]
+    entry   = load_fixture()[ "classes" ][ "eventual_answer" ]
     asked   = _when( entry[ "target" ][ "asked_at" ] )
     known   = [ c[ "answer" ] for c in entry[ "cases" ] if _when( c[ "responded_at" ] ) <= asked ]
     late    = [ c[ "answer" ] for c in entry[ "cases" ] if _when( c[ "responded_at" ] ) > asked ]
