@@ -53,14 +53,14 @@ def test_every_retrieval_asks_for_the_recipients_human_cases( engine, response_t
     assert kwargs[ "response_type" ] == response_type
 
 
-def test_a_caller_that_names_no_recipient_still_gets_only_human_cases( engine ):
+def test_a_caller_that_names_no_recipient_gets_no_personal_cases( engine ):
     engine._predict_yes_no( "Proceed?", "permission", [ 0.1 ] * 768 )
     kwargs = _retrieval_kwargs( engine )
-    assert kwargs[ "answer_source" ] == "human" and "owner_user_id" not in kwargs
+    assert ( kwargs[ "answer_source" ], kwargs[ "owner_user_id" ] ) == ( "human", "" )
 
 
 def test_the_personal_vote_filter_is_the_one_both_retrievals_use():
-    assert PredictionEngine._personal_vote_filter( None ) == { "answer_source": "human" }
+    assert PredictionEngine._personal_vote_filter( None ) == { "answer_source": "human", "owner_user_id": "" }
     assert PredictionEngine._personal_vote_filter( RECIPIENT ) == { "answer_source": "human", "owner_user_id": RECIPIENT }
 
 

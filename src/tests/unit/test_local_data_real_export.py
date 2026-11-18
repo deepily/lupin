@@ -12,7 +12,8 @@ import json
 import pytest
 
 from cosa.utils.notification_utils import extract_qualifier_comment
-from cosa.utils.local_data_tier import MANIFEST_FILE_NAME, require_local_file, sha256_of_file
+from cosa.utils.file_hash import file_sha256
+from cosa.utils.local_data_tier import MANIFEST_FILE_NAME, require_local_file
 
 EXPORT_FILE_NAME = "2026.11.17-recent-predictions-285.json"
 
@@ -25,7 +26,7 @@ def test_the_real_export_still_matches_the_manifest_sha():
     manifest_path = require_local_file( MANIFEST_FILE_NAME )
     recorded      = dict( ( line.split( "  " )[ 1 ], line.split( "  " )[ 0 ] )
                           for line in open( manifest_path ).read().splitlines() if line.strip() )
-    assert recorded[ EXPORT_FILE_NAME ] == sha256_of_file( export_path )
+    assert recorded[ EXPORT_FILE_NAME ] == file_sha256( export_path )
 
 
 def test_the_real_export_holds_the_285_rows_and_139_yes_no_asks():

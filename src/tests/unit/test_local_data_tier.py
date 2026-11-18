@@ -59,12 +59,6 @@ def test_require_local_file_skips_by_name_when_absent( monkeypatch, tmp_path ):
     assert str( tmp_path ) + "/absent.json" in str( skipped.value )
 
 
-def test_sha256_of_file_matches_hashlib( tmp_path ):
-    path = tmp_path / "bytes.bin"
-    path.write_bytes( b"synthetic bytes" * 100000 )
-    assert ldt.sha256_of_file( str( path ) ) == hashlib.sha256( b"synthetic bytes" * 100000 ).hexdigest()
-
-
 def test_skip_reason_strips_the_prefix_from_a_tuple_and_a_string():
     assert ldt.skip_reason( _report( longrepr=( "f.py", 3, "Skipped: gone" ) ) ) == "gone"
     assert ldt.skip_reason( _report( longrepr="Skipped: also gone" ) ) == "also gone"

@@ -276,12 +276,12 @@ class PredictionEngine:
 
         Ensures:
             - always keeps only cases whose answer_source is "human"
-            - adds the owner filter when the recipient is known, so another account's answer,
-              a proxy's guess, a timed-out default, a hint vote and an unknown case cast no vote
+            - always filters on an owner, so another account's answer, a proxy's guess, a timed-out
+              default, a hint vote and an unknown case cast no vote
+            - fails closed: with no recipient named, the owner is "", which no stored case carries,
+              so the caller gets no personal cases rather than everyone's
         """
-        filters = { "answer_source": "human" }
-        if owner_user_id is not None: filters[ "owner_user_id" ] = str( owner_user_id )
-        return filters
+        return { "answer_source": "human", "owner_user_id": "" if owner_user_id is None else str( owner_user_id ) }
 
     def _ratified_weight( self, record ) -> float:
         """
