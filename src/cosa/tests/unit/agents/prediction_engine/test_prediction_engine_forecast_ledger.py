@@ -40,7 +40,7 @@ class _MemoryRepo( PredictionLogRepository ):
         self.rows[ key ] = entity
         return entity
 
-    def get_by_notification_id( self, notification_id ):
+    def get_by_notification_id( self, notification_id, for_update=False ):
         return self.rows.get( uuid.UUID( notification_id ) )
 
 
@@ -181,6 +181,16 @@ class TestConfigVersion:
         engine.cbr_top_k += 1
         assert engine.config_version() != first
 
+    def test_the_retrieval_metric_changes_the_version( self, engine ):
+        first = engine.config_version()
+        engine.retrieval_metric = "cosine"
+        assert engine.config_version() != first
+
+    def test_the_calibration_switch_changes_the_version( self, engine ):
+        first = engine.config_version()
+        engine.calibration_enabled = True
+        assert engine.config_version() != first
+
 
 class TestRecordForecast:
 
@@ -209,6 +219,18 @@ class TestRecordForecast:
         engine.record_forecast( _NID, _ND, prediction_result=cold )
         row = rows[ uuid.UUID( _NID ) ]
         assert row.abstention_reason == "no_similar_cases" and row.predicted_value is None
+
+    def test_a_prediction_error_result_is_stored_as_a_predictor_error_naming_the_class( self, engine, rows, monkeypatch ):
+        def boom( *a, **k ): raise KeyError( "handler-fail" )
+        monkeypatch.setattr( engine, "_predict_yes_no", boom )
+        monkeypatch.setattr( engine, "_get_embedding_store", lambda: _CaseStore() )
+        monkeypatch.setattr( engine.classifier, "classify", lambda m, sender_id=None: ( "permission", 1.0 ) )
+        result = engine.predict( { "message": "Deploy?", "response_type": "yes_no" } )
+        engine.record_forecast( _NID, _ND, prediction_result=result )
+        row = rows[ uuid.UUID( _NID ) ]
+        assert row.abstention_reason == "predictor_error: KeyError"
+        assert row.prediction_strategy == cfg.STRATEGY_ERROR and row.predicted_value is None
+        assert row.category == "permission"
 
     def test_the_callers_abstention_reason_beats_the_results( self, engine, rows ):
         engine.record_forecast( _NID, _ND, prediction_result=_result(), abstention_reason="caller says" )

@@ -194,6 +194,7 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
     async def test_clear_pending_empties_the_routers_pending_map_and_counts_it( self ):
         import cosa.rest.routers.notifications as notifications
         cfg, pe_cls, get_pe = self._common_patches()
+        cfg.config_block_id = "Lupin: Testing"
         notifications.pending_responses.clear()          # other tests leave entries in this module-level map
         notifications.pending_responses[ "n-a" ] = { "event": None }
         notifications.pending_responses[ "n-b" ] = { "event": None }
@@ -205,6 +206,25 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
                 result = await reset_prediction_engine( drop_table=False, clear_pending=True )
             self.assertEqual( result[ "pending_cleared" ], 2 )
             self.assertEqual( notifications.pending_responses, {} )
+        finally:
+            notifications.pending_responses.clear()
+
+    async def test_clear_pending_is_refused_outside_the_testing_block_and_nothing_is_reset( self ):
+        import cosa.rest.routers.notifications as notifications
+        cfg, pe_cls, get_pe = self._common_patches()
+        cfg.config_block_id = "Lupin: Production"
+        notifications.pending_responses.clear()
+        notifications.pending_responses[ "n-live" ] = { "event": None }
+        try:
+            with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
+                 patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
+                 patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
+                result = await reset_prediction_engine( drop_table=True, clear_pending=True )
+            self.assertEqual( result[ "status" ], "error" )
+            self.assertIn( "Lupin: Testing", result[ "message" ] )
+            self.assertIn( "n-live", notifications.pending_responses )
+            pe_cls.reset.assert_not_called()
         finally:
             notifications.pending_responses.clear()
 

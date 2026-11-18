@@ -407,6 +407,8 @@ async def reset_prediction_engine( drop_table: bool = False, clear_pending: bool
         - No config reinit, DB swap, or snapshot reload (use /api/init for those)
         - drop_table=True with a failed clear still resets the singleton, but answers status "error"
           with table_dropped false and the cause in message, so a caller never reads it as success
+        - clear_pending=True is refused unless the server runs a [Lupin: Testing] config block: the answer
+          is status "error" and nothing is reset or cleared
         - clear_pending=True (test-only) empties the notification router's in-memory pending_responses map,
           which is the state a server restart loses, and reports how many entries it dropped as pending_cleared;
           the default leaves the map alone
@@ -417,6 +419,14 @@ async def reset_prediction_engine( drop_table: bool = False, clear_pending: bool
 
         config_mgr  = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         table_name  = config_mgr.get( "prediction engine lancedb table", default="prediction_decisions" )
+
+        # clear_pending empties the map the live SSE waits read, so only a test server may be asked to.
+        if clear_pending and not str( config_mgr.config_block_id ).startswith( "Lupin: Testing" ):
+            return {
+                "status"    : "error",
+                "message"   : f"clear_pending is honoured only under a [Lupin: Testing] config block, not {config_mgr.config_block_id!r}; nothing was reset",
+                "timestamp" : du.get_current_datetime_iso()
+            }
         table_dropped = False
         clear_error   = None
 

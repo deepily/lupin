@@ -325,3 +325,23 @@ class TestLedgerWrites( _PLRTestBase ):
         self.assertEqual( prediction.actual_value, { "value": "yes" } )
         self.assertTrue( prediction.accuracy_match )
         self.session.flush.assert_not_called()
+
+
+class TestRowLocks( _PLRTestBase ):
+    """The outcome check and write run under a row lock, so duplicate answers cannot both pass."""
+
+    def test_get_by_notification_id_locks_only_when_asked( self ):
+        chain = self.session.query.return_value.filter.return_value
+        chain.first.return_value = "row"
+        self.assertEqual( self.repo.get_by_notification_id( _NID ), "row" )
+        chain.with_for_update.assert_not_called()
+        chain.with_for_update.return_value.first.return_value = "locked-row"
+        self.assertEqual( self.repo.get_by_notification_id( _NID, for_update=True ), "locked-row" )
+        chain.with_for_update.assert_called_once_with()
+
+    def test_update_outcome_reads_under_a_row_lock( self ):
+        chain = self.session.query.return_value.filter.return_value
+        chain.with_for_update.return_value.first.return_value = types.SimpleNamespace(
+            actual_value=None, accuracy_match=None, accuracy_detail=None, responded_at=None )
+        self.repo.update_outcome( _NID, { "value": "yes" }, True, None )
+        chain.with_for_update.assert_called_once_with()

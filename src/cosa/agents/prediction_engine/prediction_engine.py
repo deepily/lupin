@@ -154,6 +154,11 @@ class PredictionEngine:
             self.hint_voting_enabled                = DEFAULT_HINT_VOTING_ENABLED
             self.hint_vote_min_confidence_threshold = DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD
 
+        # Settings the forecast row's config_version names beside the thresholds. Phase 3 reads the
+        # retrieval metric from the INI and phase 9 the calibration switch; until then they hold today's values.
+        self.retrieval_metric     = "dot"
+        self.calibration_enabled  = False
+
         # Retained for _get_embedding_store. None is legitimate — the store then
         # resolves its own configuration.
         self._config_mgr = config_mgr
@@ -295,7 +300,7 @@ class PredictionEngine:
                 response_type = response_type,
                 category      = category,
                 strategy      = STRATEGY_COLD_START,
-                metadata      = { "reason": "prediction_error", "error": str( e ) }
+                metadata      = { "reason": "prediction_error", "error": str( e ), "error_class": e.__class__.__name__ }
             )
 
     @staticmethod
@@ -1369,13 +1374,14 @@ class PredictionEngine:
         Name the settings the forecast ran under.
 
         Ensures:
-            - returns the first 12 hex characters of a sha256 over the retrieval and display settings
+            - returns the first 12 hex characters of a sha256 over the retrieval, display, retrieval-metric and calibration settings
             - the same settings give the same string, and a changed setting gives a different one
         """
         settings = { "cbr_top_k": self.cbr_top_k, "similarity_threshold": self.similarity_threshold,
                      "confidence_threshold": self.confidence_threshold, "yes_no_no_margin": self.yes_no_no_margin,
                      "open_ended_cbr_top_k": self.open_ended_cbr_top_k,
-                     "open_ended_cbr_threshold": self.open_ended_cbr_threshold }
+                     "open_ended_cbr_threshold": self.open_ended_cbr_threshold,
+                     "retrieval_metric": self.retrieval_metric, "calibration_enabled": self.calibration_enabled }
         return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
 
     def record_forecast( self, notification_id: str, notification_dict: Dict[str, Any],
@@ -1398,6 +1404,8 @@ class PredictionEngine:
             - writes exactly one prediction_log row with the ledger columns filled
             - with a result: its strategy, category, value, confidence, case count, evidence and latency
               are stored, and abstention_reason is the result's metadata reason (None for a forecast)
+            - a result whose reason is prediction_error is stored with strategy error and the reason
+              "predictor_error: <exception class>"
             - without a result: confidence and case count are 0, predicted_value is None, the strategy
               and abstention_reason are the arguments, and the category is the classifier's, or "unknown"
             - the row carries the code identity, config version and predictor version
@@ -1416,6 +1424,10 @@ class PredictionEngine:
                 count         = prediction_result.similar_case_count
                 strategy      = prediction_result.strategy
                 reason        = meta.get( "reason" ) if abstention_reason is None else abstention_reason
+                if meta.get( "reason" ) == "prediction_error" and abstention_reason is None:
+                    # predict() never raises; it reports a failure this way, so name the class here.
+                    strategy = STRATEGY_ERROR
+                    reason   = f"predictor_error: {meta.get( 'error_class' )}"
             else:
                 response_type = notification_dict.get( "response_type", "" )
                 try:

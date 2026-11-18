@@ -146,14 +146,15 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             - accuracy_detail: Detailed comparison info (or None)
 
         Ensures:
-            - Finds the prediction_log row by notification_id
+            - Finds the prediction_log row by notification_id, reading it under a row lock so that two
+              simultaneous duplicate answers cannot both pass the already-recorded check
             - Sets actual_value, accuracy_match, accuracy_detail, responded_at
             - Returns updated PredictionLog or None if not found
 
         Raises:
             - OutcomeAlreadyRecorded if the row already holds an outcome; the stored outcome is left as it was
         """
-        prediction = self.get_by_notification_id( notification_id )
+        prediction = self.get_by_notification_id( notification_id, for_update=True )
         if prediction is None:
             return None
         if prediction.responded_at is not None:
@@ -167,20 +168,23 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         self.session.flush()
         return prediction
 
-    def get_by_notification_id( self, notification_id: str ) -> Optional[PredictionLog]:
+    def get_by_notification_id( self, notification_id: str, for_update: bool = False ) -> Optional[PredictionLog]:
         """
         Get prediction log entry by notification ID.
 
         Requires:
             - notification_id: UUID string
+            - for_update: True to read the row under a row lock
 
         Ensures:
             - Returns the prediction log row for this notification
             - Returns None if not found
         """
-        return self.session.query( PredictionLog ).filter(
+        query = self.session.query( PredictionLog ).filter(
             PredictionLog.notification_id == uuid.UUID( notification_id )
-        ).first()
+        )
+        if for_update: query = query.with_for_update()
+        return query.first()
 
     def record_seen( self, notification_id: str, rendered: bool = False,
                      fold_opened: bool = False ) -> Optional[Dict[str, bool]]:
