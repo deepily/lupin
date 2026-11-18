@@ -105,7 +105,7 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
         if owner_user_id is not None: conditions.append( PredictionDecision.owner_user_id == owner_user_id )
         if answer_source is not None: conditions.append( PredictionDecision.answer_source == answer_source )
         if metric == "cosine":
-            conditions.append( PredictionDecision.question_embedding.is_not( None ) )
+            conditions.append( PredictionDecision.question_embedding.is_not( None ) )   # redundant with the norm check below (NULL norm is NULL); guards a future change to that check
             conditions.append( func.vector_norm( PredictionDecision.question_embedding ) > 0 )
         if conditions:
             from sqlalchemy import and_
