@@ -24,7 +24,7 @@ Four repositories hold what the decision proxy decided, how far it is trusted, a
 ## Don't
 - Don't call `delete_pending` on a ratified decision. It raises `ValueError`; only pending ones can go.
 - Don't call `delete_all` outside a test. It is a test reset that empties `prediction_decisions` and returns the count. The caller commits.
-- Don't read `accuracy_rate` as covering every prediction. It divides by the ones that have an outcome.
+- Don't read `accuracy_rate` as covering every prediction. It divides by the scored rows (`accuracy_match` present) and is `null`, with `status` `insufficient data`, when none are. Rows with `forecast_source` `test_override` are left out of every count. `GET /api/prediction-engine/accuracy` serves it to admins.
 
 ## Invariants
 - `get_or_create` makes a trust row at level 1 with zero counts. `update_after_ratification`, `update_trust_level` and `update_circuit_breaker_state` all go through it.
