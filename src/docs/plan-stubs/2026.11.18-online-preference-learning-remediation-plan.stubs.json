@@ -1,270 +1,720 @@
 {
-    "plan_ref"        : "src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.18-online-preference-learning-remediation-plan.md",
-    "project"         : "lupin",
-    "prefix"          : "LUPIN",
-    "plan_name"       : "Preference forecast fix",
-    "correlation_key" : "epic:opl-remediation-build",
-    "owner_persona"   : "mr radio",
-    "phases"          : [
+  "plan_ref": "src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.18-online-preference-learning-remediation-plan.md",
+  "project": "lupin",
+  "prefix": "LUPIN",
+  "plan_name": "Preference learning",
+  "correlation_key": "epic:opl-remediation-build",
+  "owner_persona": "mr radio",
+  "phases": [
+    {
+      "phase": 0,
+      "name": "Docs, durable data, inventory",
+      "steps": [
         {
-            "phase" : 0,
-            "name"  : "Docs, durable data, inventory",
-            "steps" : [
-                { "key": "d1-scope-order", "name": "Decision 1: scope and order", "item_class": "decision", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "Ruled by Rick 18 Nov (plan section 2, decision 1): the expert's order, foundation then checkpoint then one switch per change",
-                  "done_receipt": "Rick's ruling, 18 Nov walkthrough; plan section 2 row 1 at d4a7dafa9" },
-                { "key": "d2-folded-hints", "name": "Decision 2: folded hints", "item_class": "decision", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "Ruled by Rick 18 Nov (plan section 2, decision 2): hints shown, labelled, folded closed on every card",
-                  "done_receipt": "Rick's ruling, 18 Nov walkthrough; plan section 2 row 2 at d4a7dafa9" },
-                { "key": "d3-auto-submit-off", "name": "Decision 3: auto-submit off", "item_class": "decision", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "Ruled by Rick 18 Nov (plan section 2, decision 3): disable, keep the code",
-                  "done_receipt": "Rick's ruling, 18 Nov walkthrough; plan section 2 row 3 at d4a7dafa9" },
-                { "key": "d4-haiku-job", "name": "Decision 4: Haiku background job", "item_class": "decision", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "Ruled by Rick 18 Nov (plan section 2, decision 4): bounded Claude Code on Haiku as a background job; re-ruled only if phase 6's median cold start is over 10 s",
-                  "done_receipt": "Rick's ruling, 18 Nov walkthrough; plan section 2 row 4 at d4a7dafa9" },
-                { "key": "d5-trust-gate-scope", "name": "Decision 5: trust gate item 12 only", "item_class": "decision", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "Ruled by Rick 18 Nov (plan section 2, decision 5): item 12 only, last, no new acting behaviour",
-                  "done_receipt": "Rick's ruling, 18 Nov walkthrough; plan section 2 row 5 at d4a7dafa9" },
-                { "key": "d6-companion-files", "name": "Decision 6: companion files", "item_class": "decision", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "Ruled by Rick 18 Nov (plan section 2, decision 6): three companion files re-uploaded with authorized_by; Rick's real answers stay uncommitted",
-                  "done_receipt": "Rick's ruling, 18 Nov walkthrough; plan section 2 row 6 at d4a7dafa9" },
-                { "key": "ph0-serialise", "name": "Commit the plan and expert docs", "item_class": "task", "priority": "P2", "owner_role": "author",
-                  "acceptance": "EXECUTOR: AI. The plan at d4a7dafa9 (or later), the two expert documents and the revision-handoff document are committed on the working branch with authorized_by frontmatter; today they are held by the pin ref refs/mr-radio/opl-plan-94a8f561 only" },
-                { "key": "ph0-move-data", "name": "Move the eight data files", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. manifest-before.txt holds the sha256 of the eight io/tmp/2026.11.17-recent-predictions-* files; sha256sum -c passes at io/write-ups/online-preference-learning/; nothing committed" },
-                { "key": "ph0-inventory", "name": "Run the notification inventory", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The inventory SQL runs in its READ ONLY transaction on lupin_db_dev; output saved with run time, database, role and recipient UUID, including duplicate_log_ids",
-                  "depends_on": [ "ph0-move-data" ] },
-                { "key": "ph0-audit-figures", "name": "Reproduce the audit figures", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The 3 Nov and 17 Nov figures in the explainer's Appendix A reproduce, or each difference is explained by a named cut-off or eligibility rule",
-                  "depends_on": [ "ph0-inventory" ] },
-                { "key": "ph0-rnd-guard-ruling", "name": "Rick rules on the rnd-guard override", "item_class": "gate", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "EXECUTOR: HUMAN (Rick rules on a one-time RND_GUARD_ALLOW=1 override, because the src/rnd guard refuses a .sql file). Done when his ruling is recorded on this row" },
-                { "key": "ph0-commit-companions", "name": "Commit the three companion files", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. sample-50-findings.md, compare_context_windows.py and notification-history-inventory.sql are committed with authorized_by frontmatter; recovered-sample-50.jsonl is not",
-                  "depends_on": [ "ph0-rnd-guard-ruling" ] },
-                { "key": "ph0-old-replay", "name": "Record the old engine's yes/no replay", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI (main checkout data, local-only). At c4072524c in a detached worktree, fed from the 285-neighbours file, per-ask outcomes and totals saved with sha and run time; a miss on 60 of 60 is recorded and the old figure retired",
-                  "depends_on": [ "ph0-move-data" ] }
-            ]
+          "key": "ph0-serialise",
+          "name": "Commit the plan and expert docs",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "author",
+          "acceptance": "EXECUTOR: AI. The plan at d4a7dafa9 (or later), the two expert documents and the revision-handoff document are committed on the working branch with authorized_by frontmatter; today they are held by the pin ref refs/mr-radio/opl-plan-94a8f561 only",
+          "done_receipt": "lupin 29e9b0ec2: plan, expert docs and revision-handoff merged into wip-v0.2.4 (pin 3c5b4ff17)"
         },
         {
-            "phase" : 1,
-            "name"  : "Typed answers and owner",
-            "steps" : [
-                { "key": "ph1-coverage-before", "name": "Record coverage before changes", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 1's Coverage list before any change, and the figure is recorded on this row" },
-                { "key": "ph1-one-parser", "name": "One stance parser, copies deleted", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Census guard test_every_stance_split_goes_through_the_parser passes; neither reaches the vote as neither; the parser returns no stance on an unrecognised string; the two other callers keep their behaviour with one new test each",
-                  "depends_on": [ "ph1-coverage-before" ] },
-                { "key": "ph1-field-selections", "name": "Per-field selection sibling", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Three stances, mixed select modes, legal empty sets, write-ins and free text round-trip; one decoder replaces _parse_mc_decision_value and the comparators' value handling",
-                  "depends_on": [ "ph1-one-parser" ] },
-                { "key": "ph1-owner-source", "name": "Owner and answer source columns", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Idempotent alembic revision with a migration test; backfill counts per ratification_state and per derived value match the inventory; timeout, malformed, proxy, other-user and unknown rows add zero personal votes",
-                  "depends_on": [ "ph1-coverage-before", "ph0-inventory" ] },
-                { "key": "ph1-local-data-tier", "name": "local_data marker and fixtures", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. local_data registered in pytest.ini; skips are printed by name; --require-local-data fails on a skip; committed fixtures are synthetic; the main-checkout run's summary line and data sha are recorded on this row",
-                  "depends_on": [ "ph1-field-selections" ] },
-                { "key": "ph1-coverage-gate", "name": "Close coverage on phase 1 files", "item_class": "task", "priority": "P2", "owner_role": "tester",
-                  "acceptance": "EXECUTOR: AI. coverage report --include=<phase 1 Coverage list> --fail-under=100 exits 0",
-                  "depends_on": [ "ph1-one-parser", "ph1-field-selections", "ph1-owner-source", "ph1-local-data-tier" ] }
-            ]
+          "key": "ph0-move-data",
+          "name": "Move the eight data files",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. manifest-before.txt holds the sha256 of the eight io/tmp/2026.11.17-recent-predictions-* files; sha256sum -c passes at io/write-ups/online-preference-learning/; nothing committed"
         },
         {
-            "phase" : 2,
-            "name"  : "Ask-time forecast ledger",
-            "steps" : [
-                { "key": "ph2-coverage-before", "name": "Record coverage before changes", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 2's Coverage list before any change, and the figure is recorded on this row" },
-                { "key": "ph2-ledger-columns", "name": "Ledger columns and unique constraint", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Alembic revision with a migration test, checking each column first; the migration counts duplicate notification_id values and refuses, listing them, if any exist",
-                  "depends_on": [ "ph2-coverage-before", "ph0-inventory" ] },
-                { "key": "ph2-duplicate-ruling", "name": "Rick rules on duplicate removal", "item_class": "decision", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "EXECUTOR: HUMAN, only if phase 0's duplicate_log_ids count is non-zero: Rick rules how duplicates are removed. If the count is zero, this row closes citing the inventory output",
-                  "depends_on": [ "ph0-inventory" ] },
-                { "key": "ph2-ask-time-write", "name": "Write the forecast row at ask time", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Every eligible ask reconciles to a row or a named abstention; predictor errors and test overrides write rows with the stated filler values; predicted_at precedes responded_at; the code identity is stamped on every row",
-                  "depends_on": [ "ph2-ledger-columns", "ph2-duplicate-ruling" ] },
-                { "key": "ph2-outcome-from-row", "name": "Attach outcomes from the stored row", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Restart, late reply, duplicate callback, test hint, embedding outage and timeout each give exactly one outcome row; the restart unit test and the :8000 integration test both write the answer case; a second outcome write is refused",
-                  "depends_on": [ "ph2-ask-time-write" ] },
-                { "key": "ph2-seen-route", "name": "The prediction-seen route", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. POST /notify/prediction-seen/{id} stores the first rendered and first fold-open times, ignores later calls, and leaves fold-open null when never called (route tests)",
-                  "depends_on": [ "ph2-ledger-columns" ] },
-                { "key": "ph2-coverage-gate", "name": "Close coverage on phase 2 files", "item_class": "task", "priority": "P2", "owner_role": "tester",
-                  "acceptance": "EXECUTOR: AI. coverage report --include=<phase 2 Coverage list> --fail-under=100 exits 0",
-                  "depends_on": [ "ph2-outcome-from-row", "ph2-seen-route" ] }
-            ]
+          "key": "ph0-inventory",
+          "name": "Run the notification inventory",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The inventory SQL runs in its READ ONLY transaction on lupin_db_dev; output saved with run time, database, role and recipient UUID, including duplicate_log_ids",
+          "depends_on": [
+            "ph0-move-data"
+          ]
         },
         {
-            "phase" : 3,
-            "name"  : "Cosine retrieval",
-            "steps" : [
-                { "key": "ph3-proxy-golden", "name": "Capture the proxy's golden values", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Before any phase 3 code, the capture script commits the compiled SQL, neighbours and scores of ProxyDecisionEmbeddings.find_similar on a fixed synthetic fixture, naming the base sha" },
-                { "key": "ph3-coverage-before", "name": "Record coverage before changes", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 3's Coverage list before any change, and the figure is recorded on this row" },
-                { "key": "ph3-metric-param", "name": "Metric parameter and INI switch", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Wrapper and repository gain metric (default dot); the engine's three call sites pass the INI value; a pin test holds prediction engine retrieval metric at dot; scaling a vector changes neither rank nor score; the proxy's calls equal the golden values",
-                  "depends_on": [ "ph3-proxy-golden", "ph3-coverage-before", "ph2-ledger-columns" ] },
-                { "key": "ph3-vector-guard", "name": "Query and stored vector guards", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. A bad query vector on the cosine path raises QueryVectorRefused, the wrapper re-raises it, the engine writes query_vector_refused: <reason>; planted NULL and zero-norm stored rows are never returned",
-                  "depends_on": [ "ph3-metric-param" ] },
-                { "key": "ph3-retrieval-report", "name": "Retrieval report (report-only)", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. phase3-retrieval-report.md saved beside the phase 0 data with sha and run time: histograms, overlap, empty-result and expected abstention rates, latency, excluded-row count",
-                  "depends_on": [ "ph3-vector-guard", "ph0-move-data" ] },
-                { "key": "ph3-coverage-gate", "name": "Close coverage on phase 3 files", "item_class": "task", "priority": "P2", "owner_role": "tester",
-                  "acceptance": "EXECUTOR: AI. coverage report --include=<phase 3 Coverage list> --fail-under=100 exits 0",
-                  "depends_on": [ "ph3-vector-guard" ] }
-            ]
+          "key": "ph0-audit-figures",
+          "name": "Reproduce the audit figures",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The 3 Nov and 17 Nov figures in the explainer's Appendix A reproduce, or each difference is explained by a named cut-off or eligibility rule",
+          "depends_on": [
+            "ph0-inventory"
+          ]
         },
         {
-            "phase"      : 4,
-            "name"       : "Replay baseline and checkpoint",
-            "depends_on" : [ "ph5" ],
-            "steps"      : [
-                { "key": "ph4-coverage-before", "name": "Record coverage before changes", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 4's Coverage list before any change, and the figure is recorded on this row" },
-                { "key": "ph4-family-key", "name": "Family, retry and project function", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. One function returns family (response_type, category, normalised title), retry-copy grouping (same sender and message within 10 min) and project (from sender_id, else unknown), with unit tests",
-                  "depends_on": [ "ph4-coverage-before" ] },
-                { "key": "ph4-time-sliced-store", "name": "Time-sliced store and parity test", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The store matches the SQL path's neighbours, scores and record shape for dot and cosine with every filter, threshold after limit, clamp and NULL/zero-norm exclusion, on phase 3's golden fixture; a planted late answer never appears",
-                  "depends_on": [ "ph4-coverage-before", "ph3-proxy-golden" ] },
-                { "key": "ph4-replay-loop", "name": "Replay loop on the live engine", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. predict() is the production method under replay; records carry pair_records' shape; vectorless asks are counted as not replayable; every report carries denominators, McNemar exact, Wilson interval, the floor and family count",
-                  "depends_on": [ "ph4-time-sliced-store", "ph4-family-key" ] },
-                { "key": "ph4-leak-fixtures", "name": "One leak fixture per class", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Four committed synthetic fixtures (eventual answer, later status, final notification state, own stored case); the 50-target context export runs in the local_data tier",
-                  "depends_on": [ "ph4-replay-loop" ] },
-                { "key": "ph4-cohort-checks", "name": "Cohort and count agreement", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI (local_data tier). Cohorts reproduce the audits' populations; counts match phase 0's old-engine artifact and prediction_log.predicted_value; replay, phase 9's admin report and a direct count agree on one cohort",
-                  "depends_on": [ "ph4-replay-loop", "ph0-old-replay" ] },
-                { "key": "ph4-retune-freeze", "name": "Retune and freeze settings", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. One commit writes the retuned cbr threshold and top k, sets retrieval metric to cosine, records the tune cohort sha and replaces phase 3's pin with an equality test; the open-ended keys are untouched",
-                  "depends_on": [ "ph4-cohort-checks", "ph4-leak-fixtures" ] },
-                { "key": "ph4-calibration-fit", "name": "First calibration fit", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Fit on the tune window, evaluated on the final window, written to src/conf/prediction-calibration.json with the cohort sha; calibration enabled stays false",
-                  "depends_on": [ "ph4-retune-freeze" ] },
-                { "key": "ph4-checkpoint-report", "name": "Checkpoint report and freeze file", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Report frozen with sha, cohort and denominators; checkpoint.json written; verify_snapshot re-derives the cohort sha; a planted mismatched sha makes the harness exit non-zero; the 20-ask deferral rule is applied",
-                  "depends_on": [ "ph4-calibration-fit" ] },
-                { "key": "ph4-coverage-gate", "name": "Close coverage on phase 4 files", "item_class": "task", "priority": "P2", "owner_role": "tester",
-                  "acceptance": "EXECUTOR: AI. coverage report --include=<phase 4 Coverage list> --fail-under=100 exits 0",
-                  "depends_on": [ "ph4-checkpoint-report" ] },
-                { "key": "ph4-checkpoint-replan", "name": "Rick re-plans phases 6 to 12", "item_class": "gate", "priority": "P2", "owner_role": "operator", "gate_class": "operator",
-                  "acceptance": "EXECUTOR: HUMAN (a designer's decision). Rick reads the frozen checkpoint report and rules phase by phase on dropping or shrinking phases 6-12; the ruling is recorded on this row and the stub phases are expanded from it",
-                  "depends_on": [ "ph4-checkpoint-report" ] },
-                { "key": "hist-1-count", "name": "History track 1: count the source", "item_class": "task", "priority": "P3", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI (local_data tier). The source population is counted from phase 0's inventory, by type and era",
-                  "depends_on": [ "ph4-replay-loop", "ph0-inventory", "ph1-field-selections" ] },
-                { "key": "hist-2-preserve", "name": "History track 2: preserve and derive", "item_class": "task", "priority": "P3", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Originals kept; the derived data set is written with freeze_corpus.write_snapshot and checked with verify_snapshot",
-                  "depends_on": [ "hist-1-count" ] },
-                { "key": "hist-3-context", "name": "History track 3: rebuild context", "item_class": "task", "priority": "P3", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Context rebuilt in descending order of certainty, as the expert's document step 3 states; ambiguous joins stay missing",
-                  "depends_on": [ "hist-2-preserve" ] },
-                { "key": "hist-4-uses", "name": "History track 4: assign uses", "item_class": "task", "priority": "P3", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Each example is assigned a use according to its evidence, as the expert's document step 4 states; recovered asks stay out of the frozen cohort",
-                  "depends_on": [ "hist-3-context" ] },
-                { "key": "hist-5-by-family", "name": "History track 5: recover by family", "item_class": "task", "priority": "P3", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Recovery runs by response family using phase 4's family key",
-                  "depends_on": [ "hist-4-uses", "ph4-family-key" ] },
-                { "key": "hist-6-prove-import", "name": "History track 6: prove the import", "item_class": "task", "priority": "P3", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI (local_data tier). One family first: verify_snapshot passes and the replay reproduces the inventory's counts for it exactly; the yield funnel prints every stage, each at most the one before, every drop with a named reason; recovery scripts hold 100% per-file coverage",
-                  "depends_on": [ "hist-5-by-family" ] }
-            ]
+          "key": "ph0-rnd-guard-ruling",
+          "name": "Rick rules on the rnd-guard override",
+          "item_class": "gate",
+          "priority": "P2",
+          "owner_role": "operator",
+          "gate_class": "operator",
+          "acceptance": "EXECUTOR: HUMAN (Rick rules on a one-time RND_GUARD_ALLOW=1 override, because the src/rnd guard refuses a .sql file). Done when his ruling is recorded on this row"
         },
         {
-            "phase"      : 5,
-            "name"       : "Folded display, auto-submit off",
-            "depends_on" : [ "ph9", "ph2" ],
-            "steps"      : [
-                { "key": "ph5-coverage-before", "name": "Record coverage before changes", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The per-file and c8 coverage commands run on phase 5's Coverage list before any change, and the figures are recorded on this row" },
-                { "key": "ph5-hint-payload", "name": "Always send a hint payload", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. to_hint_dict returns a payload with state in all four states, retrieval_metric and always_yes_rate (joined through notification_id, test_override excluded, parser used); the row's display decision equals the payload's state",
-                  "depends_on": [ "ph5-coverage-before" ] },
-                { "key": "ph5-fold-clients", "name": "Fold in both web clients", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI (Playwright, one test per client). Every card type opens folded; four states render; an opened fold survives a re-render; a forecast never selects, edits, votes or submits; fold-open is stored, null when never opened, marked when after the answer",
-                  "depends_on": [ "ph5-hint-payload", "ph2-seen-route" ] },
-                { "key": "ph5-reach-browser", "name": "Rebuild bundle and bump ?v=", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. A unit test asserts the legacy notifications.js reference carries a new ?v= token; the Playwright test finds the fold on the page :8000 serves",
-                  "depends_on": [ "ph5-fold-clients" ] },
-                { "key": "ph5-auto-submit-off", "name": "Auto-submit off and pinned", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. expeditor prediction auto submit enabled is false with a pin test; the batch view applies no predicted answer; the splainer rows and expeditor guide carry the Dormant marker (grep test)",
-                  "depends_on": [ "d3-auto-submit-off" ] },
-                { "key": "ph5-mobile-row", "name": "File the lupin-mobile row", "item_class": "task", "priority": "P3", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. A store row for the lupin-mobile session carries phase 5's acceptance list and its id is recorded in the plan; completion is reported, not gated",
-                  "depends_on": [ "ph5-fold-clients" ] },
-                { "key": "ph5-coverage-gate", "name": "Close coverage on phase 5 files", "item_class": "task", "priority": "P2", "owner_role": "tester",
-                  "acceptance": "EXECUTOR: AI. c8 --100 on the changed TypeScript and coverage report --fail-under=100 on the changed Python both exit 0",
-                  "depends_on": [ "ph5-reach-browser", "ph5-auto-submit-off" ] }
-            ]
+          "key": "ph0-commit-companions",
+          "name": "Commit the three companion files",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. sample-50-findings.md, compare_context_windows.py and notification-history-inventory.sql are committed with authorized_by frontmatter; recovered-sample-50.jsonl is not",
+          "depends_on": [
+            "ph0-rnd-guard-ruling"
+          ]
         },
         {
-            "phase"          : 6,
-            "name"           : "Card and question context",
-            "depends_on"     : [ "ph4-checkpoint-replan" ],
-            "steps"          : [],
-            "expand_trigger" : "the re-plan ends"
-        },
-        {
-            "phase"          : 7,
-            "name"           : "Per-field choices",
-            "depends_on"     : [ "ph4-checkpoint-replan" ],
-            "steps"          : [],
-            "expand_trigger" : "the re-plan ends"
-        },
-        {
-            "phase"          : 8,
-            "name"           : "Three-way stance",
-            "depends_on"     : [ "ph4-checkpoint-replan" ],
-            "steps"          : [],
-            "expand_trigger" : "the re-plan ends"
-        },
-        {
-            "phase"      : 9,
-            "name"       : "Scoring and calibration code",
-            "depends_on" : [ "ph3" ],
-            "steps"      : [
-                { "key": "ph9-coverage-before", "name": "Record coverage before changes", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 9's Coverage list before any change, and the figure is recorded on this row" },
-                { "key": "ph9-score-field", "name": "Per-field scorer by schema", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. score_field scores by the stored response_options schema; a single-select plus multi-select card is scored per field; a half-right card has accuracy_match false and matches/total 1/2; band edges 0.4, 0.6, 0.8, 1.0 tested",
-                  "depends_on": [ "ph9-coverage-before", "ph1-field-selections", "ph2-outcome-from-row" ] },
-                { "key": "ph9-calibration-code", "name": "Calibration module", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. Refuses to fit below 50 rows per cell; recovers each bin's rate within 0.02 on deterministic synthetic data; a pin test holds calibration enabled at false",
-                  "depends_on": [ "ph9-coverage-before" ] },
-                { "key": "ph9-accuracy-route", "name": "Accuracy summary and admin route", "item_class": "task", "priority": "P2", "owner_role": "implementer",
-                  "acceptance": "EXECUTOR: AI. GET /api/prediction-engine/accuracy requires admin (non-admin 403); zero rows give insufficient data; on the 12-row synthetic fixture the route equals a direct SQL count and the literal counts (scheduled integration tier)",
-                  "depends_on": [ "ph9-score-field" ] },
-                { "key": "ph9-coverage-gate", "name": "Close coverage on phase 9 files", "item_class": "task", "priority": "P2", "owner_role": "tester",
-                  "acceptance": "EXECUTOR: AI. coverage report --include=<phase 9 Coverage list> --fail-under=100 exits 0",
-                  "depends_on": [ "ph9-accuracy-route", "ph9-calibration-code" ] }
-            ]
-        },
-        {
-            "phase"          : 10,
-            "name"           : "Free-text grounding",
-            "depends_on"     : [ "ph4-checkpoint-replan", "ph6" ],
-            "steps"          : [],
-            "expand_trigger" : "re-plan and phase 6 end"
-        },
-        {
-            "phase"          : 11,
-            "name"           : "Recall and failure detection",
-            "depends_on"     : [ "ph4-checkpoint-replan" ],
-            "steps"          : [],
-            "expand_trigger" : "the re-plan ends"
-        },
-        {
-            "phase"          : 12,
-            "name"           : "Trust-gate meaning and docs",
-            "depends_on"     : [ "ph6", "ph7", "ph8", "ph10", "ph11" ],
-            "steps"          : [],
-            "expand_trigger" : "phases 6-11 close"
+          "key": "ph0-old-replay",
+          "name": "Record the old engine's yes/no replay",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI (main checkout data, local-only). At c4072524c in a detached worktree, fed from the 285-neighbours file, per-ask outcomes and totals saved with sha and run time; a miss on 60 of 60 is recorded and the old figure retired",
+          "depends_on": [
+            "ph0-move-data"
+          ]
         }
-    ]
+      ]
+    },
+    {
+      "phase": 1,
+      "name": "Typed answers and owner",
+      "steps": [
+        {
+          "key": "ph1-coverage-before",
+          "name": "Record coverage before changes",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 1's Coverage list before any change, and the figure is recorded on this row"
+        },
+        {
+          "key": "ph1-one-parser",
+          "name": "One stance parser, copies deleted",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Census guard test_every_stance_split_goes_through_the_parser passes; neither reaches the vote as neither; the parser returns no stance on an unrecognised string; the two other callers keep their behaviour with one new test each",
+          "depends_on": [
+            "ph1-coverage-before"
+          ]
+        },
+        {
+          "key": "ph1-field-selections",
+          "name": "Per-field selection sibling",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Three stances, mixed select modes, legal empty sets, write-ins and free text round-trip; one decoder replaces _parse_mc_decision_value and the comparators' value handling",
+          "depends_on": [
+            "ph1-one-parser"
+          ]
+        },
+        {
+          "key": "ph1-owner-source",
+          "name": "Owner and answer source columns",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Idempotent alembic revision with a migration test; backfill counts per ratification_state and per derived value match the inventory; timeout, malformed, proxy, other-user and unknown rows add zero personal votes",
+          "depends_on": [
+            "ph1-coverage-before",
+            "ph0-inventory"
+          ]
+        },
+        {
+          "key": "ph1-local-data-tier",
+          "name": "local_data marker and fixtures",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. local_data registered in pytest.ini; skips are printed by name; --require-local-data fails on a skip; committed fixtures are synthetic; the main-checkout run's summary line and data sha are recorded on this row",
+          "depends_on": [
+            "ph1-field-selections"
+          ]
+        },
+        {
+          "key": "ph1-coverage-gate",
+          "name": "Close coverage on phase 1 files",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "tester",
+          "acceptance": "EXECUTOR: AI. coverage report --include=<phase 1 Coverage list> --fail-under=100 exits 0",
+          "depends_on": [
+            "ph1-one-parser",
+            "ph1-field-selections",
+            "ph1-owner-source",
+            "ph1-local-data-tier"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "Ask-time forecast ledger",
+      "steps": [
+        {
+          "key": "ph2-coverage-before",
+          "name": "Record coverage before changes",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 2's Coverage list before any change, and the figure is recorded on this row"
+        },
+        {
+          "key": "ph2-ledger-columns",
+          "name": "Ledger columns and unique constraint",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Alembic revision with a migration test, checking each column first; the migration counts duplicate notification_id values and refuses, listing them, if any exist",
+          "depends_on": [
+            "ph2-coverage-before",
+            "ph0-inventory"
+          ]
+        },
+        {
+          "key": "ph2-duplicate-ruling",
+          "name": "Rick rules on duplicate removal",
+          "item_class": "decision",
+          "priority": "P2",
+          "owner_role": "operator",
+          "gate_class": "operator",
+          "acceptance": "EXECUTOR: HUMAN, only if phase 0's duplicate_log_ids count is non-zero: Rick rules how duplicates are removed. If the count is zero, this row closes citing the inventory output",
+          "depends_on": [
+            "ph0-inventory"
+          ]
+        },
+        {
+          "key": "ph2-ask-time-write",
+          "name": "Write the forecast row at ask time",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Every eligible ask reconciles to a row or a named abstention; predictor errors and test overrides write rows with the stated filler values; predicted_at precedes responded_at; the code identity is stamped on every row",
+          "depends_on": [
+            "ph2-ledger-columns",
+            "ph2-duplicate-ruling"
+          ]
+        },
+        {
+          "key": "ph2-outcome-from-row",
+          "name": "Attach outcomes from the stored row",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Restart, late reply, duplicate callback, test hint, embedding outage and timeout each give exactly one outcome row; the restart unit test and the :8000 integration test both write the answer case; a second outcome write is refused",
+          "depends_on": [
+            "ph2-ask-time-write"
+          ]
+        },
+        {
+          "key": "ph2-seen-route",
+          "name": "The prediction-seen route",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. POST /notify/prediction-seen/{id} stores the first rendered and first fold-open times, ignores later calls, and leaves fold-open null when never called (route tests)",
+          "depends_on": [
+            "ph2-ledger-columns"
+          ]
+        },
+        {
+          "key": "ph2-coverage-gate",
+          "name": "Close coverage on phase 2 files",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "tester",
+          "acceptance": "EXECUTOR: AI. coverage report --include=<phase 2 Coverage list> --fail-under=100 exits 0",
+          "depends_on": [
+            "ph2-outcome-from-row",
+            "ph2-seen-route"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "Cosine retrieval",
+      "steps": [
+        {
+          "key": "ph3-proxy-golden",
+          "name": "Capture the proxy's golden values",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Before any phase 3 code, the capture script commits the compiled SQL, neighbours and scores of ProxyDecisionEmbeddings.find_similar on a fixed synthetic fixture, naming the base sha"
+        },
+        {
+          "key": "ph3-coverage-before",
+          "name": "Record coverage before changes",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 3's Coverage list before any change, and the figure is recorded on this row"
+        },
+        {
+          "key": "ph3-metric-param",
+          "name": "Metric parameter and INI switch",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Wrapper and repository gain metric (default dot); the engine's three call sites pass the INI value; a pin test holds prediction engine retrieval metric at dot; scaling a vector changes neither rank nor score; the proxy's calls equal the golden values",
+          "depends_on": [
+            "ph3-proxy-golden",
+            "ph3-coverage-before",
+            "ph2-ledger-columns"
+          ]
+        },
+        {
+          "key": "ph3-vector-guard",
+          "name": "Query and stored vector guards",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. A bad query vector on the cosine path raises QueryVectorRefused, the wrapper re-raises it, the engine writes query_vector_refused: <reason>; planted NULL and zero-norm stored rows are never returned",
+          "depends_on": [
+            "ph3-metric-param"
+          ]
+        },
+        {
+          "key": "ph3-retrieval-report",
+          "name": "Retrieval report (report-only)",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. phase3-retrieval-report.md saved beside the phase 0 data with sha and run time: histograms, overlap, empty-result and expected abstention rates, latency, excluded-row count",
+          "depends_on": [
+            "ph3-vector-guard",
+            "ph0-move-data"
+          ]
+        },
+        {
+          "key": "ph3-coverage-gate",
+          "name": "Close coverage on phase 3 files",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "tester",
+          "acceptance": "EXECUTOR: AI. coverage report --include=<phase 3 Coverage list> --fail-under=100 exits 0",
+          "depends_on": [
+            "ph3-vector-guard"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "Replay baseline and checkpoint",
+      "depends_on": [
+        "ph5"
+      ],
+      "steps": [
+        {
+          "key": "ph4-coverage-before",
+          "name": "Record coverage before changes",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 4's Coverage list before any change, and the figure is recorded on this row"
+        },
+        {
+          "key": "ph4-family-key",
+          "name": "Family, retry and project function",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. One function returns family (response_type, category, normalised title), retry-copy grouping (same sender and message within 10 min) and project (from sender_id, else unknown), with unit tests",
+          "depends_on": [
+            "ph4-coverage-before"
+          ]
+        },
+        {
+          "key": "ph4-time-sliced-store",
+          "name": "Time-sliced store and parity test",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The store matches the SQL path's neighbours, scores and record shape for dot and cosine with every filter, threshold after limit, clamp and NULL/zero-norm exclusion, on phase 3's golden fixture; a planted late answer never appears",
+          "depends_on": [
+            "ph4-coverage-before",
+            "ph3-proxy-golden"
+          ]
+        },
+        {
+          "key": "ph4-replay-loop",
+          "name": "Replay loop on the live engine",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. predict() is the production method under replay; records carry pair_records' shape; vectorless asks are counted as not replayable; every report carries denominators, McNemar exact, Wilson interval, the floor and family count",
+          "depends_on": [
+            "ph4-time-sliced-store",
+            "ph4-family-key"
+          ]
+        },
+        {
+          "key": "ph4-leak-fixtures",
+          "name": "One leak fixture per class",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Four committed synthetic fixtures (eventual answer, later status, final notification state, own stored case); the 50-target context export runs in the local_data tier",
+          "depends_on": [
+            "ph4-replay-loop"
+          ]
+        },
+        {
+          "key": "ph4-cohort-checks",
+          "name": "Cohort and count agreement",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI (local_data tier). Cohorts reproduce the audits' populations; counts match phase 0's old-engine artifact and prediction_log.predicted_value; replay, phase 9's admin report and a direct count agree on one cohort",
+          "depends_on": [
+            "ph4-replay-loop",
+            "ph0-old-replay"
+          ]
+        },
+        {
+          "key": "ph4-retune-freeze",
+          "name": "Retune and freeze settings",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. One commit writes the retuned cbr threshold and top k, sets retrieval metric to cosine, records the tune cohort sha and replaces phase 3's pin with an equality test; the open-ended keys are untouched",
+          "depends_on": [
+            "ph4-cohort-checks",
+            "ph4-leak-fixtures"
+          ]
+        },
+        {
+          "key": "ph4-calibration-fit",
+          "name": "First calibration fit",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Fit on the tune window, evaluated on the final window, written to src/conf/prediction-calibration.json with the cohort sha; calibration enabled stays false",
+          "depends_on": [
+            "ph4-retune-freeze"
+          ]
+        },
+        {
+          "key": "ph4-checkpoint-report",
+          "name": "Checkpoint report and freeze file",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Report frozen with sha, cohort and denominators; checkpoint.json written; verify_snapshot re-derives the cohort sha; a planted mismatched sha makes the harness exit non-zero; the 20-ask deferral rule is applied",
+          "depends_on": [
+            "ph4-calibration-fit"
+          ]
+        },
+        {
+          "key": "ph4-coverage-gate",
+          "name": "Close coverage on phase 4 files",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "tester",
+          "acceptance": "EXECUTOR: AI. coverage report --include=<phase 4 Coverage list> --fail-under=100 exits 0",
+          "depends_on": [
+            "ph4-checkpoint-report"
+          ]
+        },
+        {
+          "key": "ph4-checkpoint-replan",
+          "name": "Rick re-plans phases 6 to 12",
+          "item_class": "gate",
+          "priority": "P2",
+          "owner_role": "operator",
+          "gate_class": "operator",
+          "acceptance": "EXECUTOR: HUMAN (a designer's decision). Rick reads the frozen checkpoint report and rules phase by phase on dropping or shrinking phases 6-12; the ruling is recorded on this row and the stub phases are expanded from it",
+          "depends_on": [
+            "ph4-checkpoint-report"
+          ]
+        },
+        {
+          "key": "hist-1-count",
+          "name": "History track 1: count the source",
+          "item_class": "task",
+          "priority": "P3",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI (local_data tier). The source population is counted from phase 0's inventory, by type and era",
+          "depends_on": [
+            "ph4-replay-loop",
+            "ph0-inventory",
+            "ph1-field-selections"
+          ]
+        },
+        {
+          "key": "hist-2-preserve",
+          "name": "History track 2: preserve and derive",
+          "item_class": "task",
+          "priority": "P3",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Originals kept; the derived data set is written with freeze_corpus.write_snapshot and checked with verify_snapshot",
+          "depends_on": [
+            "hist-1-count"
+          ]
+        },
+        {
+          "key": "hist-3-context",
+          "name": "History track 3: rebuild context",
+          "item_class": "task",
+          "priority": "P3",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Context rebuilt in descending order of certainty, as the expert's document step 3 states; ambiguous joins stay missing",
+          "depends_on": [
+            "hist-2-preserve"
+          ]
+        },
+        {
+          "key": "hist-4-uses",
+          "name": "History track 4: assign uses",
+          "item_class": "task",
+          "priority": "P3",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Each example is assigned a use according to its evidence, as the expert's document step 4 states; recovered asks stay out of the frozen cohort",
+          "depends_on": [
+            "hist-3-context"
+          ]
+        },
+        {
+          "key": "hist-5-by-family",
+          "name": "History track 5: recover by family",
+          "item_class": "task",
+          "priority": "P3",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Recovery runs by response family using phase 4's family key",
+          "depends_on": [
+            "hist-4-uses",
+            "ph4-family-key"
+          ]
+        },
+        {
+          "key": "hist-6-prove-import",
+          "name": "History track 6: prove the import",
+          "item_class": "task",
+          "priority": "P3",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI (local_data tier). One family first: verify_snapshot passes and the replay reproduces the inventory's counts for it exactly; the yield funnel prints every stage, each at most the one before, every drop with a named reason; recovery scripts hold 100% per-file coverage",
+          "depends_on": [
+            "hist-5-by-family"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "Folded display, auto-submit off",
+      "depends_on": [
+        "ph9",
+        "ph2"
+      ],
+      "steps": [
+        {
+          "key": "ph5-coverage-before",
+          "name": "Record coverage before changes",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The per-file and c8 coverage commands run on phase 5's Coverage list before any change, and the figures are recorded on this row"
+        },
+        {
+          "key": "ph5-hint-payload",
+          "name": "Always send a hint payload",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. to_hint_dict returns a payload with state in all four states, retrieval_metric and always_yes_rate (joined through notification_id, test_override excluded, parser used); the row's display decision equals the payload's state",
+          "depends_on": [
+            "ph5-coverage-before"
+          ]
+        },
+        {
+          "key": "ph5-fold-clients",
+          "name": "Fold in both web clients",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI (Playwright, one test per client). Every card type opens folded; four states render; an opened fold survives a re-render; a forecast never selects, edits, votes or submits; fold-open is stored, null when never opened, marked when after the answer",
+          "depends_on": [
+            "ph5-hint-payload",
+            "ph2-seen-route"
+          ]
+        },
+        {
+          "key": "ph5-reach-browser",
+          "name": "Rebuild bundle and bump ?v=",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. A unit test asserts the legacy notifications.js reference carries a new ?v= token; the Playwright test finds the fold on the page :8000 serves",
+          "depends_on": [
+            "ph5-fold-clients"
+          ]
+        },
+        {
+          "key": "ph5-auto-submit-off",
+          "name": "Auto-submit off and pinned",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. expeditor prediction auto submit enabled is false with a pin test; the batch view applies no predicted answer; the splainer rows and expeditor guide carry the Dormant marker (grep test)",
+          "depends_on": []
+        },
+        {
+          "key": "ph5-mobile-row",
+          "name": "File the lupin-mobile row",
+          "item_class": "task",
+          "priority": "P3",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. A store row for the lupin-mobile session carries phase 5's acceptance list and its id is recorded in the plan; completion is reported, not gated",
+          "depends_on": [
+            "ph5-fold-clients"
+          ]
+        },
+        {
+          "key": "ph5-coverage-gate",
+          "name": "Close coverage on phase 5 files",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "tester",
+          "acceptance": "EXECUTOR: AI. c8 --100 on the changed TypeScript and coverage report --fail-under=100 on the changed Python both exit 0",
+          "depends_on": [
+            "ph5-reach-browser",
+            "ph5-auto-submit-off"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 6,
+      "name": "Card and question context",
+      "depends_on": [
+        "ph4-checkpoint-replan"
+      ],
+      "steps": [],
+      "expand_trigger": "the re-plan ends"
+    },
+    {
+      "phase": 7,
+      "name": "Per-field choices",
+      "depends_on": [
+        "ph4-checkpoint-replan"
+      ],
+      "steps": [],
+      "expand_trigger": "the re-plan ends"
+    },
+    {
+      "phase": 8,
+      "name": "Three-way stance",
+      "depends_on": [
+        "ph4-checkpoint-replan"
+      ],
+      "steps": [],
+      "expand_trigger": "the re-plan ends"
+    },
+    {
+      "phase": 9,
+      "name": "Scoring and calibration code",
+      "depends_on": [
+        "ph3"
+      ],
+      "steps": [
+        {
+          "key": "ph9-coverage-before",
+          "name": "Record coverage before changes",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. The per-file coverage command runs on phase 9's Coverage list before any change, and the figure is recorded on this row"
+        },
+        {
+          "key": "ph9-score-field",
+          "name": "Per-field scorer by schema",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. score_field scores by the stored response_options schema; a single-select plus multi-select card is scored per field; a half-right card has accuracy_match false and matches/total 1/2; band edges 0.4, 0.6, 0.8, 1.0 tested",
+          "depends_on": [
+            "ph9-coverage-before",
+            "ph1-field-selections",
+            "ph2-outcome-from-row"
+          ]
+        },
+        {
+          "key": "ph9-calibration-code",
+          "name": "Calibration module",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. Refuses to fit below 50 rows per cell; recovers each bin's rate within 0.02 on deterministic synthetic data; a pin test holds calibration enabled at false",
+          "depends_on": [
+            "ph9-coverage-before"
+          ]
+        },
+        {
+          "key": "ph9-accuracy-route",
+          "name": "Accuracy summary and admin route",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "implementer",
+          "acceptance": "EXECUTOR: AI. GET /api/prediction-engine/accuracy requires admin (non-admin 403); zero rows give insufficient data; on the 12-row synthetic fixture the route equals a direct SQL count and the literal counts (scheduled integration tier)",
+          "depends_on": [
+            "ph9-score-field"
+          ]
+        },
+        {
+          "key": "ph9-coverage-gate",
+          "name": "Close coverage on phase 9 files",
+          "item_class": "task",
+          "priority": "P2",
+          "owner_role": "tester",
+          "acceptance": "EXECUTOR: AI. coverage report --include=<phase 9 Coverage list> --fail-under=100 exits 0",
+          "depends_on": [
+            "ph9-accuracy-route",
+            "ph9-calibration-code"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 10,
+      "name": "Free-text grounding",
+      "depends_on": [
+        "ph4-checkpoint-replan",
+        "ph6"
+      ],
+      "steps": [],
+      "expand_trigger": "re-plan and phase 6 end"
+    },
+    {
+      "phase": 11,
+      "name": "Recall and failure detection",
+      "depends_on": [
+        "ph4-checkpoint-replan"
+      ],
+      "steps": [],
+      "expand_trigger": "the re-plan ends"
+    },
+    {
+      "phase": 12,
+      "name": "Trust-gate meaning and docs",
+      "depends_on": [
+        "ph6",
+        "ph7",
+        "ph8",
+        "ph10",
+        "ph11"
+      ],
+      "steps": [],
+      "expand_trigger": "phases 6-11 close"
+    }
+  ]
 }
