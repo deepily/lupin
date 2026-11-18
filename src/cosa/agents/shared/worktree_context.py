@@ -128,6 +128,7 @@ class WorktreeContext:
         self._auto_cleanup         : bool            = True
         self._cleanup_timeout_secs : int             = 30
         self._fallback_used        : bool            = False
+        self._locked               : bool            = False   # true only once __aenter__ has locked the record
 
     # ------------------------------------------------------------------
     # Context manager protocol

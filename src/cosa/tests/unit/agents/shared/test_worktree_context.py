@@ -139,6 +139,11 @@ class TestWorktreeContext( unittest.TestCase ):
         ctx.path = "/tmp/wt"
         self.assertFalse( _run( ctx.__aexit__( None, None, None ) ) )
 
+    def test_new_context_is_not_locked( self ):
+        """A context that never entered holds no job lock, so __aexit__ has nothing to unlock."""
+        ctx = self._make_ctx( enabled=True )
+        self.assertIs( ctx._locked, False )
+
     def test_aexit_cleanup_success( self ):
         """Test __aexit__ delegates cleanup to the shared drain_then_remove (clean exit)."""
         with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ), \
