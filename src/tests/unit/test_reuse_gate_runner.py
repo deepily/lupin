@@ -9,6 +9,7 @@ Every data folder and configuration file is temporary; nothing calls a model.
 import os
 import shutil
 import subprocess
+import tempfile
 
 import pytest
 
@@ -19,14 +20,28 @@ PROJECT_ROOT = cu.get_project_root()
 GATE         = os.path.join( PROJECT_ROOT, "src", "tests", "run-reuse-gate.sh" )
 RESOLVER     = os.path.join( PROJECT_ROOT, "src", "scripts", "lib", "resolve-venv-pytest.sh" )
 VENV         = os.path.join( PROJECT_ROOT, ".venv" )
-LINKED       = ( "cosa", "lupin_mcp", "lupin_cli" )                       # the packages the gate imports, linked from the real tree
+LINKED       = ( "cosa", "lupin_mcp", "lupin_cli", "conf" )                    # the packages the gate imports, linked from the real tree; conf holds the registry of repos the gate reads call logs from
 
 # No skip when this tree has no .venv: the resolver also accepts the container interpreter, and a
 # tree with neither fails these tests by name. The venv guard lists this file as one that breaks.
 
 
+def _scratch_env( base=None ):
+    """
+    Return an environment in which git sees only the scratch tree.
+
+    Ensures:
+        - every GIT_ variable is dropped: a GIT_DIR left in the caller's environment, as a git hook leaves one, would send `git init` and `git commit` into the enclosing repo
+          (measured 18 Nov 2026: the shared .git/config got core.bare = true and a seat's HEAD became the scratch commit "base")
+        - GIT_CEILING_DIRECTORIES stops a search upward from the scratch tree at the temporary folder's parent
+    """
+    env = { k: v for k, v in ( base if base is not None else os.environ ).items() if not k.startswith( "GIT_" ) }
+    env[ "GIT_CEILING_DIRECTORIES" ] = tempfile.gettempdir()
+    return env
+
+
 def _git( repo, *args ):
-    subprocess.run( [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args ], cwd=repo, check=True, timeout=60, capture_output=True )
+    subprocess.run( [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args ], cwd=repo, check=True, timeout=60, capture_output=True, env=_scratch_env() )
 
 
 @pytest.fixture
@@ -56,9 +71,9 @@ def env( tmp_path, repo ):
     ( data / "search-records" ).mkdir()
     ( data / "search-records" / f"{SID}.json" ).write_text( REAL_RECORD.read_text( encoding="utf-8" ), encoding="utf-8" )
     ini = tmp_path / "lupin-app.ini"
-    since = subprocess.run( [ "git", "-C", str( repo ), "rev-parse", "main" ], capture_output=True, text=True, check=True ).stdout.strip()
+    since = subprocess.run( [ "git", "-C", str( repo ), "rev-parse", "main" ], capture_output=True, text=True, check=True, env=_scratch_env() ).stdout.strip()
     ini.write_text( f"[x]\nreuse review gating = true\nreuse merge gate since = {since}\nreuse searched since = {since}\n", encoding="utf-8" )
-    return dict( os.environ, LUPIN_REUSE_DATA_DIR=str( data ), LUPIN_REUSE_REVIEW_INI=str( ini ) )
+    return dict( _scratch_env(), LUPIN_REUSE_DATA_DIR=str( data ), LUPIN_REUSE_REVIEW_INI=str( ini ) )
 
 
 def _commit_doc( repo, *lines ):
@@ -165,3 +180,27 @@ def test_a_linked_worktree_mid_merge_is_refused_too( repo, env, tmp_path ):
     _git( linked, "merge", "-q", "--no-commit", "--no-ff", "side" )
     code, text = _run( linked, env )
     assert code == 3 and "uncommitted merge" in text
+
+
+def test_a_git_dir_left_in_the_environment_never_reaches_the_enclosing_repo( tmp_path, monkeypatch ):
+    """A GIT_DIR in the environment never reaches the enclosing repo."""
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    _git( decoy, "init", "-q", "-b", "main" )
+    _git( decoy, "commit", "-q", "--allow-empty", "-m", "real" )
+    _git( decoy, "worktree", "add", "-q", "--detach", str( tmp_path / "decoy-wt" ), "HEAD" )
+    wt_dir = subprocess.run( [ "git", "-C", str( tmp_path / "decoy-wt" ), "rev-parse", "--absolute-git-dir" ], capture_output=True, text=True, check=True, env=_scratch_env() ).stdout.strip()
+    head   = lambda where: subprocess.run( [ "git", "-C", str( where ), "log", "--format=%H %s" ], capture_output=True, text=True, check=True, env=_scratch_env() ).stdout
+    bare   = lambda: subprocess.run( [ "git", "-C", str( decoy ), "config", "core.bare" ], capture_output=True, text=True, env=_scratch_env() ).stdout.strip()
+    before = ( head( tmp_path / "decoy-wt" ), bare() )
+    assert before[ 1 ] == "false" and before[ 0 ].count( "\n" ) == 1
+    monkeypatch.setenv( "GIT_DIR", wt_dir )
+    other = tmp_path / "other"
+    other.mkdir()
+    _git( other, "init", "-q", "-b", "main" )
+    ( other / "README.md" ).write_text( "# tree\n", encoding="utf-8" )
+    _git( other, "add", "README.md" )
+    _git( other, "commit", "-qm", "base" )
+    assert ( head( tmp_path / "decoy-wt" ), bare() ) == before, "the scratch commands reached the decoy repo"
+    assert ( other / ".git" ).is_dir() and "base" in head( other )
+    assert "GIT_DIR" not in _scratch_env() and _scratch_env()[ "GIT_CEILING_DIRECTORIES" ] == tempfile.gettempdir()
