@@ -168,7 +168,7 @@ def prior_majority_arm( row, visible_rows ):
 BASELINE_ARMS = { "always_yes": always_yes_arm, "prior_majority": prior_majority_arm }
 
 
-def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSlicedDecisionStore ):
+def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSlicedDecisionStore, target_types=None ):
     """
     Predict every replayable ask in time order with the live engine, and with each baseline.
 
@@ -178,6 +178,8 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
         - an ask with no question_embedding is not replayable
         - engine is a PredictionEngine; its embedding store is replaced for the run
         - baselines is a dict of arm name to function( ask, visible_rows ), default BASELINE_ARMS
+        - target_types is None to predict every ask, or the response types to predict; the other asks still
+          serve as cases and are neither predicted nor counted
 
     Ensures:
         - the forecast of an ask is made by engine.predict() with the ask's stored vector, so no embedding
@@ -207,6 +209,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
     try:
         for index in order:
             ask = asks[ index ]
+            if target_types is not None and ask[ "response_type" ] not in target_types: continue
             if ask[ "question_embedding" ] is None:
                 not_replayable.append( ask[ "id" ] )
                 continue

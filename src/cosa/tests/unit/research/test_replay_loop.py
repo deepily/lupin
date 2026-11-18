@@ -259,6 +259,14 @@ def test_the_floor_is_required_before_the_run_is_summarised():
     assert "PRE-STATED" in str( error.value )
 
 
+def test_target_types_limit_which_asks_are_predicted_but_every_ask_stays_a_case( engine ):
+    """A free-text ask is not predicted or counted, yet a yes/no ask can still retrieve it."""
+    asks = [ _ask( engine, "text", 2, 0, "yes", response_type="open_ended" ), _ask( engine, "yn", 2, 10, "yes" ) ]
+    run  = replay( asks, engine, SHA, target_types=( "yes_no", ) )
+    assert [ r[ "meta" ][ "notification_id" ] for r in run[ "records" ][ ENGINE_ARM ] ] == [ "yn" ]
+    assert run[ "not_replayable" ] == 0
+
+
 def test_the_replay_uses_the_time_sliced_store_by_default( engine ):
     """The store the engine reads in the replay is the time-sliced one."""
     seen = []
