@@ -48,7 +48,9 @@ def test_a_decoded_matching_answer_scores_true():
 
 def test_a_decoded_different_answer_scores_false_and_names_the_mismatch():
     outcome, _, match, detail = rm.classify( stored( { "Commit": "Commit only" } ), PRED_COMMIT )
-    assert ( outcome, match ) == ( "would_score", False ) and detail[ "mismatches" ][ 0 ][ "actual" ] == "Commit only"
+    field = detail[ "fields" ][ 0 ]
+    assert ( outcome, match, detail[ "matches" ] ) == ( "would_score", False, 0 )
+    assert ( field[ "header" ], field[ "exact" ], field[ "predicted" ], field[ "actual" ] ) == ( "Commit", False, [ "Commit and push" ], [ "Commit only" ] )
 
 
 @pytest.mark.parametrize( "actual", [ { "value": "Approve" }, { "value": "" }, { "value": 5 }, { "no_value": 1 }, None, "Approve" ] )
