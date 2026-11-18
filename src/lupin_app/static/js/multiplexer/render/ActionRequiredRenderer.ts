@@ -67,6 +67,7 @@ import { createActionRequiredMic, type ActionRequiredMicHandler, type ActionRequ
 import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
 import { projectBadge, personaBadge, abstractIndicator, abstractBlock, predictionHintBox } from "./templates/actionRequiredChrome";
+import type { PredictionFoldIntegration } from "./templates/actionRequiredChrome";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 import { castPredictionVote as castVote, type PredictionVoteStore } from "../stores/PredictionVoteStore";
 import type { PredictionVoteDir } from "../shared/types";
@@ -171,7 +172,7 @@ export interface ActionRequiredRendererOptions {
   // `predictionVote`, the renderer builds the bridge itself (stash the hint context, POST
   // through the store, repaint the card on a refused or thrown cast), as the notifications
   // list renderer does for its cards. `predictionVote` wins when both are given.
-  predictionVoteStore? : Pick<PredictionVoteStore, "getVote" | "setContext" | "vote">;
+  predictionVoteStore? : Pick<PredictionVoteStore, "getVote" | "setContext" | "vote" | "isFoldOpen" | "reportSeen">;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +210,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private slot    : HTMLElement | null = null;
   private queue   : HTMLElement | null = null;
   private readonly predictionVote : PredictionVoteIntegration | undefined;
+  // The forecast fold: which cards had it opened, and the report of the open. Built from the vote store, which holds both.
+  private readonly predictionFold : PredictionFoldIntegration | undefined;
+  private readonly predictionSeen : Pick<PredictionVoteStore, "reportSeen"> | undefined;
   // A-2 #2h — the detach for the document-level Y/N/C/P/Esc shortcuts, or null when
   // they are not attached. Doubles as legacy's `keyboardListenerActive` latch.
   private keyboardOff : (() => void) | null = null;
@@ -227,6 +231,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       getVote : (id) => voteStore.getVote(id),
       onVote  : (id, dir) => this.castPredictionVote(voteStore, id, dir),
     });
+    this.predictionSeen = voteStore;
+    this.predictionFold = voteStore === undefined ? undefined : {
+      isOpen : (id) => voteStore.isFoldOpen(id),
+      onOpen : (id) => { void voteStore.reportSeen(id, "fold_opened"); },
+    };
     /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
     this.recorder = opts.recorder ?? recordingManager;
     this.onMic = createActionRequiredMic(
@@ -538,7 +547,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // answer controls (A-2 #2e).
     const absBlock = abstractBlock(item.abstract);
     if (absBlock !== null) promptEl.after(absBlock);
-    (absBlock ?? promptEl).after(predictionHintBox(item, this.predictionVote));
+    (absBlock ?? promptEl).after(predictionHintBox(item, this.predictionVote, this.predictionFold));
+    // Phase 5: the card painted its forecast, so say so once; the store drops a repeat.
+    if (item.prediction_hint != null) void this.predictionSeen?.reportSeen(item.id_hash, "rendered");
     promptEl.after(bar);
     paintProgress(bar, Math.max(0, expiresAt - asOf));
     applyPausedUi(widget, pausedAt !== null);

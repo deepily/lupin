@@ -8,6 +8,7 @@ import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplex
 import {
   createPredictionVoteStore,
   PREDICTION_VOTE_ENDPOINT_PREFIX,
+  PREDICTION_SEEN_ENDPOINT_PREFIX,
   type PredictionVoteApiClient,
   type PredictionVoteContext,
 } from "../../../lupin_app/static/js/multiplexer/stores/PredictionVoteStore";
@@ -168,4 +169,55 @@ test("setContext can be re-cast and a later vote uses the latest context", async
   store.setContext("n4", updated);
   await store.vote("n4", "up");
   assert.equal((ctx.calls[0]!.body as { category: string }).category, "email");
+});
+
+// Phase 5: the seen reports and the fold memory.
+
+test("reportSeen sends each event once per notification, with the body the route reads", async () => {
+  const { bus } = makeBus();
+  const ctx = makeApi();
+  const store = createPredictionVoteStore({ bus, api: ctx.api, nowFn });
+  await store.reportSeen("s1", "rendered");
+  await store.reportSeen("s1", "rendered");
+  await store.reportSeen("s1", "fold_opened");
+  await store.reportSeen("s1", "fold_opened");
+  await store.reportSeen("s2", "rendered");
+  assert.deepEqual(ctx.calls, [
+    { path: PREDICTION_SEEN_ENDPOINT_PREFIX + "s1", body: { rendered: true } },
+    { path: PREDICTION_SEEN_ENDPOINT_PREFIX + "s1", body: { fold_opened: true } },
+    { path: PREDICTION_SEEN_ENDPOINT_PREFIX + "s2", body: { rendered: true } },
+  ]);
+});
+
+test("reportSeen ignores an empty id and sends nothing", async () => {
+  const { bus } = makeBus();
+  const ctx = makeApi();
+  const store = createPredictionVoteStore({ bus, api: ctx.api, nowFn });
+  await store.reportSeen("", "rendered");
+  assert.deepEqual(ctx.calls, []);
+  assert.equal(store.isFoldOpen(""), false);
+});
+
+test("a failed seen report never throws and is retried by the next report", async () => {
+  const { bus } = makeBus();
+  const ctx = makeApi();
+  const store = createPredictionVoteStore({ bus, api: ctx.api, nowFn });
+  ctx.setReject(true);
+  await store.reportSeen("s3", "rendered");
+  ctx.setReject(false);
+  await store.reportSeen("s3", "rendered");
+  assert.equal(ctx.calls.length, 2, "the failed report was forgotten, so the second call went out");
+});
+
+test("a fold-open is remembered for the card even when its report fails", async () => {
+  const { bus } = makeBus();
+  const ctx = makeApi();
+  const store = createPredictionVoteStore({ bus, api: ctx.api, nowFn });
+  assert.equal(store.isFoldOpen("s4"), false);
+  ctx.setReject(true);
+  await store.reportSeen("s4", "fold_opened");
+  assert.equal(store.isFoldOpen("s4"), true);
+  assert.equal(store.isFoldOpen("s5"), false, "another card's fold is unaffected");
+  await store.reportSeen("s5", "rendered");
+  assert.equal(store.isFoldOpen("s5"), false, "a rendered report does not open a fold");
 });

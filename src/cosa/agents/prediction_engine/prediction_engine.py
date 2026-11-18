@@ -1399,6 +1399,28 @@ class PredictionEngine:
         except ( json.JSONDecodeError, TypeError ):
             return None
 
+    def always_yes_rate( self, recipient_id: str ) -> Optional[Dict[str, Any]]:
+        """
+        Compute the always-yes label for a yes/no ask, from the recipient's past answers.
+
+        Requires:
+            - recipient_id: UUID string of the notification's recipient
+
+        Ensures:
+            - returns { yes, n, rate } as PredictionLogRepository.always_yes_counts does, counting answers
+              recorded before now
+            - returns None when there is no answer with a stance, or on any failure; never raises
+        """
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
+
+            with get_db() as session:
+                return PredictionLogRepository( session ).always_yes_counts( recipient_id )
+        except Exception as e:
+            if self.debug: print( f"[PredictionEngine] always_yes_rate error: {e}" )
+            return None
+
     def config_version( self ) -> str:
         """
         Name the settings the forecast ran under.
@@ -1419,7 +1441,7 @@ class PredictionEngine:
                          forecast_source: str = FORECAST_SOURCE_FOUNDATION,
                          strategy: str = STRATEGY_ERROR, abstention_reason: Optional[str] = None,
                          display_decision: Optional[str] = None, asked_at: Optional[datetime] = None,
-                         owner_email: Optional[str] = None ) -> bool:
+                         owner_email: Optional[str] = None, always_yes_rate: Optional[Dict[str, Any]] = None ) -> bool:
         """
         Write the ask-time forecast row for a notification, before the hint is sent.
 
@@ -1428,7 +1450,9 @@ class PredictionEngine:
             - notification_dict: the dict predict() was given (message, response_type, sender_id)
             - prediction_result: what predict() returned, or None when no forecast was made
             - strategy, abstention_reason: used only when prediction_result is None
-            - display_decision: "shown" or "withheld", as the caller decided
+            - display_decision: the card's state (ready, insufficient_evidence, below_threshold or
+              unavailable), as the caller decided; the row and the payload carry the same value
+            - always_yes_rate: the { yes, n, rate } label shown on a yes/no card, or None
 
         Ensures:
             - writes exactly one prediction_log row with the ledger columns filled
@@ -1485,6 +1509,7 @@ class PredictionEngine:
                 "original_message"   : message,
                 "batch_question_key" : meta.get( "batch_question_key" ),
                 "code_identity"      : get_code_identity(),
+                "always_yes_rate"    : always_yes_rate,
             }
 
             from cosa.rest.db.database import get_db
@@ -2060,7 +2085,7 @@ def quick_smoke_test():
             similar_case_count  = 3,
             predicted_qualifier = "only the old files"
         )
-        hint = qualified_result.to_hint_dict()
+        hint = qualified_result.to_hint_dict( 0.5, "dot" )
         assert hint[ "predicted_qualifier" ] == "only the old files"
         print( "✓ Qualifier appears in hint_dict" )
 

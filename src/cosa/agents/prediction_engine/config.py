@@ -65,6 +65,12 @@ FORECAST_SOURCE_FOUNDATION     = "foundation_sync"
 FORECAST_SOURCE_TEST_OVERRIDE  = "test_override"
 PREDICTOR_VERSION              = "foundation-sync-1"
 
+# The state a forecast card shows, and the display decision stored on the forecast row (they are one value)
+HINT_STATE_READY                 = "ready"
+HINT_STATE_INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+HINT_STATE_BELOW_THRESHOLD       = "below_threshold"
+HINT_STATE_UNAVAILABLE           = "unavailable"
+
 # Accuracy comparison thresholds
 # Default for INI key "prediction engine open ended match threshold" (Rick's ruling 6 Nov 2026, row 35a79890;
 # fitted on 133 labelled pairs: precision 0.79, recall 0.65 at 0.75, against recall 0.29 at 0.85)

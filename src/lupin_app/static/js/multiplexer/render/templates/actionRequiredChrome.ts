@@ -129,43 +129,78 @@ export function abstractBlock( abstract: string | undefined ): HTMLElement | nul
 }
 
 /**
- * Build the prediction hint box of a card. It is always returned.
+ * The card's bridge for the forecast fold: whether it was opened, and a call when it opens.
  *
- * A missing hint gives a ghost box that reads "Learning, no prediction yet". Otherwise the box shows the predicted value and the strategy when there is one. It adds the vote controls when `vote` is given and the confidence passes the gate. Without `vote` the controls are not mounted. A control with no handler would be a painted button that does nothing.
+ * The fold keeps no state of its own. The renderer holds which cards had it opened, so a repaint puts it back.
+ */
+export interface PredictionFoldIntegration {
+  /** True when the fold of this card was opened earlier in the card's life. */
+  isOpen( notificationId: string ): boolean;
+  /** Called when the reader opens the fold. Closing it is not reported. */
+  onOpen( notificationId: string ): void;
+}
+
+/** The text each state shows in the fold; a ready card shows the forecast instead. */
+const HINT_STATE_TEXT: Record<string, string> = {
+  insufficient_evidence : "Learning, no prediction yet",
+  below_threshold       : "Forecast too uncertain to show",
+  unavailable           : "Forecast unavailable",
+};
+
+/**
+ * Build the forecast fold of a card. It is always returned.
+ *
+ * The hint sits inside a native `details` fold that starts closed. A missing hint, or a state other than `ready`, shows that state's own text. A ready hint shows the value, the confidence with its metric, the strategy and the always-yes rate on a yes/no card.
+ * The vote controls are added inside the fold when `vote` is given and the confidence passes the gate. Without `vote` they are not mounted, because a control with no handler would do nothing.
  */
 export function predictionHintBox(
   item : { id_hash: string; response_type: string; prediction_hint?: PredictionHint | null },
   vote : PredictionVoteIntegration | undefined,
+  fold?: PredictionFoldIntegration,
 ): HTMLElement {
   const hint = item.prediction_hint;
-  const root = document.createElement( "div" );
+  const root = document.createElement( "details" );
   // `== null`: absent is both spellings (row 759250e4). The store no longer admits a null, but the ghost box
   // is the ratified answer to "no hint" whichever way it is spelled, so this guard says so too.
-  if ( hint == null ) {
-    root.className = "prediction-hint prediction-hint-cold";
-    const label = document.createElement( "div" );
-    label.className   = "prediction-hint-label";
-    label.textContent = "Learning, no prediction yet";
-    root.appendChild( label );
+  const state = hint == null ? "insufficient_evidence" : hint.state;
+  root.className = state === "insufficient_evidence" ? "prediction-hint prediction-hint-cold" : "prediction-hint";
+  root.setAttribute( "data-testid", "prediction-hint-fold" );
+  root.setAttribute( "data-hint-state", state );
+  if ( fold !== undefined && fold.isOpen( item.id_hash ) ) root.open = true;
+  const summary = document.createElement( "summary" );
+  summary.className   = "prediction-hint-summary";
+  summary.textContent = "Forecast";
+  root.appendChild( summary );
+  if ( fold !== undefined ) {
+    root.addEventListener( "toggle", () => { if ( root.open ) fold.onOpen( item.id_hash ); } );
+  }
+  const label = document.createElement( "div" );
+  label.className = "prediction-hint-label";
+  root.appendChild( label );
+  if ( hint == null || state !== "ready" ) {
+    label.textContent = HINT_STATE_TEXT[ state ] ?? "Forecast unavailable";
+    if ( hint != null ) appendAlwaysYes( root, hint );
     return root;
   }
-  root.className = "prediction-hint";
-  const label = document.createElement( "div" );
-  label.className   = "prediction-hint-label";
-  label.textContent = predictedText( item.response_type, hint.predicted_value );
-  root.appendChild( label );
+  label.textContent = predictedText( item.response_type, hint.predicted_value, hint.predicted_qualifier );
+  const confidencePct = Math.round( ( hint.confidence ?? 0 ) * 100 );
+  const confidence = document.createElement( "div" );
+  confidence.className   = "prediction-hint-confidence";
+  confidence.textContent = `Confidence ${ confidencePct }% (${ hint.retrieval_metric } similarity)`;
+  root.appendChild( confidence );
   if ( hint.strategy !== undefined ) {
     const strategy = document.createElement( "div" );
     strategy.className   = "prediction-hint-strategy";
     strategy.textContent = hint.strategy;
     root.appendChild( strategy );
   }
+  appendAlwaysYes( root, hint );
   if ( vote === undefined ) return root;
   const cast = vote.getVote( item.id_hash );
   const controls = renderPredictionVoteControls(
     {
       notificationId : item.id_hash,
-      confidencePct  : Math.round( hint.confidence * 100 ),
+      confidencePct,
       ...( cast === undefined ? {} : { castVote: cast } ),
     },
     { onVote: ( dir ) => vote.onVote( item.id_hash, dir ) },
@@ -174,17 +209,32 @@ export function predictionHintBox(
   return root;
 }
 
+/**
+ * Adds the always-yes line when the hint has a rate.
+ *
+ * Example: "Always yes would be right 52 of 59 times".
+ */
+function appendAlwaysYes( root: HTMLElement, hint: PredictionHint ): void {
+  const rate = hint.always_yes_rate;
+  if ( rate === undefined ) return;
+  const line = document.createElement( "div" );
+  line.className   = "prediction-hint-always-yes";
+  line.textContent = `Always yes would be right ${ rate.yes } of ${ rate.n } times`;
+  root.appendChild( line );
+}
+
 // Legacy title-cases a yes_no prediction and prints every other type as-is
 // (notifications.js:23597-23635).
 /**
  * Returns the predicted answer as display text.
  *
- * A yes or no string is capitalized, other strings are shown as they are, and other values become JSON.
+ * A yes or no string is capitalized, with the qualifier after it when there is one. Other strings are shown as they are, and other values become JSON.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line (notificationItem.ts:46 precedent).
-function predictedText( responseType: string, value: unknown ): string {
+function predictedText( responseType: string, value: unknown, qualifier?: string ): string {
   if ( responseType === "yes_no" && typeof value === "string" && value.length > 0 ) {
-    return value.charAt( 0 ).toUpperCase() + value.slice( 1 );
+    const shown = value.charAt( 0 ).toUpperCase() + value.slice( 1 );
+    return qualifier === undefined || qualifier.length === 0 ? shown : `${ shown } — "${ qualifier }"`;
   }
   return typeof value === "string" ? value : JSON.stringify( value ) ?? "";
 }

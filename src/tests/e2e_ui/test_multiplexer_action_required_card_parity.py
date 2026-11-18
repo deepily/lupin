@@ -366,7 +366,7 @@ class TestActionRequiredCardParity:
                 "name": "Rio", "voice_id": "v1", "icon": "⚡",
                 "color": "#880E4F", "borrowed": False,
             },
-            "prediction_hint": { "confidence": 0.9, "predicted_value": "yes", "category": "deploy" },
+            "prediction_hint": { "state": "ready", "retrieval_metric": "dot", "confidence": 0.9, "predicted_value": "yes", "category": "deploy" },
         } )
         card = _card( page, "e2ecard-chrome" )
 
@@ -385,8 +385,8 @@ class TestActionRequiredCardParity:
         assert block.locator( "strong" ).inner_text().strip() == "full", (
             "the real markdown bundle rendered the abstract — unit tests shim this away"
         )
-        # The prediction hint.
-        assert card.locator( ".prediction-hint-label" ).inner_text().strip() == "Yes"
+        # The prediction hint sits in a fold that starts closed, so its text is read, not seen.
+        assert card.locator( ".prediction-hint-label" ).text_content().strip() == "Yes"
 
     def test_chrome_is_absent_tolerant_when_the_server_sends_none_of_it( self, logged_in_page ):
         page = logged_in_page

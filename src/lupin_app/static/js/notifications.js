@@ -27799,13 +27799,20 @@ class NotificationsUI {
      *   - Displays predicted value, confidence percentage, and strategy label
      */
     buildPredictionHintSection( notification ) {
-        const hint = notification.prediction_hint;
-        if ( !hint ) {
-            return `
-                <div class="prediction-hint prediction-hint-cold">
-                    <div class="prediction-hint-label">Learning, no prediction yet</div>
-                </div>
-            `;
+        const hint  = notification.prediction_hint;
+        const state = hint ? ( hint.state || 'ready' ) : 'insufficient_evidence';
+        if ( state !== 'ready' ) {
+            // Every card gets a fold, whatever the state; only a ready forecast has a value to show.
+            const stateText = {
+                insufficient_evidence : 'Learning, no prediction yet',
+                below_threshold       : 'Forecast too uncertain to show',
+                unavailable           : 'Forecast unavailable'
+            };
+            const cold = state === 'insufficient_evidence' ? ' prediction-hint-cold' : '';
+            return this._wrapPredictionFold( notification, state, `
+                <div class="prediction-hint-label">${this.escapeHtml( stateText[ state ] || stateText.unavailable )}</div>
+                ${this._buildAlwaysYesLine( hint )}
+            `, cold );
         }
 
         const confidence   = Math.round( hint.confidence * 100 );
@@ -27865,13 +27872,64 @@ class NotificationsUI {
 
         const voteControls = this._buildPredictionVoteControls( notification, confidence, hint );
 
-        return `
-            <div class="prediction-hint">
+        return this._wrapPredictionFold( notification, 'ready', `
                 <div class="prediction-hint-label">${this.escapeHtml( predictedText )}</div>
+                <div class="prediction-hint-confidence">Confidence ${confidence}% (${this.escapeHtml( String( hint.retrieval_metric ) )} similarity)</div>
                 <div class="prediction-hint-strategy">${strategy}</div>
+                ${this._buildAlwaysYesLine( hint )}
                 ${voteControls}
-            </div>
+        `, '' );
+    }
+
+    /**
+     * Wraps a forecast's inner HTML in a native details fold that starts closed.
+     *
+     * An id that was opened earlier stays open on a re-render. The first paint of an id reports "rendered".
+     */
+    _wrapPredictionFold( notification, state, innerHtml, extraClass ) {
+        const id   = notification.id;
+        const open = id && this._predictionFoldOpen && this._predictionFoldOpen.has( id ) ? ' open' : '';
+        if ( id ) this._reportPredictionSeen( id, 'rendered' );
+        return `
+            <details class="prediction-hint prediction-hint-fold${extraClass}" data-testid="prediction-hint-fold"
+                     data-notification-id="${this.escapeHtml( String( id ) )}" data-hint-state="${state}"${open}>
+                <summary class="prediction-hint-summary">Forecast</summary>
+                ${innerHtml}
+            </details>
         `;
+    }
+
+    /**
+     * Builds the always-yes line, or an empty string.
+     *
+     * Example: "Always yes would be right 52 of 59 times".
+     */
+    _buildAlwaysYesLine( hint ) {
+        const rate = hint ? hint.always_yes_rate : null;
+        if ( !rate ) return '';
+        return `<div class="prediction-hint-always-yes">Always yes would be right ${Number( rate.yes )} of ${Number( rate.n )} times</div>`;
+    }
+
+    /**
+     * Tells the server a forecast was rendered or its fold opened.
+     *
+     * Each event goes once per id. A failure is forgotten, so a later call retries.
+     */
+    async _reportPredictionSeen( notificationId, event ) {
+        this._predictionSeenSent = this._predictionSeenSent || new Set();
+        const key = `${notificationId}|${event}`;
+        if ( this._predictionSeenSent.has( key ) ) return;
+        this._predictionSeenSent.add( key );
+        try {
+            const response = await this.authedFetch(
+                `/api/notify/prediction-seen/${encodeURIComponent( notificationId )}`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify( event === 'rendered' ? { rendered: true } : { fold_opened: true } ) }
+            );
+            if ( !response.ok ) this._predictionSeenSent.delete( key );
+        } catch ( err ) {
+            this._predictionSeenSent.delete( key );
+        }
     }
 
     /**
@@ -27899,6 +27957,15 @@ class NotificationsUI {
      * Attach one document click listener that sends prediction votes.
      */
     _setupPredictionVoteDelegation() {
+        // A toggle event does not bubble, so listen in the capture phase. Only an open is remembered and reported.
+        document.addEventListener( 'toggle', ( e ) => {
+            const fold = e.target && e.target.matches && e.target.matches( 'details.prediction-hint-fold' ) ? e.target : null;
+            if ( !fold || !fold.open ) return;
+            const id = fold.dataset.notificationId;
+            this._predictionFoldOpen = this._predictionFoldOpen || new Set();
+            this._predictionFoldOpen.add( id );
+            this._reportPredictionSeen( id, 'fold_opened' );
+        }, true );
         document.addEventListener( 'click', ( e ) => {
             const voteBtn = e.target.closest( '.prediction-vote-btn' );
             if ( !voteBtn ) return;

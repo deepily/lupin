@@ -15,7 +15,8 @@ import sqlalchemy as sa
 from sqlalchemy import func, and_
 
 from cosa.rest.db.repositories.base import BaseRepository
-from cosa.rest.postgres_models import PredictionLog
+from cosa.rest.postgres_models import Notification, PredictionLog
+from cosa.utils.notification_utils import extract_qualifier_comment
 
 
 TEST_OVERRIDE_SOURCE = "test_override"   # forecast_source of a row a test planted; never counted
@@ -25,7 +26,7 @@ STATUS_INSUFFICIENT  = "insufficient data"
 LEDGER_COLUMNS = frozenset( {
     "asked_at", "rendered_at", "fold_opened_at", "forecast_ready_at", "forecast_source", "predictor_version",
     "config_version", "encoder_version", "context_version", "owner_email", "evidence_ids", "evidence_scores",
-    "abstention_reason", "latency_ms", "display_decision", "original_message", "batch_question_key", "code_identity",
+    "abstention_reason", "latency_ms", "display_decision", "original_message", "batch_question_key", "code_identity", "always_yes_rate",
 } )
 
 
@@ -189,6 +190,44 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         )
         if for_update: query = query.with_for_update()
         return query.first()
+
+    def always_yes_counts( self, recipient_id: str, before: Optional[datetime] = None ) -> Optional[Dict[str, Any]]:
+        """
+        Count how often always answering yes would have been right for one recipient.
+
+        Requires:
+            - recipient_id: UUID string of the notification's recipient
+            - before: only answers recorded before this instant count; None means now
+
+        Ensures:
+            - looks at the recipient's scored yes/no forecast rows (accuracy_match not null), joined to the notification
+              through notification_id, because older rows carry no owner column
+            - leaves out rows whose strategy is test_override
+            - reads each stance with extract_qualifier_comment, so an answer with no recognised stance counts nowhere
+            - returns { "yes": answers that were yes, "n": answers with a stance, "rate": yes / n rounded to 4 places }
+            - returns None when no answer has a stance
+
+        Raises:
+            - ValueError if recipient_id is not a UUID
+        """
+        before = before or datetime.now( timezone.utc )
+        # Accepted for now: this loads the recipient's whole scored history into Python to read each stance.
+        rows   = self.session.query( PredictionLog.actual_value ).join(
+            Notification, Notification.id == PredictionLog.notification_id
+        ).filter(
+            Notification.recipient_id == uuid.UUID( recipient_id ),
+            PredictionLog.response_type == "yes_no",
+            PredictionLog.actual_value.isnot( None ),
+            PredictionLog.accuracy_match.isnot( None ),
+            PredictionLog.responded_at < before,
+            PredictionLog.prediction_strategy != "test_override",
+        ).all()
+
+        stances = [ extract_qualifier_comment( actual_value.get( "value" ) )[ 0 ] for ( actual_value, ) in rows ]
+        stances = [ stance for stance in stances if stance is not None ]
+        if not stances: return None
+        yes = stances.count( "yes" )
+        return { "yes": yes, "n": len( stances ), "rate": round( yes / len( stances ), 4 ) }
 
     def record_seen( self, notification_id: str, rendered: bool = False,
                      fold_opened: bool = False ) -> Optional[Dict[str, bool]]:

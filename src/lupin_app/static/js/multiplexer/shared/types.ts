@@ -580,15 +580,29 @@ export interface VoicePersona {
 // echoed back verbatim at vote-POST time (the server does not persist the hint,
 // so the client supplies what was voted on — parity with legacy notifications.js
 // `_predictionVoteContext`).
+/** The four states of a forecast card; the server names the state. */
+export type PredictionHintState = "ready" | "insufficient_evidence" | "below_threshold" | "unavailable";
+
+/** The share of past yes/no answers that were yes: `yes` of `n`, as `rate` from 0 to 1. */
+export interface AlwaysYesRate {
+  yes  : number;
+  n    : number;
+  rate : number;
+}
+
 /**
  * The server's prediction of how the user will answer a prompt.
  *
- * `confidence` runs from 0 to 1. `predicted_value` and `category` are sent back when the user votes.
+ * The payload is always sent, in every state. `confidence` (0 to 1), `predicted_value` and `predicted_qualifier` come only when the state is `ready`. `always_yes_rate` comes only on a yes/no card that has a rate.
  */
 export interface PredictionHint {
-  confidence      : number;     // 0.0–1.0; ×100 → percent for the gate + display
-  predicted_value : unknown;    // echoed back on vote (opaque to the renderer)
-  category        : string;     // training-signal bucket (echoed back on vote)
+  state            : PredictionHintState;
+  retrieval_metric : string;     // "dot" or "cosine"; the card says which beside the confidence
+  confidence?      : number;     // 0.0–1.0; ×100 → percent for the gate + display
+  predicted_value? : unknown;    // echoed back on vote (opaque to the renderer)
+  predicted_qualifier? : string;
+  always_yes_rate? : AlwaysYesRate;
+  category         : string;     // training-signal bucket (echoed back on vote)
   // A-2 #2m — the human-readable strategy label legacy prints under the predicted
   // value (notifications.js:23592, `formatStrategyLabel`). Optional: the server omits
   // it on hints that carry no strategy, and the line is then not drawn.

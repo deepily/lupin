@@ -33,8 +33,12 @@ class _Result:
     def __init__( self, confidence ):
         self.confidence = confidence
         self.metadata   = {}
-    def to_hint_dict( self ):
-        return { "predicted_value": "yes", "confidence": self.confidence, "strategy": "s", "category": "permission" }
+    def to_hint_dict( self, threshold, metric, always_yes=None ):
+        state = "ready" if self.confidence >= threshold else "below_threshold"
+        hint  = { "state": state, "retrieval_metric": metric, "strategy": "s", "category": "permission" }
+        if state == "ready": hint.update( predicted_value="yes", confidence=self.confidence )
+        if always_yes is not None: hint[ "always_yes_rate" ] = always_yes
+        return hint
 
 
 @pytest.fixture
@@ -44,7 +48,8 @@ def wired( harness, monkeypatch ):
     import cosa.agents.prediction_engine as pe
 
     state = { "forecasts": [], "pushed_at_forecast": [], "enabled": True, "result": _Result( 0.9 ), "predict_raises": None,
-              "forecast_raises": None, "predict_calls": [] }
+              "forecast_raises": None, "predict_calls": [], "yes_rate": { "yes": 52, "n": 59, "rate": 0.8814 },
+              "yes_rate_calls": [] }
 
     monkeypatch.setattr( user_service, "get_user_by_email", lambda email: { "id": _UID, "uid": "UID-VALUE" } )
     monkeypatch.setattr( notif, "_persist_response_required_sync", lambda *a: _NID )
@@ -55,6 +60,10 @@ def wired( harness, monkeypatch ):
     class _Engine:
         confidence_threshold = 0.5
         hint_voting_enabled  = False
+        retrieval_metric     = "dot"
+        def always_yes_rate( self, recipient_id ):
+            state[ "yes_rate_calls" ].append( recipient_id )
+            return state[ "yes_rate" ]
         @property
         def enabled( self ): return state[ "enabled" ]
         def predict( self, nd ):
@@ -95,11 +104,31 @@ class TestEveryAskWritesOneRowBeforeTheHint:
         assert kw[ "owner_email" ] == _EMAIL
         assert wired[ "pushed_at_forecast" ] == [ 0 ], "the card was already pushed when the row was written"
 
-    def test_a_confident_forecast_is_recorded_as_shown_and_a_weak_one_as_withheld( self, harness, wired ):
+    def test_the_row_stores_the_same_state_the_card_is_sent( self, harness, wired ):
         _post( harness )
         wired[ "result" ] = _Result( 0.1 )
         _post( harness )
-        assert [ f[ 2 ][ "display_decision" ] for f in wired[ "forecasts" ] ] == [ "shown", "withheld" ]
+        sent   = [ c.kwargs[ "prediction_hint" ][ "state" ] for c in harness.queue.calls_to( "push_notification" ) ]
+        stored = [ f[ 2 ][ "display_decision" ] for f in wired[ "forecasts" ] ]
+        assert sent == stored == [ "ready", "below_threshold" ]
+
+    def test_a_weak_forecast_is_sent_with_no_value_and_no_gates( self, harness, wired ):
+        wired[ "result" ] = _Result( 0.1 )
+        _post( harness )
+        hint = harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ]
+        assert hint[ "state" ] == "below_threshold" and "predicted_value" not in hint
+        assert not any( key.startswith( "auto_submit" ) or key.startswith( "vote_" ) for key in hint )
+
+    def test_a_yes_no_ask_computes_the_always_yes_rate_for_its_recipient_and_stores_and_sends_it( self, harness, wired ):
+        _post( harness )
+        assert wired[ "yes_rate_calls" ] == [ _UID ]
+        assert wired[ "forecasts" ][ 0 ][ 2 ][ "always_yes_rate" ] == wired[ "yes_rate" ]
+        assert harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ][ "always_yes_rate" ] == wired[ "yes_rate" ]
+
+    def test_a_card_that_is_not_yes_no_computes_no_rate( self, harness, wired ):
+        _post( harness, response_type="open_ended" )
+        assert wired[ "yes_rate_calls" ] == []
+        assert wired[ "forecasts" ][ 0 ][ 2 ][ "always_yes_rate" ] is None
 
     def test_a_disabled_engine_writes_a_cold_start_row_named_engine_disabled( self, harness, wired ):
         wired[ "enabled" ] = False
@@ -107,6 +136,7 @@ class TestEveryAskWritesOneRowBeforeTheHint:
         kw = wired[ "forecasts" ][ 0 ][ 2 ]
         assert wired[ "predict_calls" ] == []
         assert kw[ "strategy" ] == "cold_start" and kw[ "abstention_reason" ] == "engine_disabled"
+        assert kw[ "display_decision" ] == "unavailable"
         assert "prediction_result" not in kw
 
     def test_a_predictor_error_writes_a_row_naming_the_exception_class( self, harness, wired ):
@@ -115,14 +145,15 @@ class TestEveryAskWritesOneRowBeforeTheHint:
         assert r.status_code == 200, "a predictor error must not cost the ask"
         kw = wired[ "forecasts" ][ 0 ][ 2 ]
         assert kw[ "strategy" ] == "error" and kw[ "abstention_reason" ] == "predictor_error: KeyError"
-        assert kw[ "display_decision" ] == "withheld"
+        assert kw[ "display_decision" ] == "unavailable"
+        assert harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ][ "state" ] == "unavailable"
 
     def test_a_test_override_writes_a_test_override_row_and_never_calls_predict( self, harness, wired ):
         _post( harness, prediction_hint_override=json.dumps( { "predicted_value": "yes" } ) )
         kw = wired[ "forecasts" ][ 0 ][ 2 ]
         assert wired[ "predict_calls" ] == []
         assert kw[ "forecast_source" ] == "test_override" and kw[ "strategy" ] == "test_override"
-        assert kw[ "abstention_reason" ] == "test_override" and kw[ "display_decision" ] == "shown"
+        assert kw[ "abstention_reason" ] == "test_override" and kw[ "display_decision" ] == "ready"
 
     def test_an_engine_that_cannot_be_built_still_gets_a_ledger_attempt_without_costing_the_ask( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine as pe

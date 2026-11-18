@@ -176,7 +176,7 @@ test( "no hint draws legacy's cold-start ghost box", () => {
 
 test( "a yes_no prediction is title-cased, as legacy title-cases it", () => {
   const el = predictionHintBox(
-    { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
+    { id_hash: "a1", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } },
     undefined,
   );
   assert.equal( el.className, "prediction-hint" );
@@ -185,7 +185,7 @@ test( "a yes_no prediction is title-cased, as legacy title-cases it", () => {
 
 test( "a non-yes_no prediction prints as-is, untouched by the title-case", () => {
   const el = predictionHintBox(
-    { id_hash: "a1", response_type: "open_ended", prediction_hint: { confidence: 0.9, predicted_value: "ship it", category: "c" } },
+    { id_hash: "a1", response_type: "open_ended", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "ship it", category: "c" } },
     undefined,
   );
   assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, "ship it" );
@@ -193,7 +193,7 @@ test( "a non-yes_no prediction prints as-is, untouched by the title-case", () =>
 
 test( "a non-string prediction is JSON-rendered rather than printed as [object Object]", () => {
   const el = predictionHintBox(
-    { id_hash: "a1", response_type: "open_ended_batch", prediction_hint: { confidence: 0.9, predicted_value: { answers: { q: "a" } }, category: "c" } },
+    { id_hash: "a1", response_type: "open_ended_batch", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: { answers: { q: "a" } }, category: "c" } },
     undefined,
   );
   assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, '{"answers":{"q":"a"}}' );
@@ -201,7 +201,7 @@ test( "a non-string prediction is JSON-rendered rather than printed as [object O
 
 test( "a yes_no prediction that is not a string falls through the title-case", () => {
   const el = predictionHintBox(
-    { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: 42, category: "c" } },
+    { id_hash: "a1", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: 42, category: "c" } },
     undefined,
   );
   assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, "42" );
@@ -209,7 +209,7 @@ test( "a yes_no prediction that is not a string falls through the title-case", (
 
 test( "an empty-string yes_no prediction does not title-case an empty string", () => {
   const el = predictionHintBox(
-    { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "", category: "c" } },
+    { id_hash: "a1", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "", category: "c" } },
     undefined,
   );
   assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, "" );
@@ -218,7 +218,7 @@ test( "an empty-string yes_no prediction does not title-case an empty string", (
 test( "an undefined prediction value renders empty, never the string \"undefined\"", () => {
   // JSON.stringify(undefined) is undefined, not a string — the `?? ""` arm.
   const el = predictionHintBox(
-    { id_hash: "a1", response_type: "open_ended", prediction_hint: { confidence: 0.9, predicted_value: undefined, category: "c" } },
+    { id_hash: "a1", response_type: "open_ended", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: undefined, category: "c" } },
     undefined,
   );
   assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, "" );
@@ -226,12 +226,12 @@ test( "an undefined prediction value renders empty, never the string \"undefined
 
 test( "the strategy line is drawn when the server sent one, and omitted when it did not", () => {
   const withStrategy = predictionHintBox(
-    { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c", strategy: "recent-history" } },
+    { id_hash: "a1", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c", strategy: "recent-history" } },
     undefined,
   );
   assert.equal( withStrategy.querySelector( ".prediction-hint-strategy" )!.textContent, "recent-history" );
   const without = predictionHintBox(
-    { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
+    { id_hash: "a1", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } },
     undefined,
   );
   assertAbsent( without.querySelector( ".prediction-hint-strategy" ), "no strategy line without a strategy" );
@@ -240,7 +240,7 @@ test( "the strategy line is drawn when the server sent one, and omitted when it 
 test( "the vote controls reach the real integration — a click calls onVote with this card's id", () => {
   const calls: Array<[ string, string ]> = [];
   const el = predictionHintBox(
-    { id_hash: "card-7", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
+    { id_hash: "card-7", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } },
     { getVote: () => undefined, onVote: ( id, dir ) => calls.push( [ id, dir ] ) },
   );
   const up = el.querySelector<HTMLButtonElement>( ".prediction-vote-up" );
@@ -251,7 +251,7 @@ test( "the vote controls reach the real integration — a click calls onVote wit
 
 test( "a previously cast vote comes back highlighted", () => {
   const el = predictionHintBox(
-    { id_hash: "card-7", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
+    { id_hash: "card-7", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } },
     { getVote: () => "down", onVote: () => {} },
   );
   const root = el.querySelector( ".prediction-hint-vote" )!;
@@ -261,7 +261,7 @@ test( "a previously cast vote comes back highlighted", () => {
 
 test( "with no integration the controls do not mount, rather than mounting with no handler", () => {
   const el = predictionHintBox(
-    { id_hash: "card-7", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
+    { id_hash: "card-7", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } },
     undefined,
   );
   // The box itself is still drawn (predicted value in it); only the controls are skipped.
@@ -280,7 +280,7 @@ test( "with the real vote store the controls mount and a click POSTs this card's
   } );
   store.setContext( "card-9", { question: "Ship it?", predicted_value: "yes", category: "c", response_type: "yes_no" } );
   const el = predictionHintBox(
-    { id_hash: "card-9", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
+    { id_hash: "card-9", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.9, predicted_value: "yes", category: "c" } },
     { getVote: ( id ) => store.getVote( id ), onVote: ( id, dir ) => { void store.vote( id, dir ); } },
   );
   const down = el.querySelector<HTMLButtonElement>( ".prediction-vote-down" );
@@ -295,11 +295,73 @@ test( "with the real vote store the controls mount and a click POSTs this card's
 
 test( "a hint below the vote gate draws the box but no controls", () => {
   const el = predictionHintBox(
-    { id_hash: "card-7", response_type: "yes_no", prediction_hint: { confidence: 0.1, predicted_value: "yes", category: "c" } },
+    { id_hash: "card-7", response_type: "yes_no", prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.1, predicted_value: "yes", category: "c" } },
     { getVote: () => undefined, onVote: () => {} },
   );
   assert.equal( el.className, "prediction-hint" );
   assertAbsent( el.querySelector( ".prediction-hint-vote" ), "no vote controls below the gate" );
+} );
+
+// --- Phase 5: the fold and the four states ---------------------------------
+
+type Hint = NonNullable<Parameters<typeof predictionHintBox>[ 0 ][ "prediction_hint" ]>;
+const ready: Hint = { state: "ready", retrieval_metric: "cosine", confidence: 0.87, predicted_value: "yes", category: "c" };
+const box = ( hint: Hint | null | undefined, rt = "yes_no", fold?: Parameters<typeof predictionHintBox>[ 2 ] ) =>
+  predictionHintBox( { id_hash: "f1", response_type: rt, prediction_hint: hint }, undefined, fold );
+
+test( "every hint is wrapped in a details fold that starts closed", () => {
+  for ( const hint of [ ready, { state: "unavailable", retrieval_metric: "dot", category: "c" } as Hint, null, undefined ] ) {
+    const el = box( hint ) as HTMLDetailsElement;
+    assert.equal( el.tagName, "DETAILS" );
+    assert.equal( el.getAttribute( "data-testid" ), "prediction-hint-fold" );
+    assert.equal( el.open, false, "the fold must start closed" );
+    assert.equal( el.querySelector( "summary" ) !== null, true, "a keyboard-operable summary is the fold's handle" );
+  }
+} );
+
+test( "each state renders its own text", () => {
+  const text = ( s: string ) => box( { state: s, retrieval_metric: "dot", category: "c" } as Hint ).querySelector( ".prediction-hint-label" )!.textContent;
+  assert.equal( text( "insufficient_evidence" ), "Learning, no prediction yet" );
+  assert.equal( text( "below_threshold" ), "Forecast too uncertain to show" );
+  assert.equal( text( "unavailable" ), "Forecast unavailable" );
+  assert.equal( text( "not_a_state" ), "Forecast unavailable", "an unknown state falls back to unavailable" );
+  assert.equal( box( ready ).querySelector( ".prediction-hint-label" )!.textContent, "Yes" );
+  assert.equal( box( null ).getAttribute( "data-hint-state" ), "insufficient_evidence" );
+} );
+
+test( "only a ready hint shows a confidence, and it names the metric beside it", () => {
+  assert.equal( box( ready ).querySelector( ".prediction-hint-confidence" )!.textContent, "Confidence 87% (cosine similarity)" );
+  assertAbsent( box( { state: "below_threshold", retrieval_metric: "dot", category: "c" } ).querySelector( ".prediction-hint-confidence" ), "no confidence outside ready" );
+  const noConf = box( { state: "ready", retrieval_metric: "dot", category: "c" } );
+  assert.equal( noConf.querySelector( ".prediction-hint-confidence" )!.textContent, "Confidence 0% (dot similarity)" );
+} );
+
+test( "the always-yes line appears with its denominator, in every state, and only when sent", () => {
+  const rate = { yes: 52, n: 59, rate: 0.8814 };
+  assert.equal( box( { ...ready, always_yes_rate: rate } ).querySelector( ".prediction-hint-always-yes" )!.textContent, "Always yes would be right 52 of 59 times" );
+  const cold = box( { state: "insufficient_evidence", retrieval_metric: "dot", category: "c", always_yes_rate: rate } );
+  assert.equal( cold.querySelector( ".prediction-hint-always-yes" )!.textContent, "Always yes would be right 52 of 59 times" );
+  assertAbsent( box( ready ).querySelector( ".prediction-hint-always-yes" ), "no line without a rate" );
+} );
+
+test( "a yes/no qualifier shows beside the forecast", () => {
+  assert.equal( box( { ...ready, predicted_qualifier: "but only on weekdays" } ).querySelector( ".prediction-hint-label" )!.textContent, 'Yes — "but only on weekdays"' );
+  assert.equal( box( { ...ready, predicted_qualifier: "" } ).querySelector( ".prediction-hint-label" )!.textContent, "Yes" );
+} );
+
+test( "the fold integration reopens a fold that was opened and hears each open", async () => {
+  const opened: string[] = [];
+  const closed = box( ready, "yes_no", { isOpen: () => false, onOpen: ( id ) => opened.push( id ) } ) as HTMLDetailsElement;
+  assert.equal( closed.open, false );
+  // The DOM fires `toggle` itself when `open` changes, so the test only changes `open` and waits.
+  closed.open = true;
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  assert.deepEqual( opened, [ "f1" ] );
+  closed.open = false;
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  assert.deepEqual( opened, [ "f1" ], "closing the fold is not reported" );
+  const reopened = box( ready, "yes_no", { isOpen: ( id ) => id === "f1", onOpen: () => {} } ) as HTMLDetailsElement;
+  assert.equal( reopened.open, true );
 } );
 
 test( "the indicator takes an extra class, a test id and a title from its options, and the title can be left off", () => {

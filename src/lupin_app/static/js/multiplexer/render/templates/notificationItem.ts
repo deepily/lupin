@@ -131,7 +131,8 @@ export function renderNotificationItem(
   // (re)render and the click orchestration (optimistic + POST + reconcile).
   // Ports legacy notifications.js `buildPredictionHintSection` → `_buildPredictionVoteControls`.
   const hint = notification.prediction_hint;
-  if (hint !== undefined) {
+  // The payload now arrives in every state; only a `ready` one has a confidence to vote on.
+  if (hint !== undefined && hint.confidence !== undefined) {
     const integration = opts.predictionVote;
     const id = notification.id_hash;
     const controls = renderPredictionVoteControls(

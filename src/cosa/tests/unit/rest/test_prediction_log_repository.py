@@ -342,7 +342,7 @@ class TestLedgerWrites( _PLRTestBase ):
     def test_every_ledger_column_is_a_real_prediction_log_column( self ):
         names = { c.name for c in PredictionLog.__table__.columns }
         self.assertTrue( LEDGER_COLUMNS <= names )
-        self.assertEqual( len( LEDGER_COLUMNS ), 18 )
+        self.assertEqual( len( LEDGER_COLUMNS ), 19 )
 
     def test_a_second_outcome_is_refused_and_the_first_is_untouched( self ):
         prediction = types.SimpleNamespace( actual_value={ "value": "yes" }, accuracy_match=True, accuracy_detail=None,
@@ -373,3 +373,54 @@ class TestRowLocks( _PLRTestBase ):
             actual_value=None, accuracy_match=None, accuracy_detail=None, responded_at=None )
         self.repo.update_outcome( _NID, { "value": "yes" }, True, None )
         chain.with_for_update.assert_called_once_with()
+
+
+class TestAlwaysYesCounts( _PLRTestBase ):
+    """always_yes_counts reads each stance through the one parser and counts scored answers."""
+
+    def _rows( self, *values ):
+        chain = self.session.query.return_value.join.return_value.filter.return_value
+        chain.all.return_value = [ ( v, ) for v in values ]
+        return chain
+
+    def test_counts_yes_over_every_answer_with_a_stance( self ):
+        self._rows( { "value": "yes" }, { "value": "yes [comment: after review]" }, { "value": "no" },
+                    { "value": "neither" }, { "value": "Maybe later" }, { "answers": { "x": "y" } }, { "value": None } )
+        out = self.repo.always_yes_counts( _NID )
+        self.assertEqual( out, { "yes": 2, "n": 4, "rate": 0.5 } )
+
+    def test_the_rate_is_rounded_to_four_places( self ):
+        self._rows( { "value": "yes" }, { "value": "no" }, { "value": "no" } )
+        self.assertEqual( self.repo.always_yes_counts( _NID )[ "rate" ], 0.3333 )
+
+    def test_no_answer_with_a_stance_returns_none( self ):
+        self._rows( { "value": "Maybe later" } )
+        self.assertIsNone( self.repo.always_yes_counts( _NID ) )
+
+    def test_no_rows_returns_none( self ):
+        self._rows()
+        self.assertIsNone( self.repo.always_yes_counts( _NID ) )
+
+    def test_the_query_is_scoped_to_the_recipients_scored_yes_no_rows_before_the_cutoff_and_not_overrides( self ):
+        chain = self._rows( { "value": "yes" } )
+        cutoff = datetime( 2026, 11, 18, tzinfo=timezone.utc )
+        self.repo.always_yes_counts( _NID, before=cutoff )
+        conditions = " | ".join( str( c.compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": False } ) )
+                                 for c in self.session.query.return_value.join.return_value.filter.call_args.args )
+        self.assertIn( "notifications.recipient_id =", conditions )
+        self.assertIn( "prediction_log.response_type =", conditions )
+        self.assertIn( "prediction_log.actual_value IS NOT NULL", conditions )
+        self.assertIn( "prediction_log.accuracy_match IS NOT NULL", conditions )
+        self.assertIn( "prediction_log.responded_at <", conditions )
+        self.assertIn( "prediction_log.prediction_strategy !=", conditions )
+
+    def test_the_join_goes_through_notification_id( self ):
+        self._rows( { "value": "yes" } )
+        self.repo.always_yes_counts( _NID )
+        on_clause = str( self.session.query.return_value.join.call_args.args[ 1 ].compile( dialect=postgresql.dialect() ) )
+        self.assertIn( "notifications.id = prediction_log.notification_id", on_clause )
+
+    def test_a_non_uuid_recipient_raises_value_error( self ):
+        self._rows()
+        with self.assertRaises( ValueError ):
+            self.repo.always_yes_counts( "not-a-uuid" )

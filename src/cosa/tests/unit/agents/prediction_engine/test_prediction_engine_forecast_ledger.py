@@ -173,6 +173,36 @@ class TestPredictStampsTheEvidence:
         assert second.metadata[ "evidence_ids" ] == []
 
 
+class TestAlwaysYesRate:
+
+    def test_the_engine_returns_what_the_repository_counts( self, engine, monkeypatch ):
+        calls = []
+        class _Repo:
+            def __init__( self, session ): pass
+            def always_yes_counts( self, recipient_id ):
+                calls.append( recipient_id )
+                return { "yes": 3, "n": 4, "rate": 0.75 }
+        monkeypatch.setattr( "cosa.rest.db.database.get_db", lambda: _Ctx( _Session() ) )
+        monkeypatch.setattr( "cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository", _Repo )
+        assert engine.always_yes_rate( "u-1" ) == { "yes": 3, "n": 4, "rate": 0.75 }
+        assert calls == [ "u-1" ]
+
+    def test_a_failure_returns_none_and_never_raises( self, engine, monkeypatch ):
+        def boom(): raise RuntimeError( "db down" )
+        monkeypatch.setattr( "cosa.rest.db.database.get_db", boom )
+        assert engine.always_yes_rate( "u-1" ) is None
+
+    def test_the_forecast_row_stores_the_rate_it_is_given( self, engine, rows ):
+        rate = { "yes": 52, "n": 59, "rate": 0.8814 }
+        engine.record_forecast( _NID, _ND, prediction_result=_result(), display_decision="ready", always_yes_rate=rate )
+        row = rows[ uuid.UUID( _NID ) ]
+        assert row.always_yes_rate == rate and row.display_decision == "ready"
+
+    def test_a_forecast_without_a_rate_stores_none( self, engine, rows ):
+        engine.record_forecast( _NID, _ND, prediction_result=_result() )
+        assert rows[ uuid.UUID( _NID ) ].always_yes_rate is None
+
+
 class TestConfigVersion:
 
     def test_the_same_settings_give_the_same_version_and_a_changed_one_differs( self, engine ):

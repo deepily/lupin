@@ -23,7 +23,7 @@ def test_is_cold_start_true_when_no_value_and_zero_confidence():
     """Cold start = no predicted_value AND zero confidence."""
     r = PredictionResult( response_type="yes_no", category="permission", strategy="cold_start" )
     assert r.is_cold_start is True
-    assert r.to_hint_dict() is None
+    assert r.to_hint_dict( 0.5, "dot" )[ "state" ] == "insufficient_evidence"
 
 
 def test_is_cold_start_false_when_value_present():
@@ -50,12 +50,14 @@ def test_to_hint_dict_active_shape_and_rounding():
         response_type="yes_no", category="permission", strategy="cbr_majority_vote",
         predicted_value="yes", confidence=0.853791, similar_case_count=5,
     )
-    hint = r.to_hint_dict()
+    hint = r.to_hint_dict( 0.5, "dot" )
     assert hint == {
-        "predicted_value" : "yes",
-        "confidence"      : 0.854,
-        "strategy"        : "cbr_majority_vote",
-        "category"        : "permission",
+        "state"            : "ready",
+        "retrieval_metric" : "dot",
+        "predicted_value"  : "yes",
+        "confidence"       : 0.854,
+        "strategy"         : "cbr_majority_vote",
+        "category"         : "permission",
     }
 
 
@@ -65,7 +67,7 @@ def test_to_hint_dict_includes_qualifier_when_present():
         response_type="yes_no", category="permission", strategy="cbr_majority_vote",
         predicted_value="yes", confidence=0.9, predicted_qualifier="only the old files",
     )
-    hint = r.to_hint_dict()
+    hint = r.to_hint_dict( 0.5, "dot" )
     assert hint[ "predicted_qualifier" ] == "only the old files"
 
 

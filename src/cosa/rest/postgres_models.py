@@ -1211,6 +1211,10 @@ class PredictionLog( Base ):
         JSONB,
         nullable=True
     )
+    always_yes_rate: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
 
     # Indexes
     __table_args__ = (
