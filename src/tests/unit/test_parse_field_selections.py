@@ -81,6 +81,12 @@ def test_an_answers_map_stored_as_json_under_value_is_read_through_the_wrapper()
     assert ( got[ "DB" ][ "selected" ], got[ "Tags" ][ "mode" ] ) == ( [ "PG" ], "multi" )
 
 
+def test_a_dict_with_both_answers_and_value_reads_the_answers_and_ignores_value():
+    both = { "answers": { "DB": "PG" }, "value": json.dumps( { "answers": { "Other": "x" } } ) }
+    assert list( parse_field_selections( both ) ) == [ "DB" ]
+    assert list( parse_field_selections( json.dumps( both ) ) ) == [ "DB" ]
+
+
 def test_a_cancelled_answer_stored_under_value_is_an_empty_result():
     assert parse_field_selections( { "value": '{"cancelled":true,"answers":{}}' } ) == {}
 
