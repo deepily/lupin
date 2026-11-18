@@ -204,12 +204,13 @@ class PredictionEngine:
                 if self.debug: print( f"[PredictionEngine] Failed to load embedding store: {e}" )
         return self._embedding_store
 
-    def predict( self, notification_dict: Dict[str, Any] ) -> PredictionResult:
+    def predict( self, notification_dict: Dict[str, Any], query_vector: Optional[list] = None ) -> PredictionResult:
         """
         Generate a prediction and stamp what the forecast row stores about how it was made.
 
         Requires:
             - notification_dict as _predict_core requires
+            - query_vector is None, or the ask's embedding already computed (the replay passes the stored one)
 
         Ensures:
             - returns the PredictionResult _predict_core returns
@@ -219,7 +220,7 @@ class PredictionEngine:
         """
         evidence_recorder.begin()
         started = time.monotonic()
-        result  = self._predict_core( notification_dict )
+        result  = self._predict_core( notification_dict, query_vector )
         ids, scores = evidence_recorder.collect()
         if result.metadata is None: result.metadata = {}
         result.metadata[ "evidence_ids" ]    = ids
@@ -227,12 +228,13 @@ class PredictionEngine:
         result.metadata[ "latency_ms" ]      = round( ( time.monotonic() - started ) * 1000.0, 1 )
         return result
 
-    def _predict_core( self, notification_dict: Dict[str, Any] ) -> PredictionResult:
+    def _predict_core( self, notification_dict: Dict[str, Any], query_vector: Optional[list] = None ) -> PredictionResult:
         """
         Generate a prediction for a notification response.
 
         Requires:
             - notification_dict contains: message, response_type, sender_id (optional)
+            - query_vector is None, or the ask's embedding; None keeps today's path and embeds the message
 
         Ensures:
             - Returns PredictionResult (cold_start if insufficient data or disabled)
@@ -269,7 +271,7 @@ class PredictionEngine:
         else:
             retrieval_text = message
 
-        embedding = self._generate_embedding( retrieval_text )
+        embedding = query_vector if query_vector is not None else self._generate_embedding( retrieval_text )
 
         # Dispatch by response type
         try:
