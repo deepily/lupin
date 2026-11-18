@@ -26,6 +26,7 @@
 // no such field, so there is never a switch that does nothing.
 
 import type { EventBus } from "../shared/EventBus";
+import { stampFreshRead } from "../shared/afterWriteRead";
 import type { StoreFleetSizeCapChangedPayload, StoreFleetStatusChangedPayload } from "../shared/types";
 import type { FleetSizeCap } from "../stores/FleetStatusStore";
 import {
@@ -456,9 +457,7 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
   }
 
   private stampUpdated( ianaZone: string | undefined ): void {
-    /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container, so it is non-null here. Belt-and-suspenders.
-    if ( this.updatedEl === null ) return;
-    this.updatedEl.textContent = `updated ${formatFleetTimestamp( this.nowDateFn(), ianaZone )}`;
+    stampFreshRead( this.updatedEl, `updated ${formatFleetTimestamp( this.nowDateFn(), ianaZone )}` );
   }
 }
 

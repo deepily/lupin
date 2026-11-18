@@ -43,7 +43,7 @@
     "src/lupin_app/static/js/multiplexer/render/EpicBoardRenderer.ts": 197,
     "src/lupin_app/static/js/multiplexer/render/FilterSettingsRenderer.ts": 88,
     "src/lupin_app/static/js/multiplexer/render/FinishedTasksRenderer.ts": 105,
-    "src/lupin_app/static/js/multiplexer/render/FleetStatusRenderer.ts": 34,
+    "src/lupin_app/static/js/multiplexer/render/FleetStatusRenderer.ts": 33,
     "src/lupin_app/static/js/multiplexer/render/HoldingAreaRenderer.ts": 387,
     "src/lupin_app/static/js/multiplexer/render/JobsPaneRenderer.ts": 81,
     "src/lupin_app/static/js/multiplexer/render/ListenerErrorRenderer.ts": 64,

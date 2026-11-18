@@ -29,8 +29,7 @@ import type { BroadcastSessionsApiClient } from "../stores/BroadcastStore";
 import type { BroadcastRequest, BroadcastResult } from "../api/ApiClient";
 import { recordingManager } from "../audio/recordingManager";
 import type { RecordingManagerStartOptions } from "../audio/recordingManager";
-import { insertTranscriptionText } from "./insertTranscriptionText";
-import { setValueFocusCaret } from "./dom";
+import { startDictation } from "./dictationToggle";
 import { renderBroadcastCard } from "./templates/broadcastCard";
 import type { BroadcastAckTallyRenderer } from "./BroadcastAckTallyRenderer";
 
@@ -474,57 +473,41 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
       return;
     }
 
-    // Stash the live value + selection BEFORE recording so the transcription
-    // splices at the caret rather than clobbering (SenderCardRecorder F5).
-    this.stash = {
-      text     : this.textarea.value,
-      selStart : this.textarea.selectionStart,
-      selEnd   : this.textarea.selectionEnd,
-    };
-    this.recording = true;
-    this.setMicRecordingClass( true );
+    /* c8 ignore next */ // defensive: sttBtn is present post-mount per the template invariant.
+    if ( this.sttBtn === null ) return;
 
-    void this.recorder.startRecording( {
-      contextId : STT_CONTEXT_ID,
-      authToken : this.getAuthToken(),
-      onComplete : ( transcription ) => {
-        /* c8 ignore next */ // defensive: a stash is always set above before startRecording runs; the undefined arm guards an out-of-band onComplete.
-        const base    = this.stash ?? { text: "", selStart: null, selEnd: null };
-        const spliced = insertTranscriptionText(
-          base.text, base.selStart, base.selEnd, transcription ?? "",
-        );
+    // startDictation stashes the live value + selection BEFORE recording so the transcription
+    // splices at the caret rather than clobbering (SenderCardRecorder F5).
+    this.recording = true;
+    startDictation( {
+      recorder         : this.recorder,
+      authToken        : () => this.getAuthToken(),
+      contextId        : STT_CONTEXT_ID,
+      button           : this.sttBtn,
+      input            : this.textarea,
+      focusAfterInsert : true,
+      onStart          : ( stash ) => { this.stash = stash; },
+      // An unmount clears the stash mid-recording; the words then splice into "" (an out-of-band onComplete).
+      /* c8 ignore next */ // defensive: a stash is always set by onStart before the recorder starts; the undefined arm guards an out-of-band onComplete.
+      currentStash     : () => this.stash ?? { text: "", selStart: null, selEnd: null },
+      afterInsert      : () => {
         this.recording = false;
         this.stash = undefined;
-        this.setMicRecordingClass( false );
-        this.applyInputValueAndCaret( spliced.value, spliced.caret );
         this.updateSendButton();
       },
-      onError : ( err ) => {
+      onError          : ( err ) => {
         this.recording = false;
         this.stash = undefined;
-        this.setMicRecordingClass( false );
         this.setStatus( "recording failed: " + err.message, true );
       },
       // ESC (or auto-cancel by a new recording) fires neither onComplete nor
       // onError — reset the mic UI so it doesn't stay stuck red. The stashed
       // textarea value is left untouched (cancel ≠ transcription).
-      onCancel : () => {
+      onCancel         : () => {
         this.recording = false;
         this.stash = undefined;
-        this.setMicRecordingClass( false );
       },
     } );
-  }
-
-  private setMicRecordingClass( recording: boolean ): void {
-    /* c8 ignore next */ // defensive: sttBtn is present post-mount per the template invariant.
-    if ( this.sttBtn !== null ) this.sttBtn.classList.toggle( "recording", recording );
-  }
-
-  private applyInputValueAndCaret( value: string, caret: number | null ): void {
-    /* c8 ignore next */ // defensive: textarea is present before a record can complete.
-    if ( this.textarea === null ) return;
-    setValueFocusCaret( this.textarea, value, caret );
   }
 
   // -------------------------------------------------------------------------

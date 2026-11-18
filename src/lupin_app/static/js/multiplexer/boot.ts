@@ -32,7 +32,7 @@ import { createPokeMuteSwitch } from "./render/pokeMuteSwitch";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
-import { attachLifecycleEvents } from "./shared/lifecycleEvents";
+import { attachLifecycleEvents, emitLifecycleEvent } from "./shared/lifecycleEvents";
 import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrator";
 import { createSessionTranscriptStore } from "./stores/SessionTranscriptStore";
 import { createSessionTranscriptRoster } from "./stores/SessionTranscriptRoster";
@@ -99,7 +99,7 @@ import { createQaPaneRenderer } from "./render/QaPaneRenderer";
 import { createSubmitJobsPaneRenderer } from "./render/SubmitJobsPaneRenderer";
 import { createActionRequiredMic } from "./render/actionRequiredMic";
 import { taskReaderFor } from "./render/approveLink";
-import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
+import type { BootCompletePayload, SenderSortComparator } from "./shared/types";
 
 /**
  * Orders senders with conversation mode active first, then by most recent activity.
@@ -153,21 +153,6 @@ function buildWebSocketBaseUrl(): string {
 }
 
 /**
- * Emits a page or network lifecycle event on the event bus with the current time.
- */
-function emitLifecycle(type: "page_hidden" | "page_visible" | "network_online" | "network_offline", extra?: { bfcache?: true }): void {
-  const ts = Date.now();
-  const payload: LifecyclePayload = { ts };
-  if (extra?.bfcache) payload.bfcache = true;
-  eventBus.emit<LifecyclePayload>({
-    type,
-    payload,
-    source : "boot",
-    ts,
-  });
-}
-
-/**
  * Turns visibility, online, offline and page restore events into lifecycle events.
  */
 function attachLifecycleListeners(): void {
@@ -176,7 +161,7 @@ function attachLifecycleListeners(): void {
   // bfcache restore — see implementation deviation note in this file's
   // header comment.
   window.addEventListener("pageshow", (e) => {
-    if (e.persisted) emitLifecycle("page_visible", { bfcache: true });
+    if (e.persisted) emitLifecycleEvent(eventBus, "page_visible", "boot", { bfcache: true });
   });
 }
 

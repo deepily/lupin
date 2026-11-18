@@ -22,6 +22,7 @@
 // instant, which is what "at a glance" requires.
 
 import type { EventBus } from "../shared/EventBus";
+import { stampFreshRead } from "../shared/afterWriteRead";
 import type { StoreFinishedTasksChangedPayload } from "../shared/types";
 import {
   FINISHED_DEFAULT_SHOWN,
@@ -431,9 +432,7 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   }
 
   private stampUpdated(): void {
-    /* c8 ignore next */ // defensive: updatedEl is set/nulled in lockstep with container, which the caller already guarded.
-    if ( this.updatedEl === null ) return;
-    this.updatedEl.textContent = `updated ${ formatClock( this.nowDateFn(), this.appTimezoneFn() ) }`;
+    stampFreshRead( this.updatedEl, `updated ${ formatClock( this.nowDateFn(), this.appTimezoneFn() ) }` );
   }
 }
 
