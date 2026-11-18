@@ -36,7 +36,9 @@ import sys
 
 from cosa.repo.duplicate_check import errors as dc_errors
 from cosa.repo.duplicate_check import extract
-from cosa.repo.symindex import build, js_index, py_index, spec as sp
+from cosa.repo.symindex import build, js_index, py_index, paths as sym_paths, spec as sp
+from cosa.repo.symindex.candidates import errors as cand_errors, storage_paths
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
 from lupin_mcp import duplicate_check_daily as daily
 from lupin_mcp import fleet_cap_ini_io
 from lupin_mcp import reuse_exit_gate as eg
@@ -215,7 +217,69 @@ def added_definition_ids( root, base_sha ):
     return sorted( r[ "id" ] for r in records )
 
 
-def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_since=None ):
+def sibling_data_dirs( root, names=None ):
+    """
+    Find the call-log folders of the other registered repositories.
+
+    A seat in another registered repo logs its reuse-tool calls under that repo's own data folder.
+    The lookup tools search the tree they are given, so such a receipt is a search of another codebase.
+    The gate reads these folders only to name where a refused receipt was logged.
+
+    Requires:
+        - root is a repository root
+        - names is None to read the `external repos` registry, or a list of registered repo names
+
+    Ensures:
+        - returns the existing `<fleet data root>/<name>/<data subdir>` folders that hold a `call-log` folder, one per registered name
+        - this repo's own folder is never listed, and a name that is not registered is never looked in
+        - returns the folders in the order of the registry
+    """
+    own    = pathlib.Path( fleet_data_root( root ) )
+    base   = own.parent
+    subdir = storage_paths.data_subdir()
+    found  = []
+    for name in ( names if names is not None else sym_paths.registered_repo_names() ):
+        folder = base / name / subdir
+        if name != own.name and ( folder / "call-log" ).is_dir(): found.append( folder )
+    return found
+
+
+def foreign_receipts( sibling_dirs ):
+    """
+    Map each receipt id logged in another repo to the name of that repo.
+
+    Requires:
+        - sibling_dirs is a list of folders from sibling_data_dirs, each `<fleet>/<repo name>/<data subdir>`
+
+    Ensures:
+        - returns { receipt id: repo name } over the receipts of each folder's call log
+        - a receipt logged in two repos keeps the first repo of the list
+    """
+    out = {}
+    for folder in sibling_dirs:
+        records, _bad = eg.merge_call_logs( pathlib.Path( folder ) / "call-log" )
+        for rid in eg.receipts_by_id( records ): out.setdefault( rid, pathlib.Path( folder ).parent.name )
+    return out
+
+
+def name_foreign_receipts( verdicts, receipts, foreign, root ):
+    """
+    Name the other repo on a refused line whose receipt was logged there.
+
+    Requires:
+        - verdicts comes from rr.judge; receipts is this repo's receipts_by_id; foreign is foreign_receipts
+    Ensures:
+        - a refused line whose receipt is absent here and present in `foreign` gains one reason
+        - the reason names the repo it was logged in and says to re-run check_exists with root set to `root`
+        - no verdict ever turns from refused to accepted
+    """
+    for v in verdicts:
+        m = ro.OUTCOME_RE.match( v[ "line" ] )
+        if v[ "status" ] != "refused" or m is None or m[ "receipt" ] in receipts or m[ "receipt" ] not in foreign: continue
+        v[ "reasons" ].append( f"receipt {m[ 'receipt' ]} was logged in {foreign[ m[ 'receipt' ] ]}'s call log, so it searched that repo; re-run check_exists with root set to {root}" )
+
+
+def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_since=None, sibling_dirs=() ):
     """
     Judge the outcome lines the branch adds, and the new definitions of a given diff.
 
@@ -230,6 +294,7 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_
         - returns { "error": text } when the gate could not check: an unreadable or ill-shaped diff file, an unreadable call log, a diff with `algorithm_changed`, no base, or a record that could not be written
         - refusals.jsonl in data_dir gains one record per judged line, once per document text
         - the call log, searches and exclusions are read once for all documents
+        - a refused line whose receipt is in the call log of a folder of sibling_dirs gains a reason naming that repo; sibling_dirs never makes a line pass
         - with `since` inside the branch, lines and definitions added before it are not read
     """
     sha = resolve_base( root, base )
@@ -241,6 +306,7 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_
         if not isinstance( diff, dict ) or not isinstance( diff.get( "added", [] ), list ): raise ValueError( f"{diff_path} is not a symbol index diff" )
         if "algorithm_changed" in diff: raise ValueError( f"{diff_path}: the pin algorithm changed, so the diff lists no definitions to check" )
         records, _bad = eg.merge_call_logs( log_dir )
+        foreign = foreign_receipts( sibling_dirs )
     except UNREADABLE as e: return { "error": f"{type( e ).__name__}: {e}" }
     files = added_text_by_file( root, sha )
     if files is None: return { "error": f"git could not diff {sha} against HEAD" }
@@ -249,6 +315,7 @@ def run( root, base, diff_path, data_dir, log_dir, gating, since=None, searched_
     for path, text in files.items():
         file_rulings = eg.parse_rulings( text )
         verdicts     = rr.judge( text, receipts, searches, exclusions, file_rulings, root )
+        name_foreign_receipts( verdicts, receipts, foreign, root )
         lines       += len( verdicts )
         try:
             if verdicts: appended += rr.record( data_dir, text, verdicts )
@@ -331,7 +398,11 @@ def main( argv=None, out=None ):
     except OSError as e:
         print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
-    result = run( root, a.base or read_names( a.ini ), a.diff, data, a.log_dir or data / "call-log", flag, since, searched_since )
+    try: siblings = [] if a.log_dir else sibling_data_dirs( root )
+    except ( *UNREADABLE, cand_errors.CandidateError ) as e:
+        print( f"REFUSING: the other registered repos' call logs could not be found: {type( e ).__name__}: {e}. Nothing was checked.", file=out )
+        return EXIT_NOT_CHECKED
+    result = run( root, a.base or read_names( a.ini ), a.diff, data, a.log_dir or data / "call-log", flag, since, searched_since, siblings )
     if "error" in result:
         print( f"REFUSING: {result[ 'error' ]}. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED

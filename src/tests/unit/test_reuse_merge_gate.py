@@ -577,3 +577,112 @@ def test_a_searched_since_that_is_not_a_known_commit_could_not_be_checked( repo,
     assert code == 3 and "`reuse searched since` holds 'latest', which is not a commit" in text
     code, text = run( repo, data, tmp_path, lines="reuse searched since = abcdef1\n" )
     assert code == 3 and "`reuse searched since` names abcdef1, which git does not know" in text
+
+
+# ---- receipts logged in another registered repo (row a71018e9) ----
+
+@pytest.fixture
+def fleet( tmp_path, monkeypatch, data ):
+    """
+    Build a fleet folder with an empty log for `repo` and the real log for `other`.
+
+    Ensures:
+        - DEEPILY_DATA_DIR names the fleet folder
+        - `other` holds the real call log and the real search record
+        - returns ( this repo's data folder, other's data folder )
+    """
+    from cosa.repo.symindex.candidates import storage_paths
+    base = tmp_path / "fleet"
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( base ) )
+    subdir = storage_paths.data_subdir()
+    own, other = base / "repo" / subdir, base / "other" / subdir
+    ( own / "call-log" ).mkdir( parents=True )
+    ( other / "call-log" ).mkdir( parents=True )
+    ( other / "search-records" ).mkdir()
+    ( other / "call-log" / "real.jsonl" ).write_text( ( data / "call-log" / "real.jsonl" ).read_text( encoding="utf-8" ), encoding="utf-8" )
+    ( other / "search-records" / f"{SID}.json" ).write_text( ( data / "search-records" / f"{SID}.json" ).read_text( encoding="utf-8" ), encoding="utf-8" )
+    return own, other
+
+
+def test_a_receipt_logged_in_another_repos_call_log_is_refused_and_the_message_names_that_repo( repo, fleet, tmp_path ):
+    own, other = fleet
+    commit_doc( repo, "review.md", GOOD )
+    code, text = run( repo, own, tmp_path )
+    assert code == 1 and "REFUSED review.md" in text and "was logged in" not in text, "control: with no sibling log the line is refused, with no repo named"
+    result = mg.run( repo, "main", None, own, own / "call-log", True, sibling_dirs=[ other ] )
+    assert result[ "lines" ] == 1 and len( result[ "refusals" ] ) == 1, "the other repo's log never makes the line pass"
+    reasons = result[ "refusals" ][ 0 ][ "reasons" ]
+    assert f"receipt {RID} was logged in other's call log, so it searched that repo; re-run check_exists with root set to {repo}" in reasons
+    assert any( "is not in the log" in r for r in reasons ), "the ordinary reason stays"
+
+
+def test_the_command_names_the_repo_a_refused_receipt_was_logged_in( repo, fleet, tmp_path, monkeypatch ):
+    own, _other = fleet
+    commit_doc( repo, "review.md", GOOD )
+    monkeypatch.setattr( mg.sym_paths, "registered_repo_names", lambda config=None: [ "repo", "other", "ghost" ] )
+    code, text = run( repo, own, tmp_path )
+    assert code == 1 and f"was logged in other's call log" in text and f"root set to {repo}" in text
+    assert len( ( own / rr.REFUSALS_NAME ).read_text( encoding="utf-8" ).splitlines() ) == 1
+    assert "was logged in other" in ( own / rr.REFUSALS_NAME ).read_text( encoding="utf-8" ), "the refusal record carries the same reason"
+
+
+def test_an_unregistered_repos_call_log_is_not_read_so_no_repo_is_named( repo, fleet, tmp_path, monkeypatch ):
+    own, _other = fleet
+    commit_doc( repo, "review.md", GOOD )
+    monkeypatch.setattr( mg.sym_paths, "registered_repo_names", lambda config=None: [ "repo" ] )
+    code, text = run( repo, own, tmp_path )
+    assert code == 1 and "REFUSED review.md" in text and "was logged in" not in text
+
+
+def test_an_explicit_log_folder_skips_the_other_repos( repo, fleet, tmp_path, monkeypatch ):
+    own, _other = fleet
+    commit_doc( repo, "review.md", GOOD )
+    monkeypatch.setattr( mg.sym_paths, "registered_repo_names", lambda config=None: [ "other" ] )
+    code, text = run( repo, own, tmp_path, "--log-dir", str( own / "call-log" ) )
+    assert code == 1 and "was logged in" not in text
+
+
+def test_a_line_that_is_refused_for_another_reason_or_holds_a_receipt_no_repo_logged_gets_no_repo_named( repo, fleet, tmp_path ):
+    own, other = fleet
+    commit_doc( repo, "review.md", GOOD, NOT_IN_LOG, BAD_SHAPE )
+    result = mg.run( repo, "main", None, own, own / "call-log", True, sibling_dirs=[ other ] )
+    named  = [ r for r in result[ "refusals" ] if any( "was logged in" in x for x in r[ "reasons" ] ) ]
+    assert len( result[ "refusals" ] ) == 3 and len( named ) == 1 and named[ 0 ][ "line" ] == GOOD
+
+
+def test_a_receipt_this_repo_logged_is_not_renamed_to_another_repo( repo, data, fleet, tmp_path ):
+    _own, other = fleet
+    commit_doc( repo, "review.md", GOOD )
+    result = mg.run( repo, "main", None, data, data / "call-log", True, sibling_dirs=[ other ] )
+    assert result[ "refusals" ] == [], "this repo holds the receipt, so the other repo's copy changes nothing"
+
+
+def test_a_receipt_logged_in_two_repos_names_the_first( tmp_path ):
+    for name in ( "a", "b" ):
+        folder = tmp_path / name / "reuse-review" / "call-log"
+        folder.mkdir( parents=True )
+        ( folder / "x.jsonl" ).write_text( json.dumps( { "tool": "check_exists", "receipt_id": RID } ) + "\n", encoding="utf-8" )
+    assert mg.foreign_receipts( [ tmp_path / "a" / "reuse-review", tmp_path / "b" / "reuse-review" ] ) == { RID: "a" }
+
+
+def test_the_sibling_folders_are_the_registered_repos_with_a_call_log_other_than_this_one( repo, fleet, tmp_path ):
+    own, other = fleet
+    base = own.parent.parent
+    ( base / "nolog" / own.name ).mkdir( parents=True )
+    found = mg.sibling_data_dirs( repo, [ "repo", "other", "nolog", "ghost", "unlisted-is-not-here" ] )
+    assert found == [ other ], "own repo, a repo with no call-log, and a repo with no folder are all left out"
+
+
+def test_the_sibling_folders_default_to_the_registry( repo, fleet, monkeypatch ):
+    _own, other = fleet
+    monkeypatch.setattr( mg.sym_paths, "registered_repo_names", lambda config=None: [ "other" ] )
+    assert mg.sibling_data_dirs( repo ) == [ other ]
+
+
+def test_a_registry_that_cannot_be_read_could_not_be_checked( repo, fleet, tmp_path, monkeypatch ):
+    own, _other = fleet
+    commit_doc( repo, "review.md", GOOD )
+    def boom( config=None ): raise mg.cand_errors.CandidateError( "x", "registry unreadable" )
+    monkeypatch.setattr( mg.sym_paths, "registered_repo_names", boom )
+    code, text = run( repo, own, tmp_path )
+    assert code == 3 and "other registered repos' call logs could not be found" in text and "Total Tests" not in text
