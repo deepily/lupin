@@ -297,6 +297,29 @@ def test_predict_dispatches_to_each_type( wired_engine, monkeypatch ):
     assert "batch_question_key" in oeb_result.metadata
 
 
+def _cold_result():
+    """A minimal result for a stubbed handler, since predict() stamps metadata onto it."""
+    return PredictionResult( response_type=cfg.RESPONSE_TYPE_YES_NO, category="c", strategy=cfg.STRATEGY_COLD_START, metadata={} )
+
+
+def test_predict_uses_the_given_query_vector_and_never_embeds( wired_engine, monkeypatch ):
+    """A replay passes the stored vector, so the engine hands it on and embeds nothing."""
+    seen = []
+    monkeypatch.setattr( wired_engine, "_generate_embedding", lambda text: pytest.fail( "embedded although a vector was given" ) )
+    monkeypatch.setattr( wired_engine, "_predict_yes_no", lambda message, category, embedding, **k: seen.append( embedding ) or _cold_result() )
+    wired_engine.predict( { "message": "m", "response_type": "yes_no" }, query_vector=[ 0.9, 0.1 ] )
+    assert seen == [ [ 0.9, 0.1 ] ]
+
+
+def test_predict_without_a_query_vector_still_embeds_the_message( wired_engine, monkeypatch ):
+    """The default keeps today's path: the engine embeds the message itself."""
+    seen = []
+    monkeypatch.setattr( wired_engine, "_generate_embedding", lambda text: [ 0.3, 0.3 ] )
+    monkeypatch.setattr( wired_engine, "_predict_yes_no", lambda message, category, embedding, **k: seen.append( embedding ) or _cold_result() )
+    wired_engine.predict( { "message": "m", "response_type": "yes_no" } )
+    assert seen == [ [ 0.3, 0.3 ] ]
+
+
 def test_predict_handler_exception_is_cold_start( wired_engine, monkeypatch ):
     monkeypatch.setattr( wired_engine, "_generate_embedding", lambda text: [ 0.1 ] )
     def boom( *a, **k ):
