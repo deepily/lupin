@@ -1,0 +1,953 @@
+{
+ "manifest": {
+  "what": "SYNTHETIC export-shaped fixture. Hand-built; every string is invented. Holds no real question or answer (decision 6).",
+  "synthetic": true,
+  "rows": 15,
+  "write_in_pattern": "nine single-select write-ins across seven cards (the pilot's pattern)"
+ },
+ "predictions": [
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000001",
+    "notification_id": "00000000-0000-4000-8000-000000001001",
+    "case_id": "00000000-0000-4000-8000-000000001001",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001001",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-02T10:00:00+00:00",
+   "predicted_at": "2026-01-02T10:00:30+00:00",
+   "responded_at": "2026-01-02T10:00:30+00:00",
+   "window": "after",
+   "response_type": "yes_no",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic ask one: proceed with the invented plan?",
+   "question": "Synthetic ask one: proceed with the invented plan?",
+   "embedded_text": "Synthetic ask one: proceed with the invented plan?",
+   "options": null,
+   "prediction": {
+    "value": {
+     "value": "yes"
+    },
+    "confidence": 0.8,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 5
+   },
+   "actual": {
+    "value": "yes"
+   },
+   "answered_by": "synthetic-owner",
+   "match": true,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000001"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000002",
+    "notification_id": "00000000-0000-4000-8000-000000001002",
+    "case_id": "00000000-0000-4000-8000-000000001002",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001002",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-03T10:00:00+00:00",
+   "predicted_at": "2026-01-03T10:00:30+00:00",
+   "responded_at": "2026-01-03T10:00:30+00:00",
+   "window": "after",
+   "response_type": "yes_no",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic ask two: skip the invented step?",
+   "question": "Synthetic ask two: skip the invented step?",
+   "embedded_text": "Synthetic ask two: skip the invented step?",
+   "options": null,
+   "prediction": {
+    "value": {
+     "value": "yes"
+    },
+    "confidence": 0.8,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 5
+   },
+   "actual": {
+    "value": "no [comment: because the invented reason]"
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000002"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000003",
+    "notification_id": "00000000-0000-4000-8000-000000001003",
+    "case_id": "00000000-0000-4000-8000-000000001003",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001003",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-04T10:00:00+00:00",
+   "predicted_at": "2026-01-04T10:00:30+00:00",
+   "responded_at": "2026-01-04T10:00:30+00:00",
+   "window": "after",
+   "response_type": "yes_no",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic ask three: pick neither of the invented ",
+   "question": "Synthetic ask three: pick neither of the invented paths?",
+   "embedded_text": "Synthetic ask three: pick neither of the invented paths?",
+   "options": null,
+   "prediction": {
+    "value": {
+     "value": "yes"
+    },
+    "confidence": 0.8,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 5
+   },
+   "actual": {
+    "value": "neither [comment: both invented paths look wrong]"
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000003"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000004",
+    "notification_id": "00000000-0000-4000-8000-000000001004",
+    "case_id": "00000000-0000-4000-8000-000000001004",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001004",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-05T10:00:00+00:00",
+   "predicted_at": "2026-01-05T10:00:30+00:00",
+   "responded_at": "2026-01-05T10:00:30+00:00",
+   "window": "after",
+   "response_type": "yes_no",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic ask four: ship the invented change?",
+   "question": "Synthetic ask four: ship the invented change?",
+   "embedded_text": "Synthetic ask four: ship the invented change?",
+   "options": null,
+   "prediction": {
+    "value": {
+     "value": "yes"
+    },
+    "confidence": 0.8,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 5
+   },
+   "actual": {
+    "value": "neither"
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000005",
+    "notification_id": "00000000-0000-4000-8000-000000001005",
+    "case_id": "00000000-0000-4000-8000-000000001005",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001005",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-06T10:00:00+00:00",
+   "predicted_at": "2026-01-06T10:00:30+00:00",
+   "responded_at": "2026-01-06T10:00:30+00:00",
+   "window": "after",
+   "response_type": "yes_no",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic ask five: plain no?",
+   "question": "Synthetic ask five: plain no?",
+   "embedded_text": "Synthetic ask five: plain no?",
+   "options": null,
+   "prediction": {
+    "value": {
+     "value": "yes"
+    },
+    "confidence": 0.8,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 5
+   },
+   "actual": {
+    "value": "no"
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000005"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000010",
+    "notification_id": "00000000-0000-4000-8000-000000001010",
+    "case_id": "00000000-0000-4000-8000-000000001010",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001010",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-02T10:00:00+00:00",
+   "predicted_at": "2026-01-02T10:00:30+00:00",
+   "responded_at": "2026-01-02T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multiple choice: Alpha card",
+   "question": "Synthetic multiple choice: Alpha card",
+   "embedded_text": "Synthetic multiple choice: Alpha card",
+   "options": {
+    "questions": [
+     {
+      "header": "Stack",
+      "options": [
+       {
+        "label": "Option A",
+        "description": "synthetic"
+       },
+       {
+        "label": "Option B",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Stack?",
+      "multi_select": false
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Stack": "Option A"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Stack": "Totally different stack"
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000010"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000011",
+    "notification_id": "00000000-0000-4000-8000-000000001011",
+    "case_id": "00000000-0000-4000-8000-000000001011",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001011",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-03T10:00:00+00:00",
+   "predicted_at": "2026-01-03T10:00:30+00:00",
+   "responded_at": "2026-01-03T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multiple choice: Beta card",
+   "question": "Synthetic multiple choice: Beta card",
+   "embedded_text": "Synthetic multiple choice: Beta card",
+   "options": {
+    "questions": [
+     {
+      "header": "Mode",
+      "options": [
+       {
+        "label": "Fast",
+        "description": "synthetic"
+       },
+       {
+        "label": "Slow",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Mode?",
+      "multi_select": false
+     },
+     {
+      "header": "Scope",
+      "options": [
+       {
+        "label": "Narrow",
+        "description": "synthetic"
+       },
+       {
+        "label": "Wide",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Scope?",
+      "multi_select": false
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Mode": "Fast",
+      "Scope": "Narrow"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Mode": "A hybrid mode",
+     "Scope": "Narrow"
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000011"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000012",
+    "notification_id": "00000000-0000-4000-8000-000000001012",
+    "case_id": "00000000-0000-4000-8000-000000001012",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001012",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-04T10:00:00+00:00",
+   "predicted_at": "2026-01-04T10:00:30+00:00",
+   "responded_at": "2026-01-04T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multiple choice: Gamma card",
+   "question": "Synthetic multiple choice: Gamma card",
+   "embedded_text": "Synthetic multiple choice: Gamma card",
+   "options": {
+    "questions": [
+     {
+      "header": "Owner",
+      "options": [
+       {
+        "label": "Ann",
+        "description": "synthetic"
+       },
+       {
+        "label": "Bob",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Owner?",
+      "multi_select": false
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Owner": "Ann"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Owner": "Somebody else entirely"
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000012"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000013",
+    "notification_id": "00000000-0000-4000-8000-000000001013",
+    "case_id": "00000000-0000-4000-8000-000000001013",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001013",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-05T10:00:00+00:00",
+   "predicted_at": "2026-01-05T10:00:30+00:00",
+   "responded_at": "2026-01-05T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multiple choice: Delta card",
+   "question": "Synthetic multiple choice: Delta card",
+   "embedded_text": "Synthetic multiple choice: Delta card",
+   "options": {
+    "questions": [
+     {
+      "header": "Venue",
+      "options": [
+       {
+        "label": "Dev",
+        "description": "synthetic"
+       },
+       {
+        "label": "Test",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Venue?",
+      "multi_select": false
+     },
+     {
+      "header": "Gate",
+      "options": [
+       {
+        "label": "Soft",
+        "description": "synthetic"
+       },
+       {
+        "label": "Hard",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Gate?",
+      "multi_select": false
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Venue": "Dev",
+      "Gate": "Soft"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Venue": "Staging box",
+     "Gate": "A gate nobody offered"
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000013"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000014",
+    "notification_id": "00000000-0000-4000-8000-000000001014",
+    "case_id": "00000000-0000-4000-8000-000000001014",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001014",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-06T10:00:00+00:00",
+   "predicted_at": "2026-01-06T10:00:30+00:00",
+   "responded_at": "2026-01-06T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multiple choice: Epsilon card",
+   "question": "Synthetic multiple choice: Epsilon card",
+   "embedded_text": "Synthetic multiple choice: Epsilon card",
+   "options": {
+    "questions": [
+     {
+      "header": "Plan",
+      "options": [
+       {
+        "label": "One",
+        "description": "synthetic"
+       },
+       {
+        "label": "Two",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Plan?",
+      "multi_select": false
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Plan": "One"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Plan": "Plan Three"
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000014"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000015",
+    "notification_id": "00000000-0000-4000-8000-000000001015",
+    "case_id": "00000000-0000-4000-8000-000000001015",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001015",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-07T10:00:00+00:00",
+   "predicted_at": "2026-01-07T10:00:30+00:00",
+   "responded_at": "2026-01-07T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multiple choice: Zeta card",
+   "question": "Synthetic multiple choice: Zeta card",
+   "embedded_text": "Synthetic multiple choice: Zeta card",
+   "options": {
+    "questions": [
+     {
+      "header": "Cut",
+      "options": [
+       {
+        "label": "Early",
+        "description": "synthetic"
+       },
+       {
+        "label": "Late",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Cut?",
+      "multi_select": false
+     },
+     {
+      "header": "Tool",
+      "options": [
+       {
+        "label": "Saw",
+        "description": "synthetic"
+       },
+       {
+        "label": "Axe",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Tool?",
+      "multi_select": false
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Cut": "Early",
+      "Tool": "Saw"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Cut": "Mid",
+     "Tool": "Hatchet"
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000015"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000016",
+    "notification_id": "00000000-0000-4000-8000-000000001016",
+    "case_id": "00000000-0000-4000-8000-000000001016",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001016",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-08T10:00:00+00:00",
+   "predicted_at": "2026-01-08T10:00:30+00:00",
+   "responded_at": "2026-01-08T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multiple choice: Eta card",
+   "question": "Synthetic multiple choice: Eta card",
+   "embedded_text": "Synthetic multiple choice: Eta card",
+   "options": {
+    "questions": [
+     {
+      "header": "Color",
+      "options": [
+       {
+        "label": "Red",
+        "description": "synthetic"
+       },
+       {
+        "label": "Blue",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic Color?",
+      "multi_select": false
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Color": "Red"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Color": "Green"
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000016"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000017",
+    "notification_id": "00000000-0000-4000-8000-000000001017",
+    "case_id": "00000000-0000-4000-8000-000000001017",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001017",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-09T10:00:00+00:00",
+   "predicted_at": "2026-01-09T10:00:30+00:00",
+   "responded_at": "2026-01-09T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multi-select card",
+   "question": "Synthetic multi-select card",
+   "embedded_text": "Synthetic multi-select card",
+   "options": {
+    "questions": [
+     {
+      "header": "Tags",
+      "options": [
+       {
+        "label": "red",
+        "description": "synthetic"
+       },
+       {
+        "label": "green",
+        "description": "synthetic"
+       },
+       {
+        "label": "blue",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic tags?",
+      "multi_select": true
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Tags": "red"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Tags": "red, blue"
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000017"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000018",
+    "notification_id": "00000000-0000-4000-8000-000000001018",
+    "case_id": "00000000-0000-4000-8000-000000001018",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001018",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-01T10:00:00+00:00",
+   "predicted_at": "2026-01-01T10:00:30+00:00",
+   "responded_at": "2026-01-01T10:00:30+00:00",
+   "window": "after",
+   "response_type": "multiple_choice",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic multi-select card, nothing chosen",
+   "question": "Synthetic multi-select card, nothing chosen",
+   "embedded_text": "Synthetic multi-select card, nothing chosen",
+   "options": {
+    "questions": [
+     {
+      "header": "Tags",
+      "options": [
+       {
+        "label": "red",
+        "description": "synthetic"
+       },
+       {
+        "label": "green",
+        "description": "synthetic"
+       }
+      ],
+      "question": "Synthetic tags?",
+      "multi_select": true
+     }
+    ]
+   },
+   "prediction": {
+    "value": {
+     "answers": {
+      "Tags": "red"
+     }
+    },
+    "confidence": 0.5,
+    "strategy": "cbr_majority_vote",
+    "similar_case_count": 3
+   },
+   "actual": {
+    "answers": {
+     "Tags": ""
+    }
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000018"
+  },
+  {
+   "kind": "prediction",
+   "ref": {
+    "database": "synthetic",
+    "prediction_log_id": "00000000-0000-4000-8000-000000000019",
+    "notification_id": "00000000-0000-4000-8000-000000001019",
+    "case_id": "00000000-0000-4000-8000-000000001019",
+    "embedding": {
+     "table": "prediction_decisions",
+     "key_column": "id",
+     "key": "00000000-0000-4000-8000-000000001019",
+     "column": "question_embedding",
+     "dims": 768
+    },
+    "neighbour_embeddings": "synthetic"
+   },
+   "asked_at": "2026-01-02T10:00:00+00:00",
+   "predicted_at": "2026-01-02T10:00:30+00:00",
+   "responded_at": "2026-01-02T10:00:30+00:00",
+   "window": "after",
+   "response_type": "open_ended",
+   "category": "synthetic",
+   "asked_by": {
+    "sender_id": "synthetic@example.test#aaaa0000",
+    "persona": "Synthia"
+   },
+   "title": "Synthetic free text: describe the invented outcome",
+   "question": "Synthetic free text: describe the invented outcome",
+   "embedded_text": "Synthetic free text: describe the invented outcome",
+   "options": null,
+   "prediction": {
+    "value": {
+     "value": "an invented outcome"
+    },
+    "confidence": 0.3,
+    "strategy": "cbr_retrieval",
+    "similar_case_count": 1
+   },
+   "actual": {
+    "value": "a different invented outcome"
+   },
+   "answered_by": "synthetic-owner",
+   "match": false,
+   "query_embedding_norm": 19.5,
+   "neighbours_ref": "00000000-0000-4000-8000-000000000019"
+  }
+ ]
+}
