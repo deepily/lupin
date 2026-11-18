@@ -23,10 +23,10 @@ def _rows():
 def test_the_real_export_derives_one_example_per_row_and_names_every_unread_answer():
     rows            = _rows()
     derived, counts = derive_dataset( rows )
-    assert len( rows ) == 7862
+    assert len( rows ) == 7863
     assert [ d[ "notification_id" ] for d in derived ] == [ r[ "id" ] for r in rows ]
     assert counts[ "unread_by_reason" ] == { "fields_not_readable": 5, "stance_not_recognised": 4 }
-    assert counts[ "tiers" ] == { "unknown_actor": 3130, "timeout_default": 1498, "none": 1261, "recipient": 1972, "other_account": 1 }
+    assert counts[ "tiers" ] == { "unknown_actor": 3130, "timeout_default": 1498, "none": 1262, "recipient": 1972, "other_account": 1 }
 
 
 def test_the_real_export_is_preserved_and_the_backfill_reproduces_its_hashes( tmp_path ):
