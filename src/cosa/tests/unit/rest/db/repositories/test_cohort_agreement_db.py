@@ -1,8 +1,8 @@
 """
 One cohort, three counts: the replay, the admin report and a direct SQL count agree.
 
-A throwaway Postgres holds a hand-written yes/no cohort. It has three windows and four rows no count may
-include: a test override, an unscored row, a legacy-confidence row and a multiple-choice row. Every flag is a
+A throwaway Postgres holds a hand-written yes/no cohort. It has three windows and five rows no count may
+include: a test override, an unscored row, two legacy rows and a multiple-choice row. Every flag is a
 literal written here and never computed by the comparator. A stored flag that disagrees with the comparator
 therefore shows up as a disagreement.
 
@@ -46,6 +46,7 @@ _ROWS = [
     ( "x2", "2026-11-12T16:00:00+00:00", "yes", None,                           None,  True,  "unscored" ),
     ( "x3", "2026-11-12T17:00:00+00:00", "yes", "yes",                          True,  True,  "legacy_confidence" ),
     ( "x4", "2026-11-12T18:00:00+00:00", "yes", "yes",                          True,  True,  "multiple_choice" ),
+    ( "x5", "2026-11-12T19:00:00+00:00", "yes", "yes",                          True,  True,  "legacy_similarity" ),
 ]
 LITERAL_ALL    = { "asks": 7, "right": 5 }
 LITERAL_WINDOW = { "before": { "asks": 2, "right": 1 }, "undetermined": { "asks": 2, "right": 1 }, "after": { "asks": 3, "right": 3 } }
@@ -58,6 +59,7 @@ _DIRECT_SQL = """
       FROM prediction_log
      WHERE response_type = 'yes_no' AND accuracy_match IS NOT NULL
        AND coalesce( forecast_source, '' ) <> 'test_override' AND prediction_confidence <= 1.0
+       AND coalesce( ( accuracy_detail->>'similarity' )::float, 0 ) <= 1.0 AND coalesce( ( accuracy_detail->>'avg_similarity' )::float, 0 ) <= 1.0
      GROUP BY 1 ORDER BY 1
 """
 
@@ -88,11 +90,12 @@ def _plant( session ):
     session.add( User( id=uid, email=f"cohort-{uid.hex[:8]}@test.local", password_hash="x", email_verified=True, is_active=True,
                        is_protected=False, roles={ "roles": [ "user" ] }, created_at=datetime.now( timezone.utc ) ) )
     session.flush()
-    for axis, ( key, instant, predicted, actual, match, has_vector, kind ) in enumerate( _ROWS ):
+    # Inserted newest first, so a query with no ORDER BY would not come back oldest first by luck.
+    for axis, ( key, instant, predicted, actual, match, has_vector, kind ) in reversed( list( enumerate( _ROWS ) ) ):
         predicted_at = datetime.fromisoformat( instant )
         nid          = uuid.uuid4()
         session.add( Notification( id=nid, sender_id=SENDER, recipient_id=uid, title=f"Worker {key}", message=f"Should worker {key} proceed?",
-                                   type="task", priority="high", created_at=predicted_at - timedelta( seconds=30 ),
+                                   type="task", priority="high", created_at=predicted_at - timedelta( seconds=45 ),
                                    sender_persona="cohort", response_requested=True, state="created" ) )
         session.flush()
         answer = { "actual_value": { "value": actual }, "responded_at": predicted_at + timedelta( seconds=5 ) } if actual is not None else {}
@@ -101,7 +104,8 @@ def _plant( session ):
             predicted_value={ "value": predicted }, prediction_confidence=1.7 if kind == "legacy_confidence" else 0.9,
             prediction_strategy="cbr_majority_vote", similar_case_count=3, accuracy_match=match,
             forecast_source="test_override" if kind == "test_override" else None, predicted_at=predicted_at,
-            asked_at=predicted_at - timedelta( seconds=30 ), **answer ) )
+            asked_at=predicted_at - timedelta( seconds=30 ),
+            accuracy_detail={ "similarity": 2.0 } if kind == "legacy_similarity" else None, **answer ) )
         if has_vector:
             session.add( PredictionDecision( id=str( nid ), question=f"Should worker {key} proceed?", category="input", decision_value=actual or "yes",
                                              ratification_state="not_required", data_origin="organic", response_type="yes_no",
@@ -177,9 +181,9 @@ def test_each_window_agrees_between_replay_and_direct_count( accuracy_session, e
 def test_the_excluded_rows_are_in_the_table_and_in_no_cohort( accuracy_session ):
     _plant( accuracy_session )
     in_table = accuracy_session.execute( text( "SELECT count(*) FROM prediction_log WHERE notification_id IN ( SELECT id FROM notifications WHERE title LIKE 'Worker x%' )" ) ).scalar()
-    assert in_table == 4, "the four excluded rows must exist, or the exclusions are untested"
+    assert in_table == 5, "the five excluded rows must exist, or the exclusions are untested"
     cohort_ids = { ask[ "message" ] for ask in cohort_asks( accuracy_session, "yes_no" ) }
-    assert not any( f"worker x{n} " in message for message in cohort_ids for n in range( 1, 5 ) )
+    assert not any( f"worker x{n} " in message for message in cohort_ids for n in range( 1, 6 ) )
 
 
 def test_window_of_puts_each_planted_row_in_the_window_the_direct_count_puts_it_in( accuracy_session ):
@@ -209,6 +213,13 @@ def test_a_row_written_before_the_ledger_is_asked_at_its_notifications_creation_
     """With no asked_at stamp the ask time is the notification's own creation time."""
     _plant( accuracy_session )
     accuracy_session.query( PredictionLog ).update( { PredictionLog.asked_at: None } )
+    asks = cohort_asks( accuracy_session, "yes_no" )
+    assert all( ask[ "asked_at" ] == ask[ "responded_at" ] - timedelta( seconds=50 ) for ask in asks )
+
+
+def test_a_row_with_a_ledger_stamp_is_asked_at_that_stamp( accuracy_session ):
+    """The ledger's asked_at wins over the notification's creation time, 15 seconds earlier."""
+    _plant( accuracy_session )
     asks = cohort_asks( accuracy_session, "yes_no" )
     assert all( ask[ "asked_at" ] == ask[ "responded_at" ] - timedelta( seconds=35 ) for ask in asks )
 
