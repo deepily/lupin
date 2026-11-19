@@ -4,7 +4,7 @@
     "prefix": "LUPIN",
     "plan_name": "Principle learner",
     "correlation_key": "epic:principle-learner-build",
-    "owner_persona": "maria",
+    "owner_persona": "cheech",
     "phases": [
         {
             "phase": 0,
@@ -16,7 +16,8 @@
                     "item_class": "decision",
                     "priority": "P2",
                     "owner_role": "operator",
-                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules plan decision 2 (the plan recommends not displaying until the learner wins on replay and live shadow); the ruling is recorded in the plan text and TODO.md"
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules plan decision 2 (the plan recommends not displaying until the learner wins on replay and live shadow); the ruling is recorded in the plan text and TODO.md",
+                    "done_receipt": "Rick's ruling, row 41f7f109, 19 Nov 2026 (about 20:25 to 20:48 UTC); written into the plan and the rulings record by the commit that carries this manifest"
                 },
                 {
                     "key": "ph0-hook",
@@ -24,7 +25,8 @@
                     "item_class": "decision",
                     "priority": "P2",
                     "owner_role": "operator",
-                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules open sub-question 6: the remediation seat or this plan adds the sibling-row write inside record_forecast's commit (shipped code); ruling recorded in the plan text"
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules open sub-question 6: the remediation seat or this plan adds the sibling-row write inside record_forecast's commit (shipped code); ruling recorded in the plan text",
+                    "done_receipt": "Rick's ruling, row 41f7f109, 19 Nov 2026 (about 20:25 to 20:48 UTC); written into the plan and the rulings record by the commit that carries this manifest"
                 },
                 {
                     "key": "ph0-c0display",
@@ -32,7 +34,8 @@
                     "item_class": "decision",
                     "priority": "P2",
                     "owner_role": "operator",
-                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules open sub-question 7: after remediation phase 6 the forecast slot holds C0's output, so C0 may be the displayed arm; ruling recorded in the plan text"
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules open sub-question 7: after remediation phase 6 the forecast slot holds C0's output, so C0 may be the displayed arm; ruling recorded in the plan text",
+                    "done_receipt": "Rick's ruling, row 41f7f109, 19 Nov 2026 (about 20:25 to 20:48 UTC); written into the plan and the rulings record by the commit that carries this manifest"
                 },
                 {
                     "key": "ph0-stoprule",
@@ -40,7 +43,8 @@
                     "item_class": "decision",
                     "priority": "P2",
                     "owner_role": "operator",
-                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules the proposed wording (McNemar exact, floor of 10 discordant pairs, 'not decisive' below it) and the ask-level unit with coverage and accuracy-on-answered beside the verdict (Pocholo-B-4, D-4); ruling recorded in Layer 1 Comparison and the Stop rule"
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules the proposed wording (McNemar exact, floor of 10 discordant pairs, 'not decisive' below it) and the ask-level unit with coverage and accuracy-on-answered beside the verdict (Pocholo-B-4, D-4); ruling recorded in Layer 1 Comparison and the Stop rule",
+                    "done_receipt": "Rick's ruling, row 41f7f109, 19 Nov 2026 (about 20:25 to 20:48 UTC); written into the plan and the rulings record by the commit that carries this manifest"
                 },
                 {
                     "key": "ph0-b3c",
@@ -48,7 +52,8 @@
                     "item_class": "decision",
                     "priority": "P2",
                     "owner_role": "operator",
-                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules whether B3c (three draws from the full principle set, picked by majority or a fixed rule) is added as a control for B3 (Pocholo-C-4); ruling recorded in Layer 3"
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules whether B3c (three draws from the full principle set, picked by majority or a fixed rule) is added as a control for B3 (Pocholo-C-4); ruling recorded in Layer 3",
+                    "done_receipt": "Rick's ruling, row 41f7f109, 19 Nov 2026 (about 20:25 to 20:48 UTC); written into the plan and the rulings record by the commit that carries this manifest"
                 },
                 {
                     "key": "ph0-nophase6",
@@ -56,7 +61,16 @@
                     "item_class": "decision",
                     "priority": "P2",
                     "owner_role": "operator",
-                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick picks (a) the learner builds C0 itself, (b) step 3 and the stop rule wait, or (c) the learner stops (Pocholo-D-2; the plan recommends (a)); ruling recorded in Sequence and gates"
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick picks (a) the learner builds C0 itself, (b) step 3 and the stop rule wait, or (c) the learner stops (Pocholo-D-2; the plan recommends (a)); ruling recorded in Sequence and gates",
+                    "done_receipt": "Rick's ruling, row 41f7f109, 19 Nov 2026 (about 20:25 to 20:48 UTC); written into the plan and the rulings record by the commit that carries this manifest"
+                },
+                {
+                    "key": "ph0-opuscheck",
+                    "name": "Check the Opus twins' scope and cap",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick checks the drafted scope (C0 gets an Opus twin at least, B1 if the cost allows) and the per-ask cost cap and concurrency cap; the plan text keeps both marked 'pending Rick's check' until he does"
                 }
             ]
         },
@@ -222,9 +236,8 @@
                     "item_class": "task",
                     "priority": "P2",
                     "owner_role": "implementer",
-                    "acceptance": "EXECUTOR: AI. The displayed arm's sibling row is written in the same commit as its prediction_log row; a sibling failure rolls both back and returns False; the reconciliation check (every prediction_log row has its displayed-arm sibling) catches a planted missing row; waits on open sub-question 6's ruling",
+                    "acceptance": "EXECUTOR: AI. The learner's crew builds record_forecast's optional pre-commit hook (ruled by Rick; a change to shipped code, Trigger 6) and a remediation-side reviewer reviews it before merge; with no hook registered record_forecast behaves exactly as before and never raises on the notify path, proved by a test; with the hook, the displayed arm's sibling row is written in the same commit as its prediction_log row, a sibling failure rolls both back and returns False, and the reconciliation check (every prediction_log row has its displayed-arm sibling) catches a planted missing row",
                     "depends_on": [
-                        "ph0-hook",
                         "ph1-tables"
                     ]
                 },
@@ -239,6 +252,18 @@
                         "ph3-writer",
                         "ph1-extractor",
                         "ph1-status"
+                    ]
+                },
+                {
+                    "key": "ph3-opus",
+                    "name": "Run the Opus twin arms",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. C0-opus (and B1-opus if cost allows, per Rick's check) run the same asks as their Haiku twins, never displayed, each under its own switch and concurrency cap and the per-ask cost cap Rick sets; waits on remediation phase 6 and on the Opus check, and reads 'not run, blocked by <item>' until both",
+                    "depends_on": [
+                        "ph3-b1",
+                        "ph0-opuscheck"
                     ]
                 },
                 {
@@ -269,6 +294,7 @@
                     "acceptance": "EXECUTOR: AI. Done means holds: unit tier green for the changed files, per-file coverage command exits 0, run-census-guards.sh green with any new e2e file in src/tests/e2e_ui/partition/, a reviewer seat's Merge, and every conditional check run or reported 'not run, blocked by <item>'",
                     "depends_on": [
                         "ph3-b1",
+                        "ph3-opus",
                         "ph3-draft",
                         "ph3-report"
                     ]
@@ -287,7 +313,8 @@
                     "owner_role": "implementer",
                     "acceptance": "EXECUTOR: AI. Join rule, neighbour count, k, lag figure, retrieval bound and the date-stamped vocabulary version are frozen with the plan's sha recorded on the row before the first evaluation replay",
                     "depends_on": [
-                        "ph1-list"
+                        "ph1-list",
+                        "ph1-status"
                     ]
                 },
                 {
@@ -296,7 +323,7 @@
                     "item_class": "task",
                     "priority": "P2",
                     "owner_role": "implementer",
-                    "acceptance": "EXECUTOR: AI. Each pairing's summarize result exists with a denominator, the discordant pairs and a verdict word, reported with coverage and accuracy on answered asks; real-ask rows stay in local_data; waits on remediation item 4",
+                    "acceptance": "EXECUTOR: AI. Each pairing's summarize result exists (each Opus twin is paired with its Haiku twin too) with a denominator, the discordant pairs and a verdict word, reported with coverage and accuracy on answered asks; real-ask rows stay in local_data; waits on remediation item 4",
                     "depends_on": [
                         "ph4-freeze"
                     ]
@@ -426,6 +453,17 @@
                     "acceptance": "EXECUTOR: HUMAN Rick's design call. the item-10 rubric landing and the open-text target count are checked by AI, but the number and the go are Rick's design call; the gate stays HUMAN until he states a number"
                 },
                 {
+                    "key": "ph6-b3c",
+                    "name": "Build the B3c control arm",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. B3c draws three candidates from the full principle set, picks by majority or a fixed rule with no reranker, and is paired with B3 by the same summarize call",
+                    "depends_on": [
+                        "ph6-gate"
+                    ]
+                },
+                {
                     "key": "ph6-build",
                     "name": "Build generation and selection",
                     "item_class": "task",
@@ -439,13 +477,14 @@
                 },
                 {
                     "key": "ph6-replay",
-                    "name": "Replay B3 against B2 (and B3c if ruled)",
+                    "name": "Replay B3 against B2 and B3c",
                     "item_class": "task",
                     "priority": "P2",
                     "owner_role": "implementer",
-                    "acceptance": "EXECUTOR: AI. The summarize result for B3 against B2 exists with a denominator, the discordant pairs and a verdict word; blinded intent agreement runs once remediation item 10 exists and reads 'not run, blocked by item 10' until then; B3c is run only if Rick adds it",
+                    "acceptance": "EXECUTOR: AI. The summarize result for B3 against B2 exists with a denominator, the discordant pairs and a verdict word; blinded intent agreement runs once remediation item 10 exists and reads 'not run, blocked by item 10' until then; B3c is part of the run (ruled)",
                     "depends_on": [
-                        "ph6-build"
+                        "ph6-build",
+                        "ph6-b3c"
                     ]
                 },
                 {
@@ -454,7 +493,7 @@
                     "item_class": "decision",
                     "priority": "P2",
                     "owner_role": "operator",
-                    "acceptance": "EXECUTOR: HUMAN Rick's design call. what the B3-against-B2 verdict means is his call (and B3c's, if he adds it)",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. what the B3-against-B2 verdict means is his call (and B3c's)",
                     "depends_on": [
                         "ph6-replay"
                     ]
