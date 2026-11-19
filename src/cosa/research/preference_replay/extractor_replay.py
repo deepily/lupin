@@ -325,7 +325,8 @@ def main( argv=None, query_fn=None ):
         - reads --export, loads it into a scratch copy, and runs one replay per --lag-seconds value (default 0 and 300)
         - with --dry-run the model is canned_model and no model is called; otherwise --model, with each call limited to --timeout-seconds,
           is called through model_transport.complete unless a query_fn double was given
-        - each printed line ends with the model id and the number of model calls the variant made
+        - each variant prints a line ending with the model id and the number of model calls it made, then a line with the token
+          counts the transport reported for it; the cost there is the SDK's notional figure, not a charge, and a canned model reports none
         - writes the last variant's principle list to --out as JSON, and prints one line of counts per variant
         - returns 0
     """
@@ -341,12 +342,17 @@ def main( argv=None, query_fn=None ):
     chosen = canned_model if args.dry_run else query_fn
     listing = []
     for lag in args.lags or [ 0, 300 ]:
+        usage_before = model_transport.claude_usage_summary()
         with scratch_session() as session, model_transport.record_calls() as calls:
             load_export( session, export )
             PredictionEngine.reset()
             outcome = run_replay( session, PredictionEngine( debug=False ), timedelta( seconds=lag ), query_fn=chosen, model=args.model, timeout_seconds=args.timeout_seconds )
             listing = principle_list( session )
         print( f"lag {lag}s: {outcome[ 'counts' ]}, leakage checked {outcome[ 'leakage_checked' ]}, model {args.model}, model calls {len( calls )}", file=sys.stdout )
+        usage_after = model_transport.claude_usage_summary()
+        used        = { key: usage_after[ key ] - usage_before[ key ] for key in usage_after }
+        print( f"  usage reported by the transport: {used[ 'calls' ]} calls, input {used[ 'input_tokens' ]}, output {used[ 'output_tokens' ]}, "
+               f"cache read {used[ 'cache_read_input_tokens' ]}, cache write {used[ 'cache_creation_input_tokens' ]}, notional cost {used[ 'cost_usd' ]:.2f} USD", file=sys.stdout )
     with open( args.out, "w", encoding="utf-8" ) as handle: json.dump( listing, handle, indent=1, sort_keys=True )
     return 0
 

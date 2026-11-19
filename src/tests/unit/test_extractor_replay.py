@@ -325,3 +325,13 @@ def test_main_takes_the_model_id_and_the_call_limit_from_its_arguments( tmp_path
     assert er.main( [ "--export", FIXTURE, "--out", str( out ), "--lag-seconds", "0", "--model", "m-1", "--timeout-seconds", "9" ], query_fn=er.canned_model ) == 0
     assert "model m-1, model calls " in capsys.readouterr().out
     assert seen and set( seen ) == { ( "m-1", 9 ) }
+
+
+def test_main_reports_the_usage_the_transport_saw_during_each_variant( tmp_path, capsys, monkeypatch ):
+    tally = iter( [ { "calls": 1, "input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "cost_usd": 0.5 },
+                    { "calls": 4, "input_tokens": 110, "output_tokens": 25, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 33, "cost_usd": 1.75 } ] )
+    monkeypatch.setattr( er.model_transport, "claude_usage_summary", lambda: next( tally ) )
+    out = tmp_path / "principles.json"
+    assert er.main( [ "--export", FIXTURE, "--out", str( out ), "--lag-seconds", "0" ], query_fn=er.canned_model ) == 0
+    assert "usage reported by the transport: 3 calls, input 100, output 20, cache read 30, cache write 0, notional cost 1.25 USD" in capsys.readouterr().out
+
