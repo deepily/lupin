@@ -83,19 +83,28 @@ def test_unknown_arm_is_refused():
         arm_text( "Q+Z", target, context, ids )
 
 
-@pytest.mark.parametrize( "arm", [ "Q+A", "Q+O", "Q+P", "Q+H" ] )
-def test_no_context_falls_back_to_question_in_every_other_arm( arm ):
+def test_history_arm_with_no_context_falls_back_to_question():
     target       = _note( "target", 0, abstract="an abstract", sender_id=SENDER )
     context, ids = _ctx( target, [] )
-    assert arm_text( arm, target, context, ids ) == ( "message of target", "no_context" )
+    assert arm_text( "Q+H", target, context, ids ) == ( "message of target", "no_context" )
 
 
-def test_ambiguous_only_context_also_counts_as_no_context():
+def test_ambiguous_only_context_counts_as_no_context_for_history():
     target       = _note( "target", 0, sender_id="claude.code@lupin.deepily.ai" )
     other        = _note( "bare", -5, sender_id="claude.code@lupin.deepily.ai" )
     context, ids = _ctx( target, [ other ] )
     assert context[ "context_state" ] == "ambiguous_only"
-    assert arm_text( "Q+A", target, context, ids ) == ( "message of target", "no_context" )
+    assert arm_text( "Q+H", target, context, ids ) == ( "message of target", "no_context" )
+
+
+def test_own_field_arms_work_without_any_rebuilt_context():
+    options = { "questions": [ { "question": "Go?", "options": [ { "label": "Yes" } ] } ] }
+    target  = _note( "target", 0, abstract="abs", response_options=options, sender_id=SENDER )
+    context, ids = _ctx( target, [] )
+    assert context[ "context_state" ] == "no_context"
+    assert arm_text( "Q+A", target, context, ids ) == ( "message of target\n\nAbstract: abs", None )
+    assert arm_text( "Q+O", target, context, ids )[ 1 ] is None
+    assert arm_text( "Q+P", target, context, ids ) == ( "message of target\n\nProject: lupin\nSession: ab12cd34", None )
 
 
 def _reconstructed( **target_extra ):
@@ -226,16 +235,15 @@ def test_history_arm_refuses_an_answer_that_postdates_the_ask():
 
 
 def test_build_counts_each_fallback_reason_and_adds_up():
-    thread_ask = _note( "t", 0, thread_id="t1", abstract="abs" )
-    bare_ask   = _note( "b", 0, thread_id="t2" )
-    lone_ask   = _note( "l", 0, thread_id="t3", abstract="abs" )
-    contexts   = { "t": rebuild_context( thread_ask, [ _prev() ] ), "b": rebuild_context( bare_ask, [ _note( "e", -5, thread_id="t2" ) ] ),
-                   "l": rebuild_context( lone_ask, [] ) }
-    notes      = { "prev": _prev() }
-    result     = build_arm_texts( "Q+A", [ thread_ask, bare_ask, lone_ask ], contexts, notes )
-    assert result[ "arm" ] == "Q+A"
+    with_prev = _note( "t", 0, thread_id="t1" )
+    no_answer = _note( "b", 0, thread_id="t2" )
+    lone_ask  = _note( "l", 0, thread_id="t3" )
+    contexts  = { "t": rebuild_context( with_prev, [ _prev() ] ), "b": rebuild_context( no_answer, [ _note( "e", -5, thread_id="t2" ) ] ),
+                  "l": rebuild_context( lone_ask, [] ) }
+    result    = build_arm_texts( "Q+H", [ with_prev, no_answer, lone_ask ], contexts, { "prev": _prev() } )
+    assert result[ "arm" ] == "Q+H"
     assert list( result[ "texts" ] ) == [ "t", "b", "l" ]
-    assert result[ "texts" ][ "t" ].endswith( "Abstract: abs" )
+    assert result[ "texts" ][ "t" ].endswith( "-> yes" )
     assert result[ "texts" ][ "b" ] == "message of b" and result[ "texts" ][ "l" ] == "message of l"
     assert result[ "counts" ] == { "asks": 3, "with_section": 1, "no_context": 1, "arm_input_absent": 1 }
 

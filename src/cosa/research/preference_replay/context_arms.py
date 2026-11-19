@@ -5,10 +5,10 @@ Five arms change only the text embedded for an ask. Q is the question alone. Eac
 Q+A adds the card's abstract and Q+O adds its options.
 Q+P adds the project and asking session. Q+H adds the previous answer on the same thread.
 
-Every input is read as of the ask, through the context that ``rebuild_context`` returns. An ask whose
-context could not be rebuilt is embedded as the question alone in every arm, and is counted.
-An arm whose own input is empty for an ask does the same. It is counted under its own name,
-so the two causes stay apart.
+Q+A, Q+O and Q+P read fields of the ask itself, which are known at ask time.
+Q+H reads the context that ``rebuild_context`` returns. An ask with no rebuilt context is embedded
+as the question alone in Q+H, and is counted. An arm whose own input is empty for an ask does the same.
+It is counted under its own name, so the two causes stay apart.
 """
 
 import json
@@ -164,7 +164,8 @@ def arm_text( arm: str, target: Dict[str, Any], context: Dict[str, Any], notes_b
     Ensures:
         - returns ( text, reason )
         - the arm Q returns the question and reason None, whatever the context
-        - any other arm returns the question alone with reason "no_context" when context_state is not reconstructed
+        - Q+H returns the question alone with reason "no_context" when context_state is not reconstructed
+        - the arms Q+A, Q+O and Q+P never read the context
         - an arm whose input is empty returns the question alone with reason "arm_input_absent"
         - otherwise returns the question, a blank line, then the arm's section, with reason None
 
@@ -174,7 +175,7 @@ def arm_text( arm: str, target: Dict[str, Any], context: Dict[str, Any], notes_b
     if arm not in ARMS: raise ValueError( f"arm must be one of {ARMS}, got {arm!r}" )
     question = question_text( target )
     if arm == "Q": return question, None
-    if context[ "context_state" ] != "reconstructed": return question, NO_CONTEXT
+    if arm == "Q+H" and context[ "context_state" ] != "reconstructed": return question, NO_CONTEXT
     builders = { "Q+A": lambda: _abstract_section( target ), "Q+O": lambda: _options_section( target ),
                  "Q+P": lambda: _project_section( target ), "Q+H": lambda: _history_section( target, context, notes_by_id ) }
     section  = builders[ arm ]()
