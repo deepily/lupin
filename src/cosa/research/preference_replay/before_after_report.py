@@ -19,14 +19,14 @@ A column is a dict with these keys:
 - calibration: the report half of calibration_fit.fit_and_evaluate
 - yes_no_summary: the replay summary of the predictor against always-yes on yes/no asks
 - tune_note: optional; when present every tune figure reads this text instead of a number
-- ask_ids: optional, the asks the column replayed
-- final_ids: optional, the final-window asks the column scored
+- ask_ids: the asks the column replayed
+- final_ids: the final-window asks the column scored
 - produced_by: optional, the replay code commit and run script that made the column
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-COLUMN_KEYS = ( "label", "commit", "vector_source", "ask_count", "threshold", "top_k", "coverage", "calibration", "yes_no_summary" )
+COLUMN_KEYS = ( "label", "commit", "vector_source", "ask_count", "threshold", "top_k", "coverage", "calibration", "yes_no_summary", "ask_ids", "final_ids" )
 WINDOWS     = ( "tune", "final" )
 
 
@@ -46,8 +46,10 @@ def check_columns( columns: Sequence[Dict[str, Any]] ) -> None:
         - returns None only when there are exactly four columns, each with every key, columns one and two hold
           the same ask count, columns three and four hold the same ask count, and those two use the same threshold
           and top k
-        - when both give ask_ids, columns one and two name the same asks, and every ask of column two is in
-          column three; when both give final_ids, columns one and four score the same final-window asks
+        - columns one and two name the same asks, every ask of column two is in column three, and columns three
+          and four name the same asks
+        - columns one and four name the same final-window asks, and each holds as many final-window asks in its
+          mix as it names
 
     Raises:
         - ReportMismatch naming the first problem found
@@ -63,25 +65,18 @@ def check_columns( columns: Sequence[Dict[str, Any]] ) -> None:
         raise ReportMismatch( f"columns 3 and 4 must hold the same asks, got {after[ 'ask_count' ]} and {rescored[ 'ask_count' ]}" )
     if ( after[ "threshold" ], after[ "top_k" ] ) != ( rescored[ "threshold" ], rescored[ "top_k" ] ):
         raise ReportMismatch( "columns 3 and 4 must use the same frozen threshold and top k" )
-    if _both( before, same, "ask_ids" ) and set( before[ "ask_ids" ] ) != set( same[ "ask_ids" ] ):
+    if set( before[ "ask_ids" ] ) != set( same[ "ask_ids" ] ):
         raise ReportMismatch( "columns 1 and 2 name different asks" )
-    if _both( same, after, "ask_ids" ) and not set( same[ "ask_ids" ] ) <= set( after[ "ask_ids" ] ):
+    if not set( same[ "ask_ids" ] ) <= set( after[ "ask_ids" ] ):
         raise ReportMismatch( "column 3 does not contain every ask of column 2" )
-    if _both( before, rescored, "final_ids" ) and set( before[ "final_ids" ] ) != set( rescored[ "final_ids" ] ):
+    if set( after[ "ask_ids" ] ) != set( rescored[ "ask_ids" ] ):
+        raise ReportMismatch( "columns 3 and 4 name different asks" )
+    if set( before[ "final_ids" ] ) != set( rescored[ "final_ids" ] ):
         raise ReportMismatch( "columns 1 and 4 do not score the same final-window asks" )
-
-
-def _both( one: Dict[str, Any], two: Dict[str, Any], key: str ) -> bool:
-    """
-    Say whether two columns both carry an optional key.
-
-    Requires:
-        - one and two are column dicts
-
-    Ensures:
-        - returns True only when neither value is missing or None
-    """
-    return one.get( key ) is not None and two.get( key ) is not None
+    for column in ( before, rescored ):
+        scored = sum( column[ "coverage" ][ "final_mix" ].values() )
+        if scored != len( column[ "final_ids" ] ):
+            raise ReportMismatch( f"column {column[ 'label' ]!r} scores {scored} final-window asks but names {len( column[ 'final_ids' ] )}" )
 
 
 def check_control( committed_final_correct: int, rerun_final_correct: int ) -> None:

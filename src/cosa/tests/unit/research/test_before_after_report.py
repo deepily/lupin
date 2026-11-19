@@ -12,7 +12,7 @@ import pytest
 from cosa.research.preference_replay import before_after_report as bar
 
 
-def _column( label, commit, source, asks, yn_final_correct, mc_tune_correct, ids=None, brier=( 0.2239, 0.1728 ), threshold=0.5 ):
+def _column( label, commit, source, asks, yn_final_correct, mc_tune_correct, ids, brier=( 0.2239, 0.1728 ), threshold=0.5 ):
     """One column in the shape the module documents."""
     column = {
         "label": label, "commit": commit, "vector_source": source, "ask_count": asks, "threshold": threshold, "top_k": 10,
@@ -30,7 +30,8 @@ def _column( label, commit, source, asks, yn_final_correct, mc_tune_correct, ids
     }
     column[ "yes_no_summary" ] = { "engine_correct": yn_final_correct, "baseline_correct": 173, "engine_only_right": 3, "baseline_only_right": 10,
                                    "mcnemar": { "p_value": 0.046142578125 }, "verdict": "baseline better" }
-    if ids is not None: column[ "ask_ids" ] = ids
+    column[ "ask_ids" ]   = ids
+    column[ "final_ids" ] = [ f"f{i}" for i in range( 240 ) ]
     return column
 
 
@@ -68,18 +69,47 @@ def test_check_columns_refuses_different_ask_counts_three_and_four( columns ):
 
 
 def test_check_columns_final_ids_must_match_before( columns ):
-    columns[ 0 ][ "final_ids" ] = [ "a", "b" ]
-    columns[ 3 ][ "final_ids" ] = [ "b", "a" ]
+    columns[ 3 ][ "final_ids" ] = list( reversed( columns[ 0 ][ "final_ids" ] ) )
     assert bar.check_columns( columns ) is None
-    columns[ 3 ][ "final_ids" ] = [ "a", "x" ]
+    columns[ 3 ][ "final_ids" ] = columns[ 0 ][ "final_ids" ][ :-1 ] + [ "x" ]
     with pytest.raises( bar.ReportMismatch, match="columns 1 and 4 do not score the same final-window asks" ):
         bar.check_columns( columns )
 
 
 def test_check_columns_refuses_column_four_scoring_extra_asks_beyond_column_ones( columns ):
-    columns[ 0 ][ "final_ids" ] = [ "a", "b" ]
-    columns[ 3 ][ "final_ids" ] = [ "a", "b", "extra" ]
+    columns[ 3 ][ "final_ids" ] = columns[ 0 ][ "final_ids" ] + [ "extra" ]
     with pytest.raises( bar.ReportMismatch, match="columns 1 and 4 do not score the same final-window asks" ):
+        bar.check_columns( columns )
+
+
+def _final_391( column ):
+    """Give a column Before's real final window: 391 asks, 176 multiple choice and 215 yes/no."""
+    column[ "coverage" ][ "final_mix" ] = { "multiple_choice": 176, "yes_no": 215 }
+    column[ "final_ids" ] = [ f"b{i}" for i in range( 391 ) ]
+
+
+def test_column_four_scores_only_befores_391_final_asks( columns ):
+    _final_391( columns[ 0 ] )
+    _final_391( columns[ 3 ] )
+    assert bar.check_columns( columns ) is None
+    assert sum( bar.column_rows( columns[ 3 ] )[ f"final asks: {kind}" ] for kind in ( "multiple_choice", "yes_no" ) ) == 391
+
+
+def test_a_column_whose_final_mix_disagrees_with_its_final_ids_is_refused( columns ):
+    _final_391( columns[ 0 ] )
+    _final_391( columns[ 3 ] )
+    columns[ 3 ][ "coverage" ][ "final_mix" ] = { "multiple_choice": 176, "yes_no": 216 }
+    with pytest.raises( bar.ReportMismatch, match="scores 392 final-window asks but names 391" ):
+        bar.check_columns( columns )
+    columns[ 3 ][ "coverage" ][ "final_mix" ] = { "multiple_choice": 176, "yes_no": 215 }
+    columns[ 0 ][ "coverage" ][ "final_mix" ] = { "multiple_choice": 176, "yes_no": 214 }
+    with pytest.raises( bar.ReportMismatch, match="scores 390 final-window asks but names 391" ):
+        bar.check_columns( columns )
+
+
+def test_check_columns_refuses_columns_three_and_four_naming_different_asks( columns ):
+    columns[ 3 ][ "ask_ids" ] = [ "a", "b", "z" ]
+    with pytest.raises( bar.ReportMismatch, match="columns 3 and 4 name different asks" ):
         bar.check_columns( columns )
 
 
@@ -119,12 +149,11 @@ def test_check_columns_refuses_column_three_missing_an_ask( columns ):
         bar.check_columns( columns )
 
 
-def test_check_columns_skips_id_checks_when_ids_absent( columns ):
-    for column in columns: del column[ "ask_ids" ]
-    assert bar.check_columns( columns ) is None
-    del_one = copy.deepcopy( columns )
-    del_one[ 0 ][ "ask_ids" ] = [ "q" ]
-    assert bar.check_columns( del_one ) is None
+@pytest.mark.parametrize( "key", [ "ask_ids", "final_ids" ] )
+def test_the_ask_ids_and_final_ids_are_required( columns, key ):
+    del columns[ 2 ][ key ]
+    with pytest.raises( bar.ReportMismatch, match=f"lacks \\['{key}'\\]" ):
+        bar.check_columns( columns )
 
 
 def test_column_rows_reads_each_figure_from_its_source( columns ):
@@ -141,7 +170,7 @@ def test_column_rows_reads_each_figure_from_its_source( columns ):
 
 
 def test_column_rows_fills_a_type_missing_from_one_mix():
-    column = _column( "x", "c", "stored", 10, 1, 1 )
+    column = _column( "x", "c", "stored", 10, 1, 1, [ "a" ] )
     del column[ "coverage" ][ "tune_mix" ][ "yes_no" ]
     assert bar.column_rows( column )[ "tune asks: yes_no" ] == 0
 
