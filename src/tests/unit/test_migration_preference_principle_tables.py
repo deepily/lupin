@@ -243,6 +243,10 @@ def _capture_upgrade( module, monkeypatch ):
     return created
 
 
+# Columns a later revision adds to a table this revision created; the models carry them, this revision does not.
+# f8c2d6a14e37 adds related_principle_id and has its own migration test.
+_ADDED_LATER = { ( "preference_principles", "related_principle_id" ) }
+
 _PAIRS = ( ( PreferencePrinciple, "PRINCIPLES_TABLE" ), ( PreferenceEvidence, "EVIDENCE_TABLE" ),
            ( PredictionArmForecast, "ARM_TABLE" ) )
 
@@ -253,7 +257,7 @@ def test_the_migration_and_the_models_name_the_same_tables_and_columns( monkeypa
     assert set( created ) == { getattr( module, attr ) for _, attr in _PAIRS }
     for model, attr in _PAIRS:
         migrated = { i.name for i in created[ getattr( module, attr ) ] if isinstance( i, sa.Column ) }
-        assert migrated == { c.name for c in model.__table__.columns }, attr
+        assert migrated == { c.name for c in model.__table__.columns if ( model.__tablename__, c.name ) not in _ADDED_LATER }, attr
 
 
 def test_the_migration_and_the_models_agree_on_each_unique_key_by_name_and_columns( monkeypatch ):
@@ -276,7 +280,7 @@ def test_the_migration_and_the_models_agree_on_each_foreign_key_target_and_delet
                  for model, attr in _PAIRS for i in created[ getattr( module, attr ) ]
                  if isinstance( i, sa.Column ) and i.foreign_keys }
     modeled  = { ( model.__tablename__, c.name ): { ( fk.target_fullname, fk.ondelete ) for fk in c.foreign_keys }
-                 for model, _ in _PAIRS for c in model.__table__.columns if c.foreign_keys }
+                 for model, _ in _PAIRS for c in model.__table__.columns if c.foreign_keys and ( model.__tablename__, c.name ) not in _ADDED_LATER }
     assert migrated == modeled
     assert migrated == { ( "preference_evidence", "principle_id" ): { ( "preference_principles.id", None ) },
                          ( "prediction_arm_forecast", "notification_id" ): { ( "notifications.id", "CASCADE" ) } }

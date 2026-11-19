@@ -45,6 +45,23 @@ def _answer_as_of( candidate, asked_at ):
     return { "status": "pending", "value": None, "answer_known_at": None }
 
 
+def answer_known_at_ask( answered_at, asked_at ):
+    """
+    Say whether an answer was known at the ask, by the one as-of rule.
+
+    Requires:
+        - answered_at is an aware datetime, an ISO-8601 string with an offset, or None
+        - asked_at is an aware datetime
+
+    Ensures:
+        - returns True exactly when _answer_as_of reads the answer as "answered": given at or before the ask
+        - returns False for a later answer and for None
+        - a wrapper, not a second comparison, so the boundary cannot differ between the callers
+    """
+    candidate = { "response_requested": True, "responded_at": answered_at, "response_value": None }
+    return _answer_as_of( candidate, asked_at )[ "status" ] == "answered"
+
+
 def _link_for( target, candidate, asked_at, session_window ):
     """
     Find the strongest link between a target and one earlier candidate.
