@@ -13,7 +13,27 @@ from typing import Any, Callable, Dict, List
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from cosa.agents.prediction_engine.config import FORECAST_SOURCE_FOUNDATION, FORECAST_SOURCE_TEST_OVERRIDE
 from cosa.rest.postgres_models import PredictionArmForecast, PredictionLog
+
+# The arm a forecast source stands for, read from the row's own forecast_source and never assumed.
+DISPLAYED_ARM_BY_FORECAST_SOURCE = { FORECAST_SOURCE_FOUNDATION: "A1", FORECAST_SOURCE_TEST_OVERRIDE: "test_override" }
+
+
+def displayed_arm_for( forecast_source: str ) -> str:
+    """
+    Name the arm whose forecast a card showed.
+
+    Requires:
+        - forecast_source is the value record_forecast stores in forecast_source
+
+    Ensures:
+        - returns the arm name that source stands for
+
+    Raises:
+        - KeyError if no arm is registered for that source, so a new source must be registered here
+    """
+    return DISPLAYED_ARM_BY_FORECAST_SOURCE[ forecast_source ]
 
 
 def displayed_arm_hook( arm: str ) -> Callable[[ Session, Dict[str, Any] ], None]:

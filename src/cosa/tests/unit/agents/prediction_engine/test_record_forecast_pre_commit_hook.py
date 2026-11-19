@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 from cosa.agents.prediction_engine import config as cfg
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
-from cosa.rest.db.repositories.arm_forecast_repository import displayed_arm_hook, notifications_missing_displayed_sibling
+from cosa.rest.db.repositories.arm_forecast_repository import displayed_arm_for, displayed_arm_hook, notifications_missing_displayed_sibling
 from cosa.rest.postgres_models import PredictionArmForecast, PredictionLog
 
 # Ids carry a hex letter, because SQLite reads an all-digit id back as a number.
@@ -214,3 +214,11 @@ def test_a_sibling_failure_leaves_no_row_in_either_table_on_a_real_database( mon
     with Session( engine ) as check:
         assert check.query( PredictionLog ).count() == 0 and check.query( PredictionArmForecast ).count() == 0
     PredictionEngine.reset()
+
+
+def test_each_forecast_source_names_its_arm_and_an_unregistered_one_is_refused():
+    """The foundation source and an injected hint each name an arm; any other source is refused."""
+    assert displayed_arm_for( cfg.FORECAST_SOURCE_FOUNDATION ) == "A1"
+    assert displayed_arm_for( cfg.FORECAST_SOURCE_TEST_OVERRIDE ) == "test_override"
+    with pytest.raises( KeyError ):
+        displayed_arm_for( "background_job" )

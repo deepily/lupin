@@ -615,6 +615,25 @@ def _update_notification_state_sync( notification_id, state ):
         repo.update_state( uuid.UUID( notification_id ), state )
 
 
+def _arm_forecast_ledger_enabled() -> bool:
+    """
+    Say whether the displayed arm's sibling row is written with each ask-time forecast row.
+
+    Requires:
+        - nothing; an unreadable setting reads as off
+
+    Ensures:
+        - returns True only when "prediction learner arm forecast ledger enabled" is true in the INI file
+        - never raises, so a settings failure cannot stop the forecast row being written
+    """
+    try:
+        import lupin_app.main as main_module
+        return main_module.config_mgr.get( "prediction learner arm forecast ledger enabled", default=False, return_type="boolean" )
+    except Exception as config_error:
+        print( f"[PREDICTION] ⚠️ Arm forecast ledger switch unreadable, treated as off: {config_error}" )
+        return False
+
+
 def _persist_response_required_sync(
     resolved_sender_id, target_system_id, message, type, priority, title,
     abstract, response_type, response_default, parsed_response_options,
@@ -1574,7 +1593,7 @@ async def notify_user(
                 from cosa.agents.prediction_engine import get_prediction_engine
                 forecast_engine = get_prediction_engine()
             from cosa.agents.prediction_engine.config import (
-                STRATEGY_COLD_START, STRATEGY_ERROR, STRATEGY_TEST_OVERRIDE, FORECAST_SOURCE_TEST_OVERRIDE )
+                STRATEGY_COLD_START, STRATEGY_ERROR, STRATEGY_TEST_OVERRIDE, FORECAST_SOURCE_FOUNDATION, FORECAST_SOURCE_TEST_OVERRIDE )
             forecast_kwargs = {
                 "display_decision" : prediction_hint[ "state" ] if parsed_prediction_hint_override is None else "ready",
                 "owner_email"      : target_user,
@@ -1590,6 +1609,10 @@ async def notify_user(
                 forecast_kwargs.update( strategy=STRATEGY_ERROR, abstention_reason=f"predictor_error: {forecast_failure}" )
             else:
                 forecast_kwargs.update( strategy=STRATEGY_COLD_START, abstention_reason="engine_disabled" )
+            if _arm_forecast_ledger_enabled():
+                from cosa.rest.db.repositories.arm_forecast_repository import displayed_arm_for, displayed_arm_hook
+                forecast_kwargs[ "pre_commit_hook" ] = displayed_arm_hook(
+                    displayed_arm_for( forecast_kwargs.get( "forecast_source", FORECAST_SOURCE_FOUNDATION ) ) )
             await asyncio.to_thread(
                 forecast_engine.record_forecast, notification_id,
                 {
