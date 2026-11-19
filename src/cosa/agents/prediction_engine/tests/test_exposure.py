@@ -75,5 +75,20 @@ class TestSwitchRate( unittest.TestCase ):
         self.assertEqual( ex.switch_rate( [ ex.SWITCHED, ex.UNAIDED, ex.UNAIDED ] ), 0.3333 )
 
 
+class TestRevealedBeforeAnswer( unittest.TestCase ):
+
+    def test_no_reveal_is_never_before_the_answer( self ):
+        self.assertFalse( ex.revealed_before_answer( None, _OPENED ) )
+
+    def test_only_a_strictly_earlier_reveal_counts( self ):
+        later = _OPENED + dt.timedelta( seconds=1 )
+        self.assertTrue( ex.revealed_before_answer( _OPENED, later ) )
+        self.assertFalse( ex.revealed_before_answer( _OPENED, _OPENED ) )
+        self.assertFalse( ex.revealed_before_answer( later, _OPENED ) )
+
+    def test_a_reveal_with_an_unknown_answer_time_counts( self ):
+        self.assertTrue( ex.revealed_before_answer( _OPENED, None ) )
+
+
 if __name__ == "__main__":
     unittest.main()
