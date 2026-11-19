@@ -2097,6 +2097,16 @@
                         }
                     },
                     {
+                        "name": "clear_pending",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false,
+                            "title": "Clear Pending"
+                        }
+                    },
+                    {
                         "name": "x-api-key",
                         "in": "header",
                         "required": false,
@@ -2140,6 +2150,128 @@
                     },
                     "401": {
                         "description": "Unauthorized \u2014 no valid API key or bearer token"
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/prediction-engine/accuracy": {
+            "get": {
+                "tags": [
+                    "system"
+                ],
+                "summary": "Prediction engine accuracy summary",
+                "description": "Accuracy of the prediction log over a window: strict whole-card correctness over scored rows, with per-category and per-type breakdowns. Admin only, because it reports across users.",
+                "operationId": "prediction_engine_accuracy_api_prediction_engine_accuracy_get",
+                "parameters": [
+                    {
+                        "name": "window_days",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 3650,
+                            "minimum": 1,
+                            "description": "Days to look back",
+                            "default": 30,
+                            "title": "Window Days"
+                        },
+                        "description": "Days to look back"
+                    },
+                    {
+                        "name": "category",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Only this category",
+                            "title": "Category"
+                        },
+                        "description": "Only this category"
+                    },
+                    {
+                        "name": "response_type",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Only this response type",
+                            "title": "Response Type"
+                        },
+                        "description": "Only this response type"
+                    },
+                    {
+                        "name": "sender_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Only this sender",
+                            "title": "Sender Id"
+                        },
+                        "description": "Only this sender"
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized \u2014 no bearer token"
+                    },
+                    "403": {
+                        "description": "Forbidden \u2014 the admin role is required"
                     },
                     "422": {
                         "description": "Validation Error",
@@ -3465,6 +3597,89 @@
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/PredictionVoteRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/notify/prediction-seen/{notification_id}": {
+            "post": {
+                "tags": [
+                    "notifications"
+                ],
+                "summary": "Record that a prediction hint was rendered and/or its fold opened",
+                "description": "Stores the first rendered time and the first fold-open time on the notification's forecast row. A later call never overwrites a stored time; a time never reported stays null.",
+                "operationId": "record_prediction_seen_api_notify_prediction_seen__notification_id__post",
+                "parameters": [
+                    {
+                        "name": "notification_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Notification Id"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PredictionSeenRequest"
                             }
                         }
                     }
@@ -13150,7 +13365,7 @@
                     "v2-ask"
                 ],
                 "summary": "V2 Ask",
-                "description": "Route one question through CJ Flow v2 and return the terminal result.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.question is a non-empty string \u2264 4000 chars (Field-validated).\n\nEnsures:\n    - returns AskResponse; never 500 for an agent/replay/router/extract\n      failure \u2014 AskFlow degrades each to the receptionist.\n    - user_id / user_email come from the token, never the client body.",
+                "description": "Route one question through CJ Flow v2 and return the terminal result.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.question is a non-empty string \u2264 4000 chars (Field-validated).\n\nEnsures:\n    - returns AskResponse; never 500 for an agent/replay/router/extract\n      failure \u2014 AskFlow degrades each to the receptionist.\n    - user_id / user_email come from the token, never the client body.\n    - answers 503 with Retry-After when the shared embedding service is\n      unreachable after its retries: the caller may retry, and nothing\n      was asked.",
                 "operationId": "v2_ask_api_v2_ask_post",
                 "security": [
                     {
@@ -16131,6 +16346,23 @@
                     "muted"
                 ],
                 "title": "PokeMuteRequest"
+            },
+            "PredictionSeenRequest": {
+                "properties": {
+                    "rendered": {
+                        "type": "boolean",
+                        "title": "Rendered",
+                        "default": false
+                    },
+                    "fold_opened": {
+                        "type": "boolean",
+                        "title": "Fold Opened",
+                        "default": false
+                    }
+                },
+                "type": "object",
+                "title": "PredictionSeenRequest",
+                "description": "Body for POST /api/notify/prediction-seen/{notification_id}.\n\nEach flag reports one client event. The server stamps the time, never the client."
             },
             "PredictionVoteRequest": {
                 "properties": {

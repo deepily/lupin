@@ -766,6 +766,7 @@ Destroy and re-create the PredictionEngine singleton with current config. Used b
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | drop_table | boolean | False |  |
+| clear_pending | boolean | False |  |
 | x-api-key |  | False |  |
 | authorization |  | False |  |
 
@@ -776,6 +777,33 @@ Destroy and re-create the PredictionEngine singleton with current config. Used b
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid API key or bearer token |  |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/prediction-engine/accuracy`
+
+> **Prediction engine accuracy summary**
+
+Accuracy of the prediction log over a window: strict whole-card correctness over scored rows, with per-category and per-type breakdowns. Admin only, because it reports across users.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| window_days | integer | False | Days to look back |
+| category |  | False | Only this category |
+| response_type |  | False | Only this response type |
+| sender_id |  | False | Only this sender |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 401 | Unauthorized — no bearer token |  |
+| 403 | Forbidden — the admin role is required |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/get-session-id`
 
@@ -1168,6 +1196,33 @@ Record the user's 👍/👎 on a prediction hint. up→approved (reinforce in fu
 ### 📦 Request Body 
 
 [PredictionVoteRequest](#predictionvoterequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/notify/prediction-seen/{notification_id}`
+
+> **Record that a prediction hint was rendered and/or its fold opened**
+
+Stores the first rendered time and the first fold-open time on the notification's forecast row. A later call never overwrites a stored time; a time never reported stays null.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| notification_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[PredictionSeenRequest](#predictionseenrequest)
 
 ### ✅ Responses
 
@@ -4578,6 +4633,9 @@ Ensures:
     - returns AskResponse; never 500 for an agent/replay/router/extract
       failure — AskFlow degrades each to the receptionist.
     - user_id / user_email come from the token, never the client body.
+    - answers 503 with Retry-After when the shared embedding service is
+      unreachable after its retries: the caller may retry, and nothing
+      was asked.
 
 
 
@@ -5815,6 +5873,20 @@ One-shot peer queue snapshot.
 | Field | Type | Description |
 |-------|------|-------------|
 | muted | boolean |  |
+
+
+## PredictionSeenRequest
+
+
+Body for POST /api/notify/prediction-seen/{notification_id}.
+
+Each flag reports one client event. The server stamps the time, never the client.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| rendered | boolean |  |
+| fold_opened | boolean |  |
 
 
 ## PredictionVoteRequest
