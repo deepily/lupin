@@ -142,9 +142,51 @@ def test_the_factory_builds_a_probe_job_and_records_its_command_and_args():
     assert job.routing_command == COMMAND and job.original_args == { "probe": "true" } and job.session_id == "principle-extractor"
 
 
-def test_the_factory_builds_an_extraction_job_for_a_notification_id():
-    job = create_agentic_job( COMMAND, { "notification_id": "00000000-0000-4000-8000-0000000000aa" }, "u-1", "o@example.com", "s-1" )
-    assert job.probe is False and job.notification_id == "00000000-0000-4000-8000-0000000000aa"
+NOTIFICATION = "00000000-0000-4000-8000-0000000000aa"
+
+
+def _recipient( monkeypatch, recipient_id ):
+    """
+    Make the factory's database door return one notification owned by recipient_id.
+
+    Ensures:
+        - get_db yields a session whose get returns a row with that recipient id, or None when recipient_id is None
+    """
+    import cosa.rest.db.database as database
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    row = None if recipient_id is None else SimpleNamespace( recipient_id=recipient_id )
+    @contextmanager
+    def fake_get_db():
+        yield SimpleNamespace( get=lambda model, key: row )
+    monkeypatch.setattr( database, "get_db", fake_get_db )
+
+
+def test_the_factory_builds_an_extraction_job_when_the_submitter_is_the_recipient( monkeypatch ):
+    _recipient( monkeypatch, "u-1" )
+    job = create_agentic_job( COMMAND, { "notification_id": NOTIFICATION }, "u-1", "o@example.com", "s-1" )
+    assert job.probe is False and job.notification_id == NOTIFICATION
+
+
+def test_the_factory_refuses_to_extract_another_owners_answer( monkeypatch ):
+    _recipient( monkeypatch, "u-2" )
+    with pytest.raises( SubmitRefused, match="own answers" ):
+        create_agentic_job( COMMAND, { "notification_id": NOTIFICATION }, "u-1", "o@example.com", "s-1" )
+
+
+def test_the_factory_refuses_a_notification_that_does_not_exist_or_is_not_a_uuid( monkeypatch ):
+    _recipient( monkeypatch, None )
+    with pytest.raises( SubmitRefused, match="does not exist" ):
+        create_agentic_job( COMMAND, { "notification_id": NOTIFICATION }, "u-1", "o@example.com", "s-1" )
+    with pytest.raises( SubmitRefused ):
+        create_agentic_job( COMMAND, { "notification_id": "not-a-uuid" }, "u-1", "o@example.com", "s-1" )
+
+
+def test_a_probe_submit_reads_no_notification( monkeypatch ):
+    import cosa.rest.db.database as database
+    def forbidden(): raise AssertionError( "a probe must not open the database" )
+    monkeypatch.setattr( database, "get_db", forbidden )
+    assert create_agentic_job( COMMAND, { "probe": "true" }, "u-1", "o@example.com", "s-1" ).probe is True
 
 
 def test_the_factory_refuses_a_submit_with_neither_a_notification_id_nor_probe():
