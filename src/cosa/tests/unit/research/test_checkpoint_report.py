@@ -229,3 +229,11 @@ def test_a_sweep_point_that_beats_the_best_is_labelled_report_only_and_the_best_
 def test_a_sweep_is_not_shown_without_a_retune_result():
     """The sweep is an addition to the retune table, so alone it renders nothing."""
     assert "Retune sweep" not in _report( sweep_points=[ _point( 0.3, 3 ) ] )
+
+
+def test_a_sweep_point_between_two_grid_points_is_listed_between_them():
+    """Grid points 0.3 and 0.5 with a 0.4 sweep point give the rows grid, report only, grid."""
+    grid  = dict( RETUNE, points=[ _point( 0.5, 5 ), _point( 0.3, 3 ) ] )
+    text  = _report( retune=grid, sweep_points=[ _point( 0.4, 8 ) ] )
+    rows  = [ line for line in text.splitlines() if line.startswith( "| 0." ) ]
+    assert [ ( row.split( "|" )[ 1 ].strip(), row.split( "|" )[ -2 ].strip() ) for row in rows ] == [ ( "0.3", "grid" ), ( "0.4", "report only" ), ( "0.5", "grid" ) ]
