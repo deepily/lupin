@@ -23,6 +23,7 @@ from cosa.utils.notification_utils import extract_qualifier_comment, parse_field
 
 WHOLE_ANSWER_KEY = "$answer"   # the field key of a yes/no or open-ended answer; a card field uses its header
 FIELD_TYPES      = ( "multiple_choice", "open_ended_batch" )
+TEXT_TYPES       = ( "yes_no", "open_ended" )
 SAME             = "same"        # a field the draft already held, with the same picks
 UNDRAFTED        = "undrafted"   # a field answered after the reveal that the draft did not hold
 UNREADABLE       = "unreadable"  # a draft or answer that could not be decoded
@@ -58,6 +59,7 @@ def decode_answer_fields( response_type, stored ):
         - stored is None, or a dict in one of the forms the module docstring lists
 
     Ensures:
+        - returns None for any other response type, so a type added later is never read as free text unnoticed
         - returns { field_key: tuple of picks }, or None when a card answer holds no readable answers map
         - yes_no: one entry under the whole-answer key holding the stance ( yes, no or neither, lower case ), so a
           comment added or changed after the reveal is not a different answer; unreadable text is kept as typed, and
@@ -69,6 +71,7 @@ def decode_answer_fields( response_type, stored ):
           the whole-answer key with an empty tuple, a card gives {}
         - the dict's other keys ( source, answered_by ) are ignored
     """
+    if response_type not in FIELD_TYPES and response_type not in TEXT_TYPES: return None
     if response_type in FIELD_TYPES:
         if stored is None: return {}
         fields = parse_field_selections( stored )
@@ -120,7 +123,7 @@ def compare_draft_to_answer( response_type, draft_at_reveal, actual_value ):
 
 
 def classify_exposure( fold_opened_at, draft_at_reveal: Optional[dict], actual_value: Optional[dict],
-                       response_type, answered_at=None ) -> str:
+                       *, response_type, answered_at=None ) -> str:
     """
     Classify one card's final answer against the draft taken when its forecast was revealed.
 
@@ -128,8 +131,8 @@ def classify_exposure( fold_opened_at, draft_at_reveal: Optional[dict], actual_v
         - fold_opened_at: the first fold-open time, or None when the fold was never opened
         - draft_at_reveal: the stored draft, or None when unknown
         - actual_value: the stored final answer, in a form decode_answer_fields reads, or None when unanswered
-        - response_type: the card's response type
-        - answered_at: when the answer was stored ( the notification's responded_at ), or None when unknown
+        - response_type: the card's response type, passed by keyword
+        - answered_at, passed by keyword: when the answer was stored ( the notification's responded_at ), or None when unknown
 
     Ensures:
         - returns the unanswered class when actual_value is None, whatever else is known

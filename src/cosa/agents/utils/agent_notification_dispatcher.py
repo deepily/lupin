@@ -554,7 +554,8 @@ class AgentNotificationDispatcher:
         job_id: Optional[ str ] = None,
         role: str = None,
         priority: str = None,
-        response_default: Optional[ str ] = None
+        response_default: Optional[ str ] = None,
+        response_options_extra: Optional[ dict ] = None
     ) -> dict:
         """
         Present multiple-choice questions and get user's selection.
@@ -572,6 +573,8 @@ class AgentNotificationDispatcher:
                               (empty JSON) for the clean-stall path — dispatcher
                               interprets empty answers as timeout via Bug 7
                               normalization → VoiceGateTimeoutError.
+            response_options_extra: Optional keys merged into the ask's response_options beside
+                              "questions" (the review card sets "review_card" here). None adds nothing.
 
         Returns:
             dict: {"answers": {...}} with selections keyed by header
@@ -590,7 +593,7 @@ class AgentNotificationDispatcher:
                 priority          = NotificationPriority( priority or self.default_priority or "high" ),
                 timeout_seconds   = timeout,
                 response_default  = response_default,
-                response_options  = convert_questions_for_api( questions ),
+                response_options  = { **convert_questions_for_api( questions ), **( response_options_extra or {} ) },
                 sender_id         = self._resolve_sender_id( role ),
                 target_user       = effective_target,
                 abstract          = abstract,

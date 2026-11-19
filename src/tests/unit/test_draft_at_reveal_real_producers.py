@@ -106,7 +106,7 @@ def test_a_multiple_choice_draft_that_held_one_field_names_the_field_answered_af
     draft  = { "value": '{"answers":{"Database":"PostgreSQL"}}' }
     result = ex.compare_draft_to_answer( "multiple_choice", draft, _recorded_actual_value( engine, MULTI ) )
     assert result == { "outcome": ex.UNDRAFTED, "fields": { "Database": ex.SAME, "Features": ex.UNDRAFTED } }
-    assert ex.classify_exposure( "2026-11-19T12:00:00+00:00", draft, _recorded_actual_value( engine, MULTI ), "multiple_choice" ) == ex.EXPOSED
+    assert ex.classify_exposure( "2026-11-19T12:00:00+00:00", draft, _recorded_actual_value( engine, MULTI ), response_type="multiple_choice" ) == ex.EXPOSED
 
 
 def test_a_batch_field_changed_after_the_reveal_is_the_one_named_switched( engine ):

@@ -19,6 +19,7 @@ from datetime import timedelta
 
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.history_derive import attribution_tier
+from cosa.agents.prediction_engine.principle_features import feature_lookup
 from cosa.agents.prediction_engine.principle_retrieval import load_owner_ledger, session_lookup
 from cosa.agents.prediction_engine.principle_status import SOURCE_EXTRACT, derive_statuses, usable_at
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
@@ -130,7 +131,8 @@ def principles_as_of( session, owner_id, asked_at, extractor_version ):
         - a principle with no usable evidence is absent
     """
     principles, ledger = load_owner_ledger( session, owner_id )
-    statuses = derive_statuses( principles, ledger, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in ledger if e.session_key is None ] ) )
+    statuses = derive_statuses( principles, ledger, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in ledger if e.session_key is None ] ),
+                               feature_lookup( session, [ e.notification_id for e in ledger ] ) )
     found    = []
     for principle in sorted( principles, key=lambda p: str( p.id ) ):
         if statuses[ principle.id ] is None: continue

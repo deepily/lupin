@@ -10,7 +10,8 @@ So this module takes it as an argument, the ``c0`` contract below, and without i
 It has its own switch (``prediction learner principles forecast enabled``, default off).
 It has its own concurrency cap (``prediction learner principles forecast max concurrent``).
 So it cannot take a slot from the baseline job.
-A card beyond the cap gets a row with the reason ``capacity`` at once, not a queue.
+A card beyond the cap gets a row with the capped reason at once, not a queue.
+The per-arm summary (``arm_summary.per_arm_summary``) reads those rows and reports timeliness, capped and no_row.
 
 The ``c0`` contract, an object with:
 
@@ -29,13 +30,13 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
-import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieve_principles
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog
+from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
+from cosa.rest.postgres_models import Notification, PredictionArmForecast
 from cosa.utils.iso_timestamp import aware_moment
 
 ARM              = "B1"
@@ -47,7 +48,6 @@ STATUS_CAPACITY  = "capacity"
 STATUS_FAILED    = "failed"
 REASON_BLOCKED   = "blocked by phase 6"
 REASON_SWITCH    = "switch off"
-REASON_CAPACITY  = "capacity"
 REASON_STORED    = "already stored"
 REASON_UNREADABLE = "unreadable_forecast"
 BLOCK_HEADING    = "Principles that apply to this card, learned from earlier answers:"
@@ -58,6 +58,23 @@ CONTRACT_VALUES  = ( "model", "timeout_seconds", "predictor_version" )
 CONTRACT_ERRORS  = "errors"
 CONTRACT_SYNC    = { "build_prompts": 1, "parse": 2 }
 CONTRACT_ASYNC   = "complete"
+
+
+def switch_enabled( key ):
+    """
+    Say whether one learner switch is on.
+
+    Requires:
+        - key names a boolean INI setting; an unreadable setting reads as off
+
+    Ensures:
+        - returns True only when the INI key is true
+        - never raises, so a settings failure cannot stop an ask
+    """
+    try: return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( key, default=False, return_type="boolean" )
+    except Exception as settings_error:
+        print( f"[PRINCIPLES] ⚠️ Switch '{key}' unreadable, treated as off: {settings_error}" )
+        return False
 
 
 def principles_forecast_enabled():
@@ -71,10 +88,26 @@ def principles_forecast_enabled():
         - returns True only when the INI key named by SWITCH_KEY is true
         - never raises, so a settings failure cannot stop an ask
     """
-    try: return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( SWITCH_KEY, default=False, return_type="boolean" )
-    except Exception as settings_error:
-        print( f"[PRINCIPLES] ⚠️ Principles forecast switch unreadable, treated as off: {settings_error}" )
-        return False
+    return switch_enabled( SWITCH_KEY )
+
+
+def read_cap( key ):
+    """
+    Read how many calls of one arm may run at once.
+
+    Requires:
+        - the INI file carries the key
+
+    Ensures:
+        - returns a positive int
+
+    Raises:
+        - MissingConfigKeyError if the key is missing or blank, so a missing cap never becomes unbounded
+        - ValueError if the value is not a positive integer
+    """
+    cap = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( key, return_type="int" )
+    if cap < 1: raise ValueError( f"'{key}' must be a positive integer, got {cap}" )
+    return cap
 
 
 def concurrency_cap():
@@ -91,9 +124,7 @@ def concurrency_cap():
         - MissingConfigKeyError if the key is missing or blank, so a missing cap never becomes unbounded
         - ValueError if the value is not a positive integer
     """
-    cap = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( CAP_KEY, return_type="int" )
-    if cap < 1: raise ValueError( f"'{CAP_KEY}' must be a positive integer, got {cap}" )
-    return cap
+    return read_cap( CAP_KEY )
 
 
 class CapGate:
@@ -205,7 +236,7 @@ def card_text( episode ):
     return "\n".join( part for part in parts if part )
 
 
-def _row_present( session, key ):
+def _row_present( session, key, arm=ARM ):
     """
     Say whether a card already has its principles row on this session.
 
@@ -213,12 +244,12 @@ def _row_present( session, key ):
         - session is an active session; key is the card's notification UUID
 
     Ensures:
-        - returns True when a prediction_arm_forecast row for the card and the principles arm exists
+        - returns True when a prediction_arm_forecast row for the card and the arm exists
     """
-    return session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == key, PredictionArmForecast.arm == ARM ).first() is not None
+    return session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == key, PredictionArmForecast.arm == arm ).first() is not None
 
 
-def _has_row( session_factory, notification_id ):
+def _has_row( session_factory, notification_id, arm=ARM ):
     """
     Say whether a card already has its principles row.
 
@@ -229,11 +260,11 @@ def _has_row( session_factory, notification_id ):
         - returns True when a prediction_arm_forecast row for this card and the principles arm exists
     """
     with session_factory() as session:
-        found = _row_present( session, uuid.UUID( str( notification_id ) ) )
+        found = _row_present( session, uuid.UUID( str( notification_id ) ), arm )
     return found
 
 
-def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, version, principle_ids, reason ):
+def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, version, principle_ids, reason, arm=ARM ):
     """
     Store the one principles row for a card, unless it already has one.
 
@@ -241,7 +272,7 @@ def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, 
         - session_factory returns a context-managed session; ready_at is None for a card with no forecast
 
     Ensures:
-        - adds one prediction_arm_forecast row, for the principles arm, displayed false, and commits
+        - adds one prediction_arm_forecast row, for the arm given, displayed false, and commits
         - writes nothing when the card already has its principles row
         - a row that arrives between the check and the insert breaks the unique key; that is read as already stored,
           the session is closed with its failed commit rolled back, and nothing is raised
@@ -249,50 +280,61 @@ def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, 
     """
     with session_factory() as session:
         key     = uuid.UUID( str( notification_id ) )
-        written = not _row_present( session, key )
+        written = not _row_present( session, key, arm )
         if written:
-            session.add( PredictionArmForecast( notification_id=key, arm=ARM, predictor_version=version, forecast=forecast, input_cutoff=asked_at,
+            session.add( PredictionArmForecast( notification_id=key, arm=arm, predictor_version=version, forecast=forecast, input_cutoff=asked_at,
                                                 evidence_ids=principle_ids, forecast_ready_at=ready_at, abstention_reason=reason, displayed=False ) )
             try: session.commit()
             except IntegrityError: written = False
     return written
 
 
-def _prepare( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k ):
+def _prepare( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k, use_principles=True ):
     """
     Gather the inputs as of the ask: the episode, the principles and the two prompts.
 
     Requires:
-        - session_factory returns a context-managed session; c0 and embedder as run_b1 takes them
+        - session_factory returns a context-managed session; c0 and embedder as run_arm takes them
+        - use_principles is False for an arm that adds no principle block; its embedder is then not called
 
     Ensures:
         - returns ( episode, selected, block, system prompt, user prompt ), everything as of the ask and nothing later
+        - without principles the selection is empty, the block is principle_block of none, and the prompts are the baseline's own
     """
     with session_factory() as session:
         episode  = episode_view( session, notification_id )
-        vector   = embedder.encode( card_text( episode ) )
-        selected = retrieve_principles( session, episode[ "owner_id" ], episode[ "project" ], vector, aware_moment( episode[ "asked_at" ] ),
-                                        encoder_version, extractor_version, k=k )[ "principles" ]
+        selected = []
+        if use_principles:
+            vector   = embedder.encode( card_text( episode ) )
+            selected = retrieve_principles( session, episode[ "owner_id" ], episode[ "project" ], vector, aware_moment( episode[ "asked_at" ] ),
+                                            encoder_version, extractor_version, k=k )[ "principles" ]
     block            = principle_block( selected )
     system, user     = with_principles( *c0.build_prompts( episode ), block )
     return episode, selected, block, system, user
 
 
-async def run_b1( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, gate, enabled=None, k=DEFAULT_K, clock=None ):
+async def run_arm( arm, switch_key, version_suffix, use_principles, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, gate,
+                   enabled=None, k=DEFAULT_K, clock=None ):
     """
-    Make the principles forecast for one ask, and store its row.
+    Make one arm's forecast for one ask, and store its row.
+
+    The principles forecast and the Opus twins share this one path. They differ only in the arm name, the switch, the version suffix,
+    whether a principle block is added, and the model the baseline object names.
 
     Requires:
+        - arm names the row's arm; switch_key is the INI switch that gates it; version_suffix is added to the baseline's version
+        - use_principles is True to add the principle block and False to send the baseline's prompts unchanged
         - session_factory returns a context-managed session; notification_id names an ask
         - c0 is the baseline contract in the module docstring, or None while the background forecast job has not landed
         - embedder has encode( text ) returning a vector from the encoder named encoder_version
-        - gate is a CapGate; enabled is None (read the INI switch) or a bool; clock is None or a function returning an aware datetime
+        - gate is a CapGate; enabled is None (read the INI switch named by switch_key) or a bool; clock is None or a function returning an aware datetime
 
     Ensures:
         - returns { status, reason }; status is ran, not_run, capacity or failed
+        - only a failure gathering the inputs adds a third key, stored, True when its row was saved; no other result has it
         - with the switch off, or with c0 None (reason REASON_BLOCKED), nothing is read, called or written
         - a card that already has its row is left alone, with no call (reason "already stored")
-        - past the cap, one row with forecast None and reason "capacity" is written and no model is called
+        - past the cap, one row with forecast None and the capped reason (CAPPED_ARM_REASON) is written and no model is called
         - a baseline that does not meet the contract raises TypeError before anything is read or written
         - a failure gathering the inputs stores one row with the reason "input_error: <exception class>", the cutoff and no
           forecast, and returns failed with stored True; only a card that does not exist raises, since it has no cutoff to store
@@ -302,24 +344,24 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
           failed call stores one row with the reason and no forecast
         - the cap place is always given back
     """
-    if not ( principles_forecast_enabled() if enabled is None else enabled ): return { "status": STATUS_NOT_RUN, "reason": REASON_SWITCH }
+    if not ( switch_enabled( switch_key ) if enabled is None else enabled ): return { "status": STATUS_NOT_RUN, "reason": REASON_SWITCH }
     if c0 is None: return { "status": STATUS_NOT_RUN, "reason": REASON_BLOCKED }
     check_baseline( c0 )
-    if await asyncio.to_thread( _has_row, session_factory, notification_id ): return { "status": STATUS_NOT_RUN, "reason": REASON_STORED }
+    if await asyncio.to_thread( _has_row, session_factory, notification_id, arm ): return { "status": STATUS_NOT_RUN, "reason": REASON_STORED }
     now = clock if clock is not None else ( lambda: datetime.now( timezone.utc ) )
     if not gate.try_enter():
         asked = await asyncio.to_thread( _asked_at, session_factory, notification_id )
-        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, c0.predictor_version + VERSION_SUFFIX, [], REASON_CAPACITY )
-        return { "status": STATUS_CAPACITY, "reason": REASON_CAPACITY }
+        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, c0.predictor_version + version_suffix, [], CAPPED_ARM_REASON, arm )
+        return { "status": STATUS_CAPACITY, "reason": CAPPED_ARM_REASON }
     try:
-        version = c0.predictor_version + VERSION_SUFFIX
+        version = c0.predictor_version + version_suffix
         try:
-            episode, selected, block, system, user = await asyncio.to_thread( _prepare, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k )
+            episode, selected, block, system, user = await asyncio.to_thread( _prepare, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k, use_principles )
         except Exception as input_error:  # any failure gathering inputs (database, embedder, bound) must still leave a row
             reason = f"{REASON_INPUT}: {type( input_error ).__name__}"
             try:
                 asked = await asyncio.to_thread( _asked_at, session_factory, notification_id )
-                await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [], reason )
+                await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [], reason, arm )
             except SQLAlchemyError: return { "status": STATUS_FAILED, "reason": reason, "stored": False }  # the database that failed the read cannot take the row
             return { "status": STATUS_FAILED, "reason": reason, "stored": True }
         asked   = aware_moment( episode[ "asked_at" ] )
@@ -332,12 +374,26 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
         except ValueError:
             reason = REASON_UNREADABLE
         else:
-            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, now(), forecast, version, [ str( i ) for i in ids ], None )
+            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, now(), forecast, version, [ str( i ) for i in ids ], None, arm )
             return { "status": STATUS_RAN, "reason": None }
-        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [ str( i ) for i in ids ], reason )
+        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [ str( i ) for i in ids ], reason, arm )
         return { "status": STATUS_FAILED, "reason": reason }
     finally:
         gate.leave()
+
+
+async def run_b1( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, gate, enabled=None, k=DEFAULT_K, clock=None ):
+    """
+    Make the principles forecast for one ask, and store its row.
+
+    Requires:
+        - the same as run_arm, with the arm, switch and version suffix fixed to the principles forecast's
+
+    Ensures:
+        - is run_arm for the principles forecast with the principle block on, so everything run_arm ensures holds
+    """
+    return await run_arm( ARM, SWITCH_KEY, VERSION_SUFFIX, True, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, gate,
+                          enabled=enabled, k=k, clock=clock )
 
 
 def _asked_at( session_factory, notification_id ):
@@ -358,34 +414,3 @@ def _asked_at( session_factory, notification_id ):
         created = None if row is None else row.created_at
     if row is None: raise LookupError( f"notification {notification_id} does not exist" )
     return aware_moment( created )
-
-
-def arm_timeliness( session, arm, since ):
-    """
-    Count one arm's answered cards by whether its forecast was ready before the answer.
-
-    Requires:
-        - session is open on a database holding prediction_arm_forecast and notifications
-        - since is an aware datetime; only cards asked at or after it are counted
-
-    Ensures:
-        - returns { arm, answered, ready_before_answer, late, not_ready, capacity, no_row }, over cards answered by now
-        - a card the cap turned away counts as capacity, named apart so the cap's effect is visible
-        - a card with no ready time and another reason counts as not_ready, and is not timely
-        - a real ask (one with a prediction_log row) that was answered and has no row for the arm counts as no_row
-        - answered equals the other five added up, so the timely share never hides a card that has no row
-    """
-    counts = { "arm": arm, "answered": 0, "ready_before_answer": 0, "late": 0, "not_ready": 0, "capacity": 0, "no_row": 0 }
-    rows = session.query( PredictionArmForecast, Notification ).join( Notification, Notification.id == PredictionArmForecast.notification_id ).filter(
-        PredictionArmForecast.arm == arm, Notification.created_at >= since, Notification.responded_at.isnot( None ) ).all()
-    for forecast, notification in rows:
-        counts[ "answered" ] += 1
-        if forecast.abstention_reason == REASON_CAPACITY: counts[ "capacity" ] += 1
-        elif forecast.forecast_ready_at is None: counts[ "not_ready" ] += 1
-        elif aware_moment( forecast.forecast_ready_at ) <= aware_moment( notification.responded_at ): counts[ "ready_before_answer" ] += 1
-        else: counts[ "late" ] += 1
-    has_row = sa.select( PredictionArmForecast.id ).where( PredictionArmForecast.notification_id == Notification.id, PredictionArmForecast.arm == arm ).exists()
-    counts[ "no_row" ] = session.query( Notification ).join( PredictionLog, PredictionLog.notification_id == Notification.id ).filter(
-        Notification.created_at >= since, Notification.responded_at.isnot( None ), ~has_row ).count()
-    counts[ "answered" ] += counts[ "no_row" ]
-    return counts

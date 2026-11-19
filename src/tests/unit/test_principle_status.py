@@ -319,3 +319,15 @@ def test_a_row_without_its_own_key_falls_back_to_the_lookup():
     """A row with no session key asks the lookup, and one with a key does not."""
     rows = [ row( note="n2", session_key=None ), row( note="gone", session_key="s9" ) ]
     assert status_of( [ principle() ], rows )[ "sessions" ] == 2
+
+
+def test_a_split_contradicts_row_that_sorts_latest_is_still_no_ruling():
+    """
+    The contradicts row of a split never speaks for the principle, even when it sorts last.
+
+    With the contradicts row the later of the pair, the refines row still rules the principle.
+    """
+    refines = row( note="card", condition="f is a", source="split_step", answered=-2 * HOUR, extracted=-2 * HOUR )
+    other   = row( note="card", relation="contradicts", condition="f is b", source="split_step", answered=-HOUR, extracted=-HOUR )
+    result  = status_of( [ principle() ], [ other, refines, row( note="n1" ) ] )
+    assert result[ "status" ] != RETRACTED and result[ "ruled" ] is True
