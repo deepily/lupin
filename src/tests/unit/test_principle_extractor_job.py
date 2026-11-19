@@ -163,7 +163,7 @@ def _ask( db, minutes=0, answer="no", answered_by=OWNER, source="ui", **extra ):
     return str( row[ "id" ] )
 
 
-def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask.approval_needs_link", statement="Existing principle.", owner=OWNER ):
+def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask.approval_needs_link", statement="Existing principle.", owner=OWNER, version="old-extractor" ):
     """
     Insert a principle and return its row.
 
@@ -171,7 +171,7 @@ def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask
         - the row belongs to owner with the given encoder, vector, scope, dimension and statement, and the test extractor version
     """
     row = PreferencePrinciple( id=uuid.uuid4(), owner_id=str( owner ), kind="decision", dimension=dimension, statement=statement, scope=scope,
-                               embedding=vector if vector is not None else vec( 1, 0, 1, 0.01 ), encoder_version=encoder, extractor_version="old-extractor" )
+                               embedding=vector if vector is not None else vec( 1, 0, 1, 0.01 ), encoder_version=encoder, extractor_version=version )
     db.add( row )
     db.commit()
     return row
@@ -269,6 +269,55 @@ def test_a_named_principle_of_another_scope_is_not_joined_and_a_new_principle_is
     ask   = _ask( db, answer="no" )
     _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp( "A global habit." ) ], relations={ str( known.id ): "supports" } ) ) ) )
     assert db.query( PreferencePrinciple ).count() == 2 and db.query( PreferenceEvidence ).one().principle_id != known.id
+    assert db.query( PreferencePrinciple ).filter( PreferencePrinciple.id != known.id ).one().continues_principle_id == known.id, "it names an earlier-version principle"
+
+
+CURRENT = f"{MODEL}:extractor-v1"
+
+
+def _new_principle( db, known_ids ):
+    """
+    Return the one principle that is not among the known ones.
+
+    Ensures:
+        - returns the row; raises if there is not exactly one
+    """
+    return db.query( PreferencePrinciple ).filter( PreferencePrinciple.id.notin_( known_ids ) ).one()
+
+
+def test_a_new_principle_continues_the_lowest_id_among_the_named_earlier_version_principles( db ):
+    first  = _principle( db, scope="project:lupin", statement="One." )
+    second = _principle( db, scope="project:lupin", statement="Two." )
+    lowest = min( first.id, second.id, key=str )
+    _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ], relations={ str( first.id ): "refines", str( second.id ): "supports" } ) ) ) )
+    assert _new_principle( db, [ first.id, second.id ] ).continues_principle_id == lowest
+
+
+def test_a_relation_within_the_current_version_never_sets_continues_whatever_the_relation_word( db ):
+    same = _principle( db, scope="project:lupin", version=CURRENT )
+    _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ], relations={ str( same.id ): "contradicts" } ) ) ) )
+    assert _new_principle( db, [ same.id ] ).continues_principle_id is None
+
+
+def test_a_principle_that_names_no_other_continues_none_and_a_reused_one_is_never_changed( db ):
+    ask   = _ask( db, answer="no" )
+    reply = _reply( _result( hypotheses=[ _hyp() ] ) )
+    _run( db, ask, Model( reply ) )
+    only  = db.query( PreferencePrinciple ).one()
+    assert only.continues_principle_id is None
+    earlier = _principle( db, scope="project:lupin", statement="Earlier.", vector=only.embedding )
+    _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp() ], relations={ str( earlier.id ): "supports" } ) ) ) )
+    db.refresh( only )
+    assert only.continues_principle_id is None and db.query( PreferencePrinciple ).count() == 2
+
+
+def test_every_evidence_row_carries_the_session_of_the_answered_ask_or_none_when_it_has_none( db ):
+    ask = _ask( db, answer="no" )
+    _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ) )
+    assert [ e.session_key for e in db.query( PreferenceEvidence ) ] == [ "ab12cd34" ]
+    bare = _ask( db, 5, answer="no", sender_id="claude.code@lupin.deepily.ai" )
+    _run( db, bare, Model( _reply( _result( hypotheses=[ _hyp( "Another way to say it." ) ] ) ) ) )
+    assert sorted( e.session_key is None for e in db.query( PreferenceEvidence ) ) == [ False, True ]
 
 
 def test_a_bare_yes_adds_a_supporting_row_to_a_principle_that_applied_and_creates_no_principle( db ):

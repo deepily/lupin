@@ -151,6 +151,12 @@ def test_the_first_ask_sees_no_principles_the_last_sees_some_and_a_lag_longer_th
     assert slow[ "counts" ] == instant[ 1 ][ "counts" ], "the tables still fill once the run ends"
 
 
+def test_principles_reach_the_arms_with_a_derived_status_and_later_ones_are_established_across_sessions( instant ):
+    seen_status = { p[ "status" ] for r in instant[ 1 ][ "seen" ] for p in r[ "principles" ] }
+    assert seen_status == { "hypothesis", "established" }
+    assert [ p[ "status" ] for p in er.principles_as_of( instant[ 0 ], OWNER, T0 + timedelta( days=365 ), "replay-model:extractor-v1" ) ] == [ "established", "established" ]
+
+
 def test_an_arm_is_never_handed_a_history_answer_given_after_its_ask( instant ):
     out = instant[ 1 ]
     with_history = 0
@@ -195,11 +201,11 @@ def test_principles_as_of_keeps_only_evidence_usable_at_the_moment_and_skips_a_p
     loaded.add( PreferenceEvidence( id=uuid.uuid4(), principle_id=other.id, notification_id=uuid.uuid4(), field_key="x", relation="supports", answered_at=T0 + timedelta( hours=3 ),
                                     extracted_at=T0 + timedelta( hours=3 ), extractor_version="x", source="extractor" ) )
     loaded.commit()
-    got = er.principles_as_of( loaded, OWNER, T0 + timedelta( hours=1 ) )
-    assert [ ( p[ "id" ], [ e[ "field_key" ] for e in p[ "evidence" ] ] ) for p in got ] == [ ( str( principle.id ), [ "early" ] ) ]
-    assert er.principles_as_of( loaded, OWNER, T0 - timedelta( hours=1 ) ) == []
-    assert len( er.principles_as_of( loaded, OWNER, T0 + timedelta( hours=4 ) ) ) == 2
-    assert er.principles_as_of( loaded, "someone-else", T0 + timedelta( hours=4 ) ) == []
+    got = er.principles_as_of( loaded, OWNER, T0 + timedelta( hours=1 ), "x" )
+    assert [ ( p[ "id" ], p[ "status" ], [ e[ "field_key" ] for e in p[ "evidence" ] ] ) for p in got ] == [ ( str( principle.id ), "hypothesis", [ "early" ] ) ]
+    assert er.principles_as_of( loaded, OWNER, T0 - timedelta( hours=1 ), "x" ) == []
+    assert len( er.principles_as_of( loaded, OWNER, T0 + timedelta( hours=4 ), "x" ) ) == 2
+    assert er.principles_as_of( loaded, "someone-else", T0 + timedelta( hours=4 ), "x" ) == [] and er.principles_as_of( loaded, OWNER, T0 + timedelta( hours=4 ), "other" ) == []
 
 
 def test_the_extractor_runs_for_an_answer_before_the_first_ask_that_could_know_it_and_not_before( loaded, engine ):

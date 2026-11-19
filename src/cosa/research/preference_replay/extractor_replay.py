@@ -19,8 +19,11 @@ from datetime import timedelta
 
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.history_derive import attribution_tier
+from cosa.agents.prediction_engine.principle_retrieval import load_owner_ledger, session_lookup
+from cosa.agents.prediction_engine.principle_status import SOURCE_EXTRACT, derive_statuses, usable_at
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
+from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
 from cosa.research.preference_replay.replay_loop import always_yes_arm, replay
 from cosa.research.preference_replay.scratch_db import load_export, scratch_session, session_scope
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM
@@ -110,28 +113,33 @@ def asks_from_session( session, engine, embed_fn=stand_in_vector ):
     return asks
 
 
-def principles_as_of( session, owner_id, asked_at ):
+def principles_as_of( session, owner_id, asked_at, extractor_version ):
     """
-    List the owner's principles with only the evidence that was usable at a moment.
+    List the owner's principles at a moment, each with its derived status and evidence.
 
     Requires:
         - session is an active session; asked_at is an aware datetime
+        - extractor_version is the version the run's extractor writes
 
     Ensures:
-        - returns [ { id, kind, dimension, statement, scope, evidence } ] sorted by id
-        - evidence holds only rows with answered_at and extracted_at both at or before asked_at
-        - a principle with no such row is absent
-        - no status is derived here: contested and retracted principles are not removed
+        - returns [ { id, kind, dimension, statement, scope, status, evidence } ] sorted by id
+        - status is the one principle_status.derive_statuses gives as of asked_at, so a ruling and a contradiction
+          count by the same one as-of rule; contested and retracted principles are listed with that status, not removed
+        - evidence holds only this version's extractor rows usable at the ask: answered, extracted and not retracted by then
+        - a principle with no usable evidence is absent
     """
-    found = {}
-    query = session.query( PreferencePrinciple, PreferenceEvidence ).join( PreferenceEvidence, PreferenceEvidence.principle_id == PreferencePrinciple.id )
-    for principle, evidence in query.filter( PreferencePrinciple.owner_id == owner_id ).order_by( PreferencePrinciple.id, PreferenceEvidence.id ):
-        if aware_moment( evidence.answered_at ) > asked_at or aware_moment( evidence.extracted_at ) > asked_at: continue
-        entry = found.setdefault( str( principle.id ), { "id": str( principle.id ), "kind": principle.kind, "dimension": principle.dimension,
-                                                          "statement": principle.statement, "scope": principle.scope, "evidence": [] } )
-        entry[ "evidence" ].append( { "notification_id": str( evidence.notification_id ), "field_key": evidence.field_key, "relation": evidence.relation,
-                                      "condition": evidence.condition, "answered_at": aware_moment( evidence.answered_at ), "extracted_at": aware_moment( evidence.extracted_at ) } )
-    return [ found[ key ] for key in sorted( found ) ]
+    principles, ledger = load_owner_ledger( session, owner_id )
+    statuses = derive_statuses( principles, ledger, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in ledger if e.session_key is None ] ) )
+    found    = []
+    for principle in sorted( principles, key=lambda p: str( p.id ) ):
+        if statuses[ principle.id ] is None: continue
+        rows = sorted( ( e for e in ledger if e.principle_id == principle.id and e.source == SOURCE_EXTRACT and e.extractor_version == extractor_version
+                         and usable_at( e, asked_at ) ), key=lambda e: str( e.id ) )
+        found.append( { "id": str( principle.id ), "kind": principle.kind, "dimension": principle.dimension, "statement": principle.statement, "scope": principle.scope,
+                        "status": statuses[ principle.id ][ "status" ],
+                        "evidence": [ { "notification_id": str( e.notification_id ), "field_key": e.field_key, "relation": e.relation, "condition": e.condition,
+                                        "answered_at": aware_moment( e.answered_at ), "extracted_at": aware_moment( e.extracted_at ) } for e in rows ] } )
+    return found
 
 
 class ExtractorReplay:
@@ -157,6 +165,7 @@ class ExtractorReplay:
         self.query_fn  = query_fn
         self.embed_fn  = embed_fn
         self.model     = model
+        self.version   = f"{model}:{PROMPT_VERSION}"
         self.encoder   = encoder
         self.summaries = []
 
@@ -200,10 +209,10 @@ class ExtractorReplay:
 
         Ensures:
             - runs catch_up to asked_at first, so every answer usable by then is in the tables
-            - returns principles_as_of for the ask's owner, with only evidence usable at the ask
+            - returns principles_as_of for the ask's owner and this run's extractor version, with only evidence usable at the ask
         """
         self.catch_up( asked_at )
-        return principles_as_of( self.session, ask_at_ask[ "recipient_id" ], asked_at )
+        return principles_as_of( self.session, ask_at_ask[ "recipient_id" ], asked_at, self.version )
 
 
 def make_recorder( seen ):

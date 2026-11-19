@@ -22,6 +22,7 @@ from cosa.agents.principle_learner.extractor_rules import card_text, check_field
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
 from cosa.rest.postgres_models import Notification
+from cosa.utils.notification_utils import sender_session_suffix
 from cosa.utils.iso_timestamp import aware_moment
 import cosa.utils.util as cu
 
@@ -221,7 +222,8 @@ class PrincipleExtractorJob( AgenticJobBase ):
             checked   = check_field( by_key[ entry[ "field_key" ] ], grounding, projects, entry[ "bare_yes" ], ids )
             report[ "rejected" ].extend( { "field_key": entry[ "field_key" ], **item } for item in checked[ "rejected" ] )
             extractor_store.apply_field( session, str( row.recipient_id ), row.id, entry[ "field_key" ], checked, neighbours,
-                                         ( aware_moment( row.responded_at ), now ), ( extractor, encoder ), embed, report )
+                                         ( aware_moment( row.responded_at ), now ), ( extractor, encoder ), embed,
+                                         sender_session_suffix( row.sender_id ), report )
         return self._summary( "extracted", report=report, influenced=influenced )
 
     def _summary( self, status, report=None, influenced=None ):
