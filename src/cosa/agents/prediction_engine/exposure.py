@@ -16,7 +16,8 @@ EXPOSED    = "exposed"      # revealed, but no draft was sent: cannot tell, coun
 UNANSWERED = "unanswered"   # no final answer yet, so there is nothing to classify
 
 
-def classify_exposure( fold_opened_at, draft_at_reveal: Optional[dict], actual_value: Optional[dict] ) -> str:
+def classify_exposure( fold_opened_at, draft_at_reveal: Optional[dict], actual_value: Optional[dict],
+                       answered_at=None ) -> str:
     """
     Classify one card's final answer against the draft taken when its forecast was revealed.
 
@@ -24,19 +25,25 @@ def classify_exposure( fold_opened_at, draft_at_reveal: Optional[dict], actual_v
         - fold_opened_at: the first fold-open time, or None when the fold was never opened
         - draft_at_reveal: { "value": ... } or None when unknown
         - actual_value: the stored final answer { "value": ... }, or None when unanswered
+        - answered_at: when the answer was stored ( the notification's responded_at ), or None when unknown
 
     Ensures:
         - returns the unanswered class when actual_value is None, whatever else is known
         - returns the unaided class when the fold was never opened, even if a draft is stored
+        - returns the unaided class when the fold opened at or after answered_at: equal counts as too late
+          to influence, the same way an equal time counts as known in the as-of rule
         - with a reveal and no draft, returns the exposed class
         - with a reveal and a draft, returns the unaided class when the two "value" entries are equal, else the switched class
         - compares the "value" entry only, so an answer's source or author never makes a switch
+        - compares values with ==, so a list value is ordered: the same items in another order read as
+          switched ( the seen route requires a "value" key in a draft, so a stored draft always has one )
 
     Raises:
         - KeyError if a given draft or answer holds no "value" entry
     """
     if actual_value is None: return UNANSWERED
     if fold_opened_at is None: return UNAIDED
+    if answered_at is not None and fold_opened_at >= answered_at: return UNAIDED
     if draft_at_reveal is None: return EXPOSED
     return UNAIDED if draft_at_reveal[ "value" ] == actual_value[ "value" ] else SWITCHED
 

@@ -321,6 +321,24 @@ class TestRecordSeen( _PLRTestBase ):
         self.assertFalse( later[ "draft_recorded" ] )
         self.assertEqual( row.draft_at_reveal, { "value": "yes" } )
 
+    def test_a_draft_on_a_call_that_does_not_open_the_fold_is_ignored( self ):
+        row = self._row()
+        out = self.repo.record_seen( _NID, rendered=True, draft_at_reveal={ "value": "yes" } )
+        self.assertFalse( out[ "draft_recorded" ] )
+        self.assertIsNone( row.draft_at_reveal )
+
+    def test_a_draft_after_the_fold_time_was_already_stored_is_ignored( self ):
+        row = self._row( fold_opened_at=datetime( 2020, 1, 1, tzinfo=timezone.utc ) )
+        out = self.repo.record_seen( _NID, fold_opened=True, draft_at_reveal={ "value": "yes" } )
+        self.assertEqual( out, { "rendered_recorded": False, "fold_opened_recorded": False, "draft_recorded": False } )
+        self.assertIsNone( row.draft_at_reveal )
+
+    def test_a_draft_and_the_first_fold_open_in_one_call_are_both_stored( self ):
+        row = self._row()
+        out = self.repo.record_seen( _NID, fold_opened=True, draft_at_reveal={ "value": "yes" } )
+        self.assertTrue( out[ "fold_opened_recorded" ] and out[ "draft_recorded" ] )
+        self.assertEqual( row.draft_at_reveal, { "value": "yes" } )
+
     def test_no_draft_leaves_the_stored_draft_untouched( self ):
         row = self._row( draft_at_reveal={ "value": "yes" } )
         out = self.repo.record_seen( _NID, fold_opened=True )

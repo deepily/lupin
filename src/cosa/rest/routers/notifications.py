@@ -9,7 +9,7 @@ and managing notification lifecycle (played/deleted status).
 from fastapi import APIRouter, Query, HTTPException, Depends, Body, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Annotated, Literal
 import zoneinfo
@@ -2595,6 +2595,27 @@ class PredictionSeenRequest( BaseModel ):
     rendered        : bool = False
     fold_opened     : bool = False
     draft_at_reveal : Optional[dict] = None
+
+    @field_validator( "draft_at_reveal" )
+    @classmethod
+    def _draft_has_a_value_and_is_small( cls, draft ):
+        """
+        Refuse a draft that is not shaped like a stored answer.
+
+        Requires:
+            - draft is None or a JSON object
+
+        Ensures:
+            - returns draft unchanged when it is None, or holds a "value" key and is at most 4096 characters as JSON
+            - otherwise raises ValueError, which the route answers as 422
+
+        Raises:
+            - ValueError if the object has no "value" key or is over 4096 characters as JSON
+        """
+        if draft is None: return draft
+        if "value" not in draft: raise ValueError( "draft_at_reveal needs a \"value\" key" )
+        if len( json.dumps( draft ) ) > 4096: raise ValueError( "draft_at_reveal is over 4096 characters" )
+        return draft
 
 
 @router.post(

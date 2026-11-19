@@ -30,6 +30,22 @@ class TestClassifyExposure( unittest.TestCase ):
     def test_a_reveal_with_no_draft_is_exposed( self ):
         self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "yes" ) ), ex.EXPOSED )
 
+    def test_a_reveal_after_the_answer_is_unaided_with_or_without_a_draft( self ):
+        answered = _OPENED - dt.timedelta( minutes=1 )
+        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), answered ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), answered ), ex.UNAIDED )
+
+    def test_a_reveal_exactly_at_the_answer_time_is_too_late_to_influence( self ):
+        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "no" ), _OPENED ), ex.UNAIDED )
+
+    def test_a_reveal_before_the_answer_is_judged_on_the_draft( self ):
+        answered = _OPENED + dt.timedelta( minutes=1 )
+        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), answered ), ex.EXPOSED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), answered ), ex.SWITCHED )
+
+    def test_lists_compare_in_order( self ):
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": [ "a", "b" ] }, _a( [ "b", "a" ] ) ), ex.SWITCHED )
+
     def test_only_the_value_entry_is_compared( self ):
         draft = { "value": "yes" }
         self.assertEqual( ex.classify_exposure( _OPENED, draft, { "value": "yes", "source": "ui", "answered_by": "x" } ), ex.UNAIDED )

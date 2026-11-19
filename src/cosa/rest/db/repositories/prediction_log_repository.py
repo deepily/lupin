@@ -246,9 +246,9 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             - Sets rendered_at / fold_opened_at to the server's current UTC time only when the
               column is still NULL; a later call never overwrites it
             - A column whose event was not reported stays NULL
-            - draft_at_reveal follows the same first-write-wins rule as fold_opened_at: it is stored only
-              when the column is still NULL, so a later call never replaces the first draft. The choice is
-              deliberate: the first draft is the answer before the forecast could have influenced it
+            - draft_at_reveal is stored only by the call that stores fold_opened_at, so it is the state at
+              the reveal and first write wins like fold_opened_at. A draft sent with any other call, a
+              render-only call or a later call after the fold time is stored, is ignored
             - A request with no draft changes nothing about the draft column and behaves as before
             - Returns { "rendered_recorded": bool, "fold_opened_recorded": bool, "draft_recorded": bool },
               each True only when this call stored the value
@@ -271,7 +271,7 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         if fold_opened and prediction.fold_opened_at is None:
             prediction.fold_opened_at   = now
             recorded[ "fold_opened_recorded" ] = True
-        if draft_at_reveal is not None and prediction.draft_at_reveal is None:
+        if recorded[ "fold_opened_recorded" ] and draft_at_reveal is not None:
             prediction.draft_at_reveal  = draft_at_reveal
             recorded[ "draft_recorded" ] = True
 

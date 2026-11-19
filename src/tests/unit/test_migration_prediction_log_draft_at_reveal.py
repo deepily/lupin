@@ -23,9 +23,12 @@ _REVISION = "e5b7d9a2c418"
 
 
 class _FakeOp:
-    def __init__( self, bind ): self._bind = bind
+    def __init__( self, bind ):
+        self._bind   = bind
+        self.columns = []
     def get_bind( self ):       return self._bind
     def add_column( self, table, column ):
+        self.columns.append( column )
         self._bind.execute( sa.text( f"ALTER TABLE {table} ADD COLUMN {column.name} TEXT" ) )
     def drop_column( self, table, column_name ):
         self._bind.execute( sa.text( f"ALTER TABLE {table} DROP COLUMN {column_name}" ) )
@@ -61,9 +64,12 @@ def _columns( engine ):
 
 
 def _run( engine, module, monkeypatch, verb ):
+    fake = None
     with engine.begin() as conn:
-        monkeypatch.setattr( module, "op", _FakeOp( conn ), raising=True )
+        fake = _FakeOp( conn )
+        monkeypatch.setattr( module, "op", fake, raising=True )
         getattr( module, verb )()
+    return fake
 
 
 def test_upgrade_adds_the_column_and_leaves_rows_untouched( monkeypatch, engine ):
@@ -74,6 +80,17 @@ def test_upgrade_adds_the_column_and_leaves_rows_untouched( monkeypatch, engine 
     with engine.begin() as conn:
         row = conn.execute( sa.text( "SELECT id, draft_at_reveal FROM prediction_log" ) ).one()
     assert tuple( row ) == ( "r1", None )
+
+
+def test_the_column_the_revision_adds_is_nullable_jsonb( monkeypatch, engine ):
+    from sqlalchemy.dialects import postgresql
+    module = _load_module()
+    fake   = _run( engine, module, monkeypatch, "upgrade" )
+    assert len( fake.columns ) == 1
+    column = fake.columns[ 0 ]
+    assert column.name == "draft_at_reveal"
+    assert column.nullable is True
+    assert isinstance( column.type, postgresql.JSONB )
 
 
 def test_upgrade_is_idempotent( monkeypatch, engine ):
