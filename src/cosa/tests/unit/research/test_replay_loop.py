@@ -380,22 +380,51 @@ def test_a_context_arm_gets_its_view_and_principles_and_other_baselines_are_call
     assert [ r[ "meta" ][ "forecast" ] for r in run[ "records" ][ "always_yes" ] ] == [ { "value": "yes" } ] * 2
 
 
-def test_a_provider_is_never_handed_an_answer_given_after_the_ask( engine ):
-    """The ask carries no answer, and the visible rows hold only cases answered by the ask time."""
+KNOWN_AT_ASK = [ "asked_at", "category", "created_at", "data_origin", "id", "message", "owner_user_id", "question", "question_embedding",
+                 "recipient_id", "response_options", "response_type", "sender_id", "title" ]
+
+
+def _cohort_shaped( engine, ask_id, axis, minutes, answer ):
+    """An ask shaped like cohort_asks output, its answer fields spelling out the answer."""
+    ask = _ask( engine, ask_id, axis, minutes, answer )
+    ask.update( { "logged_value": f"SECRET-{answer}", "logged_match": f"SECRET-{answer}", "ratification_state": f"SECRET-{answer}",
+                  "answer_source": f"SECRET-{answer}", "decision_value": f"SECRET-{answer}", "actual_value": f"SECRET-{answer}" } )
+    return ask
+
+
+def test_a_provider_and_an_arm_are_handed_only_the_fields_known_at_the_ask( engine ):
+    """The ask they see has the listed keys and no answer text."""
     _context_arm.calls = []
-    asks  = [ _ask( engine, "early", 2, 0, "SECRET-EARLY" ), _ask( engine, "mid", 2, 30, "SECRET-MID" ), _ask( engine, "late", 2, 60, "SECRET-LATE" ) ]
+    asks  = [ _cohort_shaped( engine, "early", 2, 0, "ONE" ), _cohort_shaped( engine, "mid", 2, 30, "TWO" ), _cohort_shaped( engine, "late", 2, 60, "THREE" ) ]
     got   = []
     def view( ask, visible ):
         got.append( ( ask, visible ) )
-        return None
     replay( asks, engine, SHA, baselines={ "b1": _context_arm }, context_arms=( "b1", ), episode_view_provider=view )
+    assert len( got ) == 3
+    for ask, _ in got + [ ( c[ "ask" ], None ) for c in _context_arm.calls ]:
+        assert sorted( ask ) == KNOWN_AT_ASK
+        assert "SECRET-" + { "early": "ONE", "mid": "TWO", "late": "THREE" }[ ask[ "id" ] ] not in json.dumps( ask, default=str )
     for ask, visible in got:
-        assert not set( replay_loop.ASK_ANSWER_FIELDS ) & set( ask )
         assert all( r[ "responded_at" ] <= aware_moment( ask[ "asked_at" ] ) for r in visible )
-        assert "SECRET-" + ask[ "id" ].upper() not in json.dumps( [ ask, visible ], default=str )
     assert [ [ r[ "id" ] for r in v ] for _, v in got ] == [ [], [ "early" ], [ "early", "mid" ] ]
-    assert [ c[ "principles" ] for c in _context_arm.calls ] == [ None ] * 3
-    assert asks[ 0 ][ "actual_value" ] == "SECRET-EARLY"
+    assert asks[ 0 ][ "actual_value" ] == "SECRET-ONE" and asks[ 0 ][ "logged_match" ] == "SECRET-ONE"
+
+
+def test_an_arm_that_clears_its_inputs_changes_nothing_for_the_next_ask_or_arm( engine ):
+    """Clearing the copies leaves the replay's rows and a second arm intact."""
+    def vandal( ask, visible, episode_view=None, principles=None ):
+        for row in visible: row[ "response_options" ] = "gone"; row.clear()
+        visible.clear()
+        ask[ "response_options" ] = "gone"
+        ask.clear()
+        return { "value": "yes" }
+    _context_arm.calls = []
+    asks = [ _ask( engine, "a", 3, 0, "yes", response_options=[ "x" ] ), _ask( engine, "b", 3, 10, "yes", response_options=[ "x" ] ),
+             _ask( engine, "c", 3, 20, "yes", response_options=[ "x" ] ) ]
+    replay( asks, engine, SHA, baselines={ "vandal": vandal, "after": _context_arm }, context_arms=( "vandal", "after" ) )
+    assert [ [ r[ "id" ] for r in c[ "visible" ] ] for c in _context_arm.calls ] == [ [], [ "a" ], [ "a", "b" ] ]
+    assert [ c[ "ask" ][ "response_options" ] for c in _context_arm.calls ] == [ [ "x" ] ] * 3
+    assert [ a[ "response_options" ] for a in asks ] == [ [ "x" ] ] * 3
 
 
 def test_a_context_arm_without_providers_gets_none_and_an_unknown_name_is_refused( engine ):

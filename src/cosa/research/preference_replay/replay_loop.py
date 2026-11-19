@@ -31,8 +31,10 @@ from cosa.research.preference_replay.time_sliced_store import RECORD_FIELDS, Tim
 
 ENGINE_ARM = "engine"
 
-# The fields of an ask that hold its own answer or the moment it was answered.
-ASK_ANSWER_FIELDS = ( "actual_value", "decision_value", "responded_at" )
+# The only fields of an ask known when it was asked. A field not listed here, such as the answer, the
+# ratification state, the answer source or the old log's prediction, never reaches a provider or an arm.
+ASK_KNOWN_FIELDS = ( "id", "question", "category", "response_type", "question_embedding", "title", "message", "sender_id",
+                     "asked_at", "recipient_id", "response_options", "owner_user_id", "created_at", "data_origin" )
 
 
 def rows_as_of( cases, asked_at, excluded_ids=() ):
@@ -196,8 +198,9 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
         - the engine's embedding store is put back as it was
         - a context arm is called as arm( ask_at_ask, visible_rows, episode_view=..., principles=... ), where
           each value is the provider's answer for this ask, or None when that provider was not passed
-        - ask_at_ask is the ask without actual_value, decision_value and responded_at, so a provider and a context arm are
-          never handed the answer to the ask they are forecasting; visible_rows are only cases answered at
+        - ask_at_ask is the ask cut to its ASK_KNOWN_FIELDS, so a provider and a context arm are
+          never handed the answer to the ask they are forecasting; both are deep copies, so a change by
+          an arm reaches neither the replay nor the next arm; visible_rows are only cases answered at
           or before the ask, as they stood then; the providers are called once per replayed ask, in ask order
 
     Raises:
@@ -234,11 +237,10 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             visible = [ row for row in rows if row[ "responded_at" ] is not None and aware_moment( row[ "responded_at" ] ) <= asked_at ]
             forecasts = { ENGINE_ARM: _forecast_of( result ) }
             if context_arms:
-                ask_at_ask = _ask_at_ask( ask )
-                view       = None if episode_view_provider is None else episode_view_provider( ask_at_ask, visible )
-                principles = None if principles_provider is None else principles_provider( ask_at_ask, asked_at )
+                view       = None if episode_view_provider is None else episode_view_provider( _ask_at_ask( ask ), copy.deepcopy( visible ) )
+                principles = None if principles_provider is None else principles_provider( _ask_at_ask( ask ), asked_at )
             for name, arm in baselines.items():
-                if name in context_arms: forecasts[ name ] = arm( ask_at_ask, visible, episode_view=view, principles=principles )
+                if name in context_arms: forecasts[ name ] = arm( _ask_at_ask( ask ), copy.deepcopy( visible ), episode_view=view, principles=principles )
                 else: forecasts[ name ] = arm( ask, visible )
             for arm_name, predicted in forecasts.items():
                 records[ arm_name ].append( {
@@ -278,9 +280,10 @@ def _ask_at_ask( ask ):
         - ask is an ask dict
 
     Ensures:
-        - returns a new dict without the ASK_ANSWER_FIELDS; the ask is not changed
+        - returns a new dict holding a deep copy of only the ASK_KNOWN_FIELDS the ask has; the ask is not changed,
+          and a caller that changes the copy cannot change the replay's rows
     """
-    return { key: value for key, value in ask.items() if key not in ASK_ANSWER_FIELDS }
+    return { key: copy.deepcopy( ask[ key ] ) for key in ASK_KNOWN_FIELDS if key in ask }
 
 
 def _forecast_of( result ):
