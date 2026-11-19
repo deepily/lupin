@@ -13,7 +13,7 @@ import pytest
 
 import cosa.research.preference_replay.question_vectors as qv
 from cosa.research.preference_replay.question_vectors import (
-    EngineChanged, cohort_texts, engine_stamp, generate, load_side_file, main, norm_band, write_side_file )
+    EngineChanged, cohort_texts, engine_stamp, generate, load_side_file, main, norm_band, read_side_records, write_side_file )
 
 STAMP = { "model": "m", "revision": "r1", "dtype": "float16", "dimensions": 768 }
 
@@ -187,6 +187,25 @@ def test_a_file_that_is_empty_headerless_of_another_version_miscounted_or_incons
     _fresh( tmp_path )
     _edit( path, _swap( "model", "other" ) )
     with pytest.raises( ValueError, match="different model or revision" ): load_side_file( path )
+
+
+class _Refused( Exception ):
+    """A stand-in for a caller's own refusal class."""
+
+
+def test_a_header_without_a_model_is_refused_in_the_callers_own_exception_class( tmp_path ):
+    path = _fresh( tmp_path )
+    _edit( path, lambda lines: lines.__setitem__( 0, json.dumps( { k: v for k, v in json.loads( lines[ 0 ] ).items() if k != "model" } ) ) )
+    with pytest.raises( _Refused, match="lacks model or revision" ): read_side_records( path, refuse=_Refused )
+    with pytest.raises( ValueError, match="lacks model or revision" ): load_side_file( path )
+
+
+def test_another_version_is_read_only_when_the_caller_skips_the_version_check( tmp_path ):
+    path = _fresh( tmp_path )
+    _edit( path, lambda lines: lines.__setitem__( 0, json.dumps( dict( json.loads( lines[ 0 ] ), version=99 ) ) ) )
+    header, records = read_side_records( path, expected_version=None )
+    assert header[ "version" ] == 99 and [ record[ "id" ] for record in records ] == [ "a" ]
+    with pytest.raises( ValueError, match="version 99" ): read_side_records( path )
 
 
 def test_a_repeated_id_is_refused( tmp_path ):
