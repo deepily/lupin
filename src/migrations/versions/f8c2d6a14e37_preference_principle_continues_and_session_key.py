@@ -42,17 +42,6 @@ def _column_names( inspector, table ) -> set:
     return { column[ "name" ] for column in inspector.get_columns( table ) }
 
 
-def _new_columns():
-    """
-    Build the two columns, each with its table.
-
-    Ensures:
-        - returns [ ( table, column ) ]: the nullable key to preference_principles.id, then the nullable session key
-    """
-    return [ ( PRINCIPLES_TABLE, sa.Column( CONTINUES_COLUMN, postgresql.UUID( as_uuid=True ), sa.ForeignKey( 'preference_principles.id' ), nullable=True ) ),
-             ( EVIDENCE_TABLE, sa.Column( SESSION_COLUMN, sa.String( 255 ), nullable=True ) ) ]
-
-
 def upgrade() -> None:
     """
     Add continues_principle_id and session_key.
@@ -64,9 +53,12 @@ def upgrade() -> None:
     """
     inspector = inspect( op.get_bind() )
     tables    = set( inspector.get_table_names() )
-    for table, column in _new_columns():
-        if table in tables and column.name not in _column_names( inspector, table ):
-            op.add_column( table, column )
+
+    if PRINCIPLES_TABLE in tables and CONTINUES_COLUMN not in _column_names( inspector, PRINCIPLES_TABLE ):
+        op.add_column( PRINCIPLES_TABLE, sa.Column( CONTINUES_COLUMN, postgresql.UUID( as_uuid=True ), sa.ForeignKey( 'preference_principles.id' ), nullable=True ) )
+
+    if EVIDENCE_TABLE in tables and SESSION_COLUMN not in _column_names( inspector, EVIDENCE_TABLE ):
+        op.add_column( EVIDENCE_TABLE, sa.Column( SESSION_COLUMN, sa.String( 255 ), nullable=True ) )
 
 
 def downgrade() -> None:
@@ -79,6 +71,9 @@ def downgrade() -> None:
     """
     inspector = inspect( op.get_bind() )
     tables    = set( inspector.get_table_names() )
-    for table, column in _new_columns():
-        if table in tables and column.name in _column_names( inspector, table ):
-            op.drop_column( table, column.name )
+
+    if EVIDENCE_TABLE in tables and SESSION_COLUMN in _column_names( inspector, EVIDENCE_TABLE ):
+        op.drop_column( EVIDENCE_TABLE, SESSION_COLUMN )
+
+    if PRINCIPLES_TABLE in tables and CONTINUES_COLUMN in _column_names( inspector, PRINCIPLES_TABLE ):
+        op.drop_column( PRINCIPLES_TABLE, CONTINUES_COLUMN )
