@@ -25,6 +25,10 @@
         #marker { margin-top: 8px; font-size: 16px; font-weight: bold; }
         #status { margin-top: 8px; min-height: 20px; font-size: 14px; }
         #status.error { color: #b91c1c; font-weight: bold; }
+        #rules { background: #fff; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 14px; }
+        #rules summary { cursor: pointer; font-weight: bold; }
+        #rules-table { border-collapse: collapse; margin: 8px 0; }
+        #rules-table th, #rules-table td { border: 1px solid #d1d5db; padding: 4px 8px; text-align: left; }
         [hidden] { display: none !important; }
     </style>
 </head>
@@ -36,6 +40,26 @@
         <span id="reviewer"></span>
     </header>
     <main>
+        <details id="rules" open>
+            <summary>The rules (click to hide or show)</summary>
+            <p id="rules-question"><strong>Would a caller who wanted what A gives be satisfied by B, perhaps after a small change such as an extra option or parameter?</strong></p>
+            <ul>
+                <li><strong>Same job:</strong> yes. Either one could stand in for the other at a real call site, with at most a small option added.</li>
+                <li><strong>Not the same job:</strong> no. The caller would get different data or a different result, or would end up in a different state.</li>
+            </ul>
+            <p>What counts is <strong>what the caller gets</strong>. It does not matter how alike the code looks, or whether the two could be merged behind a flag.</p>
+            <table id="rules-table">
+                <tr><th>If the two...</th><th>Answer</th></tr>
+                <tr><td>give the same result on a different target, such as another element, section or list, where the target could be a parameter</td><td>Same job</td></tr>
+                <tr><td>give the same result by different code or a different algorithm</td><td>Same job</td></tr>
+                <tr><td>do opposite things to the same thing, such as open and close, or show and hide</td><td>Not the same job</td></tr>
+                <tr><td>fetch or compute different data, even with the same plumbing (fetch, auth, parse)</td><td>Not the same job</td></tr>
+                <tr><td>differ only in incidental tidying, such as clearing a field one option could cover</td><td>Same job</td></tr>
+                <tr><td>leave state the caller depends on, such as reset against pause</td><td>Not the same job</td></tr>
+            </table>
+            <p>Quick test: imagine swapping one for the other at a real call site. If the caller's next step still works, it is the same job.</p>
+            <p>Tick <em>Unsure</em> if you could not decide, and still answer the way you lean. Work on your own: the study needs two independent opinions.</p>
+        </details>
         <div id="panes">
             <section class="pane"><h2>A</h2><pre id="text-a"></pre></section>
             <section class="pane"><h2>B</h2><pre id="text-b"></pre></section>

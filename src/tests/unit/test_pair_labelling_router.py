@@ -130,6 +130,23 @@ def test_every_route_refuses_a_caller_with_no_credentials( env ):
     assert not ( packets / "labels-rick.jsonl" ).exists()
 
 
+def test_the_page_shows_the_full_labelling_rules_in_a_collapsible_panel():
+    """The rules must be on the page itself, not in a file the page never links."""
+    import pathlib, re
+    page = pathlib.Path( __file__ ).resolve().parents[ 2 ] / "lupin_app" / "static" / "html" / "pair-labelling.html"
+    html = page.read_text( encoding="utf-8" )
+    panel = re.search( r'<details id="rules"[^>]*>(.*?)</details>', html, re.S )
+    assert panel is not None, "no collapsible rules panel"
+    body = panel.group( 1 )
+    assert "Would a caller who wanted what A gives be satisfied by B" in body
+    assert "<strong>Same job:</strong>" in body and "<strong>Not the same job:</strong>" in body
+    rows = re.findall( r"<tr><td>(.*?)</td><td>(Same job|Not the same job)</td></tr>", body )
+    assert [ answer for _, answer in rows ] == [ "Same job", "Same job", "Not the same job", "Not the same job", "Same job", "Not the same job" ]
+    assert "reset against pause" in rows[ -1 ][ 0 ] and "open and close" in rows[ 2 ][ 0 ]
+    assert "Quick test: imagine swapping one for the other" in body
+    assert html.index( 'id="rules"' ) < html.index( 'id="panes"' ), "rules must sit above the pair"
+
+
 def test_a_click_saves_and_stays_on_the_same_pair_and_only_the_buttons_move():
     """Run the page script under node with a fake DOM: a click must not move the page."""
     import pathlib, shutil, subprocess
