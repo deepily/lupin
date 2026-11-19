@@ -65,6 +65,28 @@ def read_cohort( session, vectors: Optional[Dict[str, List[float]]] = None, resp
     return asks, facts
 
 
+def restrict_to_ids( asks: List[Dict[str, Any]], ids_path: str ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Keep only the asks a committed id list names, in cohort order.
+
+    Requires:
+        - asks are cohort_asks dicts; ids_path is a JSON-lines file with an "id" key on each line
+
+    Ensures:
+        - returns ( kept, facts ), kept holding the asks whose id is listed, in their original order
+        - facts names the file, its sha256 and the number of ids it lists
+
+    Raises:
+        - ValueError naming the count and the first ids when a listed id is not in the cohort
+    """
+    with open( ids_path, encoding="utf-8" ) as handle: wanted = [ json.loads( line )[ "id" ] for line in handle if line.strip() ]
+    present = { ask[ "id" ] for ask in asks }
+    absent  = [ ask_id for ask_id in wanted if ask_id not in present ]
+    if absent: raise ValueError( f"{len( absent )} listed ids are not in the cohort, first: {absent[ :5 ]}" )
+    keep = set( wanted )
+    return [ ask for ask in asks if ask[ "id" ] in keep ], { "only_ids_file": ids_path, "only_ids_sha256": file_sha256( ids_path ), "only_ids_count": len( keep ) }
+
+
 def check_vectors_cover( asks: List[Dict[str, Any]], header: Dict[str, Any] ) -> None:
     """
     Refuse a cohort that holds an ask with no vector the side file explains.
@@ -171,7 +193,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     Run the retune from the command line and write the report file.
 
     Requires:
-        - argv holds --out, the report path, and one of --vectors, the side file, or --stored-vectors, the case rows' own vectors; the factories and code_sha are injected by tests and default to the real ones
+        - argv holds --out, the report path, an optional --only-ids, the committed list of ids to keep, and one of --vectors, the side file, or --stored-vectors, the case rows' own vectors; the factories and code_sha are injected by tests and default to the real ones
 
     Ensures:
         - reads the cohort read-only, runs the grid and the sweep, writes the report with sorted keys
@@ -186,6 +208,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     source = parser.add_mutually_exclusive_group( required=True )
     source.add_argument( "--vectors", help="the question-vector side file every ask's vector is read from" )
     source.add_argument( "--stored-vectors", action="store_true", help="read each vector from its case row, as the control run does" )
+    parser.add_argument( "--only-ids", help="a JSON-lines file of ask ids; the cohort is cut to exactly these, as the control run needs" )
     args   = parser.parse_args( argv )
     session_factory = session_factory or get_db
     engine_factory  = engine_factory or _open_engine
@@ -204,6 +227,9 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
                             "vector_model": header[ "model" ], "vector_revision": header[ "revision" ], "vector_rejects": len( header[ "rejects" ] ) } )
     with session_factory() as session:
         asks, facts = read_cohort( session, vectors )
+    if args.only_ids is not None:
+        asks, only = restrict_to_ids( asks, args.only_ids )
+        run_facts.update( only )
     if header is not None: check_vectors_cover( asks, header )
     report = run_report( asks, facts, engine_factory(), run_facts )
     with open( args.out, "w", encoding="utf-8" ) as handle:
