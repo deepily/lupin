@@ -1,10 +1,10 @@
 # Context comparison report
 
-- code sha of this report: e011f7a4a1fd4c6685ec6b73a6443ae9425906e3
-- discordant floor: 6 pairs, stated before the run; source: assert_floor_pre_stated refuses a floor under 6 in the dm-rewrite checks
+- code sha of this report: df21ccffb380176ac276233dfca6a40c689c0e5e
+- discordant floor: 10 pairs; source: remediation plan section 6 question 4
 - per-ask files scored on code: Q dfc19edd7, Q+A dfc19edd7, Q+O dfc19edd7, Q+P eb4ca4a1a, Q+H eb4ca4a1a
-- generated: 2026-11-19T22:23:05.432912+00:00
-- command: `python -m cosa.research.preference_replay.context_arms_report --per-ask-dir /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf --inputs /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report-inputs.json --floor 6 --floor-source assert_floor_pre_stated refuses a floor under 6 in the dm-rewrite checks --out /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report.md`
+- generated: 2026-11-19T22:24:23.088003+00:00
+- command: `python -m cosa.research.preference_replay.context_arms_report --per-ask-dir /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf --inputs /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report-inputs.json --floor 10 --floor-source remediation plan section 6 question 4 --out /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report.md`
 
 ## Coverage
 
