@@ -76,6 +76,13 @@ def test_check_columns_final_ids_must_match_before( columns ):
         bar.check_columns( columns )
 
 
+def test_check_columns_refuses_column_four_scoring_extra_asks_beyond_column_ones( columns ):
+    columns[ 0 ][ "final_ids" ] = [ "a", "b" ]
+    columns[ 3 ][ "final_ids" ] = [ "a", "b", "extra" ]
+    with pytest.raises( bar.ReportMismatch, match="columns 1 and 4 do not score the same final-window asks" ):
+        bar.check_columns( columns )
+
+
 def test_check_control_passes_on_equal_and_refuses_otherwise():
     assert bar.check_control( 177, 177 ) is None
     with pytest.raises( bar.ReportMismatch, match="control run gave 170 final-window correct, the committed report has 177" ):
