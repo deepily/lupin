@@ -14,7 +14,6 @@ Run it from the repository root, with the config and database the report should 
 import argparse
 import collections
 import json
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -22,9 +21,13 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import text
 
+import cosa.utils.util as cu
+from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+from cosa.repo.doc_lint.pool_builder import resolve_commit
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.research.preference_replay.cohorts import cohort_asks
 from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, eligible_asks, frozen_settings, report_only_sweep, retune
+from cosa.rest.db.database import get_db
 from cosa.utils.file_hash import file_sha256
 
 REPORT_VERSION = 1
@@ -126,12 +129,13 @@ def run_report( asks: List[Dict[str, Any]], facts: Dict[str, Any], engine, run_f
     return build_report( result, sweep, provenance )
 
 
-def _git_head() -> str:  # pragma: no cover - a process boundary, the tests inject code_sha
-    return subprocess.check_output( [ "git", "rev-parse", "HEAD" ], text=True ).strip()
+def _open_engine():
+    """
+    Build the live engine from the real configuration, with embedding generation switched off.
 
-
-def _open_engine():  # pragma: no cover - builds the live engine from the real configuration, the tests inject one
-    from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+    Ensures:
+        - returns a fresh PredictionEngine whose embedding call raises, so a replay can use stored vectors only
+    """
     PredictionEngine.reset()
     engine = PredictionEngine( debug=False )
 
@@ -140,11 +144,6 @@ def _open_engine():  # pragma: no cover - builds the live engine from the real c
 
     engine._generate_embedding = _refuse
     return engine
-
-
-def _open_session():  # pragma: no cover - the real database session context, the tests inject a fake
-    from cosa.rest.db.database import get_db
-    return get_db()
 
 
 def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, session_factory: Optional[Callable] = None,
@@ -166,13 +165,13 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     parser = argparse.ArgumentParser( description="Run the retune over the real cohort and write its report." )
     parser.add_argument( "--out", required=True )
     args   = parser.parse_args( argv )
-    session_factory = session_factory or _open_session
+    session_factory = session_factory or get_db
     engine_factory  = engine_factory or _open_engine
     driver_sha256 = file_sha256( __file__ )
     command = "python -m cosa.research.preference_replay.retune_run " + " ".join( list( argv ) if argv is not None else sys.argv[ 1: ] )
     run_facts = {
         "command"       : command,
-        "code_sha"      : code_sha if code_sha is not None else _git_head(),
+        "code_sha"      : code_sha if code_sha is not None else resolve_commit( cu.get_project_root(), "HEAD" ),
         "driver_sha256" : driver_sha256,
         "started"       : ( clock or ( lambda: datetime.now( timezone.utc ) ) )().isoformat(),
     }

@@ -10,7 +10,10 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 import cosa.research.preference_replay.retune_run as retune_run
+from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.research.preference_replay.retune_run import build_report, main, read_cohort, run_report
 from cosa.tests.unit.research.test_retune import SHA, _asks, engine  # noqa: F401 - engine is a fixture
@@ -108,3 +111,24 @@ def test_the_command_writes_the_report_and_names_its_own_command_and_code( engin
     assert report[ "provenance" ][ "started" ] == READ_AT.isoformat()
     assert json.loads( printed[ 0 ] ) == report[ "frozen_settings" ]
     assert list( report ) == sorted( report ), "keys are written sorted"
+
+
+def test_without_an_injected_sha_the_command_asks_for_the_head_commit( engine, monkeypatch, tmp_path ):
+    """The code sha comes from resolve_commit on the project root and the name HEAD."""
+    calls = []
+    monkeypatch.setattr( retune_run, "resolve_commit", lambda repo, name: calls.append( ( repo, name ) ) or "e" * 40 )
+    _fake_cohort( monkeypatch, { "yes_no": _asks( engine ), "multiple_choice": [] } )
+    out = tmp_path / "report.json"
+    main( [ "--out", str( out ) ], printer=lambda line: None, session_factory=lambda: contextlib.nullcontext( FakeSession() ), engine_factory=lambda: engine )
+    assert calls == [ ( retune_run.cu.get_project_root(), "HEAD" ) ]
+    assert json.loads( out.read_text( encoding="utf-8" ) )[ "provenance" ][ "code_sha" ] == "e" * 40
+
+
+def test_the_live_engine_is_built_with_embedding_generation_switched_off():
+    """A replay on this engine cannot reach an embedding service: the call raises."""
+    live = retune_run._open_engine()
+    try:
+        with pytest.raises( RuntimeError, match="stored vectors only" ):
+            live._generate_embedding( "anything" )
+    finally:
+        PredictionEngine.reset()
