@@ -90,17 +90,22 @@ def scored_rows( session, response_type: str, window: Optional[str] = None ) -> 
     return [ row for row in rows if window is None or window_of( row.predicted_at, response_type ) == window ]
 
 
-def _source_without_case( notification ) -> str:
+HUMAN_SOURCE = "ui"
+
+
+def answer_source_of( response_value: Any ) -> str:
     """
-    Name who answered an ask that has no case row, from the notification's own response value.
+    Label an answer human when the notification says it came from the UI, otherwise unknown.
 
     Requires:
-        - notification has response_value, a dict or None
+        - response_value is a dict, a JSON string, or None
 
     Ensures:
-        - returns "human" when response_value.source is "ui", else "unknown"
+        - returns "human" only when the source field equals "ui"
     """
-    return "human" if ( notification.response_value or {} ).get( "source" ) == "ui" else "unknown"
+    if isinstance( response_value, str ): response_value = json.loads( response_value )
+    if isinstance( response_value, dict ) and response_value.get( "source" ) == HUMAN_SOURCE: return "human"
+    return "unknown"
 
 
 def _question_vector( decision, ask_id: str, vectors: Optional[Dict[str, List[float]]] ) -> Optional[List[float]]:
@@ -163,7 +168,7 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None, *, v
             "question_embedding" : _question_vector( decision, str( row.notification_id ), vectors ),
             "created_at"         : decision.created_at if decision is not None else row.predicted_at.isoformat(),
             "owner_user_id"      : decision.owner_user_id if decision is not None else str( notification.recipient_id ),
-            "answer_source"      : decision.answer_source if decision is not None else _source_without_case( notification ),
+            "answer_source"      : decision.answer_source if decision is not None else answer_source_of( notification.response_value ),
             "responded_at"       : row.responded_at,
             "title"              : notification.title,
             "message"            : notification.message,
