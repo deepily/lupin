@@ -43,7 +43,7 @@ class _Session:
 @pytest.fixture
 def row( monkeypatch ):
     """A forecast row with both seen times null, wired in behind the route."""
-    r       = types.SimpleNamespace( rendered_at=None, fold_opened_at=None )
+    r       = types.SimpleNamespace( rendered_at=None, fold_opened_at=None, draft_at_reveal=None )
     session = _Session( r )
     real    = plr.PredictionLogRepository
     monkeypatch.setattr( plr, "PredictionLogRepository", lambda _s: real( session ) )
@@ -107,6 +107,33 @@ class TestLaterCallsAreIgnored:
         r = _post( harness ).json()
         assert ( r[ "rendered_recorded" ], r[ "fold_opened_recorded" ] ) == ( False, False )
         assert row.rendered_at is None and row.fold_opened_at is None
+
+
+class TestDraftAtReveal:
+
+    def test_a_draft_is_stored_with_the_fold_open_and_reported( self, harness, row ):
+        r = _post( harness, fold_opened=True, draft_at_reveal={ "value": "yes" } ).json()
+        assert r[ "draft_recorded" ] is True
+        assert row.draft_at_reveal == { "value": "yes" }
+        assert row.fold_opened_at is not None
+
+    def test_the_first_draft_wins_over_a_later_one( self, harness, row ):
+        row.draft_at_reveal = { "value": "yes" }
+        r = _post( harness, fold_opened=True, draft_at_reveal={ "value": "no" } ).json()
+        assert r[ "draft_recorded" ] is False
+        assert row.draft_at_reveal == { "value": "yes" }
+
+    def test_a_request_without_the_field_behaves_as_before( self, harness, row ):
+        r = _post( harness, fold_opened=True ).json()
+        assert r[ "draft_recorded" ] is False
+        assert row.draft_at_reveal is None
+        assert ( r[ "rendered_recorded" ], r[ "fold_opened_recorded" ] ) == ( False, True )
+        assert row.fold_opened_at is not None and row.rendered_at is None
+
+    def test_a_draft_that_is_not_an_object_answers_422( self, harness, row ):
+        r = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": "yes" } )
+        assert r.status_code == 422
+        assert row.draft_at_reveal is None and row.fold_opened_at is None
 
 
 class TestRefusals:

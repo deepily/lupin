@@ -276,8 +276,8 @@ if __name__ == "__main__":
 class TestRecordSeen( _PLRTestBase ):
     """record_seen: first rendered / first fold-open time, never overwritten, row-locked read."""
 
-    def _row( self, rendered_at=None, fold_opened_at=None ):
-        row = types.SimpleNamespace( rendered_at=rendered_at, fold_opened_at=fold_opened_at )
+    def _row( self, rendered_at=None, fold_opened_at=None, draft_at_reveal=None ):
+        row = types.SimpleNamespace( rendered_at=rendered_at, fold_opened_at=fold_opened_at, draft_at_reveal=draft_at_reveal )
         self.session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = row
         return row
 
@@ -294,7 +294,7 @@ class TestRecordSeen( _PLRTestBase ):
     def test_first_rendered_call_stores_the_time_and_leaves_fold_open_null( self ):
         row = self._row()
         out = self.repo.record_seen( _NID, rendered=True )
-        self.assertEqual( out, { "rendered_recorded": True, "fold_opened_recorded": False } )
+        self.assertEqual( out, { "rendered_recorded": True, "fold_opened_recorded": False, "draft_recorded": False } )
         self.assertIsNotNone( row.rendered_at )
         self.assertIsNone( row.fold_opened_at )
         self.session.flush.assert_called_once_with()
@@ -302,7 +302,7 @@ class TestRecordSeen( _PLRTestBase ):
     def test_first_fold_open_call_stores_the_time_and_leaves_rendered_alone( self ):
         row = self._row()
         out = self.repo.record_seen( _NID, fold_opened=True )
-        self.assertEqual( out, { "rendered_recorded": False, "fold_opened_recorded": True } )
+        self.assertEqual( out, { "rendered_recorded": False, "fold_opened_recorded": True, "draft_recorded": False } )
         self.assertIsNone( row.rendered_at )
         self.assertIsNotNone( row.fold_opened_at )
 
@@ -310,8 +310,22 @@ class TestRecordSeen( _PLRTestBase ):
         first = datetime( 2020, 1, 1, tzinfo=timezone.utc )
         row   = self._row( rendered_at=first, fold_opened_at=first )
         out   = self.repo.record_seen( _NID, rendered=True, fold_opened=True )
-        self.assertEqual( out, { "rendered_recorded": False, "fold_opened_recorded": False } )
+        self.assertEqual( out, { "rendered_recorded": False, "fold_opened_recorded": False, "draft_recorded": False } )
         self.assertEqual( ( row.rendered_at, row.fold_opened_at ), ( first, first ) )
+
+    def test_a_draft_is_stored_once_and_the_first_draft_is_kept( self ):
+        row   = self._row()
+        first = self.repo.record_seen( _NID, fold_opened=True, draft_at_reveal={ "value": "yes" } )
+        later = self.repo.record_seen( _NID, fold_opened=True, draft_at_reveal={ "value": "no" } )
+        self.assertTrue( first[ "draft_recorded" ] )
+        self.assertFalse( later[ "draft_recorded" ] )
+        self.assertEqual( row.draft_at_reveal, { "value": "yes" } )
+
+    def test_no_draft_leaves_the_stored_draft_untouched( self ):
+        row = self._row( draft_at_reveal={ "value": "yes" } )
+        out = self.repo.record_seen( _NID, fold_opened=True )
+        self.assertFalse( out[ "draft_recorded" ] )
+        self.assertEqual( row.draft_at_reveal, { "value": "yes" } )
 
     def test_a_non_uuid_id_raises_value_error( self ):
         with self.assertRaises( ValueError ):

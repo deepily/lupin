@@ -1215,6 +1215,12 @@ class PredictionLog( Base ):
         JSONB,
         nullable=True
     )
+    # The answer controls' state at the moment the forecast fold was first opened (written by the seen route,
+    # first write wins). Same JSONB shape as actual_value, so the two compare key for key. NULL = unknown.
+    draft_at_reveal: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
 
     # Indexes
     __table_args__ = (

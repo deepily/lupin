@@ -87,7 +87,7 @@ That is why the population was re-derived rather than patched.
 | POST | `/api/notify` | API Key or JWT | Send notification to user |
 | POST | `/api/notify/response` | JWT | Submit response to notification |
 | POST | `/api/notify/prediction-vote/{notification_id}` | Credential | Vote on a prediction-engine suggestion |
-| POST | `/api/notify/prediction-seen/{notification_id}` | Credential | Record that the forecast hint was rendered (`rendered`) and/or its fold opened (`fold_opened`). The server stamps the first time of each and ignores later calls; an event never reported stays null. 404 when no forecast row exists, 422 on a non-UUID id |
+| POST | `/api/notify/prediction-seen/{notification_id}` | Credential | Record that the forecast hint was rendered (`rendered`) and/or its fold opened (`fold_opened`), and an optional `draft_at_reveal`. The server stores the first of each and ignores later calls; an unreported event stays null. 404 when no forecast row exists, 422 on a non-UUID id |
 | GET | `/api/notifications/{user_id}` | Owner | Get user notifications (with filters) |
 | GET | `/api/notifications/{user_id}/next` | Owner | Get next unplayed notification |
 | POST | `/api/notifications/{notification_id}/played` | Credential | Mark notification as played |

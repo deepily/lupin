@@ -2587,16 +2587,20 @@ class PredictionSeenRequest( BaseModel ):
 
     Each flag reports one client event. The server stamps the time, never the client.
 
+    draft_at_reveal is optional. It holds the answer controls' state when the fold opened, shaped like a
+    stored answer ( { "value": ... } ). Absent, the call behaves as it did before.
+
     """
 
-    rendered    : bool = False
-    fold_opened : bool = False
+    rendered        : bool = False
+    fold_opened     : bool = False
+    draft_at_reveal : Optional[dict] = None
 
 
 @router.post(
     "/notify/prediction-seen/{notification_id}",
     summary     = "Record that a prediction hint was rendered and/or its fold opened",
-    description = "Stores the first rendered time and the first fold-open time on the notification's forecast row. A later call never overwrites a stored time; a time never reported stays null."
+    description = "Stores the first rendered time, the first fold-open time and the optional draft answer at reveal on the notification's forecast row. A later call never overwrites a stored value; a value never reported stays null."
 )
 async def record_prediction_seen(
     notification_id: str,
@@ -2611,8 +2615,8 @@ async def record_prediction_seen(
         - notification_id is a UUID
 
     Ensures:
-        - stores each reported time once, on the first call that reports it
-        - shape: { status, notification_id, rendered_recorded, fold_opened_recorded, timestamp }
+        - stores each reported time, and the draft answer if sent, once, on the first call that reports it
+        - shape: { status, notification_id, rendered_recorded, fold_opened_recorded, draft_recorded, timestamp }
 
     Raises:
         - HTTPException 422 if notification_id is not a UUID
@@ -2628,7 +2632,8 @@ async def record_prediction_seen(
     try:
         with get_db() as session:
             recorded = PredictionLogRepository( session ).record_seen(
-                notification_id, rendered=body.rendered, fold_opened=body.fold_opened )
+                notification_id, rendered=body.rendered, fold_opened=body.fold_opened,
+                draft_at_reveal=body.draft_at_reveal )
     except Exception as e:
         print( f"[NOTIFY] Prediction-seen error for {notification_id}: {str( e )}" )
         raise HTTPException( status_code=500, detail=f"Failed to record prediction seen: {str( e )}" )
@@ -2641,6 +2646,7 @@ async def record_prediction_seen(
         "notification_id"      : notification_id,
         "rendered_recorded"    : recorded[ "rendered_recorded" ],
         "fold_opened_recorded" : recorded[ "fold_opened_recorded" ],
+        "draft_recorded"       : recorded[ "draft_recorded" ],
         "timestamp"            : get_local_timestamp()
     }
 
