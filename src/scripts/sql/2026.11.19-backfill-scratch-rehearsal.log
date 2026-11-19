@@ -1,0 +1,50 @@
+== 2026-11-19T15:13:53Z scratch rehearsal of backfill_missing_question_vectors.py, sha256 101a2ba8a6c0
+== create the scratch database from a schema-only dump
+CREATE DATABASE
+CREATE EXTENSION
+expected: ERROR:  relation "public.users" does not exist
+== seed six fixture asks
+     15 INSERT 0 1
+== 1 dry run: nothing written
+database           : lupin_db_scratch_vectors
+encoder_version    : scratch-model@rev-scratch-1
+rows to insert     : 3
+  by answer_source : {"human": 2, "unknown": 1}
+vectors to replace : 2
+log rows to stamp  : 5
+stored questions that differ from the stripped message : 1
+dry run: nothing written
+PASS  dry run leaves 3 case rows ( 3 )
+PASS  dry run stamps nothing ( 0 )
+== 2 wrong database name: refused
+database           : lupin_db_scratch_vectors
+REFUSED: connected to 'lupin_db_scratch_vectors', expected 'lupin_db_dev'
+PASS  wrong database refused ( 1 )
+PASS  refusal leaves 3 case rows ( 3 )
+== 3 rehearsal: every step, then rollback
+stored questions that differ from the stripped message : 1
+rehearsal read back, then rolled back: {"inserted_human": 2, "rows": 5, "stamped": 5, "with_vector": 5}
+PASS  rehearsal read back 5 rows ( 1 )
+PASS  rehearsal left 3 case rows ( 3 )
+PASS  rehearsal stamped nothing ( 0 )
+== 4 apply
+stored questions that differ from the stripped message : 1
+applied and read back: {"inserted_human": 2, "rows": 5, "stamped": 5, "with_vector": 5}
+PASS  apply read back clean ( 1 )
+PASS  6 case rows (3 inserted, 2 replaced, 1 bystander) ( 6 )
+PASS  5 log rows stamped ( 5 )
+PASS  one encoder version ( 1 )
+PASS  bystander log row not stamped ( 0 )
+PASS  6 distinct 768-wide vectors ( 6|6 )
+PASS  answer sources human|unknown ( human:5,unknown:1 )
+== 5 second apply: the inserted ids now have a row, so it must roll back
+ROLLED BACK: insert ids differ from the expected list: 0 extra (first []), 3 missing (first ['8d4c2972-dab7-4e6c-9546-d6b1240826ce'])
+PASS  second apply rolled back ( 1 )
+PASS  second apply left 6 case rows ( 6 )
+== 6 a side-file id outside the frozen list: refused before the database opens
+REFUSED: 2 side-file ids are outside the frozen list, first 74010cd2-0d00-4357-9184-9e4bb2cc7e83
+PASS  ids outside the frozen list refused ( 1 )
+PASS  that refusal left 6 case rows ( 6 )
+== lupin_db_dev and lupin_db_test were read by pg_dump only
+RESULT: all checks passed
+cleanup: scratch database dropped, still present: 0
