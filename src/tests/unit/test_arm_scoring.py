@@ -29,7 +29,8 @@ def _record( index, correct ):
     Ensures:
         - returns a record with the fields the scorer re-indexes and the report reads
     """
-    return { "arm": ENGINE_ARM, "row_index": index, "meta": { "notification_id": f"n{index}", "correct": correct } }
+    return { "arm": ENGINE_ARM, "row_index": index, "meta": { "notification_id": f"n{index}", "correct": correct, "response_type": "yes_no" if index % 2 else "multiple_choice",
+                                                                        "forecast": { "value": index }, "confidence": index / 10 } }
 
 
 def _run( count ):
@@ -43,7 +44,7 @@ def _run( count ):
         - returns the dict replay returns, with the engine and always_yes arms of equal length
     """
     return { "records": { ENGINE_ARM: [ _record( i, i % 2 == 0 ) for i in range( count ) ],
-                          "always_yes": [ _record( i, i % 3 == 0 ) for i in range( count ) ] },
+                          "always_yes": [ _record( i, i % 4 < 2 ) for i in range( count ) ] },
              "not_replayable": 2, "unrebuildable_cases": 3, "families": 4 }
 
 
@@ -96,6 +97,29 @@ def test_final_window_floors_the_tune_size_so_eleven_asks_leave_four():
     """Eleven asks give a tune window of seven and a final window of four, not three."""
     cut = scoring.final_window( _run( 11 ) )
     assert [ r[ "meta" ][ "notification_id" ] for r in cut[ "records" ][ ENGINE_ARM ] ] == [ "n7", "n8", "n9", "n10" ]
+
+
+def test_compact_keeps_the_six_fields_per_ask_and_the_counts():
+    """Each ask keeps six fields, and the always-yes flag comes from the baseline arm."""
+    compacted = scoring.compact( scoring.final_window( _run( 10 ) ) )
+    assert compacted[ "asks" ][ 0 ] == { "id": "n7", "response_type": "yes_no", "forecast": { "value": 7 }, "confidence": 0.7,
+                                         "correct": False, "always_yes_correct": False }
+    assert compacted[ "asks" ][ 1 ] == { "id": "n8", "response_type": "multiple_choice", "forecast": { "value": 8 }, "confidence": 0.8,
+                                         "correct": True, "always_yes_correct": True }
+    assert compacted[ "asks" ][ 2 ][ "always_yes_correct" ] is True
+    assert ( compacted[ "not_replayable" ], compacted[ "unrebuildable_cases" ], compacted[ "families" ] ) == ( 2, 3, 4 )
+
+
+def test_expand_gives_back_the_figures_compact_kept():
+    """Expanding a compact run restores the ids, types and flags of both arms."""
+    cut = scoring.final_window( _run( 10 ) )
+    back = scoring.expand( scoring.compact( cut ) )
+    for arm in ( ENGINE_ARM, "always_yes" ):
+        assert [ ( r[ "meta" ][ "notification_id" ], r[ "meta" ][ "response_type" ], r[ "meta" ][ "correct" ] ) for r in back[ "records" ][ arm ] ] == \
+               [ ( r[ "meta" ][ "notification_id" ], r[ "meta" ][ "response_type" ], r[ "meta" ][ "correct" ] ) for r in cut[ "records" ][ arm ] ]
+    assert [ r[ "row_index" ] for r in back[ "records" ][ "always_yes" ] ] == [ 0, 1, 2 ]
+    assert back[ "records" ][ ENGINE_ARM ][ 1 ][ "meta" ][ "forecast" ] == { "value": 8 } and back[ "records" ][ ENGINE_ARM ][ 1 ][ "meta" ][ "confidence" ] == 0.8
+    assert ( back[ "not_replayable" ], back[ "unrebuildable_cases" ], back[ "families" ] ) == ( 2, 3, 4 )
 
 
 def test_score_arm_runs_the_replay_under_the_frozen_settings_and_puts_them_back( monkeypatch ):
@@ -178,7 +202,7 @@ def test_main_writes_the_final_window_run_and_prints_the_count( monkeypatch, tmp
     assert document[ "settings_report_sha256" ] == hashlib.sha256( open( argv[ 5 ], "rb" ).read() ).hexdigest()
     assert ( document[ "code_sha" ], document[ "started" ] ) == ( "abc123", "2026-11-19T20:00:00+00:00" )
     assert document[ "command" ] == "python -m cosa.research.preference_replay.arm_scoring " + " ".join( argv )
-    assert len( document[ "run" ][ "records" ][ ENGINE_ARM ] ) == 3
+    assert len( document[ "run" ][ "asks" ] ) == 3 and "records" not in document[ "run" ]
     assert printed == [ "Q+A: 3 final-window asks, 1 correct" ]
 
 

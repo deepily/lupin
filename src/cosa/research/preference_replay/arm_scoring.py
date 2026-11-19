@@ -59,6 +59,43 @@ def final_window( run: Dict[str, Any] ) -> Dict[str, Any]:
     return { "records": cut, "not_replayable": run[ "not_replayable" ], "unrebuildable_cases": run[ "unrebuildable_cases" ], "families": run[ "families" ] }
 
 
+def compact( run: Dict[str, Any] ) -> Dict[str, Any]:
+    """
+    Reduce a final-window run to the fields the report reads.
+
+    Requires:
+        - run is what final_window returns, holding the engine arm and the always-yes baseline over the same asks
+
+    Ensures:
+        - returns { asks, not_replayable, unrebuildable_cases, families }, asks holding per ask the id, answer type,
+          forecast, confidence, correct and always_yes_correct, in run order
+    """
+    return { "asks": [ { "id": engine[ "meta" ][ "notification_id" ], "response_type": engine[ "meta" ][ "response_type" ],
+                         "forecast": engine[ "meta" ][ "forecast" ], "confidence": engine[ "meta" ][ "confidence" ],
+                         "correct": engine[ "meta" ][ "correct" ], "always_yes_correct": baseline[ "meta" ][ "correct" ] }
+                       for engine, baseline in zip( run[ "records" ][ ENGINE_ARM ], run[ "records" ][ BASELINE_NAME ] ) ],
+             "not_replayable": run[ "not_replayable" ], "unrebuildable_cases": run[ "unrebuildable_cases" ], "families": run[ "families" ] }
+
+
+def expand( compacted: Dict[str, Any] ) -> Dict[str, Any]:
+    """
+    Rebuild a replay-shaped run from a compact one, so the report's comparison can read it.
+
+    Requires:
+        - compacted is what compact returns
+
+    Ensures:
+        - returns a run whose engine and always-yes records carry notification_id, response_type and correct, and the engine's also forecast and confidence
+        - expand( compact( run ) ) holds the same per-ask figures as run
+    """
+    engine   = [ { "arm": ENGINE_ARM, "row_index": i, "meta": { "notification_id": a[ "id" ], "response_type": a[ "response_type" ], "forecast": a[ "forecast" ],
+                                                                "confidence": a[ "confidence" ], "correct": a[ "correct" ] } } for i, a in enumerate( compacted[ "asks" ] ) ]
+    baseline = [ { "arm": BASELINE_NAME, "row_index": i, "meta": { "notification_id": a[ "id" ], "response_type": a[ "response_type" ], "correct": a[ "always_yes_correct" ] } }
+                 for i, a in enumerate( compacted[ "asks" ] ) ]
+    return { "records": { ENGINE_ARM: engine, BASELINE_NAME: baseline }, "not_replayable": compacted[ "not_replayable" ],
+             "unrebuildable_cases": compacted[ "unrebuildable_cases" ], "families": compacted[ "families" ] }
+
+
 def score_arm( asks, engine, frozen: Dict[str, Any], snapshot_sha256: str ) -> Dict[str, Any]:
     """
     Replay the asks once at the frozen settings and keep the final window.
@@ -90,7 +127,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
         - argv holds --arm, --vectors, --settings (a retune report), --only-ids and --out
 
     Ensures:
-        - reads the cohort read-only, cuts it to the frozen ids, replays once, writes the final-window run with sorted keys
+        - reads the cohort read-only, cuts it to the frozen ids, replays once, writes the compact final-window run with sorted keys
         - the file names the arm, the settings, the side file and the ids file with their checksums
         - it also records the exact command line, the code sha and the start time; code_sha and clock are injected by tests
         - returns 0 and prints the arm, the window size and the correct count
@@ -113,12 +150,12 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     document = { "arm": args.arm, "frozen": frozen, "settings_report": args.settings, "vector_side_file": args.vectors,
                  "vector_side_file_sha256": file_sha256( args.vectors ), "settings_report_sha256": file_sha256( args.settings ),
                  "vector_rejects": len( header[ "rejects" ] ), "ids": only, "command": command, "started": started,
-                 "code_sha": code_sha if code_sha is not None else resolve_commit( cu.get_project_root(), "HEAD" ), "run": run }
+                 "code_sha": code_sha if code_sha is not None else resolve_commit( cu.get_project_root(), "HEAD" ), "run": compact( run ) }
     with open( args.out, "w", encoding="utf-8" ) as handle:
-        json.dump( document, handle, indent=1, sort_keys=True, default=str )
+        json.dump( document, handle, sort_keys=True, default=str, separators=( ",", ":" ) )
         handle.write( "\n" )
-    correct = sum( 1 for record in run[ "records" ][ ENGINE_ARM ] if record[ "meta" ][ "correct" ] )
-    printer( f"{args.arm}: {len( run[ 'records' ][ ENGINE_ARM ] )} final-window asks, {correct} correct" )
+    correct = sum( 1 for ask in document[ "run" ][ "asks" ] if ask[ "correct" ] )
+    printer( f"{args.arm}: {len( document[ 'run' ][ 'asks' ] )} final-window asks, {correct} correct" )
     return 0
 
 
