@@ -139,22 +139,24 @@ class TestCompareDraftToAnswer( unittest.TestCase ):
 
 class TestSwitchRate( unittest.TestCase ):
 
-    def test_a_switched_card_is_counted_in_the_rate( self ):
+    def test_only_measured_cards_enter_the_rate( self ):
+        cards = [ ( ex.SWITCHED, True ), ( ex.UNAIDED, True ), ( ex.UNAIDED, False ), ( ex.EXPOSED, True ), ( ex.UNANSWERED, False ) ]
+        self.assertEqual( ex.switch_rate( cards ), 0.5 )
+
+    def test_nothing_measured_gives_none( self ):
+        self.assertIsNone( ex.switch_rate( [] ) )
+        self.assertIsNone( ex.switch_rate( [ ( ex.EXPOSED, True ), ( ex.UNAIDED, False ), ( ex.UNANSWERED, False ) ] ) )
+
+    def test_the_rate_rounds_to_four_places( self ):
+        self.assertEqual( ex.switch_rate( [ ( ex.SWITCHED, True ), ( ex.UNAIDED, True ), ( ex.UNAIDED, True ) ] ), 0.3333 )
+
+    def test_classes_from_real_rows_feed_the_rate( self ):
         rows = [ ( None, None, _a( "yes" ), YN ), ( _OPENED, { "value": "yes" }, _a( "yes" ), YN ),
                  ( _OPENED, { "value": "yes" }, _a( "no" ), YN ), ( _OPENED, None, _a( "no" ), YN ) ]
         classes = [ ex.classify_exposure( *r ) for r in rows ]
         self.assertEqual( classes, [ ex.UNAIDED, ex.UNAIDED, ex.SWITCHED, ex.EXPOSED ] )
-        self.assertEqual( ex.switch_rate( classes ), 0.25 )
-
-    def test_unanswered_cards_are_left_out_of_both_counts( self ):
-        self.assertEqual( ex.switch_rate( [ ex.UNANSWERED, ex.SWITCHED, ex.UNAIDED ] ), 0.5 )
-
-    def test_nothing_answered_gives_none( self ):
-        self.assertIsNone( ex.switch_rate( [] ) )
-        self.assertIsNone( ex.switch_rate( [ ex.UNANSWERED ] ) )
-
-    def test_the_rate_rounds_to_four_places( self ):
-        self.assertEqual( ex.switch_rate( [ ex.SWITCHED, ex.UNAIDED, ex.UNAIDED ] ), 0.3333 )
+        cards = [ ( cls, ex.revealed_before_answer( row[ 0 ], None ) ) for cls, row in zip( classes, rows ) ]
+        self.assertEqual( ex.switch_rate( cards ), 0.5 )
 
 
 class TestRevealedBeforeAnswer( unittest.TestCase ):

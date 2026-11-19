@@ -17,7 +17,7 @@ An answer and a draft reach this module in four stored forms, all read by decode
 A draft at reveal is stored as { "value": <the wire string the submit button would send with the controls as they stand> }.
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, Tuple
 
 from cosa.utils.notification_utils import extract_qualifier_comment, parse_field_selections
 
@@ -149,18 +149,20 @@ def classify_exposure( fold_opened_at, draft_at_reveal: Optional[dict], actual_v
     return { SWITCHED: SWITCHED, SAME: UNAIDED }.get( outcome, EXPOSED )
 
 
-def switch_rate( classes: Iterable[str] ) -> Optional[float]:
+def switch_rate( cards: Iterable[Tuple[str, bool]] ) -> Optional[float]:
     """
-    Share of answered cards whose answer was switched after the reveal.
+    Share of the cards whose switch could be measured that were switched.
 
     Requires:
-        - classes: values returned by classify_exposure
+        - cards: ( class, revealed ) pairs, the class from classify_exposure and revealed from revealed_before_answer
 
     Ensures:
-        - unanswered entries are left out of numerator and denominator
-        - returns the switched count over the count of the remaining entries, rounded to 4 places
-        - returns None when no answered entry remains
+        - a card is measured when it was switched, or was revealed in time and left unaided with a draft equal to its answer
+        - the exposed class, an unrevealed card and an unanswered card are left out of both counts
+        - returns the switched count over the measured count, rounded to 4 places
+        - returns None when no card was measured
     """
-    answered = [ c for c in classes if c != UNANSWERED ]
-    if not answered: return None
-    return round( answered.count( SWITCHED ) / len( answered ), 4 )
+    cards    = list( cards )
+    switched = sum( 1 for cls, _ in cards if cls == SWITCHED )
+    measured = switched + sum( 1 for cls, revealed in cards if cls == UNAIDED and revealed )
+    return round( switched / measured, 4 ) if measured else None
