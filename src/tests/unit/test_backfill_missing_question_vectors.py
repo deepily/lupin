@@ -496,6 +496,16 @@ def test_main_refuses_a_rehearsal_that_omits_only_the_frozen_list( tmp_path, cap
     assert raised.value.code == 2 and "--frozen-ids" in capsys.readouterr().err
 
 
+def test_main_refuses_a_rehearsal_that_omits_only_the_database_name( tmp_path, capsys ):
+    idfile = tmp_path / "ids.txt"
+    idfile.write_text( "n1\n", encoding="utf-8" )
+    argv = [ "--side-file", "f", "--database-url", "u", "--rehearse", "--expect-insert", "1", "--expect-update", "0", "--expect-log", "1",
+             "--expect-insert-ids", str( idfile ), "--frozen-ids", str( idfile ) ]
+    with pytest.raises( SystemExit ) as raised:
+        bf.main( argv )
+    assert raised.value.code == 2 and "--expect-database" in capsys.readouterr().err
+
+
 def test_the_outside_list_message_names_the_first_of_several_sorted( tmp_path ):
     class Boom:
         def connect( self ): raise AssertionError( "database opened" )
