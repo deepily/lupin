@@ -17,6 +17,7 @@ ELIGIBLE_TYPES  = ( RESPONSE_TYPE_YES_NO, RESPONSE_TYPE_MULTIPLE_CHOICE )
 TUNE_FRACTION   = 0.7
 THRESHOLDS      = tuple( round( 0.50 + 0.05 * step, 2 ) for step in range( 9 ) )
 TOP_KS          = ( 3, 5, 8, 10 )
+SWEEP_THRESHOLDS = tuple( round( 0.30 + 0.05 * step, 2 ) for step in range( 4 ) )
 FROZEN_METRIC   = "cosine"
 THRESHOLD_KEY   = "prediction engine cbr similarity threshold"
 TOP_K_KEY       = "prediction engine cbr top k"
@@ -141,6 +142,24 @@ def retune( asks, engine, snapshot_sha256, thresholds=THRESHOLDS, top_ks=TOP_KS,
         "eligible"           : len( records ),
         "tune_cohort_sha256" : sha256_of_rows( [ { "id": i } for i in ids ] ),
     }
+
+
+def report_only_sweep( asks, engine, snapshot_sha256 ):
+    """
+    Replay the thresholds below the grid, to show the trade-off. Nothing here is frozen.
+
+    Requires:
+        - asks, engine and snapshot_sha256 are as retune takes them
+
+    Ensures:
+        - returns the points for thresholds 0.30, 0.35, 0.40 and 0.45 at every top k, in retune's point shape
+        - never names a best point, so no setting is chosen from it
+        - the engine's three settings are restored, as retune restores them
+
+    Raises:
+        - ValueError when there are no eligible asks
+    """
+    return retune( asks, engine, snapshot_sha256, thresholds=SWEEP_THRESHOLDS )[ "points" ]
 
 
 def frozen_settings( result ):

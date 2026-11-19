@@ -14,7 +14,7 @@ import pytest
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.research.preference_replay import retune
-from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, eligible_asks, frozen_settings, grid, retune as run_retune, split_windows
+from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, SWEEP_THRESHOLDS, eligible_asks, frozen_settings, grid, report_only_sweep, retune as run_retune, split_windows
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM
 
 NOON   = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
@@ -113,6 +113,42 @@ def test_each_point_reports_the_answer_rate_and_the_accuracy_among_answered_asks
     high = by_point[ ( 0.85, 3 ) ]
     assert ( high[ "tune_answered" ], high[ "tune_correct" ] ) == ( 1, 1 ), "above 0.80 only the second target is forecast, from the first"
     assert result[ "best" ][ "tune_per_100" ] == max( p[ "tune_per_100" ] for p in result[ "points" ] ), "the answered figures never decide the winner"
+
+
+def _mixed_answer_asks( engine ):
+    """The synthetic asks with mixed answers, and a last ask that no floor can forecast."""
+    answers = [ "yes", "no", "no", "no", "no", "yes", "yes", "yes", "no", "yes" ]
+    asks    = [ dict( ask, actual_value=value, decision_value=value ) for ask, value in zip( _asks( engine ), answers ) ]
+    asks[ -1 ] = dict( asks[ -1 ], question_embedding=_vector( [ 0.0 ] * 30 + [ 1.0 ] ) )   # no neighbour at any floor: never answered
+    return asks
+
+
+def test_the_winner_is_chosen_on_correct_per_100_not_on_how_many_asks_were_answered( engine ):
+    """The lowest floors answer six tune asks, the best point two, and the best point wins."""
+    result   = run_retune( _mixed_answer_asks( engine ), engine, SHA )
+    most     = max( p[ "tune_answered" ] for p in result[ "points" ] )
+    assert most == 6 and result[ "best" ][ "tune_answered" ] == 2, "the answered-count winner is not the per-100 winner"
+    assert result[ "best" ][ "threshold" ] == 0.8 and result[ "best" ][ "tune_correct" ] == 2
+    low = { ( p[ "threshold" ], p[ "top_k" ] ): p for p in result[ "points" ] }[ ( 0.6, 3 ) ]
+    assert ( low[ "tune_answered" ], low[ "tune_correct" ], low[ "tune_accuracy_answered_per_100" ] ) == ( 6, 2, round( 100 / 3, 4 ) )
+
+
+def test_the_final_accuracy_among_answered_divides_by_answered_not_by_correct_or_by_all( engine ):
+    """Two of three final asks are forecast and one is right: three different counts."""
+    best = run_retune( _mixed_answer_asks( engine ), engine, SHA )[ "best" ]
+    assert ( best[ "final_answered" ], best[ "final_correct" ] ) == ( 2, 1 )
+    assert best[ "final_accuracy_answered_per_100" ] == 50.0
+    assert best[ "final_answer_rate_per_100" ] == round( 200 / 3, 4 ) and best[ "final_per_100" ] == round( 100 / 3, 4 )
+
+
+def test_the_sweep_below_the_grid_is_report_only( engine ):
+    """It replays 0.30 to 0.45 at every top k, names no best and restores the engine."""
+    saved  = ( engine.similarity_threshold, engine.cbr_top_k, engine.retrieval_metric )
+    points = report_only_sweep( _asks( engine ), engine, SHA )
+    assert SWEEP_THRESHOLDS == ( 0.3, 0.35, 0.4, 0.45 )
+    assert [ ( p[ "threshold" ], p[ "top_k" ] ) for p in points ] == grid( SWEEP_THRESHOLDS, ( 3, 5, 8, 10 ) )
+    assert isinstance( points, list ) and all( "tune_answered" in p for p in points )
+    assert ( engine.similarity_threshold, engine.cbr_top_k, engine.retrieval_metric ) == saved
 
 
 def test_the_final_window_never_decides_the_winner( engine ):
