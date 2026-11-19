@@ -24,6 +24,7 @@ from cosa.agents.decision_proxy.config import (
     DEFAULT_TRUST_MODE,
 )
 from cosa.agents.decision_proxy.smart_router import SmartRouter
+from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.decision_proxy.user_presence import user_connected_or_default
 
 
@@ -126,6 +127,7 @@ class DecisionResponder( BaseResponder ):
             "decisions_deferred_to_user" : 0,
             "sender_rejected"      : 0,
             "disabled_skipped"     : 0,
+            "review_cards_skipped" : 0,
         } )
 
     def set_domain_strategy( self, strategy ):
@@ -212,6 +214,13 @@ class DecisionResponder( BaseResponder ):
         if not notification_id:
             self.stats[ "errors" ] += 1
             print( f"{self.LOG_PREFIX} ERROR: No notification_id in event" )
+            return
+
+        # A review card is the learner's own question to the human. The proxy never classifies, records or
+        # answers one, so it leaves no decision row and sends no answer. The marker is read from the ask.
+        if is_review_card( notification.get( "response_options" ) ):
+            self.stats[ "review_cards_skipped" ] += 1
+            if self.debug: print( f"{self.LOG_PREFIX} Review card {notification_id} — proxy skips it" )
             return
 
         # Check sender ID against accepted list — FAIL-CLOSED (960a4ec9 Option C).

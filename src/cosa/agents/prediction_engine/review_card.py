@@ -20,11 +20,13 @@ def is_review_card( response_options: Any ) -> bool:
     Say whether an ask carries the review-card marker.
 
     Requires:
-        - response_options is the ask's stored schema: a dict, a JSON string, or None
+        - response_options is the ask's stored schema: a dict, a string, or None
 
     Ensures:
         - returns True only when the schema is an object whose review_card key is exactly True
-        - returns False for None, a list, a string that is not an object, and any other value of the key
+        - returns False for None, a list, text that is not JSON, JSON that is not an object, and any other value of the key
     """
-    if isinstance( response_options, str ): response_options = json.loads( response_options )
+    if isinstance( response_options, str ):
+        try: response_options = json.loads( response_options )
+        except json.JSONDecodeError: return False
     return isinstance( response_options, dict ) and response_options.get( REVIEW_CARD_KEY ) is True
