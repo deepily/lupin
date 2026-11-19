@@ -21,16 +21,14 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 import cosa.agents.prediction_engine.episode_view as ev
 import cosa.agents.prediction_engine.principle_retrieval as pr
 import cosa.agents.prediction_engine.principles_forecast as pf
+from cosa.research.preference_replay import scratch_db  # noqa: F401  registers the one shared SQLite hooks for JSONB and Vector
 from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog, PreferenceEvidence, PreferencePrinciple
 
 T0       = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
@@ -38,18 +36,6 @@ RECIPIENT = uuid.UUID( "00000000-0000-4000-8000-0000000000aa" )
 SENDER   = "claude.code@lupin.deepily.ai#ab12cd34"
 ENCODER  = "model-x|statement-and-rationale-v1"
 EXTRACT  = "sonnet|v1"
-
-
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( element, compiler, **kw ):
-    """Render JSONB as JSON when the dialect is SQLite."""
-    return "JSON"
-
-
-@compiles( Vector, "sqlite" )
-def _vector_as_text( element, compiler, **kw ):
-    """Render a pgvector column as a text column when the dialect is SQLite."""
-    return "TEXT"
 
 
 def vec( x, y ):
