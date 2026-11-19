@@ -484,3 +484,21 @@ def test_encoder_version_is_accepted_at_100_characters_and_refused_at_101( tmp_p
             with pytest.raises( bf.RefusedPlan, match="encoder version is 101 characters" ): bf.build_plan( conn, header, records )
         else:
             assert len( bf.build_plan( conn, header, records ).encoder_version ) == 100
+
+
+def test_main_refuses_a_rehearsal_that_omits_only_the_frozen_list( tmp_path, capsys ):
+    idfile = tmp_path / "ids.txt"
+    idfile.write_text( "n1\n", encoding="utf-8" )
+    argv = [ "--side-file", "f", "--database-url", "u", "--rehearse", "--expect-insert", "1", "--expect-update", "0", "--expect-log", "1",
+             "--expect-database", "scratch", "--expect-insert-ids", str( idfile ) ]
+    with pytest.raises( SystemExit ) as raised:
+        bf.main( argv )
+    assert raised.value.code == 2 and "--frozen-ids" in capsys.readouterr().err
+
+
+def test_the_outside_list_message_names_the_first_of_several_sorted( tmp_path ):
+    class Boom:
+        def connect( self ): raise AssertionError( "database opened" )
+    out = []
+    bf.run( Boom(), side_file( tmp_path, [ "zeta", "n1", "alpha" ] ), False, None, None, None, out=out.append, frozen_ids={ "n1" } )
+    assert out == [ "REFUSED: 2 side-file ids are outside the frozen list, first alpha" ]
