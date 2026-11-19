@@ -24,14 +24,17 @@ The ``c0`` contract, an object with:
 """
 
 import asyncio
+import inspect
 import threading
 import uuid
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
+
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieve_principles
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.rest.postgres_models import Notification, PredictionArmForecast
+from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog
 from cosa.utils.iso_timestamp import aware_moment
 
 ARM              = "B1"
@@ -48,6 +51,12 @@ REASON_STORED    = "already stored"
 REASON_UNREADABLE = "unreadable_forecast"
 BLOCK_HEADING    = "Principles that apply to this card, learned from earlier answers:"
 VERSION_SUFFIX   = "+principles"
+REASON_INPUT     = "input_error"
+
+CONTRACT_VALUES  = ( "model", "timeout_seconds", "predictor_version" )
+CONTRACT_ERRORS  = "errors"
+CONTRACT_SYNC    = { "build_prompts": 1, "parse": 2 }
+CONTRACT_ASYNC   = "complete"
 
 
 def principles_forecast_enabled():
@@ -127,6 +136,41 @@ class CapGate:
             - one fewer call is counted
         """
         with self._lock: self.inflight -= 1
+
+
+def check_baseline( c0 ):
+    """
+    Check that an object meets the baseline contract this module depends on.
+
+    Requires:
+        - c0 is any object; the contract is the list in the module docstring
+
+    Ensures:
+        - returns None when c0 carries a model id, a positive timeout and a version string, a non-empty tuple of
+          exception classes as errors, build_prompts and parse taking one and two arguments, and an async complete
+          that accepts timeout_seconds
+        - the module docstring lists the same names this function checks, which a test reads
+
+    Raises:
+        - TypeError naming every member that is missing or has the wrong shape, all at once
+    """
+    problems = []
+    for name in CONTRACT_VALUES + ( CONTRACT_ERRORS, ) + tuple( CONTRACT_SYNC ) + ( CONTRACT_ASYNC, ):
+        if not hasattr( c0, name ): problems.append( f"{name} is missing" )
+    if not problems:
+        if not ( isinstance( c0.model, str ) and c0.model ): problems.append( "model must be a non-empty string" )
+        if not ( isinstance( c0.timeout_seconds, ( int, float ) ) and not isinstance( c0.timeout_seconds, bool ) and c0.timeout_seconds > 0 ): problems.append( "timeout_seconds must be a positive number" )
+        if not ( isinstance( c0.predictor_version, str ) and c0.predictor_version ): problems.append( "predictor_version must be a non-empty string" )
+        if not ( isinstance( c0.errors, tuple ) and c0.errors and all( isinstance( e, type ) and issubclass( e, BaseException ) for e in c0.errors ) ):
+            problems.append( "errors must be a non-empty tuple of exception classes" )
+        for name, count in CONTRACT_SYNC.items():
+            member = getattr( c0, name )
+            if not callable( member ) or inspect.iscoroutinefunction( member ): problems.append( f"{name} must be a plain function" )
+            elif len( inspect.signature( member ).parameters ) != count: problems.append( f"{name} must take {count} argument(s)" )
+        complete = getattr( c0, CONTRACT_ASYNC )
+        if not inspect.iscoroutinefunction( complete ): problems.append( "complete must be an async function" )
+        elif "timeout_seconds" not in inspect.signature( complete ).parameters: problems.append( "complete must accept timeout_seconds" )
+    if problems: raise TypeError( "the baseline does not meet the contract: " + "; ".join( problems ) )
 
 
 def with_principles( system_prompt, user_prompt, block ):
@@ -232,6 +276,9 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
         - with the switch off, or with c0 None (reason REASON_BLOCKED), nothing is read, called or written
         - a card that already has its row is left alone, with no call (reason "already stored")
         - past the cap, one row with forecast None and reason "capacity" is written and no model is called
+        - a baseline that does not meet the contract raises TypeError before anything is read or written
+        - a failure gathering the inputs stores one row with the reason "input_error: <exception class>", the cutoff and no
+          forecast, and returns failed; only a card that does not exist raises, since it has no cutoff to store
         - otherwise the baseline's prompts plus the principle block go to the baseline's model, once, with no retry
         - a ready forecast is stored with the principle ids it was given and its ready time; an unreadable reply or a
           failed call stores one row with the reason and no forecast
@@ -239,6 +286,7 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
     """
     if not ( principles_forecast_enabled() if enabled is None else enabled ): return { "status": STATUS_NOT_RUN, "reason": REASON_SWITCH }
     if c0 is None: return { "status": STATUS_NOT_RUN, "reason": REASON_BLOCKED }
+    check_baseline( c0 )
     if await asyncio.to_thread( _has_row, session_factory, notification_id ): return { "status": STATUS_NOT_RUN, "reason": REASON_STORED }
     now = clock if clock is not None else ( lambda: datetime.now( timezone.utc ) )
     if not gate.try_enter():
@@ -246,9 +294,15 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
         await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, c0.predictor_version + VERSION_SUFFIX, [], REASON_CAPACITY )
         return { "status": STATUS_CAPACITY, "reason": REASON_CAPACITY }
     try:
-        episode, selected, block, system, user = await asyncio.to_thread( _prepare, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k )
-        asked   = aware_moment( episode[ "asked_at" ] )
         version = c0.predictor_version + VERSION_SUFFIX
+        try:
+            episode, selected, block, system, user = await asyncio.to_thread( _prepare, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k )
+        except Exception as input_error:  # any failure gathering inputs (database, embedder, bound) must still leave a row
+            reason = f"{REASON_INPUT}: {type( input_error ).__name__}"
+            asked  = await asyncio.to_thread( _asked_at, session_factory, notification_id )
+            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [], reason )
+            return { "status": STATUS_FAILED, "reason": reason }
+        asked   = aware_moment( episode[ "asked_at" ] )
         ids     = block[ "principle_ids" ]
         try:
             text     = await c0.complete( c0.model, system, user, timeout_seconds=c0.timeout_seconds )
@@ -295,12 +349,13 @@ def arm_timeliness( session, arm, since ):
         - since is an aware datetime; only cards asked at or after it are counted
 
     Ensures:
-        - returns { arm, answered, ready_before_answer, late, not_ready, capacity }, over cards answered by now
+        - returns { arm, answered, ready_before_answer, late, not_ready, capacity, no_row }, over cards answered by now
         - a card the cap turned away counts as capacity, named apart so the cap's effect is visible
         - a card with no ready time and another reason counts as not_ready, and is not timely
-        - answered equals the other four added up
+        - a real ask (one with a prediction_log row) that was answered and has no row for the arm counts as no_row
+        - answered equals the other five added up, so the timely share never hides a card that has no row
     """
-    counts = { "arm": arm, "answered": 0, "ready_before_answer": 0, "late": 0, "not_ready": 0, "capacity": 0 }
+    counts = { "arm": arm, "answered": 0, "ready_before_answer": 0, "late": 0, "not_ready": 0, "capacity": 0, "no_row": 0 }
     rows = session.query( PredictionArmForecast, Notification ).join( Notification, Notification.id == PredictionArmForecast.notification_id ).filter(
         PredictionArmForecast.arm == arm, Notification.created_at >= since, Notification.responded_at.isnot( None ) ).all()
     for forecast, notification in rows:
@@ -309,4 +364,8 @@ def arm_timeliness( session, arm, since ):
         elif forecast.forecast_ready_at is None: counts[ "not_ready" ] += 1
         elif aware_moment( forecast.forecast_ready_at ) <= aware_moment( notification.responded_at ): counts[ "ready_before_answer" ] += 1
         else: counts[ "late" ] += 1
+    has_row = sa.select( PredictionArmForecast.id ).where( PredictionArmForecast.notification_id == Notification.id, PredictionArmForecast.arm == arm ).exists()
+    counts[ "no_row" ] = session.query( Notification ).join( PredictionLog, PredictionLog.notification_id == Notification.id ).filter(
+        Notification.created_at >= since, Notification.responded_at.isnot( None ), ~has_row ).count()
+    counts[ "answered" ] += counts[ "no_row" ]
     return counts

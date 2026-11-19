@@ -349,8 +349,8 @@ def test_arm_timeliness_counts_ready_late_not_ready_and_capacity_apart( factory 
     card( arm="C0", ready=T0 )
     card( minutes=-1000, ready=T0 )
     with factory() as db: counts = pf.arm_timeliness( db, "B1", T0 - timedelta( minutes=500 ) )
-    assert counts == { "arm": "B1", "answered": 5, "ready_before_answer": 2, "late": 1, "not_ready": 1, "capacity": 1 }
-    assert counts[ "answered" ] == sum( counts[ k ] for k in ( "ready_before_answer", "late", "not_ready", "capacity" ) )
+    assert counts == { "arm": "B1", "answered": 5, "ready_before_answer": 2, "late": 1, "not_ready": 1, "capacity": 1, "no_row": 0 }
+    assert counts[ "answered" ] == sum( counts[ k ] for k in ( "ready_before_answer", "late", "not_ready", "capacity", "no_row" ) )
 
 
 def test_the_writer_stores_one_row_per_card_even_when_called_twice( factory ):
@@ -363,3 +363,146 @@ def test_the_writer_stores_one_row_per_card_even_when_called_twice( factory ):
     first  = pf._write_row( factory, nid, T0, None, None, "v", [], "capacity" )
     second = pf._write_row( factory, nid, T0, None, None, "v", [], "capacity" )
     assert ( first, second, len( rows( factory ) ) ) == ( True, False, 1 )
+
+
+def logged_ask( factory, minutes=0, answered=True, with_log=True, arm_row=False, arm="B1" ):
+    """Insert an ask, with a prediction_log row and an arm row as asked, and return its id."""
+    nid = ask( factory, minutes, responded_at=T0 + timedelta( minutes=10 ) if answered else None )
+    with factory() as db:
+        if with_log: db.add( PredictionLog( notification_id=uuid.UUID( nid ), response_type="yes_no", category="c", prediction_confidence=0.5, prediction_strategy="cbr", similar_case_count=0 ) )
+        if arm_row: db.add( PredictionArmForecast( notification_id=uuid.UUID( nid ), arm=arm, forecast_ready_at=T0, displayed=False ) )
+        db.commit()
+    return nid
+
+
+def test_arm_timeliness_counts_an_answered_ask_with_no_row_so_the_share_cannot_flatter( factory ):
+    """
+    An answered real ask with no row for the arm counts as no_row and in answered.
+
+    A card that has only another arm's row counts too. An unanswered ask, a card with no prediction_log row,
+    a card that has its row and an old card are not counted as no_row.
+    """
+    logged_ask( factory )
+    logged_ask( factory, answered=False )
+    logged_ask( factory, with_log=False )
+    logged_ask( factory, arm_row=True )
+    logged_ask( factory, arm_row=True, arm="C0" )
+    logged_ask( factory, minutes=-1000 )
+    with factory() as db: counts = pf.arm_timeliness( db, "B1", T0 - timedelta( minutes=500 ) )
+    assert counts == { "arm": "B1", "answered": 3, "ready_before_answer": 1, "late": 0, "not_ready": 0, "capacity": 0, "no_row": 2 }
+
+
+def test_a_failure_gathering_inputs_stores_one_input_error_row_and_returns_failed( factory ):
+    """
+    An embedder that raises leaves one row with the reason, the cutoff and no forecast.
+
+    The model is never called and the cap place is returned.
+    """
+    class Broken:
+        def encode( self, text ): raise RuntimeError( "embedder down" )
+    nid, gate, c0 = ask( factory ), pf.CapGate( 1 ), Baseline()
+    result = asyncio.run( pf.run_b1( factory, nid, c0, Broken(), ENCODER, EXTRACT, gate, enabled=True ) )
+    row    = rows( factory )[ 0 ]
+    assert result == { "status": "failed", "reason": "input_error: RuntimeError" } and c0.calls == [] and gate.inflight == 0
+    assert ( row.forecast, row.forecast_ready_at, row.abstention_reason, row.evidence_ids, row.predictor_version ) == ( None, None, "input_error: RuntimeError", [], "c0-v1+principles" )
+    assert pf.aware_moment( row.input_cutoff ) == T0 and len( rows( factory ) ) == 1
+
+
+def test_a_missing_card_still_raises_because_it_has_no_cutoff_to_store( factory ):
+    """A card that does not exist raises LookupError, writes no row and returns the cap place."""
+    gate = pf.CapGate( 1 )
+    with pytest.raises( LookupError, match="does not exist" ): run( factory, str( uuid.uuid4() ), Baseline(), gate=gate )
+    assert rows( factory ) == [] and gate.inflight == 0
+
+
+CONTRACT_NAMES = { "model", "timeout_seconds", "errors", "build_prompts", "complete", "parse", "predictor_version" }
+
+
+def test_the_baseline_stand_in_meets_the_contract():
+    """The recording stand-in passes the check, so the other tests start from a good baseline."""
+    assert pf.check_baseline( Baseline() ) is None
+
+
+def test_the_checked_names_are_exactly_the_documented_contract_and_the_ones_run_b1_uses( factory ):
+    """
+    The module docstring, the check and the run use one list of seven names.
+
+    A name added on either side without the other reddens this test.
+    """
+    import re
+    documented = set( re.findall( r"^- ``(\w+)", pf.__doc__.split( "contract, an object with:" )[ 1 ], flags=re.MULTILINE ) )
+    checked    = set( pf.CONTRACT_VALUES ) | { pf.CONTRACT_ERRORS, pf.CONTRACT_ASYNC } | set( pf.CONTRACT_SYNC )
+    touched    = set()
+    class Watched( Baseline ):
+        def __getattribute__( self, name ):
+            if not name.startswith( "_" ) and name not in ( "reply", "fail", "bad_reply", "calls" ): touched.add( name )
+            return super().__getattribute__( name )
+    nid = ask( factory )
+    run( factory, nid, Watched() )
+    assert documented == checked == CONTRACT_NAMES and touched == CONTRACT_NAMES
+
+
+@pytest.mark.parametrize( "name", sorted( CONTRACT_NAMES ) )
+def test_a_baseline_missing_any_contract_member_is_refused_by_name( name ):
+    """Removing any one member makes the check raise, naming that member."""
+    class Missing( Baseline ): pass
+    c0 = Missing()
+    setattr( Missing, name, property( lambda self: ( _ for _ in () ).throw( AttributeError( name ) ) ) )
+    with pytest.raises( TypeError, match=f"{name} is missing" ): pf.check_baseline( c0 )
+
+
+@pytest.mark.parametrize( "change, expected", [
+    ( { "model": "" },                                  "model must be a non-empty string" ),
+    ( { "timeout_seconds": 0 },                         "timeout_seconds must be a positive number" ),
+    ( { "timeout_seconds": True },                      "timeout_seconds must be a positive number" ),
+    ( { "predictor_version": None },                    "predictor_version must be a non-empty string" ),
+    ( { "errors": () },                                 "errors must be a non-empty tuple of exception classes" ),
+    ( { "errors": [ Failed ] },                         "errors must be a non-empty tuple of exception classes" ),
+    ( { "errors": ( "Failed", ) },                      "errors must be a non-empty tuple of exception classes" ),
+    ( { "build_prompts": lambda a, b: None },           "build_prompts must take 1 argument(s)" ),
+    ( { "build_prompts": None },                        "build_prompts must be a plain function" ),
+    ( { "parse": lambda text: None },                   "parse must take 2 argument(s)" ),
+    ( { "parse": None },                                "parse must be a plain function" ),
+    ( { "complete": lambda *a, **k: None },             "complete must be an async function" ),
+] )
+def test_a_baseline_with_a_wrongly_shaped_member_is_refused_with_the_reason( change, expected ):
+    """Each wrong shape is named: a bad value, a wrong argument count, a non-async complete."""
+    c0 = Baseline()
+    for key, value in change.items(): setattr( c0, key, value )
+    with pytest.raises( TypeError, match=expected.replace( "(", r"\(" ).replace( ")", r"\)" ) ): pf.check_baseline( c0 )
+
+
+def test_a_complete_that_cannot_take_a_timeout_and_an_async_parse_are_refused():
+    """
+    The call passes timeout_seconds, so complete must accept it.
+
+    A coroutine parse would return an unawaited coroutine.
+    """
+    c0 = Baseline()
+    async def no_timeout( model, system, user ): return "x"
+    async def parse_async( text, episode ): return {}
+    c0.complete = no_timeout
+    with pytest.raises( TypeError, match="complete must accept timeout_seconds" ): pf.check_baseline( c0 )
+    c0 = Baseline()
+    c0.parse = parse_async
+    with pytest.raises( TypeError, match="parse must be a plain function" ): pf.check_baseline( c0 )
+
+
+def test_every_problem_is_reported_at_once():
+    """A baseline wrong in two ways gets both reasons in one error."""
+    c0 = Baseline()
+    c0.model, c0.errors = "", ()
+    with pytest.raises( TypeError ) as caught: pf.check_baseline( c0 )
+    assert "model must be a non-empty string" in str( caught.value ) and "errors must be a non-empty tuple" in str( caught.value )
+
+
+def test_run_b1_refuses_a_nonconforming_baseline_before_reading_or_writing_anything( factory ):
+    """
+    A baseline that fails the check raises TypeError at the first run.
+
+    No row is written and no call is made.
+    """
+    nid, c0 = ask( factory ), Baseline()
+    c0.errors = ()
+    with pytest.raises( TypeError, match="does not meet the contract" ): run( factory, nid, c0 )
+    assert rows( factory ) == [] and c0.calls == []
