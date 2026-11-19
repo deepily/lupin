@@ -147,6 +147,12 @@ class TestDraftAtReveal:
         assert r.status_code == 422
         assert row.draft_at_reveal is None and row.fold_opened_at is None
 
+    def test_an_explicit_null_draft_is_accepted_and_stores_nothing( self, harness, row ):
+        r = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": None } )
+        assert r.status_code == 200
+        assert r.json()[ "draft_recorded" ] is False
+        assert row.draft_at_reveal is None and row.fold_opened_at is not None
+
     def test_a_draft_that_is_not_an_object_answers_422( self, harness, row ):
         r = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": "yes" } )
         assert r.status_code == 422
