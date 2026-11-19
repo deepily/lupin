@@ -12,7 +12,7 @@ Each test names what it would catch:
   - a prompt that differs from the baseline's by more than the block    -> test_the_call_*
   - a forecast built from principles that came after the ask            -> test_principles_after_the_ask_*
   - a failed or unreadable call that stores nothing or two rows         -> test_a_failed_*, test_an_unreadable_*
-  - the cap queueing, leaking a place, or hiding in not_ready           -> test_the_cap_*, test_arm_timeliness_*
+  - the cap queueing, leaking a place, or hiding in not_ready           -> test_the_cap_*, test_the_summary_*
 """
 
 import asyncio
@@ -31,6 +31,7 @@ from sqlalchemy.pool import StaticPool
 import cosa.agents.prediction_engine.episode_view as ev
 import cosa.agents.prediction_engine.principle_retrieval as pr
 import cosa.agents.prediction_engine.principles_forecast as pf
+from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
 from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog, PreferenceEvidence, PreferencePrinciple
 
 T0       = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
@@ -252,9 +253,9 @@ def test_the_cap_turns_a_card_away_at_once_without_a_call_and_names_the_reason( 
     """
     nid, gate, c0 = ask( factory ), pf.CapGate( 1 ), Baseline()
     assert gate.try_enter() is True
-    assert run( factory, nid, c0, gate=gate ) == { "status": "capacity", "reason": "capacity" }
+    assert run( factory, nid, c0, gate=gate ) == { "status": "capacity", "reason": CAPPED_ARM_REASON }
     row = rows( factory )[ 0 ]
-    assert c0.calls == [] and ( row.forecast, row.abstention_reason, row.predictor_version ) == ( None, "capacity", "c0-v1+principles" ) and gate.inflight == 1
+    assert c0.calls == [] and ( row.forecast, row.abstention_reason, row.predictor_version ) == ( None, CAPPED_ARM_REASON, "c0-v1+principles" ) and gate.inflight == 1
 
 
 def test_the_cap_for_a_missing_card_fails_loudly( factory ):
@@ -328,31 +329,6 @@ def test_the_cap_is_read_from_the_ini_and_a_non_positive_cap_is_refused( monkeyp
     with pytest.raises( ValueError, match="positive integer" ): pf.concurrency_cap()
 
 
-def test_arm_timeliness_counts_ready_late_not_ready_and_capacity_apart( factory ):
-    """
-    Answered cards fall into four classes, and a capacity card is kept out of not_ready.
-
-    Other arms, unanswered cards and old cards are left out.
-    """
-    answered_at = T0 + timedelta( minutes=10 )
-    def card( minutes=0, answered=True, arm="B1", ready=None, reason=None ):
-        nid = ask( factory, minutes, responded_at=answered_at if answered else None )
-        with factory() as db:
-            db.add( PredictionArmForecast( notification_id=uuid.UUID( nid ), arm=arm, forecast_ready_at=ready, abstention_reason=reason, displayed=False ) )
-            db.commit()
-    card( ready=answered_at - timedelta( minutes=1 ) )
-    card( ready=answered_at )
-    card( ready=answered_at + timedelta( minutes=1 ) )
-    card( ready=None, reason="model_error: Failed" )
-    card( ready=None, reason="capacity" )
-    card( answered=False, ready=T0 )
-    card( arm="C0", ready=T0 )
-    card( minutes=-1000, ready=T0 )
-    with factory() as db: counts = pf.arm_timeliness( db, "B1", T0 - timedelta( minutes=500 ) )
-    assert counts == { "arm": "B1", "answered": 5, "ready_before_answer": 2, "late": 1, "not_ready": 1, "capacity": 1, "no_row": 0 }
-    assert counts[ "answered" ] == sum( counts[ k ] for k in ( "ready_before_answer", "late", "not_ready", "capacity", "no_row" ) )
-
-
 def test_the_writer_stores_one_row_per_card_even_when_called_twice( factory ):
     """
     Two writes for one card leave one row.
@@ -363,33 +339,6 @@ def test_the_writer_stores_one_row_per_card_even_when_called_twice( factory ):
     first  = pf._write_row( factory, nid, T0, None, None, "v", [], "capacity" )
     second = pf._write_row( factory, nid, T0, None, None, "v", [], "capacity" )
     assert ( first, second, len( rows( factory ) ) ) == ( True, False, 1 )
-
-
-def logged_ask( factory, minutes=0, answered=True, with_log=True, arm_row=False, arm="B1" ):
-    """Insert an ask, with a prediction_log row and an arm row as asked, and return its id."""
-    nid = ask( factory, minutes, responded_at=T0 + timedelta( minutes=10 ) if answered else None )
-    with factory() as db:
-        if with_log: db.add( PredictionLog( notification_id=uuid.UUID( nid ), response_type="yes_no", category="c", prediction_confidence=0.5, prediction_strategy="cbr", similar_case_count=0 ) )
-        if arm_row: db.add( PredictionArmForecast( notification_id=uuid.UUID( nid ), arm=arm, forecast_ready_at=T0, displayed=False ) )
-        db.commit()
-    return nid
-
-
-def test_arm_timeliness_counts_an_answered_ask_with_no_row_so_the_share_cannot_flatter( factory ):
-    """
-    An answered real ask with no row for the arm counts as no_row and in answered.
-
-    A card that has only another arm's row counts too. An unanswered ask, a card with no prediction_log row,
-    a card that has its row and an old card are not counted as no_row.
-    """
-    logged_ask( factory )
-    logged_ask( factory, answered=False )
-    logged_ask( factory, with_log=False )
-    logged_ask( factory, arm_row=True )
-    logged_ask( factory, arm_row=True, arm="C0" )
-    logged_ask( factory, minutes=-1000 )
-    with factory() as db: counts = pf.arm_timeliness( db, "B1", T0 - timedelta( minutes=500 ) )
-    assert counts == { "arm": "B1", "answered": 3, "ready_before_answer": 1, "late": 0, "not_ready": 0, "capacity": 0, "no_row": 2 }
 
 
 def test_a_failure_gathering_inputs_stores_one_input_error_row_and_returns_failed( factory ):
@@ -538,3 +487,39 @@ def test_with_the_database_down_the_input_failure_still_returns_failed_and_says_
     result = asyncio.run( pf.run_b1( going_down, nid, c0, Embedder(), ENCODER, EXTRACT, gate, enabled=True ) )
     assert result == { "status": "failed", "reason": "input_error: OperationalError", "stored": False }
     assert c0.calls == [] and gate.inflight == 0 and rows( factory ) == [] and len( uses ) == 3
+
+
+def test_the_capped_reason_is_the_one_word_the_repository_defines_and_the_summary_counts():
+    """
+    The capped reason is the repository's word, and the summary counts that word.
+
+    This module imports it, so it has no copy of its own.
+    """
+    from cosa.research.preference_replay import arm_summary
+    assert CAPPED_ARM_REASON == "capacity" and pf.CAPPED_ARM_REASON == CAPPED_ARM_REASON == arm_summary.CAPPED_ARM_REASON
+
+
+def test_the_summary_reads_the_rows_this_module_writes_and_names_the_cap_and_the_missing_row( factory ):
+    """
+    The per-arm summary counts a ready row as timely and a capped row as capped.
+
+    An answered card without a row is counted as no_row.
+
+    This is the check that the rows written here are the rows the summary reads.
+    """
+    from cosa.research.preference_replay import arm_summary
+    def logged( minutes ):
+        nid = ask( factory, minutes )
+        with factory() as db:
+            db.add( PredictionLog( notification_id=uuid.UUID( nid ), response_type="yes_no", category="c", prediction_confidence=0.5, prediction_strategy="cbr",
+                                   similar_case_count=0, predicted_at=T0, responded_at=T0 + timedelta( minutes=10 ), actual_value={ "value": "yes" } ) )
+            db.commit()
+        return nid
+    ready, capped, missing = logged( 0 ), logged( 1 ), logged( 2 )
+    gate = pf.CapGate( 1 )
+    run( factory, ready, Baseline(), now=T0 + timedelta( minutes=5 ) )
+    gate.try_enter()
+    run( factory, capped, Baseline(), gate=gate )
+    with factory() as db: summary = { row[ "arm" ]: row for row in arm_summary.per_arm_summary( db ) }[ "B1" ]
+    assert ( summary[ "forecasts" ], summary[ "answered" ], summary[ "timely" ], summary[ "capped" ], summary[ "no_row" ] ) == ( 2, 2, 1, 1, 1 )
+    assert missing not in [ str( r.notification_id ) for r in rows( factory ) ]
