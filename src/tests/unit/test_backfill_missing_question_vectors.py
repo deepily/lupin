@@ -48,20 +48,21 @@ def engine():
     """An in-memory database with the four tables the script touches."""
     eng = sa.create_engine( "sqlite://", poolclass=sa.pool.StaticPool )
     with eng.begin() as conn:
-        conn.execute( sa.text( "CREATE TABLE notifications ( id TEXT PRIMARY KEY, message TEXT, recipient_id TEXT, responded_at TEXT, response_value TEXT )" ) )
+        conn.execute( sa.text( "CREATE TABLE notifications ( id TEXT PRIMARY KEY, message TEXT, recipient_id TEXT, responded_at TEXT, response_value TEXT, response_options TEXT )" ) )
         conn.execute( sa.text( "CREATE TABLE prediction_log ( notification_id TEXT, category TEXT, response_type TEXT, actual_value TEXT, encoder_version TEXT )" ) )
         conn.execute( sa.text( "CREATE TABLE prediction_decisions ( id TEXT PRIMARY KEY, question TEXT, category TEXT, decision_value TEXT, ratification_state TEXT, "
                                "data_origin TEXT, response_type TEXT, question_embedding TEXT, created_at TEXT, owner_user_id TEXT, answer_source TEXT )" ) )
     return eng
 
 
-def add_ask( eng, row_id, message="Proceed?", recipient="user-1", source="ui", actual=None, response_type="yes_no", has_row=False, stored_question=None ):
+def add_ask( eng, row_id, message="Proceed?", recipient="user-1", source="ui", actual=None, response_type="yes_no", has_row=False, stored_question=None, options=None ):
     """Insert one notification, its log row, and optionally an existing case row."""
     actual = actual if actual is not None else { "value": "yes" }
     with eng.begin() as conn:
-        conn.execute( sa.text( "INSERT INTO notifications VALUES ( :i, :m, :r, :t, :v )" ),
+        conn.execute( sa.text( "INSERT INTO notifications VALUES ( :i, :m, :r, :t, :v, :o )" ),
                       { "i": row_id, "m": message, "r": recipient, "t": "2026-09-01T10:00:00+00:00",
-                        "v": json.dumps( { "source": source } ) if source else json.dumps( { } ) } )
+                        "v": json.dumps( { "source": source } ) if source else json.dumps( { } ),
+                        "o": json.dumps( options ) if options is not None else None } )
         conn.execute( sa.text( "INSERT INTO prediction_log VALUES ( :i, 'cat', :rt, :a, NULL )" ),
                       { "i": row_id, "rt": response_type, "a": json.dumps( actual ) } )
         if has_row:
@@ -438,7 +439,7 @@ def test_a_run_larger_than_two_chunks_plans_and_applies_every_id( tmp_path, engi
     total  = 2 * bf.CHUNK + 17
     ids    = [ f"id-{index:04d}" for index in range( total ) ]
     with engine.begin() as conn:
-        conn.execute( sa.text( "INSERT INTO notifications VALUES ( :i, 'Proceed?', 'user-1', '2026-09-01T10:00:00+00:00', '{\"source\": \"ui\"}' )" ), [ { "i": row_id } for row_id in ids ] )
+        conn.execute( sa.text( "INSERT INTO notifications VALUES ( :i, 'Proceed?', 'user-1', '2026-09-01T10:00:00+00:00', '{\"source\": \"ui\"}', NULL )" ), [ { "i": row_id } for row_id in ids ] )
         conn.execute( sa.text( "INSERT INTO prediction_log VALUES ( :i, 'cat', 'yes_no', '{\"value\": \"yes\"}', NULL )" ), [ { "i": row_id } for row_id in ids ] )
         conn.execute( sa.text( "INSERT INTO prediction_decisions ( id, question, question_embedding, answer_source ) VALUES ( :i, 'Proceed?', 'old', 'human' )" ), [ { "i": row_id } for row_id in ids[ : 450 ] ] )
     out  = []
@@ -512,3 +513,12 @@ def test_the_outside_list_message_names_the_first_of_several_sorted( tmp_path ):
     out = []
     bf.run( Boom(), side_file( tmp_path, [ "zeta", "n1", "alpha" ] ), False, None, None, None, out=out.append, frozen_ids={ "n1" } )
     assert out == [ "REFUSED: 2 side-file ids are outside the frozen list, first alpha" ]
+
+
+def test_a_review_card_ask_is_planned_with_the_review_card_source_even_when_answered_from_the_ui( tmp_path, engine ):
+    add_ask( engine, "rc1", options={ "review_card": True } )
+    add_ask( engine, "n1" )
+    asks = bf.fetch_asks( engine.connect(), [ "rc1", "n1" ] )
+    assert asks[ "rc1" ][ "response_options" ] == json.dumps( { "review_card": True } )
+    assert bf.answer_source_of( asks[ "rc1" ][ "response_value" ], asks[ "rc1" ][ "response_options" ] ) == "review_card"
+    assert bf.answer_source_of( asks[ "n1" ][ "response_value" ], asks[ "n1" ][ "response_options" ] ) == "human"
