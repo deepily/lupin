@@ -2,7 +2,7 @@
 capability: duplicate-check-proof-label-planting
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.repo.duplicate_check.proof.label_prep.make_ask@0076219645
+  - cosa.repo.duplicate_check.proof.label_prep.make_ask@761e070e72
   - cosa.repo.duplicate_check.proof.label_prep.unfence@2a3159ebb3
   - cosa.repo.duplicate_check.proof.label_prep.script_shape@c4d58adb38
   - cosa.repo.duplicate_check.proof.label_prep.write_sentence@5c3199a7f7
