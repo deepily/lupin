@@ -34,7 +34,7 @@ ENGINE_ARM = "engine"
 # The only fields of an ask known when it was asked. A field not listed here, such as the answer, the
 # ratification state, the answer source or the old log's prediction, never reaches a provider or an arm.
 ASK_KNOWN_FIELDS = ( "id", "question", "category", "response_type", "question_embedding", "title", "message", "sender_id",
-                     "asked_at", "recipient_id", "response_options", "owner_user_id", "created_at", "data_origin" )
+                     "asked_at", "recipient_id", "response_options", "owner_user_id", "data_origin" )
 
 
 def rows_as_of( cases, asked_at, excluded_ids=() ):

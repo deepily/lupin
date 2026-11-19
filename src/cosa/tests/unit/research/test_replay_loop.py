@@ -380,7 +380,7 @@ def test_a_context_arm_gets_its_view_and_principles_and_other_baselines_are_call
     assert [ r[ "meta" ][ "forecast" ] for r in run[ "records" ][ "always_yes" ] ] == [ { "value": "yes" } ] * 2
 
 
-KNOWN_AT_ASK = [ "asked_at", "category", "created_at", "data_origin", "id", "message", "owner_user_id", "question", "question_embedding",
+KNOWN_AT_ASK = [ "asked_at", "category", "data_origin", "id", "message", "owner_user_id", "question", "question_embedding",
                  "recipient_id", "response_options", "response_type", "sender_id", "title" ]
 
 
@@ -411,7 +411,7 @@ def test_a_provider_and_an_arm_are_handed_only_the_fields_known_at_the_ask( engi
 
 
 def test_an_arm_that_clears_its_inputs_changes_nothing_for_the_next_ask_or_arm( engine ):
-    """Clearing the copies leaves the replay's rows and a second arm intact."""
+    """Clearing the copies leaves the replay's rows and later callers intact."""
     def vandal( ask, visible, episode_view=None, principles=None ):
         for row in visible: row[ "response_options" ] = "gone"; row.clear()
         visible.clear()
@@ -421,7 +421,10 @@ def test_an_arm_that_clears_its_inputs_changes_nothing_for_the_next_ask_or_arm( 
     _context_arm.calls = []
     asks = [ _ask( engine, "a", 3, 0, "yes", response_options=[ "x" ] ), _ask( engine, "b", 3, 10, "yes", response_options=[ "x" ] ),
              _ask( engine, "c", 3, 20, "yes", response_options=[ "x" ] ) ]
-    replay( asks, engine, SHA, baselines={ "vandal": vandal, "after": _context_arm }, context_arms=( "vandal", "after" ) )
+    def vandal_view( ask, visible ):
+        visible.clear()
+        ask[ "response_options" ].append( "added" )
+    replay( asks, engine, SHA, baselines={ "vandal": vandal, "after": _context_arm }, context_arms=( "vandal", "after" ), episode_view_provider=vandal_view )
     assert [ [ r[ "id" ] for r in c[ "visible" ] ] for c in _context_arm.calls ] == [ [], [ "a" ], [ "a", "b" ] ]
     assert [ c[ "ask" ][ "response_options" ] for c in _context_arm.calls ] == [ [ "x" ] ] * 3
     assert [ a[ "response_options" ] for a in asks ] == [ [ "x" ] ] * 3
