@@ -22,7 +22,7 @@ class _Session:
     def get( self, model, key ):
         if model.__name__ == "Notification":
             return SimpleNamespace( title="t", message="m", sender_id="s", created_at=datetime( 2026, 11, 1, tzinfo=timezone.utc ),
-                                    recipient_id="r", response_options=None )
+                                    recipient_id="r", response_options=None, response_value=None )
         return None
 
 
@@ -34,7 +34,7 @@ def _row( response_type, stored ):
 
 def _asks( response_type, stored ):
     with patch( "cosa.research.preference_replay.cohorts.scored_rows", return_value=[ _row( response_type, stored ) ] ):
-        return cohort_asks( _Session(), response_type )
+        return cohort_asks( _Session(), response_type, vectors={} )
 
 
 def test_a_multiple_choice_row_with_only_answers_is_built_and_its_decision_value_is_the_dict_as_json_text():

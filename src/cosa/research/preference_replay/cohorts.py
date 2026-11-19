@@ -90,19 +90,53 @@ def scored_rows( session, response_type: str, window: Optional[str] = None ) -> 
     return [ row for row in rows if window is None or window_of( row.predicted_at, response_type ) == window ]
 
 
-def cohort_asks( session, response_type: str, window: Optional[str] = None ) -> List[Dict[str, Any]]:
+def _source_without_case( notification ) -> str:
+    """
+    Name who answered an ask that has no case row, from the notification's own response value.
+
+    Requires:
+        - notification has response_value, a dict or None
+
+    Ensures:
+        - returns "human" when response_value.source is "ui", else "unknown"
+    """
+    return "human" if ( notification.response_value or {} ).get( "source" ) == "ui" else "unknown"
+
+
+def _question_vector( decision, ask_id: str, vectors: Optional[Dict[str, List[float]]] ) -> Optional[List[float]]:
+    """
+    Pick an ask's vector from the side file, or from its case row when no side file is given.
+
+    Requires:
+        - decision is a prediction_decisions row or None; vectors is a dict by ask id or None
+
+    Ensures:
+        - with vectors given, returns a copy of its entry for ask_id, or None when absent
+        - with vectors None, returns a copy of the row's stored vector, or None when there is no row or vector
+    """
+    if vectors is not None: return list( vectors[ ask_id ] ) if ask_id in vectors else None
+    return list( decision.question_embedding ) if decision is not None and decision.question_embedding is not None else None
+
+
+def cohort_asks( session, response_type: str, window: Optional[str] = None, *, vectors: Optional[Dict[str, List[float]]] ) -> List[Dict[str, Any]]:
     """
     Build the replay's ask dicts for one cohort.
 
     Requires:
         - session is an active SQLAlchemy session
         - response_type and window are as for scored_rows
+        - vectors maps ask id to its question vector, as load_side_file returns it, or is None to read the stored vectors
 
     Ensures:
         - returns one dict per scored row, in predicted_at order, with the store record fields, responded_at and
           the ask fields title, message, sender_id, asked_at, recipient_id, response_options and actual_value
-        - a case's vector, category, answer and owner come from its prediction_decisions row, keyed by the
-          notification id; with no such row question_embedding is None and the ask is not replayable
+        - with vectors given, question_embedding is the side file's vector for the ask id, for every ask; the case
+          row's own vector is never read, and an id the side file lacks gets None and is not replayable
+        - with vectors None, it is the case row's stored vector, or None when there is no row or no vector
+        - a case's category, answer and owner come from its prediction_decisions row, keyed by the notification id
+        - with no such row the owner is the notification's recipient_id, the field the engine compares against, and
+          answer_source is "human" when the notification's response_value.source is "ui" and "unknown" when it is
+          missing or anything else (Rick's ruling, 19 Nov); the engine votes only with human cases
         - asked_at is the ledger's stamp, or the notification's creation time for a row written before the ledger
         - carries logged_value and logged_match, what the log recorded, for a baseline arm to score
         - the cases hold their final value, because no revision history is stored
@@ -126,10 +160,10 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None ) -> 
             "ratification_state" : decision.ratification_state if decision is not None else "not_required",
             "data_origin"        : decision.data_origin if decision is not None else "organic",
             "response_type"      : row.response_type,
-            "question_embedding" : list( decision.question_embedding ) if decision is not None and decision.question_embedding is not None else None,
+            "question_embedding" : _question_vector( decision, str( row.notification_id ), vectors ),
             "created_at"         : decision.created_at if decision is not None else row.predicted_at.isoformat(),
-            "owner_user_id"      : decision.owner_user_id if decision is not None else None,
-            "answer_source"      : decision.answer_source if decision is not None else "unknown",
+            "owner_user_id"      : decision.owner_user_id if decision is not None else str( notification.recipient_id ),
+            "answer_source"      : decision.answer_source if decision is not None else _source_without_case( notification ),
             "responded_at"       : row.responded_at,
             "title"              : notification.title,
             "message"            : notification.message,

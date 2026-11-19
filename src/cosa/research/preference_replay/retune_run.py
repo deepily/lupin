@@ -26,6 +26,7 @@ from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.repo.doc_lint.pool_builder import resolve_commit
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.research.preference_replay.cohorts import cohort_asks
+from cosa.research.preference_replay.question_vectors import load_side_file
 from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, eligible_asks, frozen_settings, report_only_sweep, retune
 from cosa.rest.db.database import get_db
 from cosa.utils.file_hash import file_sha256
@@ -40,13 +41,13 @@ NOTES          = [
 ]
 
 
-def read_cohort( session, response_types: Sequence[str] = ELIGIBLE_TYPES ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def read_cohort( session, vectors: Optional[Dict[str, List[float]]] = None, response_types: Sequence[str] = ELIGIBLE_TYPES ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Read the scored cohort and the facts that date it, in a read-only transaction.
 
     Requires:
         - session is an active SQLAlchemy session on the database the report should describe
-        - response_types are names cohort_asks accepts
+        - vectors maps ask id to its side-file vector, or is None, the default, for the stored vectors, as the checkpoint run script calls it; response_types are names cohort_asks accepts
 
     Ensures:
         - the first statement makes the transaction read-only, so the database refuses any write
@@ -59,9 +60,27 @@ def read_cohort( session, response_types: Sequence[str] = ELIGIBLE_TYPES ) -> Tu
     facts = { "database": row[ 0 ], "db_role": row[ 1 ], "read_at": str( row[ 2 ] ),
               "prediction_decisions_rows": row[ 3 ], "answer_source_null_rows": row[ 4 ] }
     asks  = []
-    for kind in response_types: asks += cohort_asks( session, kind )
+    for kind in response_types: asks += cohort_asks( session, kind, vectors=vectors )
     session.rollback()
     return asks, facts
+
+
+def check_vectors_cover( asks: List[Dict[str, Any]], header: Dict[str, Any] ) -> None:
+    """
+    Refuse a cohort that holds an ask with no vector the side file explains.
+
+    Requires:
+        - asks are cohort_asks dicts; header is the side file's header, whose rejects list { id, reason } entries
+
+    Ensures:
+        - returns None when every ask without a vector is one the side file lists as rejected
+
+    Raises:
+        - ValueError naming the count and the first ids of the asks that have no vector and no reject entry
+    """
+    rejected = { reject[ "id" ] for reject in header[ "rejects" ] }
+    missing  = [ ask[ "id" ] for ask in asks if ask[ "question_embedding" ] is None and ask[ "id" ] not in rejected ]
+    if missing: raise ValueError( f"{len( missing )} cohort asks have no vector in the side file and no reject entry, first: {missing[ :5 ]}" )
 
 
 def build_report( result: Dict[str, Any], sweep_points: List[Dict[str, Any]], provenance: Dict[str, Any] ) -> Dict[str, Any]:
@@ -152,11 +171,11 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     Run the retune from the command line and write the report file.
 
     Requires:
-        - argv holds --out, the report path; the factories and code_sha are injected by tests and default to the real ones
+        - argv holds --out, the report path, and one of --vectors, the side file, or --stored-vectors, the case rows' own vectors; the factories and code_sha are injected by tests and default to the real ones
 
     Ensures:
         - reads the cohort read-only, runs the grid and the sweep, writes the report with sorted keys
-        - the provenance names the exact command line, the code sha, the sha256 of this file and the start time
+        - the provenance names the exact command line, the code sha, the sha256 of this file, the start time, and the vector source: the stored vectors, or the side file with its sha256, model, revision and reject count
         - returns 0 after the report is written, and prints the frozen settings
 
     Raises:
@@ -164,6 +183,9 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     """
     parser = argparse.ArgumentParser( description="Run the retune over the real cohort and write its report." )
     parser.add_argument( "--out", required=True )
+    source = parser.add_mutually_exclusive_group( required=True )
+    source.add_argument( "--vectors", help="the question-vector side file every ask's vector is read from" )
+    source.add_argument( "--stored-vectors", action="store_true", help="read each vector from its case row, as the control run does" )
     args   = parser.parse_args( argv )
     session_factory = session_factory or get_db
     engine_factory  = engine_factory or _open_engine
@@ -175,8 +197,14 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
         "driver_sha256" : driver_sha256,
         "started"       : ( clock or ( lambda: datetime.now( timezone.utc ) ) )().isoformat(),
     }
+    header, vectors = ( None, None ) if args.stored_vectors else load_side_file( args.vectors )
+    if header is None: run_facts.update( { "vector_source": "stored" } )
+    else:
+        run_facts.update( { "vector_source": "side_file", "vector_side_file": args.vectors, "vector_side_file_sha256": file_sha256( args.vectors ),
+                            "vector_model": header[ "model" ], "vector_revision": header[ "revision" ], "vector_rejects": len( header[ "rejects" ] ) } )
     with session_factory() as session:
-        asks, facts = read_cohort( session )
+        asks, facts = read_cohort( session, vectors )
+    if header is not None: check_vectors_cover( asks, header )
     report = run_report( asks, facts, engine_factory(), run_facts )
     with open( args.out, "w", encoding="utf-8" ) as handle:
         json.dump( report, handle, indent=2, sort_keys=True )
