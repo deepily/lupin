@@ -8,6 +8,14 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.18 - Session 4def4e05 (Cheech 🌿, manager; crew John, Pocholo, Tiberius) | Reuse remediation: spend-run leak, audit cap, tie fix and probe retry merged; Opus proof at 0.7995 waits on 15 labels; :7999 unblocked
+
+**Resume here**: memento `.claude-memento-cheech-4def4e05.md` (amended 18 Nov evening). No live workers.
+1. **Merged**: John's f24ef13dc closes the spend run of a failed lookup and caps the audit queue at what the ledger can pay for. Pocholo's a41c2515e stops the gate-runner test from setting `core.bare` on the shared repo. John's 9375dbb3a adds 17 reuse outcome lines. Pocholo's 10902745e and 12fe78901 tie a baseline finding by a ruling line only. John's 18af7bce2 and 7f757798c retry a probe stream that ends with no result, then count it as PROBE_FAILED beside the miss rate.
+2. **Measured**: the Opus proof pools to 351/439 = 0.7995 against the 0.80 bar (Fable scored 127/157 = .809). The yield-trace re-measure found 66 of 70, a miss rate of 0.057 (it was 0.171).
+3. **Rick's rulings**: label the 15 flags, with Jason as the second labeller. Delete the 580 mis-tied audits (done). Keep the set at 400 until the experts answer, and close the 60M run. Delete both conflicting `prediction_log` duplicates so migration `b4d8f2a61c07` could run (done, `:7999` healthy at 18:37). Full entries are in TODO.md's Decisions Log.
+4. **Open**: 2315c65c waits on labels (chase 19 Nov 10:30), and 80bd7ed3 and 40e46c73 wait on the experts. 0bcecc27 is held: show the rules on the pair-labelling page. 8 code-health rows chase on 20 Nov.
+
 ## 2026.11.17 - Session 9da01ad8 (Cheech 🌿, manager; crew Tiberius, Rio, Krishna, Sam, Maria, Rachel; peer Mr. Radio) | Duplicate-check remediation merged, 70 new findings ruled and their 7 fixes merged, TypeScript tier green at 100%
 
 **Resume here**: memento `.claude-memento-cheech-9da01ad8.md` (amended 22:20). Working-branch head is c4072524c, pushed at session end.
