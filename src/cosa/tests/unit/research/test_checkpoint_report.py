@@ -237,3 +237,48 @@ def test_a_sweep_point_between_two_grid_points_is_listed_between_them():
     text  = _report( retune=grid, sweep_points=[ _point( 0.4, 8 ) ] )
     rows  = [ line for line in text.splitlines() if line.startswith( "| 0." ) ]
     assert [ ( row.split( "|" )[ 1 ].strip(), row.split( "|" )[ -2 ].strip() ) for row in rows ] == [ ( "0.3", "grid" ), ( "0.4", "report only" ), ( "0.5", "grid" ) ]
+
+
+COVERAGE = { "cohort_asks": 3608, "replayable": 1302, "tune_mix": { "yes_no": 364, "multiple_choice": 547 }, "final_mix": { "yes_no": 215, "multiple_choice": 176 } }
+
+
+def test_a_coverage_section_states_the_replayable_share_and_each_windows_answer_type_mix():
+    """The section sits before the first type, and its table rows carry both windows' counts."""
+    text = _report( coverage=COVERAGE )
+    assert "Only 1302 of 3608 asks were replayable: 2306 had no stored vector (64%)." in text
+    assert "| window | multiple_choice | yes_no | total |" in text
+    assert "| tune | 547 | 364 | 911 |" in text and "| final | 176 | 215 | 391 |" in text
+    assert text.index( "## Coverage" ) < text.index( "## yes_no" )
+
+
+def test_a_window_with_no_asks_of_a_type_shows_zero_for_it():
+    """A type missing from one window's mix reads 0, not a key error."""
+    text = _report( coverage=dict( COVERAGE, final_mix={ "yes_no": 10 } ) )
+    assert "| final | 0 | 10 | 10 |" in text
+
+
+def test_a_report_without_coverage_has_no_coverage_section():
+    assert "## Coverage" not in _report()
+
+
+SCORES = { "tune": { "yes_no": { "asks": 364, "correct": 100 }, "multiple_choice": { "asks": 547, "correct": 187 } },
+           "final": { "yes_no": { "asks": 215, "correct": 163 }, "multiple_choice": { "asks": 176, "correct": 14 } } }
+
+
+def test_coverage_scores_give_each_types_correct_count_and_rate_in_each_window():
+    """Each row reads its own window and type, so a swap of two cells changes a named row."""
+    text = _report( coverage=dict( COVERAGE, scores=SCORES ) )
+    assert "| tune | multiple_choice | 547 | 187 | 34.2 |" in text and "| tune | yes_no | 364 | 100 | 27.5 |" in text
+    assert "| final | multiple_choice | 176 | 14 | 8.0 |" in text and "| final | yes_no | 215 | 163 | 75.8 |" in text
+    assert text.index( "| window | type |" ) < text.index( "## yes_no" )
+
+
+def test_coverage_without_scores_has_no_score_table():
+    assert "| window | type |" not in _report( coverage=COVERAGE )
+
+
+def test_the_score_table_is_set_off_from_the_mix_table_by_a_blank_line():
+    """A table row directly above the lead-in line would run the two together in Markdown."""
+    lines = _report( coverage=dict( COVERAGE, scores=SCORES ) ).splitlines()
+    index = lines.index( "Predictor score by answer type, in each window:" )
+    assert lines[ index - 1 ] == "" and lines[ index + 1 ] == ""

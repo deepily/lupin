@@ -68,7 +68,8 @@ def label_metrics( actual: Sequence[str], predicted: Sequence[str], labels: Sequ
 
 def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dict[str, int], calibration: Dict,
                    findings: List[Dict[str, str]], cohort_sha256: str, settings_commit: str, cohort_ids: Sequence[str],
-                   retune: Optional[Dict[str, Any]] = None, sweep_points: Optional[List[Dict[str, Any]]] = None ) -> str:
+                   retune: Optional[Dict[str, Any]] = None, sweep_points: Optional[List[Dict[str, Any]]] = None,
+                   coverage: Optional[Dict[str, Any]] = None ) -> str:
     """
     Render the checkpoint report as Markdown.
 
@@ -80,8 +81,13 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
         - cohort_ids names the asks in the cohort
         - retune is None or the retune result, whose points carry the answered figures for each window
         - sweep_points is None or the report-only sweep's points, in the same shape; they are shown only with a retune result
+        - coverage is None or { cohort_asks, replayable, tune_mix, final_mix }, the mixes mapping a response type to its asks
+        - coverage may also hold scores: window to response type to { asks, correct }, with every type of both mixes present
 
     Ensures:
+        - with coverage, a section right after the header states the replayable count out of the cohort count, the
+          share with no stored vector, and the answer-type mix of the tune and final windows
+        - with coverage scores, the predictor's correct count and correct per 100 asks for each type in each window
         - returns text holding, per type, each baseline against the predictor with denominators, paired
           differences, intervals and unique families, the deferral verdict, the calibration cells, the findings,
           the cohort sha, the settings commit and every cohort id
@@ -93,6 +99,24 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
     """
     lines = [ "# Checkpoint report", "", f"- cohort sha256: `{cohort_sha256}`", f"- settings commit: `{settings_commit}`",
               f"- cohort asks: {len( cohort_ids )}", "" ]
+    if coverage is not None:
+        missing = coverage[ "cohort_asks" ] - coverage[ "replayable" ]
+        kinds   = sorted( set( coverage[ "tune_mix" ] ) | set( coverage[ "final_mix" ] ) )
+        lines  += [ "## Coverage", "",
+                    f"Only {coverage[ 'replayable' ]} of {coverage[ 'cohort_asks' ]} asks were replayable: {missing} had no stored vector"
+                    f" ({100.0 * missing / coverage[ 'cohort_asks' ]:.0f}%). Every figure below covers the replayable asks only.", "",
+                    "| window | " + " | ".join( kinds ) + " | total |",
+                    "|---|" + "---|" * ( len( kinds ) + 1 ) ]
+        for window in ( "tune", "final" ):
+            mix    = coverage[ f"{window}_mix" ]
+            lines.append( f"| {window} | " + " | ".join( str( mix.get( kind, 0 ) ) for kind in kinds ) + f" | {sum( mix.values() )} |" )
+        if "scores" in coverage:
+            lines += [ "", "Predictor score by answer type, in each window:", "", "| window | type | asks | correct | correct per 100 |", "|---|---|---|---|---|" ]
+            for window in ( "tune", "final" ):
+                for kind in kinds:
+                    asks, correct = coverage[ "scores" ][ window ][ kind ][ "asks" ], coverage[ "scores" ][ window ][ kind ][ "correct" ]
+                    lines.append( f"| {window} | {kind} | {asks} | {correct} | {100.0 * correct / asks:.1f} |" )
+        lines.append( "" )
     for name, rule in deferral( final_window_asks ).items():
         lines += [ f"## {name}", "", f"Eligible final-window asks: {rule[ 'asks' ]}. " +
                    ( f"Deferred: fewer than {DEFERRAL_FLOOR} asks." if rule[ "deferred" ] else "Not deferred." ), "" ]
