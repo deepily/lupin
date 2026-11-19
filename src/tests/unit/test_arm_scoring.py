@@ -92,6 +92,12 @@ def test_final_window_keeps_the_last_thirty_percent_of_every_arm_reindexed():
     assert ( cut[ "not_replayable" ], cut[ "unrebuildable_cases" ], cut[ "families" ] ) == ( 2, 3, 4 )
 
 
+def test_final_window_floors_the_tune_size_so_eleven_asks_leave_four():
+    """Eleven asks give a tune window of seven and a final window of four, not three."""
+    cut = scoring.final_window( _run( 11 ) )
+    assert [ r[ "meta" ][ "notification_id" ] for r in cut[ "records" ][ ENGINE_ARM ] ] == [ "n7", "n8", "n9", "n10" ]
+
+
 def test_score_arm_runs_the_replay_under_the_frozen_settings_and_puts_them_back( monkeypatch ):
     """The replay sees 0.55, 8 and cosine in force, then the engine is restored."""
     seen = {}
@@ -128,7 +134,7 @@ def _main_fixture( monkeypatch, tmp_path, vector_ids=( "n0", "n1" ) ):
         - monkeypatch and tmp_path are pytest fixtures; vector_ids names the asks the side file covers
 
     Ensures:
-        - returns ( argv, out_path, printed ) for one main call over two asks listed in an ids file
+        - returns ( argv, out_path, session, seen ) for one main call over two asks listed in an ids file
     """
     ids = tmp_path / "ids.jsonl"
     ids.write_text( "n0\nn1\n" )
@@ -140,23 +146,34 @@ def _main_fixture( monkeypatch, tmp_path, vector_ids=( "n0", "n1" ) ):
 
     monkeypatch.setattr( scoring, "read_cohort", lambda s, vectors: ( asks, {} ) )
     monkeypatch.setattr( scoring, "load_side_file", lambda path: ( { "rejects": [ { "id": "x" } ] }, {} ) )
-    monkeypatch.setattr( scoring, "replay", lambda *a, **k: _run( 10 ) )
+    seen = {}
+
+    def fake_replay( asks, engine, snapshot, baselines, target_types ):
+        seen[ "snapshot" ] = snapshot
+        seen[ "ids" ]      = [ ask[ "id" ] for ask in asks ]
+        return _run( 10 )
+
+    monkeypatch.setattr( scoring, "replay", fake_replay )
     out  = tmp_path / "out.json"
     vectors = tmp_path / "v.jsonl"
     vectors.write_text( "side file bytes" )
     argv = [ "--arm", "Q+A", "--vectors", str( vectors ), "--settings", _report( tmp_path ), "--only-ids", str( ids ), "--out", str( out ) ]
-    return argv, out, session
+    return argv, out, session, seen
 
 
 def test_main_writes_the_final_window_run_and_prints_the_count( monkeypatch, tmp_path ):
     """The file names its inputs and the printed line gives the window and the correct count."""
-    argv, out, session = _main_fixture( monkeypatch, tmp_path )
+    argv, out, session, seen = _main_fixture( monkeypatch, tmp_path )
     printed = []
     clock = lambda: datetime( 2026, 11, 19, 20, 0, tzinfo=timezone.utc )
     assert scoring.main( argv, printer=printed.append, session_factory=session, engine_factory=_engine, code_sha="abc123", clock=clock ) == 0
     document = json.loads( out.read_text() )
     assert ( document[ "arm" ], document[ "frozen" ][ "top_k" ], document[ "vector_side_file" ], document[ "vector_rejects" ] ) == ( "Q+A", 8, argv[ 3 ], 1 )
     assert document[ "ids" ][ "only_ids_count" ] == 2
+    assert document[ "settings_report" ] == argv[ 5 ]
+    assert seen[ "ids" ] == [ "n0", "n1" ]
+    assert seen[ "snapshot" ] == scoring.sha256_of_rows( [ { "id": "n0" }, { "id": "n1" } ] )
+    assert seen[ "snapshot" ] != scoring.sha256_of_rows( [ { "id": "n0" }, { "id": "n1" }, { "id": "n2" } ] )
     assert document[ "vector_side_file_sha256" ] == hashlib.sha256( b"side file bytes" ).hexdigest()
     assert document[ "settings_report_sha256" ] == hashlib.sha256( open( argv[ 5 ], "rb" ).read() ).hexdigest()
     assert ( document[ "code_sha" ], document[ "started" ] ) == ( "abc123", "2026-11-19T20:00:00+00:00" )
@@ -167,7 +184,7 @@ def test_main_writes_the_final_window_run_and_prints_the_count( monkeypatch, tmp
 
 def test_main_reads_the_real_clock_and_commit_when_none_are_injected( monkeypatch, tmp_path ):
     """With no injected clock or sha, the file holds an aware time and the tree's own HEAD."""
-    argv, out, session = _main_fixture( monkeypatch, tmp_path )
+    argv, out, session, seen = _main_fixture( monkeypatch, tmp_path )
     monkeypatch.setattr( scoring, "resolve_commit", lambda root, ref: f"head-of-{ref}" )
     scoring.main( argv, printer=lambda m: None, session_factory=session, engine_factory=_engine )
     document = json.loads( out.read_text() )
@@ -177,7 +194,7 @@ def test_main_reads_the_real_clock_and_commit_when_none_are_injected( monkeypatc
 
 def test_main_records_the_process_command_line_when_argv_is_none( monkeypatch, tmp_path ):
     """Called with no argv, main parses and records sys.argv."""
-    argv, out, session = _main_fixture( monkeypatch, tmp_path )
+    argv, out, session, seen = _main_fixture( monkeypatch, tmp_path )
     monkeypatch.setattr( scoring.sys, "argv", [ "prog" ] + argv )
     scoring.main( None, printer=lambda m: None, session_factory=session, engine_factory=_engine, code_sha="x" )
     assert json.loads( out.read_text() )[ "command" ].endswith( " ".join( argv ) )
@@ -185,5 +202,5 @@ def test_main_records_the_process_command_line_when_argv_is_none( monkeypatch, t
 
 def test_main_refuses_a_listed_ask_with_no_vector( monkeypatch, tmp_path ):
     """An ask in the ids file with no vector and no reject entry stops the run before any replay."""
-    argv, _, session = _main_fixture( monkeypatch, tmp_path, vector_ids=( "n0", ) )
+    argv, _, session, _seen = _main_fixture( monkeypatch, tmp_path, vector_ids=( "n0", ) )
     with pytest.raises( ValueError, match="no vector" ): scoring.main( argv, printer=lambda m: None, session_factory=session, engine_factory=_engine )
