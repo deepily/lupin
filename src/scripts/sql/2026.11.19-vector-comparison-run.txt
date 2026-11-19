@@ -1,6 +1,6 @@
 Run of src/cosa/research/preference_replay/vector_comparison.py
-script sha256 prefix : 00280446655c
-run at               : 2026-11-19T15:24:02Z
+script sha256 prefix : 0396388cfcdc
+run at               : 2026-11-19T15:26:52Z
 where                : container lupin-rest-dev (the model server answers only inside the compose network), PYTHONPATH=/var/lupin/src (the working branch checkout), the script copied to /tmp inside the container
 command              : python3 /tmp/vc/vector_comparison.py --side-file /var/lupin/io/question-vectors/2026.11.19-vectors.jsonl --out /tmp/vc/out.json
 database             : lupin_db_dev, read in a read-only transaction, nothing written

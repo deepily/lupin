@@ -194,6 +194,7 @@ def read_stored( session, ids: Sequence[ str ] ) -> Tuple[ Dict[ str, List[ floa
     sql = text( "SELECT id, question, CAST( question_embedding AS text ) FROM prediction_decisions WHERE id = ANY( :ids ) AND question_embedding IS NOT NULL" )
     vectors, questions, messages = {}, {}, {}
     for row_id, question, vector in session.execute( sql, { "ids": list( ids ) } ).fetchall():
+        if vector is None: continue
         vectors[ row_id ]   = parse_vector( vector )
         questions[ row_id ] = question
         messages[ row_id ]  = session.get( Notification, row_id ).message.strip()

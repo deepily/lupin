@@ -168,3 +168,33 @@ def test_negative_control_threshold_sits_at_0_95( cos_value, fails ):
         with pytest.raises( ControlFailed ): negative_control( stored, fresh )
     else:
         assert negative_control( stored, fresh )[ "mismatched_median_cosine" ] == pytest.approx( cos_value )
+
+
+def test_read_stored_skips_a_row_whose_vector_is_null():
+    session = FakeSession( ROWS + [ ( "n", "text n", None ) ], dict( MESSAGES, n="text n" ) )
+    vectors, questions, messages = read_stored( session, [ "a", "b", "n" ] )
+    assert set( vectors ) == set( questions ) == set( messages ) == { "a", "b" }
+
+
+@pytest.mark.parametrize( "angle_cos,fails", [ ( 0.9999995, False ), ( 0.99999, True ), ( 0.999, True ) ] )
+def test_positive_control_floor_sits_at_0_999999( angle_cos, fails ):
+    near   = [ angle_cos, ( 1 - angle_cos ** 2 ) ** 0.5 ]
+    table  = { "text a": [ 1.0, 0.0 ], "text b": [ 0.0, 1.0 ] }
+    filed  = { "a": near, "b": [ 0.0, 1.0 ] }   # the side file's vector for a sits at the chosen cosine from what the service returns
+    if fails:
+        with pytest.raises( ControlFailed ): positive_control( FakeProvider( table ), PAIRS, filed )
+    else:
+        assert positive_control( FakeProvider( table ), PAIRS, filed )[ "run_vs_side_file_min_cosine" ] == pytest.approx( angle_cos )
+
+
+def test_negative_control_refuses_a_median_of_exactly_the_threshold( monkeypatch ):
+    monkeypatch.setattr( vc, "cosine", lambda first, second: 0.95 )
+    with pytest.raises( ControlFailed, match="0.9500" ): negative_control( { "a": [ 1.0 ], "b": [ 1.0 ] }, { "a": [ 1.0 ], "b": [ 1.0 ] } )
+
+
+def test_report_digest_is_the_sha256_of_the_side_file_bytes( tmp_path ):
+    import hashlib
+    path   = _side_file( tmp_path, FRESH )
+    result = report( path, FakeSession( ROWS, MESSAGES ), FakeProvider( TABLE ), control_size=2 )
+    with open( path, "rb" ) as handle: expected = hashlib.sha256( handle.read() ).hexdigest()
+    assert result[ "side_file_sha256" ] == expected and expected != hashlib.sha256( b"" ).hexdigest()
