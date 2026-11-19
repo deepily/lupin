@@ -152,6 +152,25 @@ def test_the_model_id_and_the_switch_are_read_from_the_ini_when_not_given( facto
     assert asyncio.run( ot.run_baseline_opus( factory, ask( factory ), Baseline(), pf.CapGate( 1 ) ) ) == { "status": "not_run", "reason": "switch off" }
 
 
+class KeyedSwitches:
+    """A configuration manager stand-in that answers each switch key from its own value."""
+    def __init__( self, values ): self.values = values
+    def get( self, key, default=None, return_type=None ): return self.values[ key ]
+
+
+@pytest.mark.parametrize( "baseline_on, principles_on", [ ( True, False ), ( False, True ) ] )
+def test_each_twin_reads_only_its_own_switch( factory, monkeypatch, baseline_on, principles_on ):
+    """One switch on and the other off: only the twin that owns the on switch runs."""
+    values = { ot.BASELINE_SWITCH_KEY: baseline_on, ot.PRINCIPLES_SWITCH_KEY: principles_on }
+    monkeypatch.setattr( pf, "ConfigurationManager", lambda env_var_name=None: KeyedSwitches( values ) )
+    monkeypatch.setattr( ot, "opus_model", lambda: OPUS )
+    stamp = lambda: T0 + timedelta( minutes=1 )
+    first = asyncio.run( ot.run_baseline_opus( factory, ask( factory ), Baseline(), pf.CapGate( 1 ), clock=stamp ) )
+    second = asyncio.run( ot.run_principles_opus( factory, ask( factory ), Baseline(), Embedder(), ENCODER, EXTRACT, pf.CapGate( 1 ), clock=stamp ) )
+    off = { "status": "not_run", "reason": "switch off" }
+    assert ( first == off ) is ( not baseline_on ) and ( second == off ) is ( not principles_on )
+
+
 def test_the_opus_baseline_keeps_every_member_of_the_contract_but_the_model():
     """It meets the contract, carries the model given and shares the rest with the baseline."""
     c0   = Baseline()
