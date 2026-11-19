@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.prediction_engine.episode_view import episode_view, revealed_at
 from cosa.agents.prediction_engine.history_derive import attribution_tier, derive_answer
+from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt, parse_reply
 from cosa.agents.principle_learner.extractor_rules import card_text, check_field, field_answers, project_names, unaided_answer
@@ -159,7 +160,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         Ensures:
             - returns a JSON summary: status, counts, the rejections with their reasons, the dimension mismatches
               and the fields marked possibly influenced
-            - status is skipped_not_attributed, skipped_nothing_to_read, skipped_no_input, unparseable or extracted
+            - status is skipped_review_card, skipped_not_attributed, skipped_nothing_to_read, skipped_no_input, unparseable or extracted
             - evidence rows carry answered_at from the answer and extracted_at from the clock
             - nothing is sent to the owner
 
@@ -188,6 +189,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         extractor = f"{model}:{PROMPT_VERSION}"
         row = session.get( Notification, uuid.UUID( self.notification_id ) )
         if row is None: raise LookupError( f"notification {self.notification_id} does not exist" )
+        if is_review_card( row.response_options ): return self._summary( "skipped_review_card" )
         raw = { "recipient_id": str( row.recipient_id ), "response_type": row.response_type, "response_value": row.response_value }
         if attribution_tier( raw ) != "recipient" or not isinstance( row.response_value, dict ) or row.response_value.get( "source" ) != OWNER_SOURCE:
             return self._summary( "skipped_not_attributed" )

@@ -732,6 +732,28 @@ def _mark_notification_expired_sync( notification_id ):
         repo.mark_expired( uuid.UUID( notification_id ), expected_state="delivered" )
 
 
+def _record_review_ruling_sync( notification_id ):
+    """
+    Turn the answer to a review card into ruling rows, off the event loop.
+
+    Requires:
+        - notification_id is the UUID string of a review card that has just been answered
+
+    Ensures:
+        - writes and commits one ruling row per answered principle, through record_card_answer
+        - returns that function's report
+
+    Raises:
+        - whatever the database raises; the caller treats it as non-fatal, so the answer itself is never lost
+    """
+    from cosa.agents.principle_learner.review_cards import record_card_answer
+    from cosa.rest.db.database import get_db
+    from cosa.utils.iso_timestamp import aware_moment
+    import cosa.utils.util as cu
+    with get_db() as session:
+        return record_card_answer( session, notification_id, aware_moment( cu.get_current_datetime_iso() ) )
+
+
 def _submit_response_sync( notification_id, response_value, answered_by=None ):
     """
     Read, validate and update a notification response synchronously, off the event loop.
@@ -1933,6 +1955,8 @@ async def submit_notification_response(
         try:
             if is_review_card( submit_result[ "response_options" ] ):
                 print( f"[PREDICTION] Review card {notification_id}: no outcome to record" )
+                ruling_report = await asyncio.to_thread( _record_review_ruling_sync, notification_id )
+                print( f"[PREDICTION] Review card {notification_id}: {ruling_report[ 'rulings_written' ]} ruling(s) recorded" )
             else:
                 from cosa.agents.prediction_engine import get_prediction_engine
                 prediction_engine = get_prediction_engine()
