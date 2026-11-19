@@ -22,8 +22,10 @@ from cosa.research.preference_replay.calibration_fit import fit_and_evaluate
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM, replay, summarize
 from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, split_windows
 from cosa.research.preference_replay.retune_run import _open_engine, check_vectors_cover, read_cohort, restrict_to_ids
+from cosa.research.preference_replay.before_after_report import final_correct
 from cosa.research.preference_replay.question_vectors import load_side_file
 from cosa.rest.db.database import get_db
+from cosa.utils.atomic_json import write_json_atomic
 from cosa.utils.file_hash import file_sha256
 
 FLOOR = 10
@@ -118,34 +120,6 @@ def build_column( run: Dict[str, Any], header: Dict[str, Any], rescore_ids: Opti
     return column
 
 
-def _write( path: str, column: Dict[str, Any] ) -> None:
-    """
-    Write a column as sorted-key JSON.
-
-    Requires:
-        - column is JSON-ready
-
-    Ensures:
-        - the file holds the column with a closing newline
-    """
-    with open( path, "w", encoding="utf-8" ) as handle:
-        json.dump( column, handle, indent=1, sort_keys=True )
-        handle.write( "\n" )
-
-
-def _final_correct( column: Dict[str, Any] ) -> int:
-    """
-    Sum a column's final-window correct forecasts over the answer types.
-
-    Requires:
-        - column holds coverage with scores for the final window
-
-    Ensures:
-        - returns the total correct count
-    """
-    return sum( score[ "correct" ] for score in column[ "coverage" ][ "scores" ][ "final" ].values() )
-
-
 def main( argv: Optional[Sequence[str]] = None, session_factory: Optional[Callable] = None, engine_factory: Optional[Callable] = None,
           printer: Callable = print, code_sha: Optional[str] = None ) -> int:
     """
@@ -197,15 +171,15 @@ def main( argv: Optional[Sequence[str]] = None, session_factory: Optional[Callab
     header  = { "label": args.label, "commit": commit, "vector_source": vector_source, "threshold": args.threshold, "top_k": args.top_k,
                 "cohort_asks": len( asks ), "produced_by": f"commit {commit[ :9 ]}, {side}`{command}`" }
     column  = build_column( run, header )
-    _write( args.out, column )
-    printer( f"{args.label}: {column[ 'ask_count' ]} replayed, final correct {_final_correct( column )}" )
+    write_json_atomic( args.out, column, indent=1, trailing_newline=True, sort_keys=True )
+    printer( f"{args.label}: {column[ 'ask_count' ]} replayed, final correct {final_correct( column )}" )
     if args.rescore_from is not None:
         with open( args.rescore_from, encoding="utf-8" ) as handle: rescore = json.load( handle )[ "final_ids" ]
         absent = sorted( set( rescore ) - set( column[ "ask_ids" ] ) )
         if absent: raise ValueError( f"{len( absent )} ids of {args.rescore_from} are not in this run, first: {absent[ :5 ]}" )
         rescored = build_column( run, dict( header, label=args.rescored_label ), rescore )
-        _write( args.rescored_out, rescored )
-        printer( f"{args.rescored_label}: scored on {len( rescore )} asks, final correct {_final_correct( rescored )}" )
+        write_json_atomic( args.rescored_out, rescored, indent=1, trailing_newline=True, sort_keys=True )
+        printer( f"{args.rescored_label}: scored on {len( rescore )} asks, final correct {final_correct( rescored )}" )
     return 0
 
 

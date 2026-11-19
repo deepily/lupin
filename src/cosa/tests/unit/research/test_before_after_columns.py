@@ -101,6 +101,9 @@ def test_rescoring_writes_both_columns_from_one_replay_and_reads_the_ids_after_t
     assert own[ "label" ] == "Col" and "tune_note" not in own and own[ "ask_ids" ] == base[ "ask_ids" ]
     assert rescored[ "label" ] == "Four" and rescored[ "final_ids" ] == base[ "final_ids" ][ :2 ] and rescored[ "tune_note" ]
     assert rescored[ "ask_ids" ] == own[ "ask_ids" ] and lines[ 1 ].startswith( "Four: scored on 2 asks" )
+    text = ( tmp_path / "rescored.json" ).read_text( encoding="utf-8" )
+    assert text == json.dumps( rescored, indent=1, sort_keys=True ) + "\n" and text.startswith( '{\n "ask_count": ' )
+    assert [ p.name for p in tmp_path.iterdir() if p.name.endswith( ".tmp" ) ] == []
 
 
 def test_a_rescore_id_that_is_not_in_the_run_is_refused_after_the_plain_column_is_written( engine, monkeypatch, tmp_path ):
@@ -132,3 +135,15 @@ def test_the_command_sets_the_engine_to_the_threshold_and_top_k_it_was_given( en
 def test_a_correct_forecast_reads_as_true_and_a_wrong_one_as_false_in_the_calibration_rows():
     meta = { "response_type": "yes_no", "strategy": "s", "confidence": 0.7 }
     assert columns._rows( [ { "meta": dict( meta, correct=True ) }, { "meta": dict( meta, correct=False ) } ] ) == [ ( "yes_no", "s", 0.7, True ), ( "yes_no", "s", 0.7, False ) ]
+
+
+def test_the_column_file_holds_one_space_indented_sorted_json_with_a_closing_newline_and_no_temporary_file( engine, monkeypatch, tmp_path ):
+    """
+    The column file's bytes are the shape the committed column files have.
+
+    The text is the indent-1, sorted-key dump of the column and one newline, and the folder holds no leftover temporary file.
+    """
+    column, _, out = _go( engine, monkeypatch, tmp_path, [ "--stored-vectors" ] )
+    text = out.read_text( encoding="utf-8" )
+    assert text == json.dumps( column, indent=1, sort_keys=True ) + "\n" and text.startswith( '{\n "ask_count": ' )
+    assert [ p.name for p in tmp_path.iterdir() ] == [ "col.json" ]
