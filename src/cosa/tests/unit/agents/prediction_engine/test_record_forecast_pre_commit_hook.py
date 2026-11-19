@@ -1,0 +1,158 @@
+"""
+The record_forecast hook, the displayed arm's sibling row and the reconciliation check.
+
+Two layers. The hook tests run record_forecast through the real get_db.
+Only the session factory is replaced, by a recording session.
+So the rollback on a raising hook is the real context manager's.
+The reconciliation tests run the real models and queries on in-memory SQLite.
+"""
+import uuid
+from datetime import datetime, timezone
+
+import pytest
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import Session
+
+from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+from cosa.rest.db.repositories.arm_forecast_repository import displayed_arm_hook, notifications_missing_displayed_sibling
+from cosa.rest.postgres_models import PredictionArmForecast, PredictionLog
+
+# Ids carry a hex letter, because SQLite reads an all-digit id back as a number.
+NID = "a2345678-1234-5678-1234-567812345678"
+ASK = { "message": "Should it proceed?", "response_type": "yes_no", "sender_id": "claude.code@lupin.deepily.ai#00000001" }
+
+
+@compiles( JSONB, "sqlite" )
+def _jsonb_as_json( _type, _compiler, **_kw ):
+    """Let the two real tables be created on SQLite."""
+    return "JSON"
+
+
+class _RecordingSession:
+    """A session that records what get_db does to it."""
+
+    def __init__( self ):
+        self.events = []
+        self.added  = []
+
+    def add( self, row ):   self.added.append( row )
+    def flush( self ):      self.events.append( "flush" )
+    def commit( self ):     self.events.append( "commit" )
+    def rollback( self ):   self.events.append( "rollback" )
+    def close( self ):      self.events.append( "close" )
+
+
+@pytest.fixture
+def wired( monkeypatch ):
+    """The real engine and get_db over a recording session."""
+    PredictionEngine.reset()
+    session = _RecordingSession()
+    monkeypatch.setattr( "cosa.rest.db.database.SessionLocal", lambda: session )
+
+    class _Repo:
+        def __init__( self, sess ): self.sess = sess
+        def log_prediction( self, **kwargs ):
+            self.sess.events.append( "log_prediction" )
+            self.sess.log_kwargs = kwargs
+    monkeypatch.setattr( "cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository", _Repo )
+    yield PredictionEngine( debug=False ), session
+    PredictionEngine.reset()
+
+
+def test_with_no_hook_the_row_is_logged_and_committed_as_before( wired ):
+    """No hook: log, commit, True, and no second write."""
+    engine, session = wired
+    assert engine.record_forecast( NID, ASK, strategy="cold_start", abstention_reason="no_history" ) is True
+    assert session.events == [ "log_prediction", "commit", "commit", "close" ]  # record_forecast commits, then get_db commits on exit
+    assert session.added == []
+
+
+def test_a_hook_runs_between_the_log_row_and_the_commit_and_is_handed_the_stored_forecast( wired ):
+    """The hook gets the session and the stored forecast, before the commit."""
+    engine, session = wired
+    seen = []
+    def hook( sess, forecast ):
+        sess.events.append( "hook" )
+        seen.append( forecast )
+    asked = datetime( 2026, 11, 19, 12, 0, tzinfo=timezone.utc )
+    assert engine.record_forecast( NID, ASK, strategy="cold_start", abstention_reason="no_history", asked_at=asked, pre_commit_hook=hook ) is True
+    assert session.events == [ "log_prediction", "hook", "commit", "commit", "close" ]
+    forecast = seen[ 0 ]
+    assert forecast[ "notification_id" ] == NID and forecast[ "input_cutoff" ] == asked
+    assert forecast[ "abstention_reason" ] == "no_history" and forecast[ "forecast" ] is None
+    assert forecast[ "forecast_source" ] == session.log_kwargs[ "ledger" ][ "forecast_source" ]
+    assert forecast[ "forecast_ready_at" ] == session.log_kwargs[ "ledger" ][ "forecast_ready_at" ]
+    assert forecast[ "predictor_version" ] == session.log_kwargs[ "ledger" ][ "predictor_version" ]
+
+
+def test_a_raising_hook_rolls_everything_back_and_record_forecast_returns_false_without_raising( wired ):
+    """A raising hook gives no commit, a rollback and False."""
+    engine, session = wired
+    def hook( sess, forecast ): raise RuntimeError( "sibling write failed" )
+    assert engine.record_forecast( NID, ASK, strategy="cold_start", pre_commit_hook=hook ) is False
+    assert session.events == [ "log_prediction", "rollback", "close" ]
+
+
+def _real_session():
+    """In-memory SQLite holding the two real tables."""
+    engine = sa.create_engine( "sqlite://" )
+    PredictionLog.__table__.create( engine )
+    PredictionArmForecast.__table__.create( engine )
+    return Session( engine )
+
+
+def _log_row( nid ):
+    """A minimal prediction_log row."""
+    return PredictionLog( notification_id=uuid.UUID( nid ), response_type="yes_no", category="c",
+                          prediction_confidence=0.5, prediction_strategy="cold_start", similar_case_count=0 )
+
+
+def _forecast( nid ):
+    """The dict record_forecast hands a hook."""
+    return { "notification_id": nid, "predictor_version": "pv", "forecast": { "value": "yes" },
+             "input_cutoff": datetime( 2026, 11, 19, 12, 0, tzinfo=timezone.utc ), "evidence_ids": [ "e1" ],
+             "forecast_ready_at": datetime( 2026, 11, 19, 12, 0, 1, tzinfo=timezone.utc ), "abstention_reason": None }
+
+
+def test_the_hook_writes_the_displayed_arm_row_from_the_forecast_columns():
+    """The sibling row equals the forecast columns and is flagged displayed."""
+    session = _real_session()
+    session.add( _log_row( NID ) )
+    displayed_arm_hook( "A1" )( session, _forecast( NID ) )
+    session.commit()
+    row = session.query( PredictionArmForecast ).one()
+    assert ( row.arm, row.displayed, row.predictor_version, row.forecast, row.evidence_ids, row.abstention_reason ) == ( "A1", True, "pv", { "value": "yes" }, [ "e1" ], None )
+    assert str( row.notification_id ) == NID
+
+
+def test_the_hook_needs_an_arm_name():
+    """An empty arm is refused when the hook is made."""
+    with pytest.raises( ValueError, match="arm name" ):
+        displayed_arm_hook( "" )
+
+
+def test_the_reconciliation_check_reports_a_planted_missing_sibling_and_nothing_else():
+    """Three cards: one reconciled, one with no sibling, one with only a hidden arm's row."""
+    session = _real_session()
+    ok, missing, hidden_only = ( "aaaaaaaa-0000-0000-0000-00000000000%d" % i for i in ( 1, 2, 3 ) )
+    for nid in ( ok, missing, hidden_only ): session.add( _log_row( nid ) )
+    displayed_arm_hook( "A1" )( session, _forecast( ok ) )
+    session.add( PredictionArmForecast( notification_id=uuid.UUID( hidden_only ), arm="B1", displayed=False ) )
+    session.commit()
+    assert notifications_missing_displayed_sibling( session ) == [ uuid.UUID( missing ), uuid.UUID( hidden_only ) ]
+    displayed_arm_hook( "A1" )( session, _forecast( missing ) )
+    displayed_arm_hook( "A1" )( session, _forecast( hidden_only ) )
+    session.commit()
+    assert notifications_missing_displayed_sibling( session ) == []
+
+
+def test_a_second_displayed_row_for_one_card_and_arm_is_refused_by_the_table():
+    """The unique key on card and arm raises at the flush."""
+    session = _real_session()
+    session.add( _log_row( NID ) )
+    hook = displayed_arm_hook( "A1" )
+    hook( session, _forecast( NID ) )
+    with pytest.raises( sa.exc.IntegrityError ):
+        hook( session, _forecast( NID ) )

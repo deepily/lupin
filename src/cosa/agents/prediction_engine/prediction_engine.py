@@ -22,7 +22,7 @@ import hashlib
 import json
 import time
 from threading import Lock
-from typing import Optional, Dict, Any, List
+from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime, timezone
 
 import cosa.utils.util as cu
@@ -1443,7 +1443,8 @@ class PredictionEngine:
                          forecast_source: str = FORECAST_SOURCE_FOUNDATION,
                          strategy: str = STRATEGY_ERROR, abstention_reason: Optional[str] = None,
                          display_decision: Optional[str] = None, asked_at: Optional[datetime] = None,
-                         owner_email: Optional[str] = None, always_yes_rate: Optional[Dict[str, Any]] = None ) -> bool:
+                         owner_email: Optional[str] = None, always_yes_rate: Optional[Dict[str, Any]] = None,
+                         pre_commit_hook: Optional[Callable[[ Any, Dict[str, Any] ], None]] = None ) -> bool:
         """
         Write the ask-time forecast row for a notification, before the hint is sent.
 
@@ -1455,9 +1456,15 @@ class PredictionEngine:
             - display_decision: the card's state (ready, insufficient_evidence, below_threshold or
               unavailable), as the caller decided; the row and the payload carry the same value
             - always_yes_rate: the { yes, n, rate } label shown on a yes/no card, or None
+            - pre_commit_hook: None, or a function( session, forecast ) that writes more rows on the
+              same session; forecast holds notification_id, predictor_version, forecast, input_cutoff,
+              evidence_ids, forecast_ready_at, abstention_reason and forecast_source, as stored
 
         Ensures:
             - writes exactly one prediction_log row with the ledger columns filled
+            - with no hook, nothing else runs and the behaviour is exactly as it was
+            - a hook runs after the prediction_log row is added and before the commit, so what it writes
+              is committed with the row; if the hook raises, neither is stored and the result is False
             - with a result: its strategy, category, value, confidence, case count, evidence and latency
               are stored, and abstention_reason is the result's metadata reason (None for a forecast)
             - a result whose reason is prediction_error is stored with strategy error and the reason
@@ -1465,8 +1472,8 @@ class PredictionEngine:
             - without a result: confidence and case count are 0, predicted_value is None, the strategy
               and abstention_reason are the arguments, and the category is the classifier's, or "unknown"
             - the row carries the code identity, config version and predictor version
-            - returns True when the row was written, and False on any failure or when the notification
-              already has a row; never raises
+            - returns True when the row was written, and False on any failure (a hook's included) or when
+              the notification already has a row; never raises
         """
         try:
             message = notification_dict.get( "message", "" )
@@ -1529,6 +1536,17 @@ class PredictionEngine:
                     sender_id             = notification_dict.get( "sender_id" ),
                     ledger                = ledger,
                 )
+                if pre_commit_hook is not None:
+                    pre_commit_hook( session, {
+                        "notification_id"   : notification_id,
+                        "predictor_version" : ledger[ "predictor_version" ],
+                        "forecast"          : predicted,
+                        "input_cutoff"      : ledger[ "asked_at" ],
+                        "evidence_ids"      : ledger[ "evidence_ids" ],
+                        "forecast_ready_at" : ledger[ "forecast_ready_at" ],
+                        "abstention_reason" : ledger[ "abstention_reason" ],
+                        "forecast_source"   : forecast_source,
+                    } )
                 session.commit()
             return True
 
