@@ -105,6 +105,7 @@ class _Provider:
 
     def __init__( self ):
         self.sent  = []
+        self.calls = []
         self.reads = 0
 
     def describe_engines( self ):
@@ -112,6 +113,7 @@ class _Provider:
 
     def generate_embeddings_batch( self, texts, content_type="prose", role=None, pin_fastapi=False ):
         self.sent += texts
+        self.calls.append( len( texts ) )
         return [ _vector_of( text ) for text in texts ]
 
 
@@ -232,6 +234,16 @@ def test_the_probe_line_projects_the_probe_time_over_the_whole_cohort( tmp_path 
     main( [ "--arm", "Q", "--frozen-ids", _frozen( tmp_path, ids ), "--out", str( tmp_path / "x" ), "--probe-only" ], printer=lines.append,
           session_factory=lambda: _Session( rows ), provider_factory=_Provider, clock=lambda: next( ticks ) )
     assert lines[ 1 ] == "probe: 20 texts in 4.00s, projected 6.0s for 30"
+
+
+def test_batch_size_sets_how_many_texts_go_in_each_call( tmp_path ):
+    _, _, _, provider, out = _run( tmp_path, "Q", "--batch-size", "2" )
+    assert provider.calls == [ 2, 1 ] and len( load_side_file( out )[ 1 ] ) == 3
+
+
+def test_the_default_batch_holds_the_whole_small_cohort_in_one_call( tmp_path ):
+    _, _, _, provider, _ = _run( tmp_path, "Q" )
+    assert provider.calls == [ 3 ]
 
 
 def test_every_arm_has_a_text_rule():
