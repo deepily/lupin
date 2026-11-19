@@ -194,8 +194,8 @@ def test_the_retune_sweep_is_a_table_of_each_points_answered_figures_in_threshol
     """The 0.3 point, given second, is listed first with its own figures."""
     text = _report( retune=RETUNE )
     assert "## Retune sweep (report only)" in text and "Tune asks 75, final asks 25." in text
-    row_low  = "| 0.3 | 3 | 70 | 93.3 | 42.9 | 40.0 | 20 | 80.0 | 60.0 | 48.0 |"
-    row_high = "| 0.5 | 5 | 50 | 66.7 | 60.0 | 41.0 | 20 | 80.0 | 60.0 | 48.0 |"
+    row_low  = "| 0.3 | 3 | 70 | 93.3 | 42.9 | 40.0 | 20 | 80.0 | 60.0 | 48.0 | grid |"
+    row_high = "| 0.5 | 5 | 50 | 66.7 | 60.0 | 41.0 | 20 | 80.0 | 60.0 | 48.0 | grid |"
     assert row_low in text and row_high in text and text.index( row_low ) < text.index( row_high )
     assert "Best on the tune window: threshold 0.5, top k 5." in text
 
@@ -215,3 +215,17 @@ def test_three_points_are_listed_by_threshold_then_top_k_the_best_is_named_apart
     assert [ row.split( "|" )[ 2 ].strip() for row in rows ] == [ "8", "5", "3" ]
     assert "Best on the tune window: threshold 0.4, top k 5." in text
     assert points == before, "rendering must not reorder the caller's points"
+
+
+def test_a_sweep_point_that_beats_the_best_is_labelled_report_only_and_the_best_line_stays_the_frozen_one():
+    """A 0.3 sweep point above the frozen best is labelled report only, never named best."""
+    sweep = [ _point( 0.3, 3, tune_per_100=60.0 ) ]
+    text  = _report( retune=RETUNE, sweep_points=sweep )
+    assert "| 0.3 | 3 | 50 | 66.7 | 60.0 | 60.0 | 20 | 80.0 | 60.0 | 48.0 | report only |" in text
+    assert "| 0.5 | 5 | 50 | 66.7 | 60.0 | 41.0 | 20 | 80.0 | 60.0 | 48.0 | grid |" in text
+    assert "Best on the tune window: threshold 0.5, top k 5." in text and "threshold 0.3, top k 3." not in text
+
+
+def test_a_sweep_is_not_shown_without_a_retune_result():
+    """The sweep is an addition to the retune table, so alone it renders nothing."""
+    assert "Retune sweep" not in _report( sweep_points=[ _point( 0.3, 3 ) ] )

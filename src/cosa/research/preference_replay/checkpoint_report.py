@@ -68,7 +68,7 @@ def label_metrics( actual: Sequence[str], predicted: Sequence[str], labels: Sequ
 
 def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dict[str, int], calibration: Dict,
                    findings: List[Dict[str, str]], cohort_sha256: str, settings_commit: str, cohort_ids: Sequence[str],
-                   retune: Optional[Dict[str, Any]] = None ) -> str:
+                   retune: Optional[Dict[str, Any]] = None, sweep_points: Optional[List[Dict[str, Any]]] = None ) -> str:
     """
     Render the checkpoint report as Markdown.
 
@@ -79,6 +79,7 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
         - findings is a list of { title, detail } recorded before the run
         - cohort_ids names the asks in the cohort
         - retune is None or the retune result, whose points carry the answered figures for each window
+        - sweep_points is None or the report-only sweep's points, in the same shape; they are shown only with a retune result
 
     Ensures:
         - returns text holding, per type, each baseline against the predictor with denominators, paired
@@ -86,6 +87,7 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
           the cohort sha, the settings commit and every cohort id
         - with a retune result, a report-only table of every point's answered count, answer rate, accuracy among
           answered asks and correct per 100 asks, in each window, in threshold then top k order
+        - a sweep point is labelled "report only", a retune point "grid", and the best line is retune's own best, never recomputed
         - the table informs a re-plan; it never picks the settings
         - the same inputs give the same text
     """
@@ -110,12 +112,13 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
                    f"Tune asks {retune[ 'tune_size' ]}, final asks {retune[ 'final_size' ]}. Answer rate is answered asks per 100 asks;"
                    " accuracy among answered is correct per 100 answered asks. The settings were chosen on tune correct per 100 alone.", "",
                    "| threshold | top k | tune answered | tune answer rate | tune accuracy among answered | tune correct per 100 |"
-                   " final answered | final answer rate | final accuracy among answered | final correct per 100 |",
-                   "|---|---|---|---|---|---|---|---|---|---|" ]
-        for point in sorted( retune[ "points" ], key=lambda p: ( p[ "threshold" ], p[ "top_k" ] ) ):
+                   " final answered | final answer rate | final accuracy among answered | final correct per 100 | set |",
+                   "|---|---|---|---|---|---|---|---|---|---|---|" ]
+        labelled = [ ( point, "grid" ) for point in retune[ "points" ] ] + [ ( point, "report only" ) for point in ( sweep_points or [] ) ]
+        for point, label in sorted( labelled, key=lambda pair: ( pair[ 0 ][ "threshold" ], pair[ 0 ][ "top_k" ] ) ):
             lines.append( f"| {point[ 'threshold' ]} | {point[ 'top_k' ]} | {point[ 'tune_answered' ]} | {point[ 'tune_answer_rate_per_100' ]:.1f} |"
                           f" {point[ 'tune_accuracy_answered_per_100' ]:.1f} | {point[ 'tune_per_100' ]:.1f} | {point[ 'final_answered' ]} |"
-                          f" {point[ 'final_answer_rate_per_100' ]:.1f} | {point[ 'final_accuracy_answered_per_100' ]:.1f} | {point[ 'final_per_100' ]:.1f} |" )
+                          f" {point[ 'final_answer_rate_per_100' ]:.1f} | {point[ 'final_accuracy_answered_per_100' ]:.1f} | {point[ 'final_per_100' ]:.1f} | {label} |" )
         lines += [ "", f"Best on the tune window: threshold {retune[ 'best' ][ 'threshold' ]}, top k {retune[ 'best' ][ 'top_k' ]}." ]
     lines += [ "", "## Recorded findings", "" ] + [ f"- **{finding[ 'title' ]}**: {finding[ 'detail' ]}" for finding in findings ]
     lines += [ "", "## Cohort ids", "" ] + [ f"- {ask_id}" for ask_id in cohort_ids ] + [ "" ]
