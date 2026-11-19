@@ -6,6 +6,10 @@ Change 1 to 2 is the effect of the regenerated vectors alone. Change 2 to 3 is t
 - Column 3 replays all 3,608 frozen asks at its own best settings, threshold 0.5 and top k 5. Column 4 is that replay scored only on column 1's 391 final-window asks.
 - Column 4's calibration is fitted on column 3's tune window without column 1's final asks. Its tune figures read n/a.
 - The four columns are src/conf/prediction-before-after-column-1.json to -4.json. The control run is src/conf/prediction-before-control-report.json.
+- Columns 1 and 4 have equal correct counts, but 16 of the 391 asks change correctness between them. 8 go from right to wrong and 8 from wrong to right, so the totals match by coincidence.
+- Of the 391 asks, 108 differ in the stored forecast record: 89 only in the qualifier text and 19 in the forecast itself. The 19 are 4 yes to no, 6 answered to abstained, 8 abstained to yes and 1 multiple-choice abstained to answered.
+- Column 4's Brier scores differ from column 1's because 194 of the 391 confidences differ. This is an exact comparison, and no difference is smaller than 1e-6.
+- Those counts come from src/conf/prediction-before-after-column-4-per-ask.json, which holds both replays' forecast, confidence and correctness per ask, with qualifier text as a hash.
 
 | column | label | commit | vector source | asks | scored | produced by |
 |---|---|---|---|---|---|---|
