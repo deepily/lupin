@@ -1249,6 +1249,8 @@ class PreferencePrinciple( Base ):
     Ensures:
         - id is an automatically generated UUID
         - status is never stored; it is derived from preference_evidence
+        - related_principle_id, when set, names the earlier principle this one continues after a re-extraction;
+          a ruling on that earlier principle then applies here. It is NULL for a principle that continues none
         - embedding is a 768-dimension vector, comparable only within one encoder_version
     """
 
@@ -1266,6 +1268,9 @@ class PreferencePrinciple( Base ):
     embedding: Mapped[Optional[list]]          = mapped_column( Vector( EMBEDDING_DIM ), nullable=True )
     encoder_version: Mapped[Optional[str]]     = mapped_column( String( 100 ), nullable=True )
     extractor_version: Mapped[str]             = mapped_column( String( 100 ), nullable=False )
+    related_principle_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID( as_uuid=True ), ForeignKey( "preference_principles.id" ), nullable=True
+    )
     created_at: Mapped[datetime]               = mapped_column(
         DateTime( timezone=True ), nullable=False, default=func.now(), server_default=func.now()
     )

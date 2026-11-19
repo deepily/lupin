@@ -25,9 +25,9 @@ V1   = "sonnet|v1"
 V2   = "sonnet|v2"
 
 
-def principle( pid="p1", version=V1, dimension="ask.approval_needs_link", scope="global", owner="owner-a" ):
+def principle( pid="p1", version=V1, dimension="ask.approval_needs_link", scope="global", owner="owner-a", related=None ):
     """Build a principle row with the model's column names."""
-    return SimpleNamespace( id=pid, owner_id=owner, scope=scope, dimension=dimension, extractor_version=version )
+    return SimpleNamespace( id=pid, owner_id=owner, scope=scope, dimension=dimension, extractor_version=version, related_principle_id=related )
 
 
 def row( pid="p1", note="n1", relation="supports", condition=None, answered=-HOUR, extracted=-HOUR, retracted=None, version=V1, source="extractor" ):
@@ -218,40 +218,58 @@ def test_ruling_survives_a_version_switch_when_the_new_version_joins_the_same_pr
     assert status_of( [ principle( "p1", V1 ) ], rows, version=V2 )[ "status" ] == ESTABLISHED
 
 
-def test_ruling_survives_a_version_switch_when_the_new_version_made_a_new_principle():
+def new_version_rows( pid="p9", version=V2 ):
     """
-    A V2 principle in the ruled one's dimension inherits the ruling.
+    Contested V2 evidence for a new principle, plus a V1 ruling on p1.
 
-    A V2 principle with the same owner, scope and dimension as the ruled V1 one inherits the ruling.
+    The supporting side spans two sessions.
     """
-    old, new = principle( "p1", V1 ), principle( "p9", V2 )
-    rows     = [ row( pid="p9", note="n1", version=V2 ), row( pid="p9", note="n2", version=V2 ), row( pid="p9", note="n3", relation="contradicts", version=V2 ), ruling( pid="p1", version=V1 ) ]
-    assert status_of( [ old, new ], rows, version=V2, pid="p9" )[ "status" ] == ESTABLISHED
-    assert status_of( [ old, new ], rows, version=V2, pid="p1" ) is None
+    return [ row( pid=pid, note="n1", version=version ), row( pid=pid, note="n2", version=version ), row( pid=pid, note="n3", relation="contradicts", version=version ), ruling( pid="p1", version=V1 ) ]
+
+
+def test_ruling_survives_a_version_switch_when_the_new_principle_names_the_ruled_one():
+    """
+    A V2 principle that names the ruled V1 one as related inherits the ruling.
+
+    The V1 principle has no V2 evidence, so it has no status.
+    """
+    old, new = principle( "p1", V1 ), principle( "p9", V2, related="p1" )
+    assert status_of( [ old, new ], new_version_rows(), version=V2, pid="p9" )[ "status" ] == ESTABLISHED
+    assert status_of( [ old, new ], new_version_rows(), version=V2, pid="p1" ) is None
+
+
+def test_a_ruling_follows_a_chain_of_related_principles():
+    """V3 continues V2 which continues the ruled V1: the ruling reaches the V3 principle."""
+    chain = [ principle( "p1", V1 ), principle( "p5", V2, related="p1" ), principle( "p9", "sonnet|v3", related="p5" ) ]
+    rows  = new_version_rows()
+    for r in rows[ :3 ]: r.extractor_version = "sonnet|v3"
+    assert status_of( chain, rows, version="sonnet|v3", pid="p9" )[ "status" ] == ESTABLISHED
+    assert status_of( chain, new_version_rows(), version="sonnet|v3", pid="p9" ) is None
 
 
 @pytest.mark.parametrize( "other", [
-    principle( "p9", V2, dimension="another.dimension" ),
-    principle( "p9", V2, scope="project:lupin" ),
-    principle( "p9", V2, owner="owner-b" ),
+    principle( "p9", V2 ),
+    principle( "p9", V2, related="p7" ),
+    principle( "p9", V2, related="ghost" ),
     principle( "p9", V1 ),
 ] )
-def test_a_ruling_does_not_speak_for_a_different_principle( other ):
+def test_a_ruling_does_not_speak_for_a_principle_that_does_not_continue_the_ruled_one( other ):
     """
-    A ruling does not speak for a different principle.
+    Only a named relation carries a ruling to another principle.
 
-    Another dimension, scope, owner, or another principle of the same version is not covered by the ruling.
+    The same owner, scope and dimension is not enough.
     """
-    rows = [ row( pid="p9", note="n1", version=other.extractor_version ), row( pid="p9", note="n2", relation="contradicts", version=other.extractor_version ),
-             ruling( pid="p1", version=V1 ) ]
-    assert status_of( [ principle( "p1", V1 ), other ], rows, version=other.extractor_version, pid="p9" )[ "status" ] == CONTESTED
+    siblings = [ principle( "p1", V1 ), principle( "p7", V2 ), other ]
+    assert status_of( siblings, new_version_rows( version=other.extractor_version ), version=other.extractor_version, pid="p9" )[ "status" ] == CONTESTED
 
 
-def test_a_ruling_for_an_unknown_principle_is_ignored():
-    """
-    A ruling for an unknown principle speaks for nobody else.
+def test_a_related_loop_ends_and_the_principle_stays_unruled():
+    """Two principles that name each other end the walk instead of looping, and neither is ruled."""
+    a, b = principle( "p8", V2, related="p9" ), principle( "p9", V2, related="p8" )
+    assert status_of( [ principle( "p1", V1 ), a, b ], new_version_rows(), version=V2, pid="p9" )[ "status" ] == CONTESTED
 
-    Its principle row is missing from the ledger, so it matches only by its own id.
-    """
+
+def test_a_ruling_for_an_unknown_principle_speaks_for_nobody_else():
+    """A ruling whose principle row is missing from the ledger matches only by its own id."""
     rows = contested_rows() + [ ruling( pid="ghost" ) ]
     assert status_of( [ principle() ], rows )[ "status" ] == CONTESTED

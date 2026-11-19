@@ -22,6 +22,7 @@ choices are three rows (the mapping is this module's, because no writer exists y
 - relation ``contradicts``              it is retracted
 
 A ruling applies across extractor versions, the one exception to "the current version only".
+A principle re-extracted under a new version names the one it continues (``related_principle_id``), and inherits that one's rulings.
 Retraction of an evidence row (``retracted_at``) takes it out from that moment on.
 """
 
@@ -57,22 +58,24 @@ def usable_at( row, asked_at ):
     return row.retracted_at is None or aware_moment( row.retracted_at ) > asked_at
 
 
-def _ruling_applies( ruling, ruled, principle ):
+def _lineage( principle, by_id ):
     """
-    Say whether one ruling speaks for one principle.
+    List the ids of a principle and of every earlier principle it continues.
 
     Requires:
-        - ruling is a ruling evidence row, ruled the principle it names, principle the one asked about
+        - principle has id and related_principle_id; by_id maps an id to a principle
 
     Ensures:
-        - True when the ruling names this principle
-        - True when the ruled principle has another extractor version and the same owner, scope and
-          dimension, so a re-extracted principle inherits the ruling
-        - False otherwise, in particular for another principle of the same extractor version
+        - returns the set holding the principle's own id, then its related_principle_id, then that principle's, and so on
+        - stops at a principle with no related id, at an id missing from by_id, and at an id already seen, so a loop ends
     """
-    if ruling.principle_id == principle.id: return True
-    return ( ruled is not None and ruled.extractor_version != principle.extractor_version
-             and ( ruled.owner_id, ruled.scope, ruled.dimension ) == ( principle.owner_id, principle.scope, principle.dimension ) )
+    seen    = { principle.id }
+    current = principle
+    while current.related_principle_id is not None and current.related_principle_id not in seen:
+        seen.add( current.related_principle_id )
+        current = by_id.get( current.related_principle_id )
+        if current is None: break
+    return seen
 
 
 def _sessions( rows, session_of ):
@@ -127,9 +130,12 @@ def _ruled( principle, rulings, principles_by_id, asked_at ):
         - rulings are evidence rows with source review_card; principles_by_id maps an id to a principle
 
     Ensures:
+        - a ruling speaks for the principle it names, and for a principle whose related_principle_id chain reaches that one
+        - owner, scope and dimension are never used to match, so another principle in the same dimension is not ruled
         - returns the usable ruling with the latest ( answered_at, extracted_at ), or None
     """
-    found = [ r for r in rulings if usable_at( r, asked_at ) and _ruling_applies( r, principles_by_id.get( r.principle_id ), principle ) ]
+    lineage = _lineage( principle, principles_by_id )
+    found   = [ r for r in rulings if usable_at( r, asked_at ) and r.principle_id in lineage ]
     return max( found, key=lambda r: ( aware_moment( r.answered_at ), aware_moment( r.extracted_at ) ), default=None )
 
 
