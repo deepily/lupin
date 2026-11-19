@@ -130,9 +130,9 @@ def test_both_verbs_are_no_ops_when_the_table_is_absent( monkeypatch ):
         eng.dispose()
 
 
-def test_the_revision_follows_the_always_yes_revision_and_lies_on_the_single_head_chain():
+def test_the_revision_follows_the_principle_tables_revision_and_lies_on_the_single_head_chain():
     script = _script()
-    assert script.get_revision( _REVISION ).down_revision == "c9e3a7b1d542"
+    assert script.get_revision( _REVISION ).down_revision == "d3a6c1e8b5f2"
     heads = script.get_heads()
     assert len( heads ) == 1, f"the chain must stay linear, got heads {heads}"
     assert _REVISION in { r.revision for r in script.walk_revisions( base="base", head=heads[ 0 ] ) }

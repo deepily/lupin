@@ -2,7 +2,7 @@
 Add prediction_log.draft_at_reveal, the draft answer when the forecast fold opened
 
 Revision ID: e5b7d9a2c418
-Revises: c9e3a7b1d542
+Revises: d3a6c1e8b5f2
 
 The seen route stores the first fold-open time. This column keeps the draft answer at that moment, so the
 learner can tell an unaided answer from one the forecast may have changed.
@@ -21,7 +21,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'e5b7d9a2c418'
-down_revision: Union[str, Sequence[str], None] = 'c9e3a7b1d542'
+down_revision: Union[str, Sequence[str], None] = 'd3a6c1e8b5f2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
