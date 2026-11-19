@@ -24,6 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import DeclarativeBase, relationship, Mapped, mapped_column
 from datetime import datetime
 from typing import Optional, List
@@ -1225,6 +1226,125 @@ class PredictionLog( Base ):
 
     def __repr__( self ) -> str:
         return f"<PredictionLog(id={self.id}, type='{self.response_type}', category='{self.category}', match={self.accuracy_match})>"
+
+
+# The vector store module imports Base from here, which is already bound at this point.
+from cosa.rest.db.vector_store_models import EMBEDDING_DIM  # noqa: E402
+
+
+class PreferencePrinciple( Base ):
+    """
+    A short conditional principle the preference learner holds about one owner.
+
+    Requires:
+        - owner_id, kind, dimension, statement, scope and extractor_version are set
+        - kind is "decision" or "ask_form"; scope is "global" or "project:<name>"
+
+    Ensures:
+        - id is an automatically generated UUID
+        - status is never stored; it is derived from preference_evidence
+        - embedding is a 768-dimension vector, comparable only within one encoder_version
+    """
+
+    __tablename__ = "preference_principles"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ), primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid()
+    )
+    owner_id: Mapped[str]                      = mapped_column( String( 64 ), nullable=False, index=True )
+    kind: Mapped[str]                          = mapped_column( String( 20 ), nullable=False )
+    dimension: Mapped[str]                     = mapped_column( String( 255 ), nullable=False )
+    statement: Mapped[str]                     = mapped_column( Text, nullable=False )
+    rationale: Mapped[Optional[str]]           = mapped_column( Text, nullable=True )
+    scope: Mapped[str]                         = mapped_column( String( 255 ), nullable=False )
+    embedding: Mapped[Optional[list]]          = mapped_column( Vector( EMBEDDING_DIM ), nullable=True )
+    encoder_version: Mapped[Optional[str]]     = mapped_column( String( 100 ), nullable=True )
+    extractor_version: Mapped[str]             = mapped_column( String( 100 ), nullable=False )
+    created_at: Mapped[datetime]               = mapped_column(
+        DateTime( timezone=True ), nullable=False, default=func.now(), server_default=func.now()
+    )
+
+    def __repr__( self ) -> str:
+        return f"<PreferencePrinciple(id={self.id}, kind='{self.kind}', dimension='{self.dimension}')>"
+
+
+class PreferenceEvidence( Base ):
+    """
+    One timed piece of evidence for or against a principle. Append-only.
+
+    Requires:
+        - principle_id references preference_principles
+        - relation is "supports", "contradicts" or "refines"; source is "extractor" or "review_card"
+
+    Ensures:
+        - one row per ( principle_id, notification_id, field_key, extractor_version, source )
+        - usable at an ask only when answered_at and extracted_at are both at or before it
+        - no foreign key to notifications, so pruning notifications never removes evidence
+    """
+
+    __tablename__ = "preference_evidence"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ), primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid()
+    )
+    principle_id: Mapped[uuid.UUID]            = mapped_column(
+        UUID( as_uuid=True ), ForeignKey( "preference_principles.id" ), nullable=False, index=True
+    )
+    notification_id: Mapped[uuid.UUID]         = mapped_column( UUID( as_uuid=True ), nullable=False, index=True )
+    field_key: Mapped[str]                     = mapped_column( String( 255 ), nullable=False )
+    relation: Mapped[str]                      = mapped_column( String( 20 ), nullable=False )
+    condition: Mapped[Optional[str]]           = mapped_column( Text, nullable=True )
+    answered_at: Mapped[datetime]              = mapped_column( DateTime( timezone=True ), nullable=False )
+    extracted_at: Mapped[datetime]             = mapped_column( DateTime( timezone=True ), nullable=False )
+    extractor_version: Mapped[str]             = mapped_column( String( 100 ), nullable=False )
+    retracted_at: Mapped[Optional[datetime]]   = mapped_column( DateTime( timezone=True ), nullable=True )
+    source: Mapped[str]                        = mapped_column( String( 20 ), nullable=False )
+
+    __table_args__ = (
+        UniqueConstraint( 'principle_id', 'notification_id', 'field_key', 'extractor_version', 'source', name='uq_preference_evidence_key' ),
+    )
+
+    def __repr__( self ) -> str:
+        return f"<PreferenceEvidence(principle_id={self.principle_id}, notification_id={self.notification_id}, relation='{self.relation}')>"
+
+
+class PredictionArmForecast( Base ):
+    """
+    One forecast per notification and arm, the displayed arm included.
+
+    Requires:
+        - notification_id references a valid notifications row
+        - arm is a non-empty arm name
+
+    Ensures:
+        - one row per ( notification_id, arm )
+        - displayed is true for the arm whose forecast the card showed
+        - a late forecast is derived from forecast_ready_at, never stored
+    """
+
+    __tablename__ = "prediction_arm_forecast"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ), primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid()
+    )
+    notification_id: Mapped[uuid.UUID]         = mapped_column(
+        UUID( as_uuid=True ), ForeignKey( "notifications.id", ondelete="CASCADE" ), nullable=False, index=True
+    )
+    arm: Mapped[str]                           = mapped_column( String( 50 ), nullable=False )
+    predictor_version: Mapped[Optional[str]]   = mapped_column( String( 100 ), nullable=True )
+    forecast: Mapped[Optional[dict]]           = mapped_column( JSONB, nullable=True )
+    input_cutoff: Mapped[Optional[datetime]]   = mapped_column( DateTime( timezone=True ), nullable=True )
+    evidence_ids: Mapped[Optional[list]]       = mapped_column( JSONB, nullable=True )
+    forecast_ready_at: Mapped[Optional[datetime]] = mapped_column( DateTime( timezone=True ), nullable=True )
+    abstention_reason: Mapped[Optional[str]]   = mapped_column( Text, nullable=True )
+    displayed: Mapped[bool]                    = mapped_column( nullable=False, default=False, server_default=text( "false" ) )
+
+    __table_args__ = (
+        UniqueConstraint( 'notification_id', 'arm', name='uq_prediction_arm_forecast_notification_arm' ),
+    )
+
+    def __repr__( self ) -> str:
+        return f"<PredictionArmForecast(notification_id={self.notification_id}, arm='{self.arm}', displayed={self.displayed})>"
 
 
 # ============================================================================
