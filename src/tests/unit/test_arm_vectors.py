@@ -86,6 +86,20 @@ class _Session:
         self.rolled = True
 
 
+def _vector_of( text ):
+    """
+    Give the vector the fake provider returns for a text.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns 768 floats with one 20.0 on an axis chosen by a hash of the whole text, so two texts rarely share a vector
+    """
+    axis = int.from_bytes( hashlib.md5( text.encode() ).digest()[ :2 ], "big" ) % 768
+    return [ 20.0 if i == axis else 0.0 for i in range( 768 ) ]
+
+
 class _Provider:
     """Embeds each text as a one-axis vector and records what it was sent."""
 
@@ -98,7 +112,7 @@ class _Provider:
 
     def generate_embeddings_batch( self, texts, content_type="prose", role=None, pin_fastapi=False ):
         self.sent += texts
-        return [ [ 20.0 if i == len( text ) % 700 else 0.0 for i in range( 768 ) ] for text in texts ]
+        return [ _vector_of( text ) for text in texts ]
 
 
 def _rows():
@@ -152,6 +166,8 @@ def test_the_abstract_arm_embeds_question_plus_abstract_in_frozen_order( tmp_pat
     assert provider.sent == [ "question a1\n\nAbstract: why", "question a2\n\nAbstract: more", "question a3" ]
     header, vectors = load_side_file( out )
     assert sorted( vectors ) == [ "a1", "a2", "a3" ] and header[ "count" ] == 3
+    assert vectors == { "a1": _vector_of( "question a1\n\nAbstract: why" ), "a2": _vector_of( "question a2\n\nAbstract: more" ),
+                        "a3": _vector_of( "question a3" ) }
     assert lines[ 0 ] == "arm Q+A: {'asks': 3, 'with_section': 2, 'no_context': 0, 'arm_input_absent': 1}"
     assert session.statements[ 0 ] == "SET TRANSACTION READ ONLY" and session.rolled
 
@@ -199,6 +215,23 @@ def test_a_frozen_ask_with_no_notification_is_refused_before_anything_is_embedde
         main( [ "--arm", "Q", "--frozen-ids", _frozen( tmp_path, ( "a1", "ghost" ) ), "--out", str( tmp_path / "x" ) ], printer=print,
               session_factory=lambda: _Session( _rows() ), provider_factory=lambda: provider )
     assert provider.sent == []
+
+
+def test_equal_length_texts_keep_their_own_vectors_so_a_swap_of_ids_would_show( tmp_path ):
+    _, _, _, _, out = _run( tmp_path, "Q" )
+    _, vectors = load_side_file( out )
+    assert len( "question a1" ) == len( "question a2" ) and _vector_of( "question a1" ) != _vector_of( "question a2" )
+    assert vectors[ "a1" ] == _vector_of( "question a1" ) and vectors[ "a2" ] == _vector_of( "question a2" ) and vectors[ "a3" ] == _vector_of( "question a3" )
+
+
+def test_the_probe_line_projects_the_probe_time_over_the_whole_cohort( tmp_path ):
+    ids      = [ f"b{n}" for n in range( 30 ) ]
+    rows     = [ _row( ask_id, n ) for n, ask_id in enumerate( ids ) ]
+    ticks    = iter( [ 0.0, 4.0, 9.0 ] )
+    lines    = []
+    main( [ "--arm", "Q", "--frozen-ids", _frozen( tmp_path, ids ), "--out", str( tmp_path / "x" ), "--probe-only" ], printer=lines.append,
+          session_factory=lambda: _Session( rows ), provider_factory=_Provider, clock=lambda: next( ticks ) )
+    assert lines[ 1 ] == "probe: 20 texts in 4.00s, projected 6.0s for 30"
 
 
 def test_every_arm_has_a_text_rule():
