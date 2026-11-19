@@ -8,9 +8,9 @@ pins:
   - lupin_mcp.reuse_merge_gate.effective_base@4be5903d55
   - lupin_mcp.reuse_merge_gate.added_text_by_file@9ee8144d1c
   - lupin_mcp.reuse_merge_gate.added_definition_ids@6ba288dc97
-  - lupin_mcp.reuse_merge_gate.run@c4e9795f10
+  - lupin_mcp.reuse_merge_gate.run@e9dfee2c8e
   - lupin_mcp.reuse_merge_gate.summary@c915c6ed8e
-  - lupin_mcp.reuse_merge_gate.main@f451060514
+  - lupin_mcp.reuse_merge_gate.main@e350b519c2
 ---
 # Reuse merge gate
 

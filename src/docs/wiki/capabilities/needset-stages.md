@@ -2,7 +2,7 @@
 capability: needset-stages
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.stages.attribution_report@9f0ed9a947
+  - lupin_mcp.reuse_needset.stages.attribution_report@ff2ccf1ebe
   - lupin_mcp.reuse_needset.stages.run_yield@dfebf76eac
   - lupin_mcp.reuse_needset.stages.run_remainder@15df1f6811
   - lupin_mcp.reuse_needset.stages.run_stages@993fa04935

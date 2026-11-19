@@ -7,7 +7,7 @@ pins:
   - cosa.rest.routers.system.get_todo_queue@9bc801466a
   - cosa.rest.routers.system.health_check@00848fea5f
   - cosa.rest.routers.system.get_server_info@8f6aeba2d2
-  - cosa.rest.routers.system.reset_prediction_engine@439c7000c5
+  - cosa.rest.routers.system.reset_prediction_engine@60666e7713
   - cosa.rest.routers.system.get_session_id@ac09280b89
   - cosa.rest.routers.system.auth_test@46733b121c
   - cosa.rest.routers.system.get_websocket_sessions@60271eecbd

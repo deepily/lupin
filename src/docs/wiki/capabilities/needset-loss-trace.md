@@ -7,14 +7,14 @@ pins:
   - lupin_mcp.reuse_needset.loss_trace.index_locator@e278b6c99a
   - lupin_mcp.reuse_needset.loss_trace.classify@ef032f3b45
   - lupin_mcp.reuse_needset.loss_trace.classify_members@550175a9c5
-  - lupin_mcp.reuse_needset.loss_trace.trace_need@54e338c445
+  - lupin_mcp.reuse_needset.loss_trace.trace_need@221e93be49
   - lupin_mcp.reuse_needset.loss_trace.trace_version@1fbedd0c20
-  - lupin_mcp.reuse_needset.loss_trace.trace_all@ae6e42d9c3
+  - lupin_mcp.reuse_needset.loss_trace.trace_all@88d1716200
   - lupin_mcp.reuse_needset.loss_trace.extend_key@b6e8c993a7
   - lupin_mcp.reuse_needset.loss_trace.retrace@c8454dcb15
   - lupin_mcp.reuse_needset.loss_trace.confirmation_items@91778eb0ec
-  - lupin_mcp.reuse_needset.loss_trace.summarize@c6b2aa3ea7
-  - lupin_mcp.reuse_needset.loss_trace.summarize_members@09464ee28c
+  - lupin_mcp.reuse_needset.loss_trace.summarize@aacacefb3b
+  - lupin_mcp.reuse_needset.loss_trace.summarize_members@048ea3c4b9
   - lupin_mcp.reuse_needset.loss_trace.write_report@f7f4748d3f
 ---
 # Need set: loss trace

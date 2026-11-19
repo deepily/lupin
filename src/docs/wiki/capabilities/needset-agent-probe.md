@@ -11,7 +11,8 @@ pins:
   - lupin_mcp.reuse_needset.agent_probe.probe_profile@9b6af8bc10
   - lupin_mcp.reuse_needset.agent_probe.prompt_version@8684948c6b
   - lupin_mcp.reuse_needset.agent_probe.probe_options@b2970b75d0
-  - lupin_mcp.reuse_needset.agent_probe.run_probe@c943176c60
+  - lupin_mcp.reuse_needset.agent_probe.run_probe@e6e991e3cf
+  - lupin_mcp.reuse_needset.agent_probe.StreamEnded@f8ddb9720b
 ---
 # Need set: agent probe
 
@@ -31,3 +32,4 @@ The tools-on agent step: it reads each shortlisted candidate and rules it the sa
 - `probe_options` builds options with the Read tool only, the hermetic isolation arguments and no setting source. The working directory is the read-only tree of the need's source commit.
 - `probe_profile` returns the text naming the tools and turn limit. `prompt_version` hashes it with the system text, instruction, prompt builder and reply parser, so a change to any is a new version.
 - `run_probe` lets the agent read and rule. It returns the reply, rulings, reads and transcript. An unreadable reply is asked again once, and none holding a ruling raises `PROBE_UNREADABLE`. Every attempt is charged to the call cap first ([[needset-call-cap]]).
+- `StreamEnded`, a `RuntimeError`, is raised when a stream ends with no result message. `run_probe` retries it up to `STREAM_ATTEMPTS` streams, then raises `PROBE_STREAM_ENDED`.

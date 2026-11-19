@@ -5,7 +5,7 @@ pins:
   - cosa.rest.postgres_models.Notification@74eecfa097
   - cosa.rest.postgres_models.ProxyDecision@08b7b65095
   - cosa.rest.postgres_models.TrustState@99b54483eb
-  - cosa.rest.postgres_models.PredictionLog@3638bc1147
+  - cosa.rest.postgres_models.PredictionLog@1d050bbf12
   - cosa.rest.postgres_models.JobHistory@9040d3c885
   - cosa.rest.postgres_models.ServerLifecycle@dc6a76b380
   - cosa.rest.postgres_models.ApprovalSetting@ab38c60138

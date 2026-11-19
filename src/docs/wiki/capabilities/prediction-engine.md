@@ -2,14 +2,14 @@
 capability: prediction-engine
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@3a66666946
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.predict@399fd38a6c
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@b70bfe4fcc
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.predict@d8d8445bfa
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_outcome@f0fe0a9d85
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_hint_vote@384d7e7edb
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.get_accuracy_summary@c357538e8b
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_hint_vote@6eea5b4fb5
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.get_accuracy_summary@6b034cadf8
   - cosa.agents.prediction_engine.prediction_engine.get_prediction_engine@17a1a42f8d
-  - cosa.agents.prediction_engine.prediction_result.PredictionResult@8f3b490185
-  - cosa.agents.prediction_engine.prediction_result.PredictionResult.to_hint_dict@74e10b5df2
+  - cosa.agents.prediction_engine.prediction_result.PredictionResult@123b9102c4
+  - cosa.agents.prediction_engine.prediction_result.PredictionResult.to_hint_dict@4127f6dfe0
   - cosa.agents.prediction_engine.notification_category_classifier.NotificationCategoryClassifier@c07615726c
   - cosa.agents.prediction_engine.accuracy_comparators.get_comparator@b9d301e658
   - cosa.agents.prediction_engine.xml_models.OpenEndedSynthesisResponse@b42b81a7b6
