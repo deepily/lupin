@@ -205,6 +205,7 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
           its two windows, read from its mix) and produced_by, or "not stated" when the column has none
         - one comparison table gives every figure in all four columns, then the change between each adjacent pair
         - a figure one column lacks reads n/a, and its changes read n/a
+        - a pipe inside a figure name is escaped so the table keeps its columns
         - each note is printed as a bullet under the introduction
         - the same columns and notes give the same text
     """
@@ -225,7 +226,7 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
     for name in names:
         figures = [ rows.get( name ) for rows in flat ]
         changes = [ _change( figures[ i ], figures[ i + 1 ] ) for i in range( 3 ) ]
-        lines.append( f"| {name} | " + " | ".join( _shown( figure ) for figure in figures ) + " | " + " | ".join( changes ) + " |" )
+        lines.append( f"| {name.replace( '|', chr( 92 ) + '|' )} | " + " | ".join( _shown( figure ) for figure in figures ) + " | " + " | ".join( changes ) + " |" )
     lines.append( "" )
     return "\n".join( lines )
 

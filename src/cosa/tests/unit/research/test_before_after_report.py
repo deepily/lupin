@@ -361,3 +361,11 @@ def test_main_reads_four_columns_and_the_control_report_and_writes_the_report( c
     assert "- a note" in text and "| 1 | before | `8d748e033` | stored | 1302 | 390 | re-derived |" in text
     with pytest.raises( bar.ReportMismatch ):
         bar.main( argv[ :argv.index( "--control-report" ) + 1 ] + [ _retune_report( tmp_path, "bad.json", 99 ) ] + argv[ argv.index( "--control-report" ) + 2: ] )
+
+
+def test_a_pipe_in_a_figure_name_is_escaped_so_every_table_row_keeps_eight_cells( columns ):
+    for column in columns: column[ "calibration" ][ "cells" ][ "yes_no|cbr" ] = { "status": "not fitted" }
+    text = bar.render_before_after( columns )
+    row = next( line for line in text.splitlines() if line.startswith( "| calibration yes_no" ) and "|cbr" in line )
+    assert row.startswith( "| calibration yes_no\\|cbr |" )
+    assert len( row.replace( "\\|", "" ).split( "|" ) ) - 2 == 8
