@@ -103,20 +103,36 @@ def _source_without_case( notification ) -> str:
     return "human" if ( notification.response_value or {} ).get( "source" ) == "ui" else "unknown"
 
 
-def cohort_asks( session, response_type: str, window: Optional[str] = None, *, vectors: Dict[str, List[float]] ) -> List[Dict[str, Any]]:
+def _question_vector( decision, ask_id: str, vectors: Optional[Dict[str, List[float]]] ) -> Optional[List[float]]:
+    """
+    Pick an ask's vector from the side file, or from its case row when no side file is given.
+
+    Requires:
+        - decision is a prediction_decisions row or None; vectors is a dict by ask id or None
+
+    Ensures:
+        - with vectors given, returns a copy of its entry for ask_id, or None when absent
+        - with vectors None, returns a copy of the row's stored vector, or None when there is no row or vector
+    """
+    if vectors is not None: return list( vectors[ ask_id ] ) if ask_id in vectors else None
+    return list( decision.question_embedding ) if decision is not None and decision.question_embedding is not None else None
+
+
+def cohort_asks( session, response_type: str, window: Optional[str] = None, *, vectors: Optional[Dict[str, List[float]]] ) -> List[Dict[str, Any]]:
     """
     Build the replay's ask dicts for one cohort.
 
     Requires:
         - session is an active SQLAlchemy session
         - response_type and window are as for scored_rows
-        - vectors maps ask id to its question vector, as load_side_file returns it
+        - vectors maps ask id to its question vector, as load_side_file returns it, or is None to read the stored vectors
 
     Ensures:
         - returns one dict per scored row, in predicted_at order, with the store record fields, responded_at and
           the ask fields title, message, sender_id, asked_at, recipient_id, response_options and actual_value
-        - question_embedding is the side file's vector for the ask id, for every ask; the case row's own vector is
-          never read, and an id the side file lacks gets None and is not replayable
+        - with vectors given, question_embedding is the side file's vector for the ask id, for every ask; the case
+          row's own vector is never read, and an id the side file lacks gets None and is not replayable
+        - with vectors None, it is the case row's stored vector, or None when there is no row or no vector
         - a case's category, answer and owner come from its prediction_decisions row, keyed by the notification id
         - with no such row the owner is the notification's recipient_id, the field the engine compares against, and
           answer_source is "human" when the notification's response_value.source is "ui" and "unknown" when it is
@@ -144,7 +160,7 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None, *, v
             "ratification_state" : decision.ratification_state if decision is not None else "not_required",
             "data_origin"        : decision.data_origin if decision is not None else "organic",
             "response_type"      : row.response_type,
-            "question_embedding" : list( vectors[ str( row.notification_id ) ] ) if str( row.notification_id ) in vectors else None,
+            "question_embedding" : _question_vector( decision, str( row.notification_id ), vectors ),
             "created_at"         : decision.created_at if decision is not None else row.predicted_at.isoformat(),
             "owner_user_id"      : decision.owner_user_id if decision is not None else str( notification.recipient_id ),
             "answer_source"      : decision.answer_source if decision is not None else _source_without_case( notification ),

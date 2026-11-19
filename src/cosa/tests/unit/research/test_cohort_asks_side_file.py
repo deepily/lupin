@@ -55,6 +55,12 @@ def test_the_vector_is_the_side_files_even_when_the_case_row_holds_another():
     assert asks[ 0 ][ "question_embedding" ] == [ 1.0, 2.0 ]
 
 
+def test_with_no_side_file_the_stored_vector_is_read_and_a_missing_row_or_vector_gives_none():
+    assert _asks( _Session( { "n1": _decision( [ 9.0, 9.0 ] ) } ), [ _row() ], None )[ 0 ][ "question_embedding" ] == [ 9.0, 9.0 ]
+    assert _asks( _Session( { "n1": _decision( None ) } ), [ _row() ], None )[ 0 ][ "question_embedding" ] is None
+    assert _asks( _Session(), [ _row() ], None )[ 0 ][ "question_embedding" ] is None
+
+
 def test_an_id_the_side_file_lacks_is_not_replayable_even_when_the_case_row_holds_a_vector():
     asks = _asks( _Session( { "n1": _decision( [ 9.0, 9.0 ] ) } ), [ _row() ], {} )
     assert asks[ 0 ][ "question_embedding" ] is None

@@ -87,6 +87,16 @@ def test_a_change_in_any_field_between_the_two_reads_stops_the_run( field, value
         generate( [ ( "a", "q" ) ], provider )
 
 
+def test_each_ids_vector_is_the_one_made_for_its_own_text_across_the_probe_boundary_and_an_early_empty_text():
+    texts    = [ "x" * n for n in ( 1, 0, 5, 9, 3, 7, 11, 2 ) ]
+    pairs    = [ ( f"id{n}", text ) for n, text in enumerate( texts ) ]
+    provider = FakeProvider()
+    result   = generate( pairs, provider, probe_size=3, batch_size=2 )
+    assert sorted( result[ "vectors" ] ) == sorted( ask_id for ask_id, text in pairs if text )
+    assert all( result[ "vectors" ][ ask_id ] == _good( len( text ) ) for ask_id, text in pairs if text )
+    assert result[ "rejects" ] == [ { "id": "id1", "reason": "empty question text" } ]
+
+
 def test_the_info_block_is_read_after_the_probe_and_again_after_the_last_call():
     order    = []
     provider = FakeProvider()

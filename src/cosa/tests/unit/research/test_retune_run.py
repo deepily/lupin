@@ -16,7 +16,7 @@ import cosa.research.preference_replay.retune_run as retune_run
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.research.preference_replay.question_vectors import write_side_file
-from cosa.research.preference_replay.retune_run import build_report, main, read_cohort, run_report
+from cosa.research.preference_replay.retune_run import build_report, check_vectors_cover, main, read_cohort, run_report
 from cosa.tests.unit.research.test_retune import SHA, _asks, engine  # noqa: F401 - engine is a fixture
 
 READ_AT = datetime( 2026, 11, 19, 0, 36, 39, tzinfo=timezone.utc )
@@ -65,6 +65,30 @@ def _fake_cohort( monkeypatch, asks_by_type ):
 
     monkeypatch.setattr( retune_run, "cohort_asks", fake )
     return asked
+
+
+def test_an_ask_with_no_vector_and_no_reject_entry_is_refused_and_a_listed_reject_is_allowed():
+    asks = [ { "id": "a", "question_embedding": [ 1.0 ] }, { "id": "b", "question_embedding": None }, { "id": "c", "question_embedding": None } ]
+    check_vectors_cover( asks, { "rejects": [ { "id": "b", "reason": "empty question text" }, { "id": "c", "reason": "r" } ] } )
+    with pytest.raises( ValueError, match=r"1 cohort asks have no vector .*\['c'\]" ):
+        check_vectors_cover( asks, { "rejects": [ { "id": "b", "reason": "r" } ] } )
+
+
+def test_the_stored_vector_source_reads_no_side_file_and_says_so( engine, monkeypatch, tmp_path ):
+    seen = []
+    monkeypatch.setattr( retune_run, "cohort_asks", lambda session, kind, vectors: seen.append( vectors ) or ( _asks( engine ) if kind == "yes_no" else [] ) )
+    out = tmp_path / "r.json"
+    main( [ "--out", str( out ), "--stored-vectors" ], printer=lambda line: None, session_factory=lambda: contextlib.nullcontext( FakeSession() ),
+          engine_factory=lambda: engine, code_sha="d" * 40 )
+    provenance = json.loads( out.read_text( encoding="utf-8" ) )[ "provenance" ]
+    assert seen == [ None, None ] and provenance[ "vector_source" ] == "stored" and "vector_side_file" not in provenance
+
+
+def test_the_command_refuses_a_cohort_with_an_unexplained_missing_vector( engine, monkeypatch, tmp_path ):
+    _fake_cohort( monkeypatch, { "yes_no": [ dict( _asks( engine )[ 0 ], question_embedding=None ) ], "multiple_choice": [] } )
+    with pytest.raises( ValueError, match="no vector in the side file" ):
+        main( [ "--out", str( tmp_path / "r.json" ), "--vectors", _side_file( tmp_path ) ], printer=lambda line: None,
+              session_factory=lambda: contextlib.nullcontext( FakeSession() ), engine_factory=lambda: engine, code_sha="d" * 40 )
 
 
 def test_the_cohort_is_read_in_a_read_only_transaction_and_dated( monkeypatch ):
@@ -120,6 +144,7 @@ def test_the_command_writes_the_report_and_names_its_own_command_and_code( engin
     assert ( report[ "provenance" ][ "code_sha" ], report[ "provenance" ][ "driver_sha256" ] ) == ( "d" * 40, expected_sha )
     assert report[ "provenance" ][ "started" ] == READ_AT.isoformat()
     provenance = report[ "provenance" ]
+    assert ( provenance[ "vector_source" ], provenance[ "vector_rejects" ] ) == ( "side_file", 0 )
     assert ( provenance[ "vector_model" ], provenance[ "vector_revision" ], provenance[ "vector_side_file" ] ) == ( "m", "r1", str( tmp_path / "vectors.json" ) )
     with open( tmp_path / "vectors.json", "rb" ) as handle: assert provenance[ "vector_side_file_sha256" ] == hashlib.sha256( handle.read() ).hexdigest()
     assert json.loads( printed[ 0 ] ) == report[ "frozen_settings" ]
