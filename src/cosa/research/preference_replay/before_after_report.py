@@ -243,26 +243,28 @@ def final_correct( column: Dict[str, Any] ) -> int:
     return sum( score[ "correct" ] for score in column[ "coverage" ][ "scores" ][ "final" ].values() )
 
 
-def assemble_report( columns: Sequence[Dict[str, Any]], committed_final_correct: int, control_final_correct: int, before: Dict[str, Any],
+def assemble_report( columns: Sequence[Dict[str, Any]], expected_final_correct: Sequence[int], control_final_correct: int, before: Dict[str, Any],
                      notes: Sequence[str] = (), title: str = "Before and after: regenerated question vectors" ) -> str:
     """
     Check the control, set the Before column's provenance and render the report.
 
     Requires:
         - columns are the four column dicts; before holds the commit and produced_by of the committed baseline
-        - committed_final_correct is the final-window correct count of the committed baseline
-        - control_final_correct is the same count from the control run on stored vectors
+        - expected_final_correct holds the final-window correct count each of columns 1 to 3 must reproduce
+        - control_final_correct is the count from the control run on stored vectors; it must equal the first expected count
 
     Ensures:
-        - the control run and column 1 each reproduce the committed count, or nothing is rendered
+        - the control run and each of columns 1 to 3 reproduce their counts, or nothing is rendered
         - column 1 carries the commit and produced_by that before names
         - returns the render of the four columns
 
     Raises:
-        - ReportMismatch when either count differs, or when the columns do not fit the design
+        - ReportMismatch naming the column when a count differs, or when the columns do not fit the design
     """
-    check_control( committed_final_correct, control_final_correct )
-    check_control( committed_final_correct, final_correct( columns[ 0 ] ) )
+    check_control( expected_final_correct[ 0 ], control_final_correct )
+    for number, expected in enumerate( expected_final_correct ):
+        if final_correct( columns[ number ] ) != expected:
+            raise ReportMismatch( f"column {number + 1} has {final_correct( columns[ number ] )} final-window correct, the expected count is {expected}" )
     return render_before_after( [ dict( columns[ 0 ], **before ) ] + list( columns[ 1: ] ), title, notes )
 
 
@@ -271,31 +273,30 @@ def main( argv: Optional[Sequence[str]] = None ) -> int:
     Build the committed before-and-after report from the four column files.
 
     Requires:
-        - argv names the four column files in order, the control report, the frozen retune report and the output path
-        - the control report and the frozen report are retune reports with a grid point at threshold 0.5 and top k 10
+        - argv names the four column files in order, the three counts columns 1 to 3 must reproduce, the control report and the output path
+        - the control report is a retune report with a grid point at threshold 0.5 and top k 10
 
     Ensures:
         - writes the Markdown report and returns 0
 
     Raises:
-        - ReportMismatch when the control or column 1 fails to reproduce the committed count
+        - ReportMismatch when the control or a column fails to reproduce its count
     """
     parser = argparse.ArgumentParser( description="Build the before-and-after report from four column files." )
     parser.add_argument( "--columns", nargs=4, required=True )
     parser.add_argument( "--control-report", required=True )
-    parser.add_argument( "--frozen-report", required=True )
+    parser.add_argument( "--expect-final-correct", nargs=3, type=int, required=True, metavar="N", help="the final-window correct count columns 1, 2 and 3 must reproduce" )
     parser.add_argument( "--before-commit", required=True )
     parser.add_argument( "--before-produced-by", required=True )
     parser.add_argument( "--note", action="append", default=[] )
     parser.add_argument( "--out", required=True )
     args = parser.parse_args( argv )
-    def at_frozen_point( path: str ) -> int:
-        with open( path, encoding="utf-8" ) as handle: report = json.load( handle )
-        return next( point for point in report[ "grid_points" ] if point[ "threshold" ] == 0.5 and point[ "top_k" ] == 10 )[ "final_correct" ]
+    with open( args.control_report, encoding="utf-8" ) as handle: control = json.load( handle )
+    control_correct = next( point for point in control[ "grid_points" ] if point[ "threshold" ] == 0.5 and point[ "top_k" ] == 10 )[ "final_correct" ]
     columns = []
     for path in args.columns:
         with open( path, encoding="utf-8" ) as handle: columns.append( json.load( handle ) )
-    text = assemble_report( columns, at_frozen_point( args.frozen_report ), at_frozen_point( args.control_report ),
+    text = assemble_report( columns, args.expect_final_correct, control_correct,
                             { "commit": args.before_commit, "produced_by": args.before_produced_by }, args.note )
     with open( args.out, "w", encoding="utf-8" ) as handle: handle.write( text )
     return 0

@@ -327,16 +327,18 @@ def test_final_correct_sums_the_types_of_the_final_window( columns ):
 BEFORE = { "commit": "8d748e033", "produced_by": "re-derived" }
 
 
-def test_assemble_report_sets_the_before_provenance_once_both_counts_match( columns ):
-    text = bar.assemble_report( columns, 164, 164, BEFORE, notes=[ "n" ] )
+def test_assemble_report_sets_the_before_provenance_once_every_count_matches( columns ):
+    text = bar.assemble_report( columns, [ 164, 174, 172 ], 164, BEFORE, notes=[ "n" ] )
     assert "| 1 | before | `8d748e033` | stored | 1302 | 390 | re-derived |" in text and "- n" in text
     assert columns[ 0 ][ "produced_by" ].startswith( "replay 086f95590" )
 
 
-@pytest.mark.parametrize( "committed, control", [ ( 164, 163 ), ( 164, 165 ), ( 165, 165 ), ( 163, 163 ) ] )
-def test_assemble_report_refuses_a_control_or_column_one_that_misses_the_committed_count( columns, committed, control ):
-    with pytest.raises( bar.ReportMismatch, match="control run gave" ):
-        bar.assemble_report( columns, committed, control, BEFORE )
+@pytest.mark.parametrize( "expected, control, named", [
+    ( [ 164, 174, 172 ], 163, "control run gave 163" ), ( [ 164, 174, 172 ], 165, "control run gave 165" ),
+    ( [ 165, 174, 172 ], 165, "column 1 has 164" ), ( [ 164, 175, 172 ], 164, "column 2 has 174" ), ( [ 164, 174, 171 ], 164, "column 3 has 172" ) ] )
+def test_assemble_report_refuses_a_control_or_column_that_misses_its_count_and_names_it( columns, expected, control, named ):
+    with pytest.raises( bar.ReportMismatch, match=named ):
+        bar.assemble_report( columns, expected, control, BEFORE )
 
 
 def _retune_report( tmp_path, name, final_correct ):
@@ -345,14 +347,14 @@ def _retune_report( tmp_path, name, final_correct ):
     return str( path )
 
 
-def test_main_reads_four_columns_and_two_retune_reports_and_writes_the_report( columns, tmp_path ):
+def test_main_reads_four_columns_and_the_control_report_and_writes_the_report( columns, tmp_path ):
     paths = []
     for number, column in enumerate( columns ):
         path = tmp_path / f"c{number}.json"
         path.write_text( json.dumps( column ), encoding="utf-8" )
         paths.append( str( path ) )
     out = tmp_path / "report.md"
-    argv = [ "--columns" ] + paths + [ "--control-report", _retune_report( tmp_path, "ctl.json", 164 ), "--frozen-report", _retune_report( tmp_path, "frz.json", 164 ),
+    argv = [ "--columns" ] + paths + [ "--control-report", _retune_report( tmp_path, "ctl.json", 164 ), "--expect-final-correct", "164", "174", "172",
              "--before-commit", "8d748e033", "--before-produced-by", "re-derived", "--note", "a note", "--out", str( out ) ]
     assert bar.main( argv ) == 0
     text = out.read_text( encoding="utf-8" )
