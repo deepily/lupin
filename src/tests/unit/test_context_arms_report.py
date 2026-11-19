@@ -264,7 +264,7 @@ def test_main_writes_one_row_per_arm_from_the_per_ask_files( tmp_path ):
 def test_main_names_the_floor_its_source_the_files_code_and_the_command( tmp_path ):
     _write_inputs( tmp_path )
     text = _main_text( tmp_path )
-    assert "- discordant floor: 6 pairs, stated before the run; source: the exact test cannot reach 0.05 below 6 pairs" in text
+    assert "- discordant floor: 6 pairs; source: the exact test cannot reach 0.05 below 6 pairs" in text
     assert "- code sha of this report: abc1234def" in text
     assert "- per-ask files scored on code: Q q01234567, Q+A q-a012345, Q+O q-o012345, Q+P q-p012345, Q+H q-h012345" in text
     assert "- generated: 2026-11-19T22:00:00+00:00" in text
