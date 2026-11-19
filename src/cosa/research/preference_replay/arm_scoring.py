@@ -9,14 +9,18 @@ The always-yes baseline is replayed beside it, on the same asks.
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Sequence
 
+import cosa.utils.util as cu
+from cosa.repo.doc_lint.pool_builder import resolve_commit
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.rest.db.database import get_db
 from cosa.research.preference_replay.question_vectors import load_side_file
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM, always_yes_arm, replay
 from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, FROZEN_METRIC, METRIC_KEY, THRESHOLD_KEY, TOP_K_KEY, split_windows
 from cosa.research.preference_replay.retune_run import _open_engine, check_vectors_cover, read_cohort, restrict_to_ids
+from cosa.utils.file_hash import file_sha256
 
 BASELINE_NAME = "always_yes"
 
@@ -78,7 +82,7 @@ def score_arm( asks, engine, frozen: Dict[str, Any], snapshot_sha256: str ) -> D
 
 
 def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, session_factory: Optional[Callable] = None,
-          engine_factory: Optional[Callable] = None ) -> int:
+          engine_factory: Optional[Callable] = None, code_sha: Optional[str] = None, clock: Optional[Callable] = None ) -> int:
     """
     Score one arm from the command line and write the per-ask run file.
 
@@ -88,6 +92,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     Ensures:
         - reads the cohort read-only, cuts it to the frozen ids, replays once, writes the final-window run with sorted keys
         - the file names the arm, the settings, the side file and the ids file with their checksums
+        - it also records the exact command line, the code sha and the start time; code_sha and clock are injected by tests
         - returns 0 and prints the arm, the window size and the correct count
 
     Raises:
@@ -96,6 +101,8 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     parser = argparse.ArgumentParser( description="Score one context arm per ask on the final window." )
     for name in ( "--arm", "--vectors", "--settings", "--only-ids", "--out" ): parser.add_argument( name, required=True )
     args   = parser.parse_args( argv )
+    started = ( clock or ( lambda: datetime.now( timezone.utc ) ) )().isoformat()
+    command = "python -m cosa.research.preference_replay.arm_scoring " + " ".join( list( argv ) if argv is not None else sys.argv[ 1: ] )
     frozen = load_frozen( args.settings )
     header, vectors = load_side_file( args.vectors )
     with ( session_factory or get_db )() as session:
@@ -104,7 +111,9 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     check_vectors_cover( asks, header )
     run = score_arm( asks, ( engine_factory or _open_engine )(), frozen, sha256_of_rows( [ { "id": ask[ "id" ] } for ask in asks ] ) )
     document = { "arm": args.arm, "frozen": frozen, "settings_report": args.settings, "vector_side_file": args.vectors,
-                 "vector_rejects": len( header[ "rejects" ] ), "ids": only, "run": run }
+                 "vector_side_file_sha256": file_sha256( args.vectors ), "settings_report_sha256": file_sha256( args.settings ),
+                 "vector_rejects": len( header[ "rejects" ] ), "ids": only, "command": command, "started": started,
+                 "code_sha": code_sha if code_sha is not None else resolve_commit( cu.get_project_root(), "HEAD" ), "run": run }
     with open( args.out, "w", encoding="utf-8" ) as handle:
         json.dump( document, handle, indent=1, sort_keys=True, default=str )
         handle.write( "\n" )

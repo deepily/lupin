@@ -6,7 +6,9 @@ The fake replay records the engine settings it ran under, so a test can name the
 Nothing reaches a database, a model server or a real engine.
 """
 
+import hashlib
 import json
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -140,7 +142,9 @@ def _main_fixture( monkeypatch, tmp_path, vector_ids=( "n0", "n1" ) ):
     monkeypatch.setattr( scoring, "load_side_file", lambda path: ( { "rejects": [ { "id": "x" } ] }, {} ) )
     monkeypatch.setattr( scoring, "replay", lambda *a, **k: _run( 10 ) )
     out  = tmp_path / "out.json"
-    argv = [ "--arm", "Q+A", "--vectors", "v.jsonl", "--settings", _report( tmp_path ), "--only-ids", str( ids ), "--out", str( out ) ]
+    vectors = tmp_path / "v.jsonl"
+    vectors.write_text( "side file bytes" )
+    argv = [ "--arm", "Q+A", "--vectors", str( vectors ), "--settings", _report( tmp_path ), "--only-ids", str( ids ), "--out", str( out ) ]
     return argv, out, session
 
 
@@ -148,12 +152,35 @@ def test_main_writes_the_final_window_run_and_prints_the_count( monkeypatch, tmp
     """The file names its inputs and the printed line gives the window and the correct count."""
     argv, out, session = _main_fixture( monkeypatch, tmp_path )
     printed = []
-    assert scoring.main( argv, printer=printed.append, session_factory=session, engine_factory=_engine ) == 0
+    clock = lambda: datetime( 2026, 11, 19, 20, 0, tzinfo=timezone.utc )
+    assert scoring.main( argv, printer=printed.append, session_factory=session, engine_factory=_engine, code_sha="abc123", clock=clock ) == 0
     document = json.loads( out.read_text() )
-    assert ( document[ "arm" ], document[ "frozen" ][ "top_k" ], document[ "vector_side_file" ], document[ "vector_rejects" ] ) == ( "Q+A", 8, "v.jsonl", 1 )
+    assert ( document[ "arm" ], document[ "frozen" ][ "top_k" ], document[ "vector_side_file" ], document[ "vector_rejects" ] ) == ( "Q+A", 8, argv[ 3 ], 1 )
     assert document[ "ids" ][ "only_ids_count" ] == 2
+    assert document[ "vector_side_file_sha256" ] == hashlib.sha256( b"side file bytes" ).hexdigest()
+    assert document[ "settings_report_sha256" ] == hashlib.sha256( open( argv[ 5 ], "rb" ).read() ).hexdigest()
+    assert ( document[ "code_sha" ], document[ "started" ] ) == ( "abc123", "2026-11-19T20:00:00+00:00" )
+    assert document[ "command" ] == "python -m cosa.research.preference_replay.arm_scoring " + " ".join( argv )
     assert len( document[ "run" ][ "records" ][ ENGINE_ARM ] ) == 3
     assert printed == [ "Q+A: 3 final-window asks, 1 correct" ]
+
+
+def test_main_reads_the_real_clock_and_commit_when_none_are_injected( monkeypatch, tmp_path ):
+    """With no injected clock or sha, the file holds an aware time and the tree's own HEAD."""
+    argv, out, session = _main_fixture( monkeypatch, tmp_path )
+    monkeypatch.setattr( scoring, "resolve_commit", lambda root, ref: f"head-of-{ref}" )
+    scoring.main( argv, printer=lambda m: None, session_factory=session, engine_factory=_engine )
+    document = json.loads( out.read_text() )
+    assert document[ "code_sha" ] == "head-of-HEAD"
+    assert datetime.fromisoformat( document[ "started" ] ).tzinfo is not None
+
+
+def test_main_records_the_process_command_line_when_argv_is_none( monkeypatch, tmp_path ):
+    """Called with no argv, main parses and records sys.argv."""
+    argv, out, session = _main_fixture( monkeypatch, tmp_path )
+    monkeypatch.setattr( scoring.sys, "argv", [ "prog" ] + argv )
+    scoring.main( None, printer=lambda m: None, session_factory=session, engine_factory=_engine, code_sha="x" )
+    assert json.loads( out.read_text() )[ "command" ].endswith( " ".join( argv ) )
 
 
 def test_main_refuses_a_listed_ask_with_no_vector( monkeypatch, tmp_path ):
