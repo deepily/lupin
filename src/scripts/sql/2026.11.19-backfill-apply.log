@@ -1,0 +1,39 @@
+== 2026-11-19T20:48Z real apply of backfill_missing_question_vectors.py on lupin_db_dev, after Rick's typed go in the Clayton pane
+script sha256 d78b2e3c6e22 (tree after merge cf6dd8664), run as lupin_app inside lupin-rest-dev
+side file: io/question-vectors/2026.11.19-vectors-frozen-3608.jsonl sha256 e7694966535e2ab3dc8903ec2038ec6bd0654fd47b535c04d4b89365ce192402 (source 2026.11.19-vectors.jsonl sha256 f3475c6b5ca5621b95df3afb7787e669cd99ecbc6c231ccb240d342af8cec5fb)
+frozen ids: io/question-vectors/2026.11.19-frozen-ids.txt (3,608); expected insert ids: 2026.11.19-expected-insert-ids.txt (2,306)
+
+-- fresh dry run, 2026-11-19T20:48:16Z (output as printed)
+database           : lupin_db_dev
+rows to insert     : 2306
+vectors to replace : 1302
+log rows to stamp  : 3608
+dry run: nothing written
+
+-- apply, 2026-11-19T20:48:27Z, flags: --apply --expect-insert 2306 --expect-update 1302 --expect-log 3608 --expect-database lupin_db_dev --expect-insert-ids <file> --frozen-ids <file>
+database           : lupin_db_dev
+encoder_version    : nomic-ai/nomic-embed-text-v1.5@e9b6763023c676ca8431644204f50c2b100d9aab
+rows to insert     : 2306
+  by answer_source : {"human": 2304, "unknown": 2}
+vectors to replace : 1302
+log rows to stamp  : 3608
+stored questions that differ from the stripped message : 0
+applied and read back: {"inserted_human": 2304, "rows": 3608, "stamped": 3608, "with_vector": 3608}
+apply exit=0
+
+-- counts (read-only, as lupin_app)
+                           before (20:21:46Z)   after (20:49:04Z)
+prediction_decisions rows  1571                 3887
+prediction_log rows        5042                 5051
+log encoder_version set    0                    3608 (one distinct value)
+
+-- arithmetic, checked at 2026-11-19 after the apply
+prediction_decisions: 1571 + 2306 inserted + 10 peer rows = 3887.
+  10 peer rows = decisions not in the frozen list with created_at from 20:24:26Z to 20:43:08Z:
+  8880f77e-244a-4b1a-92f9-2fcc12bc5106 5c372dd5-409b-4fbe-a481-e3508c43c419 99087a02-f0a5-4eec-b908-002e4eb87b8a 0f5238aa-dc78-44b0-8d57-1e28694b2e26 64854053-8303-49d3-a88a-ef80b8505a61
+  d8a6166b-a77e-4dbd-a2b0-13ec92c6705b 3ac1dd09-b3f6-458d-b31f-99860ba7c7fe 3286f501-f606-49da-8355-7087fa9e20b7 bc24a41d-7cb8-41ec-bf55-51807ec8d227 d2a7bdfd-5450-4bd5-b287-229e20cdc2a0
+  Rows outside the frozen list: 269 before (1571 - 1302 stored cohort rows) and 279 after (3887 - 3608).
+prediction_log: 5042 + 9 peer rows = 5051.
+  9 peer rows = log rows for the ten ids above except 8880f77e (its log row, predicted_at 20:21:38Z, was already in the 20:21:46Z count); predicted_at 20:24:10Z to 20:42:23Z.
+  Log rows outside the frozen list: 1,443 after, none with encoder_version set; the 3,608 inside all carry it.
+Note: the stdout of the apply was captured on screen; this file reproduces it as printed, and the temporary capture file was removed before it was saved.
