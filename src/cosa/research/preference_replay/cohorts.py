@@ -11,6 +11,7 @@ rows the admin accuracy report leaves out. It calls the report's own clauses, so
 is changed here.
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -105,6 +106,7 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None ) -> 
         - asked_at is the ledger's stamp, or the notification's creation time for a row written before the ledger
         - carries logged_value and logged_match, what the log recorded, for a baseline arm to score
         - the cases hold their final value, because no revision history is stored
+        - a multiple-choice row, which stores {"answers": ...}, gets that dict as sorted JSON text for its fallback decision_value
 
     Raises:
         - ValueError as scored_rows does
@@ -114,7 +116,8 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None ) -> 
     for row in rows:
         notification = session.get( Notification, row.notification_id )
         decision     = session.get( PredictionDecision, str( row.notification_id ) )
-        actual       = row.actual_value[ "value" ]   # a scored row always holds its answer
+        # yes/no and open-ended rows store {"value": ...}; multiple choice stores {"answers": {title: choice}}
+        actual       = row.actual_value[ "value" ] if "value" in row.actual_value else json.dumps( row.actual_value, sort_keys=True )
         asks.append( {
             "id"                 : str( row.notification_id ),
             "question"           : decision.question if decision is not None else notification.message,
