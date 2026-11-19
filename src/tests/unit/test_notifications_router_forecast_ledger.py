@@ -173,3 +173,57 @@ class TestEveryAskWritesOneRowBeforeTheHint:
         """The override skips the engine in the predict branch, so the ledger fetches it itself."""
         _post( harness, prediction_hint_override=json.dumps( { "predicted_value": "no" } ) )
         assert len( wired[ "forecasts" ] ) == 1
+
+
+_SWITCH = "prediction learner arm forecast ledger enabled"
+
+
+class TestArmForecastLedgerSwitch:
+
+    def test_off_passes_no_hook_and_reads_the_named_key( self, harness, wired ):
+        """The default is today's call: no pre_commit_hook argument at all."""
+        _post( harness )
+        assert "pre_commit_hook" not in wired[ "forecasts" ][ 0 ][ 2 ]
+        assert _SWITCH in harness.config.reads
+
+    def test_on_passes_the_displayed_arm_hook_and_it_writes_the_sibling_row( self, harness, wired ):
+        """With the switch on, the hook writes the foundation arm's displayed row on the session."""
+        harness.config.set( _SWITCH, True )
+        _post( harness )
+        hook = wired[ "forecasts" ][ 0 ][ 2 ][ "pre_commit_hook" ]
+        added = []
+        class _Session:
+            def add( self, row ): added.append( row )
+            def flush( self ): pass
+        hook( _Session(), { "notification_id": _NID, "predictor_version": "pv", "forecast": { "value": "yes" }, "input_cutoff": None,
+                            "evidence_ids": [ "e1" ], "forecast_ready_at": None, "abstention_reason": None } )
+        assert [ ( str( r.notification_id ), r.arm, r.displayed ) for r in added ] == [ ( _NID, "A1", True ) ]
+
+    def test_on_with_a_test_override_names_the_test_override_arm( self, harness, wired ):
+        """The arm comes from forecast_source, so an injected hint is not filed as foundation."""
+        harness.config.set( _SWITCH, True )
+        _post( harness, prediction_hint_override=json.dumps( { "predicted_value": "yes" } ) )
+        hook = wired[ "forecasts" ][ 0 ][ 2 ][ "pre_commit_hook" ]
+        added = []
+        class _Session:
+            def add( self, row ): added.append( row )
+            def flush( self ): pass
+        hook( _Session(), { "notification_id": _NID, "predictor_version": "pv", "forecast": None, "input_cutoff": None,
+                            "evidence_ids": None, "forecast_ready_at": None, "abstention_reason": "test_override" } )
+        assert [ r.arm for r in added ] == [ "test_override" ]
+
+    def test_an_unreadable_switch_reads_off_and_the_forecast_row_is_still_written( self, harness, wired, monkeypatch ):
+        """A settings failure must not stop the ledger row."""
+        def broken( key, **kwargs ): raise RuntimeError( "settings down" )
+        monkeypatch.setattr( harness.config, "get", broken )
+        _post( harness )
+        assert len( wired[ "forecasts" ] ) == 1 and "pre_commit_hook" not in wired[ "forecasts" ][ 0 ][ 2 ]
+
+    def test_an_unregistered_source_writes_the_forecast_row_with_no_hook_and_says_so( self, harness, wired, monkeypatch, capsys ):
+        """A source with no arm must not drop the shipped row: no hook, one line printed."""
+        import cosa.rest.db.repositories.arm_forecast_repository as arms
+        monkeypatch.delitem( arms.DISPLAYED_ARM_BY_FORECAST_SOURCE, "foundation_sync" )
+        harness.config.set( _SWITCH, True )
+        _post( harness )
+        assert len( wired[ "forecasts" ] ) == 1 and "pre_commit_hook" not in wired[ "forecasts" ][ 0 ][ 2 ]
+        assert capsys.readouterr().out.count( "No arm registered for forecast source 'foundation_sync'" ) == 1
