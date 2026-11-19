@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieve_principles
@@ -295,7 +295,8 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
         - past the cap, one row with forecast None and reason "capacity" is written and no model is called
         - a baseline that does not meet the contract raises TypeError before anything is read or written
         - a failure gathering the inputs stores one row with the reason "input_error: <exception class>", the cutoff and no
-          forecast, and returns failed; only a card that does not exist raises, since it has no cutoff to store
+          forecast, and returns failed with stored True; only a card that does not exist raises, since it has no cutoff to store
+        - when the database is down, so the row cannot be stored either, it still returns failed, with stored False
         - otherwise the baseline's prompts plus the principle block go to the baseline's model, once, with no retry
         - a ready forecast is stored with the principle ids it was given and its ready time; an unreadable reply or a
           failed call stores one row with the reason and no forecast
@@ -316,9 +317,11 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
             episode, selected, block, system, user = await asyncio.to_thread( _prepare, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k )
         except Exception as input_error:  # any failure gathering inputs (database, embedder, bound) must still leave a row
             reason = f"{REASON_INPUT}: {type( input_error ).__name__}"
-            asked  = await asyncio.to_thread( _asked_at, session_factory, notification_id )
-            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [], reason )
-            return { "status": STATUS_FAILED, "reason": reason }
+            try:
+                asked = await asyncio.to_thread( _asked_at, session_factory, notification_id )
+                await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [], reason )
+            except SQLAlchemyError: return { "status": STATUS_FAILED, "reason": reason, "stored": False }  # the database that failed the read cannot take the row
+            return { "status": STATUS_FAILED, "reason": reason, "stored": True }
         asked   = aware_moment( episode[ "asked_at" ] )
         ids     = block[ "principle_ids" ]
         try:

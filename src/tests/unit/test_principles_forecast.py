@@ -403,7 +403,7 @@ def test_a_failure_gathering_inputs_stores_one_input_error_row_and_returns_faile
     nid, gate, c0 = ask( factory ), pf.CapGate( 1 ), Baseline()
     result = asyncio.run( pf.run_b1( factory, nid, c0, Broken(), ENCODER, EXTRACT, gate, enabled=True ) )
     row    = rows( factory )[ 0 ]
-    assert result == { "status": "failed", "reason": "input_error: RuntimeError" } and c0.calls == [] and gate.inflight == 0
+    assert result == { "status": "failed", "reason": "input_error: RuntimeError", "stored": True } and c0.calls == [] and gate.inflight == 0
     assert ( row.forecast, row.forecast_ready_at, row.abstention_reason, row.evidence_ids, row.predictor_version ) == ( None, None, "input_error: RuntimeError", [], "c0-v1+principles" )
     assert pf.aware_moment( row.input_cutoff ) == T0 and len( rows( factory ) ) == 1
 
@@ -520,3 +520,21 @@ def test_a_row_that_arrives_between_the_check_and_the_insert_reads_as_already_st
     assert pf._write_row( factory, nid, T0, None, None, "loser", [], "capacity" ) is False
     assert [ r.predictor_version for r in rows( factory ) ] == [ "first" ]
     assert pf._write_row( factory, other, T0, None, None, "next", [], "capacity" ) is True and len( rows( factory ) ) == 2
+
+
+def test_with_the_database_down_the_input_failure_still_returns_failed_and_says_the_row_was_not_stored( factory ):
+    """
+    The first read works, then every session fails as a downed database would.
+
+    The result is failed with stored False, nothing raises, no model is called and the cap place is returned.
+    """
+    from sqlalchemy.exc import OperationalError
+    uses = []
+    def going_down():
+        uses.append( 1 )
+        if len( uses ) > 1: raise OperationalError( "select", {}, Exception( "connection refused" ) )
+        return factory()
+    nid, gate, c0 = ask( factory ), pf.CapGate( 1 ), Baseline()
+    result = asyncio.run( pf.run_b1( going_down, nid, c0, Embedder(), ENCODER, EXTRACT, gate, enabled=True ) )
+    assert result == { "status": "failed", "reason": "input_error: OperationalError", "stored": False }
+    assert c0.calls == [] and gate.inflight == 0 and rows( factory ) == [] and len( uses ) == 3
