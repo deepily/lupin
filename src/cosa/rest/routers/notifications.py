@@ -21,6 +21,7 @@ import re
 
 # Import dependencies and services
 from cosa.config.app_timezone import get_app_timezone, process_config_mgr
+from cosa.utils.notification_utils import sender_session_suffix
 from ..notification_fifo_queue import NotificationFifoQueue, NOTIFICATION_PRIORITIES
 from ..websocket_manager import WebSocketManager
 from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt, authenticated_account_email
@@ -3744,20 +3745,6 @@ async def get_visible_senders(
     return await run_in_threadpool( _visible_senders_sync, user_email, hours, include_hidden, exclude_own_jobs )
 
 
-def _sender_session_suffix( resolved_sender_id ):
-    """
-    The session part of a sender id: 'claude.code@lupin.deepily.ai#<hash>' gives '<hash>'.
-
-    Ensures:
-        - returns the stripped text after the first '#'
-        - returns None when the id is empty, has no '#', or has nothing after it
-
-    """
-    if not resolved_sender_id or "#" not in resolved_sender_id:
-        return None
-    return resolved_sender_id.split( "#", 1 )[ 1 ].strip() or None
-
-
 def _stamp_sender_personas( activities ):
     """
     Stamp voice_persona and manager_persona on every activity from one bridge scan.
@@ -3784,7 +3771,7 @@ def _stamp_sender_personas( activities ):
     index       = _build_live_bridge_index() if ( activities and index_ready ) else []
 
     for activity in activities:
-        sid_suffix = _sender_session_suffix( activity.get( "sender_id" ) )
+        sid_suffix = sender_session_suffix( activity.get( "sender_id" ) )
         entry      = _find_in_bridge_index( index, sid_suffix ) if ( sid_suffix and index_ready ) else None
         activity["voice_persona"]   = _voice_persona_from_bridge( entry )
         activity["manager_persona"] = _manager_persona_from_bridge( index, entry )

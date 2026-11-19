@@ -11,6 +11,7 @@ pins:
   - cosa.utils.notification_utils.is_known_project@30e16c65d8
   - cosa.utils.notification_utils.normalize_abstract@8a292f15ee
   - cosa.utils.notification_utils.parse_field_selections@f45f1e54b8
+  - cosa.utils.notification_utils.sender_session_suffix@d5e1b70016
 ---
 # Notification text helpers
 
@@ -21,6 +22,7 @@ pins:
 - `format_questions_for_tts` returns question text only, with a `Question N of M:` prefix for several and a multi-select hint. `convert_questions_for_api` renames `multiSelect` to `multi_select`.
 - `format_open_ended_batch_for_tts` speaks one question, or `I have N questions for you.`, or an empty string for none.
 - `convert_open_ended_batch_for_api` adds `input_type: "text"` and keeps `default_value` when present.
+- `sender_session_suffix( sender_id )` names the session part of a sender id, the stripped text after the first `#`, or None when there is none. The notifications router and the context rebuild both call it.
 - `extract_qualifier_comment( value )` splits `yes [comment: ...]` into `( answer, comment )`. `format_qualified_response( answer, comment )` builds the instruction text sent back to Claude.
 - `parse_field_selections( value )` reads a multiple-choice or batch answer as one record per header. A record holds the select mode, the picks and the text as submitted. A yes, no or neither string also gives the stance. It reads an answers map given as a JSON string or a dict, or held as a string under `value`. Anything else gives `None`.
 
