@@ -179,12 +179,12 @@ def fetch_asks( conn, ids: List[ str ] ) -> Dict[ str, Dict[ str, Any ] ]:
         - conn is an open connection to a database holding notifications and prediction_log
 
     Ensures:
-        - returns a dict keyed by id with message, recipient_id, responded_at, response_value,
+        - returns a dict keyed by id with message, recipient_id, responded_at, response_value, response_options,
           category, response_type and actual_value
         - an id with no notification or no log row is absent from the dict
     """
     sql = ( "SELECT CAST( n.id AS TEXT ) AS id, n.message, CAST( n.recipient_id AS TEXT ) AS recipient_id, n.responded_at, "
-            "n.response_value, l.category, l.response_type, l.actual_value "
+            "n.response_value, n.response_options, l.category, l.response_type, l.actual_value "
             "FROM notifications n JOIN prediction_log l ON CAST( l.notification_id AS TEXT ) = CAST( n.id AS TEXT ) "
             "WHERE CAST( n.id AS TEXT ) IN :ids" )
     asks = {}
@@ -261,7 +261,7 @@ def build_plan( conn, header: Dict[ str, Any ], records: List[ Dict[ str, Any ] 
             "vector"             : vector,
             "created_at"         : _responded_text( ask[ "responded_at" ] ),
             "owner_user_id"      : ask[ "recipient_id" ],
-            "answer_source"      : answer_source_of( ask[ "response_value" ] ),
+            "answer_source"      : answer_source_of( ask[ "response_value" ], ask[ "response_options" ] ),
         } )
     plan.log_rows = _count_log_rows( conn, ids )
     return plan

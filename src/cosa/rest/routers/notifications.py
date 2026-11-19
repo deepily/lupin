@@ -29,6 +29,7 @@ from ..middleware.path_identity import require_path_identity_owner
 from ..db.database import get_db
 from ..db.repositories.notification_repository import NotificationRepository
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
+from cosa.agents.prediction_engine.review_card import is_review_card
 
 # Per-session voice persona lookup (see Phase 7 of voice persona R&D)
 # Bridge file is canonical state; lookup is best-effort and fail-soft.
@@ -1535,7 +1536,10 @@ async def notify_user(
         forecast_failure  = None    # the exception class name, when predict() or its hook raised
         forecast_engine   = None    # the engine that writes the forecast row
         forecast_always_yes = None  # the always-yes label shown on a yes/no card
-        if parsed_prediction_hint_override is not None:
+        review_card = is_review_card( parsed_response_options )    # the learner's own question: no forecast, no row
+        if review_card:
+            print( f"[PREDICTION] Review card {notification_id}: no forecast, no ledger row" )
+        elif parsed_prediction_hint_override is not None:
             prediction_hint = parsed_prediction_hint_override
             print( f"[PREDICTION] Using override hint for {notification_id}: {prediction_hint}" )
         else:
@@ -1580,51 +1584,52 @@ async def notify_user(
                 response_type = response_type,
                 category      = "unknown",
                 strategy      = STRATEGY_ERROR if forecast_failure is not None else STRATEGY_COLD_START,
-                metadata      = { "reason": "prediction_error" if forecast_failure is not None else "engine_disabled" }
+                metadata      = { "reason": "review_card" if review_card else "prediction_error" if forecast_failure is not None else "engine_disabled" }
             )
             prediction_hint = stand_in.to_hint_dict(
                 0.0, forecast_engine.retrieval_metric if forecast_engine is not None else DEFAULT_RETRIEVAL_METRIC )
 
         # ---- Forecast ledger: one row per ask, written before the hint is sent ----
         # Every path writes: a forecast, a cold start, a disabled engine, a predictor error and a
-        # test override. Only the ones with a result carry a predicted value.
-        try:
-            if forecast_engine is None:
-                from cosa.agents.prediction_engine import get_prediction_engine
-                forecast_engine = get_prediction_engine()
-            from cosa.agents.prediction_engine.config import (
-                STRATEGY_COLD_START, STRATEGY_ERROR, STRATEGY_TEST_OVERRIDE, FORECAST_SOURCE_FOUNDATION, FORECAST_SOURCE_TEST_OVERRIDE )
-            forecast_kwargs = {
-                "display_decision" : prediction_hint[ "state" ] if parsed_prediction_hint_override is None else "ready",
-                "owner_email"      : target_user,
-                "always_yes_rate"  : forecast_always_yes,
-            }
-            if parsed_prediction_hint_override is not None:
-                # An injected hint names no state of its own, so the card it draws is stored as ready, explicitly.
-                forecast_kwargs.update( forecast_source=FORECAST_SOURCE_TEST_OVERRIDE, strategy=STRATEGY_TEST_OVERRIDE,
-                                        abstention_reason="test_override" )
-            elif forecast_result is not None:
-                forecast_kwargs.update( prediction_result=forecast_result )
-            elif forecast_failure is not None:
-                forecast_kwargs.update( strategy=STRATEGY_ERROR, abstention_reason=f"predictor_error: {forecast_failure}" )
-            else:
-                forecast_kwargs.update( strategy=STRATEGY_COLD_START, abstention_reason="engine_disabled" )
-            if _arm_forecast_ledger_enabled():
-                from cosa.rest.db.repositories.arm_forecast_repository import displayed_arm_for, displayed_arm_hook
-                ledger_source = forecast_kwargs.get( "forecast_source", FORECAST_SOURCE_FOUNDATION )
-                try: forecast_kwargs[ "pre_commit_hook" ] = displayed_arm_hook( displayed_arm_for( ledger_source ) )
-                except KeyError: print( f"[PREDICTION] ⚠️ No arm registered for forecast source {ledger_source!r}; the forecast row is written without its sibling" )
-            await asyncio.to_thread(
-                forecast_engine.record_forecast, notification_id,
-                {
-                    "message"       : message.strip(),
-                    "response_type" : response_type,
-                    "sender_id"     : resolved_sender_id,
-                },
-                **forecast_kwargs
-            )
-        except Exception as ledger_error:
-            print( f"[PREDICTION] ⚠️ Forecast ledger error (non-fatal): {ledger_error}" )
+        # test override. Only the ones with a result carry a predicted value. A review card writes none.
+        if not review_card:
+            try:
+                if forecast_engine is None:
+                    from cosa.agents.prediction_engine import get_prediction_engine
+                    forecast_engine = get_prediction_engine()
+                from cosa.agents.prediction_engine.config import (
+                    STRATEGY_COLD_START, STRATEGY_ERROR, STRATEGY_TEST_OVERRIDE, FORECAST_SOURCE_FOUNDATION, FORECAST_SOURCE_TEST_OVERRIDE )
+                forecast_kwargs = {
+                    "display_decision" : prediction_hint[ "state" ] if parsed_prediction_hint_override is None else "ready",
+                    "owner_email"      : target_user,
+                    "always_yes_rate"  : forecast_always_yes,
+                }
+                if parsed_prediction_hint_override is not None:
+                    # An injected hint names no state of its own, so the card it draws is stored as ready, explicitly.
+                    forecast_kwargs.update( forecast_source=FORECAST_SOURCE_TEST_OVERRIDE, strategy=STRATEGY_TEST_OVERRIDE,
+                                            abstention_reason="test_override" )
+                elif forecast_result is not None:
+                    forecast_kwargs.update( prediction_result=forecast_result )
+                elif forecast_failure is not None:
+                    forecast_kwargs.update( strategy=STRATEGY_ERROR, abstention_reason=f"predictor_error: {forecast_failure}" )
+                else:
+                    forecast_kwargs.update( strategy=STRATEGY_COLD_START, abstention_reason="engine_disabled" )
+                if _arm_forecast_ledger_enabled():
+                    from cosa.rest.db.repositories.arm_forecast_repository import displayed_arm_for, displayed_arm_hook
+                    ledger_source = forecast_kwargs.get( "forecast_source", FORECAST_SOURCE_FOUNDATION )
+                    try: forecast_kwargs[ "pre_commit_hook" ] = displayed_arm_hook( displayed_arm_for( ledger_source ) )
+                    except KeyError: print( f"[PREDICTION] ⚠️ No arm registered for forecast source {ledger_source!r}; the forecast row is written without its sibling" )
+                await asyncio.to_thread(
+                    forecast_engine.record_forecast, notification_id,
+                    {
+                        "message"       : message.strip(),
+                        "response_type" : response_type,
+                        "sender_id"     : resolved_sender_id,
+                    },
+                    **forecast_kwargs
+                )
+            except Exception as ledger_error:
+                print( f"[PREDICTION] ⚠️ Forecast ledger error (non-fatal): {ledger_error}" )
 
         # Stage 3 (Krishna's drift-fix): the client gates its 👍🏼/👎🏼 vote controls on the
         # INI vote gate — carry it IN the hint payload so notifications.js cannot drift
@@ -1924,28 +1929,32 @@ async def submit_notification_response(
         # ---- Prediction Engine Hook 2: Record outcome on response ----
         # The forecast row written at ask time is the source, so a restart between ask and answer
         # loses nothing. The in-memory result is read only for an ask that predates the ledger.
+        # A review card has no forecast row, so there is no outcome to record.
         try:
-            from cosa.agents.prediction_engine import get_prediction_engine
-            prediction_engine = get_prediction_engine()
+            if is_review_card( submit_result[ "response_options" ] ):
+                print( f"[PREDICTION] Review card {notification_id}: no outcome to record" )
+            else:
+                from cosa.agents.prediction_engine import get_prediction_engine
+                prediction_engine = get_prediction_engine()
 
-            # FM-7 event-loop offload: record_outcome() does 3-5 GPU
-            # embeddings + a LanceDB write; run it away from the event loop so the
-            # response path (and /health) can't stall under embedding latency.
-            from_ledger = await asyncio.to_thread(
-                prediction_engine.record_outcome_from_ledger, notification_id, response_value, answered_by, submit_result[ "response_options" ]
-            )
-            if not from_ledger and notification_id in pending_responses and "prediction_result" in pending_responses[notification_id]:
-                prediction_result = pending_responses[notification_id]["prediction_result"]
-                await asyncio.to_thread(
-                    prediction_engine.record_outcome,
-                    notification_id   = notification_id,
-                    prediction_result = prediction_result,
-                    actual_value      = response_value,
-                    response_type     = prediction_result.response_type,
-                    answered_by       = answered_by,
-                    response_options  = submit_result[ "response_options" ]
+                # FM-7 event-loop offload: record_outcome() does 3-5 GPU
+                # embeddings + a LanceDB write; run it away from the event loop so the
+                # response path (and /health) can't stall under embedding latency.
+                from_ledger = await asyncio.to_thread(
+                    prediction_engine.record_outcome_from_ledger, notification_id, response_value, answered_by, submit_result[ "response_options" ]
                 )
-            if from_ledger or notification_id in pending_responses: print( f"[PREDICTION] ✓ Recorded outcome for {notification_id}" )
+                if not from_ledger and notification_id in pending_responses and "prediction_result" in pending_responses[notification_id]:
+                    prediction_result = pending_responses[notification_id]["prediction_result"]
+                    await asyncio.to_thread(
+                        prediction_engine.record_outcome,
+                        notification_id   = notification_id,
+                        prediction_result = prediction_result,
+                        actual_value      = response_value,
+                        response_type     = prediction_result.response_type,
+                        answered_by       = answered_by,
+                        response_options  = submit_result[ "response_options" ]
+                    )
+                if from_ledger or notification_id in pending_responses: print( f"[PREDICTION] ✓ Recorded outcome for {notification_id}" )
         except Exception as pred_error:
             print( f"[PREDICTION] ⚠️ Outcome recording error (non-fatal): {pred_error}" )
         # ---- End Prediction Engine Hook 2 ----

@@ -385,6 +385,36 @@ class TestThePredictionHookIsNonFatal:
         assert wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ]
 
 
+class TestAnAnswerToAReviewCardRecordsNoOutcome:
+
+    def test_a_marked_ask_never_reaches_the_prediction_engine( self, harness, wired, monkeypatch ):
+        import cosa.agents.prediction_engine as pe
+        calls = []
+
+        class _Engine:
+            def record_outcome_from_ledger( self, *a ): calls.append( "ledger" ); return True
+            def record_outcome( self, **kw ): calls.append( "memory" )
+
+        monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
+        wired[ "submit_result" ] = { **wired[ "submit_result" ], "response_options": { "review_card": True } }
+        _add_waiter( wired, prediction_result=TestThePredictionHookIsNonFatal._Prediction() )
+        r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert r.status_code == 200
+        assert calls == [], "a review card has no forecast row and no case to record"
+        assert wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ], "the answer itself is still stored"
+
+    def test_an_unmarked_ask_still_reaches_the_ledger( self, harness, wired, monkeypatch ):
+        import cosa.agents.prediction_engine as pe
+        calls = []
+
+        class _Engine:
+            def record_outcome_from_ledger( self, *a ): calls.append( "ledger" ); return True
+
+        monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
+        harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert calls == [ "ledger" ]
+
+
 class TestTheRefusals:
 
     def test_a_missing_notification_id_is_a_422( self, harness, wired ):
