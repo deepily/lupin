@@ -1611,8 +1611,9 @@ async def notify_user(
                 forecast_kwargs.update( strategy=STRATEGY_COLD_START, abstention_reason="engine_disabled" )
             if _arm_forecast_ledger_enabled():
                 from cosa.rest.db.repositories.arm_forecast_repository import displayed_arm_for, displayed_arm_hook
-                forecast_kwargs[ "pre_commit_hook" ] = displayed_arm_hook(
-                    displayed_arm_for( forecast_kwargs.get( "forecast_source", FORECAST_SOURCE_FOUNDATION ) ) )
+                ledger_source = forecast_kwargs.get( "forecast_source", FORECAST_SOURCE_FOUNDATION )
+                try: forecast_kwargs[ "pre_commit_hook" ] = displayed_arm_hook( displayed_arm_for( ledger_source ) )
+                except KeyError: print( f"[PREDICTION] ⚠️ No arm registered for forecast source {ledger_source!r}; the forecast row is written without its sibling" )
             await asyncio.to_thread(
                 forecast_engine.record_forecast, notification_id,
                 {

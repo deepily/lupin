@@ -218,3 +218,12 @@ class TestArmForecastLedgerSwitch:
         monkeypatch.setattr( harness.config, "get", broken )
         _post( harness )
         assert len( wired[ "forecasts" ] ) == 1 and "pre_commit_hook" not in wired[ "forecasts" ][ 0 ][ 2 ]
+
+    def test_an_unregistered_source_writes_the_forecast_row_with_no_hook_and_says_so( self, harness, wired, monkeypatch, capsys ):
+        """A source with no arm must not drop the shipped row: no hook, one line printed."""
+        import cosa.rest.db.repositories.arm_forecast_repository as arms
+        monkeypatch.delitem( arms.DISPLAYED_ARM_BY_FORECAST_SOURCE, "foundation_sync" )
+        harness.config.set( _SWITCH, True )
+        _post( harness )
+        assert len( wired[ "forecasts" ] ) == 1 and "pre_commit_hook" not in wired[ "forecasts" ][ 0 ][ 2 ]
+        assert capsys.readouterr().out.count( "No arm registered for forecast source 'foundation_sync'" ) == 1
