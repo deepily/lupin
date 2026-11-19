@@ -138,6 +138,11 @@ def engine():
     PredictionEngine.reset()
 
 
+def _stored_vectors( session ):
+    """The planted case rows' vectors by ask id, standing in for a side file."""
+    return { row.id: list( row.question_embedding ) for row in session.query( PredictionDecision ).all() if row.question_embedding is not None }
+
+
 def _logged_arm():
     """A baseline arm whose forecast is what the log recorded for the ask."""
     return { "logged": lambda ask, visible_rows: ask[ "logged_value" ] }
@@ -145,7 +150,7 @@ def _logged_arm():
 
 def _run( engine, session, window=None ):
     """Replay one cohort with the logged arm and count what that arm got right, replayed or not."""
-    asks   = cohort_asks( session, "yes_no", window )
+    asks   = cohort_asks( session, "yes_no", window, vectors=_stored_vectors( session ) )
     run    = replay( asks, engine, SHA, baselines=_logged_arm() )
     right  = sum( 1 for record in run[ "records" ][ "logged" ] if record[ "meta" ][ "correct" ] )
     missed = sum( 1 for ask in asks if ask[ "id" ] in run[ "not_replayable_ids" ] and ask[ "logged_match" ] is True )
@@ -182,7 +187,7 @@ def test_the_excluded_rows_are_in_the_table_and_in_no_cohort( accuracy_session )
     _plant( accuracy_session )
     in_table = accuracy_session.execute( text( "SELECT count(*) FROM prediction_log WHERE notification_id IN ( SELECT id FROM notifications WHERE title LIKE 'Worker x%' )" ) ).scalar()
     assert in_table == 5, "the five excluded rows must exist, or the exclusions are untested"
-    cohort_ids = { ask[ "message" ] for ask in cohort_asks( accuracy_session, "yes_no" ) }
+    cohort_ids = { ask[ "message" ] for ask in cohort_asks( accuracy_session, "yes_no", vectors=_stored_vectors( accuracy_session ) ) }
     assert not any( f"worker x{n} " in message for message in cohort_ids for n in range( 1, 6 ) )
 
 
@@ -213,19 +218,19 @@ def test_a_row_written_before_the_ledger_is_asked_at_its_notifications_creation_
     """With no asked_at stamp the ask time is the notification's own creation time."""
     _plant( accuracy_session )
     accuracy_session.query( PredictionLog ).update( { PredictionLog.asked_at: None } )
-    asks = cohort_asks( accuracy_session, "yes_no" )
+    asks = cohort_asks( accuracy_session, "yes_no", vectors=_stored_vectors( accuracy_session ) )
     assert all( ask[ "asked_at" ] == ask[ "responded_at" ] - timedelta( seconds=50 ) for ask in asks )
 
 
 def test_a_row_with_a_ledger_stamp_is_asked_at_that_stamp( accuracy_session ):
     """The ledger's asked_at wins over the notification's creation time, 15 seconds earlier."""
     _plant( accuracy_session )
-    asks = cohort_asks( accuracy_session, "yes_no" )
+    asks = cohort_asks( accuracy_session, "yes_no", vectors=_stored_vectors( accuracy_session ) )
     assert all( ask[ "asked_at" ] == ask[ "responded_at" ] - timedelta( seconds=35 ) for ask in asks )
 
 
 def test_the_cohort_comes_back_in_predicted_at_order( accuracy_session ):
     """The seven counted asks are listed oldest forecast first."""
     _plant( accuracy_session )
-    titles = [ ask[ "title" ] for ask in cohort_asks( accuracy_session, "yes_no" ) ]
+    titles = [ ask[ "title" ] for ask in cohort_asks( accuracy_session, "yes_no", vectors=_stored_vectors( accuracy_session ) ) ]
     assert titles == [ f"Worker y{n}" for n in range( 1, 8 ) ]

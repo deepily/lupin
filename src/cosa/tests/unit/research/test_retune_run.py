@@ -15,6 +15,7 @@ import pytest
 import cosa.research.preference_replay.retune_run as retune_run
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
+from cosa.research.preference_replay.question_vectors import write_side_file
 from cosa.research.preference_replay.retune_run import build_report, main, read_cohort, run_report
 from cosa.tests.unit.research.test_retune import SHA, _asks, engine  # noqa: F401 - engine is a fixture
 
@@ -45,11 +46,20 @@ class FakeSession:
     def rollback( self ): self.rolled_back = True
 
 
+def _side_file( tmp_path ):
+    """A real side file, written through write_side_file, holding one vector."""
+    path   = str( tmp_path / "vectors.json" )
+    result = { "stamp": { "model": "m", "revision": "r1", "dtype": "float16", "dimensions": 768 }, "vectors": { "a": [ 3.0, 4.0 ] },
+               "rejects": [], "probe_seconds": 1.0, "total_seconds": 2.0, "texts": 1 }
+    write_side_file( path, result, { "database": "lupin_db_dev" } )
+    return path
+
+
 def _fake_cohort( monkeypatch, asks_by_type ):
     """Make cohort_asks answer from a dict and record the response types asked for, in order."""
     asked = []
 
-    def fake( session, response_type ):
+    def fake( session, response_type, vectors ):
         asked.append( response_type )
         return list( asks_by_type[ response_type ] )
 
@@ -61,7 +71,7 @@ def test_the_cohort_is_read_in_a_read_only_transaction_and_dated( monkeypatch ):
     """The read-only statement comes first, the types are read in order, and a rollback ends it."""
     asked   = _fake_cohort( monkeypatch, { "yes_no": [ { "id": "y1" } ], "multiple_choice": [ { "id": "m1" }, { "id": "m2" } ] } )
     session = FakeSession()
-    asks, facts = read_cohort( session )
+    asks, facts = read_cohort( session, { "y1": [ 1.0 ] } )
     assert session.statements[ 0 ] == "SET TRANSACTION READ ONLY"
     assert len( session.statements ) == 2 and session.statements[ 1 ].startswith( "select current_database()" )
     assert asked == [ "yes_no", "multiple_choice" ] and [ ask[ "id" ] for ask in asks ] == [ "y1", "m1", "m2" ]
@@ -101,14 +111,17 @@ def test_the_command_writes_the_report_and_names_its_own_command_and_code( engin
     out      = tmp_path / "report.json"
     session  = FakeSession()
     printed  = []
-    code = main( [ "--out", str( out ) ], printer=printed.append, session_factory=lambda: contextlib.nullcontext( session ),
+    code = main( [ "--out", str( out ), "--vectors", _side_file( tmp_path ) ], printer=printed.append, session_factory=lambda: contextlib.nullcontext( session ),
                  engine_factory=lambda: engine, code_sha="d" * 40, clock=lambda: READ_AT )
     report = json.loads( out.read_text( encoding="utf-8" ) )
     with open( retune_run.__file__, "rb" ) as handle: expected_sha = hashlib.sha256( handle.read() ).hexdigest()
     assert code == 0 and session.statements[ 0 ] == "SET TRANSACTION READ ONLY"
-    assert report[ "provenance" ][ "command" ] == f"python -m cosa.research.preference_replay.retune_run --out {out}"
+    assert report[ "provenance" ][ "command" ] == f"python -m cosa.research.preference_replay.retune_run --out {out} --vectors {tmp_path / 'vectors.json'}"
     assert ( report[ "provenance" ][ "code_sha" ], report[ "provenance" ][ "driver_sha256" ] ) == ( "d" * 40, expected_sha )
     assert report[ "provenance" ][ "started" ] == READ_AT.isoformat()
+    provenance = report[ "provenance" ]
+    assert ( provenance[ "vector_model" ], provenance[ "vector_revision" ], provenance[ "vector_side_file" ] ) == ( "m", "r1", str( tmp_path / "vectors.json" ) )
+    with open( tmp_path / "vectors.json", "rb" ) as handle: assert provenance[ "vector_side_file_sha256" ] == hashlib.sha256( handle.read() ).hexdigest()
     assert json.loads( printed[ 0 ] ) == report[ "frozen_settings" ]
     assert list( report ) == sorted( report ), "keys are written sorted"
 
@@ -119,7 +132,7 @@ def test_without_an_injected_sha_the_command_asks_for_the_head_commit( engine, m
     monkeypatch.setattr( retune_run, "resolve_commit", lambda repo, name: calls.append( ( repo, name ) ) or "e" * 40 )
     _fake_cohort( monkeypatch, { "yes_no": _asks( engine ), "multiple_choice": [] } )
     out = tmp_path / "report.json"
-    main( [ "--out", str( out ) ], printer=lambda line: None, session_factory=lambda: contextlib.nullcontext( FakeSession() ), engine_factory=lambda: engine )
+    main( [ "--out", str( out ), "--vectors", _side_file( tmp_path ) ], printer=lambda line: None, session_factory=lambda: contextlib.nullcontext( FakeSession() ), engine_factory=lambda: engine )
     assert calls == [ ( retune_run.cu.get_project_root(), "HEAD" ) ]
     assert json.loads( out.read_text( encoding="utf-8" ) )[ "provenance" ][ "code_sha" ] == "e" * 40
 
@@ -132,7 +145,7 @@ def test_without_injected_factories_the_command_uses_get_db_and_the_live_engine_
     monkeypatch.setattr( retune_run, "_open_engine", lambda: opened.append( "_open_engine" ) or engine )
     _fake_cohort( monkeypatch, { "yes_no": _asks( engine ), "multiple_choice": [] } )
     out = tmp_path / "report.json"
-    assert main( [ "--out", str( out ) ], printer=lambda line: None, code_sha="f" * 40, clock=lambda: READ_AT ) == 0
+    assert main( [ "--out", str( out ), "--vectors", _side_file( tmp_path ) ], printer=lambda line: None, code_sha="f" * 40, clock=lambda: READ_AT ) == 0
     assert opened == [ "get_db", "_open_engine" ] and session.statements[ 0 ] == "SET TRANSACTION READ ONLY"
     assert out.exists()
 
