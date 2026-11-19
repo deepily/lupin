@@ -16,6 +16,21 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-19 (Mr. Radio 🦉 `67865d63`, build manager for preference learning, missing question vectors; times Eastern)
+
+The full table of today's rulings is in the [missing-vectors plan](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.18-missing-question-vectors-plan.md). The cross-track agreements are on re-plan row `47865511`.
+
+- 2026-11-19 — **Which vectors are regenerated?** → **All, from one model, recorded on each** (Rick, 09:10). Why: one model keeps columns comparable.
+- 2026-11-19 — **How is the effect shown?** → **A four-column before-and-after report.** Each column carries a McNemar test against always-yes. The control must give 177. Why: it separates the new vectors, the added asks and the window.
+- 2026-11-19 — **Side file or database first?** → **Side file first; the database on Rick's typed go** (Rick, 09:20). Applied at 15:48 on his typed go, after he read the report.
+- 2026-11-19 — **The apply input** → **A derived file holding only the 3,608 frozen ids** (Mr. Radio). Why: every run cites the unchanged side file's sha.
+- 2026-11-19 — **Which inputs help the forecast?** → **Compare five context arms on side files** (Rick). Result: none beats the question alone, and the Q+P arm is worse.
+- 2026-11-19 — **The discordant floor for the context comparison** → **10 pairs, the remediation plan's rule** (Mr. Radio, after the run). Why: one rule across reports; no verdict changed.
+- 2026-11-19 — **Who commits Tiffany's 74 lupin-mobile wiki edits?** → **A lupin-mobile session** (Rick, card). Why: Lupin seats run no git in that repository.
+- 2026-11-19 — **The model forecaster in the remediation's sixth phase** → **Disabled behind its switch, never dropped** (Rick, about 15:44, via Maria). Its background call keeps running as the learner's control arm (plan 3031c865a).
+- 2026-11-19 — **record_forecast and the learner** → **An optional pre-commit hook** (Rick). Maria's crew builds it, and Krishna reviews it.
+- 2026-11-19 — **Review cards in the cohort** → **Excluded on `response_options.review_card` alone, the ask-time field** (Mr. Radio and Cheech).
+
 ## 📚 Decisions log 2026-11-19 (Cheech 🌿 `ec5dd3e7`, Principle learner walkthrough, cascade row `8e53fc1b`; times Eastern)
 
 Rick's replies are recorded word for word in the [rulings record](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.19-principle-learner-rulings-verbatim.md).
