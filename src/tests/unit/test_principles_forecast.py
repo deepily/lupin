@@ -465,7 +465,7 @@ def test_a_row_that_arrives_between_the_check_and_the_insert_reads_as_already_st
     """
     nid, other = ask( factory ), ask( factory )
     assert pf._write_row( factory, nid, T0, None, None, "first", [], "capacity" ) is True
-    monkeypatch.setattr( pf, "_row_present", lambda session, key: False )
+    monkeypatch.setattr( pf, "_row_present", lambda session, key, arm=None: False )
     assert pf._write_row( factory, nid, T0, None, None, "loser", [], "capacity" ) is False
     assert [ r.predictor_version for r in rows( factory ) ] == [ "first" ]
     assert pf._write_row( factory, other, T0, None, None, "next", [], "capacity" ) is True and len( rows( factory ) ) == 2
