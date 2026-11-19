@@ -8,6 +8,18 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.18 - Session d6956394 (Mr. Radio 🦉, build manager; crew Sam, Rio, Tiffany, Chloé, Clayton, Maya) | Preference learning: plan cascade closed, six of twelve phases done, the replay baseline at 14 of 17 steps, database restored
+
+**Resume here**: memento `.claude-memento-mr-radio-d6956394.md` (final line 23:30). Crew reaped with mementos in `io/mementos/`; respawn each with `seed_memento`. Working-branch head is 8e925c4dd.
+1. **Plan**: cascade `cascade-opl-remediation` closed (María) and merged as 29e9b0ec2; 64 board rows approved by Rick. The task list is `io/write-ups/2026.11.18-online-preference-learning-task-list.md`.
+2. **Built and merged, each reviewed with census green**: six whole phases and 14 of the 17 replay baseline steps. Half B e2e ts-6221cc6c passed 604 of 604 on d17a269e1.
+3. **Database**: `prediction_decisions` lost 1,559 rows to an unnamed DELETE between 18:20 and 19:05 UTC. Clayton restored 1,531 from the backup and re-ran the backfill on Rick's typed go; `log_statement=mod` is now on (row 69cc0bb6).
+4. **Measured** (retune report at a89351f83): only 1,302 of 3,608 asks are replayable, because 2,306 have no question vector. Rick made the plan to build them P0 (row baf87206); Rio's draft is ce101d191 on `refs/rio/missing-vectors-plan`.
+5. **Open for the morning**: Rick answers the five vector questions. Tiffany's checkpoint report 8d748e033 on `refs/tiffany/step9-checkpoint` goes to census and Chloé. Then come Maya's coverage close and Rick's re-plan of the later phases (row 47865511).
+6. **Memento sweep**: 7 trashed, 29 kept for live and respawning seats. The digest held no new lessons; the spawn-index lesson is already in the 17 Nov entry.
+
+**Files**: history.md, TODO.md
+
 ## 2026.11.18 - Session 4def4e05 (Cheech 🌿, manager; crew John, Pocholo, Tiberius) | Reuse remediation: spend-run leak, audit cap, tie fix and probe retry merged; Opus proof at 0.7995 waits on 15 labels; :7999 unblocked
 
 **Resume here**: memento `.claude-memento-cheech-4def4e05.md` (amended 18 Nov evening). No live workers.

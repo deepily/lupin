@@ -16,6 +16,14 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-18 (Mr. Radio 🦉 `d6956394`, build manager for preference learning; crew Sam, Rio, Tiffany, Chloé, Clayton, Maya, all reaped; times Eastern)
+
+- **Rick, morning**: ruled the plan's six decisions, recorded on row 94a8f561. They are the expert's order with a checkpoint, folded hints, and auto-submit disabled with the code kept. The others are bounded Claude Code on Haiku, the trust gate only in the last phase, and his three uploaded files.
+- **Rick, 12:52**: Mr. Radio manages the whole build with a crew, manage not build. Rick also allowed a one-time `RND_GUARD_ALLOW=1` override to commit the companion files (9f550c02a).
+- **Rick, ~17:25**: after the `prediction_decisions` deletion, turn on statement logging first, then restore from the backup. Database writes need Rick's typed go in the executing seat's pane; a relayed approval does not count.
+- **Mr. Radio**: asks with no stored vector are excluded and counted, never re-embedded inside the replay (row 8bde13fb). The freeze stays at the grid corner and the extra figures are report-only.
+- **Rick, 23:20**: a plan to build the 2,306 missing question vectors is P0 for the morning, before Rick re-plans the later phases (row baf87206). Rick answers its five questions himself.
+
 ## 📚 Decisions log 2026-11-14 (Cheech 🌿 `8b134124`, crew John, Sam, Maya, Pocholo, working overnight; times Eastern)
 
 - **Full pyramid is for the PR only** (Rick by voice, about 22:40): e2e and integration run only before a PR to main. A merge to the working branch needs green unit and census checks plus review. Why: Cheech froze merges from about 21:00 to 22:40 behind all 15 rows (row d2a18b64). It could not finish before 23:00, and Rick called it "an absolute productivity killer". Row e986fbbc (Maya) audits the workflow wording and goes to Rick before it lands.
