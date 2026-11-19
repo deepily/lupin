@@ -111,6 +111,7 @@ def drafted_text( draft, field_key ):
         - returns the draft text for the field, or None when there is no draft or none for this field
         - a blank draft counts as no draft
         - a card field's text is its picks joined, or its submitted text
+        - it does not use exposure.decode_answer_fields, which drops a yes or no comment and sorts picks, while this keeps both
 
     Raises:
         - ValueError when the draft is not None and cannot be read in that shape, so a changed shape is never skipped
