@@ -16,12 +16,13 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
-from cosa.agents.prediction_engine.history_context_rebuild import _session_of, rebuild_context
+from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, _session_of, rebuild_context
 from cosa.rest.postgres_models import Notification
 from cosa.utils.iso_timestamp import aware_moment
 
 ARMS            = ( "Q", "Q+A", "Q+O", "Q+P", "Q+H" )
 HISTORY_TIERS   = ( "parent", "thread" )
+SESSION_TIERS   = ( "sender", "session" )
 NO_CONTEXT      = "no_context"
 INPUT_ABSENT    = "arm_input_absent"
 
@@ -127,29 +128,50 @@ def _answer_text( value: Any ) -> str:
     return value if isinstance( value, str ) else json.dumps( value, sort_keys=True )
 
 
+def _latest_answered( attachments: List[Dict[str, Any]], tiers: Tuple[str, ...] ) -> Optional[Dict[str, Any]]:
+    """
+    Pick the attachment answered last among the given tiers.
+
+    Requires:
+        - attachments come from rebuild_context
+
+    Ensures:
+        - returns the attachment of a given tier with status answered whose answer became known last
+        - ties go to the lower id; returns None when there is none
+    """
+    answered = [ a for a in attachments if a[ "tier" ] in tiers and a[ "answer" ][ "status" ] == "answered" ]
+    if not answered: return None
+    return min( answered, key=lambda a: ( -aware_moment( a[ "answer" ][ "answer_known_at" ] ).timestamp(), a[ "id" ] ) )
+
+
 def _history_section( target: Dict[str, Any], context: Dict[str, Any], notes_by_id: Dict[str, Dict[str, Any]] ) -> Optional[str]:
     """
-    Render the latest answer known at the ask from the target's own thread.
+    Render the latest answer known at the ask, from its thread or its sender session.
 
     Requires:
         - context comes from rebuild_context for this target
         - notes_by_id maps notification id to its dict, and holds every attachment of the context
 
     Ensures:
-        - only attachments of the parent and thread tiers with status answered are considered
-        - the one answered last is chosen; ties go to the lower id
-        - returns "Previous answer on this thread: <its question> -> <its answer>", or None when there is none
+        - an answered parent or thread attachment wins; the one answered last is chosen
+        - otherwise an answered sender or session attachment created within SESSION_WINDOW of the ask is chosen the same way
+        - returns "Previous answer on this thread: ..." or "Previous answer in this session: ..." with the earlier question
+          and its answer, or None when there is none
 
     Raises:
         - ValueError if a chosen answer became known after the ask, which rebuild_context never returns
     """
     asked_at = aware_moment( target[ "created_at" ] )
-    answered = [ a for a in context[ "attachments" ] if a[ "tier" ] in HISTORY_TIERS and a[ "answer" ][ "status" ] == "answered" ]
-    if not answered: return None
-    chosen = min( answered, key=lambda a: ( -aware_moment( a[ "answer" ][ "answer_known_at" ] ).timestamp(), a[ "id" ] ) )
+    chosen   = _latest_answered( context[ "attachments" ], HISTORY_TIERS )
+    where    = "on this thread"
+    if chosen is None:
+        near   = [ a for a in context[ "attachments" ] if asked_at - aware_moment( a[ "first_known_at" ] ) <= SESSION_WINDOW ]
+        chosen = _latest_answered( near, SESSION_TIERS )
+        where  = "in this session"
+    if chosen is None: return None
     if aware_moment( chosen[ "answer" ][ "answer_known_at" ] ) > asked_at:
         raise ValueError( f"answer to {chosen[ 'id' ]} became known after the ask {target[ 'id' ]}" )
-    return f"Previous answer on this thread: {question_text( notes_by_id[ chosen[ 'id' ] ] )} -> {_answer_text( chosen[ 'answer' ][ 'value' ] )}"
+    return f"Previous answer {where}: {question_text( notes_by_id[ chosen[ 'id' ] ] )} -> {_answer_text( chosen[ 'answer' ][ 'value' ] )}"
 
 
 def arm_text( arm: str, target: Dict[str, Any], context: Dict[str, Any], notes_by_id: Dict[str, Dict[str, Any]] ) -> Tuple[str, Optional[str]]:
