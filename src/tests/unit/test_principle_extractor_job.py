@@ -163,7 +163,7 @@ def _ask( db, minutes=0, answer="no", answered_by=OWNER, source="ui", **extra ):
     return str( row[ "id" ] )
 
 
-def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask.approval_needs_link", statement="Existing principle.", owner=OWNER, version="old-extractor" ):
+def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask.approval_needs_link", statement="Existing principle.", owner=OWNER, version="old-extractor", created_at=None ):
     """
     Insert a principle and return its row.
 
@@ -171,13 +171,14 @@ def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask
         - the row belongs to owner with the given encoder, vector, scope, dimension and statement, and the test extractor version
     """
     row = PreferencePrinciple( id=uuid.uuid4(), owner_id=str( owner ), kind="decision", dimension=dimension, statement=statement, scope=scope,
-                               embedding=vector if vector is not None else vec( 1, 0, 1, 0.01 ), encoder_version=encoder, extractor_version=version )
+                               embedding=vector if vector is not None else vec( 1, 0, 1, 0.01 ), encoder_version=encoder, extractor_version=version,
+                               created_at=created_at if created_at is not None else NOW - timedelta( days=1 ) )
     db.add( row )
     db.commit()
     return row
 
 
-def _run( db, notification_id, model, **extra ):
+def _run( db, notification_id, model, now=NOW, **extra ):
     """
     Build the job over the test doubles and run its async body to the end.
 
@@ -185,7 +186,7 @@ def _run( db, notification_id, model, **extra ):
         - returns ( summary dict, job )
     """
     job = PrincipleExtractorJob( notification_id, str( OWNER ), "owner@example.com", query_fn=model, embed_fn=embed, session_factory=_factory( db ),
-                                 model=MODEL, timeout_seconds=30, encoder=ENCODER, clock=lambda: NOW, **extra )
+                                 model=MODEL, timeout_seconds=30, encoder=ENCODER, clock=lambda: now, **extra )
     return json.loads( asyncio.run( job._execute() ) ), job
 
 
@@ -208,6 +209,7 @@ def test_a_no_answer_creates_a_principle_and_a_supporting_evidence_row_with_both
     assert out[ "status" ] == "extracted" and ( out[ "principles_created" ], out[ "evidence_written" ] ) == ( 1, 1 )
     assert ( principle.owner_id, principle.kind, principle.scope, principle.encoder_version ) == ( str( OWNER ), "ask_form", "global", ENCODER )
     assert principle.extractor_version == f"{MODEL}:extractor-v1" and principle.embedding is not None
+    assert principle.created_at.replace( tzinfo=timezone.utc ) == NOW
     assert ( evidence.relation, evidence.condition, evidence.source, evidence.field_key ) == ( "supports", "approval", "extractor", "answer" )
     assert str( evidence.notification_id ) == ask and evidence.extractor_version == principle.extractor_version
     assert evidence.answered_at.replace( tzinfo=timezone.utc ) == T0 + timedelta( minutes=1 ) and evidence.extracted_at.replace( tzinfo=timezone.utc ) == NOW
@@ -258,7 +260,7 @@ def test_two_paraphrased_answers_join_one_principle_when_the_double_names_it_for
     principle = db.query( PreferencePrinciple ).one()
     # the second answer's paraphrase uses another dimension string, and the double names the first principle
     out, _ = _run( db, second, Model( _reply( _result( dimension="ask.link_for_approval", hypotheses=[ _hyp( "Approvals need a link to the thing." ) ],
-                                                        relations={ str( principle.id ): "supports" } ) ) ) )
+                                                        relations={ str( principle.id ): "supports" } ) ) ), now=NOW + timedelta( minutes=5 ) )
     assert db.query( PreferencePrinciple ).count() == 1
     assert sorted( str( e.notification_id ) for e in db.query( PreferenceEvidence ) ) == sorted( [ first, second ] )
     assert out[ "dimension_mismatches" ] and db.query( PreferenceEvidence ).filter_by( principle_id=principle.id ).count() == 2
@@ -354,14 +356,22 @@ def test_fetch_neighbours_filters_owner_and_encoder_ranks_by_best_cosine_and_cut
     _principle( db, encoder=OLD_ENC, vector=vec( 1, 0, 0, 0 ) )
     _principle( db, owner=OTHER, vector=vec( 1, 0, 0, 0 ) )
     db.add( PreferencePrinciple( id=uuid.uuid4(), owner_id=str( OWNER ), kind="decision", dimension="d", statement="no vector", scope="global", embedding=None,
-                                 encoder_version=ENCODER, extractor_version="x" ) )
+                                 encoder_version=ENCODER, extractor_version="x", created_at=NOW - timedelta( days=1 ) ) )
     db.add( PreferencePrinciple( id=uuid.uuid4(), owner_id=str( OWNER ), kind="decision", dimension="d", statement="zero", scope="global", embedding=vec( 0, 0, 0, 0 ),
-                                 encoder_version=ENCODER, extractor_version="x" ) )
+                                 encoder_version=ENCODER, extractor_version="x", created_at=NOW - timedelta( days=1 ) ) )
     db.commit()
-    got = store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ), vec( 0, 1, 0, 0 ) ], k=2 )
+    got = store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ), vec( 0, 1, 0, 0 ) ], NOW, k=2 )
     assert sorted( row.statement for row in got ) == [ "a", "b" ] and len( got ) == 2
-    assert [ row.statement for row in store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ) ], k=3 ) ][ :2 ] == [ "a", "c" ]
+    assert [ row.statement for row in store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ) ], NOW, k=3 ) ][ :2 ] == [ "a", "c" ]
     assert a.id and b.id
+
+
+def test_fetch_neighbours_cutoff_is_strict_and_hides_later_principles( db ):
+    _principle( db, vector=vec( 1, 0, 0, 0 ), statement="earlier", created_at=NOW - timedelta( seconds=1 ) )
+    _principle( db, vector=vec( 1, 0, 0, 0 ), statement="same moment", created_at=NOW )
+    _principle( db, vector=vec( 1, 0, 0, 0 ), statement="later", created_at=NOW + timedelta( seconds=1 ) )
+    got = store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ) ], NOW )
+    assert [ row.statement for row in got ] == [ "earlier" ]
 
 
 def test_an_answer_after_a_reveal_with_no_draft_is_used_and_reported_as_possibly_influenced( db ):

@@ -202,7 +202,8 @@ class PrincipleExtractorJob( AgenticJobBase ):
             entry[ "text" ], entry[ "possibly_influenced" ] = unaided_answer( entry[ "text" ], draft, entry[ "field_key" ], reveal, row.responded_at )
             if entry[ "possibly_influenced" ]: influenced.append( entry[ "field_key" ] )
         vectors    = [ embed( card_text( episode ) ) ] + [ embed( entry[ "text" ] ) for entry in entries if entry[ "text" ] ]
-        neighbours = extractor_store.fetch_neighbours( session, str( row.recipient_id ), encoder, vectors )
+        now        = self.clock() if self.clock is not None else aware_moment( cu.get_current_datetime_iso() )
+        neighbours = extractor_store.fetch_neighbours( session, str( row.recipient_id ), encoder, vectors, now )
         if all( entry[ "bare_yes" ] for entry in entries ) and not neighbours: return self._summary( "skipped_no_input" )
         reply      = await model_transport.complete( model, SYSTEM_PROMPT, build_user_prompt( episode, entries, neighbours ),
                                                      query_fn=self.query_fn, timeout_seconds=timeout )
@@ -213,7 +214,6 @@ class PrincipleExtractorJob( AgenticJobBase ):
         report   = { "principles_created": 0, "principles_reused": 0, "evidence_written": 0, "evidence_existing": 0, "dimension_mismatches": [], "rejected": [] }
         ids      = { str( principle.id ) for principle in neighbours }
         by_key   = { field.get( "field_key" ): field for field in fields }
-        now      = self.clock() if self.clock is not None else aware_moment( cu.get_current_datetime_iso() )
         for entry in entries:
             if entry[ "field_key" ] not in by_key:
                 report[ "rejected" ].append( { "field_key": entry[ "field_key" ], "what": "field", "reason": "field_missing_from_reply" } )

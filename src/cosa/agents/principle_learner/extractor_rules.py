@@ -14,6 +14,7 @@ An answer given after a reveal with no draft is marked possibly influenced.
 import re
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
+from cosa.agents.prediction_engine.exposure import revealed_before_answer
 from cosa.utils.iso_timestamp import aware_moment
 from cosa.utils.notification_utils import parse_field_selections
 
@@ -135,8 +136,8 @@ def unaided_answer( final_text, draft, field_key, revealed_at, answered_at ):
     Ensures:
         - returns ( text, possibly_influenced )
         - with a draft for the field, returns the draft and False
-        - with no draft, returns the final text; it is marked possibly influenced only when a reveal came
-          strictly before the answer, so a reveal at the answer time or later counts as unaided
+        - with no draft, returns the final text; it is marked possibly influenced only when revealed_before_answer says so
+          (the shared rule in exposure.py), so a reveal at the answer time or later counts as unaided
 
     Raises:
         - ValueError as drafted_text does
@@ -144,8 +145,7 @@ def unaided_answer( final_text, draft, field_key, revealed_at, answered_at ):
     drafted = drafted_text( draft, field_key )
     if drafted:
         return drafted, False
-    revealed = aware_moment( revealed_at )
-    return final_text, revealed is not None and revealed < aware_moment( answered_at )
+    return final_text, revealed_before_answer( aware_moment( revealed_at ), aware_moment( answered_at ) )
 
 
 def ground_condition( condition, grounding_text ):

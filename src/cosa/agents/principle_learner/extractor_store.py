@@ -14,7 +14,7 @@ from cosa.rest.repair_attempt_tracker import cosine_similarity
 NEIGHBOURS = 5
 
 
-def fetch_neighbours( session, owner_id, encoder_version, query_vectors, k=NEIGHBOURS ):
+def fetch_neighbours( session, owner_id, encoder_version, query_vectors, before, k=NEIGHBOURS ):
     """
     Find the owner's principles nearest to the query vectors, within one encoder version.
 
@@ -22,24 +22,26 @@ def fetch_neighbours( session, owner_id, encoder_version, query_vectors, k=NEIGH
         - session is an active SQLAlchemy session
         - owner_id is a string and encoder_version a non-empty string
         - query_vectors is a list of vectors made by that encoder
+        - before is a timezone-aware datetime: the run's time
 
     Ensures:
         - returns at most k principle rows, nearest first, ties by id
         - a row is a candidate only when its owner and its encoder_version match and it has a vector
         - a principle of another encoder version is never read into the result, however near it is
         - a row's score is its best cosine over the query vectors
-        - it reads whatever the store holds now, with no cutoff on time: a replay must run its extractions in time
-          order, so the store holds only principles from answers that came before
+        - a row is a candidate only when its created_at is strictly before the run's time, so a rerun at an earlier time
+          never sees a principle made later
     """
     rows   = session.query( PreferencePrinciple ).filter( PreferencePrinciple.owner_id == owner_id,
                                                          PreferencePrinciple.encoder_version == encoder_version,
-                                                         PreferencePrinciple.embedding.isnot( None ) ).all()
+                                                         PreferencePrinciple.embedding.isnot( None ),
+                                                         PreferencePrinciple.created_at < before ).all()
     scored = [ ( max( cosine_similarity( list( row.embedding ), vector ) for vector in query_vectors ), str( row.id ), row ) for row in rows ]
     scored.sort( key=lambda item: ( -item[ 0 ], item[ 1 ] ) )
     return [ row for _, _, row in scored[ :k ] ]
 
 
-def _find_or_create_principle( session, owner_id, kind, dimension, hypothesis, extractor_version, encoder_version, embed_fn, continues, report ):
+def _find_or_create_principle( session, owner_id, kind, dimension, hypothesis, extractor_version, encoder_version, embed_fn, continues, created_at, report ):
     """
     Return the principle for a hypothesis, creating it only when none matches.
 
@@ -47,6 +49,7 @@ def _find_or_create_principle( session, owner_id, kind, dimension, hypothesis, e
         - hypothesis is a cleaned hypothesis from check_field
         - embed_fn takes a text and returns a vector
         - continues is the id of the earlier-version principle a new principle continues, or None
+        - created_at is the run's time; a new principle takes it, never the database default
 
     Ensures:
         - an existing principle of the same owner, extractor version, kind, dimension, statement and scope is reused
@@ -65,7 +68,7 @@ def _find_or_create_principle( session, owner_id, kind, dimension, hypothesis, e
     principle = PreferencePrinciple( id=uuid.uuid4(), owner_id=owner_id, kind=kind, dimension=dimension, statement=hypothesis[ "statement" ],
                                      rationale=hypothesis[ "rationale" ], scope=hypothesis[ "scope" ], embedding=embed_fn( text ),
                                      encoder_version=encoder_version, extractor_version=extractor_version,
-                                     continues_principle_id=continues )
+                                     continues_principle_id=continues, created_at=created_at )
     session.add( principle )
     session.flush()
     report[ "principles_created" ] += 1
@@ -135,5 +138,5 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
         if not targets:
             earlier   = sorted( pid for pid in named if by_id[ pid ].extractor_version != extractor_version )
             continues = by_id[ earlier[ 0 ] ].id if earlier else None
-            principle = _find_or_create_principle( session, owner_id, checked[ "kind" ], checked[ "dimension" ], hypothesis, extractor_version, encoder_version, embed_fn, continues, report )
+            principle = _find_or_create_principle( session, owner_id, checked[ "kind" ], checked[ "dimension" ], hypothesis, extractor_version, encoder_version, embed_fn, continues, extracted_at, report )
             _write_evidence( session, principle, notification_id, field_key, "supports", hypothesis[ "condition" ], answered_at, extracted_at, extractor_version, session_key, report )

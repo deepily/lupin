@@ -16,6 +16,22 @@ EXPOSED    = "exposed"      # revealed, but no draft was sent: cannot tell, coun
 UNANSWERED = "unanswered"   # no final answer yet, so there is nothing to classify
 
 
+def revealed_before_answer( fold_opened_at, answered_at ) -> bool:
+    """
+    Say whether a reveal came early enough to influence the answer.
+
+    Requires:
+        - fold_opened_at and answered_at are comparable moments, or None
+
+    Ensures:
+        - returns False when the fold was never opened
+        - returns True when the fold opened and answered_at is unknown
+        - returns True only when the reveal is strictly before answered_at; an equal time is too late to influence
+    """
+    if fold_opened_at is None: return False
+    return answered_at is None or fold_opened_at < answered_at
+
+
 def classify_exposure( fold_opened_at, draft_at_reveal: Optional[dict], actual_value: Optional[dict],
                        answered_at=None ) -> str:
     """
@@ -42,8 +58,7 @@ def classify_exposure( fold_opened_at, draft_at_reveal: Optional[dict], actual_v
         - KeyError if a given draft or answer holds no "value" entry
     """
     if actual_value is None: return UNANSWERED
-    if fold_opened_at is None: return UNAIDED
-    if answered_at is not None and fold_opened_at >= answered_at: return UNAIDED
+    if not revealed_before_answer( fold_opened_at, answered_at ): return UNAIDED
     if draft_at_reveal is None: return EXPOSED
     return UNAIDED if draft_at_reveal[ "value" ] == actual_value[ "value" ] else SWITCHED
 
