@@ -1,4 +1,4 @@
-== 2026-11-19T15:13:53Z scratch rehearsal of backfill_missing_question_vectors.py, sha256 101a2ba8a6c0
+== 2026-11-19T16:01:41Z scratch rehearsal of backfill_missing_question_vectors.py, sha256 101a2ba8a6c0
 == create the scratch database from a schema-only dump
 CREATE DATABASE
 CREATE EXTENSION
@@ -38,11 +38,11 @@ PASS  bystander log row not stamped ( 0 )
 PASS  6 distinct 768-wide vectors ( 6|6 )
 PASS  answer sources human|unknown ( human:5,unknown:1 )
 == 5 second apply: the inserted ids now have a row, so it must roll back
-ROLLED BACK: insert ids differ from the expected list: 0 extra (first []), 3 missing (first ['8d4c2972-dab7-4e6c-9546-d6b1240826ce'])
+ROLLED BACK: insert ids differ from the expected list: 0 extra (first []), 3 missing (first ['18da8d2b-c469-4526-aa67-12728e39935f'])
 PASS  second apply rolled back ( 1 )
 PASS  second apply left 6 case rows ( 6 )
 == 6 a side-file id outside the frozen list: refused before the database opens
-REFUSED: 2 side-file ids are outside the frozen list, first 74010cd2-0d00-4357-9184-9e4bb2cc7e83
+REFUSED: 2 side-file ids are outside the frozen list, first 94ddd98e-faed-4178-bf71-dcaedef67be2
 PASS  ids outside the frozen list refused ( 1 )
 PASS  that refusal left 6 case rows ( 6 )
 == lupin_db_dev and lupin_db_test were read by pg_dump only
