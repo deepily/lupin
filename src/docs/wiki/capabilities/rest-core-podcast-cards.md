@@ -10,7 +10,7 @@ pins:
   - cosa.rest.podcast_proxy.card_text@22cff5d95d
   - cosa.rest.podcast_proxy.card_state@ea4823328c
   - cosa.rest.podcast_proxy.default_yes_due@e34ee086a4
-  - cosa.rest.podcast_proxy.answer_word@a91649285f
+  - cosa.rest.podcast_proxy.answer_word@021aba4556
   - cosa.rest.podcast_proxy.max_age_seconds@21b01c71e6
   - cosa.rest.podcast_proxy.dry_run_enabled@e839d6ab46
   - cosa.rest.podcast_proxy.card_options@904beba744

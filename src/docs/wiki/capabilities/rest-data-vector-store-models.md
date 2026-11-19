@@ -8,7 +8,7 @@ pins:
   - cosa.rest.db.vector_store_models.GistCache@b1cd39113b
   - cosa.rest.db.vector_store_models.CanonicalSynonym@0265d10e94
   - cosa.rest.db.vector_store_models.QueryLog@63c01a1e29
-  - cosa.rest.db.vector_store_models.PredictionDecision@b553864db6
+  - cosa.rest.db.vector_store_models.PredictionDecision@26dc60cb5a
   - cosa.rest.db.vector_store_models.SolutionSnapshot@cf2912b408
 ---
 # Vector store models

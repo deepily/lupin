@@ -3,6 +3,7 @@ capability: utils-iso-timestamp
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.utils.iso_timestamp.parse_iso@1f810d5498
+  - cosa.utils.iso_timestamp.aware_moment@c2fc1e18bd
 ---
 # ISO-8601 timestamp parser
 
@@ -19,3 +20,5 @@ One function the arbiter modules share to read a stamp out of a JSON file or a r
 
 ## Invariants
 - It never raises. `None`, a blank or non-string value and unparseable text all give `None`.
+- `aware_moment( value )` reads a datetime or an ISO string as an aware datetime and passes `None` through. A naive result is taken as UTC.
+- It raises `AttributeError` for a string that does not parse, so a caller that must survive a bad stamp uses `parse_iso`.

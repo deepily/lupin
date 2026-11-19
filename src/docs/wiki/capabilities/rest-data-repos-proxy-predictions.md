@@ -4,8 +4,8 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.db.repositories.proxy_decision_repository.ProxyDecisionRepository@094813f6d3
   - cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository@ddeeee6a9c
-  - cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository@a2f2705ea5
-  - cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository@ad925a248b
+  - cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository@6d8c5b6a79
+  - cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository@025a26c471
   - cosa.rest.db.repositories.prediction_log_repository.legacy_similarity_clause@e36d553cbc
   - cosa.rest.db.repositories.prediction_log_repository.legacy_confidence_clause@3978238c95
 ---

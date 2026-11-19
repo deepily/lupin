@@ -2,14 +2,15 @@
 capability: repo-tools-candidate-shadow-audit-queue
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.repo.symindex.candidates.shadow_audit.enqueue_if_sampled@7e5d77b780
-  - cosa.repo.symindex.candidates.shadow_audit.enqueue_pending@2a7888df6f
+  - cosa.repo.symindex.candidates.shadow_audit.enqueue_if_sampled@b9f26b1405
+  - cosa.repo.symindex.candidates.shadow_audit.enqueue_pending@8d4aa296bb
   - cosa.repo.symindex.candidates.shadow_audit.audits_in_week@f9f110db24
   - cosa.repo.symindex.candidates.shadow_audit.count_lookup@cf3f37d3c6
   - cosa.repo.symindex.candidates.shadow_audit.run_pending@94ca1afc9b
   - cosa.repo.symindex.candidates.shadow_audit.store_receipt@525e2b37b5
   - cosa.repo.symindex.candidates.shadow_audit.load_receipts@b15e583a38
   - cosa.repo.symindex.candidates.shadow_audit.daily_volume@6b4bf98a0c
+  - cosa.repo.symindex.candidates.shadow_audit.pending_count@63dc139210
 ---
 # Candidate shadow audit: queue and receipts
 
@@ -31,3 +32,4 @@ Files live under the data folder: `shadow-pending/<id>.json` for queued lookups,
 - `store_receipt( data_dir, receipt )` writes the file once and returns what is on disk, so a repeat never rewrites history. A bad existing file raises `AUDIT_RECEIPT_CORRUPT`.
 - `load_receipts( data_dir )` reads every `shadow-*.json` receipt, sorted by id. A file that is not JSON, lacks a field or holds an unknown outcome raises `AUDIT_RECEIPT_CORRUPT`.
 - `daily_volume( data_dir )` returns `{ day: { lookups, audits } }`.
+- `pending_count( data_dir )` returns the items waiting in `shadow-pending/`, temporary files left out. `enqueue_pending` and `enqueue_if_sampled` refuse a new item once it reaches `max_pending` ([[reuse-shadow-pending-cap]]).
