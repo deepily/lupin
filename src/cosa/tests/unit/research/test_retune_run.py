@@ -205,6 +205,34 @@ def test_a_duplicate_id_in_the_list_keeps_the_ask_once_and_counts_it_once( tmp_p
     assert [ ask[ "id" ] for ask in kept ] == [ "a", "b" ] and facts[ "only_ids_count" ] == 2
 
 
+def _bare_ids_file( tmp_path, ids ):
+    path = tmp_path / "ids.txt"
+    path.write_text( "".join( ask_id + "\n" for ask_id in ids ), encoding="utf-8" )
+    return str( path )
+
+
+def test_a_bare_id_list_cuts_the_cohort_like_a_json_lines_one( tmp_path ):
+    asks = [ { "id": name } for name in ( "d", "c", "b", "a" ) ]
+    kept, facts = restrict_to_ids( asks, _bare_ids_file( tmp_path, [ "a", "d", "b" ] ) )
+    assert [ ask[ "id" ] for ask in kept ] == [ "d", "b", "a" ] and facts[ "only_ids_count" ] == 3
+    assert retune_run.read_id_list( _bare_ids_file( tmp_path, [ "x", "y" ] ) ) == [ "x", "y" ]
+    assert retune_run.read_id_list( _ids_file( tmp_path, [ "x", "y" ] ) ) == [ "x", "y" ]
+
+
+@pytest.mark.parametrize( "lines", [ [ '{"id": "a"}', "b" ], [ "a", '{"id": "b"}' ] ] )
+def test_a_list_that_mixes_json_lines_and_bare_ids_is_refused_in_either_order( tmp_path, lines ):
+    path = tmp_path / "mixed.txt"
+    path.write_text( "\n".join( lines ) + "\n", encoding="utf-8" )
+    with pytest.raises( ValueError, match="mixes JSON lines and bare ids" ):
+        retune_run.read_id_list( str( path ) )
+
+
+def test_the_committed_control_id_file_loads_as_1302_distinct_ids():
+    import cosa.utils.util as cu
+    ids = retune_run.read_id_list( cu.get_project_root() + "/src/conf/prediction-before-replayable-ids.txt" )
+    assert len( ids ) == 1302 and len( set( ids ) ) == 1302
+
+
 def test_the_command_replays_only_the_listed_ids_and_names_the_list( engine, monkeypatch, tmp_path ):
     asks = _asks( engine )
     _fake_cohort( monkeypatch, { "yes_no": asks, "multiple_choice": [] } )

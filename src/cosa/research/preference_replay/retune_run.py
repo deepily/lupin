@@ -66,12 +66,32 @@ def read_cohort( session, vectors: Optional[Dict[str, List[float]]] = None, resp
     return asks, facts
 
 
+def read_id_list( ids_path: str ) -> List[str]:
+    """
+    Read a committed id list in either of its two forms.
+
+    Requires:
+        - ids_path is a file with one id per line, either bare or as a JSON object with an "id" key
+
+    Ensures:
+        - returns the ids in file order, blank lines skipped
+        - a line starting with an opening brace is JSON; any other line is a bare id
+
+    Raises:
+        - ValueError naming the file when its lines mix the two forms
+    """
+    with open( ids_path, encoding="utf-8" ) as handle: lines = [ line.strip() for line in handle if line.strip() ]
+    as_json = [ line.startswith( "{" ) for line in lines ]
+    if any( as_json ) and not all( as_json ): raise ValueError( f"{ids_path} mixes JSON lines and bare ids" )
+    return [ json.loads( line )[ "id" ] for line in lines ] if any( as_json ) else lines
+
+
 def restrict_to_ids( asks: List[Dict[str, Any]], ids_path: str ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Keep only the asks a committed id list names, in cohort order.
 
     Requires:
-        - asks are cohort_asks dicts; ids_path is a JSON-lines file with an "id" key on each line
+        - asks are cohort_asks dicts; ids_path is a file read by read_id_list
 
     Ensures:
         - returns ( kept, facts ), kept holding the asks whose id is listed, in their original order
@@ -79,8 +99,9 @@ def restrict_to_ids( asks: List[Dict[str, Any]], ids_path: str ) -> Tuple[List[D
 
     Raises:
         - ValueError naming the count and the first ids when a listed id is not in the cohort
+        - ValueError when the file mixes the two id forms
     """
-    with open( ids_path, encoding="utf-8" ) as handle: wanted = [ json.loads( line )[ "id" ] for line in handle if line.strip() ]
+    wanted  = read_id_list( ids_path )
     present = { ask[ "id" ] for ask in asks }
     absent  = [ ask_id for ask_id in wanted if ask_id not in present ]
     if absent: raise ValueError( f"{len( absent )} listed ids are not in the cohort, first: {absent[ :5 ]}" )
