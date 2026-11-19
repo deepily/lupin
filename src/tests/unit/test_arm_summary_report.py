@@ -5,13 +5,15 @@ The expected figures are literals taken from that cohort.
 Two of its arms hold a forecast row for every answered card, and the other two miss three each, so the no-row total is six.
 No forecast is orphaned.
 """
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 import cosa.research.preference_replay.arm_summary_report as asr
-from cosa.research.preference_replay.arm_summary import per_arm_summary, render_summary
+from cosa.research.preference_replay.arm_summary import per_arm_summary, render_summary, summarize_arm
+from cosa.rest.postgres_models import PredictionArmForecast
 from tests.unit.test_arm_summary import T0, session  # noqa: F401  (session is a fixture)
 
 STAMP = datetime( 2026, 11, 19, 22, 0, 0, tzinfo=timezone.utc )
@@ -74,3 +76,17 @@ def test_the_sha_clock_and_database_default_to_the_real_ones( session, tmp_path,
     assert "- code sha of this report: feedface00\n" in text and "- generated: 20" in text
     monkeypatch.setattr( asr.sys, "argv", [ "prog", "--out", str( out ) ] )
     assert asr.main() == 0 and f"arm_summary_report --out {out}`" in out.read_text( encoding="utf-8" )
+
+
+def test_the_totals_add_up_the_orphaned_and_no_row_counts_of_every_arm():
+    summaries = [ summarize_arm( "X", [], orphaned=2, no_row=4 ), summarize_arm( "Y", [], orphaned=3, no_row=1 ) ]
+    text = asr.render_report( summaries, { "code sha of this report": "x" } )
+    assert "- orphaned forecasts, all arms: 5\n" in text
+    assert text.endswith( "- answered cards with no forecast row, all arms: 5\n" )
+
+
+def test_a_real_orphan_row_in_the_database_reaches_the_orphaned_total( session, tmp_path ):
+    session.add( PredictionArmForecast( notification_id=uuid.UUID( "b0000001-0000-0000-0000-000000000000" ), arm="A1", forecast_ready_at=None, displayed=False ) )
+    session.commit()
+    text = _run( session, tmp_path )
+    assert "- orphaned forecasts, all arms: 1\n" in text
