@@ -67,7 +67,7 @@ def summarize_arm( arm: str, rows: List[Dict[str, Any]], orphaned: int = 0, no_r
         elif ready is None:                              tally[ "not_ready" ] += 1
         elif ready <= responded:                         tally[ "timely" ] += 1
         else:                                            tally[ "late" ] += 1
-        label    = classify_exposure( opened, row[ "draft" ], row[ "final" ], row[ "response_type" ], responded )
+        label    = classify_exposure( opened, row[ "draft" ], row[ "final" ], response_type=row[ "response_type" ], answered_at=responded )
         revealed = revealed_before_answer( opened, responded )
         tally[ "no_final" if label == UNANSWERED else label ] += 1
         if revealed: tally[ "revealed" ] += 1

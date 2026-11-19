@@ -22,47 +22,55 @@ def _card( **answers ): return { "value": json.dumps( { "answers": answers }, se
 class TestClassifyExposure( unittest.TestCase ):
 
     def test_no_answer_is_unanswered_even_with_a_reveal_and_draft( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, None, YN ), ex.UNANSWERED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, None, response_type=YN ), ex.UNANSWERED )
 
     def test_no_reveal_is_unaided_even_when_a_stray_draft_differs( self ):
-        self.assertEqual( ex.classify_exposure( None, None,               _a( "no" ), YN ), ex.UNAIDED )
-        self.assertEqual( ex.classify_exposure( None, { "value": "yes" }, _a( "no" ), YN ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( None, None,               _a( "no" ), response_type=YN ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( None, { "value": "yes" }, _a( "no" ), response_type=YN ), ex.UNAIDED )
 
     def test_an_answer_equal_to_the_draft_is_unaided( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "yes" ), YN ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "yes" ), response_type=YN ), ex.UNAIDED )
 
     def test_an_answer_that_differs_from_the_draft_is_switched( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), YN ), ex.SWITCHED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), response_type=YN ), ex.SWITCHED )
 
     def test_a_reveal_with_no_draft_is_exposed( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "yes" ), YN ), ex.EXPOSED )
+        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "yes" ), response_type=YN ), ex.EXPOSED )
 
     def test_a_reveal_after_the_answer_is_unaided_with_or_without_a_draft( self ):
         answered = _OPENED - dt.timedelta( minutes=1 )
-        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), YN, answered ), ex.UNAIDED )
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), YN, answered ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), response_type=YN, answered_at=answered ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), response_type=YN, answered_at=answered ), ex.UNAIDED )
 
     def test_a_reveal_exactly_at_the_answer_time_is_too_late_to_influence( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "no" ), YN, _OPENED ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "no" ), response_type=YN, answered_at=_OPENED ), ex.UNAIDED )
 
     def test_a_reveal_before_the_answer_is_judged_on_the_draft( self ):
         answered = _OPENED + dt.timedelta( minutes=1 )
-        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), YN, answered ), ex.EXPOSED )
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), YN, answered ), ex.SWITCHED )
+        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), response_type=YN, answered_at=answered ), ex.EXPOSED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), response_type=YN, answered_at=answered ), ex.SWITCHED )
 
     def test_a_draft_held_for_only_some_fields_is_exposed_not_unaided( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, _card( Database="PostgreSQL" ), _card( Database="PostgreSQL", Tags=[ "a" ] ), MC ), ex.EXPOSED )
+        self.assertEqual( ex.classify_exposure( _OPENED, _card( Database="PostgreSQL" ), _card( Database="PostgreSQL", Tags=[ "a" ] ), response_type=MC ), ex.EXPOSED )
 
     def test_a_card_draft_in_another_order_or_spacing_is_still_the_same_answer( self ):
         draft = { "value": '{ "answers": { "Tags": [ "b", "a" ] } }' }
-        self.assertEqual( ex.classify_exposure( _OPENED, draft, { "answers": { "Tags": [ "a", "b" ] } }, MC ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, draft, { "answers": { "Tags": [ "a", "b" ] } }, response_type=MC ), ex.UNAIDED )
+
+    def test_the_response_type_and_answer_time_must_be_passed_by_keyword( self ):
+        with self.assertRaises( TypeError ): ex.classify_exposure( _OPENED, None, _a( "no" ), YN )
+        with self.assertRaises( TypeError ): ex.classify_exposure( _OPENED, None, _a( "no" ), YN, _OPENED )
+        with self.assertRaises( TypeError ): ex.classify_exposure( _OPENED, None, _a( "no" ), answered_at=_OPENED )
+
+    def test_an_unknown_response_type_is_exposed_not_read_as_text( self ):
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "x" }, _a( "x" ), response_type="drag_and_drop" ), ex.EXPOSED )
 
     def test_an_unreadable_draft_is_exposed( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "not json" }, _card( Tags=[ "a" ] ), MC ), ex.EXPOSED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "not json" }, _card( Tags=[ "a" ] ), response_type=MC ), ex.EXPOSED )
 
     def test_an_answers_source_or_author_never_makes_a_switch( self ):
         answer = { "value": "yes", "source": "ui", "answered_by": { "user_id": "x" } }
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, answer, YN ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, answer, response_type=YN ), ex.UNAIDED )
 
 
 class TestDecodeAnswerFields( unittest.TestCase ):
@@ -97,6 +105,12 @@ class TestDecodeAnswerFields( unittest.TestCase ):
     def test_an_unreadable_card_answer_is_none( self ):
         self.assertIsNone( ex.decode_answer_fields( MC, { "value": "not json" } ) )
         self.assertIsNone( ex.decode_answer_fields( "open_ended_batch", { "value": '{"no":"answers"}' } ) )
+
+    def test_an_unknown_response_type_is_unreadable_for_a_draft_and_an_answer_alike( self ):
+        for kind in ( "drag_and_drop", "", None ):
+            self.assertIsNone( ex.decode_answer_fields( kind, _a( "yes" ) ), kind )
+            self.assertIsNone( ex.decode_answer_fields( kind, None ), kind )
+            self.assertEqual( ex.compare_draft_to_answer( kind, _a( "yes" ), _a( "yes" ) ), { "outcome": ex.UNREADABLE, "fields": {} }, kind )
 
     def test_the_whole_answer_key_is_the_one_the_extractor_uses( self ):
         self.assertEqual( ex.WHOLE_ANSWER_KEY, extractor_rules.WHOLE_ANSWER_KEY )
@@ -153,7 +167,7 @@ class TestSwitchRate( unittest.TestCase ):
     def test_classes_from_real_rows_feed_the_rate( self ):
         rows = [ ( None, None, _a( "yes" ), YN ), ( _OPENED, { "value": "yes" }, _a( "yes" ), YN ),
                  ( _OPENED, { "value": "yes" }, _a( "no" ), YN ), ( _OPENED, None, _a( "no" ), YN ) ]
-        classes = [ ex.classify_exposure( *r ) for r in rows ]
+        classes = [ ex.classify_exposure( *r[ :3 ], response_type=r[ 3 ] ) for r in rows ]
         self.assertEqual( classes, [ ex.UNAIDED, ex.UNAIDED, ex.SWITCHED, ex.EXPOSED ] )
         cards = [ ( cls, ex.revealed_before_answer( row[ 0 ], None ) ) for cls, row in zip( classes, rows ) ]
         self.assertEqual( ex.switch_rate( cards ), 0.5 )
