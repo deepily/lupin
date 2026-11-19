@@ -1,0 +1,6318 @@
+{
+ "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+ "records": {
+  "000ae915-0000-0000-0000-000000000001": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-05T14:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000001",
+    "job_id": null,
+    "message": "Synthetic question 1?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-05T14:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-000",
+    "title": "Synthetic ask 1",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000002": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-05T14:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000002",
+    "job_id": null,
+    "message": "Synthetic question 2?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-000",
+    "title": "Synthetic ask 2",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000003": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-05T14:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000003",
+    "job_id": null,
+    "message": "Synthetic question 3?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-000",
+    "title": "Synthetic ask 3",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000004": {
+   "notification": {
+    "abstract": "Synthetic abstract 0. [Spec](/app/docs?path=lupin/src/rnd/x0.md)",
+    "created_at": "2026-11-05T14:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000004",
+    "job_id": null,
+    "message": "Synthetic question 4?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-000",
+    "title": "Synthetic target 0",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000005": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-05T19:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000005",
+    "job_id": "job-001",
+    "message": "Synthetic question 5?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-05T19:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 5",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000006": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-05T19:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000006",
+    "job_id": "job-001",
+    "message": "Synthetic question 6?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-05T19:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 6",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000007": {
+   "notification": {
+    "abstract": "Synthetic abstract 1. [Spec](/app/docs?path=lupin/src/rnd/x1.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002329)",
+    "created_at": "2026-11-05T19:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000007",
+    "job_id": "job-001",
+    "message": "Synthetic question 7?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 1?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 1",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000008": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T00:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000008",
+    "job_id": null,
+    "message": "Synthetic question 8?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T00:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 8",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000009": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T00:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000009",
+    "job_id": null,
+    "message": "Synthetic question 9?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T00:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 9",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000000a": {
+   "notification": {
+    "abstract": "Synthetic abstract 2. [Spec](/app/docs?path=lupin/src/rnd/x2.md)",
+    "created_at": "2026-11-06T00:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000000a",
+    "job_id": null,
+    "message": "Synthetic question 10?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 2",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000000b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T05:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000000b",
+    "job_id": null,
+    "message": "Synthetic question 11?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T05:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 11",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000000c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T01:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000000c",
+    "job_id": null,
+    "message": "Synthetic question 12?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T01:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 12",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000000d": {
+   "notification": {
+    "abstract": "Synthetic abstract 3. [Spec](/app/docs?path=lupin/src/rnd/x3.md)",
+    "created_at": "2026-11-06T05:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000000d",
+    "job_id": null,
+    "message": "Synthetic question 13?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 3?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 3",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000000e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T10:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000000e",
+    "job_id": null,
+    "message": "Synthetic question 14?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T10:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 14",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000000f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T10:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000000f",
+    "job_id": null,
+    "message": "Synthetic question 15?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T10:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 15",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000010": {
+   "notification": {
+    "abstract": "Synthetic abstract 4. [Spec](/app/docs?path=lupin/src/rnd/x4.md)",
+    "created_at": "2026-11-06T10:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000010",
+    "job_id": null,
+    "message": "Synthetic question 16?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 4",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000011": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T15:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000011",
+    "job_id": null,
+    "message": "Synthetic question 17?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T15:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-005",
+    "title": "Synthetic ask 17",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000012": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T15:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000012",
+    "job_id": null,
+    "message": "Synthetic question 18?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-005",
+    "title": "Synthetic ask 18",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000013": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T15:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000013",
+    "job_id": null,
+    "message": "Synthetic question 19?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-005",
+    "title": "Synthetic ask 19",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000014": {
+   "notification": {
+    "abstract": "Synthetic abstract 5. [Spec](/app/docs?path=lupin/src/rnd/x5.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-00000000232d)",
+    "created_at": "2026-11-06T15:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000014",
+    "job_id": null,
+    "message": "Synthetic question 20?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 5?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-005",
+    "title": "Synthetic target 5",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000015": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T20:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000015",
+    "job_id": "job-006",
+    "message": "Synthetic question 21?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T20:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 21",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000016": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-06T20:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000016",
+    "job_id": "job-006",
+    "message": "Synthetic question 22?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-06T20:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 22",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000017": {
+   "notification": {
+    "abstract": "Synthetic abstract 6. [Spec](/app/docs?path=lupin/src/rnd/x6.md)",
+    "created_at": "2026-11-06T20:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000017",
+    "job_id": "job-006",
+    "message": "Synthetic question 23?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 6",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000018": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T01:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000018",
+    "job_id": null,
+    "message": "Synthetic question 24?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T01:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 24",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000019": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T01:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000019",
+    "job_id": null,
+    "message": "Synthetic question 25?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T01:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 25",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000001a": {
+   "notification": {
+    "abstract": "Synthetic abstract 7. [Spec](/app/docs?path=lupin/src/rnd/x7.md)",
+    "created_at": "2026-11-07T01:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000001a",
+    "job_id": null,
+    "message": "Synthetic question 26?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": true,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 7?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 7",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000001b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T06:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000001b",
+    "job_id": null,
+    "message": "Synthetic question 27?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T06:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 27",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000001c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T02:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000001c",
+    "job_id": null,
+    "message": "Synthetic question 28?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T02:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 28",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000001d": {
+   "notification": {
+    "abstract": "Synthetic abstract 8. [Spec](/app/docs?path=lupin/src/rnd/x8.md)",
+    "created_at": "2026-11-07T06:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000001d",
+    "job_id": null,
+    "message": "Synthetic question 29?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 8",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000001e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T11:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000001e",
+    "job_id": null,
+    "message": "Synthetic question 30?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T11:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 30",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000001f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T11:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000001f",
+    "job_id": null,
+    "message": "Synthetic question 31?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T11:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 31",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000020": {
+   "notification": {
+    "abstract": "Synthetic abstract 9. [Spec](/app/docs?path=lupin/src/rnd/x9.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002331)",
+    "created_at": "2026-11-07T11:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000020",
+    "job_id": null,
+    "message": "Synthetic question 32?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 9?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 9",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000021": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T16:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000021",
+    "job_id": null,
+    "message": "Synthetic question 33?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T16:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-010",
+    "title": "Synthetic ask 33",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000022": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T16:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000022",
+    "job_id": null,
+    "message": "Synthetic question 34?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-010",
+    "title": "Synthetic ask 34",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000023": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T16:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000023",
+    "job_id": null,
+    "message": "Synthetic question 35?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-010",
+    "title": "Synthetic ask 35",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000024": {
+   "notification": {
+    "abstract": "Synthetic abstract 10. [Spec](/app/docs?path=lupin/src/rnd/x10.md)",
+    "created_at": "2026-11-07T16:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000024",
+    "job_id": null,
+    "message": "Synthetic question 36?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-010",
+    "title": "Synthetic target 10",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000025": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T21:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000025",
+    "job_id": "job-011",
+    "message": "Synthetic question 37?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T21:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 37",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000026": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-07T21:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000026",
+    "job_id": "job-011",
+    "message": "Synthetic question 38?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-07T21:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 38",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000027": {
+   "notification": {
+    "abstract": "Synthetic abstract 11. [Spec](/app/docs?path=lupin/src/rnd/x11.md)",
+    "created_at": "2026-11-07T21:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000027",
+    "job_id": "job-011",
+    "message": "Synthetic question 39?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 11?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 11",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000028": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T02:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000028",
+    "job_id": null,
+    "message": "Synthetic question 40?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T02:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 40",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000029": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T02:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000029",
+    "job_id": null,
+    "message": "Synthetic question 41?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T02:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 41",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000002a": {
+   "notification": {
+    "abstract": "Synthetic abstract 12. [Spec](/app/docs?path=lupin/src/rnd/x12.md)",
+    "created_at": "2026-11-08T02:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000002a",
+    "job_id": null,
+    "message": "Synthetic question 42?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 12",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000002b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T07:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000002b",
+    "job_id": null,
+    "message": "Synthetic question 43?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T07:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 43",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000002c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T03:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000002c",
+    "job_id": null,
+    "message": "Synthetic question 44?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T03:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 44",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000002d": {
+   "notification": {
+    "abstract": "Synthetic abstract 13. [Spec](/app/docs?path=lupin/src/rnd/x13.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002335)",
+    "created_at": "2026-11-08T07:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000002d",
+    "job_id": null,
+    "message": "Synthetic question 45?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 13?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 13",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000002e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T12:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000002e",
+    "job_id": null,
+    "message": "Synthetic question 46?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T12:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 46",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000002f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T12:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000002f",
+    "job_id": null,
+    "message": "Synthetic question 47?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T12:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 47",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000030": {
+   "notification": {
+    "abstract": "Synthetic abstract 14. [Spec](/app/docs?path=lupin/src/rnd/x14.md)",
+    "created_at": "2026-11-08T12:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000030",
+    "job_id": null,
+    "message": "Synthetic question 48?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 14",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000031": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T17:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000031",
+    "job_id": null,
+    "message": "Synthetic question 49?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T17:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-015",
+    "title": "Synthetic ask 49",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000032": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T17:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000032",
+    "job_id": null,
+    "message": "Synthetic question 50?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-015",
+    "title": "Synthetic ask 50",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000033": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T17:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000033",
+    "job_id": null,
+    "message": "Synthetic question 51?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-015",
+    "title": "Synthetic ask 51",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000034": {
+   "notification": {
+    "abstract": "Synthetic abstract 15. [Spec](/app/docs?path=lupin/src/rnd/x15.md)",
+    "created_at": "2026-11-08T17:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000034",
+    "job_id": null,
+    "message": "Synthetic question 52?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 15?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-015",
+    "title": "Synthetic target 15",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000035": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T22:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000035",
+    "job_id": "job-016",
+    "message": "Synthetic question 53?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T22:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 53",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000036": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-08T22:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000036",
+    "job_id": "job-016",
+    "message": "Synthetic question 54?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-08T22:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 54",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000037": {
+   "notification": {
+    "abstract": "Synthetic abstract 16. [Spec](/app/docs?path=lupin/src/rnd/x16.md)",
+    "created_at": "2026-11-08T22:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000037",
+    "job_id": "job-016",
+    "message": "Synthetic question 55?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 16",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000038": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T03:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000038",
+    "job_id": null,
+    "message": "Synthetic question 56?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T03:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 56",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000039": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T03:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000039",
+    "job_id": null,
+    "message": "Synthetic question 57?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T03:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 57",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000003a": {
+   "notification": {
+    "abstract": "Synthetic abstract 17. [Spec](/app/docs?path=lupin/src/rnd/x17.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002339)",
+    "created_at": "2026-11-09T03:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000003a",
+    "job_id": null,
+    "message": "Synthetic question 58?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 17?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 17",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000003b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T08:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000003b",
+    "job_id": null,
+    "message": "Synthetic question 59?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T08:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 59",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000003c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T04:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000003c",
+    "job_id": null,
+    "message": "Synthetic question 60?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T04:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 60",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000003d": {
+   "notification": {
+    "abstract": "Synthetic abstract 18. [Spec](/app/docs?path=lupin/src/rnd/x18.md)",
+    "created_at": "2026-11-09T08:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000003d",
+    "job_id": null,
+    "message": "Synthetic question 61?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 18",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000003e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T13:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000003e",
+    "job_id": null,
+    "message": "Synthetic question 62?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T13:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 62",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000003f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T13:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000003f",
+    "job_id": null,
+    "message": "Synthetic question 63?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T13:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 63",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000040": {
+   "notification": {
+    "abstract": "Synthetic abstract 19. [Spec](/app/docs?path=lupin/src/rnd/x19.md)",
+    "created_at": "2026-11-09T13:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000040",
+    "job_id": null,
+    "message": "Synthetic question 64?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 19?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 19",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000041": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T18:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000041",
+    "job_id": null,
+    "message": "Synthetic question 65?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T18:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-020",
+    "title": "Synthetic ask 65",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000042": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T18:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000042",
+    "job_id": null,
+    "message": "Synthetic question 66?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-020",
+    "title": "Synthetic ask 66",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000043": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T18:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000043",
+    "job_id": null,
+    "message": "Synthetic question 67?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-020",
+    "title": "Synthetic ask 67",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000044": {
+   "notification": {
+    "abstract": "Synthetic abstract 20. [Spec](/app/docs?path=lupin/src/rnd/x20.md)",
+    "created_at": "2026-11-09T18:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000044",
+    "job_id": null,
+    "message": "Synthetic question 68?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-020",
+    "title": "Synthetic target 20",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000045": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T23:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000045",
+    "job_id": "job-021",
+    "message": "Synthetic question 69?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T23:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 69",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000046": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-09T23:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000046",
+    "job_id": "job-021",
+    "message": "Synthetic question 70?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-09T23:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 70",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000047": {
+   "notification": {
+    "abstract": "Synthetic abstract 21. [Spec](/app/docs?path=lupin/src/rnd/x21.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-00000000233d)",
+    "created_at": "2026-11-09T23:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000047",
+    "job_id": "job-021",
+    "message": "Synthetic question 71?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": true,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 21?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 21",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000048": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T04:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000048",
+    "job_id": null,
+    "message": "Synthetic question 72?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-10T04:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 72",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000049": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T04:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000049",
+    "job_id": null,
+    "message": "Synthetic question 73?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-10T04:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 73",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000004a": {
+   "notification": {
+    "abstract": "Synthetic abstract 22. [Spec](/app/docs?path=lupin/src/rnd/x22.md)",
+    "created_at": "2026-11-10T04:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000004a",
+    "job_id": null,
+    "message": "Synthetic question 74?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 22",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000004b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T09:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000004b",
+    "job_id": null,
+    "message": "Synthetic question 75?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-10T09:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 75",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000004c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T05:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000004c",
+    "job_id": null,
+    "message": "Synthetic question 76?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-10T05:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 76",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000004d": {
+   "notification": {
+    "abstract": "Synthetic abstract 23. [Spec](/app/docs?path=lupin/src/rnd/x23.md)",
+    "created_at": "2026-11-10T09:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000004d",
+    "job_id": null,
+    "message": "Synthetic question 77?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 23?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 23",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000004e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T14:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000004e",
+    "job_id": null,
+    "message": "Synthetic question 78?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-10T14:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 78",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000004f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T14:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000004f",
+    "job_id": null,
+    "message": "Synthetic question 79?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-10T14:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 79",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000050": {
+   "notification": {
+    "abstract": "Synthetic abstract 24. [Spec](/app/docs?path=lupin/src/rnd/x24.md)",
+    "created_at": "2026-11-10T14:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000050",
+    "job_id": null,
+    "message": "Synthetic question 80?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 24",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000051": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T19:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000051",
+    "job_id": null,
+    "message": "Synthetic question 81?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-10T19:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-025",
+    "title": "Synthetic ask 81",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000052": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T19:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000052",
+    "job_id": null,
+    "message": "Synthetic question 82?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-025",
+    "title": "Synthetic ask 82",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000053": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-10T19:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000053",
+    "job_id": null,
+    "message": "Synthetic question 83?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-025",
+    "title": "Synthetic ask 83",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000054": {
+   "notification": {
+    "abstract": "Synthetic abstract 25. [Spec](/app/docs?path=lupin/src/rnd/x25.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002341)",
+    "created_at": "2026-11-10T19:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000054",
+    "job_id": null,
+    "message": "Synthetic question 84?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 25?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-025",
+    "title": "Synthetic target 25",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000055": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T00:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000055",
+    "job_id": "job-026",
+    "message": "Synthetic question 85?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T00:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 85",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000056": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T00:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000056",
+    "job_id": "job-026",
+    "message": "Synthetic question 86?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T00:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 86",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000057": {
+   "notification": {
+    "abstract": "Synthetic abstract 26. [Spec](/app/docs?path=lupin/src/rnd/x26.md)",
+    "created_at": "2026-11-11T00:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000057",
+    "job_id": "job-026",
+    "message": "Synthetic question 87?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 26",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000058": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T05:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000058",
+    "job_id": null,
+    "message": "Synthetic question 88?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T05:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 88",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000059": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T05:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000059",
+    "job_id": null,
+    "message": "Synthetic question 89?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T05:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 89",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000005a": {
+   "notification": {
+    "abstract": "Synthetic abstract 27. [Spec](/app/docs?path=lupin/src/rnd/x27.md)",
+    "created_at": "2026-11-11T05:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000005a",
+    "job_id": null,
+    "message": "Synthetic question 90?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 27?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 27",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000005b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T10:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000005b",
+    "job_id": null,
+    "message": "Synthetic question 91?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T10:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 91",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000005c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T06:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000005c",
+    "job_id": null,
+    "message": "Synthetic question 92?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T06:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 92",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000005d": {
+   "notification": {
+    "abstract": "Synthetic abstract 28. [Spec](/app/docs?path=lupin/src/rnd/x28.md)",
+    "created_at": "2026-11-11T10:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000005d",
+    "job_id": null,
+    "message": "Synthetic question 93?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 28",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000005e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T15:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000005e",
+    "job_id": null,
+    "message": "Synthetic question 94?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T15:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 94",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000005f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T15:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000005f",
+    "job_id": null,
+    "message": "Synthetic question 95?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T15:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 95",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000060": {
+   "notification": {
+    "abstract": "Synthetic abstract 29. [Spec](/app/docs?path=lupin/src/rnd/x29.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002345)",
+    "created_at": "2026-11-11T15:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000060",
+    "job_id": null,
+    "message": "Synthetic question 96?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 29?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 29",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000061": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T20:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000061",
+    "job_id": null,
+    "message": "Synthetic question 97?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-11T20:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-030",
+    "title": "Synthetic ask 97",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000062": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T20:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000062",
+    "job_id": null,
+    "message": "Synthetic question 98?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-030",
+    "title": "Synthetic ask 98",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000063": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-11T20:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000063",
+    "job_id": null,
+    "message": "Synthetic question 99?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-030",
+    "title": "Synthetic ask 99",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000064": {
+   "notification": {
+    "abstract": "Synthetic abstract 30. [Spec](/app/docs?path=lupin/src/rnd/x30.md)",
+    "created_at": "2026-11-11T20:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000064",
+    "job_id": null,
+    "message": "Synthetic question 100?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-030",
+    "title": "Synthetic target 30",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000065": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T01:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000065",
+    "job_id": "job-031",
+    "message": "Synthetic question 101?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T01:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 101",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000066": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T01:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000066",
+    "job_id": "job-031",
+    "message": "Synthetic question 102?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T01:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 102",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000067": {
+   "notification": {
+    "abstract": "Synthetic abstract 31. [Spec](/app/docs?path=lupin/src/rnd/x31.md)",
+    "created_at": "2026-11-12T01:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000067",
+    "job_id": "job-031",
+    "message": "Synthetic question 103?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 31?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 31",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000068": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T06:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000068",
+    "job_id": null,
+    "message": "Synthetic question 104?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T06:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 104",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000069": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T06:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000069",
+    "job_id": null,
+    "message": "Synthetic question 105?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T06:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 105",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000006a": {
+   "notification": {
+    "abstract": "Synthetic abstract 32. [Spec](/app/docs?path=lupin/src/rnd/x32.md)",
+    "created_at": "2026-11-12T06:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000006a",
+    "job_id": null,
+    "message": "Synthetic question 106?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 32",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000006b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T11:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000006b",
+    "job_id": null,
+    "message": "Synthetic question 107?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T11:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 107",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000006c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T07:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000006c",
+    "job_id": null,
+    "message": "Synthetic question 108?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T07:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 108",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000006d": {
+   "notification": {
+    "abstract": "Synthetic abstract 33. [Spec](/app/docs?path=lupin/src/rnd/x33.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002349)",
+    "created_at": "2026-11-12T11:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000006d",
+    "job_id": null,
+    "message": "Synthetic question 109?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 33?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 33",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000006e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T16:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000006e",
+    "job_id": null,
+    "message": "Synthetic question 110?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T16:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 110",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000006f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T16:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000006f",
+    "job_id": null,
+    "message": "Synthetic question 111?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T16:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 111",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000070": {
+   "notification": {
+    "abstract": "Synthetic abstract 34. [Spec](/app/docs?path=lupin/src/rnd/x34.md)",
+    "created_at": "2026-11-12T16:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000070",
+    "job_id": null,
+    "message": "Synthetic question 112?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 34",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000071": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T21:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000071",
+    "job_id": null,
+    "message": "Synthetic question 113?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-12T21:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-035",
+    "title": "Synthetic ask 113",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000072": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T21:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000072",
+    "job_id": null,
+    "message": "Synthetic question 114?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-035",
+    "title": "Synthetic ask 114",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000073": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-12T21:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000073",
+    "job_id": null,
+    "message": "Synthetic question 115?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-035",
+    "title": "Synthetic ask 115",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000074": {
+   "notification": {
+    "abstract": "Synthetic abstract 35. [Spec](/app/docs?path=lupin/src/rnd/x35.md)",
+    "created_at": "2026-11-12T21:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000074",
+    "job_id": null,
+    "message": "Synthetic question 116?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": true,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 35?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-035",
+    "title": "Synthetic target 35",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000075": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T02:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000075",
+    "job_id": "job-036",
+    "message": "Synthetic question 117?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T02:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 117",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000076": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T02:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000076",
+    "job_id": "job-036",
+    "message": "Synthetic question 118?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T02:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 118",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000077": {
+   "notification": {
+    "abstract": "Synthetic abstract 36. [Spec](/app/docs?path=lupin/src/rnd/x36.md)",
+    "created_at": "2026-11-13T02:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000077",
+    "job_id": "job-036",
+    "message": "Synthetic question 119?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 36",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000078": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T07:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000078",
+    "job_id": null,
+    "message": "Synthetic question 120?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T07:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 120",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000079": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T07:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000079",
+    "job_id": null,
+    "message": "Synthetic question 121?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T07:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 121",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000007a": {
+   "notification": {
+    "abstract": "Synthetic abstract 37. [Spec](/app/docs?path=lupin/src/rnd/x37.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-00000000234d)",
+    "created_at": "2026-11-13T07:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000007a",
+    "job_id": null,
+    "message": "Synthetic question 122?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 37?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 37",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000007b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T12:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000007b",
+    "job_id": null,
+    "message": "Synthetic question 123?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T12:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 123",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000007c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T08:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000007c",
+    "job_id": null,
+    "message": "Synthetic question 124?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T08:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 124",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000007d": {
+   "notification": {
+    "abstract": "Synthetic abstract 38. [Spec](/app/docs?path=lupin/src/rnd/x38.md)",
+    "created_at": "2026-11-13T12:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000007d",
+    "job_id": null,
+    "message": "Synthetic question 125?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 38",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000007e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T17:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000007e",
+    "job_id": null,
+    "message": "Synthetic question 126?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T17:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 126",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000007f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T17:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000007f",
+    "job_id": null,
+    "message": "Synthetic question 127?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T17:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 127",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000080": {
+   "notification": {
+    "abstract": "Synthetic abstract 39. [Spec](/app/docs?path=lupin/src/rnd/x39.md)",
+    "created_at": "2026-11-13T17:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000080",
+    "job_id": null,
+    "message": "Synthetic question 128?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 39?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 39",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000081": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T22:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000081",
+    "job_id": null,
+    "message": "Synthetic question 129?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-13T22:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-040",
+    "title": "Synthetic ask 129",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000082": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T22:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000082",
+    "job_id": null,
+    "message": "Synthetic question 130?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-040",
+    "title": "Synthetic ask 130",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000083": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-13T22:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000083",
+    "job_id": null,
+    "message": "Synthetic question 131?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-040",
+    "title": "Synthetic ask 131",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000084": {
+   "notification": {
+    "abstract": "Synthetic abstract 40. [Spec](/app/docs?path=lupin/src/rnd/x40.md)",
+    "created_at": "2026-11-13T22:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000084",
+    "job_id": null,
+    "message": "Synthetic question 132?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-040",
+    "title": "Synthetic target 40",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000085": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T03:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000085",
+    "job_id": "job-041",
+    "message": "Synthetic question 133?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T03:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 133",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000086": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T03:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000086",
+    "job_id": "job-041",
+    "message": "Synthetic question 134?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T03:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 134",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000087": {
+   "notification": {
+    "abstract": "Synthetic abstract 41. [Spec](/app/docs?path=lupin/src/rnd/x41.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002351)",
+    "created_at": "2026-11-14T03:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000087",
+    "job_id": "job-041",
+    "message": "Synthetic question 135?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 41?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 41",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000088": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T08:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000088",
+    "job_id": null,
+    "message": "Synthetic question 136?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T08:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 136",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000089": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T08:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000089",
+    "job_id": null,
+    "message": "Synthetic question 137?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T08:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 137",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000008a": {
+   "notification": {
+    "abstract": "Synthetic abstract 42. [Spec](/app/docs?path=lupin/src/rnd/x42.md)",
+    "created_at": "2026-11-14T08:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000008a",
+    "job_id": null,
+    "message": "Synthetic question 138?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 42",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000008b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T13:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000008b",
+    "job_id": null,
+    "message": "Synthetic question 139?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T13:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 139",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000008c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T09:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000008c",
+    "job_id": null,
+    "message": "Synthetic question 140?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T09:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 140",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000008d": {
+   "notification": {
+    "abstract": "Synthetic abstract 43. [Spec](/app/docs?path=lupin/src/rnd/x43.md)",
+    "created_at": "2026-11-14T13:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000008d",
+    "job_id": null,
+    "message": "Synthetic question 141?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 43?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 43",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000008e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T18:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000008e",
+    "job_id": null,
+    "message": "Synthetic question 142?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T18:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 142",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000008f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T18:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000008f",
+    "job_id": null,
+    "message": "Synthetic question 143?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T18:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 143",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000090": {
+   "notification": {
+    "abstract": "Synthetic abstract 44. [Spec](/app/docs?path=lupin/src/rnd/x44.md)",
+    "created_at": "2026-11-14T18:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000090",
+    "job_id": null,
+    "message": "Synthetic question 144?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 44",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000091": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T23:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000091",
+    "job_id": null,
+    "message": "Synthetic question 145?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-14T23:05:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-045",
+    "title": "Synthetic ask 145",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000092": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T23:10:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000092",
+    "job_id": null,
+    "message": "Synthetic question 146?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-045",
+    "title": "Synthetic ask 146",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000093": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-14T23:12:00+00:00",
+    "direction": "human_to_ai",
+    "id": "000ae915-0000-0000-0000-000000000093",
+    "job_id": null,
+    "message": "Synthetic question 147?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": false,
+    "response_type": null,
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-045",
+    "title": "Synthetic ask 147",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000094": {
+   "notification": {
+    "abstract": "Synthetic abstract 45. [Spec](/app/docs?path=lupin/src/rnd/x45.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002355)",
+    "created_at": "2026-11-14T23:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000094",
+    "job_id": null,
+    "message": "Synthetic question 148?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 45?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-045",
+    "title": "Synthetic target 45",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000095": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-15T04:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000095",
+    "job_id": "job-046",
+    "message": "Synthetic question 149?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-15T04:03:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 149",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000096": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-15T04:08:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000096",
+    "job_id": "job-046",
+    "message": "Synthetic question 150?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-15T04:10:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 150",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000097": {
+   "notification": {
+    "abstract": "Synthetic abstract 46. [Spec](/app/docs?path=lupin/src/rnd/x46.md)",
+    "created_at": "2026-11-15T04:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000097",
+    "job_id": "job-046",
+    "message": "Synthetic question 151?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 46",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000098": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-15T09:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000098",
+    "job_id": null,
+    "message": "Synthetic question 152?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-15T09:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 152",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-000000000099": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-15T09:05:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000099",
+    "job_id": null,
+    "message": "Synthetic question 153?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-15T09:09:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": "thr-other",
+    "title": "Synthetic ask 153",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000009a": {
+   "notification": {
+    "abstract": "Synthetic abstract 47. [Spec](/app/docs?path=lupin/src/rnd/x47.md)",
+    "created_at": "2026-11-15T09:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000009a",
+    "job_id": null,
+    "message": "Synthetic question 154?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 47?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 47",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000009b": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-15T14:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000009b",
+    "job_id": null,
+    "message": "Synthetic question 155?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-15T14:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 155",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000009c": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-15T10:40:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000009c",
+    "job_id": null,
+    "message": "Synthetic question 156?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-15T10:44:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "yes"
+    },
+    "sender_id": "x.y@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 156",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000009d": {
+   "notification": {
+    "abstract": "Synthetic abstract 48. [Spec](/app/docs?path=lupin/src/rnd/x48.md)",
+    "created_at": "2026-11-15T14:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000009d",
+    "job_id": null,
+    "message": "Synthetic question 157?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 48",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000009e": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-15T19:00:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000009e",
+    "job_id": null,
+    "message": "Synthetic question 158?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-15T19:04:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 158",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-00000000009f": {
+   "notification": {
+    "abstract": null,
+    "created_at": "2026-11-15T19:02:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000009f",
+    "job_id": null,
+    "message": "Synthetic question 159?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": "2026-11-15T19:06:00+00:00",
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": {
+     "source": "ui",
+     "value": "no"
+    },
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic ask 159",
+    "type": "task"
+   }
+  },
+  "000ae915-0000-0000-0000-0000000000a0": {
+   "notification": {
+    "abstract": "Synthetic abstract 49. [Spec](/app/docs?path=lupin/src/rnd/x49.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002359)",
+    "created_at": "2026-11-15T19:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-0000000000a0",
+    "job_id": null,
+    "message": "Synthetic question 160?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": true,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 49?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 49",
+    "type": "task"
+   }
+  }
+ },
+ "synthetic": true,
+ "targets": [
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 0. [Spec](/app/docs?path=lupin/src/rnd/x0.md)",
+    "created_at": "2026-11-05T14:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000004",
+    "job_id": null,
+    "message": "Synthetic question 4?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-000",
+    "title": "Synthetic target 0",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000004"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 1. [Spec](/app/docs?path=lupin/src/rnd/x1.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002329)",
+    "created_at": "2026-11-05T19:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000007",
+    "job_id": "job-001",
+    "message": "Synthetic question 7?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 1?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 1",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000007"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 2. [Spec](/app/docs?path=lupin/src/rnd/x2.md)",
+    "created_at": "2026-11-06T00:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000000a",
+    "job_id": null,
+    "message": "Synthetic question 10?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 2",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000000a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 3. [Spec](/app/docs?path=lupin/src/rnd/x3.md)",
+    "created_at": "2026-11-06T05:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000000d",
+    "job_id": null,
+    "message": "Synthetic question 13?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 3?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 3",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000000d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 4. [Spec](/app/docs?path=lupin/src/rnd/x4.md)",
+    "created_at": "2026-11-06T10:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000010",
+    "job_id": null,
+    "message": "Synthetic question 16?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 4",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000010"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 5. [Spec](/app/docs?path=lupin/src/rnd/x5.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-00000000232d)",
+    "created_at": "2026-11-06T15:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000014",
+    "job_id": null,
+    "message": "Synthetic question 20?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 5?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-005",
+    "title": "Synthetic target 5",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000014"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 6. [Spec](/app/docs?path=lupin/src/rnd/x6.md)",
+    "created_at": "2026-11-06T20:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000017",
+    "job_id": "job-006",
+    "message": "Synthetic question 23?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 6",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000017"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 7. [Spec](/app/docs?path=lupin/src/rnd/x7.md)",
+    "created_at": "2026-11-07T01:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000001a",
+    "job_id": null,
+    "message": "Synthetic question 26?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": true,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 7?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 7",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000001a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 8. [Spec](/app/docs?path=lupin/src/rnd/x8.md)",
+    "created_at": "2026-11-07T06:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000001d",
+    "job_id": null,
+    "message": "Synthetic question 29?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 8",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000001d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 9. [Spec](/app/docs?path=lupin/src/rnd/x9.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002331)",
+    "created_at": "2026-11-07T11:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000020",
+    "job_id": null,
+    "message": "Synthetic question 32?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 9?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 9",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000020"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 10. [Spec](/app/docs?path=lupin/src/rnd/x10.md)",
+    "created_at": "2026-11-07T16:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000024",
+    "job_id": null,
+    "message": "Synthetic question 36?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-010",
+    "title": "Synthetic target 10",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000024"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 11. [Spec](/app/docs?path=lupin/src/rnd/x11.md)",
+    "created_at": "2026-11-07T21:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000027",
+    "job_id": "job-011",
+    "message": "Synthetic question 39?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 11?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 11",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000027"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 12. [Spec](/app/docs?path=lupin/src/rnd/x12.md)",
+    "created_at": "2026-11-08T02:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000002a",
+    "job_id": null,
+    "message": "Synthetic question 42?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 12",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000002a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 13. [Spec](/app/docs?path=lupin/src/rnd/x13.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002335)",
+    "created_at": "2026-11-08T07:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000002d",
+    "job_id": null,
+    "message": "Synthetic question 45?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 13?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 13",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000002d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 14. [Spec](/app/docs?path=lupin/src/rnd/x14.md)",
+    "created_at": "2026-11-08T12:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000030",
+    "job_id": null,
+    "message": "Synthetic question 48?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 14",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000030"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 15. [Spec](/app/docs?path=lupin/src/rnd/x15.md)",
+    "created_at": "2026-11-08T17:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000034",
+    "job_id": null,
+    "message": "Synthetic question 52?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 15?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-015",
+    "title": "Synthetic target 15",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000034"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 16. [Spec](/app/docs?path=lupin/src/rnd/x16.md)",
+    "created_at": "2026-11-08T22:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000037",
+    "job_id": "job-016",
+    "message": "Synthetic question 55?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 16",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000037"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 17. [Spec](/app/docs?path=lupin/src/rnd/x17.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002339)",
+    "created_at": "2026-11-09T03:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000003a",
+    "job_id": null,
+    "message": "Synthetic question 58?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 17?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 17",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000003a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 18. [Spec](/app/docs?path=lupin/src/rnd/x18.md)",
+    "created_at": "2026-11-09T08:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000003d",
+    "job_id": null,
+    "message": "Synthetic question 61?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 18",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000003d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 19. [Spec](/app/docs?path=lupin/src/rnd/x19.md)",
+    "created_at": "2026-11-09T13:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000040",
+    "job_id": null,
+    "message": "Synthetic question 64?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 19?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 19",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000040"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 20. [Spec](/app/docs?path=lupin/src/rnd/x20.md)",
+    "created_at": "2026-11-09T18:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000044",
+    "job_id": null,
+    "message": "Synthetic question 68?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-020",
+    "title": "Synthetic target 20",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000044"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 21. [Spec](/app/docs?path=lupin/src/rnd/x21.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-00000000233d)",
+    "created_at": "2026-11-09T23:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000047",
+    "job_id": "job-021",
+    "message": "Synthetic question 71?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": true,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 21?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 21",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000047"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 22. [Spec](/app/docs?path=lupin/src/rnd/x22.md)",
+    "created_at": "2026-11-10T04:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000004a",
+    "job_id": null,
+    "message": "Synthetic question 74?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 22",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000004a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 23. [Spec](/app/docs?path=lupin/src/rnd/x23.md)",
+    "created_at": "2026-11-10T09:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000004d",
+    "job_id": null,
+    "message": "Synthetic question 77?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 23?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 23",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000004d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 24. [Spec](/app/docs?path=lupin/src/rnd/x24.md)",
+    "created_at": "2026-11-10T14:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000050",
+    "job_id": null,
+    "message": "Synthetic question 80?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 24",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000050"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 25. [Spec](/app/docs?path=lupin/src/rnd/x25.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002341)",
+    "created_at": "2026-11-10T19:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000054",
+    "job_id": null,
+    "message": "Synthetic question 84?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 25?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-025",
+    "title": "Synthetic target 25",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000054"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 26. [Spec](/app/docs?path=lupin/src/rnd/x26.md)",
+    "created_at": "2026-11-11T00:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000057",
+    "job_id": "job-026",
+    "message": "Synthetic question 87?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 26",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000057"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 27. [Spec](/app/docs?path=lupin/src/rnd/x27.md)",
+    "created_at": "2026-11-11T05:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000005a",
+    "job_id": null,
+    "message": "Synthetic question 90?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 27?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 27",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000005a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 28. [Spec](/app/docs?path=lupin/src/rnd/x28.md)",
+    "created_at": "2026-11-11T10:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000005d",
+    "job_id": null,
+    "message": "Synthetic question 93?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 28",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000005d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 29. [Spec](/app/docs?path=lupin/src/rnd/x29.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002345)",
+    "created_at": "2026-11-11T15:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000060",
+    "job_id": null,
+    "message": "Synthetic question 96?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 29?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 29",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000060"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 30. [Spec](/app/docs?path=lupin/src/rnd/x30.md)",
+    "created_at": "2026-11-11T20:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000064",
+    "job_id": null,
+    "message": "Synthetic question 100?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-030",
+    "title": "Synthetic target 30",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000064"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 31. [Spec](/app/docs?path=lupin/src/rnd/x31.md)",
+    "created_at": "2026-11-12T01:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000067",
+    "job_id": "job-031",
+    "message": "Synthetic question 103?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 31?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 31",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000067"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 32. [Spec](/app/docs?path=lupin/src/rnd/x32.md)",
+    "created_at": "2026-11-12T06:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000006a",
+    "job_id": null,
+    "message": "Synthetic question 106?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 32",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000006a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 33. [Spec](/app/docs?path=lupin/src/rnd/x33.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002349)",
+    "created_at": "2026-11-12T11:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000006d",
+    "job_id": null,
+    "message": "Synthetic question 109?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 33?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 33",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000006d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 34. [Spec](/app/docs?path=lupin/src/rnd/x34.md)",
+    "created_at": "2026-11-12T16:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000070",
+    "job_id": null,
+    "message": "Synthetic question 112?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 34",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000070"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 35. [Spec](/app/docs?path=lupin/src/rnd/x35.md)",
+    "created_at": "2026-11-12T21:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000074",
+    "job_id": null,
+    "message": "Synthetic question 116?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": true,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 35?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-035",
+    "title": "Synthetic target 35",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000074"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 36. [Spec](/app/docs?path=lupin/src/rnd/x36.md)",
+    "created_at": "2026-11-13T02:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000077",
+    "job_id": "job-036",
+    "message": "Synthetic question 119?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 36",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000077"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 37. [Spec](/app/docs?path=lupin/src/rnd/x37.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-00000000234d)",
+    "created_at": "2026-11-13T07:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000007a",
+    "job_id": null,
+    "message": "Synthetic question 122?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 37?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 37",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000007a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 38. [Spec](/app/docs?path=lupin/src/rnd/x38.md)",
+    "created_at": "2026-11-13T12:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000007d",
+    "job_id": null,
+    "message": "Synthetic question 125?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 38",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000007d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 39. [Spec](/app/docs?path=lupin/src/rnd/x39.md)",
+    "created_at": "2026-11-13T17:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000080",
+    "job_id": null,
+    "message": "Synthetic question 128?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 39?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 39",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000080"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 40. [Spec](/app/docs?path=lupin/src/rnd/x40.md)",
+    "created_at": "2026-11-13T22:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000084",
+    "job_id": null,
+    "message": "Synthetic question 132?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000000",
+    "state": "created",
+    "thread_id": "thr-040",
+    "title": "Synthetic target 40",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000084"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 41. [Spec](/app/docs?path=lupin/src/rnd/x41.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002351)",
+    "created_at": "2026-11-14T03:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000087",
+    "job_id": "job-041",
+    "message": "Synthetic question 135?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 41?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000001",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 41",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000087"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 42. [Spec](/app/docs?path=lupin/src/rnd/x42.md)",
+    "created_at": "2026-11-14T08:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000008a",
+    "job_id": null,
+    "message": "Synthetic question 138?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000002",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 42",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000008a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 43. [Spec](/app/docs?path=lupin/src/rnd/x43.md)",
+    "created_at": "2026-11-14T13:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000008d",
+    "job_id": null,
+    "message": "Synthetic question 141?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 43?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000003",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 43",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000008d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 44. [Spec](/app/docs?path=lupin/src/rnd/x44.md)",
+    "created_at": "2026-11-14T18:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000090",
+    "job_id": null,
+    "message": "Synthetic question 144?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 44",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000090"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 45. [Spec](/app/docs?path=lupin/src/rnd/x45.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002355)",
+    "created_at": "2026-11-14T23:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000094",
+    "job_id": null,
+    "message": "Synthetic question 148?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": "Hold",
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 45?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000005",
+    "state": "created",
+    "thread_id": "thr-045",
+    "title": "Synthetic target 45",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000094"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 46. [Spec](/app/docs?path=lupin/src/rnd/x46.md)",
+    "created_at": "2026-11-15T04:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-000000000097",
+    "job_id": "job-046",
+    "message": "Synthetic question 151?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000006",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 46",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-000000000097"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 47. [Spec](/app/docs?path=lupin/src/rnd/x47.md)",
+    "created_at": "2026-11-15T09:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000009a",
+    "job_id": null,
+    "message": "Synthetic question 154?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": false,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 47?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000007",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 47",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000009a"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 48. [Spec](/app/docs?path=lupin/src/rnd/x48.md)",
+    "created_at": "2026-11-15T14:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-00000000009d",
+    "job_id": null,
+    "message": "Synthetic question 157?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": null,
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000008",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 48",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-00000000009d"
+  },
+  {
+   "target_notification": {
+    "abstract": "Synthetic abstract 49. [Spec](/app/docs?path=lupin/src/rnd/x49.md) [Approve](/app/tasks/approve?row=000ae915-0000-0000-0000-000000002359)",
+    "created_at": "2026-11-15T19:30:00+00:00",
+    "direction": "ai_to_human",
+    "id": "000ae915-0000-0000-0000-0000000000a0",
+    "job_id": null,
+    "message": "Synthetic question 160?",
+    "priority": "medium",
+    "recipient_id": "00000000-0000-4000-8000-0000000000ab",
+    "reply_to": null,
+    "responded_at": null,
+    "response_default": null,
+    "response_options": {
+     "questions": [
+      {
+       "header": "approve",
+       "multi_select": true,
+       "options": [
+        {
+         "description": "Merge it now",
+         "label": "Approve",
+         "recommended": true
+        },
+        {
+         "description": "Wait for review",
+         "label": "Hold"
+        }
+       ],
+       "question": "Approve item 49?"
+      }
+     ]
+    },
+    "response_requested": true,
+    "response_type": "multiple_choice",
+    "response_value": null,
+    "sender_id": "claude.code@lupin.deepily.ai#s0000009",
+    "state": "created",
+    "thread_id": null,
+    "title": "Synthetic target 49",
+    "type": "task"
+   },
+   "target_notification_id": "000ae915-0000-0000-0000-0000000000a0"
+  }
+ ]
+}
