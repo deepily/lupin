@@ -5,6 +5,7 @@ The summaries are hand-written literals in the shape the replay's summarize retu
 are worked out by hand in each test, so a renderer that mixed up two arms or two labels would be caught.
 """
 
+import copy
 import hashlib
 import json
 import subprocess
@@ -202,3 +203,15 @@ def test_the_retune_sweep_is_a_table_of_each_points_answered_figures_in_threshol
 def test_a_report_without_a_retune_result_has_no_sweep_section():
     """The section is optional, so an earlier caller's report is unchanged."""
     assert "Retune sweep" not in _report()
+
+
+def test_three_points_are_listed_by_threshold_then_top_k_the_best_is_named_apart_and_the_input_is_left_alone():
+    """Points 0.5/3, 0.3/8 and 0.4/5 sort by threshold, and the best is the middle one."""
+    points = [ _point( 0.5, 3, tune_per_100=40.0 ), _point( 0.3, 8, tune_per_100=35.0 ), _point( 0.4, 5, tune_per_100=44.0 ) ]
+    before = copy.deepcopy( points )
+    text   = _report( retune=dict( RETUNE, points=points, best=points[ 2 ] ) )
+    rows   = [ line for line in text.splitlines() if line.startswith( "| 0." ) ]
+    assert [ row.split( "|" )[ 1 ].strip() for row in rows ] == [ "0.3", "0.4", "0.5" ]
+    assert [ row.split( "|" )[ 2 ].strip() for row in rows ] == [ "8", "5", "3" ]
+    assert "Best on the tune window: threshold 0.4, top k 5." in text
+    assert points == before, "rendering must not reorder the caller's points"
