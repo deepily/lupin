@@ -24,6 +24,8 @@ A column is a dict with these keys:
 - produced_by: optional, the replay code commit and run script that made the column
 """
 
+import argparse
+import json
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 COLUMN_KEYS = ( "label", "commit", "vector_source", "ask_count", "threshold", "top_k", "coverage", "calibration", "yes_no_summary", "ask_ids", "final_ids" )
@@ -190,7 +192,7 @@ def _vector_source( source: Any ) -> str:
     return source if isinstance( source, str ) else f"{source[ 'model' ]} @ {source[ 'revision' ]}"
 
 
-def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before and after: regenerated question vectors" ) -> str:
+def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before and after: regenerated question vectors", notes: Sequence[str] = () ) -> str:
     """
     Render the four-column report as Markdown.
 
@@ -203,7 +205,8 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
           its two windows, read from its mix) and produced_by, or "not stated" when the column has none
         - one comparison table gives every figure in all four columns, then the change between each adjacent pair
         - a figure one column lacks reads n/a, and its changes read n/a
-        - the same columns give the same text
+        - each note is printed as a bullet under the introduction
+        - the same columns and notes give the same text
     """
     check_columns( columns )
     flat = [ column_rows( column ) for column in columns ]
@@ -213,7 +216,7 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
     labels = [ column[ "label" ] for column in columns ]
     lines  = [ f"# {title}", "",
                "Change 1 to 2 is the effect of the regenerated vectors alone. Change 2 to 3 is the effect of the added asks."
-               " Change 3 to 4 is the effect of scoring only before's final window.", "",
+               " Change 3 to 4 is the effect of scoring only before's final window.", "" ] + [ f"- {note}" for note in notes ] + ( [ "" ] if notes else [] ) + [
                "| column | label | commit | vector source | asks | scored | produced by |", "|---|---|---|---|---|---|---|" ]
     for number, column in enumerate( columns, start=1 ):
         scored = sum( column[ "coverage" ][ "tune_mix" ].values() ) + sum( column[ "coverage" ][ "final_mix" ].values() )
@@ -225,3 +228,79 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
         lines.append( f"| {name} | " + " | ".join( _shown( figure ) for figure in figures ) + " | " + " | ".join( changes ) + " |" )
     lines.append( "" )
     return "\n".join( lines )
+
+
+def final_correct( column: Dict[str, Any] ) -> int:
+    """
+    Sum a column's final-window correct forecasts over its answer types.
+
+    Requires:
+        - column holds coverage with final-window scores for each type
+
+    Ensures:
+        - returns the total correct count
+    """
+    return sum( score[ "correct" ] for score in column[ "coverage" ][ "scores" ][ "final" ].values() )
+
+
+def assemble_report( columns: Sequence[Dict[str, Any]], committed_final_correct: int, control_final_correct: int, before: Dict[str, Any],
+                     notes: Sequence[str] = (), title: str = "Before and after: regenerated question vectors" ) -> str:
+    """
+    Check the control, set the Before column's provenance and render the report.
+
+    Requires:
+        - columns are the four column dicts; before holds the commit and produced_by of the committed baseline
+        - committed_final_correct is the final-window correct count of the committed baseline
+        - control_final_correct is the same count from the control run on stored vectors
+
+    Ensures:
+        - the control run and column 1 each reproduce the committed count, or nothing is rendered
+        - column 1 carries the commit and produced_by that before names
+        - returns the render of the four columns
+
+    Raises:
+        - ReportMismatch when either count differs, or when the columns do not fit the design
+    """
+    check_control( committed_final_correct, control_final_correct )
+    check_control( committed_final_correct, final_correct( columns[ 0 ] ) )
+    return render_before_after( [ dict( columns[ 0 ], **before ) ] + list( columns[ 1: ] ), title, notes )
+
+
+def main( argv: Optional[Sequence[str]] = None ) -> int:
+    """
+    Build the committed before-and-after report from the four column files.
+
+    Requires:
+        - argv names the four column files in order, the control report, the frozen retune report and the output path
+        - the control report and the frozen report are retune reports with a grid point at threshold 0.5 and top k 10
+
+    Ensures:
+        - writes the Markdown report and returns 0
+
+    Raises:
+        - ReportMismatch when the control or column 1 fails to reproduce the committed count
+    """
+    parser = argparse.ArgumentParser( description="Build the before-and-after report from four column files." )
+    parser.add_argument( "--columns", nargs=4, required=True )
+    parser.add_argument( "--control-report", required=True )
+    parser.add_argument( "--frozen-report", required=True )
+    parser.add_argument( "--before-commit", required=True )
+    parser.add_argument( "--before-produced-by", required=True )
+    parser.add_argument( "--note", action="append", default=[] )
+    parser.add_argument( "--out", required=True )
+    args = parser.parse_args( argv )
+    def at_frozen_point( path: str ) -> int:
+        with open( path, encoding="utf-8" ) as handle: report = json.load( handle )
+        return next( point for point in report[ "grid_points" ] if point[ "threshold" ] == 0.5 and point[ "top_k" ] == 10 )[ "final_correct" ]
+    columns = []
+    for path in args.columns:
+        with open( path, encoding="utf-8" ) as handle: columns.append( json.load( handle ) )
+    text = assemble_report( columns, at_frozen_point( args.frozen_report ), at_frozen_point( args.control_report ),
+                            { "commit": args.before_commit, "produced_by": args.before_produced_by }, args.note )
+    with open( args.out, "w", encoding="utf-8" ) as handle: handle.write( text )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - thin process entry, main() is what the tests drive
+    import sys
+    sys.exit( main( sys.argv[ 1: ] ) )
