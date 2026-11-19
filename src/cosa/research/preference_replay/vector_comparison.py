@@ -23,7 +23,6 @@ HTTP and nothing here loads a model or touches a GPU.
 import argparse
 import hashlib
 import json
-import math
 import statistics
 import sys
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -32,6 +31,7 @@ from sqlalchemy import text
 
 from cosa.memory.embedding_provider import get_embedding_provider
 from cosa.research.preference_replay.question_vectors import load_side_file
+from cosa.rest.db.embedding_regeneration import l2_norm
 from cosa.rest.db.database import get_db
 from cosa.rest.postgres_models import Notification
 
@@ -60,19 +60,6 @@ def parse_vector( value: Any ) -> List[ float ]:
     return [ float( part ) for part in value ]
 
 
-def norm( vector: Sequence[ float ] ) -> float:
-    """
-    Return the Euclidean length of a vector.
-
-    Requires:
-        - vector is a sequence of numbers
-
-    Ensures:
-        - returns a non-negative float
-    """
-    return math.sqrt( sum( part * part for part in vector ) )
-
-
 def cosine( first: Sequence[ float ], second: Sequence[ float ] ) -> float:
     """
     Return the cosine similarity of two vectors of equal length.
@@ -87,7 +74,7 @@ def cosine( first: Sequence[ float ], second: Sequence[ float ] ) -> float:
         - ValueError when the lengths differ or a vector has zero norm
     """
     if len( first ) != len( second ): raise ValueError( f"vectors differ in width: {len( first )} and {len( second )}" )
-    scale = norm( first ) * norm( second )
+    scale = l2_norm( first ) * l2_norm( second )
     if scale == 0.0: raise ValueError( "a vector has zero norm" )
     return sum( a * b for a, b in zip( first, second ) ) / scale
 
@@ -133,7 +120,7 @@ def compare( stored: Dict[ str, List[ float ] ], fresh: Dict[ str, List[ float ]
     Raises:
         - KeyError when a stored id has no fresh vector
     """
-    return { row_id: { "cosine": cosine( vector, fresh[ row_id ] ), "norm_ratio": norm( fresh[ row_id ] ) / norm( vector ) } for row_id, vector in stored.items() }
+    return { row_id: { "cosine": cosine( vector, fresh[ row_id ] ), "norm_ratio": l2_norm( fresh[ row_id ] ) / l2_norm( vector ) } for row_id, vector in stored.items() }
 
 
 def positive_control( provider, pairs: List[ Tuple[ str, str ] ], fresh: Dict[ str, List[ float ] ] ) -> Dict[ str, float ]:

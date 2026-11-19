@@ -13,7 +13,6 @@ This is a different instrument from the Jev run. It has no drafted need, and the
 So run it on the 97 pairs as well, and read the 60 against the 97 under one instrument.
 """
 import argparse
-import asyncio
 import concurrent.futures
 import json
 import pathlib
@@ -159,7 +158,7 @@ def opus_ask( model=None, query_fn=None ):
         - it must not be called from a running event loop; each call runs its own
     """
     model = chs.model_id( chs.JUDGE_MODEL_KEY ) if model is None else model
-    return lambda system, user: asyncio.run( model_transport.complete( model, system, user, query_fn=query_fn ) )
+    return model_transport.blocking_ask( model, query_fn=query_fn )
 
 
 def parse_args( argv=None ):

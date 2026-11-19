@@ -1,6 +1,5 @@
 """Label preparation for the proof: planted and monolith pairs, blind packets, answer key."""
 import argparse
-import asyncio
 import collections
 import concurrent.futures
 import hashlib
@@ -57,7 +56,8 @@ def make_ask( complete, model ):
     Ensures:
         - returns ask( system, user ) giving the reply text, each call run to the end before it returns
     """
-    return lambda system, user: unfence( asyncio.run( complete( model, system, user ) ) )
+    ask = model_transport.blocking_ask( model, call=complete )
+    return lambda system, user: unfence( ask( system, user ) )
 
 
 def unfence( text ):

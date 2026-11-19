@@ -3,7 +3,7 @@ capability: duplicate-check-audit
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_audit.index_id_finder@39c1679d22
-  - lupin_mcp.duplicate_check_audit.queue_audits@48f4a6a0f8
+  - lupin_mcp.duplicate_check_audit.queue_audits@40b52de0e7
 ---
 # Duplicate check audit queue
 `queue_audits` in `lupin_mcp.duplicate_check_audit` queues a known-miss shadow audit for each duplicate the daily check finds. The queue is described in [[repo-tools-candidate-shadow-audit-queue]].

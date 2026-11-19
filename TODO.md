@@ -16,6 +16,21 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-19 (Cheech 🌿 `ec5dd3e7`, Principle learner walkthrough, cascade row `8e53fc1b`; times Eastern)
+
+Rick's replies are recorded word for word in the [rulings record](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.19-principle-learner-rulings-verbatim.md).
+
+- 2026-11-19 — **Does the learner join the remediation re-plan?** → **No: a separate track.** Why: the baseline must stay an independent comparison.
+- 2026-11-19 — **Who owns any trained ranker?** → **The learner.** Why: the baseline keeps only its untrained parts.
+- 2026-11-19 — **Who builds the control arm?** → **The remediation's Haiku context job.** Why: the learner's arm is that job plus one prompt block.
+- 2026-11-19 — **Which models?** → **Haiku for both forecast arms, Sonnet for the extractor.** Why: a shared model keeps the comparison clean.
+- 2026-11-19 — **The draft answer at reveal?** → **An optional field on the fold-open call.** Why: it adds detail and blocks nothing.
+- 2026-11-19 — **What does the context adapter build on?** → **`rebuild_context`; the 50-target export stays a fixture.** Why: it already does as-of joins.
+- 2026-11-19 — **Where are contested principles resolved?** → **A capped, batched card, about three a day.** Why: it reuses the ask path.
+- 2026-11-19 — **Ask-form principles?** → **Record only, for now.** Why: showing them to askers would change the questions and break comparison.
+- 2026-11-19 — **Where do the hidden arms store forecasts?** → **A sibling table keyed by card and arm** (Rick, about 14:30, card). Why: outcome and reveal stay once per card.
+- 2026-11-19 — **Which arms go in the sibling table?** → **Every arm, the displayed one flagged.** Why: the harness reads every forecast from one place.
+
 ## 📚 Decisions log 2026-11-18 (Mr. Radio 🦉 `d6956394`, build manager for preference learning; crew Sam, Rio, Tiffany, Chloé, Clayton, Maya, all reaped; times Eastern)
 
 - **Rick, morning**: ruled the plan's six decisions, recorded on row 94a8f561. They are the expert's order with a checkpoint, folded hints, and auto-submit disabled with the code kept. The others are bounded Claude Code on Haiku, the trust gate only in the last phase, and his three uploaded files.

@@ -11,7 +11,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.install_mode@8a07fed64c
   - lupin_mcp.duplicate_check_daily.live_parts@d30d313817
   - lupin_mcp.duplicate_check_daily.live_filer@ae7b324cde
-  - lupin_mcp.duplicate_check_daily.live_auditor@4cc714910e
+  - lupin_mcp.duplicate_check_daily.live_auditor@7c1228f36b
   - lupin_mcp.duplicate_check_daily.main@6e805bb499
   - lupin_mcp.duplicate_check_daily.resolve_ceiling@8514765a03
   - lupin_mcp.duplicate_check_daily.append_manifest@fe7667a045

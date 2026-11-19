@@ -266,8 +266,8 @@ def test_the_event_loop_keeps_running_while_senders_visible_works( monkeypatch )
 
 
 def test_the_sender_session_suffix_parses_every_shape():
-    assert N._sender_session_suffix( "claude.code@lupin.deepily.ai#c7333045" ) == "c7333045"
-    assert N._sender_session_suffix( "a#b#c" ) == "b#c"
-    assert N._sender_session_suffix( "x#   " ) is None
-    assert N._sender_session_suffix( "no-hash" ) is None
-    assert N._sender_session_suffix( None ) is None
+    assert N.sender_session_suffix( "claude.code@lupin.deepily.ai#c7333045" ) == "c7333045"
+    assert N.sender_session_suffix( "a#b#c" ) == "b#c"
+    assert N.sender_session_suffix( "x#   " ) is None
+    assert N.sender_session_suffix( "no-hash" ) is None
+    assert N.sender_session_suffix( None ) is None

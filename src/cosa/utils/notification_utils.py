@@ -370,6 +370,23 @@ def format_qualified_response( answer, qualifier ):
     )
 
 
+def sender_session_suffix( sender_id ):
+    """
+    Name the session part of a sender id.
+
+    Example: 'claude.code@lupin.deepily.ai#<hash>' gives '<hash>'.
+
+    Requires:
+        - sender_id is a string or None
+
+    Ensures:
+        - returns the stripped text after the first '#'
+        - returns None when the id is empty, has no '#', or has nothing after it
+    """
+    if not sender_id or "#" not in sender_id: return None
+    return sender_id.split( "#", 1 )[ 1 ].strip() or None
+
+
 def quick_smoke_test():
     """Quick smoke test for notification_utils module."""
     import cosa.utils.util as cu

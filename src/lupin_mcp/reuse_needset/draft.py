@@ -88,8 +88,7 @@ def drafter_call( model=None, query_fn=None ):
         - the returned function takes ( system_prompt, user_prompt ) and blocks until the reply arrives
         - it must not be called from a running event loop
     """
-    model = drafter_model( model )
-    return lambda system, user: asyncio.run( model_transport.complete( model, system, user, query_fn=query_fn ) )
+    return model_transport.blocking_ask( drafter_model( model ), query_fn=query_fn )
 
 
 def stripped_input( seed_id, stripped ):

@@ -13,8 +13,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from cosa.utils.notification_utils import sender_session_suffix
 from cosa.agents.prediction_engine.history_context_rebuild import (
-    CONFIDENCE, SESSION_WINDOW, TIERS, _session_of, rebuild_context, reconstructable_stage,
+    CONFIDENCE, SESSION_WINDOW, TIERS, rebuild_context, reconstructable_stage,
 )
 
 T0      = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
@@ -272,8 +273,8 @@ def test_the_missing_list_is_sorted_by_reason_then_id_whatever_the_input_order()
 
 
 def test_the_session_is_everything_after_the_first_hash():
-    assert _session_of( "a@b#x#y" ) == "x#y"
-    assert _session_of( "a@b#" ) is None and _session_of( "a@b" ) is None and _session_of( None ) is None
+    assert sender_session_suffix( "a@b#x#y" ) == "x#y"
+    assert sender_session_suffix( "a@b#" ) is None and sender_session_suffix( "a@b" ) is None and sender_session_suffix( None ) is None
     target = _target( sender_id="a@b#x#y" )
     assert _ids( rebuild_context( target, [ _note( "n", -5, sender_id="a@b#x#y" ) ] ) ) == [ "n" ]
     assert rebuild_context( target, [ _note( "m", -5, sender_id="a@b#y" ) ] )[ "attachments" ] == [], "a session that is only the last segment is not the same session"

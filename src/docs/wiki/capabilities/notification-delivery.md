@@ -2,8 +2,8 @@
 capability: notification-delivery
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.rest.routers.notifications.notify_user@1eb03c0b2c
-  - cosa.rest.routers.notifications.submit_notification_response@a3844000f9
+  - cosa.rest.routers.notifications.notify_user@e2c82ccafc
+  - cosa.rest.routers.notifications.submit_notification_response@916aec46a7
   - cosa.rest.notification_fifo_queue.NotificationFifoQueue.push@a403944495
   - cosa.rest.notify_rate_limiter.check_notify_allowed@e189f2ade6
   - cosa.rest.notification_expiry_sweeper.sweep_once@ea08e4dc58

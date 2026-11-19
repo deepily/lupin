@@ -10,9 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from cosa.rest.db.embedding_regeneration import l2_norm
+
 import cosa.research.preference_replay.vector_comparison as vc
 from cosa.research.preference_replay.vector_comparison import (
-    ControlFailed, band_counts, compare, cosine, main, negative_control, norm, parse_vector, positive_control, read_stored, report, summarize )
+    ControlFailed, band_counts, compare, cosine, main, negative_control, parse_vector, positive_control, read_stored, report, summarize )
 
 
 def test_parse_reads_pgvector_text_and_sequences():
@@ -21,7 +23,7 @@ def test_parse_reads_pgvector_text_and_sequences():
 
 
 def test_norm_and_cosine_on_known_vectors():
-    assert norm( [ 3.0, 4.0 ] ) == 5.0
+    assert l2_norm( [ 3.0, 4.0 ] ) == 5.0
     assert cosine( [ 1.0, 0.0 ], [ 2.0, 0.0 ] ) == pytest.approx( 1.0 )
     assert cosine( [ 1.0, 0.0 ], [ 0.0, 3.0 ] ) == pytest.approx( 0.0 )
     assert cosine( [ 1.0, 0.0 ], [ -1.0, 0.0 ] ) == pytest.approx( -1.0 )

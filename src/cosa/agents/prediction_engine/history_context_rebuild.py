@@ -12,6 +12,7 @@ if the answer existed when the ask was made.
 from datetime import timedelta
 
 from cosa.utils.iso_timestamp import aware_moment
+from cosa.utils.notification_utils import sender_session_suffix
 
 REBUILD_VERSION = "history-context-v1"
 
@@ -22,20 +23,6 @@ CONFIDENCE = { "parent": "certain", "thread": "certain", "job": "certain", "send
 # An assumption, not a measurement: the spec says "time-bounded session matches" and gives no figure.
 # Two hours is a guess. The gap distribution between asks on the real export is recorded beside it.
 SESSION_WINDOW = timedelta( hours=2 )
-
-
-def _session_of( sender_id ):
-    """
-    Name the session part of a sender id.
-
-    Requires:
-        - sender_id is a string or None
-
-    Ensures:
-        - returns the text after the first "#", or None when there is none or it is empty
-    """
-    if not sender_id or "#" not in sender_id: return None
-    return sender_id.split( "#", 1 )[ 1 ] or None
 
 
 def _answer_as_of( candidate, asked_at ):
@@ -81,9 +68,9 @@ def _link_for( target, candidate, asked_at, session_window ):
     conflicts = [ name for name in ( "thread_id", "job_id" )
                   if target.get( name ) and candidate.get( name ) and candidate[ name ] != target[ name ] ]
     sender    = target.get( "sender_id" )
-    session   = _session_of( sender )
+    session   = sender_session_suffix( sender )
     same_full = session is not None and candidate.get( "sender_id" ) == sender
-    same_sess = session is not None and _session_of( candidate.get( "sender_id" ) ) == session
+    same_sess = session is not None and sender_session_suffix( candidate.get( "sender_id" ) ) == session
     human_msg = ( session is not None and candidate.get( "direction" ) == "human_to_ai" and candidate.get( "job_id" ) == session )
     if not ( same_full or same_sess or human_msg ):
         if sender and "#" not in sender and candidate.get( "sender_id" ) == sender: return None, None, "bare_sender_only"

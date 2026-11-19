@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_shadow.check_lifetime_limit@e6b8f02438
   - lupin_mcp.reuse_shadow.live_capacity@3f7d917b5c
   - lupin_mcp.reuse_shadow.audit_inputs@d02f6f2200
-  - lupin_mcp.reuse_shadow.queue_lookup@1316129eec
+  - lupin_mcp.reuse_shadow.queue_lookup@1ecdb22511
   - lupin_mcp.reuse_shadow.sweep_of@f2b1218847
   - lupin_mcp.reuse_shadow.drain@cf41c6dca6
   - lupin_mcp.reuse_shadow.cron_lines@074a604b39

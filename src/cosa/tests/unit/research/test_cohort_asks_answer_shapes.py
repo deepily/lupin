@@ -5,11 +5,13 @@ The three literals below were read from scored prediction_log rows on lupin_db_d
 All 2,411 scored multiple-choice rows held the answers shape and none held a value key.
 """
 
+import json
+import pytest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from cosa.research.preference_replay.cohorts import cohort_asks
+from cosa.research.preference_replay.cohorts import answer_source_of, cohort_asks
 
 YES_NO_STORED          = { "value": "yes" }
 OPEN_ENDED_STORED      = { "value": "[cancelled]" }
@@ -55,3 +57,14 @@ def test_a_yes_no_row_keeps_its_value_as_the_decision_value():
 
 def test_an_open_ended_row_keeps_its_value_as_the_decision_value():
     assert _asks( "open_ended", OPEN_ENDED_STORED )[ 0 ][ "decision_value" ] == "[cancelled]"
+
+
+@pytest.mark.parametrize( "value,expected", [
+    ( { "source": "ui" },                  "human" ),
+    ( json.dumps( { "source": "ui" } ),    "human" ),
+    ( { "source": "timeout_default" },     "unknown" ),
+    ( { "value": "yes" },                  "unknown" ),
+    ( None,                                "unknown" ),
+] )
+def test_an_answer_is_human_only_when_its_source_is_ui( value, expected ):
+    assert answer_source_of( value ) == expected

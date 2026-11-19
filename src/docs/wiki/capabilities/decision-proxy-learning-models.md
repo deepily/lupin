@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.decision_proxy.bayesian_trust.BayesianLogisticRegression@bb0b7b0250
   - cosa.agents.decision_proxy.conformal_wrapper.ConformalDecisionWrapper@fb9a2a2800
-  - cosa.agents.decision_proxy.proxy_decision_embeddings.ProxyDecisionEmbeddings@5e3df3a239
+  - cosa.agents.decision_proxy.proxy_decision_embeddings.ProxyDecisionEmbeddings@537e662d48
   - cosa.agents.decision_proxy.cbr_decision_store.CBRDecisionStore@7672dd8fa0
   - cosa.agents.decision_proxy.cbr_decision_store.is_blank_case@004584ffe1
   - cosa.agents.decision_proxy.cbr_decision_store.CBRPrediction@765fb1b2e7
