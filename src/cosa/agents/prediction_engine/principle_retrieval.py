@@ -18,6 +18,7 @@ import secrets
 
 from sqlalchemy import and_
 
+from cosa.agents.prediction_engine.principle_features import feature_lookup
 from cosa.agents.prediction_engine.principle_status import CONTESTED, RETRACTED, derive_statuses
 from cosa.rest.db.repositories.vector_search import dot_topk
 from cosa.rest.postgres_models import Notification, PreferenceEvidence, PreferencePrinciple
@@ -176,7 +177,8 @@ def retrieve_principles( session, owner_id, project, query_embedding, asked_at, 
     # despite its name, dot_topk's exclude_filter is a filter() that keeps the matching rows, before the limit
     scored = dot_topk( session, PreferencePrinciple, PreferencePrinciple.embedding, query_embedding, limit=count, exclude_filter=allowed, metric="cosine" )
     principles, evidence = load_owner_ledger( session, owner_id )
-    statuses = derive_statuses( principles, evidence, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in evidence if e.session_key is None ] ) )
+    statuses = derive_statuses( principles, evidence, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in evidence if e.session_key is None ] ),
+                               feature_lookup( session, [ e.notification_id for e in evidence ] ) )
     kept     = select_principles( scored, statuses, k )
     return { "principles": kept, "available": count, "short": len( kept ) < k }
 

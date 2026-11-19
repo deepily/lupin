@@ -21,6 +21,15 @@ choices are three rows (the mapping is this module's, because no writer exists y
 - relation ``refines``, with a condition  it stands, under that condition
 - relation ``contradicts``              it is retracted
 
+A split is a ruling the system makes itself: two rows with source ``split_step``, written together.
+A card feature separated the supporting episodes from the contradicting ones.
+The ``refines`` row holds the supporting side's condition, and the ``contradicts`` row holds the other side's. Both name the feature as their field key.
+The ``refines`` row is read as a ruling is: it clears contested from the moment it was written, and not before.
+The ``contradicts`` row only says which card feature values belong to the other side, so it never retracts the principle.
+A contradiction answered after the split belongs to the other side if its ask has a value there.
+It then does not contest the principle.
+One with a value on neither side still contests it.
+
 A ruling covers the contradicting rows answered up to its own answer time. A later contradiction counts again.
 A ruling applies across extractor versions, the one exception to "the current version only".
 A principle re-extracted under a new version names the one it continues (``continues_principle_id``), and inherits that one's rulings.
@@ -36,6 +45,9 @@ CONTESTED   = "contested"
 RETRACTED   = "retracted"
 
 SOURCE_RULING   = "review_card"
+SOURCE_SPLIT    = "split_step"
+RULING_SOURCES  = ( SOURCE_RULING, SOURCE_SPLIT )
+VALUE_JOIN      = " or "
 SOURCE_EXTRACT  = "extractor"
 SUPPORTING      = ( "supports", "refines" )
 CONTRADICTING   = "contradicts"
@@ -125,24 +137,43 @@ def _contested( supporting, contradicting ):
     return bool( { key( row ) for row in supporting } & { key( row ) for row in contradicting } )
 
 
+def _other_side_values( ruling, split_rows ):
+    """
+    Read the card feature values a split gives to the other side.
+
+    Requires:
+        - ruling is a split_step row that refines; split_rows are evidence rows
+
+    Ensures:
+        - returns the set of values in the contradicts row written with it: same principle, same feature, same extraction time
+        - returns the empty set when there is no such row, or its condition does not read "<feature> is <values>"
+    """
+    partner = next( ( r for r in split_rows if r.source == SOURCE_SPLIT and r.relation == CONTRADICTING and r.principle_id == ruling.principle_id
+                      and r.field_key == ruling.field_key and r.extracted_at == ruling.extracted_at ), None )
+    prefix  = f"{ruling.field_key} is "
+    if partner is None or not ( partner.condition or "" ).startswith( prefix ): return set()
+    return set( partner.condition[ len( prefix ): ].split( VALUE_JOIN ) )
+
+
 def _ruled( principle, rulings, principles_by_id, asked_at ):
     """
     Find the latest ruling that speaks for a principle and was usable at the ask.
 
     Requires:
-        - rulings are evidence rows with source review_card; principles_by_id maps an id to a principle
+        - rulings are evidence rows with source review_card or split_step; principles_by_id maps an id to a principle
 
     Ensures:
         - a ruling speaks for the principle it names, and for a principle whose continues_principle_id chain reaches that one
         - owner, scope and dimension are never used to match, so another principle in the same dimension is not ruled
+        - a split's contradicts row is never a ruling, because it only names the other side
         - returns the usable ruling with the latest ( answered_at, extracted_at ), or None
     """
     lineage = _lineage( principle, principles_by_id )
-    found   = [ r for r in rulings if usable_at( r, asked_at ) and r.principle_id in lineage ]
+    found   = [ r for r in rulings if usable_at( r, asked_at ) and r.principle_id in lineage and not ( r.source == SOURCE_SPLIT and r.relation == CONTRADICTING ) ]
     return max( found, key=lambda r: ( aware_moment( r.answered_at ), aware_moment( r.extracted_at ) ), default=None )
 
 
-def derive_statuses( principles, evidence, asked_at, current_version, session_of ):
+def derive_statuses( principles, evidence, asked_at, current_version, session_of, features_of=None ):
     """
     Derive the status of every principle as of one ask.
 
@@ -151,21 +182,24 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
         - evidence is all of the evidence rows for those principles
         - asked_at is an aware datetime; current_version is the extractor version the config names
         - session_of maps a notification id to a session key, or None when it has none
+        - features_of is None, or maps a notification id to its card features, or None when unknown
 
     Ensures:
         - returns { principle.id: result }; result is None when no evidence was usable at the ask
           (so a principle first extracted after the ask is not there), else
           { status, conditions, episodes, sessions, ruled }
         - extractor rows count only for the current version and for their own principle
-        - a ruling counts across versions; the latest usable one decides: supports stands, refines stands
+        - a ruling or split row counts across versions; the latest usable one decides: supports stands, refines stands
           under its condition, contradicts retracts
         - a standing ruling clears contested for the contradicting rows answered at or before the ruling's own answer time
           only; a contradiction answered later counts, and can make the principle contested again
+        - after a split, a contradiction answered later whose ask has a feature value on the split's other side does not count against the principle;
+          with features_of None, or a value on neither side, it counts as before
         - a retracting ruling is final
         - no row is read or written outside the arguments, and none is changed
     """
     by_id    = { p.id: p for p in principles }
-    rulings  = [ e for e in evidence if e.source == SOURCE_RULING ]
+    rulings  = [ e for e in evidence if e.source in RULING_SOURCES ]
     own      = [ e for e in evidence if e.source == SOURCE_EXTRACT and e.extractor_version == current_version and usable_at( e, asked_at ) ]
     statuses = {}
     for principle in principles:
@@ -181,6 +215,9 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
         if ruling is not None and ruling.relation == CONTRADICTING: status = RETRACTED
         elif ruling is not None:
             later = [ e for e in contra if aware_moment( e.answered_at ) > aware_moment( ruling.answered_at ) ]
+            if ruling.source == SOURCE_SPLIT and features_of is not None:
+                other = _other_side_values( ruling, rulings )
+                later = [ e for e in later if str( ( features_of( e.notification_id ) or {} ).get( ruling.field_key ) ) not in other ]
             if _contested( supporting, later ): status = CONTESTED
             else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
         elif not supporting: status = RETRACTED

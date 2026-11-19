@@ -66,6 +66,8 @@ def wired( harness, monkeypatch ):
                              "sender_id"        : _SENDER,
                              "response_options" : _CARD_SCHEMA },
         "submit_raises"  : None,
+        "ruling_calls"   : [],
+        "ruling_raises"  : None,
     }
 
     # `answered_by` joined the worker's signature in row e20e249a (the door now stamps who
@@ -82,6 +84,12 @@ def wired( harness, monkeypatch ):
 
     monkeypatch.setattr( notif, "_submit_response_sync",       _submit )
     monkeypatch.setattr( notif, "_mark_answer_delivered_sync", _delivered )
+
+    def _ruling( notification_id ):
+        state[ "ruling_calls" ].append( notification_id )
+        if state[ "ruling_raises" ] is not None: raise state[ "ruling_raises" ]
+        return { "rulings_written": 1, "existing": 0, "rejected": [] }
+    monkeypatch.setattr( notif, "_record_review_ruling_sync", _ruling )
     monkeypatch.setattr( notif, "get_formatted_time_display",  lambda: "TIME-DISPLAY-VALUE" )
     monkeypatch.setattr( notif, "get_formatted_date_display",  lambda: "DATE-DISPLAY-VALUE" )
     monkeypatch.setattr( notif, "pending_responses", {} )
@@ -402,6 +410,23 @@ class TestAnAnswerToAReviewCardRecordsNoOutcome:
         assert r.status_code == 200
         assert calls == [], "a review card has no forecast row and no case to record"
         assert wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ], "the answer itself is still stored"
+
+    def test_a_marked_answer_is_turned_into_ruling_rows_and_an_unmarked_one_is_not( self, harness, wired ):
+        wired[ "submit_result" ] = { **wired[ "submit_result" ], "response_options": { "review_card": True } }
+        harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert wired[ "ruling_calls" ] == [ _NID ]
+        wired[ "ruling_calls" ].clear()
+        wired[ "submit_result" ] = { **wired[ "submit_result" ], "response_options": None }
+        harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert wired[ "ruling_calls" ] == []
+
+    def test_a_failed_ruling_write_never_loses_the_answer_or_wakes_the_waiter_late( self, harness, wired ):
+        wired[ "submit_result" ] = { **wired[ "submit_result" ], "response_options": { "review_card": True } }
+        wired[ "ruling_raises" ]  = RuntimeError( "database down" )
+        entry = _add_waiter( wired )
+        r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert r.status_code == 200 and entry[ "event" ].is_set() and entry[ "response_data" ] == "ANSWER-VALUE"
+        assert wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ]
 
     def test_an_unmarked_ask_still_reaches_the_ledger( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine as pe
