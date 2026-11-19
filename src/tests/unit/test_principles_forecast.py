@@ -506,3 +506,17 @@ def test_run_b1_refuses_a_nonconforming_baseline_before_reading_or_writing_anyth
     c0.errors = ()
     with pytest.raises( TypeError, match="does not meet the contract" ): run( factory, nid, c0 )
     assert rows( factory ) == [] and c0.calls == []
+
+
+def test_a_row_that_arrives_between_the_check_and_the_insert_reads_as_already_stored( factory, monkeypatch ):
+    """
+    The check says no row, but another run's row exists, so the unique key refuses the insert.
+
+    The write returns False, raises nothing, leaves one row, and the next write on a fresh session works.
+    """
+    nid, other = ask( factory ), ask( factory )
+    assert pf._write_row( factory, nid, T0, None, None, "first", [], "capacity" ) is True
+    monkeypatch.setattr( pf, "_row_present", lambda session, key: False )
+    assert pf._write_row( factory, nid, T0, None, None, "loser", [], "capacity" ) is False
+    assert [ r.predictor_version for r in rows( factory ) ] == [ "first" ]
+    assert pf._write_row( factory, other, T0, None, None, "next", [], "capacity" ) is True and len( rows( factory ) ) == 2

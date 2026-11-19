@@ -30,6 +30,7 @@ import uuid
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieve_principles
@@ -204,6 +205,19 @@ def card_text( episode ):
     return "\n".join( part for part in parts if part )
 
 
+def _row_present( session, key ):
+    """
+    Say whether a card already has its principles row on this session.
+
+    Requires:
+        - session is an active session; key is the card's notification UUID
+
+    Ensures:
+        - returns True when a prediction_arm_forecast row for the card and the principles arm exists
+    """
+    return session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == key, PredictionArmForecast.arm == ARM ).first() is not None
+
+
 def _has_row( session_factory, notification_id ):
     """
     Say whether a card already has its principles row.
@@ -215,8 +229,8 @@ def _has_row( session_factory, notification_id ):
         - returns True when a prediction_arm_forecast row for this card and the principles arm exists
     """
     with session_factory() as session:
-        return session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == uuid.UUID( str( notification_id ) ),
-                                                              PredictionArmForecast.arm == ARM ).first() is not None
+        found = _row_present( session, uuid.UUID( str( notification_id ) ) )
+    return found
 
 
 def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, version, principle_ids, reason ):
@@ -229,16 +243,19 @@ def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, 
     Ensures:
         - adds one prediction_arm_forecast row, for the principles arm, displayed false, and commits
         - writes nothing when the card already has its principles row
+        - a row that arrives between the check and the insert breaks the unique key; that is read as already stored,
+          the session is closed with its failed commit rolled back, and nothing is raised
         - returns True when a row was written
     """
     with session_factory() as session:
         key     = uuid.UUID( str( notification_id ) )
-        present = session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == key, PredictionArmForecast.arm == ARM ).first() is not None
-        if not present:
+        written = not _row_present( session, key )
+        if written:
             session.add( PredictionArmForecast( notification_id=key, arm=ARM, predictor_version=version, forecast=forecast, input_cutoff=asked_at,
                                                 evidence_ids=principle_ids, forecast_ready_at=ready_at, abstention_reason=reason, displayed=False ) )
-            session.commit()
-    return not present
+            try: session.commit()
+            except IntegrityError: written = False
+    return written
 
 
 def _prepare( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k ):
