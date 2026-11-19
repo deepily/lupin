@@ -74,6 +74,18 @@ def test_an_ask_with_no_vector_and_no_reject_entry_is_refused_and_a_listed_rejec
         check_vectors_cover( asks, { "rejects": [ { "id": "b", "reason": "r" } ] } )
 
 
+def test_the_step_9_run_script_calls_read_cohort_with_one_argument_and_that_reads_the_stored_vectors( monkeypatch ):
+    import ast
+    from cosa.utils import util as cu
+    with open( cu.get_project_root() + "/src/scripts/preference_step9_checkpoint_run.py", encoding="utf-8" ) as handle: tree = ast.parse( handle.read() )
+    calls = [ node for node in ast.walk( tree ) if isinstance( node, ast.Call ) and getattr( node.func, "id", None ) == "read_cohort" ]
+    assert len( calls ) == 1 and len( calls[ 0 ].args ) == 1 and calls[ 0 ].keywords == []
+    seen = []
+    monkeypatch.setattr( retune_run, "cohort_asks", lambda session, kind, vectors: seen.append( vectors ) or [] )
+    read_cohort( FakeSession() )
+    assert seen == [ None, None ]
+
+
 def test_the_stored_vector_source_reads_no_side_file_and_says_so( engine, monkeypatch, tmp_path ):
     seen = []
     monkeypatch.setattr( retune_run, "cohort_asks", lambda session, kind, vectors: seen.append( vectors ) or ( _asks( engine ) if kind == "yes_no" else [] ) )

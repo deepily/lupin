@@ -41,13 +41,13 @@ NOTES          = [
 ]
 
 
-def read_cohort( session, vectors: Optional[Dict[str, List[float]]], response_types: Sequence[str] = ELIGIBLE_TYPES ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def read_cohort( session, vectors: Optional[Dict[str, List[float]]] = None, response_types: Sequence[str] = ELIGIBLE_TYPES ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Read the scored cohort and the facts that date it, in a read-only transaction.
 
     Requires:
         - session is an active SQLAlchemy session on the database the report should describe
-        - vectors maps ask id to its side-file vector, or is None for the stored vectors; response_types are names cohort_asks accepts
+        - vectors maps ask id to its side-file vector, or is None, the default, for the stored vectors, as the checkpoint run script calls it; response_types are names cohort_asks accepts
 
     Ensures:
         - the first statement makes the transaction read-only, so the database refuses any write
