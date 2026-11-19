@@ -261,8 +261,9 @@ def test_a_batch_size_below_one_or_not_a_number_is_a_usage_error( tmp_path, valu
     assert stopped.value.code == 2
 
 
-def test_positive_int_returns_the_integer():
+def test_positive_int_returns_the_integer_and_accepts_the_lowest_batch_of_one():
     assert positive_int( "8" ) == 8
+    assert positive_int( "1" ) == 1
 
 
 def test_every_arm_has_a_text_rule():
