@@ -1,10 +1,10 @@
 # Context comparison report
 
-- commit of the scorer: c617d07bc788f7efcd79487a66cb160c383b444b
-- discordant floor: 6 pairs, stated before the run
-- per-ask files: src/conf/prediction-context-arm-*-per-ask.json, each with its own command, code sha and start time
-- generated: 2026-11-19T22:20:28.323097+00:00
-- command: LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5 PYTHONPATH=/mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src python mkreport.py /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5
+- code sha of this report: e011f7a4a1fd4c6685ec6b73a6443ae9425906e3
+- discordant floor: 6 pairs, stated before the run; source: assert_floor_pre_stated refuses a floor under 6 in the dm-rewrite checks
+- per-ask files scored on code: Q dfc19edd7, Q+A dfc19edd7, Q+O dfc19edd7, Q+P eb4ca4a1a, Q+H eb4ca4a1a
+- generated: 2026-11-19T22:23:05.432912+00:00
+- command: `python -m cosa.research.preference_replay.context_arms_report --per-ask-dir /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf --inputs /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report-inputs.json --floor 6 --floor-source assert_floor_pre_stated refuses a floor under 6 in the dm-rewrite checks --out /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report.md`
 
 ## Coverage
 
@@ -18,11 +18,13 @@
 
 ## Reconciliations
 
-- **Cohort size**: All 3,608 frozen ids are scored for every arm; the report scores the final window of 1,083 asks, the cut the retune makes.
-- **Always-yes**: Always-yes has no answer to a multiple-choice ask, so it is compared on the yes/no asks only; the pooled comparison is not reported.
+- **Window**: All 3,608 frozen ids are scored for every arm; the results use the final window of 1,083 asks, the cut the retune makes.
+- **Always-yes**: Always-yes has no answer to a multiple-choice ask. It is compared on the yes/no asks only, and the pooled comparison is not reported.
 - **Seven asks differ from the export**: Seven asks have a different context state than the raw export gives, because the export lacks their earlier rows.
 - **45 asks lack context**: Of the 45 asks, 5 are newer than the export; the other 40 are an unexplained gap, named and not bridged.
 - **Retune finals**: Per-ask correct counts equal the retune finals: Q 392, Q+A 384, Q+O 392, Q+P 358, Q+H 389 of 1,083.
+- **Q+P setting is a tie**: Q+P top k 3 ties top k 5 on the tune window, 27.5644 each. The documented tie rule picks the higher threshold, then the smaller k. On the final window k 3 gives 358 and k 5 gives 378.
+- **Retune driver differs by arm**: The Q+P and Q+H retunes ran retune_run.py as of commit 560a4e382. The Q+A and Q+O retunes ran an earlier copy. The differences are refactors, and the replay and retune code are unchanged. Krishna's check: arm_scoring at the committed code reproduces 358 and 389.
 
 ## Results
 
@@ -46,4 +48,3 @@
 | Q+P | yes_no | 7 | 38 | 0.0000 | baseline better |
 | Q+H | multiple_choice | 0 | 0 | 1.0000 | not decisive |
 | Q+H | yes_no | 10 | 13 | 0.6776 | no difference |
-

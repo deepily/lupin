@@ -1,0 +1,64 @@
+{
+ "coverage": {
+  "Q": {
+   "arm_input_absent": 0,
+   "asks": 3608,
+   "no_context": 0,
+   "with_section": 3608
+  },
+  "Q+A": {
+   "arm_input_absent": 0,
+   "asks": 3608,
+   "no_context": 41,
+   "with_section": 3567
+  },
+  "Q+H": {
+   "arm_input_absent": 585,
+   "asks": 3608,
+   "no_context": 447,
+   "with_section": 2576
+  },
+  "Q+O": {
+   "arm_input_absent": 0,
+   "asks": 3608,
+   "no_context": 1408,
+   "with_section": 2200
+  },
+  "Q+P": {
+   "arm_input_absent": 0,
+   "asks": 3608,
+   "no_context": 23,
+   "with_section": 3585
+  }
+ },
+ "reconciliations": [
+  {
+   "detail": "All 3,608 frozen ids are scored for every arm; the results use the final window of 1,083 asks, the cut the retune makes.",
+   "title": "Window"
+  },
+  {
+   "detail": "Always-yes has no answer to a multiple-choice ask. It is compared on the yes/no asks only, and the pooled comparison is not reported.",
+   "title": "Always-yes"
+  },
+  {
+   "detail": "Seven asks have a different context state than the raw export gives, because the export lacks their earlier rows.",
+   "title": "Seven asks differ from the export"
+  },
+  {
+   "detail": "Of the 45 asks, 5 are newer than the export; the other 40 are an unexplained gap, named and not bridged.",
+   "title": "45 asks lack context"
+  },
+  {
+   "detail": "Per-ask correct counts equal the retune finals: Q 392, Q+A 384, Q+O 392, Q+P 358, Q+H 389 of 1,083.",
+   "title": "Retune finals"
+  },
+  {
+   "detail": "Q+P top k 3 ties top k 5 on the tune window, 27.5644 each. The documented tie rule picks the higher threshold, then the smaller k. On the final window k 3 gives 358 and k 5 gives 378.",
+   "title": "Q+P setting is a tie"
+  },
+  {
+   "detail": "The Q+P and Q+H retunes ran retune_run.py as of commit 560a4e382. The Q+A and Q+O retunes ran an earlier copy. The differences are refactors, and the replay and retune code are unchanged. Krishna's check: arm_scoring at the committed code reproduces 358 and 389.",
+   "title": "Retune driver differs by arm"
+  }
+ ]
+}
