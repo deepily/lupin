@@ -94,13 +94,18 @@ def test_a_side_file_with_one_reject_reports_one_reject( engine, monkeypatch, tm
     assert json.loads( out.read_text( encoding="utf-8" ) )[ "provenance" ][ "vector_rejects" ] == 1
 
 
+def _went_past_usage():
+    """A stand-in factory that fails the test if main gets past the usage check."""
+    raise AssertionError( "main went past the usage check" )
+
+
 def test_giving_neither_a_side_file_nor_the_stored_switch_is_a_usage_error( tmp_path, capsys ):
-    with pytest.raises( SystemExit ) as raised: main( [ "--out", str( tmp_path / "r.json" ) ] )
+    with pytest.raises( SystemExit ) as raised: main( [ "--out", str( tmp_path / "r.json" ) ], session_factory=_went_past_usage, engine_factory=_went_past_usage )
     assert raised.value.code == 2 and "one of the arguments --vectors --stored-vectors is required" in capsys.readouterr().err
 
 
 def test_giving_both_a_side_file_and_the_stored_switch_is_a_usage_error( tmp_path ):
-    with pytest.raises( SystemExit ) as raised: main( [ "--out", str( tmp_path / "r.json" ), "--vectors", "a", "--stored-vectors" ] )
+    with pytest.raises( SystemExit ) as raised: main( [ "--out", str( tmp_path / "r.json" ), "--vectors", "a", "--stored-vectors" ], session_factory=_went_past_usage, engine_factory=_went_past_usage )
     assert raised.value.code == 2
 
 
@@ -118,6 +123,28 @@ def test_the_control_writes_the_replayable_ids_in_cohort_order_only_when_both_fi
     write_control_ids( report, asks, str( path ), 10, final_correct )
     assert path.read_text( encoding="utf-8" ).split() == [ ask[ "id" ] for ask in asks[ :10 ] ]
     assert [ p.name for p in tmp_path.iterdir() ] == [ "ids.txt" ]
+
+
+def _synthetic_control():
+    """A report whose grid points all differ in final_correct, over asks whose ids descend."""
+    def point( threshold, top_k, final_correct ): return { "threshold": threshold, "top_k": top_k, "final_correct": final_correct }
+    report = { "eligible": 3, "grid_points": [ point( 0.5, 3, 6 ), point( 0.55, 10, 8 ), point( 0.5, 8, 9 ), point( 0.5, 10, 7 ) ] }
+    asks   = [ { "id": name, "response_type": "yes_no", "question_embedding": [ 1.0 ] } for name in ( "c", "b", "a" ) ]
+    return report, asks
+
+
+def test_the_control_reads_the_frozen_point_and_writes_ids_in_cohort_order_not_sorted( tmp_path ):
+    report, asks = _synthetic_control()
+    path = tmp_path / "ids.txt"
+    write_control_ids( report, asks, str( path ), 3, 7 )
+    assert path.read_text( encoding="utf-8" ).split() == [ "c", "b", "a" ]
+
+
+@pytest.mark.parametrize( "other_point_value", [ 6, 8, 9 ] )
+def test_the_control_compares_the_final_correct_of_threshold_half_and_top_k_ten_and_no_other_point( tmp_path, other_point_value ):
+    report, asks = _synthetic_control()
+    with pytest.raises( ControlMismatch, match="final_correct: measured 7" ):
+        write_control_ids( report, asks, str( tmp_path / "ids.txt" ), 3, other_point_value )
 
 
 @pytest.mark.parametrize( "replayable_delta, correct_delta, named", [ ( 1, 0, "replayable: measured 10, expected 11" ),
@@ -152,7 +179,8 @@ def test_the_command_writes_the_control_ids_after_the_report_and_refuses_a_wrong
 @pytest.mark.parametrize( "extra", [ [ "--expect-replayable", "1" ], [ "--expect-final-correct", "1" ], [] ] )
 def test_the_control_output_without_both_expectations_is_a_usage_error( tmp_path, extra, capsys ):
     with pytest.raises( SystemExit ) as raised:
-        main( [ "--out", str( tmp_path / "r.json" ), "--stored-vectors", "--control-ids-out", str( tmp_path / "i.txt" ) ] + extra )
+        main( [ "--out", str( tmp_path / "r.json" ), "--stored-vectors", "--control-ids-out", str( tmp_path / "i.txt" ) ] + extra,
+              session_factory=_went_past_usage, engine_factory=_went_past_usage )
     assert raised.value.code == 2 and "--control-ids-out needs --expect-replayable and --expect-final-correct" in capsys.readouterr().err
 
 
