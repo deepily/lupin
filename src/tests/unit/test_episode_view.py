@@ -226,14 +226,15 @@ def test_session_suffix_wildcards_do_not_widen_the_session_query( db ):
     assert ev.episode_view( db, ask, limit=50 )[ "history" ] == []
 
 
-def test_bounded_pool_equals_a_full_pool_rebuild_when_every_tier_is_under_the_limit( db ):
+@pytest.mark.parametrize( "limit", [ 50, 500 ] )
+def test_bounded_pool_equals_a_full_pool_rebuild_when_every_tier_is_under_the_limit( db, limit ):
     _fill_from_fixture( db )
     checked = 0
     statuses = {}
     for target_id, target in _fixture_targets().items():
         rows = [ r for r in _fixture_records().values() if r[ "id" ] != target_id ]
         full = ev.history_of( rebuild_context( target, rows ) )
-        got  = ev.episode_view( db, target_id, limit=50 )
+        got  = ev.episode_view( db, target_id, limit=limit )
         assert got[ "pool" ][ "truncated" ] == []
         assert got[ "history" ] == full, target_id
         for entry in got[ "history" ]: statuses[ entry[ "status" ] ] = statuses.get( entry[ "status" ], 0 ) + 1
@@ -334,20 +335,87 @@ def test_header_fields_project_asker_title_and_asked_at_are_the_asks_own( db ):
     assert ev.episode_view( db, odd, limit=50 )[ "project" ] is None
 
 
-def test_exposure_reads_fold_opened_at_and_leaves_the_draft_unknown( db ):
+def _log( db, notification_id, **extra ):
+    """
+    Insert a prediction_log row for a notification.
+
+    Ensures:
+        - the row carries only the required columns plus extra
+    """
+    db.add( PredictionLog( id=uuid.uuid4(), notification_id=uuid.UUID( notification_id ), response_type="yes_no", category="c", prediction_strategy="s",
+                           predicted_at=T0, prediction_confidence=0.5, similar_case_count=0, **extra ) )
+    db.commit()
+
+
+def test_exposure_reads_fold_opened_at_once_it_is_known_and_leaves_the_draft_unknown( db ):
     seen   = _add( db, 0, response_requested=True, response_type="yes_no" )
     unseen = _add( db, 1, response_requested=True, response_type="yes_no" )
     opened = T0 + timedelta( minutes=7 )
-    log = PredictionLog( id=uuid.uuid4(), notification_id=uuid.UUID( seen ), response_type="yes_no", category="c", prediction_strategy="s", predicted_at=T0,
-                         prediction_confidence=0.5, similar_case_count=0, fold_opened_at=opened )
-    db.add( log )
-    db.add( PredictionLog( id=uuid.uuid4(), notification_id=uuid.UUID( unseen ), response_type="yes_no", category="c", prediction_strategy="s", predicted_at=T0,
-                           prediction_confidence=0.5, similar_case_count=0 ) )
-    db.commit()
-    assert ev.episode_view( db, seen, limit=50 )[ "exposure" ] == { "revealed_at": opened.isoformat(), "draft_at_reveal": None }
+    _log( db, seen, fold_opened_at=opened )
+    _log( db, unseen )
+    later  = ev.episode_view( db, seen, as_of=opened + timedelta( minutes=1 ), limit=50 )
+    assert later[ "exposure" ] == { "revealed_at": opened.isoformat(), "draft_at_reveal": None }
     assert ev.episode_view( db, unseen, limit=50 )[ "exposure" ] == { "revealed_at": None, "draft_at_reveal": None }
     nolog = _add( db, 2 )
     assert ev.episode_view( db, nolog, limit=50 )[ "exposure" ] == { "revealed_at": None, "draft_at_reveal": None }
+
+
+def test_a_reveal_after_as_of_reads_none_and_the_raw_value_stays_readable_for_the_ledger( db ):
+    seen   = _add( db, 0, response_requested=True, response_type="yes_no" )
+    opened = T0 + timedelta( minutes=7 )
+    _log( db, seen, fold_opened_at=opened )
+    assert ev.episode_view( db, seen, limit=50 )[ "exposure" ][ "revealed_at" ] is None
+    assert ev.episode_view( db, seen, as_of=opened - timedelta( seconds=1 ), limit=50 )[ "exposure" ][ "revealed_at" ] is None
+    assert ev.revealed_at( db, uuid.UUID( seen ) ) == opened.isoformat()
+
+
+def test_a_reveal_exactly_at_as_of_is_known( db ):
+    seen   = _add( db, 0, response_requested=True, response_type="yes_no" )
+    opened = T0 + timedelta( minutes=7 )
+    _log( db, seen, fold_opened_at=opened )
+    assert ev.episode_view( db, seen, as_of=opened, limit=50 )[ "exposure" ][ "revealed_at" ] == opened.isoformat()
+
+
+def test_an_answer_given_exactly_at_the_ask_reads_answered( db ):
+    exact = _question( db, -30, answer_minutes=0, thread_id="t1" )
+    ask   = _add( db, 0, thread_id="t1", response_requested=True, response_type="yes_no" )
+    entry = ev.episode_view( db, ask, limit=50 )[ "history" ][ 0 ]
+    assert ( entry[ "notification_id" ], entry[ "status" ], entry[ "answer_known_at" ] ) == ( exact, "answered", T0.isoformat() )
+
+
+def test_sixty_newer_same_sender_rows_on_another_thread_do_not_push_out_an_older_question( db ):
+    old = _question( db, -200, answer_minutes=-150 )
+    for step in range( 60 ): _question( db, -100 + step, answer_minutes=-5, thread_id="tX" )
+    ask = _add( db, 0, thread_id="t1", response_requested=True, response_type="yes_no" )
+    got = ev.episode_view( db, ask, limit=50 )
+    assert _ids( got ) == [ old ] and got[ "pool" ][ "truncated" ] == []
+
+
+def test_sixty_newer_rows_on_another_job_do_not_push_out_an_older_question_in_the_sender_or_session_tier( db ):
+    old     = _question( db, -200, answer_minutes=-150 )
+    old_ses = _question( db, -110, answer_minutes=-105, sender_id="o.a@lupin.deepily.ai#ab12cd34" )
+    for step in range( 60 ):
+        _question( db, -100 + step, answer_minutes=-5, job_id="jX" )
+        _question( db, -100 + step, answer_minutes=-5, job_id="jX", sender_id="o.a@lupin.deepily.ai#ab12cd34" )
+    ask = _add( db, 0, job_id="j1", response_requested=True, response_type="yes_no" )
+    got = ev.episode_view( db, ask, limit=50 )
+    assert _ids( got ) == [ old, old_ses ] and got[ "pool" ][ "truncated" ] == []
+
+
+def test_sixty_newer_human_messages_on_another_job_do_not_push_out_an_older_one_in_the_session_tier( db ):
+    old = _add( db, -100, direction="human_to_ai", sender_id="rick@lupin.deepily.ai", job_id="ab12cd34" )
+    for step in range( 60 ): _add( db, -90 + step, direction="human_to_ai", sender_id="rick@lupin.deepily.ai", job_id="ab12cd34", thread_id="tX" )
+    ask = _add( db, 0, thread_id="t1", response_requested=True, response_type="yes_no" )
+    got = ev.episode_view( db, ask, limit=50 )
+    assert _ids( got ) == [ old ] and got[ "pool" ][ "truncated" ] == []
+
+
+def test_rows_with_no_thread_or_a_blank_one_still_join_through_the_sender_when_the_ask_has_a_thread( db ):
+    none  = _question( db, -30, answer_minutes=-5 )
+    blank = _question( db, -20, answer_minutes=-5, thread_id="" )
+    same  = _question( db, -10, answer_minutes=-5, thread_id="t1" )
+    ask   = _add( db, 0, thread_id="t1", response_requested=True, response_type="yes_no" )
+    assert _ids( ev.episode_view( db, ask, limit=50 ) ) == [ same, blank, none ]
 
 
 def test_the_limit_comes_from_the_ini_key_when_not_passed( db, monkeypatch ):

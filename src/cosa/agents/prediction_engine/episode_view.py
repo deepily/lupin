@@ -16,6 +16,8 @@ A tier that hit the limit is named in the record, so a reader can tell a short h
 import re
 import uuid
 
+from sqlalchemy import or_
+
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN
 from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, notification_dict, rebuild_context
 from cosa.config.configuration_manager import ConfigurationManager
@@ -64,12 +66,18 @@ def _tier_queries( session, target, before, limit, session_window ):
         - every query keeps rows to the ask's recipient created strictly before `before`, never the ask itself
         - a tier with nothing to match on (no reply_to, thread, job or sender) is absent
         - the sender query has no window, because rebuild_context joins a same full sender at any age
+        - the sender and session queries skip a row whose own thread or job differs from the ask's, because
+          rebuild_context refuses such a row, and it would otherwise fill the newest limit rows to no use
         - the session query keeps a sender ending in the ask's session suffix, or a human_to_ai row whose
           job id is that suffix, created inside the window
         - the parent query is not cut: it holds at most one row
     """
     base = lambda: session.query( Notification ).filter( Notification.recipient_id == target.recipient_id, Notification.created_at < before,
                                           Notification.id != target.id )
+    def unconflicted( query ):
+        for column, wanted in ( ( Notification.thread_id, target.thread_id ), ( Notification.job_id, target.job_id ) ):
+            if wanted: query = query.filter( or_( column.is_( None ), column == "", column == wanted ) )
+        return query
     newest = lambda query: query.order_by( Notification.created_at.desc(), Notification.id ).limit( limit + 1 )
     queries = {}
     try:
@@ -79,12 +87,12 @@ def _tier_queries( session, target, before, limit, session_window ):
     if parent_id is not None: queries[ "parent" ] = base().filter( Notification.id == parent_id )
     if target.thread_id: queries[ "thread" ] = newest( base().filter( Notification.thread_id == target.thread_id ) )
     if target.job_id:    queries[ "job" ]    = newest( base().filter( Notification.job_id == target.job_id ) )
-    if target.sender_id: queries[ "sender" ] = newest( base().filter( Notification.sender_id == target.sender_id ) )
+    if target.sender_id: queries[ "sender" ] = newest( unconflicted( base().filter( Notification.sender_id == target.sender_id ) ) )
     suffix = sender_session_suffix( target.sender_id )
     if suffix is not None:
-        queries[ "session" ] = newest( base().filter( Notification.created_at >= before - session_window,
+        queries[ "session" ] = newest( unconflicted( base().filter( Notification.created_at >= before - session_window,
                                                       ( Notification.sender_id.endswith( "#" + suffix, autoescape=True ) )
-                                                      | ( ( Notification.direction == "human_to_ai" ) & ( Notification.job_id == suffix ) ) ) )
+                                                      | ( ( Notification.direction == "human_to_ai" ) & ( Notification.job_id == suffix ) ) ) ) )
     return queries
 
 
@@ -233,19 +241,24 @@ def history_of( context ):
     return kept
 
 
-def revealed_at( session, notification_id ):
+def revealed_at( session, notification_id, cutoff=None ):
     """
-    Read when Rick first opened the prediction fold for an ask.
+    Read when Rick first opened the prediction fold for an ask, as known at a moment.
 
     Requires:
         - session is an active SQLAlchemy session and notification_id a UUID
+        - cutoff is None or an aware datetime
 
     Ensures:
         - returns the ISO time stored in prediction_log.fold_opened_at, or None when there is no log row or no reveal
+        - with a cutoff, a reveal later than the cutoff reads None; a reveal exactly at the cutoff is returned
+        - with no cutoff it is the raw stored time, which is the ledger's outcome side and never prompt input
     """
     row = session.query( PredictionLog.fold_opened_at ).filter( PredictionLog.notification_id == notification_id,
                                                                  PredictionLog.fold_opened_at.isnot( None ) ).first()
-    return None if row is None else aware_moment( row[ 0 ] ).isoformat()
+    if row is None: return None
+    moment = aware_moment( row[ 0 ] )
+    return None if cutoff is not None and moment > cutoff else moment.isoformat()
 
 
 def episode_view( session, notification_id, as_of=None, limit=None ):
@@ -263,7 +276,8 @@ def episode_view( session, notification_id, as_of=None, limit=None ):
         - asked_at is the ask's own creation time; the history is as of as_of
         - history holds at most three questions plus informational messages, each answered or pending as of as_of;
           an answer given after as_of reads pending
-        - exposure is { revealed_at, draft_at_reveal }; draft_at_reveal is always None until its column exists
+        - exposure is { revealed_at, draft_at_reveal }; revealed_at is None when the reveal came after as_of;
+          draft_at_reveal is always None until its column exists
         - pool is { limit, truncated }, truncated naming each tier that hit the limit; the history may then lack
           older rows of that tier
         - the ask's own answer is never read
@@ -287,5 +301,5 @@ def episode_view( session, notification_id, as_of=None, limit=None ):
     return { "owner_id": str( row.recipient_id ), "project": match.group( 1 ) if match else None, "asker": row.sender_id,
              "asked_at": asked.isoformat(), "title": row.title, "abstract": row.abstract, "links": links_of( row.abstract ),
              "fields": fields_of( row.response_options, row.response_default ), "history": history_of( context ),
-             "exposure": { "revealed_at": revealed_at( session, row.id ), "draft_at_reveal": None },
+             "exposure": { "revealed_at": revealed_at( session, row.id, cutoff ), "draft_at_reveal": None },
              "pool": { "limit": limit, "truncated": truncated } }
