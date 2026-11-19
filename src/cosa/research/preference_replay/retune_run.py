@@ -13,7 +13,6 @@ Run it from the repository root, with the config and database the report should 
 
 import argparse
 import collections
-import hashlib
 import json
 import subprocess
 import sys
@@ -26,6 +25,7 @@ from sqlalchemy import text
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.research.preference_replay.cohorts import cohort_asks
 from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, eligible_asks, frozen_settings, report_only_sweep, retune
+from cosa.utils.file_hash import file_sha256
 
 REPORT_VERSION = 1
 FACTS_SQL      = ( "select current_database(), current_user, now(), (select count(*) from prediction_decisions), "
@@ -168,7 +168,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     args   = parser.parse_args( argv )
     session_factory = session_factory or _open_session
     engine_factory  = engine_factory or _open_engine
-    with open( __file__, "rb" ) as handle: driver_sha256 = hashlib.sha256( handle.read() ).hexdigest()
+    driver_sha256 = file_sha256( __file__ )
     command = "python -m cosa.research.preference_replay.retune_run " + " ".join( list( argv ) if argv is not None else sys.argv[ 1: ] )
     run_facts = {
         "command"       : command,
