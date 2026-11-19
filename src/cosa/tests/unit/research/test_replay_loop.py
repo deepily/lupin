@@ -17,6 +17,7 @@ from cosa.research.preference_replay import replay_loop
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM, replay, rows_as_of, summarize
 from cosa.research.preference_replay.time_sliced_store import TimeSlicedDecisionStore
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM
+from cosa.utils.iso_timestamp import aware_moment
 
 SHA   = "0" * 64
 NOON  = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
@@ -357,3 +358,61 @@ def test_the_replay_uses_the_time_sliced_store_by_default( engine ):
     replay( [ _ask( engine, "a", 1, 0, "yes" ) ], engine, SHA, store_factory=factory )
     assert len( seen ) == 1 and isinstance( seen[ 0 ], TimeSlicedDecisionStore )
     assert seen[ 0 ].refused_writes == 0, "the engine tried to write a case during the replay"
+
+
+def _context_arm( ask, visible, episode_view=None, principles=None ):
+    """A double arm that forecasts yes and keeps what it was handed."""
+    _context_arm.calls.append( { "ask": ask, "visible": visible, "episode_view": episode_view, "principles": principles } )
+    return { "value": "yes" }
+
+
+def test_a_context_arm_gets_its_view_and_principles_and_other_baselines_are_called_as_before( engine ):
+    """Only a named arm receives context; always_yes keeps its two-argument call."""
+    _context_arm.calls = []
+    asks  = [ _ask( engine, "a", 1, 0, "yes" ), _ask( engine, "b", 1, 10, "no" ) ]
+    seen  = []
+    view  = lambda ask, visible: seen.append( ( "view", ask[ "id" ], [ r[ "id" ] for r in visible ] ) ) or f"view-{ask[ 'id' ]}"
+    prin  = lambda ask, asked_at: seen.append( ( "prin", ask[ "id" ], asked_at ) ) or f"prin-{ask[ 'id' ]}"
+    run   = replay( asks, engine, SHA, baselines={ "b1": _context_arm, "always_yes": replay_loop.always_yes_arm },
+                    context_arms=( "b1", ), episode_view_provider=view, principles_provider=prin )
+    assert [ ( c[ "episode_view" ], c[ "principles" ] ) for c in _context_arm.calls ] == [ ( "view-a", "prin-a" ), ( "view-b", "prin-b" ) ]
+    assert seen[ 1 ] == ( "prin", "a", NOON ) and seen[ 2 ] == ( "view", "b", [ "a" ] )
+    assert [ r[ "meta" ][ "forecast" ] for r in run[ "records" ][ "always_yes" ] ] == [ { "value": "yes" } ] * 2
+
+
+def test_a_provider_is_never_handed_an_answer_given_after_the_ask( engine ):
+    """The ask carries no answer, and the visible rows hold only cases answered by the ask time."""
+    _context_arm.calls = []
+    asks  = [ _ask( engine, "early", 2, 0, "SECRET-EARLY" ), _ask( engine, "mid", 2, 30, "SECRET-MID" ), _ask( engine, "late", 2, 60, "SECRET-LATE" ) ]
+    got   = []
+    def view( ask, visible ):
+        got.append( ( ask, visible ) )
+        return None
+    replay( asks, engine, SHA, baselines={ "b1": _context_arm }, context_arms=( "b1", ), episode_view_provider=view )
+    for ask, visible in got:
+        assert not set( replay_loop.ASK_ANSWER_FIELDS ) & set( ask )
+        assert all( r[ "responded_at" ] <= aware_moment( ask[ "asked_at" ] ) for r in visible )
+        assert "SECRET-" + ask[ "id" ].upper() not in json.dumps( [ ask, visible ], default=str )
+    assert [ [ r[ "id" ] for r in v ] for _, v in got ] == [ [], [ "early" ], [ "early", "mid" ] ]
+    assert [ c[ "principles" ] for c in _context_arm.calls ] == [ None ] * 3
+    assert asks[ 0 ][ "actual_value" ] == "SECRET-EARLY"
+
+
+def test_a_context_arm_without_providers_gets_none_and_an_unknown_name_is_refused( engine ):
+    """Missing providers read as None; an unknown arm name raises before any ask is replayed."""
+    _context_arm.calls = []
+    replay( [ _ask( engine, "a", 1, 0, "yes" ) ], engine, SHA, baselines={ "b1": _context_arm }, context_arms=( "b1", ) )
+    assert _context_arm.calls[ 0 ][ "episode_view" ] is None and _context_arm.calls[ 0 ][ "principles" ] is None
+    with pytest.raises( ValueError, match="ghost" ):
+        replay( [ _ask( engine, "a", 1, 0, "yes" ) ], engine, SHA, baselines={ "b1": _context_arm }, context_arms=( "ghost", ) )
+
+
+def test_summarize_pairs_an_arm_against_a_comparator_through_the_same_run( engine ):
+    """One run pairs a context arm with a comparator; the arm's records replace the engine's."""
+    run = { "records": _records( { ENGINE_ARM: [ False ] * 12, "b1": [ True ] * 12, "c0": [ False ] * 12 } ),
+            "not_replayable": 0, "unrebuildable_cases": 0, "families": 1 }
+    report = summarize( run, "c0", 10, arm="b1" )
+    assert report[ "arm" ] == "b1" and report[ "baseline" ] == "c0"
+    assert ( report[ "engine_correct" ], report[ "baseline_correct" ], report[ "engine_only_right" ] ) == ( 12, 0, 12 )
+    assert report[ "verdict" ] == "engine better"
+    assert summarize( run, "c0", 10 )[ "arm" ] == ENGINE_ARM
