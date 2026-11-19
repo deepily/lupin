@@ -1337,6 +1337,8 @@ class PredictionArmForecast( Base ):
         - one row per ( notification_id, arm )
         - displayed is true for the arm whose forecast the card showed
         - a late forecast is derived from forecast_ready_at, never stored
+        - evidence_ids holds different ids by arm: the principle ids the forecast was given for the principles forecast,
+          and the neighbour case ids for the case-based arm that showed the card, so a report never mixes the two
     """
 
     __tablename__ = "prediction_arm_forecast"
