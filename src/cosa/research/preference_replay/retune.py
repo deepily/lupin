@@ -89,7 +89,9 @@ def retune( asks, engine, snapshot_sha256, thresholds=THRESHOLDS, top_ks=TOP_KS,
     Ensures:
         - replays the eligible asks once per grid point under the cosine metric, forecasts only from earlier answers
         - returns { points, best, tune_size, final_size, eligible, tune_cohort_sha256 }
-        - each point holds threshold, top_k, tune_correct, tune_per_100, final_correct and final_per_100
+        - each point holds threshold, top_k, the correct counts and correct per 100 asks for both windows
+        - each point also holds, per window, the answered count, the answer rate, and the accuracy among answered asks
+        - the answered figures are report-only; best is chosen on tune_per_100 alone
         - best is the point with the highest tune_per_100; a tie goes to the higher threshold, then the smaller top k
         - tune_cohort_sha256 is the checksum of the tune window's ask ids in time order
         - the engine's three settings are restored, even when a replay raises
@@ -109,15 +111,23 @@ def retune( asks, engine, snapshot_sha256, thresholds=THRESHOLDS, top_ks=TOP_KS,
             run     = replay( asks, engine, snapshot_sha256, baselines={}, target_types=ELIGIBLE_TYPES )
             records = run[ "records" ][ ENGINE_ARM ]
             tune_size, final_size = split_windows( len( records ), tune_fraction )
-            tune_correct  = sum( 1 for r in records[ :tune_size ] if r[ "meta" ][ "correct" ] )
-            final_correct = sum( 1 for r in records[ tune_size: ] if r[ "meta" ][ "correct" ] )
+            tune_correct   = sum( 1 for r in records[ :tune_size ] if r[ "meta" ][ "correct" ] )
+            final_correct  = sum( 1 for r in records[ tune_size: ] if r[ "meta" ][ "correct" ] )
+            tune_answered  = sum( 1 for r in records[ :tune_size ] if r[ "meta" ][ "forecast" ] is not None )
+            final_answered = sum( 1 for r in records[ tune_size: ] if r[ "meta" ][ "forecast" ] is not None )
             points.append( {
-                "threshold"     : threshold,
-                "top_k"         : top_k,
-                "tune_correct"  : tune_correct,
-                "tune_per_100"  : _per_hundred( tune_correct, tune_size ),
-                "final_correct" : final_correct,
-                "final_per_100" : _per_hundred( final_correct, final_size ),
+                "threshold"                      : threshold,
+                "top_k"                          : top_k,
+                "tune_correct"                   : tune_correct,
+                "tune_per_100"                   : _per_hundred( tune_correct, tune_size ),
+                "final_correct"                  : final_correct,
+                "final_per_100"                  : _per_hundred( final_correct, final_size ),
+                "tune_answered"                  : tune_answered,
+                "tune_answer_rate_per_100"       : _per_hundred( tune_answered, tune_size ),
+                "tune_accuracy_answered_per_100" : _per_hundred( tune_correct, tune_answered ),
+                "final_answered"                 : final_answered,
+                "final_answer_rate_per_100"      : _per_hundred( final_answered, final_size ),
+                "final_accuracy_answered_per_100": _per_hundred( final_correct, final_answered ),
             } )
             ids = [ r[ "meta" ][ "notification_id" ] for r in records[ :tune_size ] ]
     finally:

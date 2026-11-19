@@ -99,6 +99,22 @@ def test_the_best_point_wins_on_the_tune_window_and_ties_go_to_the_higher_thresh
     assert by_point[ ( 0.8, 3 ) ][ "final_correct" ] == 3 and by_point[ ( 0.85, 3 ) ][ "final_correct" ] == 3
 
 
+def test_each_point_reports_the_answer_rate_and_the_accuracy_among_answered_asks( engine ):
+    """At 0.80 two tune targets are forecast and one is wrong, so answered and correct differ."""
+    asks = _asks( engine )
+    asks[ 5 ] = dict( asks[ 5 ], actual_value="no", decision_value="no" )
+    result   = run_retune( asks, engine, SHA )
+    by_point = { ( p[ "threshold" ], p[ "top_k" ] ): p for p in result[ "points" ] }
+    point    = by_point[ ( 0.8, 3 ) ]
+    assert ( point[ "tune_answered" ], point[ "tune_correct" ] ) == ( 2, 1 )
+    assert point[ "tune_answer_rate_per_100" ] == round( 200 / 7, 4 ) and point[ "tune_accuracy_answered_per_100" ] == 50.0
+    assert point[ "final_answered" ] == 3 and point[ "final_answer_rate_per_100" ] == 100.0
+    assert point[ "final_correct" ] == 3 and point[ "final_accuracy_answered_per_100" ] == 100.0
+    high = by_point[ ( 0.85, 3 ) ]
+    assert ( high[ "tune_answered" ], high[ "tune_correct" ] ) == ( 1, 1 ), "above 0.80 only the second target is forecast, from the first"
+    assert result[ "best" ][ "tune_per_100" ] == max( p[ "tune_per_100" ] for p in result[ "points" ] ), "the answered figures never decide the winner"
+
+
 def test_the_final_window_never_decides_the_winner( engine ):
     """The winner is the best on the tune window, whatever the final window says."""
     result = run_retune( _asks( engine ), engine, SHA )
