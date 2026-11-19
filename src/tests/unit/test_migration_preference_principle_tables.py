@@ -229,10 +229,7 @@ def test_downgrade_drops_all_three_and_is_safe_to_repeat( monkeypatch, engine ):
     _run( engine, module, monkeypatch, "downgrade" )         # already gone: no error
 
 
-def test_the_migration_and_the_models_name_the_same_tables_columns_and_keys( monkeypatch ):
-    module  = _load_module()
-    pairs   = ( ( PreferencePrinciple, module.PRINCIPLES_TABLE ), ( PreferenceEvidence, module.EVIDENCE_TABLE ),
-                ( PredictionArmForecast, module.ARM_TABLE ) )
+def _capture_upgrade( module, monkeypatch ):
     created = {}
 
     class _Capture:
@@ -243,12 +240,55 @@ def test_the_migration_and_the_models_name_the_same_tables_columns_and_keys( mon
     monkeypatch.setattr( module.sa, "inspect", lambda _bind: type( "I", (), { "get_table_names": lambda self: [] } )(), raising=True )
     monkeypatch.setattr( module, "op", _Capture(), raising=True )
     module.upgrade()
-    assert set( created ) == { table for _, table in pairs }
-    for model, table in pairs:
-        migrated = { i.name for i in created[ table ] if isinstance( i, sa.Column ) }
-        assert migrated == { c.name for c in model.__table__.columns }, table
-    unique_names = { c.name for m, _ in pairs for c in m.__table__.constraints if isinstance( c, sa.UniqueConstraint ) }
-    assert { module.EVIDENCE_UNIQUE, module.ARM_UNIQUE } <= unique_names
+    return created
+
+
+_PAIRS = ( ( PreferencePrinciple, "PRINCIPLES_TABLE" ), ( PreferenceEvidence, "EVIDENCE_TABLE" ),
+           ( PredictionArmForecast, "ARM_TABLE" ) )
+
+
+def test_the_migration_and_the_models_name_the_same_tables_and_columns( monkeypatch ):
+    module  = _load_module()
+    created = _capture_upgrade( module, monkeypatch )
+    assert set( created ) == { getattr( module, attr ) for _, attr in _PAIRS }
+    for model, attr in _PAIRS:
+        migrated = { i.name for i in created[ getattr( module, attr ) ] if isinstance( i, sa.Column ) }
+        assert migrated == { c.name for c in model.__table__.columns }, attr
+
+
+def test_the_migration_and_the_models_agree_on_each_unique_key_by_name_and_columns( monkeypatch ):
+    module  = _load_module()
+    created = _capture_upgrade( module, monkeypatch )
+    expected = { module.EVIDENCE_UNIQUE: ( "principle_id", "notification_id", "field_key", "extractor_version", "source" ),
+                 module.ARM_UNIQUE:      ( "notification_id", "arm" ) }
+    migrated = { i.name: tuple( i._pending_colargs ) for items in created.values() for i in items
+                 if isinstance( i, sa.UniqueConstraint ) }
+    modeled  = { c.name: tuple( col.name for col in c.columns ) for model, _ in _PAIRS
+                 for c in model.__table__.constraints if isinstance( c, sa.UniqueConstraint ) }
+    assert migrated == expected
+    assert modeled  == expected
+
+
+def test_the_migration_and_the_models_agree_on_each_foreign_key_target_and_delete_rule( monkeypatch ):
+    module  = _load_module()
+    created = _capture_upgrade( module, monkeypatch )
+    migrated = { ( getattr( module, attr ), i.name ): { ( fk.target_fullname, fk.ondelete ) for fk in i.foreign_keys }
+                 for model, attr in _PAIRS for i in created[ getattr( module, attr ) ]
+                 if isinstance( i, sa.Column ) and i.foreign_keys }
+    modeled  = { ( model.__tablename__, c.name ): { ( fk.target_fullname, fk.ondelete ) for fk in c.foreign_keys }
+                 for model, _ in _PAIRS for c in model.__table__.columns if c.foreign_keys }
+    assert migrated == modeled
+    assert migrated == { ( "preference_evidence", "principle_id" ): { ( "preference_principles.id", None ) },
+                         ( "prediction_arm_forecast", "notification_id" ): { ( "notifications.id", "CASCADE" ) } }
+
+
+def test_the_revision_keeps_its_own_vector_width_equal_to_the_models_constant():
+    from cosa.rest.db.vector_store_models import EMBEDDING_DIM
+    module = _load_module()
+    embedding = next( c for c in PreferencePrinciple.__table__.columns if c.name == "embedding" )
+    assert embedding.type.dim == EMBEDDING_DIM == 768
+    import inspect
+    assert "Vector( 768 )" in inspect.getsource( module ), "the revision keeps its own literal"
 
 
 def test_the_revision_follows_c9e3a7b1d542_and_is_the_only_head():

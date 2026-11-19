@@ -1228,6 +1228,10 @@ class PredictionLog( Base ):
         return f"<PredictionLog(id={self.id}, type='{self.response_type}', category='{self.category}', match={self.accuracy_match})>"
 
 
+# The vector store module imports Base from here, which is already bound at this point.
+from cosa.rest.db.vector_store_models import EMBEDDING_DIM  # noqa: E402
+
+
 class PreferencePrinciple( Base ):
     """
     A short conditional principle the preference learner holds about one owner.
@@ -1253,7 +1257,7 @@ class PreferencePrinciple( Base ):
     statement: Mapped[str]                     = mapped_column( Text, nullable=False )
     rationale: Mapped[Optional[str]]           = mapped_column( Text, nullable=True )
     scope: Mapped[str]                         = mapped_column( String( 255 ), nullable=False )
-    embedding: Mapped[Optional[list]]          = mapped_column( Vector( 768 ), nullable=True )
+    embedding: Mapped[Optional[list]]          = mapped_column( Vector( EMBEDDING_DIM ), nullable=True )
     encoder_version: Mapped[Optional[str]]     = mapped_column( String( 100 ), nullable=True )
     extractor_version: Mapped[str]             = mapped_column( String( 100 ), nullable=False )
     created_at: Mapped[datetime]               = mapped_column(
@@ -1330,7 +1334,7 @@ class PredictionArmForecast( Base ):
     predictor_version: Mapped[Optional[str]]   = mapped_column( String( 100 ), nullable=True )
     forecast: Mapped[Optional[dict]]           = mapped_column( JSONB, nullable=True )
     input_cutoff: Mapped[Optional[datetime]]   = mapped_column( DateTime( timezone=True ), nullable=True )
-    evidence_ids: Mapped[Optional[dict]]       = mapped_column( JSONB, nullable=True )
+    evidence_ids: Mapped[Optional[list]]       = mapped_column( JSONB, nullable=True )
     forecast_ready_at: Mapped[Optional[datetime]] = mapped_column( DateTime( timezone=True ), nullable=True )
     abstention_reason: Mapped[Optional[str]]   = mapped_column( Text, nullable=True )
     displayed: Mapped[bool]                    = mapped_column( nullable=False, default=False, server_default=text( "false" ) )
