@@ -99,10 +99,10 @@ def add_principle( db, n, embedding=None, scope="global", owner=OWNER, encoder=E
     return p
 
 
-def add_evidence( db, principle, note, relation="supports", answered=-HOUR, extracted=-HOUR, condition=None, version=EXT, source="extractor" ):
+def add_evidence( db, principle, note, relation="supports", answered=-HOUR, extracted=-HOUR, condition=None, version=EXT, source="extractor", session_key=None ):
     """Add an evidence row for a principle."""
     db.add( PreferenceEvidence( id=uuid.uuid4(), principle_id=principle.id, notification_id=uid( 900 + note ), field_key="f", relation=relation, condition=condition,
-                                answered_at=ASK + answered, extracted_at=ASK + extracted, extractor_version=version, source=source ) )
+                                answered_at=ASK + answered, extracted_at=ASK + extracted, extractor_version=version, source=source, session_key=session_key ) )
     db.commit()
 
 
@@ -370,3 +370,18 @@ def test_block_suffix_never_appears_in_a_statement( db, monkeypatch ):
     add_evidence( db, p, 1 )
     block = principle_block( retrieve( db )[ "principles" ] )
     assert block[ "suffix" ] == "cafe0002" and "deadbeef" in block[ "text" ] and "</principles_cafe0002>" in block[ "text" ]
+
+
+def test_established_survives_a_pruned_notification_through_the_rows_own_session_key( db ):
+    """
+    Evidence that carries its session key counts both sessions with the notifications gone.
+
+    Without the key the principle reads as a hypothesis.
+    """
+    keyed, bare = add_principle( db, 1, embedding=vec( 1, 1 ) ), add_principle( db, 2, embedding=vec( 1, 2 ) )
+    add_evidence( db, keyed, 1, session_key="s1" )
+    add_evidence( db, keyed, 2, session_key="s2" )
+    add_evidence( db, bare, 3 )
+    add_evidence( db, bare, 4 )
+    by_statement = { e[ "principle" ].statement: e[ "status" ] for e in retrieve( db )[ "principles" ] }
+    assert by_statement == { "statement 1": "established", "statement 2": "hypothesis" }

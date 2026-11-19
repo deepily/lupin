@@ -21,8 +21,9 @@ choices are three rows (the mapping is this module's, because no writer exists y
 - relation ``refines``, with a condition  it stands, under that condition
 - relation ``contradicts``              it is retracted
 
+A ruling covers the contradicting rows answered up to its own answer time. A later contradiction counts again.
 A ruling applies across extractor versions, the one exception to "the current version only".
-A principle re-extracted under a new version names the one it continues (``related_principle_id``), and inherits that one's rulings.
+A principle re-extracted under a new version names the one it continues (``continues_principle_id``), and inherits that one's rulings.
 Retraction of an evidence row (``retracted_at``) takes it out from that moment on.
 """
 
@@ -63,17 +64,17 @@ def _lineage( principle, by_id ):
     List the ids of a principle and of every earlier principle it continues.
 
     Requires:
-        - principle has id and related_principle_id; by_id maps an id to a principle
+        - principle has id and continues_principle_id; by_id maps an id to a principle
 
     Ensures:
-        - returns the set holding the principle's own id, then its related_principle_id, then that principle's, and so on
+        - returns the set holding the principle's own id, then its continues_principle_id, then that principle's, and so on
         - stops at a principle with no related id, at an id missing from by_id, and at an id already seen, so a loop ends
     """
     seen    = { principle.id }
     current = principle
-    while current.related_principle_id is not None and current.related_principle_id not in seen:
-        seen.add( current.related_principle_id )
-        current = by_id.get( current.related_principle_id )
+    while current.continues_principle_id is not None and current.continues_principle_id not in seen:
+        seen.add( current.continues_principle_id )
+        current = by_id.get( current.continues_principle_id )
         if current is None: break
     return seen
 
@@ -83,12 +84,14 @@ def _sessions( rows, session_of ):
     Name the distinct sessions behind some evidence rows.
 
     Requires:
-        - rows have notification_id; session_of maps a notification id to its session key or None
+        - rows have notification_id and session_key (a string or None)
+        - session_of maps a notification id to its session key or None
 
     Ensures:
+        - a row's own session_key is read first; session_of is asked only for a row that has none
         - returns the set of non-None session keys; an episode with no known session adds none
     """
-    return { key for key in ( session_of( row.notification_id ) for row in rows ) if key is not None }
+    return { key for key in ( row.session_key if row.session_key is not None else session_of( row.notification_id ) for row in rows ) if key is not None }
 
 
 def _conditions( rows ):
@@ -130,7 +133,7 @@ def _ruled( principle, rulings, principles_by_id, asked_at ):
         - rulings are evidence rows with source review_card; principles_by_id maps an id to a principle
 
     Ensures:
-        - a ruling speaks for the principle it names, and for a principle whose related_principle_id chain reaches that one
+        - a ruling speaks for the principle it names, and for a principle whose continues_principle_id chain reaches that one
         - owner, scope and dimension are never used to match, so another principle in the same dimension is not ruled
         - returns the usable ruling with the latest ( answered_at, extracted_at ), or None
     """
@@ -156,7 +159,9 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
         - extractor rows count only for the current version and for their own principle
         - a ruling counts across versions; the latest usable one decides: supports stands, refines stands
           under its condition, contradicts retracts
-        - a standing ruling clears contested; contradicting rows are then ignored
+        - a standing ruling clears contested for the contradicting rows answered at or before the ruling's own answer time
+          only; a contradiction answered later counts, and can make the principle contested again
+        - a retracting ruling is final
         - no row is read or written outside the arguments, and none is changed
     """
     by_id    = { p.id: p for p in principles }
@@ -174,7 +179,10 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
         sessions    = _sessions( supporting, session_of )
         conditions  = _conditions( supporting )
         if ruling is not None and ruling.relation == CONTRADICTING: status = RETRACTED
-        elif ruling is not None: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
+        elif ruling is not None:
+            later = [ e for e in contra if aware_moment( e.answered_at ) > aware_moment( ruling.answered_at ) ]
+            if _contested( supporting, later ): status = CONTESTED
+            else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
         elif not supporting: status = RETRACTED
         elif _contested( supporting, contra ): status = CONTESTED
         else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS

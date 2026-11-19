@@ -25,16 +25,16 @@ V1   = "sonnet|v1"
 V2   = "sonnet|v2"
 
 
-def principle( pid="p1", version=V1, dimension="ask.approval_needs_link", scope="global", owner="owner-a", related=None ):
+def principle( pid="p1", version=V1, dimension="ask.approval_needs_link", scope="global", owner="owner-a", continues=None ):
     """Build a principle row with the model's column names."""
-    return SimpleNamespace( id=pid, owner_id=owner, scope=scope, dimension=dimension, extractor_version=version, related_principle_id=related )
+    return SimpleNamespace( id=pid, owner_id=owner, scope=scope, dimension=dimension, extractor_version=version, continues_principle_id=continues )
 
 
-def row( pid="p1", note="n1", relation="supports", condition=None, answered=-HOUR, extracted=-HOUR, retracted=None, version=V1, source="extractor" ):
+def row( pid="p1", note="n1", relation="supports", condition=None, answered=-HOUR, extracted=-HOUR, retracted=None, version=V1, source="extractor", session_key=None ):
     """Build an evidence row; times are offsets from the ask."""
     return SimpleNamespace( principle_id=pid, notification_id=note, relation=relation, condition=condition, field_key="f",
                             answered_at=ASK + answered, extracted_at=ASK + extracted, retracted_at=None if retracted is None else ASK + retracted,
-                            extractor_version=version, source=source )
+                            extractor_version=version, source=source, session_key=session_key )
 
 
 def ruling( pid="p1", relation="supports", condition=None, answered=-HOUR, extracted=-HOUR, version=V1, retracted=None ):
@@ -202,7 +202,7 @@ def test_ruling_is_as_of_a_replay_before_the_ruling_still_sees_contested():
 
 def test_the_latest_usable_ruling_decides_and_a_retracted_ruling_does_not_count():
     """Rick may change his mind; a ruling taken back is as if never given."""
-    rows = contested_rows() + [ ruling( relation="contradicts", answered=-3 * HOUR, extracted=-3 * HOUR ), ruling( relation="supports", answered=-2 * HOUR, extracted=-2 * HOUR ) ]
+    rows = contested_rows() + [ ruling( relation="contradicts", answered=-timedelta( minutes=40 ), extracted=-timedelta( minutes=40 ) ), ruling( relation="supports", answered=-timedelta( minutes=30 ), extracted=-timedelta( minutes=30 ) ) ]
     assert status_of( [ principle() ], rows )[ "status" ] == ESTABLISHED
     taken_back = contested_rows() + [ ruling( relation="supports", retracted=-HOUR ) ]
     assert status_of( [ principle() ], taken_back )[ "status" ] == CONTESTED
@@ -233,14 +233,14 @@ def test_ruling_survives_a_version_switch_when_the_new_principle_names_the_ruled
 
     The V1 principle has no V2 evidence, so it has no status.
     """
-    old, new = principle( "p1", V1 ), principle( "p9", V2, related="p1" )
+    old, new = principle( "p1", V1 ), principle( "p9", V2, continues="p1" )
     assert status_of( [ old, new ], new_version_rows(), version=V2, pid="p9" )[ "status" ] == ESTABLISHED
     assert status_of( [ old, new ], new_version_rows(), version=V2, pid="p1" ) is None
 
 
 def test_a_ruling_follows_a_chain_of_related_principles():
     """V3 continues V2 which continues the ruled V1: the ruling reaches the V3 principle."""
-    chain = [ principle( "p1", V1 ), principle( "p5", V2, related="p1" ), principle( "p9", "sonnet|v3", related="p5" ) ]
+    chain = [ principle( "p1", V1 ), principle( "p5", V2, continues="p1" ), principle( "p9", "sonnet|v3", continues="p5" ) ]
     rows  = new_version_rows()
     for r in rows[ :3 ]: r.extractor_version = "sonnet|v3"
     assert status_of( chain, rows, version="sonnet|v3", pid="p9" )[ "status" ] == ESTABLISHED
@@ -249,8 +249,8 @@ def test_a_ruling_follows_a_chain_of_related_principles():
 
 @pytest.mark.parametrize( "other", [
     principle( "p9", V2 ),
-    principle( "p9", V2, related="p7" ),
-    principle( "p9", V2, related="ghost" ),
+    principle( "p9", V2, continues="p7" ),
+    principle( "p9", V2, continues="ghost" ),
     principle( "p9", V1 ),
 ] )
 def test_a_ruling_does_not_speak_for_a_principle_that_does_not_continue_the_ruled_one( other ):
@@ -265,7 +265,7 @@ def test_a_ruling_does_not_speak_for_a_principle_that_does_not_continue_the_rule
 
 def test_a_related_loop_ends_and_the_principle_stays_unruled():
     """Two principles that name each other end the walk instead of looping, and neither is ruled."""
-    a, b = principle( "p8", V2, related="p9" ), principle( "p9", V2, related="p8" )
+    a, b = principle( "p8", V2, continues="p9" ), principle( "p9", V2, continues="p8" )
     assert status_of( [ principle( "p1", V1 ), a, b ], new_version_rows(), version=V2, pid="p9" )[ "status" ] == CONTESTED
 
 
@@ -273,3 +273,49 @@ def test_a_ruling_for_an_unknown_principle_speaks_for_nobody_else():
     """A ruling whose principle row is missing from the ledger matches only by its own id."""
     rows = contested_rows() + [ ruling( pid="ghost" ) ]
     assert status_of( [ principle() ], rows )[ "status" ] == CONTESTED
+
+
+def test_a_ruling_covers_only_the_contradictions_answered_up_to_it():
+    """
+    A contradiction answered after the ruling contests the principle again.
+
+    One answered at the ruling is covered.
+    """
+    base = contested_rows() + [ ruling( relation="supports", answered=-HOUR, extracted=-HOUR ) ]
+    assert status_of( [ principle() ], base )[ "status" ] == ESTABLISHED
+    at_ruling = base + [ row( note="n4", relation="contradicts", answered=-HOUR ) ]
+    assert status_of( [ principle() ], at_ruling )[ "status" ] == ESTABLISHED
+    later = base + [ row( note="n5", relation="contradicts", answered=-timedelta( minutes=30 ) ) ]
+    result = status_of( [ principle() ], later )
+    assert ( result[ "status" ], result[ "ruled" ] ) == ( CONTESTED, True )
+
+
+def test_a_later_contradiction_under_another_condition_does_not_contest_a_ruled_principle():
+    """The later contradiction must meet a supporting row under the same condition to contest."""
+    rows = contested_rows() + [ ruling( relation="supports" ), row( note="n5", relation="contradicts", condition="plan B", answered=-timedelta( minutes=30 ) ) ]
+    assert status_of( [ principle() ], rows )[ "status" ] == ESTABLISHED
+
+
+def test_a_retracting_ruling_stays_final_when_later_evidence_supports_the_principle():
+    """A retraction is not reopened by a later supporting answer."""
+    rows = contested_rows() + [ ruling( relation="contradicts" ), row( note="n6", answered=-timedelta( minutes=30 ) ) ]
+    assert status_of( [ principle() ], rows )[ "status" ] == RETRACTED
+
+
+def test_sessions_are_read_from_the_rows_own_key_before_the_lookup():
+    """
+    Two rows with their own session keys establish a principle.
+
+    The lookup is never asked, and knows neither notification.
+    """
+    nowhere = lambda note: ( _ for _ in () ).throw( AssertionError( "the lookup must not be asked" ) )
+    rows    = [ row( note="gone1", session_key="s1" ), row( note="gone2", session_key="s2" ) ]
+    assert derive_statuses( [ principle() ], rows, ASK, V1, nowhere )[ "p1" ][ "status" ] == ESTABLISHED
+    same    = [ row( note="gone1", session_key="s1" ), row( note="gone2", session_key="s1" ) ]
+    assert derive_statuses( [ principle() ], same, ASK, V1, nowhere )[ "p1" ][ "sessions" ] == 1
+
+
+def test_a_row_without_its_own_key_falls_back_to_the_lookup():
+    """A row with no session key asks the lookup, and one with a key does not."""
+    rows = [ row( note="n2", session_key=None ), row( note="gone", session_key="s9" ) ]
+    assert status_of( [ principle() ], rows )[ "sessions" ] == 2

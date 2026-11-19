@@ -176,7 +176,7 @@ def retrieve_principles( session, owner_id, project, query_embedding, asked_at, 
     # despite its name, dot_topk's exclude_filter is a filter() that keeps the matching rows, before the limit
     scored = dot_topk( session, PreferencePrinciple, PreferencePrinciple.embedding, query_embedding, limit=count, exclude_filter=allowed, metric="cosine" )
     principles, evidence = load_owner_ledger( session, owner_id )
-    statuses = derive_statuses( principles, evidence, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in evidence ] ) )
+    statuses = derive_statuses( principles, evidence, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in evidence if e.session_key is None ] ) )
     kept     = select_principles( scored, statuses, k )
     return { "principles": kept, "available": count, "short": len( kept ) < k }
 
@@ -192,7 +192,7 @@ def principle_block( selected, suffix=None ):
     Ensures:
         - returns { text, principle_ids, suffix }; text is "" when nothing was selected
         - each line holds the principle's id, status, scope, dimension and statement, and its conditions when it has any
-        - no rationale and no evidence is included, so no answer text from another conversation can enter
+        - no raw answer, rationale or evidence row is included; a statement is distilled from answers, and is the only text of them that enters
         - the lines sit between tags carrying a random suffix that no statement contains, so a statement cannot close the block
         - principle_ids are in line order, for the forecast to cite
     """
