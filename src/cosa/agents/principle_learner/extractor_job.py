@@ -48,16 +48,18 @@ def encoder_version():
 
 def default_embed( text ):
     """
-    Embed one text with the project's embedding manager.
+    Embed one text with the configured embedding provider, as prose.
 
     Requires:
         - text is a non-empty string
+        - the configured provider makes 768-dimension vectors, the width of the principle table's column
 
     Ensures:
-        - returns the manager's vector as a list of floats
+        - returns the provider's vector as a list of floats
+        - a provider that makes another width fails loudly when a principle is stored, never silently
     """
-    from cosa.memory.embedding_manager import generate_embedding
-    return generate_embedding( text )
+    from cosa.memory.embedding_provider import get_embedding_provider
+    return get_embedding_provider().generate_embedding( text, content_type="prose" )
 
 
 @contextmanager

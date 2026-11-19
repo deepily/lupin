@@ -14,6 +14,7 @@ import json
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
@@ -353,7 +354,7 @@ def test_fetch_neighbours_filters_owner_and_encoder_ranks_by_best_cosine_and_cut
     got = store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ), vec( 0, 1, 0, 0 ) ], k=2 )
     assert sorted( row.statement for row in got ) == [ "a", "b" ] and len( got ) == 2
     assert [ row.statement for row in store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ) ], k=3 ) ][ :2 ] == [ "a", "c" ]
-    assert store_module._cosine( [ 0, 0 ], [ 1, 1 ] ) == 0.0 and a.id and b.id
+    assert a.id and b.id
 
 
 def test_an_answer_after_a_reveal_with_no_draft_is_used_and_reported_as_possibly_influenced( db ):
@@ -475,10 +476,15 @@ def test_settings_come_from_the_ini_keys_when_not_given_and_the_extractor_versio
 
 
 def test_the_default_embedding_and_session_doors_call_the_projects_own_helpers( monkeypatch ):
-    import cosa.memory.embedding_manager as manager
+    import cosa.memory.embedding_provider as provider
     import cosa.rest.db.database as database
-    monkeypatch.setattr( manager, "generate_embedding", lambda text: [ 1.0, 2.0 ] )
-    assert job_module.default_embed( "x" ) == [ 1.0, 2.0 ]
+    seen = []
+    class FakeProvider:
+        def generate_embedding( self, text, content_type ):
+            seen.append( ( text, content_type ) )
+            return [ 1.0, 2.0 ]
+    monkeypatch.setattr( provider, "get_embedding_provider", lambda: FakeProvider() )
+    assert job_module.default_embed( "x" ) == [ 1.0, 2.0 ] and seen == [ ( "x", "prose" ) ]
     @contextmanager
     def fake_get_db():
         yield "a session"
@@ -487,9 +493,9 @@ def test_the_default_embedding_and_session_doors_call_the_projects_own_helpers( 
 
 
 def test_the_job_uses_the_default_doors_when_none_are_given( db, monkeypatch ):
-    import cosa.memory.embedding_manager as manager
+    import cosa.memory.embedding_provider as provider
     import cosa.rest.db.database as database
-    monkeypatch.setattr( manager, "generate_embedding", embed )
+    monkeypatch.setattr( provider, "get_embedding_provider", lambda: SimpleNamespace( generate_embedding=lambda text, content_type: embed( text ) ) )
     monkeypatch.setattr( database, "get_db", _factory( db ) )
     ask = _ask( db, answer="no" )
     job = PrincipleExtractorJob( ask, str( OWNER ), "o@example.com", query_fn=Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ), model=MODEL, timeout_seconds=30, encoder=ENCODER )

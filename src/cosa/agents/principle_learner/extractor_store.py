@@ -6,26 +6,12 @@ already there and adds nothing, so a replay is safe. The nearest-principle read 
 because a vector from another encoder cannot be compared with the query.
 """
 
-import math
 import uuid
 
 from cosa.rest.postgres_models import PreferenceEvidence, PreferencePrinciple
+from cosa.rest.repair_attempt_tracker import cosine_similarity
 
 NEIGHBOURS = 5
-
-
-def _cosine( left, right ):
-    """
-    Give the cosine of two vectors.
-
-    Requires:
-        - left and right are equal-length sequences of numbers
-
-    Ensures:
-        - returns the cosine, or 0.0 when either vector has no length
-    """
-    norm = math.sqrt( sum( a * a for a in left ) ) * math.sqrt( sum( b * b for b in right ) )
-    return sum( a * b for a, b in zip( left, right ) ) / norm if norm else 0.0
 
 
 def fetch_neighbours( session, owner_id, encoder_version, query_vectors, k=NEIGHBOURS ):
@@ -46,7 +32,7 @@ def fetch_neighbours( session, owner_id, encoder_version, query_vectors, k=NEIGH
     rows   = session.query( PreferencePrinciple ).filter( PreferencePrinciple.owner_id == owner_id,
                                                          PreferencePrinciple.encoder_version == encoder_version,
                                                          PreferencePrinciple.embedding.isnot( None ) ).all()
-    scored = [ ( max( _cosine( list( row.embedding ), vector ) for vector in query_vectors ), str( row.id ), row ) for row in rows ]
+    scored = [ ( max( cosine_similarity( list( row.embedding ), vector ) for vector in query_vectors ), str( row.id ), row ) for row in rows ]
     scored.sort( key=lambda item: ( -item[ 0 ], item[ 1 ] ) )
     return [ row for _, _, row in scored[ :k ] ]
 
