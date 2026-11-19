@@ -100,6 +100,15 @@ def test_arm_against_q_by_type_splits_the_pairs_and_q_has_none():
     assert ( by_type[ "multiple_choice" ][ "engine_only_right" ], by_type[ "multiple_choice" ][ "baseline_only_right" ], by_type[ "multiple_choice" ][ "asks_replayed" ] ) == ( 0, 0, 4 )
 
 
+def test_vs_q_by_type_keys_come_out_sorted_with_three_types():
+    """Yes/no asks come first in the runs, yet the three keys are listed in sorted order."""
+    three = copy.deepcopy( _runs() )
+    for run in three.values():
+        for records in run[ "records" ].values():
+            for record in records[ 10: ]: record[ "meta" ][ "response_type" ] = "open_ended"
+    assert list( compare_arms( three, FLOOR )[ 1 ][ "vs_q_by_type" ] ) == [ "multiple_choice", "open_ended", "yes_no" ]
+
+
 def test_a_run_with_no_yes_no_ask_has_no_always_yes_pair():
     only_mc = { arm: dict( run, records={ k: [ r for r in v if r[ "meta" ][ "response_type" ] == "multiple_choice" ] for k, v in run[ "records" ].items() } )
                 for arm, run in _runs().items() }
@@ -190,6 +199,11 @@ def test_report_marks_a_type_an_arm_did_not_replay():
     rows[ 1 ][ "by_type" ][ "multiple_choice" ] = { "asks": 1, "correct": 1, "per_100": 100.0 }
     text = render_arm_report( rows, COVERAGE, RECONCILIATIONS, PROVENANCE )
     assert "| Q+A | 100.0 (1) | - |" in text
+
+
+def test_report_carries_the_by_type_heading_as_its_own_line():
+    lines = render_arm_report( compare_arms( _runs(), FLOOR ), COVERAGE, RECONCILIATIONS, PROVENANCE ).split( "\n" )
+    assert "## Against Q by answer type" in lines
 
 
 def test_report_is_the_same_text_for_the_same_inputs():
