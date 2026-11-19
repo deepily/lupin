@@ -124,6 +124,19 @@ def test_without_an_injected_sha_the_command_asks_for_the_head_commit( engine, m
     assert json.loads( out.read_text( encoding="utf-8" ) )[ "provenance" ][ "code_sha" ] == "e" * 40
 
 
+def test_without_injected_factories_the_command_uses_get_db_and_the_live_engine_builder( engine, monkeypatch, tmp_path ):
+    """With no factories given, main falls back to get_db and the live engine builder."""
+    opened = []
+    session = FakeSession()
+    monkeypatch.setattr( retune_run, "get_db", lambda: opened.append( "get_db" ) or contextlib.nullcontext( session ) )
+    monkeypatch.setattr( retune_run, "_open_engine", lambda: opened.append( "_open_engine" ) or engine )
+    _fake_cohort( monkeypatch, { "yes_no": _asks( engine ), "multiple_choice": [] } )
+    out = tmp_path / "report.json"
+    assert main( [ "--out", str( out ) ], printer=lambda line: None, code_sha="f" * 40, clock=lambda: READ_AT ) == 0
+    assert opened == [ "get_db", "_open_engine" ] and session.statements[ 0 ] == "SET TRANSACTION READ ONLY"
+    assert out.exists()
+
+
 def test_the_live_engine_is_built_with_embedding_generation_switched_off():
     """A replay on this engine cannot reach an embedding service: the call raises."""
     live = retune_run._open_engine()
