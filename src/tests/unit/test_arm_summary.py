@@ -240,3 +240,10 @@ def test_a_capped_row_is_capped_whether_or_not_it_has_a_ready_time_and_a_reason_
     other_reason     = dict( _row( 5, DRAFT_YES, YES ), abstention_reason="switch off", forecast_ready_at=None )
     got = summarize_arm( "X", [ capped_with_time, other_reason ] )
     assert ( got[ "capped" ], got[ "not_ready" ], got[ "timely" ], got[ "timeliness" ] ) == ( 1, 1, 0, 0.0 )
+
+
+def test_the_capped_reason_is_defined_once_in_the_repository_and_is_the_word_the_writers_store():
+    from cosa.rest.db.repositories import arm_forecast_repository as repo
+    from cosa.research.preference_replay import arm_summary
+    assert repo.CAPPED_ARM_REASON == "capacity"
+    assert arm_summary.CAPPED_ARM_REASON is repo.CAPPED_ARM_REASON

@@ -17,6 +17,9 @@ from cosa.agents.prediction_engine.config import FORECAST_SOURCE_FOUNDATION, FOR
 from cosa.rest.postgres_models import PredictionArmForecast, PredictionLog
 
 # The arm a forecast source stands for, read from the row's own forecast_source and never assumed.
+# The abstention reason of a forecast row the concurrency cap turned away. Defined here once; the summary and the writers import it.
+CAPPED_ARM_REASON = "capacity"
+
 DISPLAYED_ARM_BY_FORECAST_SOURCE = { FORECAST_SOURCE_FOUNDATION: "A1", FORECAST_SOURCE_TEST_OVERRIDE: "test_override" }
 
 

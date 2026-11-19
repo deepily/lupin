@@ -25,11 +25,9 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from cosa.agents.prediction_engine.exposure import EXPOSED, SWITCHED, UNAIDED, UNANSWERED, classify_exposure, revealed_before_answer, switch_rate
+from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
 from cosa.rest.postgres_models import PredictionArmForecast, PredictionLog
 from cosa.utils.iso_timestamp import aware_moment
-
-# The abstention reason a forecast row carries when the concurrency cap turned its card away.
-CAPPED_REASON = "capacity"
 
 SUMMARY_KEYS = (
     "arm", "forecasts", "orphaned", "no_row", "answered", "timely", "late", "not_ready", "capped", "timeliness",
@@ -65,7 +63,7 @@ def summarize_arm( arm: str, rows: List[Dict[str, Any]], orphaned: int = 0, no_r
         opened    = aware_moment( row[ "fold_opened_at" ] )
         ready     = aware_moment( row[ "forecast_ready_at" ] )
         tally[ "answered" ] += 1
-        if row[ "abstention_reason" ] == CAPPED_REASON: tally[ "capped" ] += 1
+        if row[ "abstention_reason" ] == CAPPED_ARM_REASON: tally[ "capped" ] += 1
         elif ready is None:                              tally[ "not_ready" ] += 1
         elif ready <= responded:                         tally[ "timely" ] += 1
         else:                                            tally[ "late" ] += 1
