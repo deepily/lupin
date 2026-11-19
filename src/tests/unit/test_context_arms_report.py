@@ -8,10 +8,12 @@ Q+A beats Q on eight yes/no asks. Q+O differs from Q on two asks, below the floo
 """
 
 import copy
+import json
+from datetime import datetime, timezone
 
 import pytest
 
-from cosa.research.preference_replay.context_arms_report import compare_arms, render_arm_report
+from cosa.research.preference_replay.context_arms_report import compare_arms, main, render_arm_report
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM
 
 KINDS     = [ "yes_no" ] * 8 + [ "multiple_choice" ] * 4
@@ -209,3 +211,73 @@ def test_report_carries_the_by_type_heading_as_its_own_line():
 def test_report_is_the_same_text_for_the_same_inputs():
     rows = compare_arms( _runs(), FLOOR )
     assert render_arm_report( rows, COVERAGE, RECONCILIATIONS, PROVENANCE ) == render_arm_report( rows, COVERAGE, RECONCILIATIONS, PROVENANCE )
+
+
+STEMS = { "Q": "q", "Q+A": "q-a", "Q+O": "q-o", "Q+P": "q-p", "Q+H": "q-h" }
+
+
+def _write_inputs( tmp_path ):
+    """
+    Write a per-ask file for each of the five arms and an inputs file.
+
+    Requires:
+        - tmp_path is an empty directory
+
+    Ensures:
+        - each file holds the compact layout arm_scoring writes, with the arm's own code sha
+        - Q+P and Q+H repeat the Q+O flags, so the five arms replay the same twelve asks
+    """
+    runs  = _runs()
+    flags = { "Q": Q_FLAGS, "Q+A": [ True ] * 8 + [ True, True, False, False ], "Q+O": [ True, True ] + [ False ] * 6 + [ True, True, False, False ] }
+    flags[ "Q+P" ] = flags[ "Q+H" ] = flags[ "Q+O" ]
+    for arm, stem in STEMS.items():
+        asks = [ { "id": ask_id, "response_type": kind, "forecast": "yes", "confidence": 0.9, "correct": flag, "always_yes_correct": yes }
+                 for ask_id, kind, flag, yes in zip( IDS, KINDS, flags[ arm ], YES_FLAGS ) ]
+        document = { "code_sha": f"{stem}0123456789abcdef", "run": { "asks": asks, "not_replayable": 0, "unrebuildable_cases": 0, "families": {} } }
+        ( tmp_path / f"prediction-context-arm-{stem}-per-ask.json" ).write_text( json.dumps( document ) )
+    assert runs[ "Q" ] is not None
+    ( tmp_path / "inputs.json" ).write_text( json.dumps( { "coverage": dict( COVERAGE, **{ "Q+P": COVERAGE[ "Q+O" ], "Q+H": COVERAGE[ "Q+O" ] } ), "reconciliations": RECONCILIATIONS } ) )
+
+
+def _main_text( tmp_path, floor_source="the exact test cannot reach 0.05 below 6 pairs" ):
+    """
+    Run main on the written files and read the report back.
+
+    Requires:
+        - _write_inputs has filled tmp_path
+
+    Ensures:
+        - returns the report text main wrote
+    """
+    argv = [ "--per-ask-dir", str( tmp_path ), "--inputs", str( tmp_path / "inputs.json" ), "--floor", "6", "--floor-source", floor_source, "--out", str( tmp_path / "r.md" ) ]
+    assert main( argv, code_sha="abc1234def", clock=lambda: datetime( 2026, 11, 19, 22, 0, tzinfo=timezone.utc ) ) == 0
+    return ( tmp_path / "r.md" ).read_text()
+
+
+def test_main_writes_one_row_per_arm_from_the_per_ask_files( tmp_path ):
+    _write_inputs( tmp_path )
+    text = _main_text( tmp_path )
+    assert "| Q+A | 50.0 (4) | 100.0 (8) | 8 | 0 | 0.0078 | engine better |" in text
+    for arm in ( "Q+P", "Q+H" ): assert f"| {arm} | 50.0 (4) | 25.0 (8) |" in text
+
+
+def test_main_names_the_floor_its_source_the_files_code_and_the_command( tmp_path ):
+    _write_inputs( tmp_path )
+    text = _main_text( tmp_path )
+    assert "- discordant floor: 6 pairs, stated before the run; source: the exact test cannot reach 0.05 below 6 pairs" in text
+    assert "- code sha of this report: abc1234def" in text
+    assert "- per-ask files scored on code: Q q01234567, Q+A q-a012345, Q+O q-o012345, Q+P q-p012345, Q+H q-h012345" in text
+    assert "- generated: 2026-11-19T22:00:00+00:00" in text
+    assert "- command: python -m cosa.research.preference_replay.context_arms_report --per-ask-dir" in text
+    assert "--floor 6 --floor-source" in text
+
+
+def test_main_takes_its_sha_and_clock_from_the_tree_when_not_given( tmp_path, monkeypatch ):
+    _write_inputs( tmp_path )
+    monkeypatch.setattr( "cosa.research.preference_replay.context_arms_report.resolve_commit", lambda root, ref: "headsha" )
+    argv = [ "--per-ask-dir", str( tmp_path ), "--inputs", str( tmp_path / "inputs.json" ), "--floor", "6", "--floor-source", "s", "--out", str( tmp_path / "r.md" ) ]
+    monkeypatch.setattr( "sys.argv", [ "x" ] + argv )
+    assert main() == 0
+    text = ( tmp_path / "r.md" ).read_text()
+    assert "- code sha of this report: headsha" in text and "- generated: 20" in text
+    assert "--floor-source s --out" in text
