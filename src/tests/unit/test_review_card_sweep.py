@@ -12,10 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -24,6 +21,7 @@ from cosa.agents.prediction_engine.principle_status import CONTESTED, derive_sta
 from cosa.agents.principle_learner import review_card_sweep as sweep
 from cosa.agents.principle_learner import review_cards as rc
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
+from cosa.research.preference_replay import scratch_db  # noqa: F401  registers the one shared SQLite hooks for JSONB and Vector
 from cosa.rest.job_state import JobState
 from cosa.rest.postgres_models import Notification, PredictionLog, PreferenceEvidence, PreferencePrinciple
 
@@ -31,18 +29,6 @@ OWNER   = uuid.UUID( "00000000-0000-4000-8000-0000000000aa" )
 T0      = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 NOW     = T0 + timedelta( hours=2 )
 VERSION = "ext"
-
-
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( element, compiler, **kw ):
-    """Render JSONB as JSON on SQLite."""
-    return "JSON"
-
-
-@compiles( Vector, "sqlite" )
-def _vector_as_text( element, compiler, **kw ):
-    """Render a pgvector column as text on SQLite."""
-    return "TEXT"
 
 
 @pytest.fixture( autouse=True )
