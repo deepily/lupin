@@ -528,7 +528,7 @@
     }
   ],
   "notes": [
-    "Objective: correct forecasts per 100 eligible asks on the tune window, abstention charged as a miss. The best point is the grid corner (threshold 0.50, top k 10); the report-only sweep below it is flat from 0.45 down, so the corner is near the plateau.",
+    "Objective: correct forecasts per 100 eligible asks on the tune window, abstention charged as a miss. The best point is the grid corner (threshold 0.50, top k 10); the report-only sweep at 0.30 to 0.45 ranges from 30.41 to 32.27 correct per 100 on the tune window across top k 3 to 10, so lower floors add about one point.",
     "Eligible means yes/no or multiple-choice asks that carry a stored vector. Asks with no vector are excluded and counted, not re-embedded. The restored case memory was backfilled with the migration's own derivation before this run.",
     "Open-ended keys are untouched. The answered-ask figures are report-only and never choose the best point."
   ],
