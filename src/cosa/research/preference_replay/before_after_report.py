@@ -24,6 +24,8 @@ A column is a dict with these keys:
 - produced_by: optional, the replay code commit and run script that made the column
 """
 
+import argparse
+import json
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 COLUMN_KEYS = ( "label", "commit", "vector_source", "ask_count", "threshold", "top_k", "coverage", "calibration", "yes_no_summary", "ask_ids", "final_ids" )
@@ -190,7 +192,7 @@ def _vector_source( source: Any ) -> str:
     return source if isinstance( source, str ) else f"{source[ 'model' ]} @ {source[ 'revision' ]}"
 
 
-def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before and after: regenerated question vectors" ) -> str:
+def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before and after: regenerated question vectors", notes: Sequence[str] = () ) -> str:
     """
     Render the four-column report as Markdown.
 
@@ -203,7 +205,9 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
           its two windows, read from its mix) and produced_by, or "not stated" when the column has none
         - one comparison table gives every figure in all four columns, then the change between each adjacent pair
         - a figure one column lacks reads n/a, and its changes read n/a
-        - the same columns give the same text
+        - a pipe inside a figure name is escaped so the table keeps its columns
+        - each note is printed as a bullet under the introduction
+        - the same columns and notes give the same text
     """
     check_columns( columns )
     flat = [ column_rows( column ) for column in columns ]
@@ -213,7 +217,7 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
     labels = [ column[ "label" ] for column in columns ]
     lines  = [ f"# {title}", "",
                "Change 1 to 2 is the effect of the regenerated vectors alone. Change 2 to 3 is the effect of the added asks."
-               " Change 3 to 4 is the effect of scoring only before's final window.", "",
+               " Change 3 to 4 is the effect of scoring only before's final window.", "" ] + [ f"- {note}" for note in notes ] + ( [ "" ] if notes else [] ) + [
                "| column | label | commit | vector source | asks | scored | produced by |", "|---|---|---|---|---|---|---|" ]
     for number, column in enumerate( columns, start=1 ):
         scored = sum( column[ "coverage" ][ "tune_mix" ].values() ) + sum( column[ "coverage" ][ "final_mix" ].values() )
@@ -222,6 +226,83 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
     for name in names:
         figures = [ rows.get( name ) for rows in flat ]
         changes = [ _change( figures[ i ], figures[ i + 1 ] ) for i in range( 3 ) ]
-        lines.append( f"| {name} | " + " | ".join( _shown( figure ) for figure in figures ) + " | " + " | ".join( changes ) + " |" )
+        lines.append( f"| {name.replace( '|', chr( 92 ) + '|' )} | " + " | ".join( _shown( figure ) for figure in figures ) + " | " + " | ".join( changes ) + " |" )
     lines.append( "" )
     return "\n".join( lines )
+
+
+def final_correct( column: Dict[str, Any] ) -> int:
+    """
+    Sum a column's final-window correct forecasts over its answer types.
+
+    Requires:
+        - column holds coverage with final-window scores for each type
+
+    Ensures:
+        - returns the total correct count
+    """
+    return sum( score[ "correct" ] for score in column[ "coverage" ][ "scores" ][ "final" ].values() )
+
+
+def assemble_report( columns: Sequence[Dict[str, Any]], expected_final_correct: Sequence[int], control_final_correct: int, before: Dict[str, Any],
+                     notes: Sequence[str] = (), title: str = "Before and after: regenerated question vectors" ) -> str:
+    """
+    Check the control, set the Before column's provenance and render the report.
+
+    Requires:
+        - columns are the four column dicts; before holds the commit and produced_by of the committed baseline
+        - expected_final_correct holds the final-window correct count each of columns 1 to 3 must reproduce
+        - control_final_correct is the count from the control run on stored vectors; it must equal the first expected count
+
+    Ensures:
+        - the control run and each of columns 1 to 3 reproduce their counts, or nothing is rendered
+        - column 1 carries the commit and produced_by that before names
+        - returns the render of the four columns
+
+    Raises:
+        - ReportMismatch naming the column when a count differs, or when the columns do not fit the design
+    """
+    check_control( expected_final_correct[ 0 ], control_final_correct )
+    for number, expected in enumerate( expected_final_correct ):
+        if final_correct( columns[ number ] ) != expected:
+            raise ReportMismatch( f"column {number + 1} has {final_correct( columns[ number ] )} final-window correct, the expected count is {expected}" )
+    return render_before_after( [ dict( columns[ 0 ], **before ) ] + list( columns[ 1: ] ), title, notes )
+
+
+def main( argv: Optional[Sequence[str]] = None ) -> int:
+    """
+    Build the committed before-and-after report from the four column files.
+
+    Requires:
+        - argv names the four column files in order, the three counts columns 1 to 3 must reproduce, the control report and the output path
+        - the control report is a retune report with a grid point at threshold 0.5 and top k 10
+
+    Ensures:
+        - writes the Markdown report and returns 0
+
+    Raises:
+        - ReportMismatch when the control or a column fails to reproduce its count
+    """
+    parser = argparse.ArgumentParser( description="Build the before-and-after report from four column files." )
+    parser.add_argument( "--columns", nargs=4, required=True )
+    parser.add_argument( "--control-report", required=True )
+    parser.add_argument( "--expect-final-correct", nargs=3, type=int, required=True, metavar="N", help="the final-window correct count columns 1, 2 and 3 must reproduce" )
+    parser.add_argument( "--before-commit", required=True )
+    parser.add_argument( "--before-produced-by", required=True )
+    parser.add_argument( "--note", action="append", default=[] )
+    parser.add_argument( "--out", required=True )
+    args = parser.parse_args( argv )
+    with open( args.control_report, encoding="utf-8" ) as handle: control = json.load( handle )
+    control_correct = next( point for point in control[ "grid_points" ] if point[ "threshold" ] == 0.5 and point[ "top_k" ] == 10 )[ "final_correct" ]
+    columns = []
+    for path in args.columns:
+        with open( path, encoding="utf-8" ) as handle: columns.append( json.load( handle ) )
+    text = assemble_report( columns, args.expect_final_correct, control_correct,
+                            { "commit": args.before_commit, "produced_by": args.before_produced_by }, args.note )
+    with open( args.out, "w", encoding="utf-8" ) as handle: handle.write( text )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - thin process entry, main() is what the tests drive
+    import sys
+    sys.exit( main( sys.argv[ 1: ] ) )

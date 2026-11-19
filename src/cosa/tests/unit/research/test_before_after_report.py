@@ -6,6 +6,7 @@ A renderer that swapped two columns, or took a change from the wrong pair, would
 """
 
 import copy
+import json
 
 import pytest
 
@@ -311,3 +312,60 @@ def test_each_id_equality_refuses_a_difference_in_either_direction( columns, fir
     if holder == 1: columns[ 2 ][ key ] = columns[ 2 ][ key ] + [ "extra" ]
     with pytest.raises( bar.ReportMismatch, match=message ):
         bar.check_columns( columns )
+
+
+def test_notes_are_printed_as_bullets_under_the_introduction_and_omitted_when_empty( columns ):
+    with_notes = bar.render_before_after( columns, notes=[ "first note", "second note" ] )
+    assert "\n- first note\n- second note\n\n| column |" in with_notes
+    assert "\n- " not in bar.render_before_after( columns ).split( "| column |" )[ 0 ]
+
+
+def test_final_correct_sums_the_types_of_the_final_window( columns ):
+    assert bar.final_correct( columns[ 0 ] ) == 164 and bar.final_correct( columns[ 1 ] ) == 174
+
+
+BEFORE = { "commit": "8d748e033", "produced_by": "re-derived" }
+
+
+def test_assemble_report_sets_the_before_provenance_once_every_count_matches( columns ):
+    text = bar.assemble_report( columns, [ 164, 174, 172 ], 164, BEFORE, notes=[ "n" ] )
+    assert "| 1 | before | `8d748e033` | stored | 1302 | 390 | re-derived |" in text and "- n" in text
+    assert columns[ 0 ][ "produced_by" ].startswith( "replay 086f95590" )
+
+
+@pytest.mark.parametrize( "expected, control, named", [
+    ( [ 164, 174, 172 ], 163, "control run gave 163" ), ( [ 164, 174, 172 ], 165, "control run gave 165" ),
+    ( [ 165, 174, 172 ], 165, "column 1 has 164" ), ( [ 164, 175, 172 ], 164, "column 2 has 174" ), ( [ 164, 174, 171 ], 164, "column 3 has 172" ) ] )
+def test_assemble_report_refuses_a_control_or_column_that_misses_its_count_and_names_it( columns, expected, control, named ):
+    with pytest.raises( bar.ReportMismatch, match=named ):
+        bar.assemble_report( columns, expected, control, BEFORE )
+
+
+def _retune_report( tmp_path, name, final_correct ):
+    path = tmp_path / name
+    path.write_text( json.dumps( { "grid_points": [ { "threshold": 0.5, "top_k": 5, "final_correct": 1 }, { "threshold": 0.5, "top_k": 10, "final_correct": final_correct } ] } ), encoding="utf-8" )
+    return str( path )
+
+
+def test_main_reads_four_columns_and_the_control_report_and_writes_the_report( columns, tmp_path ):
+    paths = []
+    for number, column in enumerate( columns ):
+        path = tmp_path / f"c{number}.json"
+        path.write_text( json.dumps( column ), encoding="utf-8" )
+        paths.append( str( path ) )
+    out = tmp_path / "report.md"
+    argv = [ "--columns" ] + paths + [ "--control-report", _retune_report( tmp_path, "ctl.json", 164 ), "--expect-final-correct", "164", "174", "172",
+             "--before-commit", "8d748e033", "--before-produced-by", "re-derived", "--note", "a note", "--out", str( out ) ]
+    assert bar.main( argv ) == 0
+    text = out.read_text( encoding="utf-8" )
+    assert "- a note" in text and "| 1 | before | `8d748e033` | stored | 1302 | 390 | re-derived |" in text
+    with pytest.raises( bar.ReportMismatch ):
+        bar.main( argv[ :argv.index( "--control-report" ) + 1 ] + [ _retune_report( tmp_path, "bad.json", 99 ) ] + argv[ argv.index( "--control-report" ) + 2: ] )
+
+
+def test_a_pipe_in_a_figure_name_is_escaped_so_every_table_row_keeps_eight_cells( columns ):
+    for column in columns: column[ "calibration" ][ "cells" ][ "yes_no|cbr" ] = { "status": "not fitted" }
+    text = bar.render_before_after( columns )
+    row = next( line for line in text.splitlines() if line.startswith( "| calibration yes_no" ) and "|cbr" in line )
+    assert row.startswith( "| calibration yes_no\\|cbr |" )
+    assert len( row.replace( "\\|", "" ).split( "|" ) ) - 2 == 8
