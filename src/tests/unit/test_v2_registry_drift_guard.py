@@ -215,6 +215,16 @@ INITIAL_DETECTION_EXEMPTIONS = {
             "absent from CARD_LABELS, so no confirmation card offers it either. Hence it waives "
             "'prompt', 'training' and 'card'.",
     },
+    "agent router go to principle extractor": {
+        "surfaces": [ "prompt", "training", "card" ],   # NOT speakable, NOT trained, OFF the card
+        "reason":
+            "Never reached by initial router detection; the server enqueues the extractor itself "
+            "after an attributed human answer, so there is no utterance to route and nothing to "
+            "train. The command exists so the :8000 test run can submit the extractor's model-door "
+            "probe by name through /api/v2/submit, and for a manual extraction of one answered "
+            "notification. It is absent from CARD_LABELS, so no confirmation card offers it. Hence "
+            "it waives 'prompt', 'training' and 'card'.",
+    },
 }
 
 _VALID_SURFACES = { "prompt", "training", "card" }

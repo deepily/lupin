@@ -18,12 +18,6 @@ from types import SimpleNamespace
 
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
-from pgvector.sqlalchemy import Vector
-from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
 import cosa.agents.principle_learner.extractor_job as job_module
 import cosa.agents.principle_learner.extractor_prompt as prompt_module
@@ -32,6 +26,7 @@ import cosa.agents.principle_learner.extractor_store as store_module
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
 from cosa.repo.doc_lint import model_transport
+from cosa.research.preference_replay.scratch_db import scratch_session, session_scope
 from cosa.rest.job_state import JobState
 from cosa.rest.postgres_models import Notification, PredictionLog, PreferenceEvidence, PreferencePrinciple
 
@@ -43,36 +38,6 @@ T0      = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 SENDER  = "claude.code@lupin.deepily.ai#ab12cd34"
 MODEL   = "claude-test-model"
 NOW     = datetime( 2026, 11, 10, 13, 0, tzinfo=timezone.utc )
-
-
-# SQLite renders JSONB as JSON and a vector as text. It also gives a UUID column numeric affinity, so every id
-# below carries a letter other than "e": an id of digits and "e" alone would be read back as a float.
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( element, compiler, **kw ):
-    """
-    Render JSONB as JSON when the dialect is SQLite.
-
-    Requires:
-        - element is a JSONB column type
-
-    Ensures:
-        - returns "JSON"
-    """
-    return "JSON"
-
-
-@compiles( Vector, "sqlite" )
-def _vector_as_text( element, compiler, **kw ):
-    """
-    Render a pgvector column as text when the dialect is SQLite.
-
-    Requires:
-        - element is a Vector column type
-
-    Ensures:
-        - returns "TEXT"
-    """
-    return "TEXT"
 
 
 def vec( *head ):
@@ -108,27 +73,20 @@ def db():
     Give a session over empty in-memory copies of the tables the extractor reads and writes.
 
     Ensures:
-        - yields an active session; the engine is disposed afterwards
+        - yields an active session from scratch_session; the SQLite caveats on ids are in that module
     """
-    engine = create_engine( "sqlite://", connect_args={ "check_same_thread": False }, poolclass=StaticPool )
-    for model in ( Notification, PredictionLog, PreferencePrinciple, PreferenceEvidence ): model.__table__.create( engine )
-    with Session( engine ) as session:
+    with scratch_session() as session:
         yield session
-    engine.dispose()
 
 
 def _factory( db ):
     """
-    Wrap a session as the factory the job takes.
+    Wrap a session as the session_factory the job takes.
 
     Ensures:
         - returns a callable giving a context manager that yields db and commits on success
     """
-    @contextmanager
-    def factory():
-        yield db
-        db.commit()
-    return factory
+    return lambda: session_scope( db )
 
 
 class Model:
@@ -164,7 +122,7 @@ def _reply( *fields ):
     return json.dumps( { "fields": list( fields ) } )
 
 
-def _result( field_key="answer", hypotheses=None, relations=None, dimension="ask.approval_needs_link", kind="ask_form" ):
+def _result( field_key="$answer", hypotheses=None, relations=None, dimension="ask.approval_needs_link", kind="ask_form" ):
     """
     Build one field result as the model returns it.
 
@@ -205,7 +163,7 @@ def _ask( db, minutes=0, answer="no", answered_by=OWNER, source="ui", **extra ):
     return str( row[ "id" ] )
 
 
-def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask.approval_needs_link", statement="Existing principle.", owner=OWNER ):
+def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask.approval_needs_link", statement="Existing principle.", owner=OWNER, version="old-extractor", created_at=None ):
     """
     Insert a principle and return its row.
 
@@ -213,13 +171,14 @@ def _principle( db, encoder=ENCODER, vector=None, scope="global", dimension="ask
         - the row belongs to owner with the given encoder, vector, scope, dimension and statement, and the test extractor version
     """
     row = PreferencePrinciple( id=uuid.uuid4(), owner_id=str( owner ), kind="decision", dimension=dimension, statement=statement, scope=scope,
-                               embedding=vector if vector is not None else vec( 1, 0, 1, 0.01 ), encoder_version=encoder, extractor_version="old-extractor" )
+                               embedding=vector if vector is not None else vec( 1, 0, 1, 0.01 ), encoder_version=encoder, extractor_version=version,
+                               created_at=created_at if created_at is not None else NOW - timedelta( days=1 ) )
     db.add( row )
     db.commit()
     return row
 
 
-def _run( db, notification_id, model, **extra ):
+def _run( db, notification_id, model, now=NOW, **extra ):
     """
     Build the job over the test doubles and run its async body to the end.
 
@@ -227,7 +186,7 @@ def _run( db, notification_id, model, **extra ):
         - returns ( summary dict, job )
     """
     job = PrincipleExtractorJob( notification_id, str( OWNER ), "owner@example.com", query_fn=model, embed_fn=embed, session_factory=_factory( db ),
-                                 model=MODEL, timeout_seconds=30, encoder=ENCODER, clock=lambda: NOW, **extra )
+                                 model=MODEL, timeout_seconds=30, encoder=ENCODER, clock=lambda: now, **extra )
     return json.loads( asyncio.run( job._execute() ) ), job
 
 
@@ -250,7 +209,8 @@ def test_a_no_answer_creates_a_principle_and_a_supporting_evidence_row_with_both
     assert out[ "status" ] == "extracted" and ( out[ "principles_created" ], out[ "evidence_written" ] ) == ( 1, 1 )
     assert ( principle.owner_id, principle.kind, principle.scope, principle.encoder_version ) == ( str( OWNER ), "ask_form", "global", ENCODER )
     assert principle.extractor_version == f"{MODEL}:extractor-v1" and principle.embedding is not None
-    assert ( evidence.relation, evidence.condition, evidence.source, evidence.field_key ) == ( "supports", "approval", "extractor", "answer" )
+    assert principle.created_at.replace( tzinfo=timezone.utc ) == NOW
+    assert ( evidence.relation, evidence.condition, evidence.source, evidence.field_key ) == ( "supports", "approval", "extractor", "$answer" )
     assert str( evidence.notification_id ) == ask and evidence.extractor_version == principle.extractor_version
     assert evidence.answered_at.replace( tzinfo=timezone.utc ) == T0 + timedelta( minutes=1 ) and evidence.extracted_at.replace( tzinfo=timezone.utc ) == NOW
 
@@ -290,7 +250,7 @@ def test_a_hypothesis_joins_a_named_principle_of_the_same_scope_even_when_the_di
                                                     relations={ str( known.id ): "refines" } ) ) ) )
     evidence = db.query( PreferenceEvidence ).one()
     assert db.query( PreferencePrinciple ).count() == 1 and evidence.principle_id == known.id and evidence.relation == "refines"
-    assert out[ "dimension_mismatches" ] == [ { "principle_id": str( known.id ), "field_key": "answer" } ] and out[ "principles_created" ] == 0
+    assert out[ "dimension_mismatches" ] == [ { "principle_id": str( known.id ), "field_key": "$answer" } ] and out[ "principles_created" ] == 0
 
 
 def test_two_paraphrased_answers_join_one_principle_when_the_double_names_it_for_the_second( db ):
@@ -300,7 +260,7 @@ def test_two_paraphrased_answers_join_one_principle_when_the_double_names_it_for
     principle = db.query( PreferencePrinciple ).one()
     # the second answer's paraphrase uses another dimension string, and the double names the first principle
     out, _ = _run( db, second, Model( _reply( _result( dimension="ask.link_for_approval", hypotheses=[ _hyp( "Approvals need a link to the thing." ) ],
-                                                        relations={ str( principle.id ): "supports" } ) ) ) )
+                                                        relations={ str( principle.id ): "supports" } ) ) ), now=NOW + timedelta( minutes=5 ) )
     assert db.query( PreferencePrinciple ).count() == 1
     assert sorted( str( e.notification_id ) for e in db.query( PreferenceEvidence ) ) == sorted( [ first, second ] )
     assert out[ "dimension_mismatches" ] and db.query( PreferenceEvidence ).filter_by( principle_id=principle.id ).count() == 2
@@ -311,6 +271,55 @@ def test_a_named_principle_of_another_scope_is_not_joined_and_a_new_principle_is
     ask   = _ask( db, answer="no" )
     _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp( "A global habit." ) ], relations={ str( known.id ): "supports" } ) ) ) )
     assert db.query( PreferencePrinciple ).count() == 2 and db.query( PreferenceEvidence ).one().principle_id != known.id
+    assert db.query( PreferencePrinciple ).filter( PreferencePrinciple.id != known.id ).one().continues_principle_id == known.id, "it names an earlier-version principle"
+
+
+CURRENT = f"{MODEL}:extractor-v1"
+
+
+def _new_principle( db, known_ids ):
+    """
+    Return the one principle that is not among the known ones.
+
+    Ensures:
+        - returns the row; raises if there is not exactly one
+    """
+    return db.query( PreferencePrinciple ).filter( PreferencePrinciple.id.notin_( known_ids ) ).one()
+
+
+def test_a_new_principle_continues_the_lowest_id_among_the_named_earlier_version_principles( db ):
+    first  = _principle( db, scope="project:lupin", statement="One." )
+    second = _principle( db, scope="project:lupin", statement="Two." )
+    lowest = min( first.id, second.id, key=str )
+    _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ], relations={ str( first.id ): "refines", str( second.id ): "supports" } ) ) ) )
+    assert _new_principle( db, [ first.id, second.id ] ).continues_principle_id == lowest
+
+
+def test_a_relation_within_the_current_version_never_sets_continues_whatever_the_relation_word( db ):
+    same = _principle( db, scope="project:lupin", version=CURRENT )
+    _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ], relations={ str( same.id ): "contradicts" } ) ) ) )
+    assert _new_principle( db, [ same.id ] ).continues_principle_id is None
+
+
+def test_a_principle_that_names_no_other_continues_none_and_a_reused_one_is_never_changed( db ):
+    ask   = _ask( db, answer="no" )
+    reply = _reply( _result( hypotheses=[ _hyp() ] ) )
+    _run( db, ask, Model( reply ) )
+    only  = db.query( PreferencePrinciple ).one()
+    assert only.continues_principle_id is None
+    earlier = _principle( db, scope="project:lupin", statement="Earlier.", vector=only.embedding )
+    _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp() ], relations={ str( earlier.id ): "supports" } ) ) ) )
+    db.refresh( only )
+    assert only.continues_principle_id is None and db.query( PreferencePrinciple ).count() == 2
+
+
+def test_every_evidence_row_carries_the_session_of_the_answered_ask_or_none_when_it_has_none( db ):
+    ask = _ask( db, answer="no" )
+    _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ) )
+    assert [ e.session_key for e in db.query( PreferenceEvidence ) ] == [ "ab12cd34" ]
+    bare = _ask( db, 5, answer="no", sender_id="claude.code@lupin.deepily.ai" )
+    _run( db, bare, Model( _reply( _result( hypotheses=[ _hyp( "Another way to say it." ) ] ) ) ) )
+    assert sorted( e.session_key is None for e in db.query( PreferenceEvidence ) ) == [ False, True ]
 
 
 def test_a_bare_yes_adds_a_supporting_row_to_a_principle_that_applied_and_creates_no_principle( db ):
@@ -319,7 +328,7 @@ def test_a_bare_yes_adds_a_supporting_row_to_a_principle_that_applied_and_create
     out, _ = _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp( "A new idea." ) ], relations={ str( known.id ): "supports" } ) ) ) )
     evidence = db.query( PreferenceEvidence ).one()
     assert db.query( PreferencePrinciple ).count() == 1 and evidence.principle_id == known.id and evidence.relation == "supports" and evidence.condition is None
-    assert { "field_key": "answer", "what": "hypotheses", "reason": "bare_yes_creates_none" } in out[ "rejected" ]
+    assert { "field_key": "$answer", "what": "hypotheses", "reason": "bare_yes_creates_none" } in out[ "rejected" ]
 
 
 def test_a_bare_yes_with_no_principle_to_support_skips_the_model_call( db ):
@@ -336,7 +345,7 @@ def test_only_principles_of_the_current_encoder_are_shown_to_the_model_whatever_
     model = Model( _reply( _result( hypotheses=[ _hyp() ], relations={ str( near_other.id ): "supports" } ) ) )
     out, _ = _run( db, ask, model )
     assert "Same encoder, farther." in model.sent[ 0 ] and "Other encoder, nearest." not in model.sent[ 0 ] and str( far_same.id ) in model.sent[ 0 ]
-    assert { "field_key": "answer", "what": f"relation {near_other.id}", "reason": "principle_not_shown" } in out[ "rejected" ]
+    assert { "field_key": "$answer", "what": f"relation {near_other.id}", "reason": "principle_not_shown" } in out[ "rejected" ]
     assert db.query( PreferenceEvidence ).filter_by( principle_id=near_other.id ).count() == 0
 
 
@@ -347,14 +356,22 @@ def test_fetch_neighbours_filters_owner_and_encoder_ranks_by_best_cosine_and_cut
     _principle( db, encoder=OLD_ENC, vector=vec( 1, 0, 0, 0 ) )
     _principle( db, owner=OTHER, vector=vec( 1, 0, 0, 0 ) )
     db.add( PreferencePrinciple( id=uuid.uuid4(), owner_id=str( OWNER ), kind="decision", dimension="d", statement="no vector", scope="global", embedding=None,
-                                 encoder_version=ENCODER, extractor_version="x" ) )
+                                 encoder_version=ENCODER, extractor_version="x", created_at=NOW - timedelta( days=1 ) ) )
     db.add( PreferencePrinciple( id=uuid.uuid4(), owner_id=str( OWNER ), kind="decision", dimension="d", statement="zero", scope="global", embedding=vec( 0, 0, 0, 0 ),
-                                 encoder_version=ENCODER, extractor_version="x" ) )
+                                 encoder_version=ENCODER, extractor_version="x", created_at=NOW - timedelta( days=1 ) ) )
     db.commit()
-    got = store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ), vec( 0, 1, 0, 0 ) ], k=2 )
+    got = store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ), vec( 0, 1, 0, 0 ) ], NOW, k=2 )
     assert sorted( row.statement for row in got ) == [ "a", "b" ] and len( got ) == 2
-    assert [ row.statement for row in store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ) ], k=3 ) ][ :2 ] == [ "a", "c" ]
+    assert [ row.statement for row in store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ) ], NOW, k=3 ) ][ :2 ] == [ "a", "c" ]
     assert a.id and b.id
+
+
+def test_fetch_neighbours_cutoff_is_strict_and_hides_later_principles( db ):
+    _principle( db, vector=vec( 1, 0, 0, 0 ), statement="earlier", created_at=NOW - timedelta( seconds=1 ) )
+    _principle( db, vector=vec( 1, 0, 0, 0 ), statement="same moment", created_at=NOW )
+    _principle( db, vector=vec( 1, 0, 0, 0 ), statement="later", created_at=NOW + timedelta( seconds=1 ) )
+    got = store_module.fetch_neighbours( db, str( OWNER ), ENCODER, [ vec( 1, 0, 0, 0 ) ], NOW )
+    assert [ row.statement for row in got ] == [ "earlier" ]
 
 
 def test_an_answer_after_a_reveal_with_no_draft_is_used_and_reported_as_possibly_influenced( db ):
@@ -364,7 +381,7 @@ def test_an_answer_after_a_reveal_with_no_draft_is_used_and_reported_as_possibly
     db.commit()
     model  = Model( _reply( _result( hypotheses=[ _hyp() ] ) ) )
     out, _ = _run( db, ask, model )
-    assert out[ "possibly_influenced" ] == [ "answer" ] and '"possibly_influenced": true' in model.sent[ 0 ] and out[ "status" ] == "extracted"
+    assert out[ "possibly_influenced" ] == [ "$answer" ] and '"possibly_influenced": true' in model.sent[ 0 ] and out[ "status" ] == "extracted"
 
 
 def test_an_answer_with_no_reveal_is_not_marked_influenced( db ):
@@ -411,7 +428,7 @@ def test_a_field_the_reply_leaves_out_is_reported_and_nothing_is_written_for_it(
 
 def test_a_rejected_hypothesis_writes_nothing_and_is_listed_with_its_reason( db ):
     out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp( "x" * 240 ) ] ) ) ) )
-    assert _counts( db ) == ( 0, 0 ) and out[ "rejected" ] == [ { "field_key": "answer", "what": "hypothesis 0", "reason": "statement_too_long" } ]
+    assert _counts( db ) == ( 0, 0 ) and out[ "rejected" ] == [ { "field_key": "$answer", "what": "hypothesis 0", "reason": "statement_too_long" } ]
 
 
 def test_a_global_statement_naming_a_project_the_owner_asked_from_is_rejected_here_too( db ):
@@ -460,12 +477,15 @@ def test_the_job_sends_the_owner_nothing_a_full_run_calls_no_notification_progre
     assert out[ "status" ] == "extracted"
 
 
-def test_no_extractor_module_imports_a_notification_or_voice_module():
+SENDING_MODULES = ( "voice", "agent_notification_dispatcher", "routers.notifications", "notification_fifo_queue", "notification_proxy", "websocket" )
+
+
+def test_no_extractor_module_imports_a_module_that_sends_to_the_owner():
     for module in ( job_module, prompt_module, rules_module, store_module ):
         tree  = ast.parse( inspect.getsource( module ) )
         names = [ alias.name for node in ast.walk( tree ) if isinstance( node, ast.Import ) for alias in node.names ]
         names += [ node.module or "" for node in ast.walk( tree ) if isinstance( node, ast.ImportFrom ) ]
-        assert not [ n for n in names if "notif" in n.lower() or "voice" in n.lower() ], ( module.__name__, names )
+        assert not [ n for n in names if any( sending in n.lower() for sending in SENDING_MODULES ) ], ( module.__name__, names )
 
 
 def test_settings_come_from_the_ini_keys_when_not_given_and_the_extractor_version_names_the_model():

@@ -510,6 +510,26 @@ JOB_ARG_CONTRACTS = {
         "fallback_questions" : {},
         "fallback_defaults"  : {},
     },
+
+    # Server-enqueued, not an agent a person asks for (principle learner, phase 1 step 5). The
+    # extractor runs after an attributed human answer and the server enqueues it. This command
+    # exists so the :8000 test run can submit the model-door probe through /api/v2/submit
+    # (`probe` true), and so one answered notification can be extracted by hand. Not speakable,
+    # not user-initiable, not in the router prompt or corpus (see INITIAL_DETECTION_EXEMPTIONS).
+    "agent router go to principle extractor" : {
+        "job_prefix"         : "pe",
+        "cli_module"         : None,
+        "job_class_path"     : "cosa.agents.principle_learner.extractor_job.PrincipleExtractorJob",
+        "display_name"       : "Principle Extractor",
+        "required_user_args" : [],
+        "system_provided"    : [ "user_id", "user_email", "session_id" ],
+        "arg_mapping"        : {
+            "notification_id" : "notification_id",
+            "probe"           : "probe",
+        },
+        "fallback_questions" : {},
+        "fallback_defaults"  : {},
+    },
 }
 
 

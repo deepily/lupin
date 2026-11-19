@@ -632,6 +632,69 @@ def _build_mock_job( command, args_dict, user_id, user_email, session_id, debug,
     return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
 
+def _require_recipient( notification_id, user_id ):
+    """
+    Refuse a hand extraction unless the submitter is the notification's recipient.
+
+    Requires:
+        - notification_id is text naming a notification, user_id is the submitter's id
+
+    Ensures:
+        - returns None when the notification exists and its recipient id equals user_id as text
+
+    Raises:
+        - ValueError if notification_id is not a UUID, no such notification exists, or the recipient is someone else
+    """
+    import uuid
+    from cosa.rest.db.database import get_db
+    from cosa.rest.postgres_models import Notification
+    with get_db() as session:
+        row = session.get( Notification, uuid.UUID( str( notification_id ) ) )
+        if row is None:
+            raise ValueError( f"notification {notification_id} does not exist" )
+        if str( row.recipient_id ) != str( user_id ):
+            raise ValueError( "principle extractor may only extract the submitter's own answers" )
+
+
+def _build_principle_extractor( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                                scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to principle extractor`.
+
+    The server enqueues the extractor itself after an answer. This command exists for two other uses.
+    The :8000 test run submits the model-door probe through /api/v2/submit with it.
+    A person can also extract one answered notification by hand with it.
+
+    Requires:
+        - args_dict carries probe true, or a notification_id
+
+    Ensures:
+        - probe true builds a probe job that reads no notification
+        - otherwise builds an extraction job for notification_id, only when the submitter is
+          that notification's recipient, so nobody can have another owner's answer extracted
+        - `_finish` records this command on the job
+
+    Raises:
+        - ValueError if probe is not true and no notification_id was given, the id is not a UUID,
+          no such notification exists, or the submitter is not its recipient
+    """
+    from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
+
+    probe           = _parse_boolean( args_dict.get( "probe" ) )
+    notification_id = args_dict.get( "notification_id" )
+    if not probe and not notification_id: raise ValueError( "principle extractor needs a notification_id, or probe true" )
+    if not probe: _require_recipient( notification_id, user_id )
+    job = PrincipleExtractorJob(
+        notification_id = notification_id or "probe",
+        user_id         = user_id,
+        user_email      = user_email,
+        probe           = probe,
+        debug           = debug,
+        verbose         = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+
 def _build_bug_fix_expediter( command, args_dict, user_id, user_email, session_id, debug, verbose,
                         scheduled_at, monopolize, spawned_by_id_hash ):
     """
@@ -787,6 +850,7 @@ _UNWRAPPED_JOB_BUILDERS = {
     "agent router go to swe team"                  : _build_swe_team,
     "agent router go to test suite"                : _build_test_suite,
     "agent router go to mock job"                  : _build_mock_job,
+    "agent router go to principle extractor"       : _build_principle_extractor,
     "agent router go to bug fix expediter"         : _build_bug_fix_expediter,
     "agent router go to test fix expediter"        : _build_test_fix_expediter,
     "agent router go to test fix expediter resume" : _build_test_fix_expediter_resume,

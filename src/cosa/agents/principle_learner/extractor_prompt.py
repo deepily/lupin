@@ -9,6 +9,8 @@ not JSON is reported and never guessed at.
 
 import json
 
+from cosa.agents.io_models.utils.json_object_recovery import recover_json_object
+
 PROMPT_VERSION = "extractor-v1"
 
 SYSTEM_PROMPT = """You extract short conditional preference principles from one answered question.
@@ -63,14 +65,10 @@ def parse_reply( text ):
 
     Ensures:
         - returns the list of field results when the reply holds a JSON object with a "fields" list of objects
-        - reads the object from the first "{" to the last "}", so a code fence or a lead-in line does no harm
-        - returns None for anything else; a malformed reply is never repaired
+        - the JSON is recovered by recover_json_object with no label, so no file is written and a code fence,
+          a lead-in line or trailing prose does no harm; this function only checks the shape
+        - returns None for anything else; a malformed reply is never repaired here
     """
-    start, end = text.find( "{" ), text.rfind( "}" )
-    if start < 0 or end < start: return None
-    try:
-        parsed = json.loads( text[ start:end + 1 ] )
-    except ValueError:
-        return None
+    parsed = recover_json_object( text )
     fields = parsed.get( "fields" ) if isinstance( parsed, dict ) else None
     return fields if isinstance( fields, list ) and all( isinstance( f, dict ) for f in fields ) else None

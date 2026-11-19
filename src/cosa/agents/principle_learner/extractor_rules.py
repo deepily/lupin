@@ -14,7 +14,9 @@ An answer given after a reveal with no draft is marked possibly influenced.
 import re
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
+from cosa.agents.prediction_engine.exposure import revealed_before_answer
 from cosa.utils.iso_timestamp import aware_moment
+from cosa.utils.notification_utils import parse_field_selections
 
 MAX_HYPOTHESES   = 3
 MAX_STATEMENT    = 240
@@ -23,7 +25,7 @@ RELATIONS        = ( "supports", "contradicts", "refines" )
 KINDS            = ( "decision", "ask_form" )
 GLOBAL_SCOPE     = "global"
 PROJECT_SCOPE    = "project:"
-WHOLE_ANSWER_KEY = "answer"
+WHOLE_ANSWER_KEY = "$answer"
 
 
 def card_text( episode ):
@@ -75,6 +77,9 @@ def field_answers( answer ):
         - a field answer is one entry per header; its text is the picks joined, or the submitted text
         - bare_yes is True only for a yes with no qualifier
         - an answer that is none or unread gives []
+
+    Raises:
+        - ValueError if a card header is literally the whole-answer key, since its entry could not be told from a whole answer
     """
     kind = answer[ "kind" ]
     if kind == "stance":
@@ -86,10 +91,41 @@ def field_answers( answer ):
     if kind == "fields":
         entries = []
         for header, record in answer[ "fields" ].items():
+            if header == WHOLE_ANSWER_KEY: raise ValueError( f"card header {header!r} is reserved for the whole answer" )
             text = ", ".join( str( pick ) for pick in record[ "selected" ] ) or record[ "text" ] or ""
             entries.append( { "field_key": header, "text": text, "bare_yes": record.get( "stance" ) == "yes" and not record.get( "qualifier" ) } )
         return entries
     return []
+
+
+def drafted_text( draft, field_key ):
+    """
+    Read the text of the draft for one field, from the shape the seen route stores.
+
+    Requires:
+        - draft is None, or a dict { "value": ... } as the seen route stores it
+        - a whole-answer draft holds its text as a string under value
+        - a card draft holds the card's answers map, as the answer door stores it: a JSON string or a dict under value
+
+    Ensures:
+        - returns the draft text for the field, or None when there is no draft or none for this field
+        - a blank draft counts as no draft
+        - a card field's text is its picks joined, or its submitted text
+
+    Raises:
+        - ValueError when the draft is not None and cannot be read in that shape, so a changed shape is never skipped
+    """
+    if draft is None: return None
+    if not isinstance( draft, dict ) or "value" not in draft: raise ValueError( f"draft at reveal is not in the stored shape {{ 'value': ... }}: {draft!r}" )
+    value = draft[ "value" ]
+    if value is None or value == "": return None
+    if field_key == WHOLE_ANSWER_KEY:
+        if not isinstance( value, str ): raise ValueError( f"a whole-answer draft must be text, got {value!r}" )
+        return value
+    fields = parse_field_selections( value if isinstance( value, dict ) else draft )
+    if fields is None: raise ValueError( f"draft at reveal holds no readable answers map: {draft!r}" )
+    record = fields.get( field_key )
+    return None if record is None else ( ", ".join( str( pick ) for pick in record[ "selected" ] ) or record[ "text" ] or None )
 
 
 def unaided_answer( final_text, draft, field_key, revealed_at, answered_at ):
@@ -98,20 +134,22 @@ def unaided_answer( final_text, draft, field_key, revealed_at, answered_at ):
 
     Requires:
         - final_text is the submitted text of the field
-        - draft is None, a string for the whole answer, or a dict of field key to draft text
+        - draft is None or in the shape drafted_text reads
         - revealed_at and answered_at are ISO strings, datetimes or None
 
     Ensures:
         - returns ( text, possibly_influenced )
         - with a draft for the field, returns the draft and False
-        - with no draft, returns the final text; it is marked possibly influenced when a reveal came
-          at or before the answer, and not otherwise
+        - with no draft, returns the final text; it is marked possibly influenced only when revealed_before_answer says so
+          (the shared rule in exposure.py), so a reveal at the answer time or later counts as unaided
+
+    Raises:
+        - ValueError as drafted_text does
     """
-    drafted = draft.get( field_key ) if isinstance( draft, dict ) else ( draft if field_key == WHOLE_ANSWER_KEY else None )
+    drafted = drafted_text( draft, field_key )
     if drafted:
         return drafted, False
-    revealed = aware_moment( revealed_at )
-    return final_text, revealed is not None and revealed <= aware_moment( answered_at )
+    return final_text, revealed_before_answer( aware_moment( revealed_at ), aware_moment( answered_at ) )
 
 
 def ground_condition( condition, grounding_text ):
