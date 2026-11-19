@@ -53,6 +53,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     import sqlalchemy as sa
+    from cosa.research.preference_replay.cohorts import answer_source_of
+    from cosa.research.preference_replay.question_vectors import read_side_records
     from cosa.rest.db.embedding_regeneration import validate_fresh_vector
 except ImportError as err:  # pragma: no cover -- run by a subprocess test, which coverage does not follow
     print( f"FATAL: import failed ({err!r}). Run with the repo's interpreter and PYTHONPATH=<tree>/src.", file=sys.stderr )
@@ -60,7 +62,6 @@ except ImportError as err:  # pragma: no cover -- run by a subprocess test, whic
 
 CHUNK              = 400
 ENCODER_VERSION_MAX = 100   # the width of prediction_log.encoder_version
-HUMAN_SOURCE       = "ui"
 RATIFICATION_STATE = "not_required"
 DATA_ORIGIN        = "organic"
 
@@ -106,25 +107,14 @@ def read_side_file( path: str ) -> Tuple[ Dict[ str, Any ], List[ Dict[ str, Any
     Ensures:
         - returns the header and the records, each record carrying the header's model and revision
         - every vector passes validate_fresh_vector, and every id is unique
+        - the header's version is not checked here
 
     Raises:
         - RefusedPlan on a missing header, a count mismatch, a duplicate id, a model or revision
           that differs from the header, or a vector that fails validation
     """
-    with open( path, encoding="utf-8" ) as handle:
-        lines = [ line for line in handle.read().splitlines() if line.strip() ]
-    if not lines: raise RefusedPlan( "side file is empty" )
-    header = json.loads( lines[ 0 ] )
-    if header.get( "kind" ) != "header": raise RefusedPlan( "first line is not a header" )
-    if not header.get( "model" ) or not header.get( "revision" ): raise RefusedPlan( "header lacks model or revision" )
-    records = [ json.loads( line ) for line in lines[ 1: ] ]
-    if header.get( "count" ) != len( records ): raise RefusedPlan( f"header count {header.get( 'count' )} but {len( records )} records" )
-    seen = set()
+    header, records = read_side_records( path, refuse=RefusedPlan, expected_version=None )
     for record in records:
-        if record[ "id" ] in seen: raise RefusedPlan( f"duplicate id {record[ 'id' ]}" )
-        seen.add( record[ "id" ] )
-        if record.get( "model" ) != header[ "model" ] or record.get( "revision" ) != header[ "revision" ]:
-            raise RefusedPlan( f"record {record[ 'id' ]} names a different model or revision than the header" )
         reason = validate_fresh_vector( record.get( "vector" ) )
         if reason is not None: raise RefusedPlan( f"record {record[ 'id' ]}: {reason}" )
     return header, records
@@ -141,21 +131,6 @@ def encoder_version_of( header: Dict[ str, Any ] ) -> str:
         - returns `<model>@<revision>`
     """
     return f"{header[ 'model' ]}@{header[ 'revision' ]}"
-
-
-def answer_source_of( response_value: Any ) -> str:
-    """
-    Label an answer human when the notification says it came from the UI, otherwise unknown.
-
-    Requires:
-        - response_value is a dict, a JSON string, or None
-
-    Ensures:
-        - returns human only when the source field equals ui
-    """
-    if isinstance( response_value, str ): response_value = json.loads( response_value )
-    if isinstance( response_value, dict ) and response_value.get( "source" ) == HUMAN_SOURCE: return "human"
-    return "unknown"
 
 
 def decision_value_of( actual_value: Any ) -> str:

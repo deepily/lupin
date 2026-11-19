@@ -21,6 +21,7 @@ pins:
   - cosa.repo.doc_lint.model_transport.ModelRateLimited@eee129bf08
   - cosa.repo.doc_lint.model_transport.claude_usage_summary@7f54a7e8f3
   - cosa.repo.doc_lint.model_transport.complete@df072bb75c
+  - cosa.repo.doc_lint.model_transport.blocking_ask@304b1154b9
   - cosa.repo.doc_lint.model_transport.limit_reply@9876942988
 ---
 # Doc-lint model transport
@@ -28,12 +29,11 @@ pins:
 The one door the judge harness uses to reach a Claude model, through bounded Claude Code or through agy. It sits under [[doc-lint-claim-judge]] and the other judges.
 
 ## Calling
-- `complete` sends one prompt and returns the stripped text, never empty. Tools are disabled, so the model can only write text. An empty model id raises `ValueError`.
+- `complete` sends one prompt and returns the stripped text, never empty. Tools are disabled, so the model can only write text. An empty model id raises `ValueError`. `blocking_ask( model, call=None, **options )` builds `ask( system, user )`, which runs one `complete` call to the end. Call it only outside a running event loop.
 - `record_calls` collects the stage and seconds of each finished call in its block, and blocks nest. A failed call is not recorded. `new_suffix` returns a random tag suffix that occurs in none of the given texts, and `wrap` puts a body between tags named with it. `prompt_version` derives a name and ten hex digits from the prompt's text and code.
 
 ## Choosing the path
-- `configure` picks the Claude Code binary and working directory for later calls. `cli_version` returns the first line of that binary's `--version`, or `None` for the SDK's own.
-- `configure_agy` sends later calls through agy, pinned to the binary on disk, and returns the ledger binding. `configure_claude` returns to Claude Code and forgets the pin. `agy_usage_summary` returns a copy of the tokens agy reported, per model. `claude_usage_summary` does the same for Claude Code: calls, token counts and `cost_usd`, a notional list-price figure, not a charge.
+- `configure` picks the Claude Code binary and working directory for later calls. `cli_version` returns the first line of that binary's `--version`, or `None` for the SDK's own. `configure_agy` sends later calls through agy, pinned to the binary on disk, and returns the ledger binding. `configure_claude` returns to Claude Code and forgets the pin. `agy_usage_summary` returns a copy of the tokens agy reported, per model. `claude_usage_summary` does the same for Claude Code: calls, token counts and `cost_usd`, a notional list-price figure, not a charge.
 
 ## Budget
 - `set_budget` caps calls per model id, counted from a ledger file that outlives the process. `calls_used` counts the ledger lines for a model, and `budget_summary` returns used and cap per capped model. A call over the cap raises `CallBudgetExceeded` before any model is contacted. It is not a `ModelCallError`, so a caller that retries must not retry past it.

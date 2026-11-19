@@ -6,7 +6,7 @@ pins:
   - lupin_mcp.reuse_needset.stage_c_opus.judge_pair@c1eeb70c03
   - lupin_mcp.reuse_needset.stage_c_opus.judged_pairs@50caa2b49a
   - lupin_mcp.reuse_needset.stage_c_opus.main@944f86a751
-  - lupin_mcp.reuse_needset.stage_c_opus.opus_ask@479cee475b
+  - lupin_mcp.reuse_needset.stage_c_opus.opus_ask@202a21a361
   - lupin_mcp.reuse_needset.stage_c_opus.parse_args@ccbf564482
   - lupin_mcp.reuse_needset.stage_c_opus.parse_reply@0e18bfb51e
   - lupin_mcp.reuse_needset.stage_c_opus.run_pairs@597f6f76cd

@@ -181,6 +181,39 @@ def write_side_file( path: str, result: Dict[str, Any], facts: Dict[str, Any] ) 
     os.replace( scratch, path )
 
 
+def read_side_records( path: str, refuse=ValueError, expected_version: Optional[int] = SIDE_FILE_VERSION ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Read a side file and check its header against its records.
+
+    Requires:
+        - path names a JSON-lines file write_side_file made
+        - refuse is the exception class to raise; expected_version is None to skip the version check
+
+    Ensures:
+        - returns ( header, records ), each record carrying the header's model and revision and an id no other record has
+
+    Raises:
+        - refuse when the file is empty, the first line is not a header, the header lacks a model or revision,
+          the version is not expected_version, the count differs from the header's, an id repeats,
+          or a record's model or revision differs from the header's
+    """
+    with open( path, encoding="utf-8" ) as handle: lines = [ line for line in handle.read().splitlines() if line.strip() ]
+    if not lines: raise refuse( "the side file is empty" )
+    header = json.loads( lines[ 0 ] )
+    if header.get( "kind" ) != "header": raise refuse( "the first line is not a header" )
+    if not header.get( "model" ) or not header.get( "revision" ): raise refuse( "the header lacks model or revision" )
+    if expected_version is not None and header[ "version" ] != expected_version: raise refuse( f"side file version {header[ 'version' ]} is not {expected_version}" )
+    records = [ json.loads( line ) for line in lines[ 1: ] ]
+    if len( records ) != header[ "count" ]: raise refuse( f"the header says {header[ 'count' ]} vectors and the file holds {len( records )}" )
+    seen = set()
+    for record in records:
+        if ( record[ "model" ], record[ "revision" ] ) != ( header[ "model" ], header[ "revision" ] ):
+            raise refuse( f"the vector of {record[ 'id' ]} names a different model or revision than the header" )
+        if record[ "id" ] in seen: raise refuse( f"the id {record[ 'id' ]} appears twice" )
+        seen.add( record[ "id" ] )
+    return header, records
+
+
 def load_side_file( path: str ) -> Tuple[Dict[str, Any], Dict[str, List[float]]]:
     """
     Read a side file back as its header and a vector for each ask id.
@@ -192,23 +225,10 @@ def load_side_file( path: str ) -> Tuple[Dict[str, Any], Dict[str, List[float]]]
         - returns ( header, vectors ), vectors mapping ask id to its list of floats
 
     Raises:
-        - ValueError when the first line is not a header, the version is not SIDE_FILE_VERSION, the count differs
-          from the header's, an id repeats, or a record's model or revision differs from the header's
+        - ValueError as read_side_records raises it
     """
-    with open( path, encoding="utf-8" ) as handle: lines = [ line for line in handle.read().splitlines() if line.strip() ]
-    if not lines: raise ValueError( "the side file is empty" )
-    header = json.loads( lines[ 0 ] )
-    if header.get( "kind" ) != "header": raise ValueError( "the first line is not a header" )
-    if header[ "version" ] != SIDE_FILE_VERSION: raise ValueError( f"side file version {header[ 'version' ]} is not {SIDE_FILE_VERSION}" )
-    records = [ json.loads( line ) for line in lines[ 1: ] ]
-    if len( records ) != header[ "count" ]: raise ValueError( f"the header says {header[ 'count' ]} vectors and the file holds {len( records )}" )
-    vectors = {}
-    for record in records:
-        if ( record[ "model" ], record[ "revision" ] ) != ( header[ "model" ], header[ "revision" ] ):
-            raise ValueError( f"the vector of {record[ 'id' ]} names a different model or revision than the header" )
-        if record[ "id" ] in vectors: raise ValueError( f"the id {record[ 'id' ]} appears twice" )
-        vectors[ record[ "id" ] ] = record[ "vector" ]
-    return header, vectors
+    header, records = read_side_records( path )
+    return header, { record[ "id" ]: record[ "vector" ] for record in records }
 
 
 def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, session_factory: Optional[Callable] = None,

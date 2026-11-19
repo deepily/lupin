@@ -761,6 +761,22 @@ def wrap( label, suffix, body ):
     return f"<{label}_{suffix}>\n{body}\n</{label}_{suffix}>"
 
 
+def blocking_ask( model, call=None, **options ):
+    """
+    Build ask( system, user ), which sends one prompt to a model and blocks for its text.
+
+    Requires:
+        - model is a model id
+        - call is None for complete, or a stand-in with complete's ( model, system, user ) signature
+        - options are passed to call as keywords, for example query_fn
+
+    Ensures:
+        - returns ask( system, user ) that runs one call to the end on its own event loop
+        - it must not be called from a running event loop
+    """
+    return lambda system, user: asyncio.run( ( complete if call is None else call )( model, system, user, **options ) )
+
+
 async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_seconds=TIMEOUT_SECONDS, thinking="default" ):
     """
     Send one prompt to a model and return its text, through Claude Code or agy.

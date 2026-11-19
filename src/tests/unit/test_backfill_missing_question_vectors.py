@@ -94,7 +94,7 @@ def test_side_file_reads_a_valid_file( tmp_path ):
 @pytest.mark.parametrize( "mutate,fragment", [
     ( lambda h, r: h.update( kind="other" ),                         "not a header" ),
     ( lambda h, r: h.pop( "revision" ),                              "lacks model or revision" ),
-    ( lambda h, r: r[ 1 ].update( id="a" ),                          "duplicate id" ),
+    ( lambda h, r: r[ 1 ].update( id="a" ),                          "appears twice" ),
     ( lambda h, r: r[ 1 ].update( revision="zzz" ),                  "different model or revision" ),
     ( lambda h, r: r[ 1 ].update( model="other" ),                   "different model or revision" ),
     ( lambda h, r: r[ 1 ].update( vector=[ 1.0 ] * 10 ),             "wrong dimension" ),
@@ -106,7 +106,7 @@ def test_side_file_refuses_each_defect( tmp_path, mutate, fragment ):
 
 
 def test_side_file_refuses_a_count_mismatch( tmp_path ):
-    with pytest.raises( bf.RefusedPlan, match="header count 5 but 2 records" ):
+    with pytest.raises( bf.RefusedPlan, match="header says 5 vectors" ):
         bf.read_side_file( side_file( tmp_path, [ "a", "b" ], count=5 ) )
 
 

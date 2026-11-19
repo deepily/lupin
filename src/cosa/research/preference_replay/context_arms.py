@@ -16,9 +16,10 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
-from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, _session_of, rebuild_context
+from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, rebuild_context
 from cosa.rest.postgres_models import Notification
 from cosa.utils.iso_timestamp import aware_moment
+from cosa.utils.notification_utils import sender_session_suffix
 
 ARMS            = ( "Q", "Q+A", "Q+O", "Q+P", "Q+H" )
 HISTORY_TIERS   = ( "parent", "thread" )
@@ -109,7 +110,7 @@ def _project_section( target: Dict[str, Any] ) -> Optional[str]:
     sender  = target.get( "sender_id" ) or ""
     match   = PROJECT_PATTERN.search( sender )
     project = match.group( 1 ) if match else UNKNOWN_PROJECT
-    session = _session_of( sender )
+    session = sender_session_suffix( sender )
     lines   = [] if project == UNKNOWN_PROJECT else [ f"Project: {project}" ]
     if session is not None: lines.append( f"Session: {session}" )
     return "\n".join( lines ) if lines else None

@@ -2,7 +2,8 @@
 capability: preference-replay-core
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.research.preference_replay.cohorts.cohort_asks@98d7925d3b
+  - cosa.research.preference_replay.cohorts.answer_source_of@f287080cfb
+  - cosa.research.preference_replay.cohorts.cohort_asks@6e1a50f001
   - cosa.research.preference_replay.cohorts.counted_scored_filter@6797c07c4e
   - cosa.research.preference_replay.cohorts.scored_rows@bcb7278695
   - cosa.research.preference_replay.cohorts.window_of@fc57249447
@@ -21,7 +22,7 @@ Offline tools that replay the live prediction engine over past asks, using only 
 
 ## Cohorts
 - A scored ask is a `prediction_log` row with a non-null `accuracy_match`. `window_of( predicted_at, response_type )` names its audit window by `predicted_at`, because the audit query groups on that column.
-- `scored_rows( session, response_type, window )` lists scored forecasts. `cohort_asks` builds the replay's ask dicts. `counted_scored_filter()` is the SQL condition for a row the admin report counts and has scored.
+- `scored_rows( session, response_type, window )` lists scored forecasts. `cohort_asks` builds the replay's ask dicts. `answer_source_of( response_value )` names an answer human when its source is `ui` and unknown otherwise; the backfill script uses it too. `counted_scored_filter()` is the SQL condition for a row the admin report counts and has scored.
 
 ## Replay
 - `TimeSlicedDecisionStore` stands in for the decision embeddings. A case is visible only when its `responded_at` is at or before the moment the harness advanced to. So a forecast never sees a later answer. Its `add_decision`, `advance_to`, `find_similar` and `visible_ids` follow that rule.
