@@ -75,6 +75,7 @@ header = { "kind": "header", "model": "scratch-model", "revision": "rev-scratch-
 lines  = [ json.dumps( header ) ] + [ json.dumps( { "id": ids[ key ], "model": "scratch-model", "revision": "rev-scratch-1", "vector": vec( index ) } ) for index, key in enumerate( order ) ]
 open( f"{work}/side.jsonl", "w" ).write( "\n".join( lines ) + "\n" )
 open( f"{work}/insert_ids.txt", "w" ).write( "\n".join( ids[ key ] for key in ( "a1", "a2", "a3" ) ) + "\n" )
+open( f"{work}/frozen_ids.txt", "w" ).write( "\n".join( ids[ key ] for key in order ) + "\n" )   # the five asks of the side file
 open( f"{work}/runner.py", "w" ).write( '''import importlib.util, sys
 import sqlalchemy as sa
 from cosa.rest.db.database import get_database_url
@@ -87,8 +88,8 @@ EOF
 $PG psql -U lupin_app -d "$SCRATCH_DB" < "$WORK/seed.sql" | sort | uniq -c
 docker exec lupin-rest-dev mkdir -p /tmp/scratchvec
 docker cp "$SCRIPT" lupin-rest-dev:/tmp/scratchvec/backfill_missing_question_vectors.py
-for f in side.jsonl insert_ids.txt runner.py; do docker cp "$WORK/$f" lupin-rest-dev:/tmp/scratchvec/$f; done
-EXPECT="--expect-insert 3 --expect-update 2 --expect-log 5 --expect-insert-ids /tmp/scratchvec/insert_ids.txt"
+for f in side.jsonl insert_ids.txt frozen_ids.txt runner.py; do docker cp "$WORK/$f" lupin-rest-dev:/tmp/scratchvec/$f; done
+EXPECT="--expect-insert 3 --expect-update 2 --expect-log 5 --expect-insert-ids /tmp/scratchvec/insert_ids.txt --frozen-ids /tmp/scratchvec/frozen_ids.txt"
 
 echo "== 1 dry run: nothing written"
 runner | tail -8
@@ -120,6 +121,12 @@ echo "== 5 second apply: the inserted ids now have a row, so it must roll back"
 OUT="$( runner --apply $EXPECT --expect-database $SCRATCH_DB )"; echo "$OUT" | tail -1
 check "second apply rolled back" 1 "$( echo "$OUT" | grep -c 'ROLLED BACK: insert ids differ' )"
 check "second apply left 6 case rows" 6 "$( scratch 'select count(*) from prediction_decisions' )"
+
+echo "== 6 a side-file id outside the frozen list: refused before the database opens"
+$APP sh -c 'head -3 /tmp/scratchvec/frozen_ids.txt > /tmp/scratchvec/frozen_short.txt'
+OUT="$( runner --rehearse $EXPECT --expect-database $SCRATCH_DB --frozen-ids /tmp/scratchvec/frozen_short.txt )"; echo "$OUT" | tail -1
+check "ids outside the frozen list refused" 1 "$( echo "$OUT" | grep -c 'outside the frozen list' )"
+check "that refusal left 6 case rows" 6 "$( scratch 'select count(*) from prediction_decisions' )"
 
 echo "== lupin_db_dev and lupin_db_test were read by pg_dump only"
 if [ "$FAILED" == "0" ]; then echo "RESULT: all checks passed"; else echo "RESULT: at least one check failed"; fi

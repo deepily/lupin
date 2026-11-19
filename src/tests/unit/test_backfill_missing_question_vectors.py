@@ -20,7 +20,7 @@ bf     = importlib.util.module_from_spec( spec )
 sys.modules[ spec.name ] = bf   # a dataclass resolves its annotations through sys.modules
 spec.loader.exec_module( bf )
 
-GO    = { "expect_database": ":memory:", "expect_insert_ids": { "n1", "n2" } }   # the scenario's two asks without a row
+GO    = { "expect_database": ":memory:", "expect_insert_ids": { "n1", "n2" }, "frozen_ids": { "n1", "n2", "n3" } }   # the scenario's two asks without a row
 DIM   = 768
 MODEL = "test-model"
 REV   = "abc123"
@@ -383,7 +383,7 @@ def test_apply_refuses_when_the_expected_insert_ids_differ_by_a_swap( tmp_path, 
 def test_apply_refuses_without_an_expected_insert_id_list( tmp_path, engine ):
     ids  = scenario( engine )
     out  = []
-    code = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append, expect_database=":memory:" )
+    code = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append, expect_database=":memory:", frozen_ids=set( ids ) )
     assert code == 3 and "no expected insert id list" in out[ -1 ]
 
 
@@ -403,9 +403,9 @@ def test_main_passes_the_database_and_id_file_through( tmp_path, monkeypatch ):
     monkeypatch.setattr( bf.sa, "create_engine", lambda url: "engine" )
     monkeypatch.setattr( bf, "run", lambda *args, **kwargs: seen.update( args=args, kwargs=kwargs ) or 0 )
     argv = [ "--side-file", "f", "--database-url", "u", "--rehearse", "--expect-insert", "2", "--expect-update", "1", "--expect-log", "3",
-             "--expect-database", "scratch", "--expect-insert-ids", str( idfile ) ]
+             "--expect-database", "scratch", "--expect-insert-ids", str( idfile ), "--frozen-ids", str( idfile ) ]
     assert bf.main( argv ) == 0
-    assert seen[ "kwargs" ] == { "rehearse": True, "expect_database": "scratch", "expect_insert_ids": { "n1", "n2" } }
+    assert seen[ "kwargs" ] == { "rehearse": True, "expect_database": "scratch", "expect_insert_ids": { "n1", "n2" }, "frozen_ids": { "n1", "n2" } }
 
 
 def test_main_refuses_apply_with_rehearse( capsys ):
@@ -443,7 +443,44 @@ def test_a_run_larger_than_two_chunks_plans_and_applies_every_id( tmp_path, engi
         conn.execute( sa.text( "INSERT INTO prediction_decisions ( id, question, question_embedding, answer_source ) VALUES ( :i, 'Proceed?', 'old', 'human' )" ), [ { "i": row_id } for row_id in ids[ : 450 ] ] )
     out  = []
     code = bf.run( engine, side_file( tmp_path, ids ), True, total - 450, 450, total, out=out.append,
-                   expect_database=":memory:", expect_insert_ids=set( ids[ 450: ] ) )
+                   expect_database=":memory:", expect_insert_ids=set( ids[ 450: ] ), frozen_ids=set( ids ) )
     assert code == 0 and f'"rows": {total}' in out[ -1 ] and f'"stamped": {total}' in out[ -1 ]
     with engine.connect() as conn:
         assert conn.execute( sa.text( "SELECT count(*) FROM prediction_decisions WHERE question_embedding <> 'old'" ) ).scalar() == total
+
+
+def test_a_side_file_id_outside_the_frozen_list_is_refused_before_the_database_opens( tmp_path ):
+    class Boom:
+        def connect( self ): raise AssertionError( "database opened" )
+    out = []
+    code = bf.run( Boom(), side_file( tmp_path, [ "n1", "stranger" ] ), False, None, None, None, out=out.append, frozen_ids={ "n1" } )
+    assert code == 2 and out == [ "REFUSED: 1 side-file ids are outside the frozen list, first stranger" ]
+
+
+def test_apply_and_rehearse_refuse_without_a_frozen_list( tmp_path, engine ):
+    ids    = scenario( engine )
+    before = table_dump( engine )
+    for flags in ( { "apply": True, "rehearse": False }, { "apply": False, "rehearse": True } ):
+        out  = []
+        code = bf.run( engine, side_file( tmp_path, ids ), flags[ "apply" ], 2, 1, 3, out=out.append, rehearse=flags[ "rehearse" ],
+                       expect_database=":memory:", expect_insert_ids={ "n1", "n2" } )
+        assert code == 2 and out == [ "REFUSED: a rehearsal or apply needs the frozen id list" ] and table_dump( engine ) == before
+
+
+def test_a_dry_run_inside_the_frozen_list_proceeds( tmp_path, engine ):
+    ids = scenario( engine )
+    out = []
+    assert bf.run( engine, side_file( tmp_path, ids ), False, None, None, None, out=out.append, frozen_ids=set( ids ) ) == 0
+
+
+@pytest.mark.parametrize( "revision_width,refused", [ ( 89, False ), ( 90, True ) ] )
+def test_encoder_version_is_accepted_at_100_characters_and_refused_at_101( tmp_path, engine, revision_width, refused ):
+    add_ask( engine, "x" )
+    header, records = bf.read_side_file( side_file( tmp_path, [ "x" ] ) )
+    header[ "revision" ] = "r" * revision_width
+    assert len( bf.encoder_version_of( header ) ) == 100 + ( 1 if refused else 0 )
+    with engine.connect() as conn:
+        if refused:
+            with pytest.raises( bf.RefusedPlan, match="encoder version is 101 characters" ): bf.build_plan( conn, header, records )
+        else:
+            assert len( bf.build_plan( conn, header, records ).encoder_version ) == 100

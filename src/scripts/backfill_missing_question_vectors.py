@@ -4,8 +4,9 @@ Backfill every ask's question vector into `prediction_decisions` from the side f
 
 Dry run by default. It reads the database inside a read-only transaction and prints counts only.
 `--rehearse` runs every apply step and the read-back, then rolls back. The real run is the same file with `--apply`.
-Both need the three `--expect-*` counts, `--expect-insert-ids` and `--expect-database`.
-The ids file lists the asks to insert. The database name must match the connection.
+Both need the three `--expect-*` counts, `--expect-insert-ids`, `--frozen-ids` and `--expect-database`.
+The insert file lists the asks to insert. The frozen file lists every ask the run may touch.
+The database name must match the connection.
 
 What it does, in one transaction:
     1. Asserts the insert ids match the expected list and have no row, and the update ids have one.
@@ -415,7 +416,7 @@ def database_name( conn ) -> str:
 
 def run( engine, side_file: str, apply: bool, expect_insert: int, expect_update: int, expect_log: int,
          out=print, rehearse: bool = False, expect_database: Optional[ str ] = None,
-         expect_insert_ids: Optional[ Set[ str ] ] = None ) -> int:
+         expect_insert_ids: Optional[ Set[ str ] ] = None, frozen_ids: Optional[ Set[ str ] ] = None ) -> int:
     """
     Run the dry run, the rehearsal or the apply against an engine and return the exit code.
 
@@ -423,6 +424,7 @@ def run( engine, side_file: str, apply: bool, expect_insert: int, expect_update:
         - engine is a SQLAlchemy engine; side_file is a path
         - a rehearsal or an apply carries expect_database, the database name the operator intends
         - a rehearsal or an apply carries expect_insert_ids, the exact ids to insert
+        - a rehearsal or an apply carries frozen_ids, the closed set of ask ids the run may touch
 
     Ensures:
         - the output names the database the connection is on
@@ -430,6 +432,7 @@ def run( engine, side_file: str, apply: bool, expect_insert: int, expect_update:
         - a rehearsal runs every apply step and read-back, then rolls back, so nothing persists
         - an apply commits only when every check and the read-back pass, otherwise it rolls back
         - a rehearsal or apply on a database other than expect_database writes nothing and returns 2
+        - a side file holding an id outside frozen_ids is refused before the database is opened
         - returns 0 on success, 2 when the plan is refused, 3 on a count mismatch
 
     Raises:
@@ -439,6 +442,13 @@ def run( engine, side_file: str, apply: bool, expect_insert: int, expect_update:
         header, records = read_side_file( side_file )
     except ( RefusedPlan, KeyError, ValueError ) as err:
         out( f"REFUSED: {err}" )
+        return 2
+    if ( apply or rehearse ) and frozen_ids is None:
+        out( "REFUSED: a rehearsal or apply needs the frozen id list" )
+        return 2
+    outside = sorted( record[ "id" ] for record in records if frozen_ids is not None and record[ "id" ] not in frozen_ids )
+    if outside:
+        out( f"REFUSED: {len( outside )} side-file ids are outside the frozen list, first {outside[ 0 ]}" )
         return 2
     writing = apply or rehearse
     with engine.connect() as conn:
@@ -472,6 +482,20 @@ def run( engine, side_file: str, apply: bool, expect_insert: int, expect_update:
             return 3
 
 
+def _read_id_file( path: Optional[ str ] ) -> Optional[ Set[ str ] ]:
+    """
+    Read a file of ids, one per line.
+
+    Requires:
+        - path is None or a readable UTF-8 file
+
+    Ensures:
+        - returns None for None, otherwise the set of non-blank stripped lines
+    """
+    if path is None: return None
+    with open( path, encoding="utf-8" ) as handle: return { line.strip() for line in handle if line.strip() }
+
+
 def main( argv: Optional[ List[ str ] ] = None ) -> int:
     """
     Parse the command line and run.
@@ -489,20 +513,20 @@ def main( argv: Optional[ List[ str ] ] = None ) -> int:
     parser.add_argument( "--apply",           action="store_true" )
     parser.add_argument( "--rehearse",        action="store_true" )
     parser.add_argument( "--expect-database" )
+    parser.add_argument( "--frozen-ids", help="a file with one id per line: the closed set of asks the run may touch" )
     parser.add_argument( "--expect-insert-ids", help="a file with one id per line: exactly the asks that have no row today" )
     parser.add_argument( "--expect-insert", type=int )
     parser.add_argument( "--expect-update", type=int )
     parser.add_argument( "--expect-log",    type=int )
     args = parser.parse_args( argv )
     if args.apply and args.rehearse: parser.error( "--apply and --rehearse are exclusive" )
-    if ( args.apply or args.rehearse ) and None in ( args.expect_insert, args.expect_update, args.expect_log, args.expect_database, args.expect_insert_ids ):
-        parser.error( "--apply and --rehearse need --expect-insert, --expect-update, --expect-log, --expect-database and --expect-insert-ids" )
-    expected_ids = None
-    if args.expect_insert_ids:
-        with open( args.expect_insert_ids, encoding="utf-8" ) as handle: expected_ids = { line.strip() for line in handle if line.strip() }
+    if ( args.apply or args.rehearse ) and None in ( args.expect_insert, args.expect_update, args.expect_log, args.expect_database, args.expect_insert_ids, args.frozen_ids ):
+        parser.error( "--apply and --rehearse need --expect-insert, --expect-update, --expect-log, --expect-database, --expect-insert-ids and --frozen-ids" )
+    expected_ids = _read_id_file( args.expect_insert_ids )
+    frozen_ids   = _read_id_file( args.frozen_ids )
     engine = sa.create_engine( args.database_url )
     return run( engine, args.side_file, args.apply, args.expect_insert, args.expect_update, args.expect_log,
-                rehearse=args.rehearse, expect_database=args.expect_database, expect_insert_ids=expected_ids )
+                rehearse=args.rehearse, expect_database=args.expect_database, expect_insert_ids=expected_ids, frozen_ids=frozen_ids )
 
 
 if __name__ == "__main__":
