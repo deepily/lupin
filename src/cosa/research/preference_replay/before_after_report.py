@@ -17,6 +17,8 @@ A column is a dict with these keys:
 - label, commit, vector_source, ask_count, threshold, top_k
 - coverage: the coverage dict of checkpoint_report.render_report, with scores
 - calibration: the report half of calibration_fit.fit_and_evaluate
+- yes_no_summary: the replay summary of the predictor against always-yes on yes/no asks
+- tune_note: optional; when present every tune figure reads this text instead of a number
 - ask_ids: optional, the asks the column replayed
 - final_ids: optional, the final-window asks the column scored
 - produced_by: optional, the replay code commit and run script that made the column
@@ -24,7 +26,7 @@ A column is a dict with these keys:
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-COLUMN_KEYS = ( "label", "commit", "vector_source", "ask_count", "threshold", "top_k", "coverage", "calibration" )
+COLUMN_KEYS = ( "label", "commit", "vector_source", "ask_count", "threshold", "top_k", "coverage", "calibration", "yes_no_summary" )
 WINDOWS     = ( "tune", "final" )
 
 
@@ -42,7 +44,8 @@ def check_columns( columns: Sequence[Dict[str, Any]] ) -> None:
 
     Ensures:
         - returns None only when there are exactly four columns, each with every key, columns one and two hold
-          the same ask count, and columns three and four hold the same ask count
+          the same ask count, columns three and four hold the same ask count, and those two use the same threshold
+          and top k
         - when both give ask_ids, columns one and two name the same asks, and every ask of column two is in
           column three; when both give final_ids, columns one and four score the same final-window asks
 
@@ -58,6 +61,8 @@ def check_columns( columns: Sequence[Dict[str, Any]] ) -> None:
         raise ReportMismatch( f"columns 1 and 2 must hold the same asks, got {before[ 'ask_count' ]} and {same[ 'ask_count' ]}" )
     if after[ "ask_count" ] != rescored[ "ask_count" ]:
         raise ReportMismatch( f"columns 3 and 4 must hold the same asks, got {after[ 'ask_count' ]} and {rescored[ 'ask_count' ]}" )
+    if ( after[ "threshold" ], after[ "top_k" ] ) != ( rescored[ "threshold" ], rescored[ "top_k" ] ):
+        raise ReportMismatch( "columns 3 and 4 must use the same frozen threshold and top k" )
     if _both( before, same, "ask_ids" ) and set( before[ "ask_ids" ] ) != set( same[ "ask_ids" ] ):
         raise ReportMismatch( "columns 1 and 2 name different asks" )
     if _both( same, after, "ask_ids" ) and not set( same[ "ask_ids" ] ) <= set( after[ "ask_ids" ] ):
@@ -106,7 +111,9 @@ def column_rows( column: Dict[str, Any] ) -> Dict[str, Any]:
     Ensures:
         - returns label to figure, a number or a string, never recomputed from another figure here
         - holds the ask count, the frozen threshold and top k, each window's mix, each window's correct count
-          and correct per 100 by answer type, and each calibration cell
+          and correct per 100 by answer type (n/a for a type with no asks), the yes/no comparison against always-yes
+          (counts, discordant pairs, McNemar p and verdict), and each calibration cell
+        - with a tune_note, every figure whose label starts with "tune " reads that note
         - a calibration cell that was not fitted shows its status in place of Brier scores
     """
     coverage = column[ "coverage" ]
@@ -117,14 +124,23 @@ def column_rows( column: Dict[str, Any] ) -> Dict[str, Any]:
     for window in WINDOWS:
         for kind in kinds:
             score = coverage[ "scores" ][ window ][ kind ]
-            rows[ f"{window} correct: {kind}" ]        = score[ "correct" ]
-            rows[ f"{window} correct per 100: {kind}" ] = 100.0 * score[ "correct" ] / score[ "asks" ]
+            rows[ f"{window} correct: {kind}" ]         = score[ "correct" ]
+            rows[ f"{window} correct per 100: {kind}" ] = 100.0 * score[ "correct" ] / score[ "asks" ] if score[ "asks" ] > 0 else "n/a"
+    summary = column[ "yes_no_summary" ]
+    rows[ "yes_no vs always-yes: predictor correct" ]      = summary[ "engine_correct" ]
+    rows[ "yes_no vs always-yes: baseline correct" ]       = summary[ "baseline_correct" ]
+    rows[ "yes_no vs always-yes: predictor only right" ]   = summary[ "engine_only_right" ]
+    rows[ "yes_no vs always-yes: baseline only right" ]    = summary[ "baseline_only_right" ]
+    rows[ "yes_no vs always-yes: McNemar exact p" ]        = summary[ "mcnemar" ][ "p_value" ]
+    rows[ "yes_no vs always-yes: verdict" ]                = summary[ "verdict" ]
     for key, cell in sorted( column[ "calibration" ][ "cells" ].items() ):
         if cell[ "status" ] == "evaluated":
             rows[ f"calibration {key}: Brier raw" ]        = cell[ "brier_raw" ]
             rows[ f"calibration {key}: Brier calibrated" ] = cell[ "brier_calibrated" ]
         else:
             rows[ f"calibration {key}" ] = cell[ "status" ]
+    if "tune_note" in column:
+        rows = { name: ( column[ "tune_note" ] if name.startswith( "tune " ) else value ) for name, value in rows.items() }
     return rows
 
 

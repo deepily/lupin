@@ -28,8 +28,13 @@ def _column( label, commit, source, asks, yn_final_correct, mc_tune_correct, ids
             "yes_no/cbr": { "status": "evaluated", "brier_raw": brier[ 0 ], "brier_calibrated": brier[ 1 ] },
             "mc/cold": { "status": "not fitted" } } },
     }
+    column[ "yes_no_summary" ] = { "engine_correct": yn_final_correct, "baseline_correct": 173, "engine_only_right": 3, "baseline_only_right": 10,
+                                   "mcnemar": { "p_value": 0.046142578125 }, "verdict": "baseline better" }
     if ids is not None: column[ "ask_ids" ] = ids
     return column
+
+
+NOTE = "n/a (scored on Before's 391 final asks)"
 
 
 @pytest.fixture
@@ -37,12 +42,14 @@ def columns():
     """The four columns."""
     first = _column( "before", "8d748e033", "stored", 1302, 160, 10, ids=[ "a", "b" ] )
     first[ "produced_by" ] = "replay 086f95590, src/scripts/preference_step9_checkpoint_run.py"
-    return [
+    cols = [
         first,
         _column( "same asks, new vectors", "c2", { "model": "m", "revision": "r1" }, 1302, 170, 12, ids=[ "b", "a" ], brier=( 0.2, 0.15 ) ),
         _column( "all asks, new vectors", "c3", { "model": "m", "revision": "r1" }, 3610, 168, 12, ids=[ "a", "b", "c" ], threshold=0.6 ),
         _column( "all asks, before's final window", "c4", { "model": "m", "revision": "r1" }, 3610, 172, 11, ids=[ "a", "b", "c" ], threshold=0.6 ),
     ]
+    cols[ 3 ][ "tune_note" ] = NOTE
+    return cols
 
 
 def test_check_columns_accepts_the_design( columns ):
@@ -166,7 +173,7 @@ def test_render_changes_come_from_the_right_pairs( columns ):
     text = bar.render_before_after( columns )
     assert "| final correct: yes_no | 160 | 170 | 168 | 172 | +10 | -2 | +4 |" in text
     assert "| final correct per 100: yes_no | 80.0 | 85.0 | 84.0 | 86.0 | +5.0 | -1.0 | +2.0 |" in text
-    assert "| tune correct: multiple_choice | 10 | 12 | 12 | 11 | +2 | +0 | -1 |" in text
+    assert f"| tune correct: multiple_choice | 10 | 12 | 12 | {NOTE} | +2 | +0 | n/a |" in text
     assert "| calibration yes_no/cbr: Brier raw | 0.2239 | 0.2000 | 0.2239 | 0.2239 | -0.0239 | +0.0239 | +0.0000 |" in text
     assert "| threshold | 0.5000 | 0.5000 | 0.6000 | 0.6000 | +0.0000 | +0.1000 | +0.0000 |" in text
     assert "| asks | 1302 | 1302 | 3610 | 3610 | +0 | +2308 | +0 |" in text
@@ -189,3 +196,67 @@ def test_render_is_deterministic_and_titled( columns ):
     assert first == bar.render_before_after( columns, title="T" )
     assert first.startswith( "# T\n" )
     assert "effect of the regenerated vectors alone" in first
+
+
+def test_the_header_lists_the_labels_in_column_order_then_the_three_changes( columns ):
+    text = bar.render_before_after( columns )
+    assert "| figure | before | same asks, new vectors | all asks, new vectors | all asks, before's final window | change 1 to 2 | change 2 to 3 | change 3 to 4 |" in text
+
+
+def test_every_figure_appears_in_exactly_one_row( columns ):
+    rows = [ line.split( " | " )[ 0 ] for line in bar.render_before_after( columns ).splitlines() if line.startswith( "| " ) and line.count( "|" ) == 9 ]
+    assert len( rows ) > 20 and len( rows ) == len( set( rows ) )
+
+
+def test_check_columns_refuses_five_columns( columns ):
+    with pytest.raises( bar.ReportMismatch, match="expected 4 columns, got 5" ):
+        bar.check_columns( columns + [ columns[ 0 ] ] )
+
+
+def test_check_control_refuses_above_the_committed_count_too():
+    with pytest.raises( bar.ReportMismatch, match="control run gave 178" ):
+        bar.check_control( 177, 178 )
+
+
+def test_check_columns_refuses_different_frozen_settings_in_columns_three_and_four( columns ):
+    columns[ 3 ][ "threshold" ] = 0.5
+    with pytest.raises( bar.ReportMismatch, match="same frozen threshold and top k" ):
+        bar.check_columns( columns )
+    columns[ 3 ][ "threshold" ] = 0.6
+    columns[ 3 ][ "top_k" ] = 5
+    with pytest.raises( bar.ReportMismatch, match="same frozen threshold and top k" ):
+        bar.check_columns( columns )
+
+
+def test_a_type_with_no_asks_in_a_window_reads_na_not_a_divide_error( columns ):
+    columns[ 0 ][ "coverage" ][ "scores" ][ "final" ][ "multiple_choice" ] = { "asks": 0, "correct": 0 }
+    rows = bar.column_rows( columns[ 0 ] )
+    assert rows[ "final correct per 100: multiple_choice" ] == "n/a"
+    assert rows[ "final correct per 100: yes_no" ] == 80.0
+
+
+def test_a_calibration_status_other_than_evaluated_shows_the_status_not_brier_scores( columns ):
+    columns[ 0 ][ "calibration" ][ "cells" ][ "x/y" ] = { "status": "skipped", "brier_raw": 9.0, "brier_calibrated": 9.0 }
+    rows = bar.column_rows( columns[ 0 ] )
+    assert rows[ "calibration x/y" ] == "skipped"
+    assert "calibration x/y: Brier raw" not in rows
+
+
+def test_the_yes_no_comparison_against_always_yes_is_read_from_each_columns_summary( columns ):
+    text = bar.render_before_after( columns )
+    assert "| yes_no vs always-yes: predictor correct | 160 | 170 | 168 | 172 | +10 | -2 | +4 |" in text
+    assert "| yes_no vs always-yes: baseline correct | 173 | 173 | 173 | 173 | +0 | +0 | +0 |" in text
+    assert "| yes_no vs always-yes: predictor only right | 3 | 3 | 3 | 3 | +0 | +0 | +0 |" in text
+    assert "| yes_no vs always-yes: baseline only right | 10 | 10 | 10 | 10 | +0 | +0 | +0 |" in text
+    assert "| yes_no vs always-yes: McNemar exact p | 0.0461 | 0.0461 | 0.0461 | 0.0461 | +0.0000 | +0.0000 | +0.0000 |" in text
+    assert "| yes_no vs always-yes: verdict | baseline better | baseline better | baseline better | baseline better | same | same | same |" in text
+
+
+def test_a_column_with_a_tune_note_reports_final_window_figures_only( columns ):
+    rows = bar.column_rows( columns[ 3 ] )
+    tune = [ name for name in rows if name.startswith( "tune " ) ]
+    assert len( tune ) == 6 and all( rows[ name ] == NOTE for name in tune )
+    assert rows[ "final correct: yes_no" ] == 172
+    assert rows[ "threshold" ] == 0.6
+    plain = bar.column_rows( columns[ 2 ] )
+    assert plain[ "tune correct: yes_no" ] == 25
