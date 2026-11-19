@@ -9,7 +9,10 @@ The model door is cosa.repo.doc_lint.model_transport.complete, awaited inside _e
 do_all on a worker thread, where asyncio.run has no loop to clash with.
 """
 
+import asyncio
 import json
+import threading
+import time
 import uuid
 from contextlib import contextmanager
 
@@ -31,6 +34,8 @@ TIMEOUT_KEY        = "prediction learner extractor timeout seconds"
 ENCODER_MODEL_KEY  = "local embedding prose model name"
 ENCODER_RECIPE     = "statement-rationale-v1"
 OWNER_SOURCE       = "ui"
+PROBE_SYSTEM       = "Answer with the single word ok."
+PROBE_QUESTION     = "Are you there?"
 
 
 def encoder_version():
@@ -92,7 +97,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
     JOB_PREFIX = "pe"
 
     def __init__( self, notification_id, user_id, user_email, query_fn=None, embed_fn=None, session_factory=None, model=None,
-                  timeout_seconds=None, encoder=None, clock=None, debug=False, verbose=False ):
+                  timeout_seconds=None, encoder=None, clock=None, probe=False, debug=False, verbose=False ):
         """
         Build the job.
 
@@ -105,6 +110,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         Ensures:
             - the job id has the "pe" prefix and the session id is "principle-extractor"
             - model, timeout and encoder are read from the INI file when the job runs, not here
+            - probe True makes the job check the model door and touch no notification or table
         """
         super().__init__( user_id=user_id, user_email=user_email, session_id=SESSION_ID, debug=debug, verbose=verbose )
         self.notification_id = str( notification_id )
@@ -115,6 +121,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         self.timeout_seconds = timeout_seconds
         self.encoder         = encoder
         self.clock           = clock
+        self.probe           = probe
 
     @property
     def last_question_asked( self ):
@@ -167,11 +174,55 @@ class PrincipleExtractorJob( AgenticJobBase ):
             - LookupError if the notification does not exist
             - whatever model_transport.complete raises, so the queue sees the failure
         """
+        if self.probe: return await self._probe_model_door()
         model, timeout, encoder = self._settings()
         embed = self.embed_fn if self.embed_fn is not None else default_embed
         with ( self.session_factory if self.session_factory is not None else default_session )() as session:
             summary = await self._extract( session, model, timeout, encoder, embed )
         return summary
+
+    async def _probe_model_door( self ):
+        """
+        Check, from this server process, that the model door answers or fails with a named error.
+
+        The probe makes the same call the extractor makes, through the same class and the same await,
+        with one fixed question. It reads nothing from the database and sends the owner nothing.
+
+        Requires:
+            - runs inside _execute, so a loop is already running on this pool worker thread
+
+        Ensures:
+            - returns JSON with status probe_ok when the call returns non-empty text, else probe_error
+            - probe_error carries the error class name and message of a ModelCallError or CallBudgetExceeded
+            - the JSON names the model, the timeout, the thread, whether a loop was running, the transport,
+              the CLI path as set ( None means unset ), the cap for the model as a literal ( None means no cap )
+              and every cap in model_transport.BUDGET_CAPS
+            - the call is bounded by the timeout, so the probe never hangs
+
+        Raises:
+            - MissingConfigKeyError if the model or timeout key is absent
+            - any exception other than the two named above, so the queue sees a real failure
+        """
+        model, timeout, _ = self._settings()
+        report = {
+            "model"         : model,
+            "timeout"       : timeout,
+            "thread"        : threading.current_thread().name,
+            "loop_running"  : asyncio.get_running_loop().is_running(),
+            "transport"     : model_transport.TRANSPORT,
+            "cli_path"      : model_transport.CLI_PATH,
+            "budget_cap"    : model_transport.BUDGET_CAPS.get( model ),
+            "budget_caps"   : dict( model_transport.BUDGET_CAPS ),
+        }
+        started = time.monotonic()
+        try:
+            text = await model_transport.complete( model, PROBE_SYSTEM, PROBE_QUESTION, query_fn=self.query_fn, timeout_seconds=timeout )
+        except ( model_transport.ModelCallError, model_transport.CallBudgetExceeded ) as e:
+            report.update( { "status": "probe_error", "error_type": type( e ).__name__, "error": str( e ) } )
+        else:
+            report.update( { "status": "probe_ok", "reply": text.strip()[ :200 ] } )
+        report[ "seconds" ] = round( time.monotonic() - started, 2 )
+        return json.dumps( report, sort_keys=True )
 
     async def _extract( self, session, model, timeout, encoder, embed ):
         """
