@@ -20,6 +20,7 @@ bf     = importlib.util.module_from_spec( spec )
 sys.modules[ spec.name ] = bf   # a dataclass resolves its annotations through sys.modules
 spec.loader.exec_module( bf )
 
+GO    = { "expect_database": ":memory:", "expect_insert_ids": { "n1", "n2" } }   # the scenario's two asks without a row
 DIM   = 768
 MODEL = "test-model"
 REV   = "abc123"
@@ -211,7 +212,7 @@ def test_dry_run_writes_nothing_and_prints_counts( tmp_path, engine ):
 def test_apply_inserts_replaces_stamps_and_reads_back( tmp_path, engine ):
     ids  = scenario( engine )
     out  = []
-    code = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append )
+    code = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append, **GO )
     assert code == 0 and "applied and read back" in out[ -1 ]
     with engine.connect() as conn:
         rows    = { row[ 0 ]: row for row in conn.execute( sa.text( "SELECT id, question, question_embedding, owner_user_id, answer_source FROM prediction_decisions" ) ) }
@@ -230,7 +231,7 @@ def test_apply_rolls_back_on_a_wrong_expected_count( tmp_path, engine, expected,
     ids    = scenario( engine )
     before = table_dump( engine )
     out    = []
-    code   = bf.run( engine, side_file( tmp_path, ids ), True, *expected, out=out.append )
+    code   = bf.run( engine, side_file( tmp_path, ids ), True, *expected, out=out.append, **GO )
     assert code == 3 and fragment in out[ -1 ] and table_dump( engine ) == before
 
 
@@ -238,20 +239,28 @@ def test_apply_refuses_when_an_insert_id_already_has_a_row( tmp_path, engine, mo
     ids    = scenario( engine )
     before = table_dump( engine )
     real   = bf.fetch_existing
-    monkeypatch.setattr( bf, "fetch_existing", lambda conn, wanted: { } )   # the plan believes n3 has no row
+    calls  = []
+    def stale( conn, wanted ):
+        calls.append( 1 )
+        return { } if len( calls ) == 1 else real( conn, wanted )   # the plan is built on a stale read: it believes n3 has no row
+    monkeypatch.setattr( bf, "fetch_existing", stale )
     out    = []
-    code   = bf.run( engine, side_file( tmp_path, ids ), True, 3, 0, 3, out=out.append )
-    assert code == 3 and "of the 3 insert ids already have a row" in out[ -1 ] and table_dump( engine ) == before
-    assert real is not bf.fetch_existing
+    code   = bf.run( engine, side_file( tmp_path, ids ), True, 3, 0, 3, out=out.append, **{ **GO, "expect_insert_ids": { "n1", "n2", "n3" } } )
+    assert code == 3 and "1 of the 3 insert ids already have a row, first n3" in out[ -1 ] and table_dump( engine ) == before
 
 
 def test_apply_refuses_when_an_update_id_has_no_row( tmp_path, engine, monkeypatch ):
     ids    = scenario( engine )
     before = table_dump( engine )
-    monkeypatch.setattr( bf, "fetch_existing", lambda conn, wanted: { "n1": "x", "n3": "y" } )   # the plan believes n1 has a row
+    real   = bf.fetch_existing
+    calls  = []
+    def stale( conn, wanted ):
+        calls.append( 1 )
+        return { "n1": "x", "n3": "y" } if len( calls ) == 1 else real( conn, wanted )   # the plan believes n1 has a row
+    monkeypatch.setattr( bf, "fetch_existing", stale )
     out    = []
-    code   = bf.run( engine, side_file( tmp_path, ids ), True, 1, 2, 3, out=out.append )
-    assert code == 3 and "only 1 of the 2 update ids have a row" in out[ -1 ] and table_dump( engine ) == before
+    code   = bf.run( engine, side_file( tmp_path, ids ), True, 1, 2, 3, out=out.append, **{ **GO, "expect_insert_ids": { "n2" } } )
+    assert code == 3 and "1 of the 2 update ids have no row, first n1" in out[ -1 ] and table_dump( engine ) == before
 
 
 def test_apply_rolls_back_when_the_read_back_disagrees( tmp_path, engine, monkeypatch ):
@@ -261,7 +270,7 @@ def test_apply_rolls_back_when_the_read_back_disagrees( tmp_path, engine, monkey
     def wrong( conn, plan, expect_rows ): return real( conn, plan, expect_rows + 1 )
     monkeypatch.setattr( bf, "read_back", wrong )
     out    = []
-    code   = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append )
+    code   = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append, **GO )
     assert code == 3 and "read-back" in out[ -1 ] and table_dump( engine ) == before
 
 
@@ -269,7 +278,7 @@ def test_run_refuses_a_bad_side_file_before_opening_the_database( tmp_path ):
     class Boom:
         def connect( self ): raise AssertionError( "database opened" )
     out = []
-    assert bf.run( Boom(), side_file( tmp_path, [ "a" ], count=9 ), True, 1, 0, 1, out=out.append ) == 2
+    assert bf.run( Boom(), side_file( tmp_path, [ "a" ], count=9 ), True, 1, 0, 1, out=out.append, **GO ) == 2
     assert out[ -1 ].startswith( "REFUSED" )
 
 
@@ -290,7 +299,9 @@ def test_postgres_dry_run_sets_the_transaction_read_only( tmp_path ):
             class T:
                 def rollback( self ): statements.append( "rollback" )
             return T()
-        def execute( self, statement, *args ): statements.append( str( statement ) )
+        def execute( self, statement, *args ):
+            statements.append( str( statement ) )
+            return type( "R", ( ), { "scalar": lambda self: "scratch" } )()
     class FakeEngine:
         def connect( self ): return FakeConn()
     original = bf.build_plan
@@ -299,7 +310,7 @@ def test_postgres_dry_run_sets_the_transaction_read_only( tmp_path ):
         assert bf.run( FakeEngine(), side_file( tmp_path, [ "a" ] ), False, None, None, None, out=lambda line: None ) == 0
     finally:
         bf.build_plan = original
-    assert statements[ 0 ] == "SET TRANSACTION READ ONLY" and statements[ -1 ] == "rollback"
+    assert statements[ :2 ] == [ "SELECT current_database()", "SET TRANSACTION READ ONLY" ] and statements[ -1 ] == "rollback"
 
 
 def test_vector_sql_casts_only_on_postgres():
@@ -314,13 +325,13 @@ def test_vector_sql_casts_only_on_postgres():
 def test_main_needs_every_expect_count_to_apply( tmp_path, capsys ):
     with pytest.raises( SystemExit ) as raised:
         bf.main( [ "--side-file", "x", "--database-url", "sqlite://", "--apply", "--expect-insert", "1" ] )
-    assert raised.value.code == 2 and "--apply needs" in capsys.readouterr().err
+    assert raised.value.code == 2 and "need --expect-insert" in capsys.readouterr().err
 
 
 def test_main_dry_run_uses_the_url_and_returns_the_run_code( tmp_path, monkeypatch ):
     seen = { }
     monkeypatch.setattr( bf.sa, "create_engine", lambda url: seen.setdefault( "url", url ) or "engine" )
-    monkeypatch.setattr( bf, "run", lambda engine, path, apply, ei, eu, el: seen.update( apply=apply, path=path ) or 0 )
+    monkeypatch.setattr( bf, "run", lambda engine, path, apply, ei, eu, el, **kw: seen.update( apply=apply, path=path ) or 0 )
     assert bf.main( [ "--side-file", "f.jsonl", "--database-url", "sqlite://" ] ) == 0
     assert seen == { "url": "sqlite://", "apply": False, "path": "f.jsonl" }
 
@@ -330,3 +341,74 @@ def test_wrong_interpreter_path_exits_4_before_touching_anything( tmp_path ):
     result = subprocess.run( [ sys.executable, "-I", SCRIPT, "--side-file", "x", "--database-url", "sqlite://" ],
                              capture_output=True, text=True, env={ } )
     assert result.returncode == 4 and "FATAL: import failed" in result.stderr
+
+
+def test_apply_touches_only_the_asks_in_the_side_file_and_gives_each_its_own_vector( tmp_path, engine ):
+    ids = scenario( engine )
+    add_ask( engine, "bystander", has_row=True )   # has a case row and a log row, and is not in the side file
+    with engine.connect() as conn:
+        bystander_before = [ tuple( row ) for row in conn.execute( sa.text( "SELECT * FROM prediction_decisions WHERE id = 'bystander'" ) ) ]
+    path = side_file( tmp_path, ids )
+    assert bf.run( engine, path, True, 2, 1, 3, out=lambda line: None, **GO ) == 0
+    _, records = bf.read_side_file( path )
+    with engine.connect() as conn:
+        stored    = { row[ 0 ]: row[ 1 ] for row in conn.execute( sa.text( "SELECT id, question_embedding FROM prediction_decisions" ) ) }
+        bystander = [ tuple( row ) for row in conn.execute( sa.text( "SELECT * FROM prediction_decisions WHERE id = 'bystander'" ) ) ]
+        versions  = { row[ 0 ]: row[ 1 ] for row in conn.execute( sa.text( "SELECT notification_id, encoder_version FROM prediction_log" ) ) }
+    for record in records:
+        assert stored[ record[ "id" ] ] == bf.vector_text( record[ "vector" ] )
+    assert len( { stored[ record[ "id" ] ] for record in records } ) == 3   # three different vectors, not one copied to all
+    assert bystander == bystander_before and stored[ "bystander" ] == "old"
+    assert versions[ "bystander" ] is None and all( versions[ row_id ] == f"{MODEL}@{REV}" for row_id in ids )
+
+
+def test_apply_refuses_the_wrong_database_before_any_read_of_the_plan( tmp_path, engine ):
+    ids    = scenario( engine )
+    before = table_dump( engine )
+    out    = []
+    code   = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append, **{ **GO, "expect_database": "lupin_db_dev" } )
+    assert code == 2 and "connected to ':memory:', expected 'lupin_db_dev'" in out[ -1 ] and table_dump( engine ) == before
+    assert out[ 0 ] == "database           : :memory:" and not any( "rows to insert" in line for line in out )
+
+
+def test_apply_refuses_when_the_expected_insert_ids_differ_by_a_swap( tmp_path, engine ):
+    ids    = scenario( engine )
+    before = table_dump( engine )
+    out    = []
+    swapped = { "n1", "n3" }   # same size as the plan's two inserts, one id swapped for an id that has a row
+    code   = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append, **{ **GO, "expect_insert_ids": swapped } )
+    assert code == 3 and "1 extra (first ['n2']), 1 missing (first ['n3'])" in out[ -1 ] and table_dump( engine ) == before
+
+
+def test_apply_refuses_without_an_expected_insert_id_list( tmp_path, engine ):
+    ids  = scenario( engine )
+    out  = []
+    code = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append, expect_database=":memory:" )
+    assert code == 3 and "no expected insert id list" in out[ -1 ]
+
+
+def test_rehearsal_runs_every_step_then_rolls_back( tmp_path, engine ):
+    ids    = scenario( engine )
+    before = table_dump( engine )
+    out    = []
+    code   = bf.run( engine, side_file( tmp_path, ids ), False, 2, 1, 3, out=out.append, rehearse=True, **GO )
+    assert code == 0 and "rehearsal read back, then rolled back" in out[ -1 ] and '"rows": 3' in out[ -1 ]
+    assert table_dump( engine ) == before
+
+
+def test_main_passes_the_database_and_id_file_through( tmp_path, monkeypatch ):
+    idfile = tmp_path / "ids.txt"
+    idfile.write_text( "n1\n\nn2\n", encoding="utf-8" )
+    seen = { }
+    monkeypatch.setattr( bf.sa, "create_engine", lambda url: "engine" )
+    monkeypatch.setattr( bf, "run", lambda *args, **kwargs: seen.update( args=args, kwargs=kwargs ) or 0 )
+    argv = [ "--side-file", "f", "--database-url", "u", "--rehearse", "--expect-insert", "2", "--expect-update", "1", "--expect-log", "3",
+             "--expect-database", "scratch", "--expect-insert-ids", str( idfile ) ]
+    assert bf.main( argv ) == 0
+    assert seen[ "kwargs" ] == { "rehearse": True, "expect_database": "scratch", "expect_insert_ids": { "n1", "n2" } }
+
+
+def test_main_refuses_apply_with_rehearse( capsys ):
+    with pytest.raises( SystemExit ):
+        bf.main( [ "--side-file", "x", "--database-url", "u", "--apply", "--rehearse" ] )
+    assert "exclusive" in capsys.readouterr().err

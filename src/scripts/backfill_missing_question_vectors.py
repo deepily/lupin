@@ -3,10 +3,12 @@ r"""
 Backfill every ask's question vector into `prediction_decisions` from the side file.
 
 Dry run by default. It reads the database inside a read-only transaction and prints counts only.
-The real run is the same file with `--apply`, which needs the three `--expect-*` counts as well.
+`--rehearse` runs every apply step and the read-back, then rolls back. The real run is the same file with `--apply`.
+Both need the three `--expect-*` counts, `--expect-insert-ids` and `--expect-database`.
+The ids file lists the asks to insert. The database name must match the connection.
 
 What it does, in one transaction:
-    1. Asserts the ids it will insert still have no row, and the ids it will update still have one.
+    1. Asserts the insert ids match the expected list and have no row, and the update ids have one.
     2. Inserts a case row for each ask in the side file that has none.
     3. Replaces the stored vector of each ask that already has a row.
     4. Sets `prediction_log.encoder_version` on every ask to `<model>@<revision>` from the file header.
@@ -17,7 +19,7 @@ Side file contract (JSON lines, UTF-8):
     Every later line is a record: `{"id": <notification id>, "model": ..., "revision": ..., "vector": [768 floats]}`.
     A record's model and revision must equal the header's. Ids are unique and the count must match.
 
-Field rules for a new row:
+Fields of a new row:
     - question is the notification message, stripped; it is what the live store path embeds.
     - category and response_type come from the prediction log row.
     - decision_value is the logged answer: the value for yes/no, sorted JSON text for multiple choice.
@@ -27,9 +29,7 @@ Field rules for a new row:
     - created_at is the time the notification was answered, in UTC, as text.
 
 Usage:
-    python src/scripts/backfill_missing_question_vectors.py --side-file <path> --database-url <url>
-    python src/scripts/backfill_missing_question_vectors.py --side-file <path> --database-url <url> \\
-        --apply --expect-insert 2306 --expect-update 1304 --expect-log 3610
+    python src/scripts/backfill_missing_question_vectors.py --side-file <path> --database-url <url> [--apply | --rehearse] [expect flags]
 
 Exit codes:
     0 means the dry run printed its counts, or the apply committed and read back clean.
@@ -48,7 +48,7 @@ import math
 import sys
 from dataclasses import dataclass, field
 from datetime import timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     import sqlalchemy as sa
@@ -323,16 +323,18 @@ def _vector_sql( conn, name: str ) -> str:
     return f"CAST( :{name} AS vector )" if conn.dialect.name == "postgresql" else f":{name}"
 
 
-def apply_plan( conn, plan: Plan, expect_insert: int, expect_update: int, expect_log: int ) -> Dict[ str, int ]:
+def apply_plan( conn, plan: Plan, expect_insert: int, expect_update: int, expect_log: int,
+                expect_insert_ids: Optional[ Set[ str ] ] = None ) -> Dict[ str, int ]:
     """
     Write the plan inside the caller's open transaction and read it back.
 
     Requires:
         - conn has an open transaction the caller commits or rolls back
         - the three expect values are the counts the operator was told to expect
+        - expect_insert_ids is the exact set of ids the operator expects to insert, from a source other than this plan
 
     Ensures:
-        - the first statement counts the insert ids and the update ids that already have a row
+        - the plan's insert ids equal expect_insert_ids exactly, and no insert id has a row, before any write
         - returns the read-back counts after all writes
 
     Raises:
@@ -341,10 +343,15 @@ def apply_plan( conn, plan: Plan, expect_insert: int, expect_update: int, expect
     """
     insert_ids = [ row[ "id" ] for row in plan.inserts ]
     update_ids = [ row[ "id" ] for row in plan.updates ]
-    already    = sum( conn.execute( _in_clause( "SELECT count(*) FROM prediction_decisions WHERE id IN :ids" ), { "ids": part } ).scalar() for part in _chunks( insert_ids ) )
-    present    = sum( conn.execute( _in_clause( "SELECT count(*) FROM prediction_decisions WHERE id IN :ids" ), { "ids": part } ).scalar() for part in _chunks( update_ids ) )
-    if already:                                raise CountMismatch( f"{already} of the {len( insert_ids )} insert ids already have a row" )
-    if present != len( update_ids ):           raise CountMismatch( f"only {present} of the {len( update_ids )} update ids have a row" )
+    if expect_insert_ids is None:              raise CountMismatch( "no expected insert id list was given" )
+    extra      = sorted( set( insert_ids ) - expect_insert_ids )
+    short      = sorted( expect_insert_ids - set( insert_ids ) )
+    if extra or short:                         raise CountMismatch( f"insert ids differ from the expected list: {len( extra )} extra (first {extra[ :1 ]}), {len( short )} missing (first {short[ :1 ]})" )
+    have_row   = set( fetch_existing( conn, insert_ids + update_ids ) )
+    already    = sorted( have_row & set( insert_ids ) )
+    absent     = sorted( set( update_ids ) - have_row )
+    if already:                                raise CountMismatch( f"{len( already )} of the {len( insert_ids )} insert ids already have a row, first {already[ 0 ]}" )
+    if absent:                                 raise CountMismatch( f"{len( absent )} of the {len( update_ids )} update ids have no row, first {absent[ 0 ]}" )
     if len( insert_ids ) != expect_insert:     raise CountMismatch( f"plan inserts {len( insert_ids )}, expected {expect_insert}" )
     if len( update_ids ) != expect_update:     raise CountMismatch( f"plan updates {len( update_ids )}, expected {expect_update}" )
     if plan.log_rows != expect_log:            raise CountMismatch( f"plan stamps {plan.log_rows} log rows, expected {expect_log}" )
@@ -390,16 +397,37 @@ def read_back( conn, plan: Plan, expect_rows: int ) -> Dict[ str, int ]:
     return counts
 
 
-def run( engine, side_file: str, apply: bool, expect_insert: int, expect_update: int, expect_log: int, out=print ) -> int:
+def database_name( conn ) -> str:
     """
-    Run the dry run or the apply against an engine and return the exit code.
+    Name the database the connection is really on.
+
+    Requires:
+        - conn is an open connection
+
+    Ensures:
+        - on Postgres returns current_database(); elsewhere returns the database part of the URL, or :memory:
+    """
+    if conn.dialect.name == "postgresql": return conn.execute( sa.text( "SELECT current_database()" ) ).scalar()
+    return conn.engine.url.database or ":memory:"
+
+
+def run( engine, side_file: str, apply: bool, expect_insert: int, expect_update: int, expect_log: int,
+         out=print, rehearse: bool = False, expect_database: Optional[ str ] = None,
+         expect_insert_ids: Optional[ Set[ str ] ] = None ) -> int:
+    """
+    Run the dry run, the rehearsal or the apply against an engine and return the exit code.
 
     Requires:
         - engine is a SQLAlchemy engine; side_file is a path
+        - a rehearsal or an apply carries expect_database, the database name the operator intends
+        - a rehearsal or an apply carries expect_insert_ids, the exact ids to insert
 
     Ensures:
+        - the output names the database the connection is on
         - a dry run writes nothing and prints counts only; on Postgres it sets the transaction read only
+        - a rehearsal runs every apply step and read-back, then rolls back, so nothing persists
         - an apply commits only when every check and the read-back pass, otherwise it rolls back
+        - a rehearsal or apply on a database other than expect_database writes nothing and returns 2
         - returns 0 on success, 2 when the plan is refused, 3 on a count mismatch
 
     Raises:
@@ -410,17 +438,25 @@ def run( engine, side_file: str, apply: bool, expect_insert: int, expect_update:
     except ( RefusedPlan, KeyError, ValueError ) as err:
         out( f"REFUSED: {err}" )
         return 2
+    writing = apply or rehearse
     with engine.connect() as conn:
         transaction = conn.begin()
         try:
-            if not apply and conn.dialect.name == "postgresql": conn.execute( sa.text( "SET TRANSACTION READ ONLY" ) )
+            name = database_name( conn )
+            out( f"database           : {name}" )
+            if writing and name != expect_database: raise RefusedPlan( f"connected to {name!r}, expected {expect_database!r}" )
+            if not writing and conn.dialect.name == "postgresql": conn.execute( sa.text( "SET TRANSACTION READ ONLY" ) )
             plan = build_plan( conn, header, records )
             out( format_counts( plan ) )
-            if not apply:
+            if not writing:
                 transaction.rollback()
                 out( "dry run: nothing written" )
                 return 0
-            counts = apply_plan( conn, plan, expect_insert, expect_update, expect_log )
+            counts = apply_plan( conn, plan, expect_insert, expect_update, expect_log, expect_insert_ids )
+            if rehearse:
+                transaction.rollback()
+                out( f"rehearsal read back, then rolled back: {json.dumps( counts, sort_keys=True )}" )
+                return 0
             transaction.commit()
             out( f"applied and read back: {json.dumps( counts, sort_keys=True )}" )
             return 0
@@ -448,15 +484,23 @@ def main( argv: Optional[ List[ str ] ] = None ) -> int:
     parser = argparse.ArgumentParser( description="Backfill question vectors into prediction_decisions from the side file." )
     parser.add_argument( "--side-file",     required=True )
     parser.add_argument( "--database-url",  required=True )
-    parser.add_argument( "--apply",         action="store_true" )
+    parser.add_argument( "--apply",           action="store_true" )
+    parser.add_argument( "--rehearse",        action="store_true" )
+    parser.add_argument( "--expect-database" )
+    parser.add_argument( "--expect-insert-ids", help="a file with one id per line: exactly the asks that have no row today" )
     parser.add_argument( "--expect-insert", type=int )
     parser.add_argument( "--expect-update", type=int )
     parser.add_argument( "--expect-log",    type=int )
     args = parser.parse_args( argv )
-    if args.apply and None in ( args.expect_insert, args.expect_update, args.expect_log ):
-        parser.error( "--apply needs --expect-insert, --expect-update and --expect-log" )
+    if args.apply and args.rehearse: parser.error( "--apply and --rehearse are exclusive" )
+    if ( args.apply or args.rehearse ) and None in ( args.expect_insert, args.expect_update, args.expect_log, args.expect_database, args.expect_insert_ids ):
+        parser.error( "--apply and --rehearse need --expect-insert, --expect-update, --expect-log, --expect-database and --expect-insert-ids" )
+    expected_ids = None
+    if args.expect_insert_ids:
+        with open( args.expect_insert_ids, encoding="utf-8" ) as handle: expected_ids = { line.strip() for line in handle if line.strip() }
     engine = sa.create_engine( args.database_url )
-    return run( engine, args.side_file, args.apply, args.expect_insert, args.expect_update, args.expect_log )
+    return run( engine, args.side_file, args.apply, args.expect_insert, args.expect_update, args.expect_log,
+                rehearse=args.rehearse, expect_database=args.expect_database, expect_insert_ids=expected_ids )
 
 
 if __name__ == "__main__":
