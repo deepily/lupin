@@ -24,6 +24,8 @@ from cosa.research.preference_replay.cohorts import answer_source_of
     ( json.dumps( [ "review_card" ] ),               False ),
     ( [ { "review_card": True } ],                   False ),
     ( None,                                          False ),
+    ( "not json",                                    False ),
+    ( "",                                            False ),
 ] )
 def test_only_an_object_with_the_key_exactly_true_is_a_review_card( options, expected ):
     assert is_review_card( options ) is expected

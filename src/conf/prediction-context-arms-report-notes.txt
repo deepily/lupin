@@ -1,0 +1,5 @@
+Window: All 3,608 frozen ids are scored for every arm. The results use the final window of 1,083 asks, the cut the retune makes.
+Always-yes: Always-yes has no answer to a multiple-choice ask. It is compared on the yes/no asks only.
+Retune finals: Per-ask correct counts equal the finals in the committed retune reports: Q 392, Q+A 384, Q+O 392, Q+P 358, Q+H 389 of 1,083.
+Q+P setting is a tie: Q+P top k 3 ties top k 5 on the tune window, 27.5644 each. The tie rule takes the higher threshold, then the smaller k. On the final window k 3 gives 358 and k 5 gives 378 (Krishna's check).
+Retune driver differs by arm: The Q+P and Q+H retunes ran retune_run.py as of commit 560a4e382. The Q+A and Q+O retunes ran an earlier copy. The differences are refactors (Krishna's check).

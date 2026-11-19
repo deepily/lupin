@@ -607,3 +607,31 @@ def test_enabled_proxy_still_submits_on_act_path():
     r.submit_response.assert_called_once_with( "nid-1", "yes" )
     assert r.stats[ "disabled_skipped" ] == 0
     assert r.stats[ "responses_sent" ] == 1
+
+
+# ============================================================================
+# review cards
+# ============================================================================
+def test_a_review_card_is_skipped_before_the_pipeline_and_leaves_no_decision_and_no_answer():
+    """A marked ask is never classified, persisted or answered, whatever the sender."""
+    r = _responder( accepted_senders=[ "s@x" ], enabled=True )
+    strategy = MagicMock()
+    r.set_domain_strategy( strategy )
+    r.submit_response = MagicMock()
+    r._persist_decision = MagicMock()
+    _run( r._handle_decision_event( _event( response_options={ "review_card": True } ) ) )
+    assert r.stats[ "review_cards_skipped" ] == 1 and r.stats[ "decisions_classified" ] == 0
+    strategy.evaluate.assert_not_called()
+    r._persist_decision.assert_not_called()
+    r.submit_response.assert_not_called()
+
+
+def test_an_unmarked_ask_with_options_still_runs_the_pipeline():
+    r = _responder( accepted_senders=[ "s@x" ], enabled=True )
+    strategy = MagicMock()
+    strategy.evaluate.return_value = _result( action="shadow" )
+    r.set_domain_strategy( strategy )
+    r._persist_decision = MagicMock()
+    _run( r._handle_decision_event( _event( response_options={ "review_card": False } ) ) )
+    assert r.stats[ "review_cards_skipped" ] == 0 and r.stats[ "decisions_classified" ] == 1
+    r._persist_decision.assert_called_once()

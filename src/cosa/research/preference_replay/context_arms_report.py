@@ -8,8 +8,15 @@ by the same summary the checkpoint report uses. The report also carries the cove
 table, so a reader sees how many asks each arm changed, and the reconciliations of those counts.
 """
 
-from typing import Any, Dict, List, Optional
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
+import cosa.utils.util as cu
+from cosa.repo.doc_lint.pool_builder import resolve_commit
+from cosa.research.preference_replay.arm_scoring import expand
 from cosa.research.preference_replay.context_arms import ARMS
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM, summarize
 
@@ -187,3 +194,68 @@ def render_arm_report( rows: List[Dict[str, Any]], coverage: Dict[str, Dict[str,
     for row in rows:
         for kind, summary in row[ "vs_q_by_type" ].items(): lines.append( f"| {row[ 'arm' ]} | {kind} | {_pair_cells( summary )} |" )
     return "\n".join( lines ) + "\n"
+
+
+ARM_FILE_STEMS = { "Q": "q", "Q+A": "q-a", "Q+O": "q-o", "Q+P": "q-p", "Q+H": "q-h" }
+
+
+def read_coverage( side_file_prefix: str ) -> Dict[str, Dict[str, int]]:
+    """
+    Read each arm's coverage counts from the header of its side file.
+
+    Requires:
+        - side_file_prefix plus an arm's stem and ".jsonl" names the side file of each arm but Q
+
+    Ensures:
+        - returns { arm: { asks, with_section, no_context, arm_input_absent } }, the four counts as the side file's header wrote them
+        - Q has every ask with its section, since it adds nothing to the question
+
+    Raises:
+        - ValueError if a header's three reason counts do not add up to its asks, or the arms hold different numbers of asks
+    """
+    coverage = {}
+    for arm, stem in ARM_FILE_STEMS.items():
+        if arm == "Q": continue
+        with open( f"{side_file_prefix}{stem}.jsonl", encoding="utf-8" ) as handle: counts = json.loads( handle.readline() )[ "facts" ][ "arm_counts" ]
+        if counts[ "with_section" ] + counts[ "no_context" ] + counts[ "arm_input_absent" ] != counts[ "asks" ]: raise ValueError( f"{arm}: the reason counts do not add up to the asks" )
+        coverage[ arm ] = { key: counts[ key ] for key in ( "asks", "with_section", "no_context", "arm_input_absent" ) }
+    if len( { counts[ "asks" ] for counts in coverage.values() } ) != 1: raise ValueError( "the arms hold different numbers of asks" )
+    asks = next( iter( coverage.values() ) )[ "asks" ]
+    return { "Q": { "asks": asks, "with_section": asks, "no_context": 0, "arm_input_absent": 0 }, **coverage }
+
+
+def main( argv: Optional[Sequence[str]] = None, code_sha: Optional[str] = None, clock: Optional[Callable] = None ) -> int:
+    """
+    Build the context comparison report from the committed per-ask files.
+
+    Requires:
+        - argv holds --per-ask-dir (holding prediction-context-arm-<stem>-per-ask.json for each arm), --side-file-prefix
+          (read_coverage), --floor, --floor-source, --out, and --notes-file, one "title: detail" reconciliation per line
+        - code_sha and clock are injected by tests
+
+    Ensures:
+        - writes the Markdown report to --out, its header naming the code sha, the floor and where it comes from,
+          each per-ask file's own code sha, the time, and the exact command line
+        - returns 0
+
+    Raises:
+        - ValueError as compare_arms does
+    """
+    parser = argparse.ArgumentParser( description="Write the context comparison report." )
+    for name in ( "--per-ask-dir", "--side-file-prefix", "--floor", "--floor-source", "--out" ): parser.add_argument( name, required=True )
+    parser.add_argument( "--notes-file", required=True )
+    args    = parser.parse_args( argv )
+    command = "python -m cosa.research.preference_replay.context_arms_report " + " ".join( list( argv ) if argv is not None else sys.argv[ 1: ] )
+    docs    = { arm: json.load( open( f"{args.per_ask_dir}/prediction-context-arm-{stem}-per-ask.json", encoding="utf-8" ) ) for arm, stem in ARM_FILE_STEMS.items() }
+    rows       = compare_arms( { arm: expand( doc[ "run" ] ) for arm, doc in docs.items() }, int( args.floor ) )
+    with open( args.notes_file, encoding="utf-8" ) as handle: notes = [ dict( zip( ( "title", "detail" ), line.rstrip( "\n" ).split( ": ", 1 ) ) ) for line in handle if line.strip() ]
+    provenance = { "code sha of this report": code_sha if code_sha is not None else resolve_commit( cu.get_project_root(), "HEAD" ),
+                   "discordant floor": f"{args.floor} pairs; source: {args.floor_source}",
+                   "per-ask files scored on code": ", ".join( f"{arm} {docs[ arm ][ 'code_sha' ][ :9 ]}" for arm in docs ),
+                   "generated": ( clock or ( lambda: datetime.now( timezone.utc ) ) )().isoformat(), "command": f"`{command}`" }
+    with open( args.out, "w", encoding="utf-8" ) as handle: handle.write( render_arm_report( rows, read_coverage( args.side_file_prefix ), notes, provenance ) )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - thin process entry, main() is what the tests drive
+    sys.exit( main() )

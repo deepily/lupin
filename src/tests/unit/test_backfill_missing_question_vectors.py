@@ -515,6 +515,15 @@ def test_the_outside_list_message_names_the_first_of_several_sorted( tmp_path ):
     assert out == [ "REFUSED: 2 side-file ids are outside the frozen list, first alpha" ]
 
 
+def test_build_plan_gives_a_marked_ask_the_review_card_source_even_when_answered_from_the_ui( tmp_path, engine ):
+    add_ask( engine, "rc1", options={ "review_card": True } )
+    add_ask( engine, "n1" )
+    header, records = bf.read_side_file( side_file( tmp_path, [ "rc1", "n1" ] ) )
+    with engine.connect() as conn:
+        plan = bf.build_plan( conn, header, records )
+    assert { row[ "id" ]: row[ "answer_source" ] for row in plan.inserts } == { "rc1": "review_card", "n1": "human" }
+
+
 def test_a_review_card_ask_is_planned_with_the_review_card_source_even_when_answered_from_the_ui( tmp_path, engine ):
     add_ask( engine, "rc1", options={ "review_card": True } )
     add_ask( engine, "n1" )

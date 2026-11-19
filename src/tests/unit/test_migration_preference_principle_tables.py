@@ -244,8 +244,8 @@ def _capture_upgrade( module, monkeypatch ):
 
 
 # Columns a later revision adds to a table this revision created; the models carry them, this revision does not.
-# f8c2d6a14e37 adds related_principle_id and has its own migration test.
-_ADDED_LATER = { ( "preference_principles", "related_principle_id" ) }
+# f8c2d6a14e37 adds continues_principle_id and session_key, and has its own migration test.
+_ADDED_LATER = { ( "preference_principles", "continues_principle_id" ), ( "preference_evidence", "session_key" ) }
 
 _PAIRS = ( ( PreferencePrinciple, "PRINCIPLES_TABLE" ), ( PreferenceEvidence, "EVIDENCE_TABLE" ),
            ( PredictionArmForecast, "ARM_TABLE" ) )

@@ -68,3 +68,23 @@ def test_an_open_ended_row_keeps_its_value_as_the_decision_value():
 ] )
 def test_an_answer_is_human_only_when_its_source_is_ui( value, expected ):
     assert answer_source_of( value ) == expected
+
+
+class _MarkedSession:
+    """Answers session.get with a UI-answered notification whose ask may carry the marker."""
+
+    def __init__( self, options ):
+        self.options = options
+
+    def get( self, model, key ):
+        if model.__name__ == "Notification":
+            return SimpleNamespace( title="t", message="m", sender_id="s", created_at=datetime( 2026, 11, 1, tzinfo=timezone.utc ),
+                                    recipient_id="r", response_options=self.options, response_value={ "value": "yes", "source": "ui" } )
+        return None
+
+
+@pytest.mark.parametrize( "options,expected", [ ( { "review_card": True }, "review_card" ), ( None, "human" ), ( { "review_card": False }, "human" ) ] )
+def test_a_cohort_ask_takes_its_answer_source_from_the_ask_options_and_not_from_the_ui_source( options, expected ):
+    with patch( "cosa.research.preference_replay.cohorts.scored_rows", return_value=[ _row( "yes_no", YES_NO_STORED ) ] ):
+        asks = cohort_asks( _MarkedSession( options ), "yes_no", vectors={} )
+    assert [ ask[ "answer_source" ] for ask in asks ] == [ expected ]
