@@ -52,3 +52,43 @@ def test_the_report_opens_with_the_replayable_count_and_both_windows_mix():
     assert "Only 1302 of 3608 asks were replayable: 2306 had no stored vector" in text
     assert "| tune | 547 | 364 | 911 |" in text and "| final | 176 | 215 | 391 |" in text
     assert text.index( "## Coverage" ) < text.index( "## yes_no" )
+
+
+def _report_text():
+    with open( REPORT_PATH, "r", encoding="utf-8" ) as handle: return handle.read()
+
+
+def _cohort_ids():
+    with open( COHORT_FILE, "r", encoding="utf-8" ) as handle: return [ json.loads( line )[ "id" ] for line in handle if line.strip() ]
+
+
+def test_the_manifest_sha_and_row_count_equal_the_freeze_files():
+    with open( COHORT_MANIFEST, "r", encoding="utf-8" ) as handle: manifest = json.load( handle )
+    assert manifest[ "snapshot_sha256" ] == _freeze()[ "cohort_sha256" ]
+    assert manifest[ "snapshot_row_count" ] == _freeze()[ "cohort_rows" ]
+
+
+def test_the_report_header_names_the_freeze_files_cohort_sha_settings_commit_and_count():
+    text, freeze = _report_text(), _freeze()
+    assert f"- cohort sha256: `{freeze[ 'cohort_sha256' ]}`" in text
+    assert f"- settings commit: `{freeze[ 'settings_commit' ]}`" in text
+    assert f"- cohort asks: {freeze[ 'cohort_rows' ]}" in text
+
+
+def test_the_report_lists_exactly_the_cohort_files_ids_in_order():
+    ids   = _cohort_ids()
+    lines = _report_text().splitlines()
+    start = lines.index( "## Cohort ids" ) + 2
+    listed = [ line[ 2: ] for line in lines[ start: ] if line.startswith( "- " ) ]
+    assert len( ids ) == 3608
+    assert listed == ids
+
+
+def test_the_score_table_sums_equal_the_retune_best_points_correct_counts():
+    with open( RETUNE_REPORT, "r", encoding="utf-8" ) as handle: best = json.load( handle )[ "best_point" ]
+    rows   = [ line.split( "|" )[ 1: -1 ] for line in _report_text().splitlines() if line.startswith( "| tune | " ) or line.startswith( "| final | " ) ]
+    scored = [ [ cell.strip() for cell in row ] for row in rows if len( row ) == 5 ]
+    assert len( scored ) == 4
+    for window, expected in ( ( "tune", best[ "tune_correct" ] ), ( "final", best[ "final_correct" ] ) ):
+        assert sum( int( row[ 3 ] ) for row in scored if row[ 0 ] == window ) == expected
+    assert ( best[ "tune_correct" ], best[ "final_correct" ] ) == ( 287, 177 )

@@ -273,6 +273,14 @@ def test_coverage_scores_give_each_types_correct_count_and_rate_in_each_window()
     assert text.index( "| window | type |" ) < text.index( "## yes_no" )
 
 
+def test_a_type_with_no_asks_in_a_window_reads_na_in_the_score_table():
+    """A type with zero asks reads n/a, not a divide error; the other rows keep their rates."""
+    scores = dict( SCORES, final=dict( SCORES[ "final" ], multiple_choice={ "asks": 0, "correct": 0 } ) )
+    text   = _report( coverage=dict( COVERAGE, final_mix={ "yes_no": 215, "multiple_choice": 0 }, scores=scores ) )
+    assert "| final | multiple_choice | 0 | 0 | n/a |" in text
+    assert "| final | yes_no | 215 | 163 | 75.8 |" in text
+
+
 def test_coverage_without_scores_has_no_score_table():
     assert "| window | type |" not in _report( coverage=COVERAGE )
 
