@@ -293,12 +293,14 @@ def test_main_names_the_floor_its_source_the_files_code_and_the_command( tmp_pat
 
 def test_main_takes_its_sha_and_clock_from_the_tree_when_not_given( tmp_path, monkeypatch ):
     _write_inputs( tmp_path )
-    monkeypatch.setattr( "cosa.research.preference_replay.context_arms_report.resolve_commit", lambda root, ref: "headsha" )
+    monkeypatch.setattr( "cosa.research.preference_replay.context_arms_report.resolve_commit", lambda root, ref: "headsha" if ref == "HEAD" else "wrong ref" )
     argv = [ "--per-ask-dir", str( tmp_path ), "--side-file-prefix", str( tmp_path / "side-" ), "--notes-file", str( tmp_path / "notes.txt" ), "--floor", "6", "--floor-source", "s", "--out", str( tmp_path / "r.md" ) ]
     monkeypatch.setattr( "sys.argv", [ "x" ] + argv )
     assert main() == 0
     text = ( tmp_path / "r.md" ).read_text()
-    assert "- code sha of this report: headsha" in text and "- generated: 20" in text
+    assert "- code sha of this report: headsha" in text
+    generated = [ line for line in text.split( "\n" ) if line.startswith( "- generated: " ) ][ 0 ]
+    assert generated.startswith( "- generated: 20" ) and generated.endswith( "+00:00" )
     assert "--floor-source s --out" in text
 
 
