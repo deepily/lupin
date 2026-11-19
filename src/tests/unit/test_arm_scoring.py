@@ -65,9 +65,9 @@ def _engine():
     Build an engine stand-in with the three settings the scorer sets.
 
     Ensures:
-        - returns a namespace holding threshold 0.5, top k 5 and metric cosine
+        - returns a namespace holding threshold 0.5, top k 5 and metric dot
     """
-    return SimpleNamespace( similarity_threshold=0.5, cbr_top_k=5, retrieval_metric="cosine" )
+    return SimpleNamespace( similarity_threshold=0.5, cbr_top_k=5, retrieval_metric="dot" )
 
 
 def test_load_frozen_reads_the_three_settings( tmp_path ):
@@ -105,7 +105,7 @@ def test_score_arm_runs_the_replay_under_the_frozen_settings_and_puts_them_back(
     assert seen == { "threshold": 0.55, "top_k": 8, "metric": "cosine", "baselines": [ "always_yes" ], "snapshot": "sha",
                      "target_types": scoring.ELIGIBLE_TYPES }
     assert len( run[ "records" ][ ENGINE_ARM ] ) == 3
-    assert ( engine.similarity_threshold, engine.cbr_top_k, engine.retrieval_metric ) == ( 0.5, 5, "cosine" )
+    assert ( engine.similarity_threshold, engine.cbr_top_k, engine.retrieval_metric ) == ( 0.5, 5, "dot" )
 
 
 def test_score_arm_puts_the_settings_back_when_the_replay_raises( monkeypatch ):
@@ -115,7 +115,7 @@ def test_score_arm_puts_the_settings_back_when_the_replay_raises( monkeypatch ):
     monkeypatch.setattr( scoring, "replay", broken )
     engine = _engine()
     with pytest.raises( RuntimeError, match="boom" ): scoring.score_arm( [], engine, { "threshold": 0.9, "top_k": 3, "metric": "cosine" }, "sha" )
-    assert ( engine.similarity_threshold, engine.cbr_top_k, engine.retrieval_metric ) == ( 0.5, 5, "cosine" )
+    assert ( engine.similarity_threshold, engine.cbr_top_k, engine.retrieval_metric ) == ( 0.5, 5, "dot" )
 
 
 def _main_fixture( monkeypatch, tmp_path, vector_ids=( "n0", "n1" ) ):
