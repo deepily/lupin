@@ -35,8 +35,10 @@ def _column( label, commit, source, asks, yn_final_correct, mc_tune_correct, ids
 @pytest.fixture
 def columns():
     """The four columns."""
+    first = _column( "before", "8d748e033", "stored", 1302, 160, 10, ids=[ "a", "b" ] )
+    first[ "produced_by" ] = "replay 086f95590, src/scripts/preference_step9_checkpoint_run.py"
     return [
-        _column( "before", "8d748e033", "stored", 1302, 160, 10, ids=[ "a", "b" ] ),
+        first,
         _column( "same asks, new vectors", "c2", { "model": "m", "revision": "r1" }, 1302, 170, 12, ids=[ "b", "a" ], brier=( 0.2, 0.15 ) ),
         _column( "all asks, new vectors", "c3", { "model": "m", "revision": "r1" }, 3610, 168, 12, ids=[ "a", "b", "c" ], threshold=0.6 ),
         _column( "all asks, before's final window", "c4", { "model": "m", "revision": "r1" }, 3610, 172, 11, ids=[ "a", "b", "c" ], threshold=0.6 ),
@@ -155,9 +157,9 @@ def test_vector_source_string_and_dict():
 def test_render_provenance_names_commit_source_and_asks( columns ):
     text = bar.render_before_after( columns )
     assert "| 1 | before | `8d748e033` | stored | 1302 |" in text
-    assert "| 2 | same asks, new vectors | `c2` | m @ r1 | 1302 | 390 |" in text
-    assert "| 3 | all asks, new vectors | `c3` | m @ r1 | 3610 | 390 |" in text
-    assert "| 1 | before | `8d748e033` | stored | 1302 | 390 |" in text
+    assert "| 2 | same asks, new vectors | `c2` | m @ r1 | 1302 | 390 | not stated |" in text
+    assert "| 3 | all asks, new vectors | `c3` | m @ r1 | 3610 | 390 | not stated |" in text
+    assert "| 1 | before | `8d748e033` | stored | 1302 | 390 | replay 086f95590, src/scripts/preference_step9_checkpoint_run.py |" in text
 
 
 def test_render_changes_come_from_the_right_pairs( columns ):

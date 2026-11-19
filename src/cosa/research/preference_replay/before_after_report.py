@@ -19,6 +19,7 @@ A column is a dict with these keys:
 - calibration: the report half of calibration_fit.fit_and_evaluate
 - ask_ids: optional, the asks the column replayed
 - final_ids: optional, the final-window asks the column scored
+- produced_by: optional, the replay code commit and run script that made the column
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -187,8 +188,8 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
           scored on before's final window
 
     Ensures:
-        - a provenance table gives each column's label, commit, vector source, ask count and scored count
-          (the asks in its two windows, read from its mix)
+        - a provenance table gives each column's label, commit, vector source, ask count, scored count (the asks in
+          its two windows, read from its mix) and produced_by, or "not stated" when the column has none
         - one comparison table gives every figure in all four columns, then the change between each adjacent pair
         - a figure one column lacks reads n/a, and its changes read n/a
         - the same columns give the same text
@@ -202,10 +203,10 @@ def render_before_after( columns: Sequence[Dict[str, Any]], title: str = "Before
     lines  = [ f"# {title}", "",
                "Change 1 to 2 is the effect of the regenerated vectors alone. Change 2 to 3 is the effect of the added asks."
                " Change 3 to 4 is the effect of scoring only before's final window.", "",
-               "| column | label | commit | vector source | asks | scored |", "|---|---|---|---|---|---|" ]
+               "| column | label | commit | vector source | asks | scored | produced by |", "|---|---|---|---|---|---|---|" ]
     for number, column in enumerate( columns, start=1 ):
         scored = sum( column[ "coverage" ][ "tune_mix" ].values() ) + sum( column[ "coverage" ][ "final_mix" ].values() )
-        lines.append( f"| {number} | {column[ 'label' ]} | `{column[ 'commit' ]}` | {_vector_source( column[ 'vector_source' ] )} | {column[ 'ask_count' ]} | {scored} |" )
+        lines.append( f"| {number} | {column[ 'label' ]} | `{column[ 'commit' ]}` | {_vector_source( column[ 'vector_source' ] )} | {column[ 'ask_count' ]} | {scored} | {column.get( 'produced_by', 'not stated' )} |" )
     lines += [ "", "| figure | " + " | ".join( labels ) + " | change 1 to 2 | change 2 to 3 | change 3 to 4 |", "|---|---|---|---|---|---|---|---|" ]
     for name in names:
         figures = [ rows.get( name ) for rows in flat ]
