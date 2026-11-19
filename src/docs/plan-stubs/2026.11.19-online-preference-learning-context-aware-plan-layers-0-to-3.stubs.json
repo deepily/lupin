@@ -115,6 +115,31 @@
                     ]
                 },
                 {
+                    "key": "ph1-status",
+                    "name": "Build principle status and retrieval",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Status is derived as of an ask from evidence with both answered_at and extracted_at at or before it, and from review_card ruling rows across extractor versions; retrieval fetches all of the owner's principles below the 500 bound, filters status after the vector search and keeps k (5); an encoder_version change re-embeds; the prompt-block builder exists; the acceptances 'Contested outrank applicable', 'No future principle', 'Ruling is as-of', 'Ruling survives a version switch' and the collision test pass",
+                    "depends_on": [
+                        "ph1-tables",
+                        "ph1-episode"
+                    ]
+                },
+                {
+                    "key": "ph1-card",
+                    "name": "Send the capped review card",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. A split step looks for a card feature separating two sets of supporting episodes; an unseparable pair is marked contested and a batched multiple-choice card goes out through the present_choices caller; at most 3 cards per owner in any rolling 24 hours, tested with a fixed clock; answering it writes one ruling row and clears 'contested'",
+                    "depends_on": [
+                        "ph1-marker",
+                        "ph1-extractor",
+                        "ph1-status"
+                    ]
+                },
+                {
                     "key": "ph1-harness",
                     "name": "Plug arms into replay_loop.replay",
                     "item_class": "task",
@@ -155,7 +180,9 @@
                     "owner_role": "implementer",
                     "acceptance": "EXECUTOR: AI. Done means holds: unit tier green for the changed files, per-file coverage command exits 0, run-census-guards.sh green with any new e2e file in src/tests/e2e_ui/partition/, a reviewer seat's Merge, and every conditional check run or reported 'not run, blocked by <item>'",
                     "depends_on": [
-                        "ph1-replay"
+                        "ph1-replay",
+                        "ph1-status",
+                        "ph1-card"
                     ]
                 }
             ]
@@ -210,7 +237,8 @@
                     "acceptance": "EXECUTOR: AI. The learner makes B1's call with the principle block behind its own switch and its own concurrency cap; same model and prompt as C0 apart from the block; per-arm timeliness is reported with any cap effect named; waits on remediation phase 6 and reads 'not run, blocked by phase 6' until then",
                     "depends_on": [
                         "ph3-writer",
-                        "ph1-extractor"
+                        "ph1-extractor",
+                        "ph1-status"
                     ]
                 },
                 {
@@ -257,7 +285,10 @@
                     "item_class": "task",
                     "priority": "P2",
                     "owner_role": "implementer",
-                    "acceptance": "EXECUTOR: AI. Join rule, neighbour count, k, lag figure, retrieval bound and the date-stamped vocabulary version are frozen with the plan's sha recorded on the row before the first evaluation replay"
+                    "acceptance": "EXECUTOR: AI. Join rule, neighbour count, k, lag figure, retrieval bound and the date-stamped vocabulary version are frozen with the plan's sha recorded on the row before the first evaluation replay",
+                    "depends_on": [
+                        "ph1-list"
+                    ]
                 },
                 {
                     "key": "ph4-run",
@@ -293,7 +324,11 @@
                     "item_class": "gate",
                     "priority": "P2",
                     "owner_role": "operator",
-                    "acceptance": "EXECUTOR: HUMAN Rick's design call. B1 beating C0 on replay and the evidence counts are computed by AI, but the go to start is Rick's design call"
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. B1 beating C0 on replay and the evidence counts are computed by AI, but the go to start is Rick's design call",
+                    "depends_on": [
+                        "ph4-read",
+                        "ph2-accept"
+                    ]
                 },
                 {
                     "key": "ph5-pad",
@@ -354,6 +389,17 @@
                     ]
                 },
                 {
+                    "key": "ph5-read",
+                    "name": "Rick reads B2 against B1",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. what the B2-against-B1 verdict means is his call; the AI check only asserts the result exists",
+                    "depends_on": [
+                        "ph5-replay"
+                    ]
+                },
+                {
                     "key": "ph5-done",
                     "name": "Layer 2: closing gate",
                     "item_class": "gate",
@@ -361,7 +407,8 @@
                     "owner_role": "implementer",
                     "acceptance": "EXECUTOR: AI. Done means holds: unit tier green for the changed files, per-file coverage command exits 0, run-census-guards.sh green with any new e2e file in src/tests/e2e_ui/partition/, a reviewer seat's Merge, and every conditional check run or reported 'not run, blocked by <item>'",
                     "depends_on": [
-                        "ph5-replay"
+                        "ph5-replay",
+                        "ph5-read"
                     ]
                 }
             ]
@@ -402,6 +449,28 @@
                     ]
                 },
                 {
+                    "key": "ph6-read",
+                    "name": "Rick reads B3 against B2",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. what the B3-against-B2 verdict means is his call (and B3c's, if he adds it)",
+                    "depends_on": [
+                        "ph6-replay"
+                    ]
+                },
+                {
+                    "key": "ph6-handscore",
+                    "name": "Hand-score text while the rubric is missing",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN a judgment of intent, not a test. Conditional: needed only while remediation item 10's blinded rubric does not exist; Rick scores the text forecasts by hand and the AI check is skipped, reported 'not run, blocked by item 10'",
+                    "depends_on": [
+                        "ph6-replay"
+                    ]
+                },
+                {
                     "key": "ph6-done",
                     "name": "Layer 3: closing gate",
                     "item_class": "gate",
@@ -409,7 +478,8 @@
                     "owner_role": "implementer",
                     "acceptance": "EXECUTOR: AI. Done means holds: unit tier green for the changed files, per-file coverage command exits 0, run-census-guards.sh green with any new e2e file in src/tests/e2e_ui/partition/, a reviewer seat's Merge, and every conditional check run or reported 'not run, blocked by <item>'",
                     "depends_on": [
-                        "ph6-replay"
+                        "ph6-replay",
+                        "ph6-read"
                     ]
                 }
             ]
