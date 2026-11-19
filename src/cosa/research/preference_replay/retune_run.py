@@ -1,0 +1,189 @@
+"""
+Run the retune over the real cohort and write its report, reading the database only.
+
+The command reads the yes/no and multiple-choice cohorts in a read-only transaction. It replays the
+live engine over them with the retune grid and with the report-only sweep, then writes one JSON report.
+The report holds the frozen settings, the cohort checksums and every grid point. It also holds the
+exact command and code that made it, so the frozen baseline can be made again from the tree.
+
+Run it from the repository root, with the config and database the report should describe:
+
+    python -m cosa.research.preference_replay.retune_run --out /tmp/prediction-retune-report.json
+"""
+
+import argparse
+import collections
+import json
+import sys
+import time
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+from sqlalchemy import text
+
+import cosa.utils.util as cu
+from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+from cosa.repo.doc_lint.pool_builder import resolve_commit
+from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
+from cosa.research.preference_replay.cohorts import cohort_asks
+from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, eligible_asks, frozen_settings, report_only_sweep, retune
+from cosa.rest.db.database import get_db
+from cosa.utils.file_hash import file_sha256
+
+REPORT_VERSION = 1
+FACTS_SQL      = ( "select current_database(), current_user, now(), (select count(*) from prediction_decisions), "
+                   "(select count(*) from prediction_decisions where answer_source is null)" )
+NOTES          = [
+    "Objective: correct forecasts per 100 eligible asks on the tune window, abstention charged as a miss.",
+    "Eligible means yes/no or multiple-choice asks that carry a stored vector. Asks with no vector are excluded and counted, not re-embedded.",
+    "The answered-ask figures and the sweep below the grid are report-only and never choose the best point. Open-ended keys are untouched.",
+]
+
+
+def read_cohort( session, response_types: Sequence[str] = ELIGIBLE_TYPES ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Read the scored cohort and the facts that date it, in a read-only transaction.
+
+    Requires:
+        - session is an active SQLAlchemy session on the database the report should describe
+        - response_types are names cohort_asks accepts
+
+    Ensures:
+        - the first statement makes the transaction read-only, so the database refuses any write
+        - returns ( asks, facts ): the ask dicts of every type in order, and the database name, role,
+          read time, prediction_decisions row count and the count of rows with no answer source
+        - ends the transaction with a rollback
+    """
+    session.execute( text( "SET TRANSACTION READ ONLY" ) )
+    row   = session.execute( text( FACTS_SQL ) ).fetchall()[ 0 ]
+    facts = { "database": row[ 0 ], "db_role": row[ 1 ], "read_at": str( row[ 2 ] ),
+              "prediction_decisions_rows": row[ 3 ], "answer_source_null_rows": row[ 4 ] }
+    asks  = []
+    for kind in response_types: asks += cohort_asks( session, kind )
+    session.rollback()
+    return asks, facts
+
+
+def build_report( result: Dict[str, Any], sweep_points: List[Dict[str, Any]], provenance: Dict[str, Any] ) -> Dict[str, Any]:
+    """
+    Assemble the report document from a retune result, the sweep and the provenance.
+
+    Requires:
+        - result is the dict retune returns; sweep_points is the list report_only_sweep returns
+        - provenance holds cohort_sha256_all_ids and the run's facts
+
+    Ensures:
+        - returns a JSON-ready dict with the frozen settings, the best point, the window sizes, both checksums,
+          the provenance, every grid point and every sweep point
+        - the sweep never feeds the frozen settings or the best point
+    """
+    return {
+        "version"                  : REPORT_VERSION,
+        "what"                     : "The retune of the two retrieval settings and the metric. The committed INI values must equal frozen_settings; a unit test asserts it.",
+        "frozen_settings"          : frozen_settings( result ),
+        "best_point"               : result[ "best" ],
+        "tune_size"                : result[ "tune_size" ],
+        "final_size"               : result[ "final_size" ],
+        "eligible"                 : result[ "eligible" ],
+        "tune_cohort_sha256"       : result[ "tune_cohort_sha256" ],
+        "cohort_sha256_all_ids"    : provenance[ "cohort_sha256_all_ids" ],
+        "provenance"               : { key: value for key, value in provenance.items() if key != "cohort_sha256_all_ids" },
+        "grid_points"              : result[ "points" ],
+        "report_only_sweep_points" : sweep_points,
+        "notes"                    : list( NOTES ),
+    }
+
+
+def run_report( asks: List[Dict[str, Any]], facts: Dict[str, Any], engine, run_facts: Dict[str, Any] ) -> Dict[str, Any]:
+    """
+    Replay the grid and the sweep over the cohort and build the report.
+
+    Requires:
+        - asks and facts are what read_cohort returns; engine is a PredictionEngine with embedding generation disabled
+        - run_facts holds command, code_sha, driver_sha256 and started
+
+    Ensures:
+        - the snapshot checksum is the sha256 of every ask id in cohort order
+        - the provenance names the replayable and not-replayable counts by type, the seconds taken and run_facts
+        - returns the build_report document
+
+    Raises:
+        - ValueError when no ask is eligible, as retune raises
+    """
+    began    = time.time()
+    snapshot = sha256_of_rows( [ { "id": ask[ "id" ] } for ask in asks ] )
+    result   = retune( asks, engine, snapshot )
+    sweep    = report_only_sweep( asks, engine, snapshot )
+    usable   = eligible_asks( asks )
+    provenance = dict( facts )
+    provenance.update( {
+        "cohort_asks"           : len( asks ),
+        "cohort_asks_by_type"   : dict( collections.Counter( ask[ "response_type" ] for ask in asks ) ),
+        "replayable_by_type"    : dict( collections.Counter( ask[ "response_type" ] for ask in usable ) ),
+        "not_replayable"        : len( asks ) - len( usable ),
+        "response_types"        : list( ELIGIBLE_TYPES ),
+        "seconds"               : round( time.time() - began, 1 ),
+        "cohort_sha256_all_ids" : snapshot,
+    } )
+    provenance.update( run_facts )
+    return build_report( result, sweep, provenance )
+
+
+def _open_engine():
+    """
+    Build the live engine from the real configuration, with embedding generation switched off.
+
+    Ensures:
+        - returns a fresh PredictionEngine whose embedding call raises, so a replay can use stored vectors only
+    """
+    PredictionEngine.reset()
+    engine = PredictionEngine( debug=False )
+
+    def _refuse( text_to_embed ):
+        raise RuntimeError( "the retune embedded a message; it must use stored vectors only" )
+
+    engine._generate_embedding = _refuse
+    return engine
+
+
+def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, session_factory: Optional[Callable] = None,
+          engine_factory: Optional[Callable] = None, code_sha: Optional[str] = None, clock: Optional[Callable] = None ) -> int:
+    """
+    Run the retune from the command line and write the report file.
+
+    Requires:
+        - argv holds --out, the report path; the factories and code_sha are injected by tests and default to the real ones
+
+    Ensures:
+        - reads the cohort read-only, runs the grid and the sweep, writes the report with sorted keys
+        - the provenance names the exact command line, the code sha, the sha256 of this file and the start time
+        - returns 0 after the report is written, and prints the frozen settings
+
+    Raises:
+        - ValueError when no ask is eligible
+    """
+    parser = argparse.ArgumentParser( description="Run the retune over the real cohort and write its report." )
+    parser.add_argument( "--out", required=True )
+    args   = parser.parse_args( argv )
+    session_factory = session_factory or get_db
+    engine_factory  = engine_factory or _open_engine
+    driver_sha256 = file_sha256( __file__ )
+    command = "python -m cosa.research.preference_replay.retune_run " + " ".join( list( argv ) if argv is not None else sys.argv[ 1: ] )
+    run_facts = {
+        "command"       : command,
+        "code_sha"      : code_sha if code_sha is not None else resolve_commit( cu.get_project_root(), "HEAD" ),
+        "driver_sha256" : driver_sha256,
+        "started"       : ( clock or ( lambda: datetime.now( timezone.utc ) ) )().isoformat(),
+    }
+    with session_factory() as session:
+        asks, facts = read_cohort( session )
+    report = run_report( asks, facts, engine_factory(), run_facts )
+    with open( args.out, "w", encoding="utf-8" ) as handle:
+        json.dump( report, handle, indent=2, sort_keys=True )
+        handle.write( "\n" )
+    printer( json.dumps( report[ "frozen_settings" ], sort_keys=True ) )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - thin process entry, main() is what the tests drive
+    sys.exit( main() )

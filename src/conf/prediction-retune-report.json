@@ -528,23 +528,25 @@
     }
   ],
   "notes": [
-    "Objective: correct forecasts per 100 eligible asks on the tune window, abstention charged as a miss. The best point is the grid corner (threshold 0.50, top k 10); the report-only sweep below it is flat from 0.45 down, so the corner is near the plateau.",
-    "Eligible means yes/no or multiple-choice asks that carry a stored vector. Asks with no vector are excluded and counted, not re-embedded. The restored case memory was backfilled with the migration's own derivation before this run.",
-    "Open-ended keys are untouched. The answered-ask figures are report-only and never choose the best point."
+    "Objective: correct forecasts per 100 eligible asks on the tune window, abstention charged as a miss.",
+    "Eligible means yes/no or multiple-choice asks that carry a stored vector. Asks with no vector are excluded and counted, not re-embedded.",
+    "The answered-ask figures and the sweep below the grid are report-only and never choose the best point. Open-ended keys are untouched."
   ],
   "provenance": {
     "answer_source_null_rows": 0,
-    "code_sha": "bb9750403d8f42741edb817cf6af017f4fd60ffb",
+    "code_sha": "01c22a6c37ec1a056393c0f79bca5685d5228baf",
     "cohort_asks": 3608,
     "cohort_asks_by_type": {
       "multiple_choice": 2200,
       "yes_no": 1408
     },
+    "command": "python -m cosa.research.preference_replay.retune_run --out /tmp/claude-1001/-mnt-DATA01-include-www-deepily-ai-projects-lupin--claude-worktrees-seat-cc-author-mr-radio-2/e44c5af7-4864-40e5-b30e-f72e39b45be3/scratchpad/step7_repro_report.json",
     "database": "lupin_db_dev",
     "db_role": "lupin_host",
+    "driver_sha256": "33b1a862c7ceb4227972566b5df8e163c0bad921ad70b276398cbacf49f06007",
     "not_replayable": 2306,
     "prediction_decisions_rows": 1544,
-    "read_at": "2026-11-19 00:36:39.149774+00:00",
+    "read_at": "2026-11-19 02:26:32.673837+00:00",
     "replayable_by_type": {
       "multiple_choice": 723,
       "yes_no": 579
@@ -553,8 +555,8 @@
       "yes_no",
       "multiple_choice"
     ],
-    "seconds": 5462.2,
-    "started": "2026-11-19T00:36:39.141393+00:00"
+    "seconds": 5431.8,
+    "started": "2026-11-19T02:26:32.666008+00:00"
   },
   "report_only_sweep_points": [
     {
@@ -785,5 +787,5 @@
   "tune_cohort_sha256": "63f19406bae9696f308504fd7ac35b1de75b240bc04f1949ab6b8d99e8ba87bd",
   "tune_size": 911,
   "version": 1,
-  "what": "The phase 4 retune of the two retrieval settings, frozen. The INI values must equal frozen_settings; a unit test asserts it."
+  "what": "The retune of the two retrieval settings and the metric. The committed INI values must equal frozen_settings; a unit test asserts it."
 }
