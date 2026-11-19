@@ -241,6 +241,7 @@ def _write_inputs( tmp_path ):
         ( tmp_path / f"prediction-context-arm-{stem}-per-ask.json" ).write_text( json.dumps( document ) )
     assert runs[ "Q" ] is not None
     for arm, counts in SIDE_COUNTS.items(): _write_side_file( tmp_path, STEMS[ arm ], counts )
+    ( tmp_path / "notes.txt" ).write_text( "The 7 that differ: the export lacks their earlier rows\n\nSecond: a: b\n" )
 
 
 def _write_side_file( tmp_path, stem, counts ):
@@ -267,7 +268,7 @@ def _main_text( tmp_path, floor=6, floor_source="the exact test cannot reach 0.0
         - returns the report text main wrote
     """
     argv = [ "--per-ask-dir", str( tmp_path ), "--side-file-prefix", str( tmp_path / "side-" ), "--floor", str( floor ), "--floor-source", floor_source, "--out", str( tmp_path / "r.md" ),
-            "--note", "The 7 that differ: the export lacks their earlier rows", "--note", "Second: a: b" ]
+            "--notes-file", str( tmp_path / "notes.txt" ) ]
     assert main( argv, code_sha="abc1234def", clock=lambda: datetime( 2026, 11, 19, 22, 0, tzinfo=timezone.utc ) ) == 0
     return ( tmp_path / "r.md" ).read_text()
 
@@ -293,7 +294,7 @@ def test_main_names_the_floor_its_source_the_files_code_and_the_command( tmp_pat
 def test_main_takes_its_sha_and_clock_from_the_tree_when_not_given( tmp_path, monkeypatch ):
     _write_inputs( tmp_path )
     monkeypatch.setattr( "cosa.research.preference_replay.context_arms_report.resolve_commit", lambda root, ref: "headsha" )
-    argv = [ "--per-ask-dir", str( tmp_path ), "--side-file-prefix", str( tmp_path / "side-" ), "--floor", "6", "--floor-source", "s", "--out", str( tmp_path / "r.md" ) ]
+    argv = [ "--per-ask-dir", str( tmp_path ), "--side-file-prefix", str( tmp_path / "side-" ), "--notes-file", str( tmp_path / "notes.txt" ), "--floor", "6", "--floor-source", "s", "--out", str( tmp_path / "r.md" ) ]
     monkeypatch.setattr( "sys.argv", [ "x" ] + argv )
     assert main() == 0
     text = ( tmp_path / "r.md" ).read_text()
@@ -310,11 +311,12 @@ def test_main_reads_each_coverage_column_from_the_side_file_header( tmp_path ):
     assert "| Q+H | 12 | 4 | 3 | 5 |" in text
 
 
-def test_main_writes_its_notes_as_reconciliations_and_splits_on_the_first_colon_only( tmp_path ):
+def test_main_writes_the_notes_file_as_reconciliations_skipping_blank_lines( tmp_path ):
     _write_inputs( tmp_path )
     text = _main_text( tmp_path )
     assert "- **The 7 that differ**: the export lacks their earlier rows" in text
     assert "- **Second**: a: b" in text
+    assert "- ****" not in text
 
 
 def test_main_passes_the_floor_it_was_given_to_the_comparison( tmp_path ):

@@ -230,7 +230,7 @@ def main( argv: Optional[Sequence[str]] = None, code_sha: Optional[str] = None, 
 
     Requires:
         - argv holds --per-ask-dir (holding prediction-context-arm-<stem>-per-ask.json for each arm), --side-file-prefix
-          (read_coverage), --floor, --floor-source, --out, and any number of --note "title: detail" lines for the reconciliations
+          (read_coverage), --floor, --floor-source, --out, and --notes-file, one "title: detail" reconciliation per line
         - code_sha and clock are injected by tests
 
     Ensures:
@@ -243,12 +243,12 @@ def main( argv: Optional[Sequence[str]] = None, code_sha: Optional[str] = None, 
     """
     parser = argparse.ArgumentParser( description="Write the context comparison report." )
     for name in ( "--per-ask-dir", "--side-file-prefix", "--floor", "--floor-source", "--out" ): parser.add_argument( name, required=True )
-    parser.add_argument( "--note", action="append", default=[] )
+    parser.add_argument( "--notes-file", required=True )
     args    = parser.parse_args( argv )
     command = "python -m cosa.research.preference_replay.context_arms_report " + " ".join( list( argv ) if argv is not None else sys.argv[ 1: ] )
     docs    = { arm: json.load( open( f"{args.per_ask_dir}/prediction-context-arm-{stem}-per-ask.json", encoding="utf-8" ) ) for arm, stem in ARM_FILE_STEMS.items() }
     rows       = compare_arms( { arm: expand( doc[ "run" ] ) for arm, doc in docs.items() }, int( args.floor ) )
-    notes      = [ dict( zip( ( "title", "detail" ), note.split( ": ", 1 ) ) ) for note in args.note ]
+    with open( args.notes_file, encoding="utf-8" ) as handle: notes = [ dict( zip( ( "title", "detail" ), line.rstrip( "\n" ).split( ": ", 1 ) ) ) for line in handle if line.strip() ]
     provenance = { "code sha of this report": code_sha if code_sha is not None else resolve_commit( cu.get_project_root(), "HEAD" ),
                    "discordant floor": f"{args.floor} pairs; source: {args.floor_source}",
                    "per-ask files scored on code": ", ".join( f"{arm} {docs[ arm ][ 'code_sha' ][ :9 ]}" for arm in docs ),
