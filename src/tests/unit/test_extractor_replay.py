@@ -242,20 +242,20 @@ def test_the_stand_in_vector_is_stable_has_the_stored_width_and_a_different_text
 
 def test_the_canned_model_gives_a_grounded_hypothesis_for_each_answer_and_none_for_a_bare_yes():
     import asyncio
-    answers = [ { "field_key": "answer", "answer": "no", "bare_yes": False, "possibly_influenced": False },
+    answers = [ { "field_key": "$answer", "answer": "no", "bare_yes": False, "possibly_influenced": False },
                 { "field_key": "budget", "answer": "yes", "bare_yes": True, "possibly_influenced": False } ]
     prompt  = "CARD\n{}\n\nANSWERS\n" + json.dumps( answers ) + "\n\nEXISTING PRINCIPLES\n[]"
     async def collect():
         return [ message async for message in er.canned_model( prompt, None ) ]
     text   = asyncio.run( collect() )[ 0 ].content[ 0 ].text
     fields = json.loads( text )[ "fields" ]
-    assert [ ( f[ "field_key" ], len( f[ "hypotheses" ] ) ) for f in fields ] == [ ( "answer", 1 ), ( "budget", 0 ) ]
+    assert [ ( f[ "field_key" ], len( f[ "hypotheses" ] ) ) for f in fields ] == [ ( "$answer", 1 ), ( "budget", 0 ) ]
     assert fields[ 0 ][ "hypotheses" ][ 0 ][ "condition" ] == "no"
 
 
 def test_the_principle_list_is_sorted_with_relation_counts( instant ):
     listing = er.principle_list( instant[ 0 ] )
-    assert [ ( p[ "dimension" ], p[ "scope" ] ) for p in listing ] == [ ( "decision.answer", "global" ), ( "decision.approve", "global" ) ]
+    assert [ ( p[ "dimension" ], p[ "scope" ] ) for p in listing ] == [ ( "decision.$answer", "global" ), ( "decision.approve", "global" ) ]
     assert sum( p[ "supports" ] for p in listing ) == 85 and all( p[ "contradicts" ] == 0 and p[ "refines" ] == 0 for p in listing )
 
 
@@ -273,7 +273,7 @@ def test_main_replays_an_export_with_the_canned_model_and_writes_the_principle_l
     lines = capsys.readouterr().out.splitlines()
     assert [ line.split( ":" )[ 0 ] for line in lines if line.startswith( "lag" ) ] == [ "lag 0s", "lag 300s" ]
     assert all( "'principles': 2, 'evidence': 85" in line for line in lines if line.startswith( "lag" ) )
-    assert [ p[ "dimension" ] for p in json.loads( out.read_text() ) ] == [ "decision.answer", "decision.approve" ]
+    assert [ p[ "dimension" ] for p in json.loads( out.read_text() ) ] == [ "decision.$answer", "decision.approve" ]
 
 
 def test_main_passes_a_given_model_through_and_takes_each_lag_asked_for( tmp_path, capsys ):

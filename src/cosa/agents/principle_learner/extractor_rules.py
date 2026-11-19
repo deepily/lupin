@@ -25,7 +25,7 @@ RELATIONS        = ( "supports", "contradicts", "refines" )
 KINDS            = ( "decision", "ask_form" )
 GLOBAL_SCOPE     = "global"
 PROJECT_SCOPE    = "project:"
-WHOLE_ANSWER_KEY = "answer"
+WHOLE_ANSWER_KEY = "$answer"
 
 
 def card_text( episode ):
@@ -77,6 +77,9 @@ def field_answers( answer ):
         - a field answer is one entry per header; its text is the picks joined, or the submitted text
         - bare_yes is True only for a yes with no qualifier
         - an answer that is none or unread gives []
+
+    Raises:
+        - ValueError if a card header is literally the whole-answer key, since its entry could not be told from a whole answer
     """
     kind = answer[ "kind" ]
     if kind == "stance":
@@ -88,6 +91,7 @@ def field_answers( answer ):
     if kind == "fields":
         entries = []
         for header, record in answer[ "fields" ].items():
+            if header == WHOLE_ANSWER_KEY: raise ValueError( f"card header {header!r} is reserved for the whole answer" )
             text = ", ".join( str( pick ) for pick in record[ "selected" ] ) or record[ "text" ] or ""
             entries.append( { "field_key": header, "text": text, "bare_yes": record.get( "stance" ) == "yes" and not record.get( "qualifier" ) } )
         return entries

@@ -122,7 +122,7 @@ def _reply( *fields ):
     return json.dumps( { "fields": list( fields ) } )
 
 
-def _result( field_key="answer", hypotheses=None, relations=None, dimension="ask.approval_needs_link", kind="ask_form" ):
+def _result( field_key="$answer", hypotheses=None, relations=None, dimension="ask.approval_needs_link", kind="ask_form" ):
     """
     Build one field result as the model returns it.
 
@@ -210,7 +210,7 @@ def test_a_no_answer_creates_a_principle_and_a_supporting_evidence_row_with_both
     assert ( principle.owner_id, principle.kind, principle.scope, principle.encoder_version ) == ( str( OWNER ), "ask_form", "global", ENCODER )
     assert principle.extractor_version == f"{MODEL}:extractor-v1" and principle.embedding is not None
     assert principle.created_at.replace( tzinfo=timezone.utc ) == NOW
-    assert ( evidence.relation, evidence.condition, evidence.source, evidence.field_key ) == ( "supports", "approval", "extractor", "answer" )
+    assert ( evidence.relation, evidence.condition, evidence.source, evidence.field_key ) == ( "supports", "approval", "extractor", "$answer" )
     assert str( evidence.notification_id ) == ask and evidence.extractor_version == principle.extractor_version
     assert evidence.answered_at.replace( tzinfo=timezone.utc ) == T0 + timedelta( minutes=1 ) and evidence.extracted_at.replace( tzinfo=timezone.utc ) == NOW
 
@@ -250,7 +250,7 @@ def test_a_hypothesis_joins_a_named_principle_of_the_same_scope_even_when_the_di
                                                     relations={ str( known.id ): "refines" } ) ) ) )
     evidence = db.query( PreferenceEvidence ).one()
     assert db.query( PreferencePrinciple ).count() == 1 and evidence.principle_id == known.id and evidence.relation == "refines"
-    assert out[ "dimension_mismatches" ] == [ { "principle_id": str( known.id ), "field_key": "answer" } ] and out[ "principles_created" ] == 0
+    assert out[ "dimension_mismatches" ] == [ { "principle_id": str( known.id ), "field_key": "$answer" } ] and out[ "principles_created" ] == 0
 
 
 def test_two_paraphrased_answers_join_one_principle_when_the_double_names_it_for_the_second( db ):
@@ -328,7 +328,7 @@ def test_a_bare_yes_adds_a_supporting_row_to_a_principle_that_applied_and_create
     out, _ = _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp( "A new idea." ) ], relations={ str( known.id ): "supports" } ) ) ) )
     evidence = db.query( PreferenceEvidence ).one()
     assert db.query( PreferencePrinciple ).count() == 1 and evidence.principle_id == known.id and evidence.relation == "supports" and evidence.condition is None
-    assert { "field_key": "answer", "what": "hypotheses", "reason": "bare_yes_creates_none" } in out[ "rejected" ]
+    assert { "field_key": "$answer", "what": "hypotheses", "reason": "bare_yes_creates_none" } in out[ "rejected" ]
 
 
 def test_a_bare_yes_with_no_principle_to_support_skips_the_model_call( db ):
@@ -345,7 +345,7 @@ def test_only_principles_of_the_current_encoder_are_shown_to_the_model_whatever_
     model = Model( _reply( _result( hypotheses=[ _hyp() ], relations={ str( near_other.id ): "supports" } ) ) )
     out, _ = _run( db, ask, model )
     assert "Same encoder, farther." in model.sent[ 0 ] and "Other encoder, nearest." not in model.sent[ 0 ] and str( far_same.id ) in model.sent[ 0 ]
-    assert { "field_key": "answer", "what": f"relation {near_other.id}", "reason": "principle_not_shown" } in out[ "rejected" ]
+    assert { "field_key": "$answer", "what": f"relation {near_other.id}", "reason": "principle_not_shown" } in out[ "rejected" ]
     assert db.query( PreferenceEvidence ).filter_by( principle_id=near_other.id ).count() == 0
 
 
@@ -381,7 +381,7 @@ def test_an_answer_after_a_reveal_with_no_draft_is_used_and_reported_as_possibly
     db.commit()
     model  = Model( _reply( _result( hypotheses=[ _hyp() ] ) ) )
     out, _ = _run( db, ask, model )
-    assert out[ "possibly_influenced" ] == [ "answer" ] and '"possibly_influenced": true' in model.sent[ 0 ] and out[ "status" ] == "extracted"
+    assert out[ "possibly_influenced" ] == [ "$answer" ] and '"possibly_influenced": true' in model.sent[ 0 ] and out[ "status" ] == "extracted"
 
 
 def test_an_answer_with_no_reveal_is_not_marked_influenced( db ):
@@ -428,7 +428,7 @@ def test_a_field_the_reply_leaves_out_is_reported_and_nothing_is_written_for_it(
 
 def test_a_rejected_hypothesis_writes_nothing_and_is_listed_with_its_reason( db ):
     out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp( "x" * 240 ) ] ) ) ) )
-    assert _counts( db ) == ( 0, 0 ) and out[ "rejected" ] == [ { "field_key": "answer", "what": "hypothesis 0", "reason": "statement_too_long" } ]
+    assert _counts( db ) == ( 0, 0 ) and out[ "rejected" ] == [ { "field_key": "$answer", "what": "hypothesis 0", "reason": "statement_too_long" } ]
 
 
 def test_a_global_statement_naming_a_project_the_owner_asked_from_is_rejected_here_too( db ):

@@ -61,11 +61,11 @@ def test_project_names_come_from_the_sender_ids_and_skip_unknown_and_missing():
 
 
 @pytest.mark.parametrize( "answer,expected", [
-    ( { "kind": "stance", "stance": "yes", "qualifier": None }, [ { "field_key": "answer", "text": "yes", "bare_yes": True } ] ),
-    ( { "kind": "stance", "stance": "yes", "qualifier": "but link it" }, [ { "field_key": "answer", "text": "yes but link it", "bare_yes": False } ] ),
-    ( { "kind": "stance", "stance": "no", "qualifier": None }, [ { "field_key": "answer", "text": "no", "bare_yes": False } ] ),
-    ( { "kind": "text", "text": "do it later" }, [ { "field_key": "answer", "text": "do it later", "bare_yes": False } ] ),
-    ( { "kind": "text", "text": None }, [ { "field_key": "answer", "text": "", "bare_yes": False } ] ),
+    ( { "kind": "stance", "stance": "yes", "qualifier": None }, [ { "field_key": "$answer", "text": "yes", "bare_yes": True } ] ),
+    ( { "kind": "stance", "stance": "yes", "qualifier": "but link it" }, [ { "field_key": "$answer", "text": "yes but link it", "bare_yes": False } ] ),
+    ( { "kind": "stance", "stance": "no", "qualifier": None }, [ { "field_key": "$answer", "text": "no", "bare_yes": False } ] ),
+    ( { "kind": "text", "text": "do it later" }, [ { "field_key": "$answer", "text": "do it later", "bare_yes": False } ] ),
+    ( { "kind": "text", "text": None }, [ { "field_key": "$answer", "text": "", "bare_yes": False } ] ),
     ( { "kind": "none" }, [] ),
     ( { "kind": "unread", "text": "x" }, [] ),
 ] )
@@ -84,11 +84,17 @@ def test_field_answers_for_a_card_give_one_entry_per_header_with_picks_joined():
     assert got == { "held_bugs": ( "Approve", False ), "themes": ( "A, B", False ), "empty": ( "", False ), "ok": ( "yes", True ), "ok2": ( "yes", False ) }
 
 
+def test_a_card_header_equal_to_the_whole_answer_key_is_refused():
+    answer = { "kind": "fields", "fields": { "$answer": { "mode": "single", "selected": [ "x" ], "text": "x" } } }
+    with pytest.raises( ValueError, match="reserved for the whole answer" ): rules.field_answers( answer )
+    assert rules.field_answers( { "kind": "fields", "fields": { "answer": { "mode": "single", "selected": [ "x" ], "text": "x" } } } )[ 0 ][ "field_key" ] == "answer"
+
+
 REVEAL, ANSWERED = "2026-11-10T12:00:00+00:00", "2026-11-10T12:05:00+00:00"
 
 
 def test_unaided_answer_reads_the_draft_in_the_shape_the_route_stores_and_never_marks_it_influenced():
-    assert rules.unaided_answer( "final", { "value": "draft text" }, "answer", REVEAL, ANSWERED ) == ( "draft text", False )
+    assert rules.unaided_answer( "final", { "value": "draft text" }, "$answer", REVEAL, ANSWERED ) == ( "draft text", False )
     card = { "value": json.dumps( { "answers": { "held_bugs": "Hold", "themes": [ "A", "B" ] } } ) }
     assert rules.unaided_answer( "Approve", card, "held_bugs", REVEAL, ANSWERED ) == ( "Hold", False )
     assert rules.unaided_answer( "x", card, "themes", REVEAL, ANSWERED ) == ( "A, B", False )
@@ -96,7 +102,7 @@ def test_unaided_answer_reads_the_draft_in_the_shape_the_route_stores_and_never_
 
 
 def test_a_blank_draft_or_a_field_with_no_draft_reads_the_final_answer():
-    assert rules.drafted_text( None, "answer" ) is None
+    assert rules.drafted_text( None, "$answer" ) is None
     assert rules.drafted_text( { "value": "" }, "answer" ) is None and rules.drafted_text( { "value": None }, "held_bugs" ) is None
     card = { "value": json.dumps( { "answers": { "held_bugs": "Hold" } } ) }
     assert rules.drafted_text( card, "other_field" ) is None
@@ -104,16 +110,16 @@ def test_a_blank_draft_or_a_field_with_no_draft_reads_the_final_answer():
     assert rules.unaided_answer( "final", card, "other_field", None, ANSWERED ) == ( "final", False )
 
 
-@pytest.mark.parametrize( "draft,key", [ ( "draft text", "answer" ), ( { "text": "x" }, "answer" ), ( { "value": 5 }, "answer" ), ( { "value": "not json" }, "held_bugs" ),
-                                         ( { "value": json.dumps( [ 1 ] ) }, "held_bugs" ), ( [ "x" ], "answer" ) ] )
+@pytest.mark.parametrize( "draft,key", [ ( "draft text", "$answer" ), ( { "text": "x" }, "$answer" ), ( { "value": 5 }, "$answer" ), ( { "value": "not json" }, "held_bugs" ),
+                                         ( { "value": json.dumps( [ 1 ] ) }, "held_bugs" ), ( [ "x" ], "$answer" ) ] )
 def test_a_draft_that_cannot_be_read_in_the_stored_shape_raises_and_is_never_skipped( draft, key ):
     with pytest.raises( ValueError ):
         rules.unaided_answer( "final", draft, key, REVEAL, ANSWERED )
 
 
 def test_unaided_answer_without_a_draft_marks_only_a_reveal_strictly_before_the_answer_as_influenced():
-    assert rules.unaided_answer( "final", None, "answer", REVEAL, ANSWERED ) == ( "final", True )
-    assert rules.unaided_answer( "final", None, "answer", ANSWERED, ANSWERED ) == ( "final", False ), "a reveal at the answer time is unaided"
+    assert rules.unaided_answer( "final", None, "$answer", REVEAL, ANSWERED ) == ( "final", True )
+    assert rules.unaided_answer( "final", None, "$answer", ANSWERED, ANSWERED ) == ( "final", False ), "a reveal at the answer time is unaided"
     assert rules.unaided_answer( "final", None, "answer", "2026-11-10T12:06:00+00:00", ANSWERED ) == ( "final", False )
     assert rules.unaided_answer( "final", None, "answer", None, ANSWERED ) == ( "final", False )
 
