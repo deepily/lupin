@@ -1,30 +1,28 @@
 # Context comparison report
 
-- code sha of this report: df21ccffb380176ac276233dfca6a40c689c0e5e
+- code sha of this report: 040d1148f735bed3269dc391a15210b35bb4a995
 - discordant floor: 10 pairs; source: remediation plan section 6 question 4
 - per-ask files scored on code: Q dfc19edd7, Q+A dfc19edd7, Q+O dfc19edd7, Q+P eb4ca4a1a, Q+H eb4ca4a1a
-- generated: 2026-11-19T22:24:23.088003+00:00
-- command: `python -m cosa.research.preference_replay.context_arms_report --per-ask-dir /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf --inputs /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report-inputs.json --floor 10 --floor-source remediation plan section 6 question 4 --out /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report.md`
+- generated: 2026-11-19T22:31:03.672646+00:00
+- command: `python -m cosa.research.preference_replay.context_arms_report --per-ask-dir /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf --side-file-prefix /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/question-vectors/2026.11.19-arm- --notes-file /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report-notes.txt --floor 10 --floor-source remediation plan section 6 question 4 --out /mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-mr-radio-5/src/conf/prediction-context-arms-report.md`
 
 ## Coverage
 
 | arm | asks | with its section | no context | arm input empty |
 |---|---|---|---|---|
 | Q | 3608 | 3608 | 0 | 0 |
-| Q+A | 3608 | 3567 | 41 | 0 |
-| Q+O | 3608 | 2200 | 1408 | 0 |
-| Q+P | 3608 | 3585 | 23 | 0 |
+| Q+A | 3608 | 3567 | 0 | 41 |
+| Q+O | 3608 | 2200 | 0 | 1408 |
+| Q+P | 3608 | 3585 | 0 | 23 |
 | Q+H | 3608 | 2576 | 447 | 585 |
 
 ## Reconciliations
 
-- **Window**: All 3,608 frozen ids are scored for every arm; the results use the final window of 1,083 asks, the cut the retune makes.
-- **Always-yes**: Always-yes has no answer to a multiple-choice ask. It is compared on the yes/no asks only, and the pooled comparison is not reported.
-- **Seven asks differ from the export**: Seven asks have a different context state than the raw export gives, because the export lacks their earlier rows.
-- **45 asks lack context**: Of the 45 asks, 5 are newer than the export; the other 40 are an unexplained gap, named and not bridged.
-- **Retune finals**: Per-ask correct counts equal the retune finals: Q 392, Q+A 384, Q+O 392, Q+P 358, Q+H 389 of 1,083.
-- **Q+P setting is a tie**: Q+P top k 3 ties top k 5 on the tune window, 27.5644 each. The documented tie rule picks the higher threshold, then the smaller k. On the final window k 3 gives 358 and k 5 gives 378.
-- **Retune driver differs by arm**: The Q+P and Q+H retunes ran retune_run.py as of commit 560a4e382. The Q+A and Q+O retunes ran an earlier copy. The differences are refactors, and the replay and retune code are unchanged. Krishna's check: arm_scoring at the committed code reproduces 358 and 389.
+- **Window**: All 3,608 frozen ids are scored for every arm. The results use the final window of 1,083 asks, the cut the retune makes.
+- **Always-yes**: Always-yes has no answer to a multiple-choice ask. It is compared on the yes/no asks only.
+- **Retune finals**: Per-ask correct counts equal the finals in the committed retune reports: Q 392, Q+A 384, Q+O 392, Q+P 358, Q+H 389 of 1,083.
+- **Q+P setting is a tie**: Q+P top k 3 ties top k 5 on the tune window, 27.5644 each. The tie rule takes the higher threshold, then the smaller k. On the final window k 3 gives 358 and k 5 gives 378 (Krishna's check).
+- **Retune driver differs by arm**: The Q+P and Q+H retunes ran retune_run.py as of commit 560a4e382. The Q+A and Q+O retunes ran an earlier copy. The differences are refactors (Krishna's check).
 
 ## Results
 
