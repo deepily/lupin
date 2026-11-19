@@ -483,7 +483,7 @@ async def reset_prediction_engine( drop_table: bool = False, clear_pending: bool
     "/api/prediction-engine/accuracy",
     response_class = JSONResponse,
     summary        = "Prediction engine accuracy summary",
-    description    = "Accuracy of the prediction log over a window: strict whole-card correctness over scored rows, with per-category and per-type breakdowns. ADMIN ONLY, because it reports across users.",
+    description    = "Accuracy of the prediction log over a window: strict whole-card correctness over scored rows, with per-category and per-type breakdowns. Admin only, because it reports across users.",
     # Declared so the gate shows in /docs; require_admin adds no 401/403 to the schema by itself.
     responses      = {
         401 : { "description": "Unauthorized — no bearer token" },
