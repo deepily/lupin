@@ -7,6 +7,7 @@ A standing check names any card that has the first without the second.
 """
 
 import uuid
+from datetime import datetime
 from typing import Any, Callable, Dict, List
 
 import sqlalchemy as sa
@@ -60,16 +61,18 @@ def displayed_arm_hook( arm: str ) -> Callable[[ Session, Dict[str, Any] ], None
     return write_displayed_sibling
 
 
-def notifications_missing_displayed_sibling( session: Session ) -> List[uuid.UUID]:
+def notifications_missing_displayed_sibling( session: Session, since: datetime ) -> List[uuid.UUID]:
     """
-    Name every card whose prediction_log row has no displayed-arm sibling row.
+    Name the cards since go-live whose prediction_log row has no displayed-arm sibling row.
 
     Requires:
         - session is open on a database holding prediction_log and prediction_arm_forecast
+        - since is the moment the hook went live; rows predicted before it never had a sibling
 
     Ensures:
-        - returns the notification ids, sorted, of prediction_log rows with no prediction_arm_forecast
-          row for the same notification whose displayed flag is true
+        - returns the notification ids, sorted, of prediction_log rows predicted at or after since with no
+          prediction_arm_forecast row for the same notification whose displayed flag is true
+        - a row predicted before since is never listed, so the answer is empty on a live table that is reconciled
         - an empty list means every prediction_log row has its displayed-arm sibling row
         - a sibling row of an arm that was not displayed does not stand in for the displayed one
     """
@@ -77,5 +80,5 @@ def notifications_missing_displayed_sibling( session: Session ) -> List[uuid.UUI
         PredictionArmForecast.notification_id == PredictionLog.notification_id,
         PredictionArmForecast.displayed.is_( True ),
     ).exists()
-    rows = session.execute( sa.select( PredictionLog.notification_id ).where( ~sibling ) ).scalars().all()
+    rows = session.execute( sa.select( PredictionLog.notification_id ).where( PredictionLog.predicted_at >= since, ~sibling ) ).scalars().all()
     return sorted( rows, key=str )
