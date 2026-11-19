@@ -1,0 +1,312 @@
+"""
+The principles forecast: the baseline job plus a block of applicable principles.
+
+It runs the same model and the same prompts as the baseline arm.
+The one difference is a block of principles, retrieved as of the ask, added to the user prompt.
+Its result goes to the sibling table ``prediction_arm_forecast`` under its own arm name, never to ``prediction_log``.
+
+The baseline job is the remediation's background forecast job, and it has not landed.
+So this module takes it as an argument, the ``c0`` contract below, and without it reads "blocked" and writes nothing.
+It has its own switch (``prediction learner principles forecast enabled``, default off).
+It has its own concurrency cap (``prediction learner principles forecast max concurrent``).
+So it cannot take a slot from the baseline job.
+A card beyond the cap gets a row with the reason ``capacity`` at once, not a queue.
+
+The ``c0`` contract, an object with:
+
+- ``model``                         the model id the baseline calls
+- ``timeout_seconds``               the call's timeout
+- ``errors``                        the exception classes a failed call raises, as a tuple
+- ``build_prompts( episode )``      returns ( system prompt, user prompt ), the baseline's own
+- ``complete( model, system, user, timeout_seconds=... )``  an async call returning the reply text
+- ``parse( text, episode )``        returns the typed forecast dict, or raises ValueError for an unreadable reply
+- ``predictor_version``             the baseline's version string
+"""
+
+import asyncio
+import threading
+import uuid
+from datetime import datetime, timezone
+
+from cosa.agents.prediction_engine.episode_view import episode_view
+from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieve_principles
+from cosa.config.configuration_manager import ConfigurationManager
+from cosa.rest.postgres_models import Notification, PredictionArmForecast
+from cosa.utils.iso_timestamp import aware_moment
+
+ARM              = "B1"
+SWITCH_KEY       = "prediction learner principles forecast enabled"
+CAP_KEY          = "prediction learner principles forecast max concurrent"
+STATUS_RAN       = "ran"
+STATUS_NOT_RUN   = "not_run"
+STATUS_CAPACITY  = "capacity"
+STATUS_FAILED    = "failed"
+REASON_BLOCKED   = "blocked by phase 6"
+REASON_SWITCH    = "switch off"
+REASON_CAPACITY  = "capacity"
+REASON_STORED    = "already stored"
+REASON_UNREADABLE = "unreadable_forecast"
+BLOCK_HEADING    = "Principles that apply to this card, learned from earlier answers:"
+VERSION_SUFFIX   = "+principles"
+
+
+def principles_forecast_enabled():
+    """
+    Say whether the principles forecast is switched on.
+
+    Requires:
+        - nothing; an unreadable setting reads as off
+
+    Ensures:
+        - returns True only when the INI key named by SWITCH_KEY is true
+        - never raises, so a settings failure cannot stop an ask
+    """
+    try: return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( SWITCH_KEY, default=False, return_type="boolean" )
+    except Exception as settings_error:
+        print( f"[PRINCIPLES] ⚠️ Principles forecast switch unreadable, treated as off: {settings_error}" )
+        return False
+
+
+def concurrency_cap():
+    """
+    Read how many principles forecasts may run at once.
+
+    Requires:
+        - the INI file carries the key named by CAP_KEY
+
+    Ensures:
+        - returns a positive int
+
+    Raises:
+        - MissingConfigKeyError if the key is missing or blank, so a missing cap never becomes unbounded
+        - ValueError if the value is not a positive integer
+    """
+    cap = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( CAP_KEY, return_type="int" )
+    if cap < 1: raise ValueError( f"'{CAP_KEY}' must be a positive integer, got {cap}" )
+    return cap
+
+
+class CapGate:
+    """A count of calls in flight that refuses at once past its limit, never queues."""
+
+    def __init__( self, limit ):
+        """
+        Make a gate that lets at most limit calls in.
+
+        Requires:
+            - limit is a positive int
+
+        Raises:
+            - ValueError if limit is not a positive int
+        """
+        if not isinstance( limit, int ) or limit < 1: raise ValueError( f"limit must be a positive int, got {limit!r}" )
+        self.limit    = limit
+        self.inflight = 0
+        self._lock    = threading.Lock()
+
+    def try_enter( self ):
+        """
+        Take a place if one is free.
+
+        Ensures:
+            - returns True and counts the call when fewer than limit are in flight, else False and changes nothing
+        """
+        with self._lock:
+            entered = self.inflight < self.limit
+            if entered: self.inflight += 1
+        return entered
+
+    def leave( self ):
+        """
+        Give a place back.
+
+        Requires:
+            - the caller got True from try_enter
+
+        Ensures:
+            - one fewer call is counted
+        """
+        with self._lock: self.inflight -= 1
+
+
+def with_principles( system_prompt, user_prompt, block ):
+    """
+    Add the principle block to the baseline's user prompt and change nothing else.
+
+    Requires:
+        - system_prompt and user_prompt are the baseline's own prompts for this card
+        - block is principle_block's result
+
+    Ensures:
+        - returns ( system_prompt, user prompt ); the system prompt is returned as given
+        - with no principles the user prompt is returned as given, so the call then equals the baseline's
+        - otherwise the user prompt is followed by a blank line, BLOCK_HEADING and the block text
+    """
+    if not block[ "text" ]: return system_prompt, user_prompt
+    return system_prompt, f"{user_prompt}\n\n{BLOCK_HEADING}\n{block[ 'text' ]}"
+
+
+def card_text( episode ):
+    """
+    Build the text a card is searched for principles by.
+
+    Requires:
+        - episode is episode_view's result
+
+    Ensures:
+        - returns the title, the abstract and each field's prompt, one per line, skipping empty parts
+    """
+    parts = [ episode[ "title" ], episode[ "abstract" ] ] + [ field[ "prompt" ] for field in episode[ "fields" ] ]
+    return "\n".join( part for part in parts if part )
+
+
+def _has_row( session_factory, notification_id ):
+    """
+    Say whether a card already has its principles row.
+
+    Requires:
+        - session_factory returns a context-managed session
+
+    Ensures:
+        - returns True when a prediction_arm_forecast row for this card and the principles arm exists
+    """
+    with session_factory() as session:
+        return session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == uuid.UUID( str( notification_id ) ),
+                                                              PredictionArmForecast.arm == ARM ).first() is not None
+
+
+def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, version, principle_ids, reason ):
+    """
+    Store the one principles row for a card, unless it already has one.
+
+    Requires:
+        - session_factory returns a context-managed session; ready_at is None for a card with no forecast
+
+    Ensures:
+        - adds one prediction_arm_forecast row, for the principles arm, displayed false, and commits
+        - writes nothing when the card already has its principles row
+        - returns True when a row was written
+    """
+    with session_factory() as session:
+        key     = uuid.UUID( str( notification_id ) )
+        present = session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == key, PredictionArmForecast.arm == ARM ).first() is not None
+        if not present:
+            session.add( PredictionArmForecast( notification_id=key, arm=ARM, predictor_version=version, forecast=forecast, input_cutoff=asked_at,
+                                                evidence_ids=principle_ids, forecast_ready_at=ready_at, abstention_reason=reason, displayed=False ) )
+            session.commit()
+    return not present
+
+
+def _prepare( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k ):
+    """
+    Gather the inputs as of the ask: the episode, the principles and the two prompts.
+
+    Requires:
+        - session_factory returns a context-managed session; c0 and embedder as run_b1 takes them
+
+    Ensures:
+        - returns ( episode, selected, block, system prompt, user prompt ), everything as of the ask and nothing later
+    """
+    with session_factory() as session:
+        episode  = episode_view( session, notification_id )
+        vector   = embedder.encode( card_text( episode ) )
+        selected = retrieve_principles( session, episode[ "owner_id" ], episode[ "project" ], vector, aware_moment( episode[ "asked_at" ] ),
+                                        encoder_version, extractor_version, k=k )[ "principles" ]
+    block            = principle_block( selected )
+    system, user     = with_principles( *c0.build_prompts( episode ), block )
+    return episode, selected, block, system, user
+
+
+async def run_b1( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, gate, enabled=None, k=DEFAULT_K, clock=None ):
+    """
+    Make the principles forecast for one ask, and store its row.
+
+    Requires:
+        - session_factory returns a context-managed session; notification_id names an ask
+        - c0 is the baseline contract in the module docstring, or None while the background forecast job has not landed
+        - embedder has encode( text ) returning a vector from the encoder named encoder_version
+        - gate is a CapGate; enabled is None (read the INI switch) or a bool; clock is None or a function returning an aware datetime
+
+    Ensures:
+        - returns { status, reason }; status is ran, not_run, capacity or failed
+        - with the switch off, or with c0 None (reason REASON_BLOCKED), nothing is read, called or written
+        - a card that already has its row is left alone, with no call (reason "already stored")
+        - past the cap, one row with forecast None and reason "capacity" is written and no model is called
+        - otherwise the baseline's prompts plus the principle block go to the baseline's model, once, with no retry
+        - a ready forecast is stored with the principle ids it was given and its ready time; an unreadable reply or a
+          failed call stores one row with the reason and no forecast
+        - the cap place is always given back
+    """
+    if not ( principles_forecast_enabled() if enabled is None else enabled ): return { "status": STATUS_NOT_RUN, "reason": REASON_SWITCH }
+    if c0 is None: return { "status": STATUS_NOT_RUN, "reason": REASON_BLOCKED }
+    if await asyncio.to_thread( _has_row, session_factory, notification_id ): return { "status": STATUS_NOT_RUN, "reason": REASON_STORED }
+    now = clock if clock is not None else ( lambda: datetime.now( timezone.utc ) )
+    if not gate.try_enter():
+        asked = await asyncio.to_thread( _asked_at, session_factory, notification_id )
+        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, c0.predictor_version + VERSION_SUFFIX, [], REASON_CAPACITY )
+        return { "status": STATUS_CAPACITY, "reason": REASON_CAPACITY }
+    try:
+        episode, selected, block, system, user = await asyncio.to_thread( _prepare, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k )
+        asked   = aware_moment( episode[ "asked_at" ] )
+        version = c0.predictor_version + VERSION_SUFFIX
+        ids     = block[ "principle_ids" ]
+        try:
+            text     = await c0.complete( c0.model, system, user, timeout_seconds=c0.timeout_seconds )
+            forecast = c0.parse( text, episode )
+        except c0.errors as call_error:
+            reason = f"model_error: {type( call_error ).__name__}"
+        except ValueError:
+            reason = REASON_UNREADABLE
+        else:
+            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, now(), forecast, version, [ str( i ) for i in ids ], None )
+            return { "status": STATUS_RAN, "reason": None }
+        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [ str( i ) for i in ids ], reason )
+        return { "status": STATUS_FAILED, "reason": reason }
+    finally:
+        gate.leave()
+
+
+def _asked_at( session_factory, notification_id ):
+    """
+    Read the moment an ask was made.
+
+    Requires:
+        - session_factory returns a context-managed session; notification_id names an ask
+
+    Ensures:
+        - returns the notification's creation time as an aware datetime
+
+    Raises:
+        - LookupError if the notification does not exist
+    """
+    with session_factory() as session:
+        row     = session.get( Notification, uuid.UUID( str( notification_id ) ) )
+        created = None if row is None else row.created_at
+    if row is None: raise LookupError( f"notification {notification_id} does not exist" )
+    return aware_moment( created )
+
+
+def arm_timeliness( session, arm, since ):
+    """
+    Count one arm's answered cards by whether its forecast was ready before the answer.
+
+    Requires:
+        - session is open on a database holding prediction_arm_forecast and notifications
+        - since is an aware datetime; only cards asked at or after it are counted
+
+    Ensures:
+        - returns { arm, answered, ready_before_answer, late, not_ready, capacity }, over cards answered by now
+        - a card the cap turned away counts as capacity, named apart so the cap's effect is visible
+        - a card with no ready time and another reason counts as not_ready, and is not timely
+        - answered equals the other four added up
+    """
+    counts = { "arm": arm, "answered": 0, "ready_before_answer": 0, "late": 0, "not_ready": 0, "capacity": 0 }
+    rows = session.query( PredictionArmForecast, Notification ).join( Notification, Notification.id == PredictionArmForecast.notification_id ).filter(
+        PredictionArmForecast.arm == arm, Notification.created_at >= since, Notification.responded_at.isnot( None ) ).all()
+    for forecast, notification in rows:
+        counts[ "answered" ] += 1
+        if forecast.abstention_reason == REASON_CAPACITY: counts[ "capacity" ] += 1
+        elif forecast.forecast_ready_at is None: counts[ "not_ready" ] += 1
+        elif aware_moment( forecast.forecast_ready_at ) <= aware_moment( notification.responded_at ): counts[ "ready_before_answer" ] += 1
+        else: counts[ "late" ] += 1
+    return counts
