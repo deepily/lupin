@@ -128,6 +128,25 @@ def rebuild_context( target, notifications, session_window=SESSION_WINDOW ):
              "attachments": attachments, "missing": missing, "unrelated": unrelated, "not_earlier": not_earlier }
 
 
+def notification_dict( row ):
+    """
+    Turn a Notification row into the dict that rebuild_context and the arm builders read.
+
+    Requires:
+        - row has the Notification columns listed below
+
+    Ensures:
+        - returns id (as text), created_at (ISO text), message, abstract, response_options, sender_id, reply_to,
+          thread_id, job_id, direction, response_requested, responded_at (ISO text or None) and response_value
+        - created_at is the notification's own creation time, never a case row's time
+    """
+    return { "id": str( row.id ), "created_at": row.created_at.isoformat(), "message": row.message, "abstract": row.abstract,
+             "response_options": row.response_options, "sender_id": row.sender_id, "reply_to": row.reply_to, "thread_id": row.thread_id,
+             "job_id": row.job_id, "direction": row.direction, "response_requested": row.response_requested,
+             "responded_at": row.responded_at.isoformat() if row.responded_at is not None else None,
+             "response_value": row.response_value }
+
+
 def reconstructable_stage( results ):
     """
     Count the asks whose context could be rebuilt, as one stage of the yield funnel.

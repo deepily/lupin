@@ -16,7 +16,7 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
-from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, rebuild_context
+from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, notification_dict, rebuild_context
 from cosa.rest.postgres_models import Notification
 from cosa.utils.iso_timestamp import aware_moment
 from cosa.utils.notification_utils import sender_session_suffix
@@ -235,25 +235,6 @@ def build_arm_texts( arm: str, targets: List[Dict[str, Any]], contexts: Dict[str
         reasons[ reason ] += 1
     counts = { "asks": len( targets ), "with_section": reasons[ None ], NO_CONTEXT: reasons[ NO_CONTEXT ], INPUT_ABSENT: reasons[ INPUT_ABSENT ] }
     return { "arm": arm, "texts": texts, "counts": counts }
-
-
-def notification_dict( row: Any ) -> Dict[str, Any]:
-    """
-    Turn a Notification row into the dict that rebuild_context and the arm builders read.
-
-    Requires:
-        - row has the Notification columns listed below
-
-    Ensures:
-        - returns id (as text), created_at (ISO text), message, abstract, response_options, sender_id, reply_to,
-          thread_id, job_id, direction, response_requested, responded_at (ISO text or None) and response_value
-        - created_at is the notification's own creation time, never a case row's time
-    """
-    return { "id": str( row.id ), "created_at": row.created_at.isoformat(), "message": row.message, "abstract": row.abstract,
-             "response_options": row.response_options, "sender_id": row.sender_id, "reply_to": row.reply_to, "thread_id": row.thread_id,
-             "job_id": row.job_id, "direction": row.direction, "response_requested": row.response_requested,
-             "responded_at": row.responded_at.isoformat() if row.responded_at is not None else None,
-             "response_value": row.response_value }
 
 
 def read_arm_inputs( session: Any, asks: List[Dict[str, Any]] ) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
