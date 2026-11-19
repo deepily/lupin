@@ -110,6 +110,13 @@ def test_compact_keeps_the_six_fields_per_ask_and_the_counts():
     assert ( compacted[ "not_replayable" ], compacted[ "unrebuildable_cases" ], compacted[ "families" ] ) == ( 2, 3, 4 )
 
 
+def test_compact_takes_each_id_from_the_engine_record():
+    """The id comes from the engine arm even when the baseline record carries another."""
+    cut = scoring.final_window( _run( 10 ) )
+    for record in cut[ "records" ][ "always_yes" ]: record[ "meta" ][ "notification_id" ] = "other"
+    assert [ a[ "id" ] for a in scoring.compact( cut )[ "asks" ] ] == [ "n7", "n8", "n9" ]
+
+
 def test_expand_gives_back_the_figures_compact_kept():
     """Expanding a compact run restores the ids, types and flags of both arms."""
     cut = scoring.final_window( _run( 10 ) )
@@ -118,6 +125,7 @@ def test_expand_gives_back_the_figures_compact_kept():
         assert [ ( r[ "meta" ][ "notification_id" ], r[ "meta" ][ "response_type" ], r[ "meta" ][ "correct" ] ) for r in back[ "records" ][ arm ] ] == \
                [ ( r[ "meta" ][ "notification_id" ], r[ "meta" ][ "response_type" ], r[ "meta" ][ "correct" ] ) for r in cut[ "records" ][ arm ] ]
     assert [ r[ "row_index" ] for r in back[ "records" ][ "always_yes" ] ] == [ 0, 1, 2 ]
+    assert [ r[ "row_index" ] for r in back[ "records" ][ ENGINE_ARM ] ] == [ 0, 1, 2 ]
     assert back[ "records" ][ ENGINE_ARM ][ 1 ][ "meta" ][ "forecast" ] == { "value": 8 } and back[ "records" ][ ENGINE_ARM ][ 1 ][ "meta" ][ "confidence" ] == 0.8
     assert ( back[ "not_replayable" ], back[ "unrebuildable_cases" ], back[ "families" ] ) == ( 2, 3, 4 )
 
@@ -203,6 +211,7 @@ def test_main_writes_the_final_window_run_and_prints_the_count( monkeypatch, tmp
     assert ( document[ "code_sha" ], document[ "started" ] ) == ( "abc123", "2026-11-19T20:00:00+00:00" )
     assert document[ "command" ] == "python -m cosa.research.preference_replay.arm_scoring " + " ".join( argv )
     assert len( document[ "run" ][ "asks" ] ) == 3 and "records" not in document[ "run" ]
+    assert out.read_text().count( "\n" ) == 1 and ", " not in out.read_text() and ": " not in out.read_text()
     assert printed == [ "Q+A: 3 final-window asks, 1 correct" ]
 
 
