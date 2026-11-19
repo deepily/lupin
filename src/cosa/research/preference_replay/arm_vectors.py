@@ -49,6 +49,25 @@ def load_frozen_ids( path: str ) -> List[str]:
     return ids
 
 
+def positive_int( value: str ) -> int:
+    """
+    Read a command-line count that must be at least one.
+
+    Requires:
+        - value is the text of the argument
+
+    Ensures:
+        - returns the integer
+
+    Raises:
+        - argparse.ArgumentTypeError if the text is not an integer or the integer is below one
+    """
+    try: number = int( value )
+    except ValueError: raise argparse.ArgumentTypeError( f"{value!r} is not an integer" )
+    if number < 1: raise argparse.ArgumentTypeError( f"{value!r} is below one" )
+    return number
+
+
 def restamp_text_rule( path: str, rule: str ) -> None:
     """
     Name the arm's own text rule in a side file's header.
@@ -92,7 +111,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     parser.add_argument( "--frozen-ids", required=True )
     parser.add_argument( "--out", required=True )
     parser.add_argument( "--probe-only", action="store_true" )
-    parser.add_argument( "--batch-size", type=int, default=BATCH_SIZE, help="texts per embedding call; lower it when the model server runs out of memory" )
+    parser.add_argument( "--batch-size", type=positive_int, default=BATCH_SIZE, help="texts per embedding call; lower it when the model server runs out of memory" )
     args     = parser.parse_args( argv )
     ids      = load_frozen_ids( args.frozen_ids )
     provider = ( provider_factory or get_embedding_provider )()

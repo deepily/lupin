@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cosa.research.preference_replay.arm_vectors import ARM_TEXT_RULES, load_frozen_ids, main, restamp_text_rule
+from cosa.research.preference_replay.arm_vectors import ARM_TEXT_RULES, load_frozen_ids, main, positive_int, restamp_text_rule
 from cosa.research.preference_replay.context_arms import ARMS
-from cosa.research.preference_replay.question_vectors import load_side_file
+from cosa.research.preference_replay.question_vectors import BATCH_SIZE, load_side_file
 
 T0    = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 STAMP = { "model": "m", "revision": "r1", "dtype": "float16", "dimensions": 768 }
@@ -241,9 +241,28 @@ def test_batch_size_sets_how_many_texts_go_in_each_call( tmp_path ):
     assert provider.calls == [ 2, 1 ] and len( load_side_file( out )[ 1 ] ) == 3
 
 
-def test_the_default_batch_holds_the_whole_small_cohort_in_one_call( tmp_path ):
-    _, _, _, provider, _ = _run( tmp_path, "Q" )
-    assert provider.calls == [ 3 ]
+def test_the_default_batch_is_the_generators_own_sixty_four_and_the_small_cohort_goes_in_one_call( tmp_path ):
+    assert BATCH_SIZE == 64
+    ids  = [ f"c{n}" for n in range( 70 ) ]
+    rows = [ _row( ask_id, n ) for n, ask_id in enumerate( ids ) ]
+    provider = _Provider()
+    main( [ "--arm", "Q", "--frozen-ids", _frozen( tmp_path, ids ), "--out", str( tmp_path / "x" ) ], printer=print,
+          session_factory=lambda: _Session( rows ), provider_factory=lambda: provider )
+    assert provider.calls == [ 20, 50 ]
+    _, _, _, small, _ = _run( tmp_path, "Q" )
+    assert small.calls == [ 3 ]
+
+
+@pytest.mark.parametrize( "value", [ "0", "-3", "x", "1.5" ] )
+def test_a_batch_size_below_one_or_not_a_number_is_a_usage_error( tmp_path, value ):
+    with pytest.raises( SystemExit ) as stopped:
+        main( [ "--arm", "Q", "--frozen-ids", _frozen( tmp_path ), "--out", str( tmp_path / "x" ), "--batch-size", value ],
+              session_factory=lambda: _Session( _rows() ), provider_factory=_Provider )
+    assert stopped.value.code == 2
+
+
+def test_positive_int_returns_the_integer():
+    assert positive_int( "8" ) == 8
 
 
 def test_every_arm_has_a_text_rule():
