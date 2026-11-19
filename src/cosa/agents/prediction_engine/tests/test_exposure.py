@@ -1,65 +1,147 @@
 """
-Exposure rules on synthetic rows, and the switch rate.
+Exposure rules on synthetic rows, the draft decoder, and the switch rate.
 """
 import datetime as dt
+import json
 import unittest
 
 from cosa.agents.prediction_engine import exposure as ex
+from cosa.agents.principle_learner import extractor_rules
 
 _OPENED = dt.datetime( 2026, 11, 19, 12, 0, tzinfo=dt.timezone.utc )
+YN      = "yes_no"
+MC      = "multiple_choice"
 
 
 def _a( value ): return { "value": value, "source": "ui" }
 
 
+def _card( **answers ): return { "value": json.dumps( { "answers": answers }, separators=( ",", ":" ) ) }
+
+
 class TestClassifyExposure( unittest.TestCase ):
 
     def test_no_answer_is_unanswered_even_with_a_reveal_and_draft( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, None ), ex.UNANSWERED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, None, YN ), ex.UNANSWERED )
 
     def test_no_reveal_is_unaided_even_when_a_stray_draft_differs( self ):
-        self.assertEqual( ex.classify_exposure( None, None,                 _a( "no" ) ), ex.UNAIDED )
-        self.assertEqual( ex.classify_exposure( None, { "value": "yes" },   _a( "no" ) ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( None, None,               _a( "no" ), YN ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( None, { "value": "yes" }, _a( "no" ), YN ), ex.UNAIDED )
 
     def test_an_answer_equal_to_the_draft_is_unaided( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "yes" ) ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "yes" ), YN ), ex.UNAIDED )
 
     def test_an_answer_that_differs_from_the_draft_is_switched( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ) ), ex.SWITCHED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), YN ), ex.SWITCHED )
 
     def test_a_reveal_with_no_draft_is_exposed( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "yes" ) ), ex.EXPOSED )
+        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "yes" ), YN ), ex.EXPOSED )
 
     def test_a_reveal_after_the_answer_is_unaided_with_or_without_a_draft( self ):
         answered = _OPENED - dt.timedelta( minutes=1 )
-        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), answered ), ex.UNAIDED )
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), answered ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), YN, answered ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), YN, answered ), ex.UNAIDED )
 
     def test_a_reveal_exactly_at_the_answer_time_is_too_late_to_influence( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "no" ), _OPENED ), ex.UNAIDED )
+        self.assertEqual( ex.classify_exposure( _OPENED, None, _a( "no" ), YN, _OPENED ), ex.UNAIDED )
 
     def test_a_reveal_before_the_answer_is_judged_on_the_draft( self ):
         answered = _OPENED + dt.timedelta( minutes=1 )
-        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), answered ), ex.EXPOSED )
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), answered ), ex.SWITCHED )
+        self.assertEqual( ex.classify_exposure( _OPENED, None,               _a( "no" ), YN, answered ), ex.EXPOSED )
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, _a( "no" ), YN, answered ), ex.SWITCHED )
 
-    def test_lists_compare_in_order( self ):
-        self.assertEqual( ex.classify_exposure( _OPENED, { "value": [ "a", "b" ] }, _a( [ "b", "a" ] ) ), ex.SWITCHED )
+    def test_a_draft_held_for_only_some_fields_is_exposed_not_unaided( self ):
+        self.assertEqual( ex.classify_exposure( _OPENED, _card( Database="PostgreSQL" ), _card( Database="PostgreSQL", Tags=[ "a" ] ), MC ), ex.EXPOSED )
 
-    def test_only_the_value_entry_is_compared( self ):
-        draft = { "value": "yes" }
-        self.assertEqual( ex.classify_exposure( _OPENED, draft, { "value": "yes", "source": "ui", "answered_by": "x" } ), ex.UNAIDED )
+    def test_a_card_draft_in_another_order_or_spacing_is_still_the_same_answer( self ):
+        draft = { "value": '{ "answers": { "Tags": [ "b", "a" ] } }' }
+        self.assertEqual( ex.classify_exposure( _OPENED, draft, { "answers": { "Tags": [ "a", "b" ] } }, MC ), ex.UNAIDED )
 
-    def test_an_entry_without_a_value_raises( self ):
-        with self.assertRaises( KeyError ):
-            ex.classify_exposure( _OPENED, {}, _a( "yes" ) )
+    def test_an_unreadable_draft_is_exposed( self ):
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "not json" }, _card( Tags=[ "a" ] ), MC ), ex.EXPOSED )
+
+    def test_an_answers_source_or_author_never_makes_a_switch( self ):
+        answer = { "value": "yes", "source": "ui", "answered_by": { "user_id": "x" } }
+        self.assertEqual( ex.classify_exposure( _OPENED, { "value": "yes" }, answer, YN ), ex.UNAIDED )
+
+
+class TestDecodeAnswerFields( unittest.TestCase ):
+
+    def test_yes_no_reads_the_stance_and_ignores_the_comment( self ):
+        self.assertEqual( ex.decode_answer_fields( YN, _a( "No [comment: not ready]" ) ), { ex.WHOLE_ANSWER_KEY: ( "no", ) } )
+
+    def test_yes_no_with_unreadable_text_keeps_the_text_and_with_nothing_is_empty( self ):
+        self.assertEqual( ex.decode_answer_fields( YN, _a( "  Maybe later " ) ), { ex.WHOLE_ANSWER_KEY: ( "Maybe later", ) } )
+        self.assertEqual( ex.decode_answer_fields( YN, _a( "" ) ), { ex.WHOLE_ANSWER_KEY: () } )
+        self.assertEqual( ex.decode_answer_fields( YN, None ), { ex.WHOLE_ANSWER_KEY: () } )
+        self.assertEqual( ex.decode_answer_fields( YN, { "value": None } ), { ex.WHOLE_ANSWER_KEY: () } )
+
+    def test_open_ended_reads_the_stripped_text( self ):
+        self.assertEqual( ex.decode_answer_fields( "open_ended", _a( "  write it down " ) ), { ex.WHOLE_ANSWER_KEY: ( "write it down", ) } )
+        self.assertEqual( ex.decode_answer_fields( "open_ended", _a( " " ) ), { ex.WHOLE_ANSWER_KEY: () } )
+
+    def test_a_card_reads_every_stored_form_the_same_way( self ):
+        wire     = '{"answers":{"Database":"PostgreSQL","Tags":["b","a"]}}'
+        expected = { "Database": ( "PostgreSQL", ), "Tags": ( "a", "b" ) }
+        for stored in ( wire, { "value": wire }, { "value": wire, "source": "ui", "answered_by": { "user_id": "x" } },
+                        { "answers": { "Database": "PostgreSQL", "Tags": [ "b", "a" ] } } ):
+            self.assertEqual( ex.decode_answer_fields( MC, stored ), expected, stored )
+
+    def test_a_card_drops_blank_picks_and_keeps_an_empty_field_as_empty( self ):
+        self.assertEqual( ex.decode_answer_fields( MC, { "answers": { "A": [ " ", "x" ], "B": [], "C": "" } } ), { "A": ( "x", ), "B": (), "C": () } )
+
+    def test_a_cancelled_card_has_no_fields_and_a_missing_card_answer_is_empty( self ):
+        self.assertEqual( ex.decode_answer_fields( MC, { "value": '{"cancelled":true,"answers":{}}' } ), {} )
+        self.assertEqual( ex.decode_answer_fields( MC, None ), {} )
+
+    def test_an_unreadable_card_answer_is_none( self ):
+        self.assertIsNone( ex.decode_answer_fields( MC, { "value": "not json" } ) )
+        self.assertIsNone( ex.decode_answer_fields( "open_ended_batch", { "value": '{"no":"answers"}' } ) )
+
+    def test_the_whole_answer_key_is_the_one_the_extractor_uses( self ):
+        self.assertEqual( ex.WHOLE_ANSWER_KEY, extractor_rules.WHOLE_ANSWER_KEY )
+
+
+class TestCompareDraftToAnswer( unittest.TestCase ):
+
+    def test_a_yes_no_draft_equal_to_the_answer_is_same( self ):
+        self.assertEqual( ex.compare_draft_to_answer( YN, _a( "yes" ), _a( "yes [comment: ok]" ) ), { "outcome": ex.SAME, "fields": { ex.WHOLE_ANSWER_KEY: ex.SAME } } )
+
+    def test_a_yes_no_answer_that_changed_is_switched( self ):
+        self.assertEqual( ex.compare_draft_to_answer( YN, _a( "yes" ), _a( "no" ) ), { "outcome": ex.SWITCHED, "fields": { ex.WHOLE_ANSWER_KEY: ex.SWITCHED } } )
+
+    def test_a_yes_no_draft_with_nothing_chosen_is_undrafted( self ):
+        self.assertEqual( ex.compare_draft_to_answer( YN, _a( "" ), _a( "no" ) ), { "outcome": ex.UNDRAFTED, "fields": { ex.WHOLE_ANSWER_KEY: ex.UNDRAFTED } } )
+        self.assertEqual( ex.compare_draft_to_answer( YN, None, _a( "no" ) )[ "outcome" ], ex.UNDRAFTED )
+
+    def test_a_card_is_judged_field_by_field( self ):
+        draft  = _card( Database="PostgreSQL", Tags=[ "a" ] )
+        answer = { "answers": { "Database": "SQLite", "Tags": [ "a" ], "Notes": "later" } }
+        self.assertEqual( ex.compare_draft_to_answer( MC, draft, answer ),
+                          { "outcome": ex.SWITCHED, "fields": { "Database": ex.SWITCHED, "Tags": ex.SAME, "Notes": ex.UNDRAFTED } } )
+
+    def test_a_card_with_every_field_unchanged_is_same_and_one_with_an_added_field_is_undrafted( self ):
+        draft = _card( Database="PostgreSQL" )
+        self.assertEqual( ex.compare_draft_to_answer( MC, draft, { "answers": { "Database": "PostgreSQL" } } )[ "outcome" ], ex.SAME )
+        self.assertEqual( ex.compare_draft_to_answer( MC, draft, { "answers": { "Database": "PostgreSQL", "Tags": [ "a" ] } } )[ "outcome" ], ex.UNDRAFTED )
+
+    def test_a_field_the_draft_held_and_the_answer_cleared_is_switched( self ):
+        result = ex.compare_draft_to_answer( MC, _card( Tags=[ "a" ] ), { "value": '{"cancelled":true,"answers":{}}' } )
+        self.assertEqual( result, { "outcome": ex.SWITCHED, "fields": { "Tags": ex.SWITCHED } } )
+
+    def test_a_field_neither_side_holds_is_left_out_and_two_empty_sides_are_undrafted( self ):
+        self.assertEqual( ex.compare_draft_to_answer( MC, _card( Tags=[] ), { "answers": { "Tags": [] } } ), { "outcome": ex.UNDRAFTED, "fields": {} } )
+
+    def test_an_unreadable_side_is_unreadable( self ):
+        self.assertEqual( ex.compare_draft_to_answer( MC, { "value": "not json" }, _card( Tags=[ "a" ] ) ), { "outcome": ex.UNREADABLE, "fields": {} } )
+        self.assertEqual( ex.compare_draft_to_answer( MC, _card( Tags=[ "a" ] ), { "value": "not json" } )[ "outcome" ], ex.UNREADABLE )
 
 
 class TestSwitchRate( unittest.TestCase ):
 
     def test_a_switched_card_is_counted_in_the_rate( self ):
-        rows = [ ( None, None, _a( "yes" ) ), ( _OPENED, { "value": "yes" }, _a( "yes" ) ),
-                 ( _OPENED, { "value": "yes" }, _a( "no" ) ), ( _OPENED, None, _a( "no" ) ) ]
+        rows = [ ( None, None, _a( "yes" ), YN ), ( _OPENED, { "value": "yes" }, _a( "yes" ), YN ),
+                 ( _OPENED, { "value": "yes" }, _a( "no" ), YN ), ( _OPENED, None, _a( "no" ), YN ) ]
         classes = [ ex.classify_exposure( *r ) for r in rows ]
         self.assertEqual( classes, [ ex.UNAIDED, ex.UNAIDED, ex.SWITCHED, ex.EXPOSED ] )
         self.assertEqual( ex.switch_rate( classes ), 0.25 )
