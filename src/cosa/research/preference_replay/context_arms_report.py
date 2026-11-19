@@ -226,7 +226,7 @@ def main( argv: Optional[Sequence[str]] = None, code_sha: Optional[str] = None, 
     provenance = { "code sha of this report": code_sha if code_sha is not None else resolve_commit( cu.get_project_root(), "HEAD" ),
                    "discordant floor": f"{args.floor} pairs, stated before the run; source: {args.floor_source}",
                    "per-ask files scored on code": ", ".join( f"{arm} {docs[ arm ][ 'code_sha' ][ :9 ]}" for arm in docs ),
-                   "generated": ( clock or ( lambda: datetime.now( timezone.utc ) ) )().isoformat(), "command": command }
+                   "generated": ( clock or ( lambda: datetime.now( timezone.utc ) ) )().isoformat(), "command": f"`{command}`" }
     with open( args.out, "w", encoding="utf-8" ) as handle: handle.write( render_arm_report( rows, inputs[ "coverage" ], inputs[ "reconciliations" ], provenance ) )
     return 0
 

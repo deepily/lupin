@@ -268,7 +268,7 @@ def test_main_names_the_floor_its_source_the_files_code_and_the_command( tmp_pat
     assert "- code sha of this report: abc1234def" in text
     assert "- per-ask files scored on code: Q q01234567, Q+A q-a012345, Q+O q-o012345, Q+P q-p012345, Q+H q-h012345" in text
     assert "- generated: 2026-11-19T22:00:00+00:00" in text
-    assert "- command: python -m cosa.research.preference_replay.context_arms_report --per-ask-dir" in text
+    assert "- command: `python -m cosa.research.preference_replay.context_arms_report --per-ask-dir" in text
     assert "--floor 6 --floor-source" in text
 
 
