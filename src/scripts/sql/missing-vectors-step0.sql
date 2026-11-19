@@ -13,12 +13,12 @@
 --
 -- - Earliest `prediction_decisions.created_at`: **2026-09-25T22:28:59Z**. The restored backup has the same earliest value. The earliest cohort ask with a row was asked 2026-09-26 15:54Z; the 3 rows of 25 Sep belong to asks outside the cohort.
 -- - Every ask asked from 26 Sep to 18 Nov has a row, except the 9. Asked May 175, Jun 380, Jul 408, Aug 659, Sep 675 (of 847; 172 have rows) have none, so **0 of 2,297 early asks has a row**.
--- - Row `created_at` equals the notification's `responded_at` for all 1,304 (lag 0.00 hours at minimum, median and maximum). So the rows were written when the answer arrived (the live path), not in a later bulk load.
--- - The 9 are the only cohort asks answered between the backup (18 Nov 03:56:16Z) and the cleanup (19:05:17Z), so 9 of 9 in that window lack a row, against 0 of every other ask from 26 Sep on. The 9 are yes/no, from the lupin and plan seats.
--- - The table's heap file was born 2026-08-17 (row 69cc0bb6). `lupin_db_v1baseline` holds 3 rows, all 2026-08-17 01:43Z. `lupin_db_test` holds 12 rows, all 18 Nov. Neither holds an earlier case. `prediction_log` has rows from 5 Apr; none of the 877 + 520 + 463 + 837 logged May to Aug has a row, and none of Sep 25 and before.
--- - The table's stats counters read 5,357 inserts and 3,567 deletes; their difference (1,790) is not the live count (1,553). I do not know what period the counters cover, so I draw nothing from them.
--- - Migration history: `f1c9a4d27b36` (owner and answer source) is the only migration naming the table in `src/migrations/versions`; its downgrade deletes no rows. The table itself is not created by a migration in that folder. `alembic_version` reads `c9e3a7b1d542`. The only code that deletes the table's rows is `PredictionDecisionRepository.delete_all`, per row 69cc0bb6.
--- - Since logging went on, the server has logged no DELETE on this table (the only DELETE statements are 149 on `failed_login_attempts`).
+-- - Row `created_at` falls within 0.63 seconds after the notification's `responded_at` (minimum 0.20 seconds) on all 1,547 rows whose notification has an answer time (query 5). So the rows were written when the answer arrived, not in a later bulk load.
+-- - The 9 are the only cohort asks answered between the backup (18 Nov 03:56:16Z) and the cleanup (19:05:17Z), so 9 of 9 in that window lack a row, against 0 of every other ask from 26 Sep on. The 9 are yes/no, from the lupin and plan seats. A restore of some other backup over the table is an alternative cause that I did not test.
+-- - Run by hand, no query in this file: the table's heap file was born 2026-08-17 (row 69cc0bb6). `lupin_db_v1baseline` holds 3 rows, all 2026-08-17 01:43Z. `lupin_db_test` holds 12 rows, all 18 Nov. Neither holds an earlier case. `prediction_log` has rows from 5 Apr; none of the 877 + 520 + 463 + 837 logged May to Aug has a row, and none of Sep 25 and before.
+-- - Run by hand, no query in this file: the table's stats counters read 5,357 inserts and 3,567 deletes; their difference (1,790) is not the live count (1,553). I do not know what period the counters cover, so I draw nothing from them.
+-- - Run by hand, no query in this file (a read of the migration folder and the code): migration history. `f1c9a4d27b36` (owner and answer source) is the only migration naming the table in `src/migrations/versions`; its downgrade deletes no rows. The table itself is not created by a migration in that folder. `alembic_version` reads `c9e3a7b1d542` (query 8). The only code that deletes the table's rows is `PredictionDecisionRepository.delete_all`, per row 69cc0bb6.
+-- - Run by hand (the server log, not the database): since logging went on, the server has logged no DELETE on this table (the only DELETE statements are 149 on `failed_login_attempts`).
 --
 -- ## Not found (named gaps)
 --
@@ -36,6 +36,8 @@
 -- | `response_value.answered_by.user_id` (the owner) | present on 302; absent on 2,004 |
 -- | `prediction_log.forecast_source`, `display_decision` | null on all of them |
 -- | `notifications.recipient_id` | 5 distinct recipients, a usable owner for every ask |
+--
+-- Only 302 of the 2,306 asks name an owner in the answer itself.
 --
 -- - The migration's own rule (`derive_answer_source`) needs a ratification state to call an answer human. No such state exists for these asks, so that rule would answer `unknown` for all 2,306, not `human`.
 -- - On the 1,304 asks that do have a row, the stored answer is `human` on all, and every one has `source = ui` and an owner. So `source = ui` agrees with human on that population; it cannot prove it on the early one, because no proxy log exists to rule a proxy out.
@@ -64,11 +66,10 @@ SELECT (SELECT min(coalesce(asked_at,n_created)) FROM :coh c WHERE has_row) firs
 SELECT to_char(coalesce(asked_at,n_created) AT TIME ZONE 'UTC','YYYY-MM') mon, count(*) asks,
        count(*) FILTER (WHERE has_row) with_row, count(*) FILTER (WHERE NOT has_row) without_row FROM :coh c GROUP BY 1 ORDER BY 1;
 
-\echo '== 5 the lag between an ask and its row, for asks that have one (hours; row created_at minus responded_at)'
-SELECT count(*) n, round(min(extract(epoch from (d_created::timestamptz - n_responded))/3600)::numeric,2) min_h,
-       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch from (d_created::timestamptz - n_responded))/3600)::numeric,2) median_h,
-       round(max(extract(epoch from (d_created::timestamptz - n_responded))/3600)::numeric,2) max_h
-FROM :coh c WHERE has_row AND n_responded IS NOT NULL;
+\echo '== 5 the lag between an answer and its row, in seconds (row created_at minus notification responded_at), every row with an answer time'
+SELECT count(*) n, round(min(extract(epoch from (d.created_at::timestamptz - n.responded_at)))::numeric,2) min_s,
+       round(max(extract(epoch from (d.created_at::timestamptz - n.responded_at)))::numeric,2) max_s
+FROM prediction_decisions d JOIN notifications n ON n.id::text = d.id WHERE n.responded_at IS NOT NULL;
 
 \echo '== 6 rows whose created_at is not the ask day: rows created the same day as the migration-style backfill?'
 SELECT substr(d_created,1,10) dy, count(*) rows_created FROM :coh c WHERE has_row GROUP BY 1 ORDER BY 2 DESC LIMIT 8;
