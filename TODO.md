@@ -28,7 +28,7 @@ Rick's replies are recorded word for word in the [rulings record](src/rnd/v0.2.4
 - 2026-11-19 — **What does the context adapter build on?** → **`rebuild_context`; the 50-target export stays a fixture.** Why: it already does as-of joins.
 - 2026-11-19 — **Where are contested principles resolved?** → **A capped, batched card, about three a day.** Why: it reuses the ask path.
 - 2026-11-19 — **Ask-form principles?** → **Record only, for now.** Why: showing them to askers would change the questions and break comparison.
-- 2026-11-19 — **Ledger key for the hidden arms** → pending Rick's card; a sibling table is recommended.
+- 2026-11-19 — **Where do the hidden arms store forecasts?** → **A sibling table keyed by card and arm** (Rick, about 14:30, card). Why: outcome and reveal stay once per card.
 
 ## 📚 Decisions log 2026-11-18 (Mr. Radio 🦉 `d6956394`, build manager for preference learning; crew Sam, Rio, Tiffany, Chloé, Clayton, Maya, all reaped; times Eastern)
 
