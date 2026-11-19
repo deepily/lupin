@@ -46,6 +46,9 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 
+# Bound before the Base import below: postgres_models imports it while this module is part-loaded.
+EMBEDDING_DIM = 768
+
 # Import the shared declarative Base so these tables land in the same metadata
 # that env.py / auto_migrate already consume. (postgres_models imports THIS module
 # at its tail to guarantee registration — see the note there.)
@@ -58,7 +61,6 @@ from cosa.rest.postgres_models import Base
 # HNSW params mirror pgvector defaults; design §4.4 promotes them to config keys
 # (`vector index m` / `ef_construction`) at the config layer (Lane A §4.4 / P2).
 # --------------------------------------------------------------------------- #
-EMBEDDING_DIM        = 768
 HNSW_M               = 16
 HNSW_EF_CONSTRUCTION = 64
 

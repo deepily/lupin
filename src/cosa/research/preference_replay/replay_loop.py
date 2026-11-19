@@ -31,6 +31,11 @@ from cosa.research.preference_replay.time_sliced_store import RECORD_FIELDS, Tim
 
 ENGINE_ARM = "engine"
 
+# The only fields of an ask known when it was asked. A field not listed here, such as the answer, the
+# ratification state, the answer source or the old log's prediction, never reaches a provider or an arm.
+ASK_KNOWN_FIELDS = ( "id", "question", "category", "response_type", "question_embedding", "title", "message", "sender_id",
+                     "asked_at", "recipient_id", "response_options", "owner_user_id", "data_origin" )
+
 
 def rows_as_of( cases, asked_at, excluded_ids=() ):
     """
@@ -159,7 +164,8 @@ def prior_majority_arm( row, visible_rows ):
 BASELINE_ARMS = { "always_yes": always_yes_arm, "prior_majority": prior_majority_arm }
 
 
-def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSlicedDecisionStore, target_types=None ):
+def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSlicedDecisionStore, target_types=None,
+            context_arms=(), episode_view_provider=None, principles_provider=None ):
     """
     Predict every replayable ask in time order with the live engine, and with each baseline.
 
@@ -171,6 +177,11 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
         - baselines is a dict of arm name to function( ask, visible_rows ), default BASELINE_ARMS
         - target_types is None to predict every ask, or the response types to predict; the other asks still
           serve as cases and are neither predicted nor counted
+        - context_arms names the baselines that receive context; each name is a key of baselines. The default,
+          an empty tuple, leaves every baseline called as arm( ask, visible_rows ), exactly as before
+        - episode_view_provider is None or a function( ask_at_ask, visible_rows ); principles_provider is None
+          or a function( ask_at_ask, asked_at ). Neither is called unless context_arms is not empty
+        - the real episode_view and principle store are never imported here; the caller passes them in
 
     Ensures:
         - the forecast of an ask is made by engine.predict() with the ask's stored vector, so no embedding
@@ -185,8 +196,19 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
           left out for want of a rebuildable value, however many asks they were left out of
         - families is the number of distinct families among the replayed asks
         - the engine's embedding store is put back as it was
+        - a context arm is called as arm( ask_at_ask, visible_rows, episode_view=..., principles=... ), where
+          each value is the provider's answer for this ask, or None when that provider was not passed
+        - ask_at_ask is the ask cut to its ASK_KNOWN_FIELDS, so a provider and a context arm are
+          never handed the answer to the ask they are forecasting; both are deep copies, so a change by
+          an arm reaches neither the replay nor the next arm; visible_rows are only cases answered at
+          or before the ask, as they stood then; the providers are called once per replayed ask, in ask order
+
+    Raises:
+        - ValueError if context_arms names an arm that is not in baselines
     """
     baselines = BASELINE_ARMS if baselines is None else baselines
+    unknown   = [ name for name in context_arms if name not in baselines ]
+    if unknown: raise ValueError( f"context_arms {unknown} are not in baselines {sorted( baselines )}" )
     classes   = classify_asks( asks )
     groups    = {}
     for index, info in enumerate( classes ): groups.setdefault( info[ "retry_group" ], [] ).append( asks[ index ][ "id" ] )
@@ -214,7 +236,12 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             families.add( classes[ index ][ "family" ] )
             visible = [ row for row in rows if row[ "responded_at" ] is not None and aware_moment( row[ "responded_at" ] ) <= asked_at ]
             forecasts = { ENGINE_ARM: _forecast_of( result ) }
-            forecasts.update( { name: arm( ask, visible ) for name, arm in baselines.items() } )
+            if context_arms:
+                view       = None if episode_view_provider is None else episode_view_provider( _ask_at_ask( ask ), copy.deepcopy( visible ) )
+                principles = None if principles_provider is None else principles_provider( _ask_at_ask( ask ), asked_at )
+            for name, arm in baselines.items():
+                if name in context_arms: forecasts[ name ] = arm( _ask_at_ask( ask ), copy.deepcopy( visible ), episode_view=view, principles=principles )
+                else: forecasts[ name ] = arm( ask, visible )
             for arm_name, predicted in forecasts.items():
                 records[ arm_name ].append( {
                     "arm"             : arm_name,
@@ -243,6 +270,20 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
         "unrebuildable_cases" : len( unrebuildable ),
         "families"            : len( families ),
     }
+
+
+def _ask_at_ask( ask ):
+    """
+    Show an ask as it stood when it was asked, without its answer.
+
+    Requires:
+        - ask is an ask dict
+
+    Ensures:
+        - returns a new dict holding a deep copy of only the ASK_KNOWN_FIELDS the ask has; the ask is not changed,
+          and a caller that changes the copy cannot change the replay's rows
+    """
+    return { key: copy.deepcopy( ask[ key ] ) for key in ASK_KNOWN_FIELDS if key in ask }
 
 
 def _forecast_of( result ):
@@ -277,22 +318,26 @@ def _notification_dict( ask ):
     }
 
 
-def summarize( run, baseline_arm, operational_floor ):
+def summarize( run, baseline_arm, operational_floor, arm=ENGINE_ARM ):
     """
-    Compare the engine with one baseline, paired on the same asks.
+    Compare the engine, or another arm, with one baseline, paired on the same asks.
 
     Requires:
-        - run is the dict replay returns, with records for ENGINE_ARM and baseline_arm
+        - run is the dict replay returns, with records for arm and baseline_arm
+        - arm is ENGINE_ARM, or the name of any arm in the run, so one run pairs a context arm with its comparator the way
+          _paired_with_q pairs an arm with Q, with no second harness
         - operational_floor is the discordant-pair floor stated before the run
 
     Ensures:
+        - the arm's records are read in the engine's place; the keys and the verdict words stay the engine's,
+          so "engine better" means the arm is better, as it does for Q in context_arms_report
         - returns denominators, the not-replayable count, each arm's correct count with its Wilson interval,
           the discordant pairs b and c, McNemar's exact result, the floor and whether it was met, and the
           number of families
         - below the floor, verdict is "not decisive"; it is never "no effect"
         - at or above the floor, verdict is "engine better", "baseline better" or "no difference" by McNemar's p below 0.05
     """
-    engine   = run[ "records" ][ ENGINE_ARM ]
+    engine   = run[ "records" ][ arm ]
     baseline = run[ "records" ][ baseline_arm ]
     n        = len( engine )
     wins     = sum( 1 for e, b in zip( engine, baseline ) if e[ "meta" ][ "correct" ] and not b[ "meta" ][ "correct" ] )
@@ -312,6 +357,7 @@ def summarize( run, baseline_arm, operational_floor ):
     else:
         verdict = "engine better" if wins > losses else "baseline better"
     return {
+        "arm"                 : arm,
         "baseline"            : baseline_arm,
         "asks_replayed"       : n,
         "not_replayable"      : run[ "not_replayable" ],

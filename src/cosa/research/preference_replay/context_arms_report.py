@@ -15,6 +15,7 @@ from cosa.research.preference_replay.replay_loop import ENGINE_ARM, summarize
 
 BASELINE_ARM = "always_yes"
 PAIRED_ARM   = "q_arm"
+YES_NO       = "yes_no"
 
 
 def _engine_records( run: Dict[str, Any] ) -> List[Dict[str, Any]]:
@@ -76,6 +77,33 @@ def _paired_with_q( run: Dict[str, Any], q_run: Dict[str, Any] ) -> Dict[str, An
     return dict( run, records={ ENGINE_ARM: _engine_records( run ), PAIRED_ARM: _engine_records( q_run ) } )
 
 
+def _slice( run: Dict[str, Any], kind: str ) -> Dict[str, Any]:
+    """
+    Cut a run to the asks of one answer type.
+
+    Requires:
+        - run is the dict replay returns
+
+    Ensures:
+        - returns a run whose every arm holds only the records of that type, in order
+        - the inputs are not changed
+    """
+    return dict( run, records={ arm: [ r for r in records if r[ "meta" ][ "response_type" ] == kind ] for arm, records in run[ "records" ].items() } )
+
+
+def _kinds( run: Dict[str, Any] ) -> List[str]:
+    """
+    List the answer types a run replayed, sorted.
+
+    Requires:
+        - run is the dict replay returns
+
+    Ensures:
+        - returns each response type once
+    """
+    return sorted( { record[ "meta" ][ "response_type" ] for record in _engine_records( run ) } )
+
+
 def compare_arms( runs: Dict[str, Dict[str, Any]], operational_floor: int ) -> List[Dict[str, Any]]:
     """
     Score every arm against Q and against always-yes.
@@ -85,8 +113,10 @@ def compare_arms( runs: Dict[str, Dict[str, Any]], operational_floor: int ) -> L
         - operational_floor is the discordant-pair floor stated before the run
 
     Ensures:
-        - returns one row per arm, in the arm tuple's order, each { arm, asks, by_type, vs_always_yes, vs_q }
+        - returns one row per arm, in the arm tuple's order, each { arm, asks, by_type, vs_always_yes, vs_q, vs_q_by_type }
+        - vs_always_yes counts the yes/no asks only, because always-yes has no answer to a multiple-choice ask; it is None with no yes/no ask
         - vs_q is None for Q itself; otherwise it is summarize with Q as the baseline
+        - vs_q_by_type is empty for Q; otherwise it maps each answer type to that same summary over the type's asks
         - the arms replayed identical asks in identical order, so every pair is the same ask
 
     Raises:
@@ -100,8 +130,10 @@ def compare_arms( runs: Dict[str, Dict[str, Any]], operational_floor: int ) -> L
     for arm in ( a for a in ARMS if a in runs ):
         if _ids( runs[ arm ] ) != expected: raise ValueError( f"arm {arm} replayed different asks from Q" )
         rows.append( { "arm": arm, "asks": len( expected ), "by_type": _per_100_by_type( runs[ arm ] ),
-                       "vs_always_yes": summarize( runs[ arm ], BASELINE_ARM, operational_floor ),
-                       "vs_q": None if arm == "Q" else summarize( _paired_with_q( runs[ arm ], runs[ "Q" ] ), PAIRED_ARM, operational_floor ) } )
+                       "vs_always_yes": summarize( _slice( runs[ arm ], YES_NO ), BASELINE_ARM, operational_floor ) if YES_NO in _kinds( runs[ arm ] ) else None,
+                       "vs_q": None if arm == "Q" else summarize( _paired_with_q( runs[ arm ], runs[ "Q" ] ), PAIRED_ARM, operational_floor ),
+                       "vs_q_by_type": {} if arm == "Q" else { kind: summarize( _paired_with_q( _slice( runs[ arm ], kind ), _slice( runs[ "Q" ], kind ) ),
+                                                                                PAIRED_ARM, operational_floor ) for kind in _kinds( runs[ arm ] ) } } )
     return rows
 
 
@@ -132,7 +164,8 @@ def render_arm_report( rows: List[Dict[str, Any]], coverage: Dict[str, Dict[str,
 
     Ensures:
         - returns text with the provenance, the coverage table, the reconciliations, and one results row per arm
-        - the results table gives correct per 100 for each answer type, then the pairs against Q and against always-yes
+        - the results table gives correct per 100 for each answer type, then the pairs against Q and against always-yes on yes/no asks
+        - a second table gives the pair against Q for each answer type
         - the same inputs give the same text
     """
     kinds = sorted( { kind for row in rows for kind in row[ "by_type" ] } )
@@ -145,9 +178,12 @@ def render_arm_report( rows: List[Dict[str, Any]], coverage: Dict[str, Dict[str,
     lines += [ "", "## Reconciliations", "" ] + [ f"- **{item[ 'title' ]}**: {item[ 'detail' ]}" for item in reconciliations ]
     lines += [ "", "## Results", "",
                "| arm | " + " | ".join( f"{kind} correct per 100 (asks)" for kind in kinds ) +
-               " | vs Q: arm only | vs Q: Q only | vs Q: p | vs Q: verdict | vs always-yes: arm only | vs always-yes: yes only | vs always-yes: p | vs always-yes: verdict |",
+               " | vs Q: arm only | vs Q: Q only | vs Q: p | vs Q: verdict | vs always-yes (yes/no only): arm only | yes only | p | verdict |",
                "|---|" + "---|" * ( len( kinds ) + 8 ) ]
     for row in rows:
         cells = " | ".join( f"{row[ 'by_type' ][ kind ][ 'per_100' ]:.1f} ({row[ 'by_type' ][ kind ][ 'asks' ]})" if kind in row[ "by_type" ] else "-" for kind in kinds )
         lines.append( f"| {row[ 'arm' ]} | {cells} | {_pair_cells( row[ 'vs_q' ] )} | {_pair_cells( row[ 'vs_always_yes' ] )} |" )
+    lines += [ "", "## Against Q by answer type", "", "| arm | answer type | arm only | Q only | p | verdict |", "|---|---|---|---|---|---|" ]
+    for row in rows:
+        for kind, summary in row[ "vs_q_by_type" ].items(): lines.append( f"| {row[ 'arm' ]} | {kind} | {_pair_cells( summary )} |" )
     return "\n".join( lines ) + "\n"
