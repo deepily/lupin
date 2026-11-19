@@ -1,0 +1,418 @@
+{
+    "plan_ref": "src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.19-online-preference-learning-context-aware-plan-layers-0-to-3.md",
+    "project": "lupin",
+    "prefix": "LUPIN",
+    "plan_name": "Principle learner",
+    "correlation_key": "epic:principle-learner-build",
+    "owner_persona": "maria",
+    "phases": [
+        {
+            "phase": 0,
+            "name": "Decisions Rick holds",
+            "steps": [
+                {
+                    "key": "ph0-display",
+                    "name": "Rule whether learner forecasts are shown",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules plan decision 2 (the plan recommends not displaying until the learner wins on replay and live shadow); the ruling is recorded in the plan text and TODO.md"
+                },
+                {
+                    "key": "ph0-hook",
+                    "name": "Rule who edits record_forecast for the second write",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules open sub-question 6: the remediation seat or this plan adds the sibling-row write inside record_forecast's commit (shipped code); ruling recorded in the plan text"
+                },
+                {
+                    "key": "ph0-c0display",
+                    "name": "Rule whether C0 is displayed after phase 6",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules open sub-question 7: after remediation phase 6 the forecast slot holds C0's output, so C0 may be the displayed arm; ruling recorded in the plan text"
+                },
+                {
+                    "key": "ph0-stoprule",
+                    "name": "Rule the stop-rule floor and its unit",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules the proposed wording (McNemar exact, floor of 10 discordant pairs, 'not decisive' below it) and the ask-level unit with coverage and accuracy-on-answered beside the verdict (Pocholo-B-4, D-4); ruling recorded in Layer 1 Comparison and the Stop rule"
+                },
+                {
+                    "key": "ph0-b3c",
+                    "name": "Rule the B3c sampling control arm",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick rules whether B3c (three draws from the full principle set, picked by majority or a fixed rule) is added as a control for B3 (Pocholo-C-4); ruling recorded in Layer 3"
+                },
+                {
+                    "key": "ph0-nophase6",
+                    "name": "Rule the branch if remediation drops phase 6",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. Rick picks (a) the learner builds C0 itself, (b) step 3 and the stop rule wait, or (c) the learner stops (Pocholo-D-2; the plan recommends (a)); ruling recorded in Sequence and gates"
+                }
+            ]
+        },
+        {
+            "phase": 1,
+            "name": "Fixture replay",
+            "steps": [
+                {
+                    "key": "ph1-pool",
+                    "name": "Decide the live pool bound and import path",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Open sub-question 4 is closed in the plan text: a bound on the live notification pool for episode_view and a ruling on importing cosa.research.preference_replay helpers from production code or moving them"
+                },
+                {
+                    "key": "ph1-episode",
+                    "name": "Build episode_view on rebuild_context",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Layer 0 acceptance holds on synthetic fixtures: as-of withholding, the three-question cut, the inferred mark; the 50-target export is a synthetic test fixture",
+                    "depends_on": [
+                        "ph1-pool"
+                    ]
+                },
+                {
+                    "key": "ph1-tables",
+                    "name": "Add principle, evidence and arm-forecast tables",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. One idempotent alembic revision creates preference_principles, preference_evidence and the arm-forecast table; it applies twice without error and refuses a second row for the same notification and arm"
+                },
+                {
+                    "key": "ph1-marker",
+                    "name": "Add the review-card marker and no-forecast switch",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Open sub-question 8 is closed; answering a marked review card yields one ruling row, zero extractor-input rows, no forecast row, zero PredictionDecision case rows, and answer_source_of does not label it human",
+                    "depends_on": [
+                        "ph1-tables"
+                    ]
+                },
+                {
+                    "key": "ph1-extractor",
+                    "name": "Build the extractor job",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Open sub-question 5 is closed (job class, model door); the eight extractor-rule checks, idempotent replay through the query_fn seam and the model-door probe pass; the probe reads 'not run, blocked by open sub-question 5' until it has run",
+                    "depends_on": [
+                        "ph1-tables",
+                        "ph1-episode"
+                    ]
+                },
+                {
+                    "key": "ph1-harness",
+                    "name": "Plug arms into replay_loop.replay",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. replay is extended to hand an arm its episode_view and as-of principles and summarize pairs arms through a run whose engine records are the arm's; no second harness exists"
+                },
+                {
+                    "key": "ph1-replay",
+                    "name": "Replay the 50-target fixture in time order",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Replay runs, tables fill, counts repeat on a second run, and no forecast uses evidence answered or extracted after its ask; the real-data half runs in the main checkout with --require-local-data and its summary line is on the row",
+                    "depends_on": [
+                        "ph1-episode",
+                        "ph1-tables",
+                        "ph1-extractor",
+                        "ph1-harness"
+                    ]
+                },
+                {
+                    "key": "ph1-list",
+                    "name": "Rick reads the principles and prunes dimensions",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. whether an extracted principle truly states his preference is his judgment, there is no oracle; Rick reads the list and prunes the dimension vocabulary (open sub-question 1)",
+                    "depends_on": [
+                        "ph1-replay"
+                    ]
+                },
+                {
+                    "key": "ph1-done",
+                    "name": "Layers 0 and 1: closing gate",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Done means holds: unit tier green for the changed files, per-file coverage command exits 0, run-census-guards.sh green with any new e2e file in src/tests/e2e_ui/partition/, a reviewer seat's Merge, and every conditional check run or reported 'not run, blocked by <item>'",
+                    "depends_on": [
+                        "ph1-replay"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 2,
+            "name": "Inventory",
+            "steps": [
+                {
+                    "key": "ph2-size",
+                    "name": "Size the corpus and set gate numbers",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. The remediation inventory output is read, the corpus is sized per interaction type, and layer 2's fields-per-feature and sessions thresholds and layer 3's open-text target count are proposed with the counts behind them"
+                },
+                {
+                    "key": "ph2-accept",
+                    "name": "Rick accepts the gate numbers",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. the thresholds are judgments (layer 2 starts at 20 fields from 5 sessions, layer 3 at 20 open-text targets)",
+                    "depends_on": [
+                        "ph2-size"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 3,
+            "name": "Live shadow",
+            "steps": [
+                {
+                    "key": "ph3-writer",
+                    "name": "Write arm forecasts in the ask-time commit",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. The displayed arm's sibling row is written in the same commit as its prediction_log row; a sibling failure rolls both back and returns False; the reconciliation check (every prediction_log row has its displayed-arm sibling) catches a planted missing row; waits on open sub-question 6's ruling",
+                    "depends_on": [
+                        "ph0-hook",
+                        "ph1-tables"
+                    ]
+                },
+                {
+                    "key": "ph3-b1",
+                    "name": "Make B1's second call per ask",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. The learner makes B1's call with the principle block behind its own switch and its own concurrency cap; same model and prompt as C0 apart from the block; per-arm timeliness is reported with any cap effect named; waits on remediation phase 6 and reads 'not run, blocked by phase 6' until then",
+                    "depends_on": [
+                        "ph3-writer",
+                        "ph1-extractor"
+                    ]
+                },
+                {
+                    "key": "ph3-draft",
+                    "name": "Store the draft answer at reveal",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. One optional draft field on the seen route, one new nullable prediction_log column by an idempotent alembic revision; exposure rules pass on synthetic rows; the Playwright test reads 'not run, blocked by remediation phase 5' until the client call lands; npm run build and the ?v= bump are run by the implementing seat"
+                },
+                {
+                    "key": "ph3-report",
+                    "name": "Produce the per-arm summary",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. One per-arm summary carries timeliness, the late flag and the switch rate; on a committed synthetic cohort its counts equal literal counts and a direct SQL count",
+                    "depends_on": [
+                        "ph3-writer"
+                    ]
+                },
+                {
+                    "key": "ph3-done",
+                    "name": "Live shadow: closing gate",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Done means holds: unit tier green for the changed files, per-file coverage command exits 0, run-census-guards.sh green with any new e2e file in src/tests/e2e_ui/partition/, a reviewer seat's Merge, and every conditional check run or reported 'not run, blocked by <item>'",
+                    "depends_on": [
+                        "ph3-b1",
+                        "ph3-draft",
+                        "ph3-report"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 4,
+            "name": "Archive replay",
+            "steps": [
+                {
+                    "key": "ph4-freeze",
+                    "name": "Freeze choices before the evaluation window",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Join rule, neighbour count, k, lag figure, retrieval bound and the date-stamped vocabulary version are frozen with the plan's sha recorded on the row before the first evaluation replay"
+                },
+                {
+                    "key": "ph4-run",
+                    "name": "Replay B1, C0, A1 and A0 on the same asks",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Each pairing's summarize result exists with a denominator, the discordant pairs and a verdict word, reported with coverage and accuracy on answered asks; real-ask rows stay in local_data; waits on remediation item 4",
+                    "depends_on": [
+                        "ph4-freeze"
+                    ]
+                },
+                {
+                    "key": "ph4-read",
+                    "name": "Rick reads the verdict against the stop rule",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. what the verdict means for the stop rule is his design call; if B1 does not beat C0 decisively on novel multiple-choice families and on text, the plan stops before layer 2",
+                    "depends_on": [
+                        "ph4-run"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 5,
+            "name": "Layer 2 reranker",
+            "steps": [
+                {
+                    "key": "ph5-gate",
+                    "name": "Check the layer 2 gate",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. B1 beating C0 on replay and the evidence counts are computed by AI, but the go to start is Rick's design call"
+                },
+                {
+                    "key": "ph5-pad",
+                    "name": "Extend the BLR class with a padding method",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. The class pads w, H_inv and the feature sum and sets n_features; predictions on old features are unchanged, a stored n-feature state loads into n+1, and an update with an n+1 vector succeeds after the pad",
+                    "depends_on": [
+                        "ph5-gate"
+                    ]
+                },
+                {
+                    "key": "ph5-state",
+                    "name": "Add the per-owner reranker state table",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. A new table keyed by owner holds the serialised model and its index map with its own writer, never update_after_ratification; migration applies twice and the state round-trips to equal predictions",
+                    "depends_on": [
+                        "ph5-gate"
+                    ]
+                },
+                {
+                    "key": "ph5-compare",
+                    "name": "Build comparisons and the labelling pass",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. One comparison per answered field (chosen against the mean of the unchosen); one cached labelling call per field through harness_runner.cached; a write-in is labelled through the extractor's dimensions",
+                    "depends_on": [
+                        "ph5-pad"
+                    ]
+                },
+                {
+                    "key": "ph5-rank",
+                    "name": "Rank, abstain and rebuild by replay",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Margin is abs(w . (phi1 - phi2)); abstain when margin/uncertainty is under r (starts at 1.0); no extra question, no trust write, no evidence row; a dimension merge or prune rebuilds the model by replay; disabling the reranker returns B1's forecasts exactly through the recorded-response seam",
+                    "depends_on": [
+                        "ph5-pad",
+                        "ph5-state",
+                        "ph5-compare"
+                    ]
+                },
+                {
+                    "key": "ph5-replay",
+                    "name": "Replay B2 against B1",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. B2's reranker is a fresh instance updated in time order from comparisons answered at or before each ask; the summarize result exists with a denominator, the discordant pairs and a verdict word",
+                    "depends_on": [
+                        "ph5-rank",
+                        "ph4-read"
+                    ]
+                },
+                {
+                    "key": "ph5-done",
+                    "name": "Layer 2: closing gate",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Done means holds: unit tier green for the changed files, per-file coverage command exits 0, run-census-guards.sh green with any new e2e file in src/tests/e2e_ui/partition/, a reviewer seat's Merge, and every conditional check run or reported 'not run, blocked by <item>'",
+                    "depends_on": [
+                        "ph5-replay"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 6,
+            "name": "Layer 3 best-of-N",
+            "steps": [
+                {
+                    "key": "ph6-gate",
+                    "name": "Check the layer 3 gate",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "owner_role": "operator",
+                    "acceptance": "EXECUTOR: HUMAN Rick's design call. the item-10 rubric landing and the open-text target count are checked by AI, but the number and the go are Rick's design call; the gate stays HUMAN until he states a number"
+                },
+                {
+                    "key": "ph6-build",
+                    "name": "Build generation and selection",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Three candidates from three distinct principle subsets, each with its stances on the applicable dimensions from the layer 1 call; the selector returns the top candidate unless the margin is within uncertainty; a candidate ready after the answer is flagged late",
+                    "depends_on": [
+                        "ph6-gate",
+                        "ph5-done"
+                    ]
+                },
+                {
+                    "key": "ph6-replay",
+                    "name": "Replay B3 against B2 (and B3c if ruled)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. The summarize result for B3 against B2 exists with a denominator, the discordant pairs and a verdict word; blinded intent agreement runs once remediation item 10 exists and reads 'not run, blocked by item 10' until then; B3c is run only if Rick adds it",
+                    "depends_on": [
+                        "ph6-build"
+                    ]
+                },
+                {
+                    "key": "ph6-done",
+                    "name": "Layer 3: closing gate",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "owner_role": "implementer",
+                    "acceptance": "EXECUTOR: AI. Done means holds: unit tier green for the changed files, per-file coverage command exits 0, run-census-guards.sh green with any new e2e file in src/tests/e2e_ui/partition/, a reviewer seat's Merge, and every conditional check run or reported 'not run, blocked by <item>'",
+                    "depends_on": [
+                        "ph6-replay"
+                    ]
+                }
+            ]
+        }
+    ]
+}
