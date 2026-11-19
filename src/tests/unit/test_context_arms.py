@@ -220,12 +220,65 @@ def test_history_arm_ignores_unanswered_and_non_question_notes():
     assert arm_text( "Q+H", target, context, ids ) == ( "message of target", "arm_input_absent" )
 
 
-def test_history_arm_ignores_answers_linked_only_through_sender():
+def _sender_note( minutes, **extra ):
+    """
+    Build an earlier question from the target's own sender, answered just before the ask.
+
+    Requires:
+        - minutes is a number, negative for earlier
+
+    Ensures:
+        - returns a notification dict with the same full sender id as the target
+    """
+    fields = { "sender_id": SENDER, "response_requested": True, "response_value": extra.pop( "value", "yes" ),
+               "responded_at": ( T0 - timedelta( minutes=1 ) ).isoformat() }
+    fields.update( extra )
+    return _note( fields.pop( "note_id", "prev" ), minutes, **fields )
+
+
+def test_history_arm_falls_back_to_an_answer_from_the_same_session_within_the_window():
     target       = _note( "target", 0, sender_id=SENDER )
-    earlier      = _note( "prev", -10, sender_id=SENDER, response_requested=True, response_value="yes", responded_at=T0.isoformat() )
-    context, ids = _ctx( target, [ earlier ] )
+    context, ids = _ctx( target, [ _sender_note( -90 ) ] )
     assert context[ "attachments" ][ 0 ][ "tier" ] == "sender"
+    assert arm_text( "Q+H", target, context, ids ) == ( "message of target\n\nPrevious answer in this session: message of prev -> yes", None )
+
+
+def test_history_arm_session_answer_outside_the_window_is_not_used():
+    target       = _note( "target", 0, sender_id=SENDER )
+    context, ids = _ctx( target, [ _sender_note( -121 ) ] )
+    assert context[ "context_state" ] == "reconstructed"
     assert arm_text( "Q+H", target, context, ids ) == ( "message of target", "arm_input_absent" )
+
+
+def test_history_arm_session_answer_exactly_at_the_window_edge_is_used():
+    target       = _note( "target", 0, sender_id=SENDER )
+    context, ids = _ctx( target, [ _sender_note( -120 ) ] )
+    assert "in this session" in arm_text( "Q+H", target, context, ids )[ 0 ]
+
+
+def test_history_arm_uses_a_session_tier_answer_from_another_sender_of_the_same_session():
+    target       = _note( "target", 0, sender_id=SENDER )
+    other        = _sender_note( -30, sender_id="other.agent@lupin.deepily.ai#ab12cd34" )
+    context, ids = _ctx( target, [ other ] )
+    assert context[ "attachments" ][ 0 ][ "tier" ] == "session"
+    assert "in this session: message of prev -> yes" in arm_text( "Q+H", target, context, ids )[ 0 ]
+
+
+def test_history_arm_thread_answer_wins_over_a_later_session_answer():
+    target       = _note( "target", 0, thread_id="t1", sender_id=SENDER )
+    thread_prev  = _prev( note_id="th", minutes=-100, answered_minutes=-90, value="thread-answer", sender_id="x@y#zzzz" )
+    session_prev = _sender_note( -10, note_id="se", value="session-answer" )
+    context, ids = _ctx( target, [ thread_prev, session_prev ] )
+    text = arm_text( "Q+H", target, context, ids )[ 0 ]
+    assert "on this thread" in text and text.endswith( "thread-answer" )
+
+
+def test_history_arm_session_answer_wins_by_latest_answer_among_session_candidates():
+    target       = _note( "target", 0, sender_id=SENDER )
+    early        = _sender_note( -60, note_id="early", value="early-answer", responded_at=( T0 - timedelta( minutes=50 ) ).isoformat() )
+    late         = _sender_note( -70, note_id="late", value="late-answer" )
+    context, ids = _ctx( target, [ early, late ] )
+    assert arm_text( "Q+H", target, context, ids )[ 0 ].endswith( "late-answer" )
 
 
 def test_history_arm_takes_the_answer_given_last_and_breaks_ties_by_id():
