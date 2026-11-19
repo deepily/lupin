@@ -29,6 +29,7 @@ Rick's replies are recorded word for word in the [rulings record](src/rnd/v0.2.4
 - 2026-11-19 — **Where are contested principles resolved?** → **A capped, batched card, about three a day.** Why: it reuses the ask path.
 - 2026-11-19 — **Ask-form principles?** → **Record only, for now.** Why: showing them to askers would change the questions and break comparison.
 - 2026-11-19 — **Where do the hidden arms store forecasts?** → **A sibling table keyed by card and arm** (Rick, about 14:30, card). Why: outcome and reveal stay once per card.
+- 2026-11-19 — **Which arms go in the sibling table?** → **Every arm, the displayed one flagged.** Why: the harness reads every forecast from one place.
 
 ## 📚 Decisions log 2026-11-18 (Mr. Radio 🦉 `d6956394`, build manager for preference learning; crew Sam, Rio, Tiffany, Chloé, Clayton, Maya, all reaped; times Eastern)
 
