@@ -21,7 +21,7 @@ from sqlalchemy import text
 from cosa.agents.prediction_engine.history_context_rebuild import rebuild_context
 from cosa.memory.embedding_provider import get_embedding_provider
 from cosa.research.preference_replay.context_arms import ARMS, build_arm_texts, read_arm_inputs
-from cosa.research.preference_replay.question_vectors import FACTS_SQL, PROBE_SIZE, generate, write_side_file
+from cosa.research.preference_replay.question_vectors import BATCH_SIZE, FACTS_SQL, PROBE_SIZE, generate, write_side_file
 from cosa.rest.db.database import get_db
 from cosa.utils.file_hash import file_sha256
 
@@ -74,7 +74,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     Make one arm's side file from the command line.
 
     Requires:
-        - argv holds --arm (one of the arm names), --frozen-ids and --out, and optionally --probe-only
+        - argv holds --arm (one of the arm names), --frozen-ids and --out, and optionally --probe-only and --batch-size, a positive count
 
     Ensures:
         - the database is read in a read-only transaction and never written
@@ -92,6 +92,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     parser.add_argument( "--frozen-ids", required=True )
     parser.add_argument( "--out", required=True )
     parser.add_argument( "--probe-only", action="store_true" )
+    parser.add_argument( "--batch-size", type=int, default=BATCH_SIZE, help="texts per embedding call; lower it when the model server runs out of memory" )
     args     = parser.parse_args( argv )
     ids      = load_frozen_ids( args.frozen_ids )
     provider = ( provider_factory or get_embedding_provider )()
@@ -104,7 +105,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     contexts = { target[ "id" ]: rebuild_context( target, pool ) for target in targets }
     built    = build_arm_texts( args.arm, targets, contexts, notes_by_id )
     printer( f"arm {args.arm}: {built[ 'counts' ]}" )
-    result   = generate( [ ( ask_id, built[ "texts" ][ ask_id ] ) for ask_id in ids ], provider, probe_only=args.probe_only, clock=clock )
+    result   = generate( [ ( ask_id, built[ "texts" ][ ask_id ] ) for ask_id in ids ], provider, batch_size=args.batch_size, probe_only=args.probe_only, clock=clock )
     projected = result[ "probe_seconds" ] / min( PROBE_SIZE, len( ids ) ) * len( ids )
     printer( f"probe: {min( PROBE_SIZE, len( ids ) )} texts in {result[ 'probe_seconds' ]:.2f}s, projected {projected:.1f}s for {len( ids )}" )
     if args.probe_only: return 0
