@@ -296,3 +296,18 @@ def test_a_column_with_a_tune_note_reports_final_window_figures_only( columns ):
     assert rows[ "threshold" ] == 0.6
     plain = bar.column_rows( columns[ 2 ] )
     assert plain[ "tune correct: yes_no" ] == 25
+
+
+@pytest.mark.parametrize( "first,second,key,message", [
+    ( 0, 1, "ask_ids", "columns 1 and 2 name different asks" ),
+    ( 2, 3, "ask_ids", "columns 3 and 4 name different asks" ),
+    ( 0, 3, "final_ids", "columns 1 and 4 do not score the same final-window asks" ),
+] )
+@pytest.mark.parametrize( "direction", [ "first_has_extra", "second_has_extra" ] )
+def test_each_id_equality_refuses_a_difference_in_either_direction( columns, first, second, key, message, direction ):
+    """Each equality is pinned both ways, so a subset test in either direction fails."""
+    holder = first if direction == "first_has_extra" else second
+    columns[ holder ][ key ] = columns[ holder ][ key ] + [ "extra" ]
+    if holder == 1: columns[ 2 ][ key ] = columns[ 2 ][ key ] + [ "extra" ]
+    with pytest.raises( bar.ReportMismatch, match=message ):
+        bar.check_columns( columns )
