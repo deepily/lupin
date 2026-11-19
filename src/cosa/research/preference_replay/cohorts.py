@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 import sqlalchemy as sa
 
+from cosa.agents.prediction_engine.review_card import REVIEW_CARD_SOURCE, is_review_card
 from cosa.rest.db.repositories.prediction_log_repository import (
     TEST_OVERRIDE_SOURCE, legacy_confidence_clause, legacy_similarity_clause )
 from cosa.rest.postgres_models import Notification, PredictionLog
@@ -93,16 +94,19 @@ def scored_rows( session, response_type: str, window: Optional[str] = None ) -> 
 HUMAN_SOURCE = "ui"
 
 
-def answer_source_of( response_value: Any ) -> str:
+def answer_source_of( response_value: Any, response_options: Any = None ) -> str:
     """
-    Label an answer human when the notification says it came from the UI, otherwise unknown.
+    Name where an answer came from: review card, human or unknown.
 
     Requires:
         - response_value is a dict, a JSON string, or None
+        - response_options is the ask's stored schema (dict, JSON string or None); None means an unmarked ask
 
     Ensures:
-        - returns "human" only when the source field equals "ui"
+        - returns "review_card" whenever the ask carries the marker, whatever the stored answer says
+        - otherwise returns "human" only when the source field equals "ui"
     """
+    if is_review_card( response_options ): return REVIEW_CARD_SOURCE
     if isinstance( response_value, str ): response_value = json.loads( response_value )
     if isinstance( response_value, dict ) and response_value.get( "source" ) == HUMAN_SOURCE: return "human"
     return "unknown"
@@ -168,7 +172,7 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None, *, v
             "question_embedding" : _question_vector( decision, str( row.notification_id ), vectors ),
             "created_at"         : decision.created_at if decision is not None else row.predicted_at.isoformat(),
             "owner_user_id"      : decision.owner_user_id if decision is not None else str( notification.recipient_id ),
-            "answer_source"      : decision.answer_source if decision is not None else answer_source_of( notification.response_value ),
+            "answer_source"      : decision.answer_source if decision is not None else answer_source_of( notification.response_value, notification.response_options ),
             "responded_at"       : row.responded_at,
             "title"              : notification.title,
             "message"            : notification.message,

@@ -173,3 +173,25 @@ class TestEveryAskWritesOneRowBeforeTheHint:
         """The override skips the engine in the predict branch, so the ledger fetches it itself."""
         _post( harness, prediction_hint_override=json.dumps( { "predicted_value": "no" } ) )
         assert len( wired[ "forecasts" ] ) == 1
+
+
+class TestAReviewCardIsNeverForecast:
+    """A card marked as a review card gets no forecast and no ledger row."""
+
+    _MARKED = json.dumps( { "review_card": True } )
+
+    def test_a_marked_ask_calls_no_predictor_and_writes_no_row_but_the_card_is_still_sent( self, harness, wired ):
+        r = _post( harness, response_options=self._MARKED )
+        assert r.status_code == 200
+        assert wired[ "predict_calls" ] == [] and wired[ "forecasts" ] == [] and wired[ "yes_rate_calls" ] == []
+        hint = harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ]
+        assert hint[ "state" ] == "insufficient_evidence" and "predicted_value" not in hint, "a payload with no value in it"
+
+    def test_the_same_ask_without_the_marker_is_forecast_and_written( self, harness, wired ):
+        _post( harness, response_options=json.dumps( { "review_card": False } ) )
+        _post( harness, response_options=json.dumps( { "note": "review_card" } ) )
+        assert len( wired[ "predict_calls" ] ) == 2 and len( wired[ "forecasts" ] ) == 2
+
+    def test_a_marked_ask_is_skipped_even_with_a_test_override_hint( self, harness, wired ):
+        _post( harness, response_options=self._MARKED, prediction_hint_override=json.dumps( { "predicted_value": "yes" } ) )
+        assert wired[ "forecasts" ] == [] and wired[ "predict_calls" ] == []
