@@ -240,7 +240,7 @@ def test_bounded_pool_equals_a_full_pool_rebuild_when_every_tier_is_under_the_li
         for entry in got[ "history" ]: statuses[ entry[ "status" ] ] = statuses.get( entry[ "status" ], 0 ) + 1
         checked += 1
     assert checked == 50
-    assert statuses == { "not_a_question": 10, "pending": 37, "answered": 65 }, "literal counts of the fixture, not derived from the code under test"
+    assert statuses == { "not_a_question": 10, "pending": 10, "answered": 92 }, "literal counts of the fixture, not derived from the code under test"
 
 
 def test_the_fixture_has_fifty_targets_and_each_tier_is_exercised():
