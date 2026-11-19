@@ -241,14 +241,14 @@ def test_batch_size_sets_how_many_texts_go_in_each_call( tmp_path ):
     assert provider.calls == [ 2, 1 ] and len( load_side_file( out )[ 1 ] ) == 3
 
 
-def test_the_default_batch_is_the_generators_own_sixty_four_and_the_small_cohort_goes_in_one_call( tmp_path ):
+def test_the_default_batch_is_the_generators_own_sixty_four_and_a_small_cohort_goes_in_one_call( tmp_path ):
     assert BATCH_SIZE == 64
-    ids  = [ f"c{n}" for n in range( 70 ) ]
+    ids  = [ f"c{n}" for n in range( 100 ) ]
     rows = [ _row( ask_id, n ) for n, ask_id in enumerate( ids ) ]
     provider = _Provider()
     main( [ "--arm", "Q", "--frozen-ids", _frozen( tmp_path, ids ), "--out", str( tmp_path / "x" ) ], printer=print,
           session_factory=lambda: _Session( rows ), provider_factory=lambda: provider )
-    assert provider.calls == [ 20, 50 ]
+    assert provider.calls == [ 20, 64, 16 ]
     _, _, _, small, _ = _run( tmp_path, "Q" )
     assert small.calls == [ 3 ]
 
