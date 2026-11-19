@@ -101,6 +101,9 @@ def test_rescoring_writes_both_columns_from_one_replay_and_reads_the_ids_after_t
     assert own[ "label" ] == "Col" and "tune_note" not in own and own[ "ask_ids" ] == base[ "ask_ids" ]
     assert rescored[ "label" ] == "Four" and rescored[ "final_ids" ] == base[ "final_ids" ][ :2 ] and rescored[ "tune_note" ]
     assert rescored[ "ask_ids" ] == own[ "ask_ids" ] and lines[ 1 ].startswith( "Four: scored on 2 asks" )
+    text = ( tmp_path / "rescored.json" ).read_text( encoding="utf-8" )
+    assert text == json.dumps( rescored, indent=1, sort_keys=True ) + "\n" and text.startswith( '{\n "ask_count": ' )
+    assert [ p.name for p in tmp_path.iterdir() if p.name.endswith( ".tmp" ) ] == []
 
 
 def test_a_rescore_id_that_is_not_in_the_run_is_refused_after_the_plain_column_is_written( engine, monkeypatch, tmp_path ):
