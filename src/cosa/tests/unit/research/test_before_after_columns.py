@@ -39,21 +39,29 @@ def test_a_column_holds_every_key_and_cuts_the_run_into_windows_by_position( eng
     assert column[ "yes_no_summary" ][ "baseline" ] == "always_yes" and set( column[ "calibration" ][ "cells" ] )
 
 
-def test_rescoring_scores_the_named_asks_from_anywhere_in_the_run_and_marks_the_tune_figures( engine ):
+def test_the_windows_hold_seven_tune_asks_and_three_final_asks_with_their_own_scores_and_calibration( engine ):
+    column = build_column( _run( engine ), HEADER )
+    assert column[ "coverage" ][ "scores" ][ "tune" ][ "yes_no" ] == { "asks": 7, "correct": 6 }
+    assert column[ "coverage" ][ "scores" ][ "final" ][ "yes_no" ] == { "asks": 3, "correct": 3 }
+    assert column[ "calibration" ][ "tune_size" ] == 7 and column[ "calibration" ][ "final_size" ] == 3
+    assert column[ "yes_no_summary" ][ "asks_replayed" ] == 3
+
+
+def test_rescoring_scores_the_named_asks_from_anywhere_in_the_run_and_fits_without_them( engine ):
     run     = _run( engine )
     base    = build_column( run, HEADER )
-    chosen  = [ base[ "ask_ids" ][ 0 ], base[ "final_ids" ][ -1 ] ]
-    column  = build_column( run, HEADER, rescore_ids=chosen )
-    assert sorted( column[ "final_ids" ] ) == sorted( chosen ) and column[ "ask_ids" ] == base[ "ask_ids" ]
-    assert column[ "coverage" ][ "tune_mix" ] == {} and sum( column[ "coverage" ][ "final_mix" ].values() ) == 2
-    assert column[ "tune_note" ].startswith( "n/a" ) and column[ "calibration" ][ "final_size" ] == 2
-    assert column[ "calibration" ][ "tune_size" ] < base[ "calibration" ][ "tune_size" ] + 1
+    column  = build_column( run, HEADER, rescore_ids=[ "t0", "t4" ] )
+    assert sorted( column[ "final_ids" ] ) == [ "t0", "t4" ] and column[ "ask_ids" ] == base[ "ask_ids" ]
+    assert column[ "coverage" ][ "tune_mix" ] == {} and column[ "coverage" ][ "final_mix" ] == { "yes_no": 2 }
+    assert column[ "coverage" ][ "scores" ][ "final" ][ "yes_no" ] == { "asks": 2, "correct": 2 }
+    assert column[ "tune_note" ].startswith( "n/a" ) and column[ "yes_no_summary" ][ "asks_replayed" ] == 2
+    assert column[ "calibration" ][ "final_size" ] == 2 and column[ "calibration" ][ "tune_size" ] == 6
 
 
-def _go( engine, monkeypatch, tmp_path, extra, asks=None, name="col.json" ):
+def _go( engine, monkeypatch, tmp_path, extra, asks=None, name="col.json", setting=( "0.5", "10" ) ):
     _fake_cohort( monkeypatch, { "yes_no": asks if asks is not None else _asks( engine ), "multiple_choice": [] } )
     out, lines = tmp_path / name, []
-    main( [ "--out", str( out ), "--label", "Col", "--threshold", "0.5", "--top-k", "10" ] + extra, printer=lines.append,
+    main( [ "--out", str( out ), "--label", "Col", "--threshold", setting[ 0 ], "--top-k", setting[ 1 ] ] + extra, printer=lines.append,
           session_factory=lambda: contextlib.nullcontext( FakeSession() ), engine_factory=lambda: engine, code_sha="d" * 40 )
     return json.loads( out.read_text( encoding="utf-8" ) ), lines, out
 
@@ -113,3 +121,14 @@ def test_the_scores_and_mix_count_every_eligible_type_even_when_a_type_has_no_re
     assert columns._scores( records ) == { "yes_no": { "asks": 2, "correct": 1 }, "multiple_choice": { "asks": 0, "correct": 0 } }
     assert columns._mix( records ) == { "yes_no": 2 }
     assert columns._rows( [ { "meta": { "response_type": "yes_no", "strategy": "s", "confidence": None, "correct": True } } ] ) == []
+
+
+def test_the_command_sets_the_engine_to_the_threshold_and_top_k_it_was_given( engine, monkeypatch, tmp_path ):
+    column, _, _ = _go( engine, monkeypatch, tmp_path, [ "--stored-vectors" ], setting=( "0.7", "3" ) )
+    assert ( engine.retrieval_metric, engine.similarity_threshold, engine.cbr_top_k ) == ( "cosine", 0.7, 3 )
+    assert column[ "threshold" ] == 0.7 and column[ "top_k" ] == 3
+
+
+def test_a_correct_forecast_reads_as_true_and_a_wrong_one_as_false_in_the_calibration_rows():
+    meta = { "response_type": "yes_no", "strategy": "s", "confidence": 0.7 }
+    assert columns._rows( [ { "meta": dict( meta, correct=True ) }, { "meta": dict( meta, correct=False ) } ] ) == [ ( "yes_no", "s", 0.7, True ), ( "yes_no", "s", 0.7, False ) ]
