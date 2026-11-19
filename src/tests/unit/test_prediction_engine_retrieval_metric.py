@@ -3,10 +3,11 @@
 Unit tests for the prediction engine's retrieval metric switch.
 
 The INI key ``prediction engine retrieval metric`` chooses how the engine's three neighbour
-searches rank cases. It stays ``dot`` until the replay harness retunes the floors. All mocked,
-no DB or server, so :7999-eligible.
+searches rank cases. The replay retune froze it at ``cosine``, with the floor and top k, in
+the committed retune report. All mocked, no DB or server, so :7999-eligible.
 """
 
+import json
 import re
 from unittest.mock import MagicMock
 
@@ -51,9 +52,23 @@ def _reset_singleton():
 
 class TestRetrievalMetricSwitch:
 
-    def test_committed_ini_value_is_dot( self ):
-        root = cu.get_project_root()
-        assert _ini_value( root + "/src/conf/lupin-app.ini", "prediction engine retrieval metric" ) == "dot"
+    def test_committed_ini_values_equal_the_frozen_retune_report( self ):
+        root     = cu.get_project_root()
+        ini      = root + "/src/conf/lupin-app.ini"
+        with open( root + "/src/conf/prediction-retune-report.json", encoding="utf-8" ) as handle: report = json.load( handle )
+        frozen   = report[ "frozen_settings" ]
+        assert sorted( frozen ) == [ "prediction engine cbr similarity threshold", "prediction engine cbr top k", "prediction engine retrieval metric" ]
+        for key, value in frozen.items(): assert _ini_value( ini, key ) == str( value ), key
+        assert ( frozen[ "prediction engine cbr similarity threshold" ], frozen[ "prediction engine cbr top k" ], frozen[ "prediction engine retrieval metric" ] ) == ( 0.5, 10, "cosine" )
+        assert ( report[ "best_point" ][ "threshold" ], report[ "best_point" ][ "top_k" ] ) == ( 0.5, 10 )
+        assert report[ "tune_cohort_sha256" ] == "63f19406bae9696f308504fd7ac35b1de75b240bc04f1949ab6b8d99e8ba87bd"
+        assert ( report[ "tune_size" ], report[ "final_size" ], report[ "eligible" ] ) == ( 911, 391, 1302 )
+
+    def test_the_open_ended_keys_are_untouched_by_the_freeze( self ):
+        ini = cu.get_project_root() + "/src/conf/lupin-app.ini"
+        assert _ini_value( ini, "prediction engine open ended cbr top k" ) == "5"
+        assert _ini_value( ini, "prediction engine open ended cbr threshold" ) == "0.85"
+        assert _ini_value( ini, "prediction engine open ended match threshold" ) == "0.75"
 
     def test_key_has_an_explainer( self ):
         root = cu.get_project_root()
