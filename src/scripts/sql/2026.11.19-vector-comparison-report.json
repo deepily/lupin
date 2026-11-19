@@ -1,0 +1,56 @@
+{
+  "all_with_a_stored_vector": {
+    "asks": 1305,
+    "at_or_above_0.999": 1305,
+    "bands": {
+      "0.9 to 0.99": 0,
+      "0.99 to 0.999": 0,
+      "at or above 0.999": 1305,
+      "below 0.9": 0
+    },
+    "cosine": {
+      "max": 0.9999999999998047,
+      "median": 0.9999999999992315,
+      "min": 0.9999999999977054,
+      "n": 1305
+    },
+    "norm_ratio": {
+      "max": 1.0000005091117223,
+      "median": 1.0000000017802553,
+      "min": 0.9999997143553575,
+      "n": 1305
+    }
+  },
+  "controls": {
+    "mismatched_max_cosine": 0.9999999999998047,
+    "mismatched_median_cosine": 0.49715854891747446,
+    "run_vs_side_file_min_cosine": 0.9999999999990071,
+    "twice_now_min_cosine": 0.9999999999999999
+  },
+  "model": "nomic-ai/nomic-embed-text-v1.5",
+  "revision": "e9b6763023c676ca8431644204f50c2b100d9aab",
+  "side_file_sha256": "f3475c6b5ca5621b95df3afb7787e669cd99ecbc6c231ccb240d342af8cec5fb",
+  "stored_question_differs_from_message": 0,
+  "stored_question_equals_message": {
+    "asks": 1305,
+    "at_or_above_0.999": 1305,
+    "bands": {
+      "0.9 to 0.99": 0,
+      "0.99 to 0.999": 0,
+      "at or above 0.999": 1305,
+      "below 0.9": 0
+    },
+    "cosine": {
+      "max": 0.9999999999998047,
+      "median": 0.9999999999992315,
+      "min": 0.9999999999977054,
+      "n": 1305
+    },
+    "norm_ratio": {
+      "max": 1.0000005091117223,
+      "median": 1.0000000017802553,
+      "min": 0.9999997143553575,
+      "n": 1305
+    }
+  }
+}
