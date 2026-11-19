@@ -14,6 +14,7 @@ Run it from the repository root, with the config and database the report should 
 import argparse
 import collections
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -85,6 +86,37 @@ def restrict_to_ids( asks: List[Dict[str, Any]], ids_path: str ) -> Tuple[List[D
     if absent: raise ValueError( f"{len( absent )} listed ids are not in the cohort, first: {absent[ :5 ]}" )
     keep = set( wanted )
     return [ ask for ask in asks if ask[ "id" ] in keep ], { "only_ids_file": ids_path, "only_ids_sha256": file_sha256( ids_path ), "only_ids_count": len( keep ) }
+
+
+class ControlMismatch( RuntimeError ):
+    """The control run did not reproduce the committed baseline."""
+
+
+def write_control_ids( report: Dict[str, Any], asks: List[Dict[str, Any]], path: str, expect_replayable: int, expect_final_correct: int ) -> None:
+    """
+    Write the replayable ask ids, but only when the run reproduces the committed baseline.
+
+    Requires:
+        - report is what run_report returns; asks is the cohort it replayed
+
+    Ensures:
+        - checks that the replayable count equals expect_replayable and that the frozen point
+          (threshold 0.5, top k 10) has expect_final_correct correct forecasts in the final window
+        - on a match, writes the replayable ids one per line in cohort order, through a temporary name
+        - on a mismatch, writes nothing
+
+    Raises:
+        - ControlMismatch naming each figure that differs, the measured value and the expected one
+    """
+    point    = next( point for point in report[ "grid_points" ] if point[ "threshold" ] == 0.5 and point[ "top_k" ] == 10 )
+    measured = { "replayable": report[ "eligible" ], "final_correct": point[ "final_correct" ] }
+    expected = { "replayable": expect_replayable, "final_correct": expect_final_correct }
+    wrong    = [ f"{name}: measured {measured[ name ]}, expected {expected[ name ]}" for name in expected if measured[ name ] != expected[ name ] ]
+    if wrong: raise ControlMismatch( "the control run does not reproduce the baseline; " + "; ".join( wrong ) )
+    scratch = path + ".part"
+    with open( scratch, "w", encoding="utf-8" ) as handle:
+        for ask in eligible_asks( asks ): handle.write( ask[ "id" ] + "\n" )
+    os.replace( scratch, path )
 
 
 def check_vectors_cover( asks: List[Dict[str, Any]], header: Dict[str, Any] ) -> None:
@@ -193,15 +225,20 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     Run the retune from the command line and write the report file.
 
     Requires:
-        - argv holds --out, the report path, an optional --only-ids, the committed list of ids to keep, and one of --vectors, the side file, or --stored-vectors, the case rows' own vectors; the factories and code_sha are injected by tests and default to the real ones
+        - argv holds --out, the report path, and one of --vectors, the side file, or --stored-vectors, the case rows' own vectors
+        - an optional --only-ids names a committed list of ids to keep
+        - an optional --control-ids-out needs --expect-replayable and --expect-final-correct
+        - the factories and code_sha are injected by tests and default to the real ones
 
     Ensures:
         - reads the cohort read-only, runs the grid and the sweep, writes the report with sorted keys
+        - with --control-ids-out, the report is written first and the id file only when the baseline is reproduced
         - the provenance names the exact command line, the code sha, the sha256 of this file, the start time, and the vector source: the stored vectors, or the side file with its sha256, model, revision and reject count
         - returns 0 after the report is written, and prints the frozen settings
 
     Raises:
         - ValueError when no ask is eligible
+        - ControlMismatch when a control run does not reproduce its expected figures
     """
     parser = argparse.ArgumentParser( description="Run the retune over the real cohort and write its report." )
     parser.add_argument( "--out", required=True )
@@ -209,7 +246,12 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
     source.add_argument( "--vectors", help="the question-vector side file every ask's vector is read from" )
     source.add_argument( "--stored-vectors", action="store_true", help="read each vector from its case row, as the control run does" )
     parser.add_argument( "--only-ids", help="a JSON-lines file of ask ids; the cohort is cut to exactly these, as the control run needs" )
+    parser.add_argument( "--control-ids-out", help="write the replayable ids here, only if the baseline is reproduced; needs both --expect options" )
+    parser.add_argument( "--expect-replayable", type=int, help="the replayable count the control must reproduce" )
+    parser.add_argument( "--expect-final-correct", type=int, help="the final-window correct count at threshold 0.5 and top k 10 the control must reproduce" )
     args   = parser.parse_args( argv )
+    if args.control_ids_out is not None and ( args.expect_replayable is None or args.expect_final_correct is None ):
+        parser.error( "--control-ids-out needs --expect-replayable and --expect-final-correct" )
     session_factory = session_factory or get_db
     engine_factory  = engine_factory or _open_engine
     driver_sha256 = file_sha256( __file__ )
@@ -236,6 +278,7 @@ def main( argv: Optional[Sequence[str]] = None, printer: Callable = print, sessi
         json.dump( report, handle, indent=2, sort_keys=True )
         handle.write( "\n" )
     printer( json.dumps( report[ "frozen_settings" ], sort_keys=True ) )
+    if args.control_ids_out is not None: write_control_ids( report, asks, args.control_ids_out, args.expect_replayable, args.expect_final_correct )
     return 0
 
 

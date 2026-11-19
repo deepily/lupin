@@ -16,7 +16,7 @@ import cosa.research.preference_replay.retune_run as retune_run
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.research.preference_replay.question_vectors import write_side_file
-from cosa.research.preference_replay.retune_run import build_report, check_vectors_cover, restrict_to_ids, main, read_cohort, run_report
+from cosa.research.preference_replay.retune_run import build_report, ControlMismatch, check_vectors_cover, restrict_to_ids, write_control_ids, main, read_cohort, run_report
 from cosa.tests.unit.research.test_retune import SHA, _asks, engine  # noqa: F401 - engine is a fixture
 
 READ_AT = datetime( 2026, 11, 19, 0, 36, 39, tzinfo=timezone.utc )
@@ -104,6 +104,58 @@ def test_giving_both_a_side_file_and_the_stored_switch_is_a_usage_error( tmp_pat
     assert raised.value.code == 2
 
 
+def _control_report( asks, engine, final_correct=None ):
+    """A report from a real replay, and the final-window correct count at the frozen point."""
+    report = run_report( asks, FACTS, engine, RUN )
+    point  = next( p for p in report[ "grid_points" ] if p[ "threshold" ] == 0.5 and p[ "top_k" ] == 10 )
+    return report, point[ "final_correct" ]
+
+
+def test_the_control_writes_the_replayable_ids_in_cohort_order_only_when_both_figures_match( engine, tmp_path ):
+    asks = _asks( engine ) + [ dict( _asks( engine )[ 0 ], id="no-vector", question_embedding=None ) ]
+    report, final_correct = _control_report( asks, engine )
+    path = tmp_path / "ids.txt"
+    write_control_ids( report, asks, str( path ), 10, final_correct )
+    assert path.read_text( encoding="utf-8" ).split() == [ ask[ "id" ] for ask in asks[ :10 ] ]
+    assert [ p.name for p in tmp_path.iterdir() ] == [ "ids.txt" ]
+
+
+@pytest.mark.parametrize( "replayable_delta, correct_delta, named", [ ( 1, 0, "replayable: measured 10, expected 11" ),
+                                                                       ( 0, 1, "final_correct: measured" ),
+                                                                       ( 1, 1, "replayable: measured 10, expected 11; final_correct" ) ] )
+def test_the_control_writes_nothing_and_names_each_figure_that_differs( engine, tmp_path, replayable_delta, correct_delta, named ):
+    asks = _asks( engine )
+    report, final_correct = _control_report( asks, engine )
+    path = tmp_path / "ids.txt"
+    with pytest.raises( ControlMismatch, match="does not reproduce the baseline" ) as raised:
+        write_control_ids( report, asks, str( path ), 10 + replayable_delta, final_correct + correct_delta )
+    assert named in str( raised.value ) and list( tmp_path.iterdir() ) == []
+
+
+def test_the_command_writes_the_control_ids_after_the_report_and_refuses_a_wrong_expectation( engine, monkeypatch, tmp_path ):
+    asks = _asks( engine )
+    _fake_cohort( monkeypatch, { "yes_no": asks, "multiple_choice": [] } )
+    _, final_correct = _control_report( asks, engine )
+    base = [ "--stored-vectors" ]
+    kwargs = dict( printer=lambda line: None, session_factory=lambda: contextlib.nullcontext( FakeSession() ), engine_factory=lambda: engine, code_sha="d" * 40 )
+    good = tmp_path / "ids.txt"
+    assert main( [ "--out", str( tmp_path / "r1.json" ) ] + base + [ "--control-ids-out", str( good ), "--expect-replayable", "10",
+                                                                    "--expect-final-correct", str( final_correct ) ], **kwargs ) == 0
+    assert len( good.read_text( encoding="utf-8" ).split() ) == 10
+    bad = tmp_path / "bad.txt"
+    with pytest.raises( ControlMismatch ):
+        main( [ "--out", str( tmp_path / "r2.json" ) ] + base + [ "--control-ids-out", str( bad ), "--expect-replayable", "11",
+                                                                "--expect-final-correct", str( final_correct ) ], **kwargs )
+    assert ( tmp_path / "r2.json" ).exists() and not bad.exists()
+
+
+@pytest.mark.parametrize( "extra", [ [ "--expect-replayable", "1" ], [ "--expect-final-correct", "1" ], [] ] )
+def test_the_control_output_without_both_expectations_is_a_usage_error( tmp_path, extra, capsys ):
+    with pytest.raises( SystemExit ) as raised:
+        main( [ "--out", str( tmp_path / "r.json" ), "--stored-vectors", "--control-ids-out", str( tmp_path / "i.txt" ) ] + extra )
+    assert raised.value.code == 2 and "--control-ids-out needs --expect-replayable and --expect-final-correct" in capsys.readouterr().err
+
+
 def _ids_file( tmp_path, ids ):
     path = tmp_path / "ids.jsonl"
     path.write_text( "".join( json.dumps( { "id": ask_id } ) + "\n" for ask_id in ids ) + "\n", encoding="utf-8" )
@@ -111,12 +163,18 @@ def _ids_file( tmp_path, ids ):
 
 
 def test_the_id_list_cuts_the_cohort_to_exactly_those_asks_in_cohort_order_and_refuses_an_absent_id( tmp_path ):
-    asks = [ { "id": name } for name in ( "a", "b", "c", "d" ) ]
-    kept, facts = restrict_to_ids( asks, _ids_file( tmp_path, [ "d", "b" ] ) )
-    assert [ ask[ "id" ] for ask in kept ] == [ "b", "d" ] and facts[ "only_ids_count" ] == 2 and facts[ "only_ids_file" ].endswith( "ids.jsonl" )
+    asks = [ { "id": name } for name in ( "d", "c", "b", "a" ) ]
+    kept, facts = restrict_to_ids( asks, _ids_file( tmp_path, [ "a", "d", "b" ] ) )
+    assert [ ask[ "id" ] for ask in kept ] == [ "d", "b", "a" ] and facts[ "only_ids_count" ] == 3 and facts[ "only_ids_file" ].endswith( "ids.jsonl" )
     assert len( facts[ "only_ids_sha256" ] ) == 64
     with pytest.raises( ValueError, match=r"1 listed ids are not in the cohort, first: \['zz'\]" ):
         restrict_to_ids( asks, _ids_file( tmp_path, [ "a", "zz" ] ) )
+
+
+def test_a_duplicate_id_in_the_list_keeps_the_ask_once_and_counts_it_once( tmp_path ):
+    asks = [ { "id": name } for name in ( "a", "b", "c" ) ]
+    kept, facts = restrict_to_ids( asks, _ids_file( tmp_path, [ "b", "a", "b" ] ) )
+    assert [ ask[ "id" ] for ask in kept ] == [ "a", "b" ] and facts[ "only_ids_count" ] == 2
 
 
 def test_the_command_replays_only_the_listed_ids_and_names_the_list( engine, monkeypatch, tmp_path ):
