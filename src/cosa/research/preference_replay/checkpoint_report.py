@@ -87,7 +87,7 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
     Ensures:
         - with coverage, a section right after the header states the replayable count out of the cohort count, the
           share with no stored vector, and the answer-type mix of the tune and final windows
-        - with coverage scores, the predictor's correct count and correct per 100 asks for each type in each window
+        - with coverage scores, the predictor's correct count and correct per 100 asks for each type in each window; a type with no asks in a window reads n/a
         - returns text holding, per type, each baseline against the predictor with denominators, paired
           differences, intervals and unique families, the deferral verdict, the calibration cells, the findings,
           the cohort sha, the settings commit and every cohort id
@@ -115,7 +115,8 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
             for window in ( "tune", "final" ):
                 for kind in kinds:
                     asks, correct = coverage[ "scores" ][ window ][ kind ][ "asks" ], coverage[ "scores" ][ window ][ kind ][ "correct" ]
-                    lines.append( f"| {window} | {kind} | {asks} | {correct} | {100.0 * correct / asks:.1f} |" )
+                    rate = f"{100.0 * correct / asks:.1f}" if asks > 0 else "n/a"
+                    lines.append( f"| {window} | {kind} | {asks} | {correct} | {rate} |" )
         lines.append( "" )
     for name, rule in deferral( final_window_asks ).items():
         lines += [ f"## {name}", "", f"Eligible final-window asks: {rule[ 'asks' ]}. " +
