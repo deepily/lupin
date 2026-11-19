@@ -16,7 +16,7 @@ import cosa.research.preference_replay.retune_run as retune_run
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
 from cosa.research.preference_replay.question_vectors import write_side_file
-from cosa.research.preference_replay.retune_run import build_report, check_vectors_cover, main, read_cohort, run_report
+from cosa.research.preference_replay.retune_run import build_report, check_vectors_cover, restrict_to_ids, main, read_cohort, run_report
 from cosa.tests.unit.research.test_retune import SHA, _asks, engine  # noqa: F401 - engine is a fixture
 
 READ_AT = datetime( 2026, 11, 19, 0, 36, 39, tzinfo=timezone.utc )
@@ -46,11 +46,11 @@ class FakeSession:
     def rollback( self ): self.rolled_back = True
 
 
-def _side_file( tmp_path ):
+def _side_file( tmp_path, rejects=() ):
     """A real side file, written through write_side_file, holding one vector."""
     path   = str( tmp_path / "vectors.json" )
     result = { "stamp": { "model": "m", "revision": "r1", "dtype": "float16", "dimensions": 768 }, "vectors": { "a": [ 3.0, 4.0 ] },
-               "rejects": [], "probe_seconds": 1.0, "total_seconds": 2.0, "texts": 1 }
+               "rejects": list( rejects ), "probe_seconds": 1.0, "total_seconds": 2.0, "texts": 1 }
     write_side_file( path, result, { "database": "lupin_db_dev" } )
     return path
 
@@ -84,6 +84,49 @@ def test_the_step_9_run_script_calls_read_cohort_with_one_argument_and_that_read
     monkeypatch.setattr( retune_run, "cohort_asks", lambda session, kind, vectors: seen.append( vectors ) or [] )
     read_cohort( FakeSession() )
     assert seen == [ None, None ]
+
+
+def test_a_side_file_with_one_reject_reports_one_reject( engine, monkeypatch, tmp_path ):
+    _fake_cohort( monkeypatch, { "yes_no": _asks( engine ), "multiple_choice": [] } )
+    out = tmp_path / "r.json"
+    main( [ "--out", str( out ), "--vectors", _side_file( tmp_path, [ { "id": "zz", "reason": "empty question text" } ] ) ], printer=lambda line: None,
+          session_factory=lambda: contextlib.nullcontext( FakeSession() ), engine_factory=lambda: engine, code_sha="d" * 40 )
+    assert json.loads( out.read_text( encoding="utf-8" ) )[ "provenance" ][ "vector_rejects" ] == 1
+
+
+def test_giving_neither_a_side_file_nor_the_stored_switch_is_a_usage_error( tmp_path, capsys ):
+    with pytest.raises( SystemExit ) as raised: main( [ "--out", str( tmp_path / "r.json" ) ] )
+    assert raised.value.code == 2 and "one of the arguments --vectors --stored-vectors is required" in capsys.readouterr().err
+
+
+def test_giving_both_a_side_file_and_the_stored_switch_is_a_usage_error( tmp_path ):
+    with pytest.raises( SystemExit ) as raised: main( [ "--out", str( tmp_path / "r.json" ), "--vectors", "a", "--stored-vectors" ] )
+    assert raised.value.code == 2
+
+
+def _ids_file( tmp_path, ids ):
+    path = tmp_path / "ids.jsonl"
+    path.write_text( "".join( json.dumps( { "id": ask_id } ) + "\n" for ask_id in ids ) + "\n", encoding="utf-8" )
+    return str( path )
+
+
+def test_the_id_list_cuts_the_cohort_to_exactly_those_asks_in_cohort_order_and_refuses_an_absent_id( tmp_path ):
+    asks = [ { "id": name } for name in ( "a", "b", "c", "d" ) ]
+    kept, facts = restrict_to_ids( asks, _ids_file( tmp_path, [ "d", "b" ] ) )
+    assert [ ask[ "id" ] for ask in kept ] == [ "b", "d" ] and facts[ "only_ids_count" ] == 2 and facts[ "only_ids_file" ].endswith( "ids.jsonl" )
+    assert len( facts[ "only_ids_sha256" ] ) == 64
+    with pytest.raises( ValueError, match=r"1 listed ids are not in the cohort, first: \['zz'\]" ):
+        restrict_to_ids( asks, _ids_file( tmp_path, [ "a", "zz" ] ) )
+
+
+def test_the_command_replays_only_the_listed_ids_and_names_the_list( engine, monkeypatch, tmp_path ):
+    asks = _asks( engine )
+    _fake_cohort( monkeypatch, { "yes_no": asks, "multiple_choice": [] } )
+    out = tmp_path / "r.json"
+    main( [ "--out", str( out ), "--stored-vectors", "--only-ids", _ids_file( tmp_path, [ ask[ "id" ] for ask in asks[ :8 ] ] ) ], printer=lambda line: None,
+          session_factory=lambda: contextlib.nullcontext( FakeSession() ), engine_factory=lambda: engine, code_sha="d" * 40 )
+    provenance = json.loads( out.read_text( encoding="utf-8" ) )[ "provenance" ]
+    assert provenance[ "cohort_asks" ] == 8 and provenance[ "only_ids_count" ] == 8
 
 
 def test_the_stored_vector_source_reads_no_side_file_and_says_so( engine, monkeypatch, tmp_path ):
