@@ -3,6 +3,8 @@ The run script that made the committed checkpoint report.
 
 It is committed unchanged except for one line. The original read step8_result.json from its own scratchpad.
 This copy takes that folder as its one argument.
+It ran at commit 086f95590 and calls read_cohort( session ).
+After the stored-vectors change to read_cohort( session, vectors ) it needs that stored-vectors path to reproduce the Before column.
 The replay code it ran against is commit 086f95590, and the frozen settings are from commit ba045c7ce.
 Run from the repository root with LUPIN_ROOT and PYTHONPATH pinned to the tree.
 """
