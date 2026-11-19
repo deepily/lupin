@@ -172,3 +172,33 @@ def test_types_baselines_and_calibration_cells_are_written_in_name_order_whateve
     assert text.index( "## batch" ) < text.index( "## yes_no" )
     assert text.index( "against alpha" ) < text.index( "against zeta" )
     assert text.index( "- a|s:" ) < text.index( "- z|s:" )
+
+
+def _point( threshold, top_k, **over ):
+    """A retune point in the shape retune returns, answered figures included."""
+    base = { "threshold": threshold, "top_k": top_k, "tune_correct": 30, "tune_per_100": 40.0, "final_correct": 12, "final_per_100": 48.0,
+             "tune_answered": 50, "tune_answer_rate_per_100": 66.7, "tune_accuracy_answered_per_100": 60.0,
+             "final_answered": 20, "final_answer_rate_per_100": 80.0, "final_accuracy_answered_per_100": 60.0 }
+    base.update( over )
+    return base
+
+
+RETUNE = { "tune_size": 75, "final_size": 25, "eligible": 100, "tune_cohort_sha256": SHA,
+           "points": [ _point( 0.5, 5, tune_per_100=41.0 ), _point( 0.3, 3, tune_answered=70, tune_answer_rate_per_100=93.3,
+                                                                  tune_accuracy_answered_per_100=42.9 ) ],
+           "best": _point( 0.5, 5, tune_per_100=41.0 ) }
+
+
+def test_the_retune_sweep_is_a_table_of_each_points_answered_figures_in_threshold_order():
+    """The 0.3 point, given second, is listed first with its own figures."""
+    text = _report( retune=RETUNE )
+    assert "## Retune sweep (report only)" in text and "Tune asks 75, final asks 25." in text
+    row_low  = "| 0.3 | 3 | 70 | 93.3 | 42.9 | 40.0 | 20 | 80.0 | 60.0 | 48.0 |"
+    row_high = "| 0.5 | 5 | 50 | 66.7 | 60.0 | 41.0 | 20 | 80.0 | 60.0 | 48.0 |"
+    assert row_low in text and row_high in text and text.index( row_low ) < text.index( row_high )
+    assert "Best on the tune window: threshold 0.5, top k 5." in text
+
+
+def test_a_report_without_a_retune_result_has_no_sweep_section():
+    """The section is optional, so an earlier caller's report is unchanged."""
+    assert "Retune sweep" not in _report()
