@@ -44,6 +44,11 @@ def test_a_multiple_choice_row_with_only_answers_is_built_and_its_decision_value
     assert asks[ 0 ][ "actual_value" ] == MULTIPLE_CHOICE_STORED
 
 
+def test_a_multiple_choice_row_with_two_answers_stored_out_of_order_gets_sorted_json_text():
+    stored = { "answers": { "Zeta Review": "Reject", "Alpha Review": "Approve" } }
+    assert _asks( "multiple_choice", stored )[ 0 ][ "decision_value" ] == '{"answers": {"Alpha Review": "Approve", "Zeta Review": "Reject"}}'
+
+
 def test_a_yes_no_row_keeps_its_value_as_the_decision_value():
     assert _asks( "yes_no", YES_NO_STORED )[ 0 ][ "decision_value" ] == "yes"
 
