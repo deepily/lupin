@@ -18,12 +18,6 @@ from types import SimpleNamespace
 
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
-from pgvector.sqlalchemy import Vector
-from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
 import cosa.agents.principle_learner.extractor_job as job_module
 import cosa.agents.principle_learner.extractor_prompt as prompt_module
@@ -32,6 +26,7 @@ import cosa.agents.principle_learner.extractor_store as store_module
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
 from cosa.repo.doc_lint import model_transport
+from cosa.research.preference_replay.scratch_db import scratch_session, session_scope
 from cosa.rest.job_state import JobState
 from cosa.rest.postgres_models import Notification, PredictionLog, PreferenceEvidence, PreferencePrinciple
 
@@ -43,36 +38,6 @@ T0      = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 SENDER  = "claude.code@lupin.deepily.ai#ab12cd34"
 MODEL   = "claude-test-model"
 NOW     = datetime( 2026, 11, 10, 13, 0, tzinfo=timezone.utc )
-
-
-# SQLite renders JSONB as JSON and a vector as text. It also gives a UUID column numeric affinity, so every id
-# below carries a letter other than "e": an id of digits and "e" alone would be read back as a float.
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( element, compiler, **kw ):
-    """
-    Render JSONB as JSON when the dialect is SQLite.
-
-    Requires:
-        - element is a JSONB column type
-
-    Ensures:
-        - returns "JSON"
-    """
-    return "JSON"
-
-
-@compiles( Vector, "sqlite" )
-def _vector_as_text( element, compiler, **kw ):
-    """
-    Render a pgvector column as text when the dialect is SQLite.
-
-    Requires:
-        - element is a Vector column type
-
-    Ensures:
-        - returns "TEXT"
-    """
-    return "TEXT"
 
 
 def vec( *head ):
@@ -108,27 +73,20 @@ def db():
     Give a session over empty in-memory copies of the tables the extractor reads and writes.
 
     Ensures:
-        - yields an active session; the engine is disposed afterwards
+        - yields an active session from scratch_session; the SQLite caveats on ids are in that module
     """
-    engine = create_engine( "sqlite://", connect_args={ "check_same_thread": False }, poolclass=StaticPool )
-    for model in ( Notification, PredictionLog, PreferencePrinciple, PreferenceEvidence ): model.__table__.create( engine )
-    with Session( engine ) as session:
+    with scratch_session() as session:
         yield session
-    engine.dispose()
 
 
 def _factory( db ):
     """
-    Wrap a session as the factory the job takes.
+    Wrap a session as the session_factory the job takes.
 
     Ensures:
         - returns a callable giving a context manager that yields db and commits on success
     """
-    @contextmanager
-    def factory():
-        yield db
-        db.commit()
-    return factory
+    return lambda: session_scope( db )
 
 
 class Model:
@@ -460,12 +418,15 @@ def test_the_job_sends_the_owner_nothing_a_full_run_calls_no_notification_progre
     assert out[ "status" ] == "extracted"
 
 
-def test_no_extractor_module_imports_a_notification_or_voice_module():
+SENDING_MODULES = ( "voice", "agent_notification_dispatcher", "routers.notifications", "notification_fifo_queue", "notification_proxy", "websocket" )
+
+
+def test_no_extractor_module_imports_a_module_that_sends_to_the_owner():
     for module in ( job_module, prompt_module, rules_module, store_module ):
         tree  = ast.parse( inspect.getsource( module ) )
         names = [ alias.name for node in ast.walk( tree ) if isinstance( node, ast.Import ) for alias in node.names ]
         names += [ node.module or "" for node in ast.walk( tree ) if isinstance( node, ast.ImportFrom ) ]
-        assert not [ n for n in names if "notif" in n.lower() or "voice" in n.lower() ], ( module.__name__, names )
+        assert not [ n for n in names if any( sending in n.lower() for sending in SENDING_MODULES ) ], ( module.__name__, names )
 
 
 def test_settings_come_from_the_ini_keys_when_not_given_and_the_extractor_version_names_the_model():

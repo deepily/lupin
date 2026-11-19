@@ -28,6 +28,8 @@ def fetch_neighbours( session, owner_id, encoder_version, query_vectors, k=NEIGH
         - a row is a candidate only when its owner and its encoder_version match and it has a vector
         - a principle of another encoder version is never read into the result, however near it is
         - a row's score is its best cosine over the query vectors
+        - it reads whatever the store holds now, with no cutoff on time: a replay must run its extractions in time
+          order, so the store holds only principles from answers that came before
     """
     rows   = session.query( PreferencePrinciple ).filter( PreferencePrinciple.owner_id == owner_id,
                                                          PreferencePrinciple.encoder_version == encoder_version,
@@ -49,6 +51,8 @@ def _find_or_create_principle( session, owner_id, kind, dimension, hypothesis, e
         - an existing principle of the same owner, extractor version, kind, dimension, statement and scope is reused
         - otherwise one is added and flushed, with its embedding made from the statement and the rationale
         - report counts the principle as created or reused
+        - two jobs for one answer at the same moment could both add a principle, since the table has no unique key
+          on this match; the job is queued once per answer, so that is not guarded
     """
     match = session.query( PreferencePrinciple ).filter_by( owner_id=owner_id, extractor_version=extractor_version, kind=kind, dimension=dimension,
                                                            statement=hypothesis[ "statement" ], scope=hypothesis[ "scope" ] ).first()

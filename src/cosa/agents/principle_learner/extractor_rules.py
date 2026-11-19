@@ -15,6 +15,7 @@ import re
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
 from cosa.utils.iso_timestamp import aware_moment
+from cosa.utils.notification_utils import parse_field_selections
 
 MAX_HYPOTHESES   = 3
 MAX_STATEMENT    = 240
@@ -92,26 +93,59 @@ def field_answers( answer ):
     return []
 
 
+def drafted_text( draft, field_key ):
+    """
+    Read the text of the draft for one field, from the shape the seen route stores.
+
+    Requires:
+        - draft is None, or a dict { "value": ... } as the seen route stores it
+        - a whole-answer draft holds its text as a string under value
+        - a card draft holds the card's answers map, as the answer door stores it: a JSON string or a dict under value
+
+    Ensures:
+        - returns the draft text for the field, or None when there is no draft or none for this field
+        - a blank draft counts as no draft
+        - a card field's text is its picks joined, or its submitted text
+
+    Raises:
+        - ValueError when the draft is not None and cannot be read in that shape, so a changed shape is never skipped
+    """
+    if draft is None: return None
+    if not isinstance( draft, dict ) or "value" not in draft: raise ValueError( f"draft at reveal is not in the stored shape {{ 'value': ... }}: {draft!r}" )
+    value = draft[ "value" ]
+    if value is None or value == "": return None
+    if field_key == WHOLE_ANSWER_KEY:
+        if not isinstance( value, str ): raise ValueError( f"a whole-answer draft must be text, got {value!r}" )
+        return value
+    fields = parse_field_selections( value if isinstance( value, dict ) else draft )
+    if fields is None: raise ValueError( f"draft at reveal holds no readable answers map: {draft!r}" )
+    record = fields.get( field_key )
+    return None if record is None else ( ", ".join( str( pick ) for pick in record[ "selected" ] ) or record[ "text" ] or None )
+
+
 def unaided_answer( final_text, draft, field_key, revealed_at, answered_at ):
     """
     Choose the text the extractor reads for a field, and whether it may be influenced.
 
     Requires:
         - final_text is the submitted text of the field
-        - draft is None, a string for the whole answer, or a dict of field key to draft text
+        - draft is None or in the shape drafted_text reads
         - revealed_at and answered_at are ISO strings, datetimes or None
 
     Ensures:
         - returns ( text, possibly_influenced )
         - with a draft for the field, returns the draft and False
-        - with no draft, returns the final text; it is marked possibly influenced when a reveal came
-          at or before the answer, and not otherwise
+        - with no draft, returns the final text; it is marked possibly influenced only when a reveal came
+          strictly before the answer, so a reveal at the answer time or later counts as unaided
+
+    Raises:
+        - ValueError as drafted_text does
     """
-    drafted = draft.get( field_key ) if isinstance( draft, dict ) else ( draft if field_key == WHOLE_ANSWER_KEY else None )
+    drafted = drafted_text( draft, field_key )
     if drafted:
         return drafted, False
     revealed = aware_moment( revealed_at )
-    return final_text, revealed is not None and revealed <= aware_moment( answered_at )
+    return final_text, revealed is not None and revealed < aware_moment( answered_at )
 
 
 def ground_condition( condition, grounding_text ):

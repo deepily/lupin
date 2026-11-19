@@ -12,13 +12,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session
 
 import cosa.agents.prediction_engine.episode_view as ev
 from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, rebuild_context
+from cosa.research.preference_replay.scratch_db import scratch_session
 from cosa.rest.postgres_models import Notification, PredictionLog
 from cosa.utils.iso_timestamp import aware_moment
 
@@ -29,36 +26,16 @@ T0        = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 SENDER    = "claude.code@lupin.deepily.ai#ab12cd34"
 
 
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( element, compiler, **kw ):
-    """
-    Render JSONB as JSON when the dialect is SQLite.
-
-    Requires:
-        - element is a JSONB column type
-
-    Ensures:
-        - returns "JSON"
-    """
-    return "JSON"
-
-
-# SQLite gives a column typed UUID numeric affinity, so an id made only of digits and "e" is read back as a float.
-# Every id and the recipient below carry a letter other than "e" for that reason.
 @pytest.fixture
 def db():
     """
-    Give a session over an empty in-memory copy of notifications and prediction_log.
+    Give a session over empty in-memory copies of the replay's tables.
 
     Ensures:
-        - yields an active session; the engine is disposed afterwards
+        - yields an active session from scratch_session; the SQLite caveats on ids are in that module
     """
-    engine = create_engine( "sqlite://" )
-    Notification.__table__.create( engine )
-    PredictionLog.__table__.create( engine )
-    with Session( engine ) as session:
+    with scratch_session() as session:
         yield session
-    engine.dispose()
 
 
 def _add( db, minutes=-60, nid=None, **extra ):

@@ -4,6 +4,8 @@ The extractor's output rules and the prompt reader, as pure functions.
 Each rule is checked on synthetic input, so a model that breaks it fails here whether it is live or recorded.
 """
 
+import json
+
 import pytest
 
 from cosa.agents.principle_learner import extractor_rules as rules
@@ -82,19 +84,38 @@ def test_field_answers_for_a_card_give_one_entry_per_header_with_picks_joined():
     assert got == { "held_bugs": ( "Approve", False ), "themes": ( "A, B", False ), "empty": ( "", False ), "ok": ( "yes", True ), "ok2": ( "yes", False ) }
 
 
-def test_unaided_answer_reads_the_draft_when_there_is_one_and_never_marks_it_influenced():
-    assert rules.unaided_answer( "final", "draft text", "answer", "2026-11-10T12:00:00+00:00", "2026-11-10T12:05:00+00:00" ) == ( "draft text", False )
-    assert rules.unaided_answer( "final", { "a": "draft a" }, "a", "2026-11-10T12:00:00+00:00", "2026-11-10T12:05:00+00:00" ) == ( "draft a", False )
+REVEAL, ANSWERED = "2026-11-10T12:00:00+00:00", "2026-11-10T12:05:00+00:00"
 
 
-def test_unaided_answer_without_a_draft_reads_the_final_and_marks_a_reveal_before_the_answer_as_influenced():
-    reveal, answered = "2026-11-10T12:00:00+00:00", "2026-11-10T12:05:00+00:00"
-    assert rules.unaided_answer( "final", None, "answer", reveal, answered ) == ( "final", True )
-    assert rules.unaided_answer( "final", None, "answer", answered, answered ) == ( "final", True )
-    assert rules.unaided_answer( "final", None, "answer", "2026-11-10T12:06:00+00:00", answered ) == ( "final", False )
-    assert rules.unaided_answer( "final", None, "answer", None, answered ) == ( "final", False )
-    assert rules.unaided_answer( "final", { "other": "x" }, "a", None, answered ) == ( "final", False )
-    assert rules.unaided_answer( "final", "draft for whole", "field", reveal, answered ) == ( "final", True )
+def test_unaided_answer_reads_the_draft_in_the_shape_the_route_stores_and_never_marks_it_influenced():
+    assert rules.unaided_answer( "final", { "value": "draft text" }, "answer", REVEAL, ANSWERED ) == ( "draft text", False )
+    card = { "value": json.dumps( { "answers": { "held_bugs": "Hold", "themes": [ "A", "B" ] } } ) }
+    assert rules.unaided_answer( "Approve", card, "held_bugs", REVEAL, ANSWERED ) == ( "Hold", False )
+    assert rules.unaided_answer( "x", card, "themes", REVEAL, ANSWERED ) == ( "A, B", False )
+    assert rules.unaided_answer( "x", { "value": { "answers": { "held_bugs": "Hold" } } }, "held_bugs", REVEAL, ANSWERED ) == ( "Hold", False )
+
+
+def test_a_blank_draft_or_a_field_with_no_draft_reads_the_final_answer():
+    assert rules.drafted_text( None, "answer" ) is None
+    assert rules.drafted_text( { "value": "" }, "answer" ) is None and rules.drafted_text( { "value": None }, "held_bugs" ) is None
+    card = { "value": json.dumps( { "answers": { "held_bugs": "Hold" } } ) }
+    assert rules.drafted_text( card, "other_field" ) is None
+    assert rules.drafted_text( { "value": json.dumps( { "answers": { "empty": [] } } ) }, "empty" ) is None
+    assert rules.unaided_answer( "final", card, "other_field", None, ANSWERED ) == ( "final", False )
+
+
+@pytest.mark.parametrize( "draft,key", [ ( "draft text", "answer" ), ( { "text": "x" }, "answer" ), ( { "value": 5 }, "answer" ), ( { "value": "not json" }, "held_bugs" ),
+                                         ( { "value": json.dumps( [ 1 ] ) }, "held_bugs" ), ( [ "x" ], "answer" ) ] )
+def test_a_draft_that_cannot_be_read_in_the_stored_shape_raises_and_is_never_skipped( draft, key ):
+    with pytest.raises( ValueError ):
+        rules.unaided_answer( "final", draft, key, REVEAL, ANSWERED )
+
+
+def test_unaided_answer_without_a_draft_marks_only_a_reveal_strictly_before_the_answer_as_influenced():
+    assert rules.unaided_answer( "final", None, "answer", REVEAL, ANSWERED ) == ( "final", True )
+    assert rules.unaided_answer( "final", None, "answer", ANSWERED, ANSWERED ) == ( "final", False ), "a reveal at the answer time is unaided"
+    assert rules.unaided_answer( "final", None, "answer", "2026-11-10T12:06:00+00:00", ANSWERED ) == ( "final", False )
+    assert rules.unaided_answer( "final", None, "answer", None, ANSWERED ) == ( "final", False )
 
 
 def test_a_condition_is_kept_only_when_its_text_is_in_the_card_or_the_answer_else_unknown():
@@ -165,6 +186,8 @@ def test_parse_reply_reads_json_through_a_fence_and_refuses_everything_else():
     body = '{"fields": [{"field_key": "a"}]}'
     assert parse_reply( body ) == [ { "field_key": "a" } ]
     assert parse_reply( "Here you go:\n```json\n" + body + "\n```" ) == [ { "field_key": "a" } ]
+    assert parse_reply( "```json\n" + body + "\n```\nHope that helps {as always}." ) == [ { "field_key": "a" } ]
+    assert parse_reply( '{"note": "first"}\n' + body ) == [ { "field_key": "a" } ]
     for bad in ( "no json", "} {", "{broken", "{not json}", '{"fields": "x"}', '{"fields": [1]}', "[1, 2]", '{"other": []}' ):
         assert parse_reply( bad ) is None
 
