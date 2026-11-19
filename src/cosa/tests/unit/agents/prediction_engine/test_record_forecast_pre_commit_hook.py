@@ -11,26 +11,19 @@ from datetime import datetime, timezone
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from cosa.agents.prediction_engine import config as cfg
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
+from cosa.research.preference_replay import scratch_db  # noqa: F401  registers the one shared SQLite JSONB hook
 from cosa.rest.db.repositories.arm_forecast_repository import displayed_arm_for, displayed_arm_hook, notifications_missing_displayed_sibling
 from cosa.rest.postgres_models import PredictionArmForecast, PredictionLog
 
 # Ids carry a hex letter, because SQLite reads an all-digit id back as a number.
 NID = "a2345678-1234-5678-1234-567812345678"
 ASK = { "message": "Should it proceed?", "response_type": "yes_no", "sender_id": "claude.code@lupin.deepily.ai#00000001" }
-
-
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( _type, _compiler, **_kw ):
-    """Let the two real tables be created on SQLite."""
-    return "JSON"
 
 
 class _RecordingSession:
