@@ -1956,7 +1956,7 @@ async def submit_notification_response(
             if is_review_card( submit_result[ "response_options" ] ):
                 print( f"[PREDICTION] Review card {notification_id}: no outcome to record" )
                 ruling_report = await asyncio.to_thread( _record_review_ruling_sync, notification_id )
-                print( f"[PREDICTION] Review card {notification_id}: {ruling_report[ 'rulings_written' ]} ruling(s) recorded" )
+                print( f"[PREDICTION] Review card {notification_id}: {ruling_report[ 'rulings_written' ]} ruling(s) recorded, rejected: {ruling_report[ 'rejected' ]}" )
             else:
                 from cosa.agents.prediction_engine import get_prediction_engine
                 prediction_engine = get_prediction_engine()

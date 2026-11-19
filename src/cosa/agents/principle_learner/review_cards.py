@@ -13,6 +13,7 @@ import json
 import uuid
 from datetime import timedelta
 
+from cosa.agents.prediction_engine.history_derive import attribution_tier
 from cosa.agents.prediction_engine.review_card import REVIEW_CARD_KEY, REVIEW_CARD_SOURCE, is_review_card
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.postgres_models import Notification, PreferenceEvidence
@@ -23,6 +24,7 @@ WINDOW         = timedelta( hours=24 )
 BATCH_MAX      = 5
 PRINCIPLES_KEY = "principle_ids"
 RULING_VERSION = "review_card"
+OWNER_SOURCE   = "ui"
 
 OPTION_ONE     = "One: keep the principle"
 OPTION_OTHER   = "Other: drop the principle"
@@ -143,7 +145,7 @@ def build_card( items ):
             "options"     : [
                 { "label": OPTION_ONE,     "description": "The principle stands as stated." },
                 { "label": OPTION_OTHER,   "description": "The other answer wins; the principle is dropped." },
-                { "label": OPTION_BOTH,    "description": "Both hold, each under a condition you write in." },
+                { "label": OPTION_BOTH,    "description": f"Both hold. Type: {OPTION_BOTH}: your condition. A click alone records nothing." },
                 { "label": OPTION_RETRACT, "description": "Drop the principle altogether." },
             ],
         } )
@@ -205,6 +207,22 @@ def _ruling_of( label ):
     return None
 
 
+def _owners_own_answer( row ):
+    """
+    Say whether the stored answer is the owner's own word, from their own screen.
+
+    Requires:
+        - row is an answered Notification
+
+    Ensures:
+        - returns True only when the answering user is the recipient and the source is the screen, the test the extractor applies
+        - a timeout default, a proxy answer, an answer with no user and another account's answer are all False
+    """
+    value = row.response_value
+    raw   = { "recipient_id": str( row.recipient_id ), "response_value": value }
+    return attribution_tier( raw ) == "recipient" and isinstance( value, dict ) and value.get( "source" ) == OWNER_SOURCE
+
+
 def record_card_answer( session, notification_id, now ):
     """
     Turn the answer to a review card into ruling rows.
@@ -216,6 +234,8 @@ def record_card_answer( session, notification_id, now ):
     Ensures:
         - returns { rulings_written, existing, rejected }; rejected lists { header, reason }
         - an ask without the marker, an unanswered ask, or an answer with no choices writes nothing
+        - an answer that is not the owner's own from their screen (a timeout default, a proxy, another account) writes nothing and is
+          rejected with header None and reason not_the_owners_answer
         - each answered header writes one evidence row with source review_card, field key the header, answered_at the ask's response time
         - a header the card does not name, or an answer that is no option, is rejected and writes nothing
         - an answer recorded twice writes nothing the second time
@@ -224,6 +244,9 @@ def record_card_answer( session, notification_id, now ):
     report = { "rulings_written": 0, "existing": 0, "rejected": [] }
     row    = session.get( Notification, uuid.UUID( str( notification_id ) ) )
     if row is None or row.responded_at is None or not is_review_card( row.response_options ): return report
+    if not _owners_own_answer( row ):
+        report[ "rejected" ].append( { "header": None, "reason": "not_the_owners_answer" } )
+        return report
     options = json.loads( row.response_options ) if isinstance( row.response_options, str ) else row.response_options
     ids     = options.get( PRINCIPLES_KEY, {} )
     value   = row.response_value[ "value" ] if isinstance( row.response_value, dict ) and "value" in row.response_value else row.response_value

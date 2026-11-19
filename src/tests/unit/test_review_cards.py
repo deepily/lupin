@@ -321,7 +321,7 @@ def test_a_json_string_for_the_options_and_an_answer_stored_as_a_bare_dict_are_b
     card = _card( db, { "P1": rc.OPTION_ONE } )
     row = db.get( Notification, card )
     row.response_options = json.dumps( row.response_options )
-    row.response_value   = { "answers": { "P1": rc.OPTION_ONE }, "answered_by": { "user_id": str( OWNER ) } }
+    row.response_value   = { "answers": { "P1": rc.OPTION_ONE }, "source": "ui", "answered_by": { "user_id": str( OWNER ) } }
     db.commit()
     assert rc.record_card_answer( db, card, NOW )[ "rulings_written" ] == 1
 
@@ -391,3 +391,48 @@ def test_the_answer_door_helper_writes_and_commits_the_ruling_through_the_real_g
     db.expire_all()
     row = db.query( PreferenceEvidence ).filter_by( source="review_card" ).one()
     assert row.principle_id == principle.id and row.relation == "contradicts" and row.extracted_at is not None
+
+
+
+# ---- only the owner's own answer is a ruling ---------------------------------------------------------
+
+def _answer_as( db, stored ):
+    """Insert a marked card whose stored answer is `stored`, and return its id."""
+    _principle( db )
+    card = _card( db, { "P1": rc.OPTION_ONE } )
+    row  = db.get( Notification, card )
+    row.response_value = stored
+    db.commit()
+    return card
+
+
+_ANSWERS = { "P1": rc.OPTION_ONE }
+_OWNER   = { "user_id": str( OWNER ) }
+
+
+@pytest.mark.parametrize( "stored", [
+    { "value": json.dumps( { "answers": _ANSWERS } ), "source": "timeout_default" },
+    { "value": json.dumps( { "answers": _ANSWERS } ), "source": "proxy", "answered_by": _OWNER },
+    { "value": json.dumps( { "answers": _ANSWERS } ), "source": "ui", "answered_by": { "user_id": str( OTHER ) } },
+    { "value": json.dumps( { "answers": _ANSWERS } ), "source": "ui" },
+    "not a dict",
+] )
+def test_an_answer_that_is_not_the_owners_own_from_their_screen_writes_no_ruling( db, stored ):
+    """A timeout default, a proxy, another account, no user or a bare string writes nothing."""
+    card   = _answer_as( db, stored )
+    report = rc.record_card_answer( db, card, NOW )
+    assert report == { "rulings_written": 0, "existing": 0, "rejected": [ { "header": None, "reason": "not_the_owners_answer" } ] }
+    assert db.query( PreferenceEvidence ).count() == 0
+
+
+def test_the_owners_own_screen_answer_still_writes_its_ruling( db ):
+    """The control: the same card answered by its owner from the screen writes one ruling."""
+    card = _answer_as( db, { "value": json.dumps( { "answers": _ANSWERS } ), "source": "ui", "answered_by": _OWNER } )
+    assert rc.record_card_answer( db, card, NOW )[ "rulings_written" ] == 1
+
+
+def test_the_both_option_tells_the_owner_what_to_type():
+    """A click alone records nothing, so the option says what to type."""
+    questions, _ = rc.build_card( [ _item() ] )
+    both = next( o for o in questions[ 0 ][ "options" ] if o[ "label" ] == rc.OPTION_BOTH )
+    assert f"Type: {rc.OPTION_BOTH}: your condition" in both[ "description" ] and "A click alone records nothing" in both[ "description" ]

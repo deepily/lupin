@@ -19,6 +19,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from cosa.agents.prediction_engine.principle_features import card_features, feature_lookup
 from cosa.agents.prediction_engine.principle_status import CONTESTED, derive_statuses
 from cosa.agents.principle_learner import review_card_sweep as sweep
 from cosa.agents.principle_learner import review_cards as rc
@@ -314,9 +315,11 @@ def test_an_answered_card_does_not_hold_its_principle_back_if_the_principle_is_s
 
 # ---- the split step, applied --------------------------------------------------------------------
 
-def _status_at( db, principle, moment ):
+def _status_at( db, principle, moment, with_features=True ):
     """The principle's derived status result at a moment, over all rows."""
-    return derive_statuses( db.query( PreferencePrinciple ).all(), db.query( PreferenceEvidence ).all(), moment, VERSION, lambda nid: None )[ principle.id ]
+    evidence = db.query( PreferenceEvidence ).all()
+    features = feature_lookup( db, [ e.notification_id for e in evidence ] ) if with_features else None
+    return derive_statuses( db.query( PreferencePrinciple ).all(), evidence, moment, VERSION, lambda nid: None, features )[ principle.id ]
 
 
 def test_a_pair_a_card_feature_separates_is_split_and_no_card_is_sent_for_it( db ):
@@ -325,10 +328,13 @@ def test_a_pair_a_card_feature_separates_is_split_and_no_card_is_sent_for_it( db
     dispatcher = Dispatcher()
     report     = _sweep( db, dispatcher )
     assert report == { "split": 1, "contested": 0, "sent": False, "deferred": 0, "sent_in_window": 0 } and dispatcher.calls == []
-    row = db.query( PreferenceEvidence ).filter_by( source="split_step" ).one()
-    assert ( row.relation, row.field_key, row.condition, row.extractor_version ) == ( "refines", "response_type", "response_type is yes_no", "split_step" )
-    assert row.principle_id == principle.id and row.extracted_at.replace( tzinfo=timezone.utc ) == NOW
-    assert row.answered_at.replace( tzinfo=timezone.utc ) == T0 + timedelta( minutes=6 ), "answered at the later of the two answers"
+    rows = { r.relation: r for r in db.query( PreferenceEvidence ).filter_by( source="split_step" ).all() }
+    assert sorted( rows ) == [ "contradicts", "refines" ], "both sides are stored"
+    assert ( rows[ "refines" ].field_key, rows[ "refines" ].condition, rows[ "refines" ].extractor_version ) == ( "response_type", "response_type is yes_no", "split_step" )
+    assert ( rows[ "contradicts" ].field_key, rows[ "contradicts" ].condition ) == ( "response_type", "response_type is open_ended" )
+    for row in rows.values():
+        assert row.principle_id == principle.id and row.extracted_at.replace( tzinfo=timezone.utc ) == NOW
+        assert row.answered_at.replace( tzinfo=timezone.utc ) == T0 + timedelta( minutes=6 ), "answered at the later of the two answers"
     assert db.query( PreferenceEvidence ).filter_by( source="extractor" ).count() == 2, "no extractor row was changed or added"
     after = _status_at( db, principle, NOW )
     assert after[ "status" ] != CONTESTED and "response_type is yes_no" in after[ "conditions" ]
@@ -348,7 +354,7 @@ def test_a_second_sweep_finds_the_split_done_and_writes_and_sends_nothing( db ):
     _sweep( db, Dispatcher() )
     dispatcher = Dispatcher()
     assert _sweep( db, dispatcher, now=NOW + timedelta( minutes=5 ) )[ "split" ] == 0
-    assert db.query( PreferenceEvidence ).filter_by( source="split_step" ).count() == 1 and dispatcher.calls == []
+    assert db.query( PreferenceEvidence ).filter_by( source="split_step" ).count() == 2 and dispatcher.calls == []
 
 
 def test_one_pair_is_split_and_the_pair_no_feature_separates_still_gets_its_card( db ):
@@ -368,7 +374,7 @@ def test_the_sender_s_project_can_separate_a_pair_and_the_condition_names_it( db
     """Same response type, different projects: the project is the separating feature."""
     principle = _contested( db, 1, contra_sender="claude.code@other.deepily.ai#ab12cd34" )
     _sweep( db, Dispatcher() )
-    row = db.query( PreferenceEvidence ).filter_by( source="split_step" ).one()
+    row = db.query( PreferenceEvidence ).filter_by( source="split_step", relation="refines" ).one()
     assert ( row.field_key, row.condition ) == ( "project", "project is lupin" ) and row.principle_id == principle.id
 
 
@@ -376,4 +382,73 @@ def test_the_card_features_are_few_and_a_sender_with_no_project_reads_none( db )
     """Only response type, type and project; a title never separates episodes."""
     row = Notification( id=uuid.uuid4(), sender_id="plain-sender", recipient_id=OWNER, message="m", title="a unique title", type="task", priority="low",
                         created_at=T0, response_requested=True, response_type="yes_no" )
-    assert sweep._card_features( row ) == { "response_type": "yes_no", "type": "task", "project": "none" }
+    assert card_features( row ) == { "response_type": "yes_no", "type": "task", "project": "none" }
+
+
+def _later_contradiction( db, principle, response_type, minutes=50 ):
+    """Add a contradiction answered after the split, on an ask of the given response type."""
+    nid = _ask( db, "no", minutes, response_type )
+    db.add( PreferenceEvidence( id=uuid.uuid4(), principle_id=principle.id, notification_id=nid, field_key="answer", relation="contradicts", condition=None,
+                                answered_at=T0 + timedelta( minutes=minutes + 1 ), extracted_at=T0 + timedelta( minutes=minutes + 2 ), extractor_version=VERSION,
+                                source="extractor" ) )
+    db.commit()
+
+
+def test_a_later_contradiction_from_the_other_side_does_not_contest_the_split_principle_again( db ):
+    """An open-ended contradiction after the split belongs to the other side; no card is sent."""
+    principle = _contested( db, 1, contra_type="open_ended" )
+    _sweep( db, Dispatcher() )
+    _later_contradiction( db, principle, "open_ended" )
+    later = NOW + timedelta( days=10 )
+    assert _status_at( db, principle, later )[ "status" ] != CONTESTED
+    dispatcher = Dispatcher()
+    assert _sweep( db, dispatcher, now=later )[ "contested" ] == 0 and dispatcher.calls == []
+
+
+def test_a_later_contradiction_with_a_value_on_neither_side_contests_the_principle_again( db ):
+    """A multiple-choice contradiction is on neither side, so it contests."""
+    principle = _contested( db, 1, contra_type="open_ended" )
+    _sweep( db, Dispatcher() )
+    _later_contradiction( db, principle, "multiple_choice" )
+    assert _status_at( db, principle, NOW + timedelta( days=10 ) )[ "status" ] == CONTESTED
+
+
+def test_a_later_contradiction_from_the_supporting_side_contests_it_and_so_does_a_status_without_features( db ):
+    """A yes/no contradiction is on the supporting side; with no features nothing is placed."""
+    principle = _contested( db, 1, contra_type="open_ended" )
+    _sweep( db, Dispatcher() )
+    _later_contradiction( db, principle, "yes_no" )
+    assert _status_at( db, principle, NOW + timedelta( days=10 ) )[ "status" ] == CONTESTED
+    other = _contested( db, 2, contra_type="open_ended" )
+    _sweep( db, Dispatcher(), now=NOW + timedelta( minutes=1 ) )
+    _later_contradiction( db, other, "open_ended", minutes=90 )
+    assert _status_at( db, other, NOW + timedelta( days=10 ), with_features=False )[ "status" ] == CONTESTED
+
+
+def test_a_split_never_retracts_and_its_contradicts_row_is_not_a_ruling( db ):
+    """The contradicts row names the other side only and never retracts the principle."""
+    principle = _contested( db, 1, contra_type="open_ended" )
+    _sweep( db, Dispatcher() )
+    assert _status_at( db, principle, NOW )[ "status" ] != "retracted" and _status_at( db, principle, NOW )[ "ruled" ] is True
+
+
+def test_a_split_pair_with_no_partner_row_or_an_unreadable_condition_names_no_other_side( db ):
+    """A lone refines row, or an unreadable contradicts condition, names no other side."""
+    from cosa.agents.prediction_engine.principle_status import _other_side_values
+    principle = _contested( db, 1, contra_type="open_ended" )
+    _sweep( db, Dispatcher() )
+    refines = db.query( PreferenceEvidence ).filter_by( source="split_step", relation="refines" ).one()
+    contra  = db.query( PreferenceEvidence ).filter_by( source="split_step", relation="contradicts" ).one()
+    assert _other_side_values( refines, [ refines ] ) == set() and _other_side_values( refines, [ refines, contra ] ) == { "open_ended" }
+    contra.condition = "something else"
+    assert _other_side_values( refines, [ refines, contra ] ) == set()
+    contra.condition = None
+    assert _other_side_values( refines, [ refines, contra ] ) == set() and principle is not None
+
+
+def test_the_feature_lookup_gives_features_for_known_asks_and_none_for_the_rest( db ):
+    """One query; an id that is no ask reads as None, and an empty list asks nothing."""
+    known = _ask( db, "yes", 5 )
+    lookup = feature_lookup( db, [ known, uuid.uuid4() ] )
+    assert lookup( known ) == { "response_type": "yes_no", "type": "task", "project": "lupin" } and lookup( uuid.uuid4() ) is None
+    assert feature_lookup( db, [] )( known ) is None
