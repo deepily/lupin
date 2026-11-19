@@ -9,6 +9,7 @@ Fixture: `tests.helpers.notifications_endpoint_harness`.
 """
 
 import datetime as dt
+import json
 import types
 
 import pytest
@@ -146,6 +147,16 @@ class TestDraftAtReveal:
         r = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": draft } )
         assert r.status_code == 422
         assert row.draft_at_reveal is None and row.fold_opened_at is None
+
+    def test_the_size_bound_is_exact_4096_accepted_4097_refused( self, harness, row ):
+        at_bound   = { "value": "x" * ( 4096 - len( json.dumps( { "value": "" } ) ) ) }
+        over_bound = { "value": "x" * ( 4097 - len( json.dumps( { "value": "" } ) ) ) }
+        assert len( json.dumps( at_bound ) ) == 4096 and len( json.dumps( over_bound ) ) == 4097
+        refused = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": over_bound } )
+        assert refused.status_code == 422 and row.draft_at_reveal is None
+        accepted = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": at_bound } )
+        assert accepted.status_code == 200 and accepted.json()[ "draft_recorded" ] is True
+        assert row.draft_at_reveal == at_bound
 
     def test_an_explicit_null_draft_is_accepted_and_stores_nothing( self, harness, row ):
         r = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": None } )
