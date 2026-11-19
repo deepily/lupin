@@ -1216,6 +1216,12 @@ class PredictionLog( Base ):
         JSONB,
         nullable=True
     )
+    # The answer controls' state at the moment the forecast fold was first opened (written by the seen route,
+    # first write wins). Same JSONB shape as actual_value, so the two compare key for key. NULL = unknown.
+    draft_at_reveal: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
 
     # Indexes
     __table_args__ = (
@@ -1243,6 +1249,11 @@ class PreferencePrinciple( Base ):
     Ensures:
         - id is an automatically generated UUID
         - status is never stored; it is derived from preference_evidence
+        - continues_principle_id, when set, names the earlier principle this one continues after a re-extraction;
+          a ruling on that earlier principle then applies here. It is NULL for a principle that continues none
+        - the one writer rule: only the extractor job writes it, and only when the model's relation names a principle
+          of an earlier extractor_version (the lowest id if several). It is never written for a relation within one
+          version, and a supports, contradicts or refines relation is never a reason to write it
         - embedding is a 768-dimension vector, comparable only within one encoder_version
     """
 
@@ -1260,6 +1271,9 @@ class PreferencePrinciple( Base ):
     embedding: Mapped[Optional[list]]          = mapped_column( Vector( EMBEDDING_DIM ), nullable=True )
     encoder_version: Mapped[Optional[str]]     = mapped_column( String( 100 ), nullable=True )
     extractor_version: Mapped[str]             = mapped_column( String( 100 ), nullable=False )
+    continues_principle_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID( as_uuid=True ), ForeignKey( "preference_principles.id" ), nullable=True
+    )
     created_at: Mapped[datetime]               = mapped_column(
         DateTime( timezone=True ), nullable=False, default=func.now(), server_default=func.now()
     )
@@ -1280,6 +1294,8 @@ class PreferenceEvidence( Base ):
         - one row per ( principle_id, notification_id, field_key, extractor_version, source )
         - usable at an ask only when answered_at and extracted_at are both at or before it
         - no foreign key to notifications, so pruning notifications never removes evidence
+        - session_key, when set, is the session of the answered notification, stored when the row is written so
+          that status can count sessions after the notification is pruned; NULL when the writer had none
     """
 
     __tablename__ = "preference_evidence"
@@ -1299,6 +1315,7 @@ class PreferenceEvidence( Base ):
     extractor_version: Mapped[str]             = mapped_column( String( 100 ), nullable=False )
     retracted_at: Mapped[Optional[datetime]]   = mapped_column( DateTime( timezone=True ), nullable=True )
     source: Mapped[str]                        = mapped_column( String( 20 ), nullable=False )
+    session_key: Mapped[Optional[str]]         = mapped_column( String( 255 ), nullable=True )
 
     __table_args__ = (
         UniqueConstraint( 'principle_id', 'notification_id', 'field_key', 'extractor_version', 'source', name='uq_preference_evidence_key' ),
