@@ -343,7 +343,8 @@ def test_assemble_report_refuses_a_control_or_column_that_misses_its_count_and_n
 
 def _retune_report( tmp_path, name, final_correct ):
     path = tmp_path / name
-    path.write_text( json.dumps( { "grid_points": [ { "threshold": 0.5, "top_k": 5, "final_correct": 1 }, { "threshold": 0.5, "top_k": 10, "final_correct": final_correct } ] } ), encoding="utf-8" )
+    points = [ { "threshold": 0.5, "top_k": 5, "final_correct": 1 }, { "threshold": 0.55, "top_k": 10, "final_correct": 77 }, { "threshold": 0.5, "top_k": 10, "final_correct": final_correct } ]
+    path.write_text( json.dumps( { "grid_points": points } ), encoding="utf-8" )
     return str( path )
 
 
