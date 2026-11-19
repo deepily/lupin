@@ -10,7 +10,8 @@ So this module takes it as an argument, the ``c0`` contract below, and without i
 It has its own switch (``prediction learner principles forecast enabled``, default off).
 It has its own concurrency cap (``prediction learner principles forecast max concurrent``).
 So it cannot take a slot from the baseline job.
-A card beyond the cap gets a row with the reason ``capacity`` at once, not a queue.
+A card beyond the cap gets a row with the capped reason at once, not a queue.
+The per-arm summary (``arm_summary.per_arm_summary``) reads those rows and reports timeliness, capped and no_row.
 
 The ``c0`` contract, an object with:
 
@@ -29,13 +30,13 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
-import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieve_principles
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog
+from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
+from cosa.rest.postgres_models import Notification, PredictionArmForecast
 from cosa.utils.iso_timestamp import aware_moment
 
 ARM              = "B1"
@@ -47,7 +48,6 @@ STATUS_CAPACITY  = "capacity"
 STATUS_FAILED    = "failed"
 REASON_BLOCKED   = "blocked by phase 6"
 REASON_SWITCH    = "switch off"
-REASON_CAPACITY  = "capacity"
 REASON_STORED    = "already stored"
 REASON_UNREADABLE = "unreadable_forecast"
 BLOCK_HEADING    = "Principles that apply to this card, learned from earlier answers:"
@@ -290,9 +290,10 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
 
     Ensures:
         - returns { status, reason }; status is ran, not_run, capacity or failed
+        - only a failure gathering the inputs adds a third key, stored, True when its row was saved; no other result has it
         - with the switch off, or with c0 None (reason REASON_BLOCKED), nothing is read, called or written
         - a card that already has its row is left alone, with no call (reason "already stored")
-        - past the cap, one row with forecast None and reason "capacity" is written and no model is called
+        - past the cap, one row with forecast None and the capped reason (CAPPED_ARM_REASON) is written and no model is called
         - a baseline that does not meet the contract raises TypeError before anything is read or written
         - a failure gathering the inputs stores one row with the reason "input_error: <exception class>", the cutoff and no
           forecast, and returns failed with stored True; only a card that does not exist raises, since it has no cutoff to store
@@ -309,8 +310,8 @@ async def run_b1( session_factory, notification_id, c0, embedder, encoder_versio
     now = clock if clock is not None else ( lambda: datetime.now( timezone.utc ) )
     if not gate.try_enter():
         asked = await asyncio.to_thread( _asked_at, session_factory, notification_id )
-        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, c0.predictor_version + VERSION_SUFFIX, [], REASON_CAPACITY )
-        return { "status": STATUS_CAPACITY, "reason": REASON_CAPACITY }
+        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, c0.predictor_version + VERSION_SUFFIX, [], CAPPED_ARM_REASON )
+        return { "status": STATUS_CAPACITY, "reason": CAPPED_ARM_REASON }
     try:
         version = c0.predictor_version + VERSION_SUFFIX
         try:
@@ -358,34 +359,3 @@ def _asked_at( session_factory, notification_id ):
         created = None if row is None else row.created_at
     if row is None: raise LookupError( f"notification {notification_id} does not exist" )
     return aware_moment( created )
-
-
-def arm_timeliness( session, arm, since ):
-    """
-    Count one arm's answered cards by whether its forecast was ready before the answer.
-
-    Requires:
-        - session is open on a database holding prediction_arm_forecast and notifications
-        - since is an aware datetime; only cards asked at or after it are counted
-
-    Ensures:
-        - returns { arm, answered, ready_before_answer, late, not_ready, capacity, no_row }, over cards answered by now
-        - a card the cap turned away counts as capacity, named apart so the cap's effect is visible
-        - a card with no ready time and another reason counts as not_ready, and is not timely
-        - a real ask (one with a prediction_log row) that was answered and has no row for the arm counts as no_row
-        - answered equals the other five added up, so the timely share never hides a card that has no row
-    """
-    counts = { "arm": arm, "answered": 0, "ready_before_answer": 0, "late": 0, "not_ready": 0, "capacity": 0, "no_row": 0 }
-    rows = session.query( PredictionArmForecast, Notification ).join( Notification, Notification.id == PredictionArmForecast.notification_id ).filter(
-        PredictionArmForecast.arm == arm, Notification.created_at >= since, Notification.responded_at.isnot( None ) ).all()
-    for forecast, notification in rows:
-        counts[ "answered" ] += 1
-        if forecast.abstention_reason == REASON_CAPACITY: counts[ "capacity" ] += 1
-        elif forecast.forecast_ready_at is None: counts[ "not_ready" ] += 1
-        elif aware_moment( forecast.forecast_ready_at ) <= aware_moment( notification.responded_at ): counts[ "ready_before_answer" ] += 1
-        else: counts[ "late" ] += 1
-    has_row = sa.select( PredictionArmForecast.id ).where( PredictionArmForecast.notification_id == Notification.id, PredictionArmForecast.arm == arm ).exists()
-    counts[ "no_row" ] = session.query( Notification ).join( PredictionLog, PredictionLog.notification_id == Notification.id ).filter(
-        Notification.created_at >= since, Notification.responded_at.isnot( None ), ~has_row ).count()
-    counts[ "answered" ] += counts[ "no_row" ]
-    return counts
