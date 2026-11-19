@@ -100,12 +100,20 @@ def _arm( engine, nid, arm, displayed=False ):
             { "i": f"{nid}-{arm}", "n": nid, "a": arm, "d": displayed } )
 
 
-def _evidence( engine, source, row_id ):
+_KEY_COLUMNS = ( "principle_id", "notification_id", "field_key", "extractor_version", "source" )
+_BASE_KEY    = { "principle_id": _PID, "notification_id": _NID_A, "field_key": "f", "extractor_version": "v1", "source": "extractor" }
+_OTHER_VALUE = { "principle_id": "44444444-4444-4444-4444-444444444444", "notification_id": _NID_B,
+                 "field_key": "g", "extractor_version": "v2", "source": "review_card" }
+
+
+def _evidence( engine, row_id, **key ):
+    values = { **_BASE_KEY, **key }
     with engine.begin() as conn:
         conn.execute( sa.text(
             "INSERT INTO preference_evidence ( id, principle_id, notification_id, field_key, relation, answered_at, "
-            "extracted_at, extractor_version, source ) VALUES ( :i, :p, :n, 'f', 'supports', :t, :t, 'v1', :s )" ),
-            { "i": row_id, "p": _PID, "n": _NID_A, "t": _NOW, "s": source } )
+            "extracted_at, extractor_version, source ) VALUES ( :i, :principle_id, :notification_id, :field_key, "
+            "'supports', :t, :t, :extractor_version, :source )" ),
+            { "i": row_id, "t": _NOW, **values } )
 
 
 def test_upgrade_creates_the_three_tables_with_the_columns_rick_named( monkeypatch, engine ):
@@ -171,13 +179,46 @@ def test_the_displayed_flag_defaults_to_false( monkeypatch, engine ):
         assert conn.execute( sa.text( "SELECT displayed FROM prediction_arm_forecast" ) ).scalar() in ( 0, False )
 
 
-def test_the_evidence_key_refuses_a_repeat_and_allows_another_source( monkeypatch, engine ):
+def test_the_evidence_key_refuses_a_repeat_of_all_five_columns( monkeypatch, engine ):
     module = _load_module()
     _run( engine, module, monkeypatch, "upgrade" )
-    _evidence( engine, "extractor", "e1" )
-    _evidence( engine, "review_card", "e2" )                 # same key apart from source: accepted
+    _evidence( engine, "e1" )
     with pytest.raises( sa.exc.IntegrityError ):
-        _evidence( engine, "extractor", "e3" )               # the full key repeats: refused
+        _evidence( engine, "e2" )
+
+
+@pytest.mark.parametrize( "column", _KEY_COLUMNS )
+def test_a_row_that_differs_in_only_one_key_column_is_accepted( monkeypatch, engine, column ):
+    module = _load_module()
+    _run( engine, module, monkeypatch, "upgrade" )
+    _evidence( engine, "e1" )
+    _evidence( engine, "e2", **{ column: _OTHER_VALUE[ column ] } )
+    with engine.begin() as conn:
+        assert conn.execute( sa.text( "SELECT COUNT(*) FROM preference_evidence" ) ).scalar() == 2
+
+
+@pytest.mark.parametrize( "column", _KEY_COLUMNS )
+def test_a_row_that_differs_in_every_key_column_but_one_is_still_accepted( monkeypatch, engine, column ):
+    module = _load_module()
+    _run( engine, module, monkeypatch, "upgrade" )
+    _evidence( engine, "e1" )
+    others = { name: _OTHER_VALUE[ name ] for name in _KEY_COLUMNS if name != column }
+    _evidence( engine, "e2", **others )                      # shares only this column: the key is the five together
+    with engine.begin() as conn:
+        assert conn.execute( sa.text( "SELECT COUNT(*) FROM preference_evidence" ) ).scalar() == 2
+
+
+@pytest.mark.parametrize( "column", _KEY_COLUMNS )
+def test_dropping_one_column_from_the_key_would_be_caught( monkeypatch, engine, column ):
+    module = _load_module()
+    with engine.begin() as conn:
+        narrowed = [ c for c in _KEY_COLUMNS if c != column ]
+        conn.execute( sa.text( "CREATE TABLE preference_evidence ( id TEXT PRIMARY KEY, principle_id TEXT, "
+                               "notification_id TEXT, field_key TEXT, extractor_version TEXT, source TEXT, relation TEXT, "
+                               "answered_at TEXT, extracted_at TEXT, UNIQUE ( " + ", ".join( narrowed ) + " ) )" ) )
+    _evidence( engine, "e1" )
+    with pytest.raises( sa.exc.IntegrityError ):
+        _evidence( engine, "e2", **{ column: _OTHER_VALUE[ column ] } )
 
 
 def test_downgrade_drops_all_three_and_is_safe_to_repeat( monkeypatch, engine ):
