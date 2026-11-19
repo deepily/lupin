@@ -16,7 +16,8 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
-from cosa.agents.prediction_engine.history_context_rebuild import _session_of
+from cosa.agents.prediction_engine.history_context_rebuild import _session_of, rebuild_context
+from cosa.rest.postgres_models import Notification
 from cosa.utils.iso_timestamp import aware_moment
 
 ARMS            = ( "Q", "Q+A", "Q+O", "Q+P", "Q+H" )
@@ -211,3 +212,74 @@ def build_arm_texts( arm: str, targets: List[Dict[str, Any]], contexts: Dict[str
         reasons[ reason ] += 1
     counts = { "asks": len( targets ), "with_section": reasons[ None ], NO_CONTEXT: reasons[ NO_CONTEXT ], INPUT_ABSENT: reasons[ INPUT_ABSENT ] }
     return { "arm": arm, "texts": texts, "counts": counts }
+
+
+def notification_dict( row: Any ) -> Dict[str, Any]:
+    """
+    Turn a Notification row into the dict that rebuild_context and the arm builders read.
+
+    Requires:
+        - row has the Notification columns listed below
+
+    Ensures:
+        - returns id (as text), created_at (ISO text), message, abstract, response_options, sender_id, reply_to,
+          thread_id, job_id, direction, response_requested, responded_at (ISO text or None) and response_value
+        - created_at is the notification's own creation time, never a case row's time
+    """
+    return { "id": str( row.id ), "created_at": row.created_at.isoformat(), "message": row.message, "abstract": row.abstract,
+             "response_options": row.response_options, "sender_id": row.sender_id, "reply_to": row.reply_to, "thread_id": row.thread_id,
+             "job_id": row.job_id, "direction": row.direction, "response_requested": row.response_requested,
+             "responded_at": row.responded_at.isoformat() if row.responded_at is not None else None,
+             "response_value": row.response_value }
+
+
+def read_arm_inputs( session: Any, asks: List[Dict[str, Any]] ) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """
+    Read each cohort ask's notification, and the pool of question notifications.
+
+    Requires:
+        - session is an active SQLAlchemy session
+        - asks are cohort_asks dicts, whose id is the notification id
+
+    Ensures:
+        - returns ( targets, notes_by_id )
+        - targets hold one notification dict per ask, in the asks' order
+        - notes_by_id holds the targets and every notification with response_requested true, keyed by id
+        - the pool holds question notifications only, because only a question carries an answer
+        - the context state of a target is read over that pool, so it can differ from a rebuild over every notification
+
+    Raises:
+        - LookupError if an ask has no notification row
+    """
+    targets = []
+    for ask in asks:
+        row = session.get( Notification, ask[ "id" ] )
+        if row is None: raise LookupError( f"ask {ask[ 'id' ]} has no notification row" )
+        targets.append( notification_dict( row ) )
+    pool = { str( row.id ): notification_dict( row ) for row in session.query( Notification ).filter( Notification.response_requested.is_( True ) ).all() }
+    notes_by_id = dict( pool )
+    notes_by_id.update( { target[ "id" ]: target for target in targets } )
+    return targets, notes_by_id
+
+
+def build_cohort_arms( session: Any, asks: List[Dict[str, Any]], arms: Tuple[str, ...] = ARMS ) -> Dict[str, Dict[str, Any]]:
+    """
+    Build the text of every arm for every ask of a cohort.
+
+    Requires:
+        - session is an active SQLAlchemy session
+        - asks are cohort_asks dicts
+        - arms are names in the arm tuple
+
+    Ensures:
+        - returns { arm: build_arm_texts result } for each arm
+        - each context is rebuilt once, from the pool read_arm_inputs returns, and shared by all arms
+
+    Raises:
+        - LookupError as read_arm_inputs does
+        - ValueError as build_arm_texts does
+    """
+    targets, notes_by_id = read_arm_inputs( session, asks )
+    pool     = list( notes_by_id.values() )
+    contexts = { target[ "id" ]: rebuild_context( target, pool ) for target in targets }
+    return { arm: build_arm_texts( arm, targets, contexts, notes_by_id ) for arm in arms }
