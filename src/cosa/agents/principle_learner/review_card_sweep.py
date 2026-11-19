@@ -17,19 +17,21 @@ import uuid
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.prediction_engine.history_derive import derive_answer
 from cosa.agents.prediction_engine.principle_retrieval import load_owner_ledger, session_lookup
-from cosa.agents.prediction_engine.principle_status import CONTESTED, CONTRADICTING, SOURCE_EXTRACT, SUPPORTING, derive_statuses
+from cosa.agents.prediction_engine.principle_status import CONTESTED, CONTRADICTING, SOURCE_EXTRACT, SOURCE_SPLIT, SUPPORTING, derive_statuses, usable_at
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_job
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
-from cosa.agents.principle_learner.review_cards import PRINCIPLES_KEY, WINDOW, review_card_cap, review_card_times, send_review_card
+from cosa.agents.principle_learner.extractor_rules import project_names
+from cosa.agents.principle_learner.review_cards import PRINCIPLES_KEY, WINDOW, resolve_conflict, review_card_cap, review_card_times, send_review_card
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.rest.postgres_models import Notification
+from cosa.rest.postgres_models import Notification, PreferenceEvidence
 from cosa.utils.iso_timestamp import aware_moment
 import cosa.utils.util as cu
 
 WAIT_KEY         = "prediction learner review card wait seconds"
 SESSION_ID       = "principle-review-sweep"
 SAME_SEND_SECONDS = 60
+SPLIT_VERSION     = "split_step"
 ANSWER_CHARS      = 200
 
 _LOCK  = threading.Lock()
@@ -140,6 +142,74 @@ def _recent_card_principles( session, owner_id, now ):
     return found
 
 
+def _contested_pairs( session, owner_id, now, current_version ):
+    """
+    Find each contested principle with the rows on either side of the contradiction.
+
+    Requires:
+        - session is open; owner_id is the owner's user id; now is an aware datetime
+        - current_version is the extractor version the config names
+
+    Ensures:
+        - returns ( principle, supporting rows, contradicting rows ) for every principle whose derived status is contested, in id order
+        - each list holds the extractor rows of the current version usable at now, earliest answer first
+        - reads only
+    """
+    principles, evidence = load_owner_ledger( session, str( owner_id ) )
+    statuses = derive_statuses( principles, evidence, now, current_version, session_lookup( session, [ e.notification_id for e in evidence ] ) )
+    pairs    = []
+    for principle in sorted( principles, key=lambda p: str( p.id ) ):
+        state = statuses.get( principle.id )
+        if state is None or state[ "status" ] != CONTESTED: continue
+        own = sorted( ( e for e in evidence if e.principle_id == principle.id and e.source == SOURCE_EXTRACT and e.extractor_version == current_version
+                        and usable_at( e, now ) ), key=lambda e: aware_moment( e.answered_at ) )
+        pairs.append( ( principle, [ e for e in own if e.relation in SUPPORTING ], [ e for e in own if e.relation == CONTRADICTING ] ) )
+    return pairs
+
+
+def _card_features( row ):
+    """
+    List the card features the split step may use to tell two episodes apart.
+
+    Requires:
+        - row is a Notification
+
+    Ensures:
+        - returns { response_type, type, project }; project is the sender's project name, or "none"
+        - features are few and shared by every ask; a title or a message is never one, because it would separate any two episodes
+    """
+    names = project_names( [ row.sender_id ] )
+    return { "response_type": row.response_type, "type": row.type, "project": names[ 0 ] if names else "none" }
+
+
+def apply_splits( session, owner_id, now, current_version ):
+    """
+    Resolve each contested principle a card feature can separate; leave the rest contested.
+
+    Requires:
+        - session is open; owner_id is the owner's user id; now is an aware datetime
+        - current_version is the extractor version the config names
+
+    Ensures:
+        - for each contested principle, the split step runs on the real supporting and contradicting episodes' card features
+        - when a feature separates them, one evidence row is added: source split_step, relation refines, the supporting side's condition,
+          the feature as its field key, answered at the latest answer of the pair and extracted at now
+        - that row clears contested from now on, never before, and no existing row is changed
+        - returns [ { principle_id, feature, condition_a, condition_b } ] for the splits made; a pair no feature separates is untouched
+    """
+    done = []
+    for principle, support, contra in _contested_pairs( session, owner_id, now, current_version ):
+        features = { e.notification_id: _card_features( session.get( Notification, e.notification_id ) ) for e in support + contra }
+        found    = resolve_conflict( [ features[ e.notification_id ] for e in support ], [ features[ e.notification_id ] for e in contra ] )
+        if found[ "outcome" ] != "split": continue
+        session.add( PreferenceEvidence( id=uuid.uuid4(), principle_id=principle.id, notification_id=support[ 0 ].notification_id, field_key=found[ "feature" ],
+                                         relation="refines", condition=found[ "condition_a" ], extractor_version=SPLIT_VERSION, source=SOURCE_SPLIT, extracted_at=now,
+                                         answered_at=max( aware_moment( e.answered_at ) for e in support + contra ) ) )
+        done.append( { "principle_id": str( principle.id ), "feature": found[ "feature" ], "condition_a": found[ "condition_a" ], "condition_b": found[ "condition_b" ] } )
+    session.flush()
+    return done
+
+
 def contested_items( session, owner_id, now, current_version ):
     """
     Build the card items for the owner's contested principles.
@@ -154,20 +224,13 @@ def contested_items( session, owner_id, now, current_version ):
         - a principle on a recent unanswered card, or sent in this process inside the window, is left out
         - reads only
     """
-    principles, evidence = load_owner_ledger( session, str( owner_id ) )
-    statuses = derive_statuses( principles, evidence, now, current_version, session_lookup( session, [ e.notification_id for e in evidence ] ) )
-    skip     = _recent_card_principles( session, owner_id, now ) | _sent_principles( owner_id, now )
-    items    = []
-    for principle in sorted( principles, key=lambda p: str( p.id ) ):
-        state = statuses.get( principle.id )
-        if state is None or state[ "status" ] != CONTESTED or str( principle.id ) in skip: continue
-        own = sorted( ( e for e in evidence if e.principle_id == principle.id and e.source == SOURCE_EXTRACT and e.extractor_version == current_version ),
-                      key=lambda e: aware_moment( e.answered_at ) )
-        support = next( e for e in own if e.relation in SUPPORTING )
-        contra  = next( e for e in own if e.relation == CONTRADICTING )
+    skip  = _recent_card_principles( session, owner_id, now ) | _sent_principles( owner_id, now )
+    items = []
+    for principle, support, contra in _contested_pairs( session, owner_id, now, current_version ):
+        if str( principle.id ) in skip: continue
         items.append( { "principle_id": str( principle.id ), "statement": principle.statement,
-                        "answer_a": _answer_text( session.get( Notification, support.notification_id ) ),
-                        "answer_b": _answer_text( session.get( Notification, contra.notification_id ) ) } )
+                        "answer_a": _answer_text( session.get( Notification, support[ 0 ].notification_id ) ),
+                        "answer_b": _answer_text( session.get( Notification, contra[ 0 ].notification_id ) ) } )
     return items
 
 
@@ -241,17 +304,19 @@ async def sweep_review_cards( session, owner_id, now, cap, dispatcher, current_v
         - current_version is the extractor version; wait_seconds is how long the ask stays open
 
     Ensures:
-        - returns { contested, sent, deferred, sent_in_window }
+        - returns { split, contested, sent, deferred, sent_in_window }
+        - a contested principle a card feature can separate is split first, and no card is sent for it
         - the card goes out through the dispatcher on its own thread, and this call does not wait for the answer
         - a card sent is counted against the cap at once, so a sweep that runs again before it is answered, or stored, sees it
         - with no contested principle, or at the cap, nothing is sent
     """
+    splits = apply_splits( session, owner_id, now, current_version )
     items  = contested_items( session, owner_id, now, current_version )
     result = await send_review_card( DetachedDispatcher( dispatcher, wait_seconds ), items, _sent_times( session, owner_id, now ), now, cap )
     if result[ "sent" ]:
         sent_ids = { item[ "principle_id" ] for item in items } - { item[ "principle_id" ] for item in result[ "deferred" ] }
         _remember_send( owner_id, now, sent_ids )
-    return { "contested": len( items ), "sent": result[ "sent" ], "deferred": len( result[ "deferred" ] ), "sent_in_window": result[ "sent_in_window" ] }
+    return { "split": len( splits ), "contested": len( items ), "sent": result[ "sent" ], "deferred": len( result[ "deferred" ] ), "sent_in_window": result[ "sent_in_window" ] }
 
 
 class ReviewCardSweepJob( AgenticJobBase ):

@@ -19,6 +19,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from cosa.agents.prediction_engine.principle_status import CONTESTED, derive_statuses
 from cosa.agents.principle_learner import review_card_sweep as sweep
 from cosa.agents.principle_learner import review_cards as rc
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
@@ -79,24 +80,27 @@ class Dispatcher:
         return { "answers": {} }
 
 
-def _ask( db, answer, minutes ):
-    """Insert a yes/no ask with its stored answer, and return its id."""
-    row = dict( id=uuid.uuid4(), sender_id="claude.code@lupin.deepily.ai#ab12cd34", recipient_id=OWNER, message="Approve?", title="T", type="task",
-                priority="low", created_at=T0 + timedelta( minutes=minutes ), response_requested=True, response_type="yes_no",
+SENDER = "claude.code@lupin.deepily.ai#ab12cd34"
+
+
+def _ask( db, answer, minutes, response_type="yes_no", sender=SENDER ):
+    """Insert an ask with its stored answer, and return its id."""
+    row = dict( id=uuid.uuid4(), sender_id=sender, recipient_id=OWNER, message="Approve?", title="T", type="task",
+                priority="low", created_at=T0 + timedelta( minutes=minutes ), response_requested=True, response_type=response_type,
                 responded_at=T0 + timedelta( minutes=minutes + 1 ), response_value={ "value": answer, "source": "ui" } )
     db.add( Notification( **row ) )
     db.commit()
     return row[ "id" ]
 
 
-def _contested( db, number, version=VERSION ):
+def _contested( db, number, version=VERSION, contra_type="yes_no", contra_sender=SENDER ):
     """Insert a principle with a supporting yes and a contradicting no; return its row."""
     principle = PreferencePrinciple( id=uuid.UUID( f"00000000-0000-4000-8000-0000000c{number:04d}" ), owner_id=str( OWNER ), kind="decision", dimension="ask.x",
                                      statement=f"Statement {number}.", scope="global", embedding=None, encoder_version="enc", extractor_version=version )
     db.add( principle )
     db.commit()
     for relation, answer, minutes in ( ( "supports", "yes", 1 ), ( "contradicts", "no", 5 ) ):
-        nid = _ask( db, answer, minutes + number * 10 )
+        nid = _ask( db, answer, minutes + number * 10, *( ( contra_type, contra_sender ) if relation == "contradicts" else () ) )
         db.add( PreferenceEvidence( id=uuid.uuid4(), principle_id=principle.id, notification_id=nid, field_key="answer", relation=relation, condition=None,
                                     answered_at=T0 + timedelta( minutes=minutes + 1 ), extracted_at=T0 + timedelta( minutes=minutes + 2 ),
                                     extractor_version=version, source="extractor" ) )
@@ -170,7 +174,7 @@ def test_the_card_is_sent_on_its_own_thread_and_the_sweep_returns_before_the_ans
     _contested( db, 1 )
     dispatcher = Dispatcher( hold=True )
     report     = _sweep( db, dispatcher )
-    assert dispatcher.entered.wait( 2 ) and report == { "contested": 1, "sent": True, "deferred": 0, "sent_in_window": 0 }
+    assert dispatcher.entered.wait( 2 ) and report == { "split": 0, "contested": 1, "sent": True, "deferred": 0, "sent_in_window": 0 }
     call = dispatcher.calls[ 0 ]
     assert call[ "timeout" ] == 3600 and call[ "response_options_extra" ][ "review_card" ] is True
     dispatcher.release.set()
@@ -190,7 +194,7 @@ def test_a_failing_send_thread_is_swallowed_and_reported_in_the_log( db, capsys 
 def test_no_contested_principle_sends_nothing( db ):
     """An empty list calls no dispatcher."""
     dispatcher = Dispatcher()
-    assert _sweep( db, dispatcher ) == { "contested": 0, "sent": False, "deferred": 0, "sent_in_window": 0 }
+    assert _sweep( db, dispatcher ) == { "split": 0, "contested": 0, "sent": False, "deferred": 0, "sent_in_window": 0 }
     assert dispatcher.calls == []
 
 
@@ -204,7 +208,7 @@ def test_a_card_counts_against_the_cap_when_it_is_sent_even_if_it_is_never_store
     _join( dispatcher )
     assert [ r[ "sent" ] for r in reports ] == [ True, True, True, False ]
     assert [ len( c[ "questions" ] ) for c in dispatcher.calls ] == [ 5, 5, 5 ]
-    assert reports[ 3 ] == { "contested": 1, "sent": False, "deferred": 1, "sent_in_window": 3 }
+    assert reports[ 3 ] == { "split": 0, "contested": 1, "sent": False, "deferred": 1, "sent_in_window": 3 }
     sent_ids = [ pid for c in dispatcher.calls for pid in c[ "response_options_extra" ][ "principle_ids" ].values() ]
     assert len( sent_ids ) == len( set( sent_ids ) ) == 15, "no principle went on two cards"
     after = _sweep( db, dispatcher, now=NOW + timedelta( hours=24, seconds=1 ) )
@@ -306,3 +310,70 @@ def test_an_answered_card_does_not_hold_its_principle_back_if_the_principle_is_s
                           response_options={ "questions": questions, **extras } ) )
     db.commit()
     assert [ i[ "principle_id" ] for i in sweep.contested_items( db, OWNER, NOW, VERSION ) ] == [ str( principle.id ) ]
+
+
+# ---- the split step, applied --------------------------------------------------------------------
+
+def _status_at( db, principle, moment ):
+    """The principle's derived status result at a moment, over all rows."""
+    return derive_statuses( db.query( PreferencePrinciple ).all(), db.query( PreferenceEvidence ).all(), moment, VERSION, lambda nid: None )[ principle.id ]
+
+
+def test_a_pair_a_card_feature_separates_is_split_and_no_card_is_sent_for_it( db ):
+    """A yes/no ask and an open-ended one separate: a condition is written, no card."""
+    principle  = _contested( db, 1, contra_type="open_ended" )
+    dispatcher = Dispatcher()
+    report     = _sweep( db, dispatcher )
+    assert report == { "split": 1, "contested": 0, "sent": False, "deferred": 0, "sent_in_window": 0 } and dispatcher.calls == []
+    row = db.query( PreferenceEvidence ).filter_by( source="split_step" ).one()
+    assert ( row.relation, row.field_key, row.condition, row.extractor_version ) == ( "refines", "response_type", "response_type is yes_no", "split_step" )
+    assert row.principle_id == principle.id and row.extracted_at.replace( tzinfo=timezone.utc ) == NOW
+    assert row.answered_at.replace( tzinfo=timezone.utc ) == T0 + timedelta( minutes=6 ), "answered at the later of the two answers"
+    assert db.query( PreferenceEvidence ).filter_by( source="extractor" ).count() == 2, "no extractor row was changed or added"
+    after = _status_at( db, principle, NOW )
+    assert after[ "status" ] != CONTESTED and "response_type is yes_no" in after[ "conditions" ]
+
+
+def test_the_split_clears_contested_from_the_moment_it_is_written_and_not_before( db ):
+    """A replay of an ask made before the split still reads the principle as contested."""
+    principle = _contested( db, 1, contra_type="open_ended" )
+    _sweep( db, Dispatcher() )
+    assert _status_at( db, principle, NOW - timedelta( minutes=1 ) )[ "status" ] == CONTESTED
+    assert _status_at( db, principle, NOW )[ "status" ] != CONTESTED
+
+
+def test_a_second_sweep_finds_the_split_done_and_writes_and_sends_nothing( db ):
+    """The principle is no longer contested, so the second run has nothing to do."""
+    _contested( db, 1, contra_type="open_ended" )
+    _sweep( db, Dispatcher() )
+    dispatcher = Dispatcher()
+    assert _sweep( db, dispatcher, now=NOW + timedelta( minutes=5 ) )[ "split" ] == 0
+    assert db.query( PreferenceEvidence ).filter_by( source="split_step" ).count() == 1 and dispatcher.calls == []
+
+
+def test_one_pair_is_split_and_the_pair_no_feature_separates_still_gets_its_card( db ):
+    """Of two contested principles, only the unseparable one goes to Rick."""
+    separable = _contested( db, 1, contra_type="open_ended" )
+    stuck     = _contested( db, 2 )
+    dispatcher = Dispatcher()
+    report     = _sweep( db, dispatcher )
+    assert report[ "split" ] == 1 and report[ "contested" ] == 1 and report[ "sent" ] is True
+    assert dispatcher.entered.wait( 2 )
+    assert list( dispatcher.calls[ 0 ][ "response_options_extra" ][ "principle_ids" ].values() ) == [ str( stuck.id ) ]
+    assert _status_at( db, separable, NOW )[ "status" ] != CONTESTED and _status_at( db, stuck, NOW )[ "status" ] == CONTESTED
+    _join( dispatcher )
+
+
+def test_the_sender_s_project_can_separate_a_pair_and_the_condition_names_it( db ):
+    """Same response type, different projects: the project is the separating feature."""
+    principle = _contested( db, 1, contra_sender="claude.code@other.deepily.ai#ab12cd34" )
+    _sweep( db, Dispatcher() )
+    row = db.query( PreferenceEvidence ).filter_by( source="split_step" ).one()
+    assert ( row.field_key, row.condition ) == ( "project", "project is lupin" ) and row.principle_id == principle.id
+
+
+def test_the_card_features_are_few_and_a_sender_with_no_project_reads_none( db ):
+    """Only response type, type and project; a title never separates episodes."""
+    row = Notification( id=uuid.uuid4(), sender_id="plain-sender", recipient_id=OWNER, message="m", title="a unique title", type="task", priority="low",
+                        created_at=T0, response_requested=True, response_type="yes_no" )
+    assert sweep._card_features( row ) == { "response_type": "yes_no", "type": "task", "project": "none" }

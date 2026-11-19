@@ -21,6 +21,10 @@ choices are three rows (the mapping is this module's, because no writer exists y
 - relation ``refines``, with a condition  it stands, under that condition
 - relation ``contradicts``              it is retracted
 
+A split row (source ``split_step``) is a ruling the system makes itself.
+When a card feature separates the supporting episodes from the contradicting ones, one ``refines`` row records the feature as a condition.
+It is read exactly as a ruling is, so it clears contested from the moment it was written, and not before.
+
 A ruling applies across extractor versions, the one exception to "the current version only".
 A principle re-extracted under a new version names the one it continues (``related_principle_id``), and inherits that one's rulings.
 Retraction of an evidence row (``retracted_at``) takes it out from that moment on.
@@ -35,6 +39,8 @@ CONTESTED   = "contested"
 RETRACTED   = "retracted"
 
 SOURCE_RULING   = "review_card"
+SOURCE_SPLIT    = "split_step"
+RULING_SOURCES  = ( SOURCE_RULING, SOURCE_SPLIT )
 SOURCE_EXTRACT  = "extractor"
 SUPPORTING      = ( "supports", "refines" )
 CONTRADICTING   = "contradicts"
@@ -154,13 +160,13 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
           (so a principle first extracted after the ask is not there), else
           { status, conditions, episodes, sessions, ruled }
         - extractor rows count only for the current version and for their own principle
-        - a ruling counts across versions; the latest usable one decides: supports stands, refines stands
+        - a ruling or split row counts across versions; the latest usable one decides: supports stands, refines stands
           under its condition, contradicts retracts
         - a standing ruling clears contested; contradicting rows are then ignored
         - no row is read or written outside the arguments, and none is changed
     """
     by_id    = { p.id: p for p in principles }
-    rulings  = [ e for e in evidence if e.source == SOURCE_RULING ]
+    rulings  = [ e for e in evidence if e.source in RULING_SOURCES ]
     own      = [ e for e in evidence if e.source == SOURCE_EXTRACT and e.extractor_version == current_version and usable_at( e, asked_at ) ]
     statuses = {}
     for principle in principles:
