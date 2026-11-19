@@ -58,6 +58,7 @@ except ImportError as err:  # pragma: no cover -- run by a subprocess test, whic
     sys.exit( 4 )
 
 CHUNK              = 400
+ENCODER_VERSION_MAX = 100   # the width of prediction_log.encoder_version
 HUMAN_SOURCE       = "ui"
 RATIFICATION_STATE = "not_required"
 DATA_ORIGIN        = "organic"
@@ -254,7 +255,7 @@ def build_plan( conn, header: Dict[ str, Any ], records: List[ Dict[ str, Any ] 
         - log_rows counts the prediction_log rows the encoder version will be written to
 
     Raises:
-        - RefusedPlan if an id has no notification and log row, no recipient, or an empty message
+        - RefusedPlan if an id has no notification and log row, no recipient, an empty message, or an encoder version wider than its column
     """
     ids      = [ record[ "id" ] for record in records ]
     asks     = fetch_asks( conn, ids )
@@ -262,6 +263,7 @@ def build_plan( conn, header: Dict[ str, Any ], records: List[ Dict[ str, Any ] 
     missing  = [ row_id for row_id in ids if row_id not in asks ]
     if missing: raise RefusedPlan( f"{len( missing )} ids have no notification and log row, first {missing[ 0 ]}" )
     plan = Plan( encoder_version=encoder_version_of( header ), log_ids=ids )
+    if len( plan.encoder_version ) > ENCODER_VERSION_MAX: raise RefusedPlan( f"encoder version is {len( plan.encoder_version )} characters, the column holds {ENCODER_VERSION_MAX}" )
     for record in records:
         ask  = asks[ record[ "id" ] ]
         text = ask[ "message" ].strip()

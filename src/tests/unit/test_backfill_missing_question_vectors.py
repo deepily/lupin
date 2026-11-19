@@ -412,3 +412,38 @@ def test_main_refuses_apply_with_rehearse( capsys ):
     with pytest.raises( SystemExit ):
         bf.main( [ "--side-file", "x", "--database-url", "u", "--apply", "--rehearse" ] )
     assert "exclusive" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize( "expected_ids,fragment", [
+    ( { "n1" },                 "1 extra (first ['n2']), 0 missing (first [])" ),
+    ( { "n1", "n2", "other" },  "0 extra (first []), 1 missing (first ['other'])" ),
+] )
+def test_apply_refuses_an_expected_id_list_that_is_only_short_or_only_long( tmp_path, engine, expected_ids, fragment ):
+    ids    = scenario( engine )
+    before = table_dump( engine )
+    out    = []
+    code   = bf.run( engine, side_file( tmp_path, ids ), True, 2, 1, 3, out=out.append, **{ **GO, "expect_insert_ids": expected_ids } )
+    assert code == 3 and fragment in out[ -1 ] and table_dump( engine ) == before
+
+
+def test_plan_refuses_an_encoder_version_wider_than_its_column( tmp_path, engine ):
+    add_ask( engine, "x" )
+    header, records = bf.read_side_file( side_file( tmp_path, [ "x" ] ) )
+    header[ "revision" ] = "r" * 120
+    with engine.connect() as conn, pytest.raises( bf.RefusedPlan, match="encoder version is 131 characters, the column holds 100" ):
+        bf.build_plan( conn, header, records )
+
+
+def test_a_run_larger_than_two_chunks_plans_and_applies_every_id( tmp_path, engine ):
+    total  = 2 * bf.CHUNK + 17
+    ids    = [ f"id-{index:04d}" for index in range( total ) ]
+    with engine.begin() as conn:
+        conn.execute( sa.text( "INSERT INTO notifications VALUES ( :i, 'Proceed?', 'user-1', '2026-09-01T10:00:00+00:00', '{\"source\": \"ui\"}' )" ), [ { "i": row_id } for row_id in ids ] )
+        conn.execute( sa.text( "INSERT INTO prediction_log VALUES ( :i, 'cat', 'yes_no', '{\"value\": \"yes\"}', NULL )" ), [ { "i": row_id } for row_id in ids ] )
+        conn.execute( sa.text( "INSERT INTO prediction_decisions ( id, question, question_embedding, answer_source ) VALUES ( :i, 'Proceed?', 'old', 'human' )" ), [ { "i": row_id } for row_id in ids[ : 450 ] ] )
+    out  = []
+    code = bf.run( engine, side_file( tmp_path, ids ), True, total - 450, 450, total, out=out.append,
+                   expect_database=":memory:", expect_insert_ids=set( ids[ 450: ] ) )
+    assert code == 0 and f'"rows": {total}' in out[ -1 ] and f'"stamped": {total}' in out[ -1 ]
+    with engine.connect() as conn:
+        assert conn.execute( sa.text( "SELECT count(*) FROM prediction_decisions WHERE question_embedding <> 'old'" ) ).scalar() == total
