@@ -122,6 +122,15 @@ def test_an_arm_that_replayed_other_asks_is_refused():
         compare_arms( runs, FLOOR )
 
 
+def test_an_arm_that_replayed_the_same_asks_in_another_order_is_refused():
+    runs = _runs()
+    swapped = [ IDS[ 1 ], IDS[ 0 ] ] + IDS[ 2: ]
+    runs[ "Q+A" ] = _run( [ True ] * 8 + [ True, True, False, False ], ids=swapped )
+    assert sorted( swapped ) == sorted( IDS )
+    with pytest.raises( ValueError, match="arm Q\\+A replayed different asks from Q" ):
+        compare_arms( runs, FLOOR )
+
+
 COVERAGE = { "Q": { "asks": 12, "with_section": 12, "no_context": 0, "arm_input_absent": 0 },
              "Q+A": { "asks": 12, "with_section": 10, "no_context": 0, "arm_input_absent": 2 },
              "Q+O": { "asks": 12, "with_section": 7, "no_context": 0, "arm_input_absent": 5 } }
@@ -139,6 +148,16 @@ def test_report_holds_provenance_coverage_reconciliations_and_one_row_per_arm():
     assert "| multiple_choice correct per 100 (asks) | yes_no correct per 100 (asks) |" in text
     assert "| Q | 50.0 (4) | 0.0 (8) | - | - | - | - |" in text
     assert "| Q+A | 50.0 (4) | 100.0 (8) | 8 | 0 | 0.0078 | engine better | 7 | 0 | 0.0156 | engine better |" in text
+
+
+def test_report_headers_are_exact_lines():
+    lines = render_arm_report( compare_arms( _runs(), FLOOR ), COVERAGE, RECONCILIATIONS, PROVENANCE ).split( "\n" )
+    assert lines[ 0 ] == "# Context comparison report"
+    assert "| arm | asks | with its section | no context | arm input empty |" in lines
+    results = lines.index( "## Results" ) + 2
+    assert lines[ results ] == ( "| arm | multiple_choice correct per 100 (asks) | yes_no correct per 100 (asks) | vs Q: arm only | vs Q: Q only | vs Q: p |"
+                                 " vs Q: verdict | vs always-yes: arm only | vs always-yes: yes only | vs always-yes: p | vs always-yes: verdict |" )
+    assert lines[ results + 1 ] == "|---|" + "---|" * 10
 
 
 def test_report_marks_a_type_an_arm_did_not_replay():
