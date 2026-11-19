@@ -84,10 +84,28 @@ def test_arm_against_q_counts_discordant_pairs_and_exact_p():
     assert pair[ "verdict" ] == "engine better"
 
 
-def test_arm_against_always_yes_uses_the_runs_own_baseline():
+def test_arm_against_always_yes_counts_yes_no_asks_only():
     pair = compare_arms( _runs(), FLOOR )[ 1 ][ "vs_always_yes" ]
-    assert ( pair[ "engine_only_right" ], pair[ "baseline_only_right" ] ) == ( 7, 0 )
-    assert pair[ "mcnemar" ][ "p_value" ] == pytest.approx( 2 / 2 ** 7 )
+    assert pair[ "asks_replayed" ] == 8
+    assert ( pair[ "engine_only_right" ], pair[ "baseline_only_right" ] ) == ( 5, 0 )
+    assert pair[ "mcnemar" ][ "p_value" ] == pytest.approx( 2 / 2 ** 5 )
+
+
+def test_arm_against_q_by_type_splits_the_pairs_and_q_has_none():
+    rows = compare_arms( _runs(), FLOOR )
+    assert rows[ 0 ][ "vs_q_by_type" ] == {}
+    by_type = rows[ 1 ][ "vs_q_by_type" ]
+    assert sorted( by_type ) == [ "multiple_choice", "yes_no" ]
+    assert ( by_type[ "yes_no" ][ "engine_only_right" ], by_type[ "yes_no" ][ "baseline_only_right" ], by_type[ "yes_no" ][ "asks_replayed" ] ) == ( 8, 0, 8 )
+    assert ( by_type[ "multiple_choice" ][ "engine_only_right" ], by_type[ "multiple_choice" ][ "baseline_only_right" ], by_type[ "multiple_choice" ][ "asks_replayed" ] ) == ( 0, 0, 4 )
+
+
+def test_a_run_with_no_yes_no_ask_has_no_always_yes_pair():
+    only_mc = { arm: dict( run, records={ k: [ r for r in v if r[ "meta" ][ "response_type" ] == "multiple_choice" ] for k, v in run[ "records" ].items() } )
+                for arm, run in _runs().items() }
+    rows = compare_arms( only_mc, FLOOR )
+    assert all( row[ "vs_always_yes" ] is None for row in rows )
+    assert sorted( rows[ 1 ][ "vs_q_by_type" ] ) == [ "multiple_choice" ]
 
 
 def test_pairs_below_the_floor_are_not_decisive_rather_than_no_effect():
@@ -147,7 +165,10 @@ def test_report_holds_provenance_coverage_reconciliations_and_one_row_per_arm():
     assert "- **The 45 missing**: 5 newer than the export, 40 unexplained" in text
     assert "| multiple_choice correct per 100 (asks) | yes_no correct per 100 (asks) |" in text
     assert "| Q | 50.0 (4) | 0.0 (8) | - | - | - | - |" in text
-    assert "| Q+A | 50.0 (4) | 100.0 (8) | 8 | 0 | 0.0078 | engine better | 7 | 0 | 0.0156 | engine better |" in text
+    assert "| Q+A | 50.0 (4) | 100.0 (8) | 8 | 0 | 0.0078 | engine better | 5 | 0 | 0.0625 | not decisive |" in text
+    assert "| Q+A | yes_no | 8 | 0 | 0.0078 | engine better |" in text
+    assert "| Q+A | multiple_choice | 0 | 0 | 1.0000 | not decisive |" in text
+    assert "| arm | answer type | arm only | Q only | p | verdict |" in text
 
 
 def test_report_headers_are_exact_lines():
@@ -156,7 +177,7 @@ def test_report_headers_are_exact_lines():
     assert "| arm | asks | with its section | no context | arm input empty |" in lines
     results = lines.index( "## Results" ) + 2
     assert lines[ results ] == ( "| arm | multiple_choice correct per 100 (asks) | yes_no correct per 100 (asks) | vs Q: arm only | vs Q: Q only | vs Q: p |"
-                                 " vs Q: verdict | vs always-yes: arm only | vs always-yes: yes only | vs always-yes: p | vs always-yes: verdict |" )
+                                 " vs Q: verdict | vs always-yes (yes/no only): arm only | yes only | p | verdict |" )
     assert lines[ results + 1 ] == "|---|" + "---|" * 10
 
 
