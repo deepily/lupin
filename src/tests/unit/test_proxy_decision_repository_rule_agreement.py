@@ -59,3 +59,28 @@ def test_the_column_is_the_only_one_the_two_values_differ_on( factory ):
     declined = _write_and_read_back( factory, "log_decision", action="act", rule_agreement=False )
     assert ( approved.rule_agreement, declined.rule_agreement ) == ( True, False )
     assert approved.action == declined.action and approved.category == declined.category
+
+
+def test_log_shadow_stores_every_keyword_it_is_given( factory ):
+    """Give each keyword its own literal, so a dropped one reads back as a default."""
+    with factory() as session:
+        row_id = ProxyDecisionRepository( session ).log_shadow(
+            notification_id = "n-shadow-7",
+            domain          = "domain-7",
+            category        = "category-7",
+            question        = "question-7",
+            sender_id       = "sender-7",
+            confidence      = 0.73,
+            trust_level     = 3,
+            reason          = "reason-7",
+            metadata_json   = { "marker": "metadata-7" },
+            data_origin     = "synthetic_seed",
+            rule_agreement  = True,
+        ).id
+        session.commit()
+    with factory() as fresh:
+        row = fresh.get( ProxyDecision, row_id )
+    assert ( row.notification_id, row.domain, row.category, row.question ) == ( "n-shadow-7", "domain-7", "category-7", "question-7" )
+    assert ( row.sender_id, row.confidence, row.trust_level, row.reason ) == ( "sender-7", 0.73, 3, "reason-7" )
+    assert ( row.metadata_json, row.data_origin, row.rule_agreement ) == ( { "marker": "metadata-7" }, "synthetic_seed", True )
+    assert ( row.action, row.decision_value, row.ratification_state ) == ( "shadow", None, "not_required" )
