@@ -204,3 +204,24 @@ test( "opening a fold reports it and asks for the forecast", () => {
   assert.deepEqual( seen, [ [ "n1", "fold_opened", null ] ] );
   assert.deepEqual( asked, [ fold ] );
 } );
+
+test( "a real drawn fold, opened, asks the hint route for its card", async () => {
+  const ui   = makeUI();
+  const urls: string[] = [];
+  ui.actionRequiredNotifications = new Map();
+  ui.authedFetch = ( path: string, init?: { method?: string } ) => {
+    urls.push( `${ init && init.method ? init.method : "GET" } ${ path }` );
+    return Promise.resolve( { ok: true, json: async () => ( { context_forecast: READY } ) } );
+  };
+  const n = { id: "late-1", response_type: "yes_no", message: "Deploy?",
+    prediction_hint: { state: "ready", predicted_value: "yes", confidence: 0.9, retrieval_metric: "dot", strategy: "context_baseline",
+      context_forecast: { state: "forecasting" } } };
+  document.body.innerHTML = ( ui.buildPredictionHintSection as ( n: unknown ) => string )( n );
+  ui._setupPredictionVoteDelegation();
+  const fold = document.querySelector( "details.prediction-hint-fold" ) as HTMLDetailsElement;
+  assert.ok( fold, "the fold was drawn" );
+  assert.equal( fold.querySelector( CONTEXT_SELECTOR )!.getAttribute( "data-context-state" ), "forecasting" );
+  fold.open = true;
+  await new Promise( ( r ) => setTimeout( r, 20 ) );
+  assert.ok( urls.includes( "GET /api/notify/prediction-hint/late-1" ), `asked: ${ JSON.stringify( urls ) }` );
+} );
