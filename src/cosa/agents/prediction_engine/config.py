@@ -27,6 +27,13 @@ DEFAULT_CALIBRATION_ENABLED    = False
 # abstention reason on the forecast row and a [PREDICTION-FAILURE] log line (phase 11, failure half).
 DEFAULT_FAILURE_VISIBILITY_ENABLED = False
 
+# The three-way stance challenger (yes, no, neither). It runs only in shadow, so this switch gates the
+# engine method that forecasts with it; the live ask path never calls it.
+DEFAULT_THREE_WAY_ENABLED      = False
+
+# Half-life, in days, of the weight an earlier answer carries. 14 is the trust tracker's own figure.
+DEFAULT_RECENCY_HALF_LIFE_DAYS = 14
+
 # Yes/no prior-weighted vote. "no" is predicted only when the
 # no tally beats the yes tally by at least this margin (in vote-weight units; an
 # ordinary neighbour counts 1.0). 1.35 = ln( 527 / 137 ), the log-odds of the 79.4%
