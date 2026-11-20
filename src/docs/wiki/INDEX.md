@@ -102,6 +102,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[db-setup-and-seed-scripts]] — one-off scripts that migrate, create, seed and rehearse database tables and users. `scripts` (migrate_solution_snapshots, auth_migration, create_notifications_table, seed_test_companions, seed_proxy_decisions, embedding_regen_probe)
 - [[question-vector-backfill-plan]] — the backfill script's side file contract and the plan of inserts and updates it builds. `scripts` (backfill_missing_question_vectors)
 - [[question-vector-backfill-run]] — the backfill script's dry run, rehearsal, counted apply and read-back. `scripts` (backfill_missing_question_vectors)
+- [[preference-checkpoint-run-script]] — the record of the script that made the committed preference checkpoint report. `scripts` (preference_step9_checkpoint_run)
 - [[api-key-and-account-scripts]] — the service account, model-server key, admin test account and password reset scripts. `scripts` (create_service_account_postgres, mint-model-server-api-key, create_admin_test_account, reset_user_password)
 - [[lupin-config-cli]] — the lupin-config tool: init, show, list, add, use, test and migrate for the per-user environment config. `scripts` (lupin_config)
 - [[dump-solution-cache-learn-back]] — the solution cache dump tool's check that the emptied cache learns again, with polling, login and receipts. `scripts` (dump_solution_cache)
