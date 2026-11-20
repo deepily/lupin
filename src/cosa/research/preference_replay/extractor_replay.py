@@ -29,6 +29,7 @@ from cosa.agents.principle_learner.vocabulary import heading_for
 from cosa.repo.doc_lint import model_transport
 from cosa.research.preference_replay.replay_loop import always_yes_arm, replay
 from cosa.research.preference_replay.scratch_db import load_export, scratch_session, session_scope
+from cosa.research.preference_replay.service_embeddings import CachedServiceEmbedder, record_neighbour_cosines
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM
 from cosa.rest.postgres_models import Notification, PreferenceEvidence, PreferencePrinciple
 from cosa.utils.iso_timestamp import aware_moment
@@ -292,7 +293,7 @@ def principle_list( session ):
     return rows
 
 
-def run_replay( session, engine, lag, query_fn=None, embed_fn=stand_in_vector, target_types=REPLAYED_TYPES, model="replay-model", timeout_seconds=30 ):
+def run_replay( session, engine, lag, query_fn=None, embed_fn=stand_in_vector, target_types=REPLAYED_TYPES, model="replay-model", timeout_seconds=30, encoder="replay-encoder:v1" ):
     """
     Replay the loaded asks in time order through the harness and the extractor.
 
@@ -300,6 +301,7 @@ def run_replay( session, engine, lag, query_fn=None, embed_fn=stand_in_vector, t
         - session holds the loaded notifications and empty principle tables
         - engine is a PredictionEngine; lag is a timedelta; target_types names the response types the harness predicts
         - model is the id the extractor writes under and, with no query_fn, the model it calls; timeout_seconds limits each call
+        - encoder is the encoder version the principles are stored and searched under
 
     Ensures:
         - returns { run, seen, extractions, counts, leakage_checked }
@@ -309,7 +311,7 @@ def run_replay( session, engine, lag, query_fn=None, embed_fn=stand_in_vector, t
         - leakage_checked is the number of evidence rows check_no_leakage verified; a leak raises LeakageError
     """
     asks   = asks_from_session( session, engine, embed_fn )
-    runner = ExtractorReplay( session, asks, lag, query_fn=query_fn, embed_fn=embed_fn, model=model, timeout_seconds=timeout_seconds )
+    runner = ExtractorReplay( session, asks, lag, query_fn=query_fn, embed_fn=embed_fn, model=model, timeout_seconds=timeout_seconds, encoder=encoder )
     seen   = []
     run    = replay( asks, engine, SNAPSHOT_SHA, baselines={ RECORDER_ARM: make_recorder( seen ) }, target_types=target_types, context_arms=( RECORDER_ARM, ),
                      episode_view_provider=runner.episode_provider, principles_provider=runner.principles_provider )
@@ -332,9 +334,13 @@ def main( argv=None, query_fn=None ):
         - with --dry-run the model is canned_model and no model is called; otherwise --model, with each call limited to --timeout-seconds,
           is called through model_transport.complete unless a query_fn double was given
         - without --dry-run, a double or --model, it exits with a usage error before it reads the export or makes any call
+        - each variant also prints the extractor's totals: principles created, reused, off-vocabulary and rejected
         - each variant prints a line ending with the model id and the number of finished model calls, then a line with the token
           counts the transport reported for it; a call that failed or timed out is not counted in the first, so the second is the spend
           figure; its cost is the SDK's notional figure, not a charge, and a canned model reports none
+        - with --embeddings service, vectors come from the embedding service through a side cache keyed by text and encoder version;
+          an unreachable service stops the run with EmbeddingServiceUnavailable; the default stand-in never calls a service
+        - with --neighbour-cosines-out, writes the cosine of every neighbour shown to the model, over all variants, as a JSON list
         - writes the last variant's principle list to --out as JSON, and prints one line of counts per variant
         - returns 0
     """
@@ -345,24 +351,41 @@ def main( argv=None, query_fn=None ):
     parser.add_argument( "--dry-run", action="store_true" )
     parser.add_argument( "--model", default=None, help="model id for a live run; required unless --dry-run is given" )
     parser.add_argument( "--timeout-seconds", type=int, default=30 )
+    parser.add_argument( "--embeddings", choices=( "stand-in", "service" ), default="stand-in", help="stand-in (default) calls no service; service uses the live extractor's embedding path" )
+    parser.add_argument( "--embedding-cache", default=None, help="side file for service vectors; defaults to <out>.embeddings.json" )
+    parser.add_argument( "--neighbour-cosines-out", default=None, help="write the cosines of the neighbours shown to the model, as JSON" )
     args = parser.parse_args( argv )
     if args.model is None and not args.dry_run and query_fn is None: parser.error( "--model is required for a live run: give --model <id>, or --dry-run for the canned model" )
     if args.model is None: args.model = "replay-model"
     with open( args.export, encoding="utf-8" ) as handle: export = json.load( handle )
     chosen = canned_model if args.dry_run else query_fn
     listing = []
+    cosines = []
+    embed   = stand_in_vector
+    encoder = "replay-encoder:v1"
+    if args.embeddings == "service":
+        embed   = CachedServiceEmbedder( args.embedding_cache or f"{args.out}.embeddings.json" )
+        encoder = embed.encoder
     for lag in args.lags or [ 0, 300 ]:
         usage_before = model_transport.claude_usage_summary()
-        with scratch_session() as session, model_transport.record_calls() as calls:
+        with scratch_session() as session, model_transport.record_calls() as calls, record_neighbour_cosines( cosines ):
             load_export( session, export )
             PredictionEngine.reset()
-            outcome = run_replay( session, PredictionEngine( debug=False ), timedelta( seconds=lag ), query_fn=chosen, model=args.model, timeout_seconds=args.timeout_seconds )
+            outcome = run_replay( session, PredictionEngine( debug=False ), timedelta( seconds=lag ), query_fn=chosen, embed_fn=embed, model=args.model, timeout_seconds=args.timeout_seconds, encoder=encoder )
             listing = principle_list( session )
         print( f"lag {lag}s: {outcome[ 'counts' ]}, leakage checked {outcome[ 'leakage_checked' ]}, model {args.model}, finished model calls {len( calls )}", file=sys.stdout )
+        done = [ item[ "summary" ] for item in outcome[ "extractions" ] ]
+        print( f"  extractor totals: {sum( d[ 'principles_created' ] for d in done )} principles created, {sum( d[ 'principles_reused' ] for d in done )} reused, "
+               f"{sum( len( d[ 'off_vocabulary' ] ) for d in done )} off-vocabulary, {sum( len( d[ 'rejected' ] ) for d in done )} rejected", file=sys.stdout )
         usage_after = model_transport.claude_usage_summary()
         used        = { key: usage_after[ key ] - usage_before[ key ] for key in usage_after }
         print( f"  usage reported by the transport: {used[ 'calls' ]} calls, input {used[ 'input_tokens' ]}, output {used[ 'output_tokens' ]}, "
                f"cache read {used[ 'cache_read_input_tokens' ]}, cache write {used[ 'cache_creation_input_tokens' ]}, notional cost {used[ 'cost_usd' ]:.2f} USD", file=sys.stdout )
+    if args.embeddings == "service":
+        embed.flush()
+        print( f"embeddings: {embed.calls} service calls, {embed.hits} cache hits, encoder {encoder}", file=sys.stdout )
+    if args.neighbour_cosines_out is not None:
+        with open( args.neighbour_cosines_out, "w", encoding="utf-8" ) as handle: json.dump( cosines, handle )
     with open( args.out, "w", encoding="utf-8" ) as handle: json.dump( listing, handle, indent=1, sort_keys=True )
     return 0
 
