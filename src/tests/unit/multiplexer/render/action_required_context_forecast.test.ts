@@ -75,8 +75,8 @@ test( "the line sits inside the fold of a card whose own hint is not ready, and 
 test( "the line sits inside the fold of a ready card too, and a card with no forecast has none", () => {
   const ready = { state: "ready" as const, retrieval_metric: "cosine", category: "c", predicted_value: "no", confidence: 0.7 };
   assert.equal( box( { ...ready, context_forecast: { state: "forecast_timed_out" } } ).querySelector( '[data-testid="prediction-hint-context"]' )!.textContent, "Haiku forecast timed out" );
-  assert.equal( box( ready ).querySelector( '[data-testid="prediction-hint-context"]' ), null );
-  assert.equal( box( undefined ).querySelector( '[data-testid="prediction-hint-context"]' ), null );
+  assert.ok( box( ready ).querySelector( '[data-testid="prediction-hint-context"]' ) === null, "a card with no forecast has no context line" );
+  assert.ok( box( undefined ).querySelector( '[data-testid="prediction-hint-context"]' ) === null, "a card with no hint has no context line" );
 } );
 
 function mountCard( fetchForecast: ( ( id: string ) => Promise<void> ) | undefined ) {
