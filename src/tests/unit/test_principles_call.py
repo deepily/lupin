@@ -21,6 +21,7 @@ import cosa.rest.db.database as database
 from cosa.agents.prediction_engine.principles_forecast import CAP_KEY, SWITCH_KEY, CapGate
 from cosa.agents.principle_learner import extractor_job
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
+from cosa.agents.principle_learner.review_card_sweep import extractor_version_of
 from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
 from test_principles_forecast import Baseline, ENCODER, EXTRACT, Embedder, T0, ask, factory, principle, rows, vec  # noqa: F401  factory is a fixture
 
@@ -36,8 +37,9 @@ def _fresh_gate():
 
 
 def settings( monkeypatch, model="model-x" ):
-    """Make the settings read answer one extractor model, not the committed one."""
-    monkeypatch.setattr( pc, "ConfigurationManager", lambda env_var_name=None: type( "C", (), { "get_required": lambda self, key: model } )() )
+    """Make the settings read answer the extractor model for its own key only."""
+    answer = lambda self, key: model if key == extractor_job.MODEL_KEY else f"wrong-key:{key}"
+    monkeypatch.setattr( pc, "ConfigurationManager", lambda env_var_name=None: type( "C", (), { "get_required": answer } )() )
 
 
 def run( factory, nid, **kwargs ):
@@ -125,10 +127,11 @@ def test_the_versions_the_call_passes_are_the_extractors_stored_encoder_and_the_
         return { "status": "ran", "reason": None }
     monkeypatch.setattr( pc, "run_b1", recorder )
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: "enc-literal:recipe" )
-    settings( monkeypatch, model="model-y" )
+    settings( monkeypatch, model="extractor-model" )
     asyncio.run( pc.run_principles_forecast( "n", session_factory=object(), c0=object(), gate=object(), embedder=object(), enabled=True ) )
     assert seen[ "encoder" ] == "enc-literal:recipe" and seen[ "enabled" ] is True
-    assert seen[ "extractor" ] == f"model-y:{PROMPT_VERSION}" and seen[ "extractor" ].startswith( "model-y:" )
+    assert seen[ "extractor" ] == extractor_version_of( "extractor-model" ) == f"extractor-model:{PROMPT_VERSION}"
+    assert seen[ "extractor" ].startswith( "extractor-model:" ), "read from the extractor's model key, not another"
 
 
 def test_one_gate_is_made_per_process_and_reset_makes_a_new_one( monkeypatch ):
@@ -168,8 +171,10 @@ def test_the_cap_is_not_the_baselines( factory, monkeypatch ):
 
 def test_the_provider_embedder_uses_the_extractors_own_embedding_call( monkeypatch ):
     """The embedder's encode is default_embed, looked up at call time."""
-    monkeypatch.setattr( extractor_job, "default_embed", lambda text: [ text, "vector" ] )
-    assert pc.provider_embedder().encode( "card text" ) == [ "card text", "vector" ]
+    received = []
+    monkeypatch.setattr( extractor_job, "default_embed", lambda text: received.append( text ) or [ "vector" ] )
+    assert pc.provider_embedder().encode( "Mixed CASE text" ) == [ "vector" ]
+    assert received == [ "Mixed CASE text" ], "the text reaches the embedding call exactly as given, case and all"
 
 
 def test_the_committed_ini_has_the_switch_off_and_a_positive_cap():
