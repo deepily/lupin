@@ -1207,7 +1207,7 @@ Record the user's 👍/👎 on a prediction hint. up→approved (reinforce in fu
 
 > **Record that a prediction hint was rendered and/or its fold opened**
 
-Stores the first rendered time and the first fold-open time on the notification's forecast row. A later call never overwrites a stored time; a time never reported stays null.
+Stores the first rendered time, the first fold-open time and the optional draft answer at reveal on the notification's forecast row. A later call never overwrites a stored value; a value never reported stays null.
 
 
 
@@ -5882,11 +5882,15 @@ Body for POST /api/notify/prediction-seen/{notification_id}.
 
 Each flag reports one client event. The server stamps the time, never the client.
 
+draft_at_reveal is optional. It holds the answer controls' state when the fold opened, shaped like a
+stored answer ( { "value": ... } ). Absent, the call behaves as it did before.
+
 
 | Field | Type | Description |
 |-------|------|-------------|
 | rendered | boolean |  |
 | fold_opened | boolean |  |
+| draft_at_reveal |  |  |
 
 
 ## PredictionVoteRequest
