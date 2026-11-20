@@ -9,7 +9,7 @@
 // It is read only. Nothing here marks a field invalid or changes a control.
 
 import type { ActionRequiredItem } from "../../shared/types";
-import { MC_OTHER_VALUE } from "./actionRequiredInteractive";
+import { checkedChoices } from "./actionRequiredInteractive";
 
 /** The server's limit on a draft, counted in characters of its JSON text. */
 export const DRAFT_MAX_CHARS = 4096;
@@ -53,15 +53,7 @@ function visibleChoice(item: ActionRequiredItem, widget: HTMLElement): { header:
   const block = widget.querySelector<HTMLElement>(".action-required-question");
   if (block === null) return null;
   const question = item.questions[Number(block.dataset.questionIndex)]!;
-  const values: string[] = [];
-  for (const input of Array.from(block.querySelectorAll<HTMLInputElement>(".action-required-option-input:checked"))) {
-    if (input.value !== MC_OTHER_VALUE) {
-      values.push(input.value);
-      continue;
-    }
-    const text = block.querySelector<HTMLInputElement>(".mc-other-input")!.value.trim();
-    if (text !== "") values.push(text);
-  }
+  const values = checkedChoices(block);
   if (values.length === 0) return null;
   return { header: question.header, value: question.multiSelect ? values : values[0]! };
 }

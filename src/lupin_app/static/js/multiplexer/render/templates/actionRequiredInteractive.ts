@@ -218,16 +218,7 @@ function buildMultipleChoice(
   // A ticked Other answers with its trimmed text.
   const saveCurrent = (block: HTMLElement): boolean => {
     const question = item.questions[index]!;
-    const other    = block.querySelector<HTMLInputElement>(".mc-other-input")!;
-    const values: string[] = [];
-    for (const input of Array.from(block.querySelectorAll<HTMLInputElement>(".action-required-option-input:checked"))) {
-      if (input.value !== MC_OTHER_VALUE) {
-        values.push(input.value);
-        continue;
-      }
-      const text = other.value.trim();
-      if (text !== "") values.push(text);
-    }
+    const values   = checkedChoices(block);
     if (values.length === 0) return false;
     // legacy getCurrentQuestionAnswer: `question.multi_select ? answers : answers[ 0 ]`
     answers[question.header] = question.multiSelect ? values : values[0]!;
@@ -368,6 +359,30 @@ export const OPEN_ENDED_MIC_TITLE = "Press Enter or Space to record (30s max, ES
 
 /** Legacy's value for the "Other" option (notifications.js:23969); never sent as an answer. */
 export const MC_OTHER_VALUE = "__other__";
+
+/**
+ * Read what a question block has ticked, the way the card answers it.
+ *
+ * Requires:
+ *   - block is one question's element on the card
+ *
+ * Ensures:
+ *   - returns the value of each ticked option, in page order
+ *   - a ticked Other counts through its trimmed text, and counts for nothing when that text is empty
+ *   - reads only: nothing is marked invalid and no control changes
+ */
+export function checkedChoices(block: HTMLElement): string[] {
+  const values: string[] = [];
+  for (const input of Array.from(block.querySelectorAll<HTMLInputElement>(".action-required-option-input:checked"))) {
+    if (input.value !== MC_OTHER_VALUE) {
+      values.push(input.value);
+      continue;
+    }
+    const text = block.querySelector<HTMLInputElement>(".mc-other-input")!.value.trim();
+    if (text !== "") values.push(text);
+  }
+  return values;
+}
 
 /** Legacy's placeholder for the "Other" text (notifications.js:23979). */
 export const MC_OTHER_PLACEHOLDER = "Type or speak custom answer...";

@@ -84,21 +84,19 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
         Returns:
             Created ProxyDecision instance
         """
-        return self.create(
-            notification_id      = notification_id,
-            domain               = domain,
-            category             = category,
-            question             = question,
-            sender_id            = sender_id,
-            action               = "shadow",
-            decision_value       = None,
-            confidence           = confidence,
-            trust_level          = trust_level,
-            reason               = reason or "L1 shadow mode — log only",
-            ratification_state   = "not_required",
-            metadata_json        = metadata_json,
-            data_origin          = data_origin,
-            rule_agreement       = rule_agreement,
+        return self.log_decision(
+            notification_id = notification_id,
+            domain          = domain,
+            category        = category,
+            question        = question,
+            action          = "shadow",
+            sender_id       = sender_id,
+            confidence      = confidence,
+            trust_level     = trust_level,
+            reason          = reason or "L1 shadow mode — log only",
+            metadata_json   = metadata_json,
+            data_origin     = data_origin,
+            rule_agreement  = rule_agreement,
         )
 
     def log_decision( self, notification_id, domain, category, question,
