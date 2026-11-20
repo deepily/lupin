@@ -13,7 +13,12 @@ pins:
   - cosa.research.preference_replay.before_after_report.check_columns@062cea1ade
   - cosa.research.preference_replay.before_after_report.check_control@9edaad5a86
   - cosa.research.preference_replay.before_after_report.column_rows@0409838bfb
-  - cosa.research.preference_replay.before_after_report.render_before_after@365ca6dc92
+  - cosa.research.preference_replay.before_after_report.render_before_after@5d7dff1259
+  - cosa.research.preference_replay.before_after_report.assemble_report@aab790a1e0
+  - cosa.research.preference_replay.before_after_report.final_correct@cfec5c356a
+  - cosa.research.preference_replay.before_after_report.main@2d60ab12a8
+  - cosa.research.preference_replay.before_after_columns.build_column@d63656e8bc
+  - cosa.research.preference_replay.before_after_columns.main@14c0fc9c52
 ---
 # Preference replay reports
 
@@ -26,4 +31,8 @@ The Markdown reports of the replay, and the text each context arm embeds ([[pref
 
 ## Before and after
 - Four columns. First the committed baseline, then the same asks on regenerated vectors, then every ask on regenerated vectors. Last, every ask as neighbours, scored on column 1's final window.
-- `check_columns` refuses columns that cannot support that, with `ReportMismatch`. `check_control` refuses new figures until the control run reproduces the committed final-correct count. `column_rows` flattens a column and `render_before_after` renders it.
+- `check_columns` refuses columns that cannot support that, with `ReportMismatch`. `check_control` refuses new figures until the control run reproduces the committed final-correct count. `column_rows` flattens a column and `render_before_after` renders it. It takes optional notes, printed as bullets, and escapes a pipe in a figure name.
+- `final_correct( column )` sums a column's final-window correct forecasts over its answer types.
+- `assemble_report` checks the control and columns 1 to 3 against their expected counts, sets the Before column's provenance and renders. It renders nothing when a count differs.
+- `before_after_report.main` builds the report from the four column files. `before_after_columns.build_column` builds one column from a replay: the tune and final windows, the calibration and the yes/no comparison with always-yes.
+- `before_after_columns.main` replays the cohort at one setting and writes the column file. With `--rescore-from` it also scores the run on another column's final asks.
