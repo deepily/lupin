@@ -110,6 +110,7 @@ class TestGetAccuracySummary( _PLRTestBase ):
             0.8,   # avg_confidence
         ]
         self.repo._get_breakdown = Mock( side_effect=[ { "by_cat": 1 }, { "by_type": 2 } ] )
+        self.repo._get_abstention_counts = Mock( return_value={ "embedding_missing": 2 } )
         summary = self.repo.get_accuracy_summary()
         self.assertEqual( summary[ "window_days" ], 30 )
         self.assertEqual( summary[ "excluded_legacy_similarity" ], 132 )
@@ -123,6 +124,7 @@ class TestGetAccuracySummary( _PLRTestBase ):
         self.assertEqual( summary[ "avg_confidence" ], 0.8 )
         self.assertEqual( summary[ "by_category" ], { "by_cat": 1 } )
         self.assertEqual( summary[ "by_response_type" ], { "by_type": 2 } )
+        self.assertEqual( summary[ "by_abstention_reason" ], { "embedding_missing": 2 } )
 
     def test_all_filters_no_responses_uses_or_defaults( self ):
         # All scalars falsy → exercise the `or 0` / `or 0.0` right arcs + responded==0 else.
@@ -136,6 +138,7 @@ class TestGetAccuracySummary( _PLRTestBase ):
             None,  # avg_confidence   → or 0.0
         ]
         self.repo._get_breakdown = Mock( return_value={} )
+        self.repo._get_abstention_counts = Mock( return_value={} )
         summary = self.repo.get_accuracy_summary(
             window_days=7, category="permission", response_type="yes_no",
             sender_id="sess-1"
@@ -150,6 +153,32 @@ class TestGetAccuracySummary( _PLRTestBase ):
         self.assertIsNone( summary[ "accuracy_rate" ] )
         self.assertEqual( summary[ "status" ], "insufficient data" )
         self.assertEqual( summary[ "avg_confidence" ], 0.0 )
+
+
+class TestAbstentionCounts( _PLRTestBase ):
+    """Phase 11: the summary counts forecast rows per named abstention reason."""
+
+    def test_counts_per_reason_most_frequent_first_with_ties_in_name_order( self ):
+        self.session.query.return_value.filter.return_value.group_by.return_value.all.return_value = [
+            ( "store_error: RuntimeError", 1 ), ( "embedding_missing", 3 ), ( "no_similar_cases", 3 ), ( "store_write_failed", 2 ) ]
+        counts = self.repo._get_abstention_counts( "base-filter" )
+        self.assertEqual( list( counts.items() ), [
+            ( "embedding_missing", 3 ), ( "no_similar_cases", 3 ), ( "store_write_failed", 2 ), ( "store_error: RuntimeError", 1 ) ] )
+
+    def test_the_query_leaves_out_rows_with_no_reason_and_applies_the_summary_filter( self ):
+        self.session.query.return_value.filter.return_value.group_by.return_value.all.return_value = []
+        self.assertEqual( self.repo._get_abstention_counts( "base-filter" ), {} )
+        args = self.session.query.return_value.filter.call_args.args
+        self.assertEqual( args[ 0 ], "base-filter" )
+        self.assertIn( "abstention_reason IS NOT NULL", str( args[ 1 ].compile( dialect=postgresql.dialect() ) ) )
+
+    def test_the_summary_passes_its_own_filter_to_the_counter( self ):
+        self.session.query.return_value.filter.return_value.scalar.return_value = 0
+        self.repo._get_breakdown = Mock( return_value={} )
+        self.repo._get_abstention_counts = Mock( return_value={ "store_write_failed": 1 } )
+        summary = self.repo.get_accuracy_summary()
+        self.repo._get_abstention_counts.assert_called_once()
+        self.assertEqual( summary[ "by_abstention_reason" ], { "store_write_failed": 1 } )
 
 
 class TestSummaryScopeFilters( _PLRTestBase ):

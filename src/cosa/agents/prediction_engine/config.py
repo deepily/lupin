@@ -23,6 +23,10 @@ VALID_RETRIEVAL_METRICS        = ( "dot", "cosine" )
 # instead of raw confidence. False in the foundation; a measured change turns it on.
 DEFAULT_CALIBRATION_ENABLED    = False
 
+# Whether a missing embedding, a failed forecast write and a swallowed store error write a named
+# abstention reason on the forecast row and a [PREDICTION-FAILURE] log line (phase 11, failure half).
+DEFAULT_FAILURE_VISIBILITY_ENABLED = False
+
 # Yes/no prior-weighted vote. "no" is predicted only when the
 # no tally beats the yes tally by at least this margin (in vote-weight units; an
 # ordinary neighbour counts 1.0). 1.35 = ln( 527 / 137 ), the log-odds of the 79.4%

@@ -302,6 +302,8 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             - Also leaves out rows with a stored confidence above 1 ( see legacy_confidence_clause );
               their count, without the rows already counted above, is returned as
               excluded_legacy_confidence, so the two counts add up
+            - by_abstention_reason counts rows per named abstention reason ( embedding_missing,
+              store_write_failed, "store_error: <class>", beside the older reasons ), same filters as the totals
         """
         cutoff = datetime.now( timezone.utc ) - timedelta( days=window_days )
 
@@ -365,6 +367,8 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         # Per-type breakdown
         type_breakdown = self._get_breakdown( combined_filter, PredictionLog.response_type )
 
+        abstention_counts = self._get_abstention_counts( combined_filter )
+
         return {
             "window_days"       : window_days,
             "total_predictions" : total_predictions,
@@ -378,7 +382,29 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             "avg_confidence"    : round( float( avg_confidence ), 4 ),
             "by_category"       : category_breakdown,
             "by_response_type"  : type_breakdown,
+            "by_abstention_reason" : abstention_counts,
         }
+
+    def _get_abstention_counts( self, base_filter ) -> Dict[str, int]:
+        """
+        Count forecast rows per named abstention reason.
+
+        Requires:
+            - base_filter: SQLAlchemy filter expression
+
+        Ensures:
+            - Returns { reason: row count } for rows whose abstention_reason is not null, most frequent first
+            - a "store_error: <class>" reason is its own key per exception class
+            - rows with no abstention reason (forecasts that were made) are not counted
+        """
+        rows = self.session.query(
+            PredictionLog.abstention_reason, func.count( PredictionLog.id )
+        ).filter(
+            base_filter, PredictionLog.abstention_reason.isnot( None )
+        ).group_by(
+            PredictionLog.abstention_reason
+        ).all()
+        return { reason: count for reason, count in sorted( rows, key=lambda row: ( -row[1], row[0] ) ) }
 
     def _get_breakdown( self, base_filter, group_column ) -> Dict[str, Dict[str, Any]]:
         """
