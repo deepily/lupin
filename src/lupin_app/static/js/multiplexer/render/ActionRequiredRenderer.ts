@@ -445,12 +445,17 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
    *
    * Ensures:
    *   - returns null for a card that is not on screen as an interactive widget, and for a yes/no card or an empty answer
+   *   - returns null when reading the controls throws, so the report that the fold opened is never held back
    */
   private draftOf(idHash: string): DraftAtReveal | null {
-    const item   = this.stores.actionRequired.getById(idHash);
-    const widget = this.root?.querySelector<HTMLElement>(`.action-required-widget-interactive[data-id-hash="${idHash}"]`) ?? null;
-    if (item === undefined || widget === null) return null;
-    return draftAtReveal(item, widget);
+    try {
+      const item   = this.stores.actionRequired.getById(idHash);
+      const widget = this.root?.querySelector<HTMLElement>(`.action-required-widget-interactive[data-id-hash="${idHash}"]`) ?? null;
+      if (item === undefined || widget === null) return null;
+      return draftAtReveal(item, widget);
+    } catch (_err) {
+      return null;
+    }
   }
 
   private buildWidgetFor(item: ActionRequiredItem): HTMLElement {

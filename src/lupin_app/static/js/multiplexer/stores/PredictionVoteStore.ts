@@ -67,6 +67,7 @@ export interface PredictionVoteStore {
    *
    * A fold-open carries `draft_at_reveal` when a draft is given, and a render never does. No draft, or null,
    * sends the call as it was, so an empty answer is never sent as an empty value.
+   * The first fold-open's draft is the one kept. A retry sends it again, never a draft read after the forecast showed.
    */
   reportSeen( notificationId: string, event: PredictionSeenEvent, draft?: { value: string } | null ): Promise<void>;
   /** Test/cleanup helper. */
@@ -94,6 +95,8 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
   // call fails, because the reader did open it and the card must stay open on a repaint.
   private readonly seenSent  = new Set<string>();
   private readonly foldOpens = new Set<string>();
+  // The draft taken at each card's first fold-open, kept so a retry after a failed call sends it and not a later one.
+  private readonly firstDrafts = new Map<string, { value: string } | null>();
 
   /**
    * Stores the bus and API client and the clock, which defaults to the current time.
@@ -165,7 +168,11 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
    */
   async reportSeen( notificationId: string, event: PredictionSeenEvent, draft?: { value: string } | null ): Promise<void> {
     if ( !notificationId ) return;
-    if ( event === "fold_opened" ) this.foldOpens.add( notificationId );
+    if ( event === "fold_opened" ) {
+      this.foldOpens.add( notificationId );
+      if ( !this.firstDrafts.has( notificationId ) ) this.firstDrafts.set( notificationId, draft ?? null );
+      draft = this.firstDrafts.get( notificationId );
+    }
     const key = `${ notificationId }|${ event }`;
     if ( this.seenSent.has( key ) ) return;
     this.seenSent.add( key );
@@ -188,6 +195,7 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
     this.votes.clear();
     this.seenSent.clear();
     this.foldOpens.clear();
+    this.firstDrafts.clear();
   }
   /* c8 ignore stop */
 }

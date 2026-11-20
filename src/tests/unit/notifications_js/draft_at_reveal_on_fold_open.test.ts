@@ -141,14 +141,48 @@ test( "a card with no state or no controls on the page has no draft", () => {
   assert.equal( ui._draftAtReveal( "n1" ), null, "the state is there but the card is gone" );
 } );
 
-test( "a draft is kept at exactly the server's limit and dropped one character over it", () => {
+// The same literals sit in the route's Python test (test_notifications_router_prediction_seen.py) and the multiplexer test,
+// so the counters cannot drift: a character outside space-to-tilde counts six, an emoji twelve, and the frame is 13.
+const ROUTE_COUNTS: ReadonlyArray<readonly [ string, number, boolean ]> = [
+  [ "x".repeat( 4083 ),                 4096, true  ],
+  [ "x".repeat( 4084 ),                 4097, false ],
+  [ "\u00e9".repeat( 500 ),              3013, true  ],
+  [ "\u00e9".repeat( 700 ),              4213, false ],
+  [ "\u00e9".repeat( 680 ) + "xxx",      4096, true  ],
+  [ "\u00e9".repeat( 680 ) + "xxxx",     4097, false ],
+  [ "\u{1F600}".repeat( 500 ),           6013, false ],
+  [ "\x7f",                                19, true  ],
+];
+
+test( "a draft is counted as the route counts it, kept at the limit and dropped one over it", () => {
   const ui   = makeUI();
   const card = place( ui, note( "open_ended" ), OPEN_ENDED_HTML );
   const box  = card.querySelector( ".response-text-input" ) as HTMLInputElement;
-  box.value = "x".repeat( 4084 );   // {"value":"…"} is 12 characters of frame, so 4084 makes 4096
-  assert.deepEqual( ui._draftAtReveal( "n1" ), { value: "x".repeat( 4084 ) } );
-  box.value = "x".repeat( 4085 );
+  for ( const [ text, counted, kept ] of ROUTE_COUNTS ) {
+    assert.equal( ui._draftRouteLength( { value: text } ), counted, `${ text.length } UTF-16 units` );
+    box.value = text;
+    assert.deepEqual( ui._draftAtReveal( "n1" ), kept ? { value: text } : null, `${ counted } counted: ${ kept ? "kept" : "dropped" }` );
+  }
+} );
+
+test( "a throw while reading the controls gives no draft instead of blocking the report", () => {
+  const ui   = makeUI();
+  const card = place( ui, note( "open_ended" ), OPEN_ENDED_HTML );
+  card.querySelector( ".response-text-input" )!.remove();   // the reader expects it, and so throws
   assert.equal( ui._draftAtReveal( "n1" ), null );
+} );
+
+test( "a retry after a failed fold-open sends the draft of the first open, not a later one", async () => {
+  const ui = makeUI();
+  let ok   = false;
+  ui.authedFetch = async ( url: string, init: { body: string } ): Promise<{ ok: boolean }> => { ui.calls.push( { url, body: JSON.parse( init.body ) } ); return { ok }; };
+  await ui._reportPredictionSeen( "r1", "fold_opened", { value: "first" } );
+  ok = true;
+  await ui._reportPredictionSeen( "r1", "fold_opened", { value: "later, read after the forecast was shown" } );
+  assert.deepEqual( ui.calls.map( ( c: Call ) => c.body ), [
+    { fold_opened: true, draft_at_reveal: { value: "first" } },
+    { fold_opened: true, draft_at_reveal: { value: "first" } },
+  ] );
 } );
 
 test( "the seen report carries the draft on a fold-open, never on a render, and nothing when it is null", async () => {

@@ -14,6 +14,25 @@ import { MC_OTHER_VALUE } from "./actionRequiredInteractive";
 /** The server's limit on a draft, counted in characters of its JSON text. */
 export const DRAFT_MAX_CHARS = 4096;
 
+/**
+ * Count a draft the way the route does: as Python's json.dumps writes it.
+ *
+ * json.dumps puts a space after the colon. It writes every character outside space to tilde as a six-character escape.
+ * So a character beyond Basic Latin counts six, and an emoji, which is two UTF-16 units, counts twelve.
+ *
+ * Requires:
+ *   - draft is { value: string }
+ *
+ * Ensures:
+ *   - returns the length json.dumps gives the same draft on the server
+ */
+export function routeLength(draft: DraftAtReveal): number {
+  const text = JSON.stringify(draft);
+  let length = text.length + 1;
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) > 0x7e) length += 5;
+  return length;
+}
+
 /** The draft the seen route takes: the wire string of the answer so far. */
 export interface DraftAtReveal {
   value : string;
@@ -77,7 +96,7 @@ function batchAnswers(widget: HTMLElement): Record<string, string> {
  *   - an open-ended card returns its trimmed text, or null when the box is empty
  *   - a multiple-choice card returns the saved answers plus the question on screen, and a batch card its non-empty fields,
  *     as the JSON text of { answers: { header: pick or [picks] } }, or null when no answer is held
- *   - returns null when the draft would be over DRAFT_MAX_CHARS as the route counts it
+ *   - returns null when the draft would be over DRAFT_MAX_CHARS as the route counts it (routeLength)
  *   - never returns an empty value
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
@@ -97,5 +116,5 @@ export function draftAtReveal(item: ActionRequiredItem, widget: HTMLElement): Dr
   }
   if (wire === null) return null;
   const draft = { value: wire };
-  return JSON.stringify(draft).length > DRAFT_MAX_CHARS ? null : draft;
+  return routeLength(draft) > DRAFT_MAX_CHARS ? null : draft;
 }

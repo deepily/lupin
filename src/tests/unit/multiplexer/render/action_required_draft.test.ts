@@ -14,7 +14,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-import { draftAtReveal, DRAFT_MAX_CHARS } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredDraft";
+import { draftAtReveal, routeLength, DRAFT_MAX_CHARS } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredDraft";
 import { renderActionRequiredInteractive, MC_OTHER_VALUE } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredInteractive";
 import { createActionRequiredRenderer, type ActionRequiredStoreLike } from "../../../../lupin_app/static/js/multiplexer/render/ActionRequiredRenderer";
 import { createPredictionVoteStore } from "../../../../lupin_app/static/js/multiplexer/stores/PredictionVoteStore";
@@ -108,15 +108,33 @@ test( "an open-ended card sends its stripped text, and an empty box sends none",
   assert.deepEqual( draftAtReveal( it, w ), { value: "hello" } );
 } );
 
-test( "a draft is kept at exactly the server's limit and dropped one character over it", () => {
-  const it = item( "open_ended" );
-  const w  = widgetOf( it );
-  const box = w.querySelector( "[data-draft='response']" ) as HTMLInputElement;
+// The same literals sit in the route's Python test (test_notifications_router_prediction_seen.py), so the two counters cannot drift:
+// a character outside space-to-tilde counts six, an emoji (two UTF-16 units) twelve, and the frame is 13 because json.dumps spaces the colon.
+const ROUTE_COUNTS: ReadonlyArray<readonly [ string, number, boolean ]> = [
+  [ "x".repeat( 4083 ),                 4096, true  ],
+  [ "x".repeat( 4084 ),                 4097, false ],
+  [ "\u00e9".repeat( 500 ),              3013, true  ],
+  [ "\u00e9".repeat( 700 ),              4213, false ],
+  [ "\u00e9".repeat( 680 ) + "xxx",      4096, true  ],
+  [ "\u00e9".repeat( 680 ) + "xxxx",     4097, false ],
+  [ "\u{1F600}".repeat( 500 ),           6013, false ],
+  [ "\x7f",                                19, true  ],
+];
+
+test( "routeLength counts a draft the way the route does", () => {
+  for ( const [ text, counted ] of ROUTE_COUNTS ) assert.equal( routeLength( { value: text } ), counted, `${ text.length } UTF-16 units` );
   assert.equal( DRAFT_MAX_CHARS, 4096 );
-  box.value = "x".repeat( 4084 );   // {"value":"…"} is 12 characters of frame, so 4084 makes 4096
-  assert.deepEqual( draftAtReveal( it, w ), { value: "x".repeat( 4084 ) } );
-  box.value = "x".repeat( 4085 );
-  assert.equal( draftAtReveal( it, w ), null );
+} );
+
+test( "a draft is kept at exactly the server's limit and dropped one character over it, counted as the route counts", () => {
+  const it  = item( "open_ended" );
+  const w   = widgetOf( it );
+  const box = w.querySelector( "[data-draft='response']" ) as HTMLInputElement;
+  for ( const [ text, counted, kept ] of ROUTE_COUNTS ) {
+    box.value = text;
+    const draft = draftAtReveal( it, w );
+    assert.deepEqual( draft, kept ? { value: text.trim() } : null, `${ counted } counted: ${ kept ? "kept" : "dropped" }` );
+  }
 } );
 
 // ---- the renderer, the store and the fold ----
@@ -194,4 +212,12 @@ test( "a card the store no longer knows, or one whose widget has left the page, 
   b.root.querySelector( ".action-required-widget-interactive" )!.remove();   // the fold is still in the detached widget
   assert.deepEqual( await b.open(), [ { fold_opened: true } ] );
   b.renderer.unmount();
+} );
+
+test( "a throw while reading the controls still reports the open, with no draft", async () => {
+  const it = item( "open_ended", { prediction_hint: HINT } );
+  const h  = mount( [ it ] );
+  h.root.querySelector( "[data-draft='response']" )!.remove();   // the reader expects it, and so throws
+  assert.deepEqual( await h.open(), [ { fold_opened: true } ] );
+  h.renderer.unmount();
 } );

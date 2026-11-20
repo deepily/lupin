@@ -203,6 +203,25 @@ test("reportSeen sends the draft with a fold-open, never with a render, and neve
   ]);
 });
 
+test("a retry after a failed fold-open sends the draft of the first open, not a later one", async () => {
+  const { bus } = makeBus();
+  const ctx = makeApi();
+  const store = createPredictionVoteStore({ bus, api: ctx.api, nowFn });
+  ctx.setReject(true);
+  await store.reportSeen("r1", "fold_opened", { value: "first" });
+  ctx.setReject(false);
+  await store.reportSeen("r1", "fold_opened", { value: "later, read after the forecast was shown" });
+  assert.deepEqual(ctx.calls.map((c) => c.body), [
+    { fold_opened: true, draft_at_reveal: { value: "first" } },
+    { fold_opened: true, draft_at_reveal: { value: "first" } },
+  ]);
+  ctx.setReject(true);
+  await store.reportSeen("r2", "fold_opened", null);
+  ctx.setReject(false);
+  await store.reportSeen("r2", "fold_opened", { value: "later" });
+  assert.deepEqual(ctx.calls.slice(2).map((c) => c.body), [ { fold_opened: true }, { fold_opened: true } ], "a first open with no draft keeps none");
+});
+
 test("reportSeen ignores an empty id and sends nothing", async () => {
   const { bus } = makeBus();
   const ctx = makeApi();

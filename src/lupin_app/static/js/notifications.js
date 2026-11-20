@@ -27922,9 +27922,38 @@ class NotificationsUI {
      *   - an open-ended card gives its trimmed text; a multiple-choice card gives the saved answers plus the question on screen,
      *     and a batch card its non-empty fields, as the JSON text of { answers: { header: pick or [picks] } }
      *   - an empty answer, a card with no controls on screen, or a draft over 4096 characters as the route counts it returns null
+     *   - a throw while reading the controls returns null, so the report that the fold opened is never held back
      *   - reads only: no field is marked invalid and no state changes
      */
     _draftAtReveal( id ) {
+        try {
+            return this._readDraftAtReveal( id );
+        } catch ( err ) {
+            this.log( '_draftAtReveal: reading the controls failed, no draft sent:', err );
+            return null;
+        }
+    }
+
+    /**
+     * Counts a draft the way the route does, as Python's json.dumps writes it.
+     *
+     * A space follows the colon. Every character outside space to tilde is a six-character escape.
+     * So a character past Basic Latin counts six, and an emoji, which is two UTF-16 units, counts twelve.
+     *
+     * Requires:
+     *   - draft is { value: string }
+     */
+    _draftRouteLength( draft ) {
+        const text = JSON.stringify( draft );
+        let length = text.length + 1;
+        for ( let i = 0; i < text.length; i++ ) if ( text.charCodeAt( i ) > 0x7e ) length += 5;
+        return length;
+    }
+
+    /**
+     * Reads the draft from the controls; _draftAtReveal guards the call.
+     */
+    _readDraftAtReveal( id ) {
         const state = this.actionRequiredNotifications.get( id );
         const card  = document.getElementById( `action-required-${id}` );
         if ( !state || !card ) return null;
@@ -27948,7 +27977,7 @@ class NotificationsUI {
         }
         if ( wire === null ) return null;
         const draft = { value: wire };
-        return JSON.stringify( draft ).length > 4096 ? null : draft;
+        return this._draftRouteLength( draft ) > 4096 ? null : draft;
     }
 
     /**
@@ -27959,6 +27988,12 @@ class NotificationsUI {
      */
     async _reportPredictionSeen( notificationId, event, draft = null ) {
         this._predictionSeenSent = this._predictionSeenSent || new Set();
+        // The draft of the first fold-open is kept for a retry, so a failed call never resends a draft read after the forecast was shown.
+        this._predictionFirstDraft = this._predictionFirstDraft || new Map();
+        if ( event === 'fold_opened' ) {
+            if ( !this._predictionFirstDraft.has( notificationId ) ) this._predictionFirstDraft.set( notificationId, draft );
+            draft = this._predictionFirstDraft.get( notificationId );
+        }
         const key = `${notificationId}|${event}`;
         if ( this._predictionSeenSent.has( key ) ) return;
         this._predictionSeenSent.add( key );
