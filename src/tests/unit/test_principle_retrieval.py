@@ -19,15 +19,13 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 
 import cosa.agents.prediction_engine.principle_retrieval as pr
 from cosa.agents.prediction_engine.principle_retrieval import ( PrincipleBoundExceeded, embedding_text, encoder_version_of, load_owner_ledger, principle_block,
                                                                  reembed_principles, retrieve_principles, select_principles, session_lookup )
+from cosa.research.preference_replay import scratch_db  # noqa: F401  registers the one shared SQLite hooks for JSONB and Vector
 from cosa.rest.postgres_models import Notification, PreferenceEvidence, PreferencePrinciple
 
 ASK   = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
@@ -35,22 +33,6 @@ HOUR  = timedelta( hours=1 )
 OWNER = "owner-a"
 ENC   = encoder_version_of( "model-x" )
 EXT   = "sonnet|v1"
-
-
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( element, compiler, **kw ):
-    """Render JSONB as JSON when the dialect is SQLite."""
-    return "JSON"
-
-
-@compiles( Vector, "sqlite" )
-def _vector_as_text( element, compiler, **kw ):
-    """
-    Render a pgvector column as a text column on SQLite.
-
-    Render a pgvector column as a text column when the dialect is SQLite.
-    """
-    return "TEXT"
 
 
 def vec( x, y ):

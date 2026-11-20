@@ -25,6 +25,7 @@ from cosa.agents.prediction_engine.principle_status import SOURCE_EXTRACT, deriv
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
+from cosa.repo.doc_lint import model_transport
 from cosa.research.preference_replay.replay_loop import always_yes_arm, replay
 from cosa.research.preference_replay.scratch_db import load_export, scratch_session, session_scope
 from cosa.rest.db.vector_store_models import EMBEDDING_DIM
@@ -152,6 +153,7 @@ class ExtractorReplay:
         - session is an active session over loaded notifications and empty principle tables
         - asks are the replay's ask dicts, each with an id and responded_at
         - lag is the time between an answer and its evidence being usable
+        - timeout_seconds is the limit the extractor job gives one model call
         - query_fn is the model double or None, as the extractor job takes it; embed_fn maps a text to a vector
 
     Ensures:
@@ -160,13 +162,14 @@ class ExtractorReplay:
         - the evidence's extracted_at is exactly responded_at + lag
     """
 
-    def __init__( self, session, asks, lag, query_fn=None, embed_fn=stand_in_vector, model="replay-model", encoder="replay-encoder:v1" ):
+    def __init__( self, session, asks, lag, query_fn=None, embed_fn=stand_in_vector, model="replay-model", encoder="replay-encoder:v1", timeout_seconds=30 ):
         self.session   = session
         self.pending   = sorted( asks, key=lambda ask: ( aware_moment( ask[ "responded_at" ] ), ask[ "id" ] ) )
         self.lag       = lag
         self.query_fn  = query_fn
         self.embed_fn  = embed_fn
         self.model     = model
+        self.timeout   = timeout_seconds
         self.version   = f"{model}:{PROMPT_VERSION}"
         self.encoder   = encoder
         self.summaries = []
@@ -186,7 +189,7 @@ class ExtractorReplay:
             ask   = self.pending.pop( 0 )
             ready = aware_moment( ask[ "responded_at" ] ) + self.lag
             job   = PrincipleExtractorJob( ask[ "id" ], ask[ "owner_user_id" ], "replay@example.com", query_fn=self.query_fn, embed_fn=self.embed_fn,
-                                           session_factory=lambda: session_scope( self.session ), model=self.model, timeout_seconds=30,
+                                           session_factory=lambda: session_scope( self.session ), model=self.model, timeout_seconds=self.timeout,
                                            encoder=self.encoder, clock=lambda ready=ready: ready )
             self.summaries.append( { "notification_id": ask[ "id" ], "summary": json.loads( asyncio.run( job._execute() ) ) } )
 
@@ -260,29 +263,40 @@ def check_no_leakage( seen ):
 
 def principle_list( session ):
     """
-    List every principle with its evidence count, for the owner to read.
+    List every principle with its status and evidence count, for the owner to read.
 
     Requires:
         - session is an active session over the principle tables
 
     Ensures:
-        - returns [ { owner_id, scope, dimension, statement, supports, contradicts, refines } ] sorted by dimension, statement, id
-        - each count is the number of evidence rows with that relation
+        - returns [ { owner_id, scope, dimension, statement, status, supports, contradicts, refines, answers } ] sorted by dimension, statement, id
+        - each relation count is the number of evidence rows with that relation; answers is the number of distinct notifications behind them
+        - status is the one principle_status.derive_statuses gives one second after the last extraction, owner by owner and
+          extractor version by extractor version; it is None for a principle with no usable evidence then
     """
+    moments  = [ aware_moment( row.extracted_at ) for row in session.query( PreferenceEvidence ) ]
+    end      = max( moments ) + timedelta( seconds=1 ) if moments else None
+    statuses = {}
+    if end is not None:
+        for owner_id, version in sorted( set( session.query( PreferencePrinciple.owner_id, PreferencePrinciple.extractor_version ) ) ):
+            for found in principles_as_of( session, owner_id, end, version ): statuses[ found[ "id" ] ] = found[ "status" ]
     rows = []
     for principle in session.query( PreferencePrinciple ).order_by( PreferencePrinciple.dimension, PreferencePrinciple.statement, PreferencePrinciple.id ):
-        counts = { relation: session.query( PreferenceEvidence ).filter_by( principle_id=principle.id, relation=relation ).count() for relation in ( "supports", "contradicts", "refines" ) }
-        rows.append( { "owner_id": principle.owner_id, "scope": principle.scope, "dimension": principle.dimension, "statement": principle.statement, **counts } )
+        evidence = session.query( PreferenceEvidence ).filter_by( principle_id=principle.id ).all()
+        counts   = { relation: sum( 1 for row in evidence if row.relation == relation ) for relation in ( "supports", "contradicts", "refines" ) }
+        rows.append( { "owner_id": principle.owner_id, "scope": principle.scope, "dimension": principle.dimension, "statement": principle.statement,
+                       "status": statuses.get( str( principle.id ) ), **counts, "answers": len( { row.notification_id for row in evidence } ) } )
     return rows
 
 
-def run_replay( session, engine, lag, query_fn=None, embed_fn=stand_in_vector, target_types=REPLAYED_TYPES ):
+def run_replay( session, engine, lag, query_fn=None, embed_fn=stand_in_vector, target_types=REPLAYED_TYPES, model="replay-model", timeout_seconds=30 ):
     """
     Replay the loaded asks in time order through the harness and the extractor.
 
     Requires:
         - session holds the loaded notifications and empty principle tables
         - engine is a PredictionEngine; lag is a timedelta; target_types names the response types the harness predicts
+        - model is the id the extractor writes under and, with no query_fn, the model it calls; timeout_seconds limits each call
 
     Ensures:
         - returns { run, seen, extractions, counts, leakage_checked }
@@ -292,7 +306,7 @@ def run_replay( session, engine, lag, query_fn=None, embed_fn=stand_in_vector, t
         - leakage_checked is the number of evidence rows check_no_leakage verified; a leak raises LeakageError
     """
     asks   = asks_from_session( session, engine, embed_fn )
-    runner = ExtractorReplay( session, asks, lag, query_fn=query_fn, embed_fn=embed_fn )
+    runner = ExtractorReplay( session, asks, lag, query_fn=query_fn, embed_fn=embed_fn, model=model, timeout_seconds=timeout_seconds )
     seen   = []
     run    = replay( asks, engine, SNAPSHOT_SHA, baselines={ RECORDER_ARM: make_recorder( seen ) }, target_types=target_types, context_arms=( RECORDER_ARM, ),
                      episode_view_provider=runner.episode_provider, principles_provider=runner.principles_provider )
@@ -311,7 +325,10 @@ def main( argv=None, query_fn=None ):
 
     Ensures:
         - reads --export, loads it into a scratch copy, and runs one replay per --lag-seconds value (default 0 and 300)
-        - with --dry-run the model is canned_model and no model is called
+        - with --dry-run the model is canned_model and no model is called; otherwise --model, with each call limited to --timeout-seconds,
+          is called through model_transport.complete unless a query_fn double was given
+        - each variant prints a line ending with the model id and the number of model calls it made, then a line with the token
+          counts the transport reported for it; the cost there is the SDK's notional figure, not a charge, and a canned model reports none
         - writes the last variant's principle list to --out as JSON, and prints one line of counts per variant
         - returns 0
     """
@@ -320,17 +337,24 @@ def main( argv=None, query_fn=None ):
     parser.add_argument( "--out", required=True )
     parser.add_argument( "--lag-seconds", type=int, action="append", dest="lags" )
     parser.add_argument( "--dry-run", action="store_true" )
+    parser.add_argument( "--model", default="replay-model" )
+    parser.add_argument( "--timeout-seconds", type=int, default=30 )
     args = parser.parse_args( argv )
     with open( args.export, encoding="utf-8" ) as handle: export = json.load( handle )
     chosen = canned_model if args.dry_run else query_fn
     listing = []
     for lag in args.lags or [ 0, 300 ]:
-        with scratch_session() as session:
+        usage_before = model_transport.claude_usage_summary()
+        with scratch_session() as session, model_transport.record_calls() as calls:
             load_export( session, export )
             PredictionEngine.reset()
-            outcome = run_replay( session, PredictionEngine( debug=False ), timedelta( seconds=lag ), query_fn=chosen )
+            outcome = run_replay( session, PredictionEngine( debug=False ), timedelta( seconds=lag ), query_fn=chosen, model=args.model, timeout_seconds=args.timeout_seconds )
             listing = principle_list( session )
-        print( f"lag {lag}s: {outcome[ 'counts' ]}, leakage checked {outcome[ 'leakage_checked' ]}", file=sys.stdout )
+        print( f"lag {lag}s: {outcome[ 'counts' ]}, leakage checked {outcome[ 'leakage_checked' ]}, model {args.model}, model calls {len( calls )}", file=sys.stdout )
+        usage_after = model_transport.claude_usage_summary()
+        used        = { key: usage_after[ key ] - usage_before[ key ] for key in usage_after }
+        print( f"  usage reported by the transport: {used[ 'calls' ]} calls, input {used[ 'input_tokens' ]}, output {used[ 'output_tokens' ]}, "
+               f"cache read {used[ 'cache_read_input_tokens' ]}, cache write {used[ 'cache_creation_input_tokens' ]}, notional cost {used[ 'cost_usd' ]:.2f} USD", file=sys.stdout )
     with open( args.out, "w", encoding="utf-8" ) as handle: json.dump( listing, handle, indent=1, sort_keys=True )
     return 0
 

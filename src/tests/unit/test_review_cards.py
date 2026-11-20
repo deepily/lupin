@@ -14,10 +14,7 @@ from unittest.mock import patch
 
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -26,6 +23,7 @@ from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import review_cards as rc
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
 from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher
+from cosa.research.preference_replay import scratch_db  # noqa: F401  registers the one shared SQLite hooks for JSONB and Vector
 from cosa.rest.postgres_models import Notification, PredictionLog, PreferenceEvidence, PreferencePrinciple
 from lupin_cli.notifications.notification_models import NotificationResponse
 
@@ -33,18 +31,6 @@ OWNER = uuid.UUID( "00000000-0000-4000-8000-0000000000aa" )
 OTHER = uuid.UUID( "00000000-0000-4000-8000-0000000000bb" )
 T0    = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 NOW   = T0 + timedelta( hours=2 )
-
-
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( element, compiler, **kw ):
-    """Render JSONB as JSON on SQLite."""
-    return "JSON"
-
-
-@compiles( Vector, "sqlite" )
-def _vector_as_text( element, compiler, **kw ):
-    """Render a pgvector column as text on SQLite."""
-    return "TEXT"
 
 
 @pytest.fixture

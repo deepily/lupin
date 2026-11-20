@@ -26,8 +26,8 @@ from cosa.agents.principle_learner.extractor_rules import card_text, check_field
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
 from cosa.rest.postgres_models import Notification
-from cosa.utils.notification_utils import sender_session_suffix
 from cosa.utils.iso_timestamp import aware_moment
+from cosa.utils.notification_utils import sender_session_suffix
 import cosa.utils.util as cu
 
 SESSION_ID         = "principle-extractor"

@@ -259,6 +259,36 @@ def test_the_principle_list_is_sorted_with_relation_counts( instant ):
     assert sum( p[ "supports" ] for p in listing ) == 85 and all( p[ "contradicts" ] == 0 and p[ "refines" ] == 0 for p in listing )
 
 
+def test_the_principle_list_carries_each_status_and_the_number_of_answers_behind_it( instant ):
+    listing = er.principle_list( instant[ 0 ] )
+    assert all( p[ "status" ] in ( "hypothesis", "established" ) for p in listing )
+    assert all( 1 <= p[ "answers" ] <= p[ "supports" ] for p in listing )
+    assert { p[ "status" ] for p in listing } <= { "hypothesis", "established" } and len( { p[ "dimension" ] for p in listing } ) == len( listing )
+
+
+def test_the_principle_list_of_an_empty_store_is_empty_and_a_principle_without_evidence_has_no_status():
+    with scratch_session() as session:
+        assert er.principle_list( session ) == []
+        session.add( PreferencePrinciple( id=uuid.uuid4(), owner_id="o", kind="decision", dimension="d", statement="s", scope="global", encoder_version="e", extractor_version="x" ) )
+        session.commit()
+        assert er.principle_list( session ) == [ { "owner_id": "o", "scope": "global", "dimension": "d", "statement": "s", "status": None,
+                                                   "supports": 0, "contradicts": 0, "refines": 0, "answers": 0 } ]
+
+
+def test_run_replay_gives_the_extractor_the_model_and_the_call_limit_it_was_given( export, engine, monkeypatch ):
+    seen = []
+    real = er.PrincipleExtractorJob
+    def spy( *args, **kwargs ):
+        seen.append( ( kwargs[ "model" ], kwargs[ "timeout_seconds" ] ) )
+        return real( *args, **kwargs )
+    monkeypatch.setattr( er, "PrincipleExtractorJob", spy )
+    with scratch_session() as session:
+        load_export( session, export )
+        er.run_replay( session, engine, timedelta( 0 ), query_fn=er.canned_model, model="other-model", timeout_seconds=7 )
+        assert { principle.extractor_version.split( ":" )[ 0 ] for principle in session.query( PreferencePrinciple ) } == { "other-model" }
+    assert seen and set( seen ) == { ( "other-model", 7 ) }
+
+
 def test_session_scope_commits_on_a_clean_exit():
     with scratch_session() as session:
         with session_scope( session ) as inner:
@@ -274,9 +304,34 @@ def test_main_replays_an_export_with_the_canned_model_and_writes_the_principle_l
     assert [ line.split( ":" )[ 0 ] for line in lines if line.startswith( "lag" ) ] == [ "lag 0s", "lag 300s" ]
     assert all( "'principles': 2, 'evidence': 85" in line for line in lines if line.startswith( "lag" ) )
     assert [ p[ "dimension" ] for p in json.loads( out.read_text() ) ] == [ "decision.$answer", "decision.approve" ]
+    assert all( "model replay-model, model calls " in line and not line.endswith( "model calls 0" ) for line in lines if line.startswith( "lag" ) )
+    assert all( p[ "status" ] is not None for p in json.loads( out.read_text() ) )
 
 
 def test_main_passes_a_given_model_through_and_takes_each_lag_asked_for( tmp_path, capsys ):
     out = tmp_path / "principles.json"
     assert er.main( [ "--export", FIXTURE, "--out", str( out ), "--lag-seconds", "60" ], query_fn=er.canned_model ) == 0
     assert [ line.split( ":" )[ 0 ] for line in capsys.readouterr().out.splitlines() if line.startswith( "lag" ) ] == [ "lag 60s" ]
+
+
+def test_main_takes_the_model_id_and_the_call_limit_from_its_arguments( tmp_path, capsys, monkeypatch ):
+    seen = []
+    real = er.PrincipleExtractorJob
+    def spy( *args, **kwargs ):
+        seen.append( ( kwargs[ "model" ], kwargs[ "timeout_seconds" ] ) )
+        return real( *args, **kwargs )
+    monkeypatch.setattr( er, "PrincipleExtractorJob", spy )
+    out = tmp_path / "principles.json"
+    assert er.main( [ "--export", FIXTURE, "--out", str( out ), "--lag-seconds", "0", "--model", "m-1", "--timeout-seconds", "9" ], query_fn=er.canned_model ) == 0
+    assert "model m-1, model calls " in capsys.readouterr().out
+    assert seen and set( seen ) == { ( "m-1", 9 ) }
+
+
+def test_main_reports_the_usage_the_transport_saw_during_each_variant( tmp_path, capsys, monkeypatch ):
+    tally = iter( [ { "calls": 1, "input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "cost_usd": 0.5 },
+                    { "calls": 4, "input_tokens": 110, "output_tokens": 25, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 33, "cost_usd": 1.75 } ] )
+    monkeypatch.setattr( er.model_transport, "claude_usage_summary", lambda: next( tally ) )
+    out = tmp_path / "principles.json"
+    assert er.main( [ "--export", FIXTURE, "--out", str( out ), "--lag-seconds", "0" ], query_fn=er.canned_model ) == 0
+    assert "usage reported by the transport: 3 calls, input 100, output 20, cache read 30, cache write 0, notional cost 1.25 USD" in capsys.readouterr().out
+

@@ -13,22 +13,16 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.preference_replay.arm_summary import SUMMARY_KEYS, per_arm_summary, render_summary, summarize_arm
+from cosa.research.preference_replay import scratch_db  # noqa: F401  registers the one shared SQLite hooks for JSONB and Vector
 from cosa.rest.routers.notifications import _stored_response_dict
 from cosa.rest.postgres_models import PredictionArmForecast, PredictionLog
 
 T0 = datetime( 2026, 11, 19, 12, 0, 0, tzinfo=timezone.utc )
-
-
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( _type, _compiler, **_kw ):
-    return "JSON"
 
 
 def _nid( n ):
