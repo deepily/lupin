@@ -650,3 +650,29 @@ def test_the_extractor_settings_are_read_from_the_ini_file_as_the_live_job_reads
     model, timeout = ar.extractor_settings()
     assert model.startswith( "claude-" ) and isinstance( timeout, int ) and timeout >= 30
     assert not hasattr( ar, "EXTRACTOR_MODEL" ), "a model id literal must not live in the runner"
+
+
+def test_an_ask_before_the_window_start_is_left_out_of_the_evaluation_and_one_at_the_start_is_kept( loaded ):
+    from datetime import datetime, timezone
+    session, asks, ids, _, _, fixture = loaded
+    assert ar.WINDOW_START == datetime( 2026, 9, 10, tzinfo=timezone.utc )
+    pool = [ a for a in asks if a[ "response_type" ] in ar.ELIGIBLE_TYPES and a[ "id" ] not in fixture ]
+    early, edge, late = ( dict( a ) for a in pool[ :3 ] )
+    early[ "asked_at" ] = datetime( 2026, 9, 9, 23, 59, 59, tzinfo=timezone.utc )
+    edge[ "asked_at" ]  = ar.WINDOW_START
+    late[ "asked_at" ]  = datetime( 2026, 11, 1, tzinfo=timezone.utc )
+    found = ar.evaluation_ids( [ early, edge, late ], set() )
+    assert found == [ edge[ "id" ], late[ "id" ] ], "the ask before the window must be left out, the one on the first instant kept"
+    assert ar.evaluation_ids( [ early, edge, late ], set(), window_start=datetime( 2026, 11, 2, tzinfo=timezone.utc ) ) == []
+
+
+def test_the_window_start_is_part_of_the_freeze_so_a_different_window_is_refused( loaded ):
+    session, asks, ids, embed, work, _ = loaded
+    models, _ = _models( session, embed )
+    ar.run_first_stage( session, asks, ids[ :3 ], PredictionEngine( debug=False ), embed, models, work, query_fn=er.canned_model, chunk=3, out=lambda line: None, code=CODE )
+    assert ar.load_state( work.state )[ "freeze" ][ "window_start" ] == "2026-09-10T00:00:00+00:00"
+    state = ar.load_state( work.state )
+    state[ "freeze" ][ "window_start" ] = "2026-05-01T00:00:00+00:00"
+    ar.save_state( work.state, state )
+    with pytest.raises( ar.FreezeMismatch, match="window_start" ):
+        ar.run_first_stage( session, asks, ids[ :6 ], PredictionEngine( debug=False ), embed, models, work, query_fn=er.canned_model, chunk=3, out=lambda line: None, code=CODE )
