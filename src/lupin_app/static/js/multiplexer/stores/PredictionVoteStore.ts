@@ -64,8 +64,11 @@ export interface PredictionVoteStore {
    * Each event is sent once per notification and a repeat is dropped. A fold-open is also
    * remembered for `isFoldOpen`. A failed call is forgotten, so the next report retries, and
    * it never throws.
+   *
+   * A fold-open carries `draft_at_reveal` when a draft is given, and a render never does. No draft, or null,
+   * sends the call as it was, so an empty answer is never sent as an empty value.
    */
-  reportSeen( notificationId: string, event: PredictionSeenEvent ): Promise<void>;
+  reportSeen( notificationId: string, event: PredictionSeenEvent, draft?: { value: string } | null ): Promise<void>;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -160,7 +163,7 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
   /**
    * Sends one seen event per notification and forgets it when the call fails.
    */
-  async reportSeen( notificationId: string, event: PredictionSeenEvent ): Promise<void> {
+  async reportSeen( notificationId: string, event: PredictionSeenEvent, draft?: { value: string } | null ): Promise<void> {
     if ( !notificationId ) return;
     if ( event === "fold_opened" ) this.foldOpens.add( notificationId );
     const key = `${ notificationId }|${ event }`;
@@ -169,7 +172,7 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
     try {
       await this.api.post<unknown>(
         PREDICTION_SEEN_ENDPOINT_PREFIX + encodeURIComponent( notificationId ),
-        event === "rendered" ? { rendered: true } : { fold_opened: true },
+        event === "rendered" ? { rendered: true } : draft ? { fold_opened: true, draft_at_reveal: draft } : { fold_opened: true },
       );
     } catch ( _err ) {
       this.seenSent.delete( key );

@@ -189,6 +189,20 @@ test("reportSeen sends each event once per notification, with the body the route
   ]);
 });
 
+test("reportSeen sends the draft with a fold-open, never with a render, and never when it is null", async () => {
+  const { bus } = makeBus();
+  const ctx = makeApi();
+  const store = createPredictionVoteStore({ bus, api: ctx.api, nowFn });
+  await store.reportSeen("d1", "rendered", { value: "ignored" });
+  await store.reportSeen("d1", "fold_opened", { value: "yes" });
+  await store.reportSeen("d2", "fold_opened", null);
+  assert.deepEqual(ctx.calls, [
+    { path: PREDICTION_SEEN_ENDPOINT_PREFIX + "d1", body: { rendered: true } },
+    { path: PREDICTION_SEEN_ENDPOINT_PREFIX + "d1", body: { fold_opened: true, draft_at_reveal: { value: "yes" } } },
+    { path: PREDICTION_SEEN_ENDPOINT_PREFIX + "d2", body: { fold_opened: true } },
+  ]);
+});
+
 test("reportSeen ignores an empty id and sends nothing", async () => {
   const { bus } = makeBus();
   const ctx = makeApi();

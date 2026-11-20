@@ -27911,11 +27911,53 @@ class NotificationsUI {
     }
 
     /**
+     * Says what a card's answer would be if submitted now, as the seen route stores it.
+     *
+     * Requires:
+     *   - id is a notification id
+     *
+     * Ensures:
+     *   - returns { value } holding the string the submit button would send, or null
+     *   - a yes/no card returns null, because choosing is submitting
+     *   - an open-ended card gives its trimmed text; a multiple-choice card gives the saved answers plus the question on screen,
+     *     and a batch card its non-empty fields, as the JSON text of { answers: { header: pick or [picks] } }
+     *   - an empty answer, a card with no controls on screen, or a draft over 4096 characters as the route counts it returns null
+     *   - reads only: no field is marked invalid and no state changes
+     */
+    _draftAtReveal( id ) {
+        const state = this.actionRequiredNotifications.get( id );
+        const card  = document.getElementById( `action-required-${id}` );
+        if ( !state || !card ) return null;
+        const type = state.notification.response_type;
+        let wire   = null;
+        if ( type === 'open_ended' ) {
+            const text = card.querySelector( '.response-text-input' ).value.trim();
+            wire = text === '' ? null : text;
+        } else if ( type === 'open_ended_batch' ) {
+            const answers = {};
+            card.querySelectorAll( '.batch-text-input' ).forEach( ( input ) => {
+                const text = input.value.trim();
+                if ( text !== '' ) answers[ input.dataset.header ] = text;
+            } );
+            wire = Object.keys( answers ).length === 0 ? null : JSON.stringify( { answers } );
+        } else if ( type === 'multiple_choice' ) {
+            const answers = { ...state.collectedAnswers };
+            const shown   = this._peekCurrentQuestionAnswer( id );
+            if ( shown ) answers[ shown.header ] = shown.value;
+            wire = Object.keys( answers ).length === 0 ? null : JSON.stringify( { answers } );
+        }
+        if ( wire === null ) return null;
+        const draft = { value: wire };
+        return JSON.stringify( draft ).length > 4096 ? null : draft;
+    }
+
+    /**
      * Tells the server a forecast was rendered or its fold opened.
      *
      * Each event goes once per id. A failure is forgotten, so a later call retries.
+     * A fold-open carries draft_at_reveal when a draft is given; a render never does, and a null draft sends the call as it was.
      */
-    async _reportPredictionSeen( notificationId, event ) {
+    async _reportPredictionSeen( notificationId, event, draft = null ) {
         this._predictionSeenSent = this._predictionSeenSent || new Set();
         const key = `${notificationId}|${event}`;
         if ( this._predictionSeenSent.has( key ) ) return;
@@ -27924,7 +27966,7 @@ class NotificationsUI {
             const response = await this.authedFetch(
                 `/api/notify/prediction-seen/${encodeURIComponent( notificationId )}`,
                 { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify( event === 'rendered' ? { rendered: true } : { fold_opened: true } ) }
+                  body: JSON.stringify( event === 'rendered' ? { rendered: true } : ( draft ? { fold_opened: true, draft_at_reveal: draft } : { fold_opened: true } ) ) }
             );
             if ( !response.ok ) this._predictionSeenSent.delete( key );
         } catch ( err ) {
@@ -27964,7 +28006,7 @@ class NotificationsUI {
             const id = fold.dataset.notificationId;
             this._predictionFoldOpen = this._predictionFoldOpen || new Set();
             this._predictionFoldOpen.add( id );
-            this._reportPredictionSeen( id, 'fold_opened' );
+            this._reportPredictionSeen( id, 'fold_opened', this._draftAtReveal( id ) );
         }, true );
         document.addEventListener( 'click', ( e ) => {
             const voteBtn = e.target.closest( '.prediction-vote-btn' );
@@ -28320,23 +28362,40 @@ class NotificationsUI {
      *   - Returns null and shows validation error if no selection
      */
     getCurrentQuestionAnswer( notificationId ) {
+        const answer = this._peekCurrentQuestionAnswer( notificationId );
+        if ( answer === null ) {
+            document.getElementById( `action-required-${notificationId}` )?.querySelector( '.response-multiple-choice' )?.classList.add( 'invalid' );
+        }
+        return answer || null;
+    }
+
+    /**
+     * Reads the current question's answer from the UI and changes nothing.
+     *
+     * Requires:
+     *   - notificationId corresponds to an active multiple_choice notification
+     *
+     * Ensures:
+     *   - Returns { header, value } for the current question
+     *   - Returns null when nothing usable is chosen (a ticked Other with no text counts as nothing)
+     *   - Returns undefined when the card, its state or its question cannot be found
+     *   - Marks nothing invalid
+     */
+    _peekCurrentQuestionAnswer( notificationId ) {
         const card      = document.getElementById( `action-required-${notificationId}` );
         const container = card?.querySelector( '.response-multiple-choice' );
-        if ( !container ) return null;
+        if ( !container ) return undefined;
 
         const state = this.actionRequiredNotifications.get( notificationId );
-        if ( !state ) return null;
+        if ( !state ) return undefined;
 
         const questionIndex = state.currentQuestionIndex || 0;
         const questions     = state.notification.response_options?.questions || [];
         const question      = questions[ questionIndex ];
-        if ( !question ) return null;
+        if ( !question ) return undefined;
 
         const checked = container.querySelectorAll( '.mc-input:checked' );
-        if ( checked.length === 0 ) {
-            container.classList.add( 'invalid' );
-            return null;
-        }
+        if ( checked.length === 0 ) return null;
 
         const answers = [];
         checked.forEach( input => {
@@ -28349,10 +28408,7 @@ class NotificationsUI {
         } );
 
         // Handle case where "Other" was selected but no text entered
-        if ( answers.length === 0 ) {
-            container.classList.add( 'invalid' );
-            return null;
-        }
+        if ( answers.length === 0 ) return null;
 
         return {
             header: question.header,
