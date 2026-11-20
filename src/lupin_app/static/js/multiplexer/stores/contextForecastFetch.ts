@@ -1,4 +1,5 @@
-// The late-forecast fetch: a fold opened late reads the card's current Haiku forecast.
+/* c8 ignore next */
+// Late fetch: a fold opened late reads the card's Haiku forecast.
 //
 // A client that missed the frame, or opened its fold before the job finished, still ends up with the stored result.
 // The call is made only for a card still showing "forecasting", and a failed call changes nothing.
