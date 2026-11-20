@@ -58,7 +58,13 @@ _LATE_JS = """( args ) => window.notificationsUI.handleQueueMessage( {
 
 
 def _fresh_page( page ):
-    """Load the legacy page again, so the card made next is the only one on it."""
+    """Load the legacy page again, so the card made next is the only one on it.
+
+    The page saves its action-required queue in localStorage and restores it on load.
+    The earlier card would come back first and show its own fold instead of the new card's.
+    """
+    page.evaluate( "() => window.localStorage.removeItem( 'notifications_action_required' )" )
+    page.add_init_script( "window.localStorage.removeItem( 'notifications_action_required' )" )
     page.goto( f"{ BASE_URL }/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
     wait_for_ws_connected( page )
