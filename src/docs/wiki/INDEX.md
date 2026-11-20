@@ -466,6 +466,17 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[iterative-debugging-agent]] — the agent that asks an LLM to fix code that failed, runs the fix, and reports whether it worked. `cosa.agents` (iterative_debugging_agent), `cosa.agents.agent_base`
 - [[runtime-argument-expeditor]] — finding the arguments a voice command left out, asking the user for them, and returning a complete args dict. `cosa.agents.runtime_argument_expeditor` (expeditor, agent_registry, cli_help)
 - [[prediction-engine]] — guessing how the user will answer a notification, showing the guess as a hint, and logging the real answer to measure accuracy. `cosa.agents.prediction_engine`
+- [[prediction-episode-view]] — the ask-time record the principle learner reads, with its pool, history, fields and links. `cosa.agents` (prediction_engine.episode_view, history_context_rebuild)
+- [[prediction-exposure-rules]] — the pure rules that class a final answer as unaided, switched or exposed, and the review-card marker. `cosa.agents` (prediction_engine.exposure, review_card)
+- [[principle-retrieval]] — fetching the principles that apply to one ask as of its moment, and the prompt block and card features. `cosa.agents` (prediction_engine.principle_retrieval, principle_features)
+- [[principle-status-derivation]] — the status of a principle at one ask, derived from its evidence and rulings. `cosa.agents` (prediction_engine.principle_status)
+- [[principles-forecast-arm]] — the baseline forecast plus a block of applicable principles, with its switch and cap. `cosa.agents` (prediction_engine.principles_forecast)
+- [[opus-twin-forecasts]] — each learner forecast run again on Opus, one call per ask and never displayed. `cosa.agents` (prediction_engine.opus_twins)
+- [[principle-extractor-job]] — the silent job that turns one answer into evidence, and the enqueue after an answer. `cosa.agents` (principle_learner.enqueue_after_answer, extractor_job)
+- [[principle-extractor-prompt-and-rules]] — the extractor's prompt, the rules that hold its output and the store writes. `cosa.agents` (principle_learner.extractor_prompt, extractor_rules, extractor_store)
+- [[principle-review-cards]] — the split step, the capped review card and the ruling an answer becomes. `cosa.agents` (principle_learner.review_cards)
+- [[principle-review-card-sweep]] — the job that splits or sends a card for contested principles, within the cap. `cosa.agents` (principle_learner.review_card_sweep)
+- [[principle-vocabulary]] — the 14 approved dimension headings and the map from old names. `cosa.agents` (principle_learner.vocabulary)
 - [[prediction-calibration]] — the per-cell isotonic map from raw confidence to chance of being right: fit, store, load, apply and the reliability bins. `cosa.agents.prediction_engine` (calibration)
 - [[prediction-evidence-recorder]] — the per-thread list of cases a forecast retrieved, so the row stores its own evidence. `cosa.agents.prediction_engine` (evidence_recorder)
 - [[prediction-history-recovery]] — recovering old notification rows as prediction examples: source count, family, derive, context rebuild, use, recovery and the yield funnel. `cosa.agents.prediction_engine` (ask_family, history_*)

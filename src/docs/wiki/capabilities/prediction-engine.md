@@ -2,7 +2,7 @@
 capability: prediction-engine
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@b70bfe4fcc
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@021ad01f68
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.predict@d8d8445bfa
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_outcome@f0fe0a9d85
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_hint_vote@6eea5b4fb5
@@ -24,17 +24,17 @@ A process-wide singleton that guesses how the user will answer a notification be
 - A `yes_no` vote says `no` only when the no tally beats the yes tally by `prediction engine yes no no margin`. That default is 1.35, the log-odds of the 79% yes prior. Otherwise it says `yes`. With five unit votes, `no` needs a lead of 2 or more. `open_ended` and `open_ended_batch` try an exact question match first, then an LLM synthesis over the similar cases. If synthesis fails they fall back to retrieval.
 - A multiple-choice case's answers are re-keyed onto the new question's own headers before the vote, because a neighbour's headers seldom match. A header with no usable answer is dropped.
 - `record_outcome` decodes a multiple-choice or batch answer sent as a JSON string. It compares the prediction with the real answer and writes the `prediction_log` row. The engine reads `prediction engine open ended match threshold` when it is built. `record_outcome` hands that and the stored `response_options` to `get_comparator` (see [[prediction-accuracy-comparators]]). It also stores the answer as a new case.
-- `record_hint_vote` stores a thumbs up or down as a case keyed `hintvote-<notification id>`, so a second vote flips the state in place.
+- `record_forecast` writes the ask-time `prediction_log` row. It takes an optional `pre_commit_hook( session, forecast )`, run before the commit, so what it writes commits with the row. A hook that raises stores neither row. `record_hint_vote` stores a thumbs up or down as a case keyed `hintvote-<notification id>`, so a second vote flips the state in place.
 
 ## Invariants
 - Cold start is a result, not an error. It covers a disabled engine, no embedding, no store, no similar case and an unsupported type.
 - An approved case votes `+approved_weight`, a rejected case votes negative, and any other case votes `+1`. A rejected case is never the answer in the open-ended retrieval tiers.
 - Consistency is the winner's tally over the positive mass, clamped to 0 to 1. With no positive mass it is 0.
 - A multi-select option is kept when its weighted votes reach half the positive case mass.
-- `to_hint_dict` returns `None` for a cold start, so the card shows no hint. Batch cases are keyed by the question's content, not the count preamble, so unrelated batches do not collide.
+- `to_hint_dict` never returns `None`. The payload carries a state: ready, below threshold, insufficient evidence or unavailable. Value and confidence appear only when ready. Batch cases are keyed by the question's content, not the count preamble, so unrelated batches do not collide.
 
 ## How it is used
-- `lupin_app.main` builds the singleton with the config at startup. The notify route calls `predict` off the event loop and shows the hint only when confidence reaches `prediction engine confidence threshold`.
+- `lupin_app.main` builds the singleton with the config at startup. The notify route calls `predict` off the event loop. Confidence under `prediction engine confidence threshold` gives the below-threshold state.
 - The same route stamps the vote gate and the auto-submit keys into the hint, so the client reads them from the server. Auto-submit and batch prefill are **Dormant**: `expeditor prediction auto submit enabled` is false and a unit test pins it. The keys and the client code stay.
 - The response route calls `record_outcome`. The vote route calls `record_hint_vote`.
 - Thresholds, `top k`, the LanceDB table and the open-ended LLM key are `prediction engine ...` INI keys, with code defaults in `config.py`. A hot reload drops the singleton through `PredictionEngine.reset`.

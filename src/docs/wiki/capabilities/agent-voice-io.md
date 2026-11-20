@@ -8,7 +8,7 @@ pins:
   - cosa.agents.utils.voice_io.present_choices@b1c28fbb38
   - cosa.agents.utils.voice_io.read_gate_answer@c775d66871
   - cosa.agents.utils.voice_io.VoiceGateNoDefaultError@8a7e015aa2
-  - cosa.agents.utils.agent_notification_dispatcher.AgentNotificationDispatcher@9b2475f79f
+  - cosa.agents.utils.agent_notification_dispatcher.AgentNotificationDispatcher@9be777adbd
   - cosa.agents.utils.agent_notification_dispatcher.set_dispatch_context@fcab3323d7
   - cosa.agents.deep_research.voice_io.reconfigure@8265f4719a
   - cosa.agents.utils.sender_id.build_sender_id@e3f42ed236
@@ -21,7 +21,7 @@ How a job tells the user something or asks a question: by voice when a notificat
 ## What it does
 - `notify` announces progress, `ask_yes_no` asks for a yes or no, `present_choices` asks a multiple-choice question and returns a dict. `choose`, `select_themes` and `select_topics` return a bare label or list.
 - `configure( cosa_interface )` binds the module to one agent's `cosa_interface`, which must provide `notify_progress`, `ask_confirmation`, `get_feedback` and `present_choices`.
-- `AgentNotificationDispatcher` is what seven of the ten `cosa_interface.py` files build (not decision_proxy, notification_proxy or test_fix_expediter, which reuses bug_fix_expediter's). It builds the sender id (`{agent}@{project}.deepily.ai[#suffix]`, from `build_sender_id`) and sends from a worker thread. `sync_notify.notify` is the fire-and-forget REST call for the synchronous proxy agents, which have no event loop.
+- `AgentNotificationDispatcher` is what seven of the ten `cosa_interface.py` files build (not decision_proxy, notification_proxy or test_fix_expediter, which reuses bug_fix_expediter's). It builds the sender id (`{agent}@{project}.deepily.ai[#suffix]`, from `build_sender_id`) and sends from a worker thread. An ask can carry `response_options_extra`, keys merged into `response_options` beside the questions. `sync_notify.notify` is the fire-and-forget REST call for the synchronous proxy agents, which have no event loop.
 
 ## When nobody can answer
 - On a run with no terminal, when voice is unavailable or the dispatch raises, `ask_yes_no` returns the caller's `unattended_default`. It raises `VoiceGateNoDefaultError` if none was given. At a terminal `default` is only what the prompt offers. On the dispatched path it is also sent on as the notification's `response_default`, so the two are not fully separate.
