@@ -58,8 +58,8 @@ class CachedServiceEmbedder:
         - dimension is the vector length the service must return, or None for the stored column's width
 
     Ensures:
-        - construction makes one probe call; it stores the probe's vector in the cache file under a sentinel key when none is there
-        - a cache whose stored probe vector has cosine under 0.999 with the fresh probe raises CacheSentinelMismatch
+        - construction makes one probe call; it stores the probe's vector under a sentinel key only in an empty or absent cache
+        - a cache holding vectors but no sentinel, or whose stored probe differs from the fresh probe (cosine under 0.999), raises CacheSentinelMismatch
         - a vector of any other length raises WrongVectorWidth and is never cached
         - a text already in the cache is answered from it with no call
         - a failed call raises EmbeddingServiceUnavailable naming the cause, and the cache keeps every vector already made
@@ -101,18 +101,23 @@ class CachedServiceEmbedder:
 
     def _check_sentinel( self ):
         """
-        Compare a fresh probe with the cache's stored one, or store it when the cache has none.
+        Compare a fresh probe with the cache's stored one, or store it in an empty cache.
 
         Ensures:
-            - raises CacheSentinelMismatch when the stored and fresh probe vectors have cosine under 0.999
-            - otherwise leaves the stored probe, or adds the fresh one, in memory; flush writes it
+            - an absent or empty cache is stamped in memory with the fresh probe; flush writes it
+            - a cache that holds vectors but no sentinel raises CacheSentinelMismatch: nothing says which model made them
+            - a stored probe of another length, or one whose cosine with the fresh probe is not at least 0.999 (a NaN counts), raises CacheSentinelMismatch
         """
         fresh = self._fetch( SENTINEL_TEXT )
         if SENTINEL_KEY not in self.vectors:
+            if self.vectors: raise CacheSentinelMismatch( f"cache {self.cache_path} holds {len( self.vectors )} vectors but no sentinel, so their model is unknown: delete it or rebuild it" )
             self.vectors[ SENTINEL_KEY ] = fresh
             return
-        similarity = cosine_similarity( list( self.vectors[ SENTINEL_KEY ] ), fresh )
-        if similarity < SENTINEL_FLOOR:
+        stored = list( self.vectors[ SENTINEL_KEY ] )
+        if len( stored ) != self.dimension:
+            raise CacheSentinelMismatch( f"cache {self.cache_path} holds a sentinel of {len( stored )} numbers, expected {self.dimension}" )
+        similarity = cosine_similarity( stored, fresh )
+        if not similarity >= SENTINEL_FLOOR:
             raise CacheSentinelMismatch( f"cache {self.cache_path} was filled by another model: probe cosine {similarity:.4f}, floor {SENTINEL_FLOOR}" )
 
     def __call__( self, text ):

@@ -88,12 +88,30 @@ def test_the_cache_keeps_a_sentinel_vector_and_a_cache_filled_by_another_model_i
         se.CachedServiceEmbedder( path, embed=lambda text: [ 1.0, 1.0 ], encoder="e1", dimension=2 )
 
 
-def test_a_cache_file_with_no_sentinel_is_stamped_with_the_fresh_probe(tmp_path):
+def test_an_absent_or_empty_cache_is_stamped_with_the_fresh_probe(tmp_path):
+    path = str( tmp_path / "c.json" )
+    for before in ( None, {} ):
+        if before is not None: json.dump( before, open( path, "w" ) )
+        one = se.CachedServiceEmbedder( path, embed=lambda text: [ 0.0, 1.0 ], encoder="e1", dimension=2 )
+        one.flush()
+        assert json.load( open( path ) ) == { se.SENTINEL_KEY: [ 0.0, 1.0 ] }
+        os.remove( path )
+
+
+def test_a_cache_with_vectors_but_no_sentinel_is_refused_and_left_untouched(tmp_path):
     path = str( tmp_path / "c.json" )
     json.dump( { "old": [ 5.0, 5.0 ] }, open( path, "w" ) )
-    one = se.CachedServiceEmbedder( path, embed=lambda text: [ 0.0, 1.0 ], encoder="e1", dimension=2 )
-    one.flush()
-    assert json.load( open( path ) ) == { "old": [ 5.0, 5.0 ], se.SENTINEL_KEY: [ 0.0, 1.0 ] }
+    with pytest.raises( se.CacheSentinelMismatch, match="holds 1 vectors but no sentinel" ):
+        se.CachedServiceEmbedder( path, embed=lambda text: [ 0.0, 1.0 ], encoder="e1", dimension=2 )
+    assert json.load( open( path ) ) == { "old": [ 5.0, 5.0 ] }
+
+
+def test_a_nan_or_a_wrong_length_stored_sentinel_is_refused_by_name(tmp_path):
+    path = str( tmp_path / "c.json" )
+    for stored, words in ( ( [ float( "nan" ), float( "nan" ) ], "probe cosine nan" ), ( [ 1.0 ], "sentinel of 1 numbers, expected 2" ) ):
+        with open( path, "w" ) as handle: handle.write( json.dumps( { se.SENTINEL_KEY: stored } ) )
+        with pytest.raises( se.CacheSentinelMismatch, match=words ):
+            se.CachedServiceEmbedder( path, embed=lambda text: [ 1.0, 0.0 ], encoder="e1", dimension=2 )
 
 
 def test_the_defaults_are_the_live_extractors_embed_function_and_encoder_version(tmp_path, monkeypatch):
