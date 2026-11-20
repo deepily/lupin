@@ -261,6 +261,27 @@ def revealed_at( session, notification_id, cutoff=None ):
     return None if cutoff is not None and moment > cutoff else moment.isoformat()
 
 
+def revealed_draft( session, notification_id, cutoff=None ):
+    """
+    Read the owner's draft from the moment the fold opened, as known at a moment.
+
+    Requires:
+        - session is an active SQLAlchemy session and notification_id a UUID
+        - cutoff is None or an aware datetime
+
+    Ensures:
+        - returns the stored prediction_log.draft_at_reveal, or None when there is no log row, no reveal or no draft
+        - the draft is stored by the same call as fold_opened_at, so with a cutoff a reveal later than the cutoff reads None
+          and its draft is never returned; a reveal exactly at the cutoff is returned
+        - with no cutoff it is the raw stored draft, which is the ledger's outcome side and never prompt input
+    """
+    row = session.query( PredictionLog.fold_opened_at, PredictionLog.draft_at_reveal ).filter(
+        PredictionLog.notification_id == notification_id, PredictionLog.fold_opened_at.isnot( None ) ).first()
+    if row is None: return None
+    if cutoff is not None and aware_moment( row[ 0 ] ) > cutoff: return None
+    return row[ 1 ]
+
+
 def episode_view( session, notification_id, as_of=None, limit=None ):
     """
     Return what was knowable about one ask at as_of, and nothing later.
@@ -277,7 +298,7 @@ def episode_view( session, notification_id, as_of=None, limit=None ):
         - history holds at most three questions plus informational messages, each answered or pending as of as_of;
           an answer given after as_of reads pending
         - exposure is { revealed_at, draft_at_reveal }; revealed_at is None when the reveal came after as_of;
-          draft_at_reveal is always None until its column exists
+          draft_at_reveal is the stored draft, None when there is none or the reveal came after as_of
         - pool is { limit, truncated }, truncated naming each tier that hit the limit; the history may then lack
           older rows of that tier
         - the ask's own answer is never read
@@ -301,5 +322,5 @@ def episode_view( session, notification_id, as_of=None, limit=None ):
     return { "owner_id": str( row.recipient_id ), "project": match.group( 1 ) if match else None, "asker": row.sender_id,
              "asked_at": asked.isoformat(), "title": row.title, "abstract": row.abstract, "links": links_of( row.abstract ),
              "fields": fields_of( row.response_options, row.response_default ), "history": history_of( context ),
-             "exposure": { "revealed_at": revealed_at( session, row.id, cutoff ), "draft_at_reveal": None },
+             "exposure": { "revealed_at": revealed_at( session, row.id, cutoff ), "draft_at_reveal": revealed_draft( session, row.id, cutoff ) },
              "pool": { "limit": limit, "truncated": truncated } }
