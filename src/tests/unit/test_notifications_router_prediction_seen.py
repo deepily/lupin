@@ -158,6 +158,28 @@ class TestDraftAtReveal:
         assert accepted.status_code == 200 and accepted.json()[ "draft_recorded" ] is True
         assert row.draft_at_reveal == at_bound
 
+    # The same literals sit in both clients' tests (draft_at_reveal_on_fold_open.test.ts and action_required_draft.test.ts),
+    # so the route's count and the clients' count cannot drift apart: each non-ASCII UTF-16 unit counts six, a space-to-tilde
+    # character one, and the frame is 13 characters because json.dumps puts a space after the colon.
+    ROUTE_COUNTS = [
+        ( "x" * 4083,                4096, 200 ),
+        ( "x" * 4084,                4097, 422 ),
+        ( "\u00e9" * 500,             3013, 200 ),
+        ( "\u00e9" * 700,             4213, 422 ),
+        ( "\u00e9" * 680 + "x" * 3,   4096, 200 ),
+        ( "\u00e9" * 680 + "x" * 4,   4097, 422 ),
+        ( "\U0001F600" * 500,         6013, 422 ),
+        ( "\x7f",                      19, 200 ),
+    ]
+
+    @pytest.mark.parametrize( "text, counted, status", ROUTE_COUNTS )
+    def test_the_route_counts_each_non_ascii_character_as_six_the_way_both_clients_do( self, harness, row, text, counted, status ):
+        draft = { "value": text }
+        assert len( json.dumps( draft ) ) == counted
+        r = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": draft } )
+        assert r.status_code == status
+        assert ( row.draft_at_reveal == draft ) is ( status == 200 )
+
     def test_an_explicit_null_draft_is_accepted_and_stores_nothing( self, harness, row ):
         r = harness.client.post( _URL, json={ "fold_opened": True, "draft_at_reveal": None } )
         assert r.status_code == 200

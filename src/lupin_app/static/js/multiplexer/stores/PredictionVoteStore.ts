@@ -64,8 +64,12 @@ export interface PredictionVoteStore {
    * Each event is sent once per notification and a repeat is dropped. A fold-open is also
    * remembered for `isFoldOpen`. A failed call is forgotten, so the next report retries, and
    * it never throws.
+   *
+   * A fold-open carries `draft_at_reveal` when a draft is given, and a render never does. No draft, or null,
+   * sends the call as it was, so an empty answer is never sent as an empty value.
+   * The first fold-open's draft is the one kept. A retry sends it again, never a draft read after the forecast showed.
    */
-  reportSeen( notificationId: string, event: PredictionSeenEvent ): Promise<void>;
+  reportSeen( notificationId: string, event: PredictionSeenEvent, draft?: { value: string } | null ): Promise<void>;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -91,6 +95,8 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
   // call fails, because the reader did open it and the card must stay open on a repaint.
   private readonly seenSent  = new Set<string>();
   private readonly foldOpens = new Set<string>();
+  // The draft taken at each card's first fold-open, kept so a retry after a failed call sends it and not a later one.
+  private readonly firstDrafts = new Map<string, { value: string } | null>();
 
   /**
    * Stores the bus and API client and the clock, which defaults to the current time.
@@ -160,16 +166,20 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
   /**
    * Sends one seen event per notification and forgets it when the call fails.
    */
-  async reportSeen( notificationId: string, event: PredictionSeenEvent ): Promise<void> {
+  async reportSeen( notificationId: string, event: PredictionSeenEvent, draft?: { value: string } | null ): Promise<void> {
     if ( !notificationId ) return;
-    if ( event === "fold_opened" ) this.foldOpens.add( notificationId );
+    if ( event === "fold_opened" ) {
+      this.foldOpens.add( notificationId );
+      if ( !this.firstDrafts.has( notificationId ) ) this.firstDrafts.set( notificationId, draft ?? null );
+      draft = this.firstDrafts.get( notificationId );
+    }
     const key = `${ notificationId }|${ event }`;
     if ( this.seenSent.has( key ) ) return;
     this.seenSent.add( key );
     try {
       await this.api.post<unknown>(
         PREDICTION_SEEN_ENDPOINT_PREFIX + encodeURIComponent( notificationId ),
-        event === "rendered" ? { rendered: true } : { fold_opened: true },
+        event === "rendered" ? { rendered: true } : draft ? { fold_opened: true, draft_at_reveal: draft } : { fold_opened: true },
       );
     } catch ( _err ) {
       this.seenSent.delete( key );
@@ -185,6 +195,7 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
     this.votes.clear();
     this.seenSent.clear();
     this.foldOpens.clear();
+    this.firstDrafts.clear();
   }
   /* c8 ignore stop */
 }

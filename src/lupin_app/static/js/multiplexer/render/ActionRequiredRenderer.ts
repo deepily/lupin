@@ -68,6 +68,7 @@ import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
 import { projectBadge, personaBadge, abstractIndicator, abstractBlock, predictionHintBox } from "./templates/actionRequiredChrome";
 import type { PredictionFoldIntegration } from "./templates/actionRequiredChrome";
+import { draftAtReveal, type DraftAtReveal } from "./templates/actionRequiredDraft";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 import { castPredictionVote as castVote, type PredictionVoteStore } from "../stores/PredictionVoteStore";
 import type { PredictionVoteDir } from "../shared/types";
@@ -234,7 +235,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.predictionSeen = voteStore;
     this.predictionFold = voteStore === undefined ? undefined : {
       isOpen : (id) => voteStore.isFoldOpen(id),
-      onOpen : (id) => { void voteStore.reportSeen(id, "fold_opened"); },
+      onOpen : (id) => { void voteStore.reportSeen(id, "fold_opened", this.draftOf(id)); },
     };
     /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
     this.recorder = opts.recorder ?? recordingManager;
@@ -437,6 +438,24 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private updateCount(n: number): void {
     /* c8 ignore next */ // defensive: header is set/nulled in lockstep with content, so it is non-null whenever renderAll/onChange run.
     if (this.header !== null) this.header.setCount(n);
+  }
+
+  /**
+   * Read what the controls of a card hold, for the report that its forecast fold opened.
+   *
+   * Ensures:
+   *   - returns null for a card that is not on screen as an interactive widget, and for a yes/no card or an empty answer
+   *   - returns null when reading the controls throws, so the report that the fold opened is never held back
+   */
+  private draftOf(idHash: string): DraftAtReveal | null {
+    try {
+      const item   = this.stores.actionRequired.getById(idHash);
+      const widget = this.root?.querySelector<HTMLElement>(`.action-required-widget-interactive[data-id-hash="${idHash}"]`) ?? null;
+      if (item === undefined || widget === null) return null;
+      return draftAtReveal(item, widget);
+    } catch (_err) {
+      return null;
+    }
   }
 
   private buildWidgetFor(item: ActionRequiredItem): HTMLElement {
