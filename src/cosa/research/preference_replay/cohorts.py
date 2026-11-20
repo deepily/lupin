@@ -80,15 +80,19 @@ def scored_rows( session, response_type: str, window: Optional[str] = None ) -> 
 
     Ensures:
         - returns the rows the admin report would count and score, in predicted_at order
+        - leaves out an ask whose response_options carries the review-card marker (is_review_card, read from the ask-time field and nothing else); a review card is the learner's question, not a real ask
         - with a window, only the rows window_of puts there
 
     Raises:
         - ValueError if window is not None and not a window name
     """
     if window is not None and window not in WINDOW_NAMES: raise ValueError( f"window must be one of {WINDOW_NAMES}, got {window!r}" )
-    rows = session.query( PredictionLog ).filter( PredictionLog.response_type == response_type, counted_scored_filter() ) \
-                  .order_by( PredictionLog.predicted_at ).all()
-    return [ row for row in rows if window is None or window_of( row.predicted_at, response_type ) == window ]
+    pairs = session.query( PredictionLog, Notification.response_options ) \
+                   .outerjoin( Notification, Notification.id == PredictionLog.notification_id ) \
+                   .filter( PredictionLog.response_type == response_type, counted_scored_filter() ) \
+                   .order_by( PredictionLog.predicted_at ).all()
+    return [ row for row, options in pairs
+             if not is_review_card( options ) and ( window is None or window_of( row.predicted_at, response_type ) == window ) ]
 
 
 HUMAN_SOURCE = "ui"

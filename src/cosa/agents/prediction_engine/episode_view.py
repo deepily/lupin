@@ -272,7 +272,8 @@ def episode_view( session, notification_id, as_of=None, limit=None ):
         - limit is None (read the INI key) or a positive int
 
     Ensures:
-        - returns owner_id, project, asker, asked_at, title, abstract, links, fields, history, exposure and pool
+        - returns owner_id, project, asker, asked_at, title, message, response_type, default, timeout_seconds, abstract, links, fields, history, exposure and pool
+        - message, response_type, default and timeout_seconds are the card's own ask-time fields: the default and the timeout are inputs a forecast may read, never a label
         - asked_at is the ask's own creation time; the history is as of as_of
         - history holds at most three questions plus informational messages, each answered or pending as of as_of;
           an answer given after as_of reads pending
@@ -299,7 +300,8 @@ def episode_view( session, notification_id, as_of=None, limit=None ):
     context  = rebuild_context( target, pool )
     match    = PROJECT_PATTERN.search( row.sender_id or "" )
     return { "owner_id": str( row.recipient_id ), "project": match.group( 1 ) if match else None, "asker": row.sender_id,
-             "asked_at": asked.isoformat(), "title": row.title, "abstract": row.abstract, "links": links_of( row.abstract ),
+             "asked_at": asked.isoformat(), "title": row.title, "message": row.message, "response_type": row.response_type,
+             "default": row.response_default, "timeout_seconds": row.timeout_seconds, "abstract": row.abstract, "links": links_of( row.abstract ),
              "fields": fields_of( row.response_options, row.response_default ), "history": history_of( context ),
              "exposure": { "revealed_at": revealed_at( session, row.id, cutoff ), "draft_at_reveal": None },
              "pool": { "limit": limit, "truncated": truncated } }
