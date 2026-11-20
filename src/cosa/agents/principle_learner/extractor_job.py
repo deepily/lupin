@@ -113,6 +113,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
             - the job id has the "pe" prefix and the session id is "principle-extractor"
             - model, timeout and encoder are read from the INI file when the job runs, not here
             - probe True makes the job check the model door and touch no notification or table
+            - cost_summary is None, so a done or dead queue listing can serialize the job
         """
         super().__init__( user_id=user_id, user_email=user_email, session_id=SESSION_ID, debug=debug, verbose=verbose )
         self.notification_id = str( notification_id )
@@ -124,6 +125,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         self.encoder         = encoder
         self.clock           = clock
         self.probe           = probe
+        self.cost_summary    = None  # queues.py reads it on every agentic job; the extractor reports no cost
 
     @property
     def last_question_asked( self ):
