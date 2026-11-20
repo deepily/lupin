@@ -3410,6 +3410,8 @@ class NotificationsUI {
                 "task_store_changed",
                 // Row 063fc1a8: an administrator flipped a scheduled job's switch. Queue socket only.
                 "cron_job_switch_changed",
+                // Phase 6: the late Haiku forecast of a card. Queue socket only.
+                "prediction_hint_updated",
                 "auth_success",
                 "auth_error",
                 "connect",
@@ -3745,6 +3747,11 @@ class NotificationsUI {
                 case "cron_job_switch_changed":
                     // Row 063fc1a8: cron-jobs.js owns the section; this only hands it the row.
                     if ( window.cronJobs ) window.cronJobs.applyEvent( envelope );
+                    break;
+
+                case "prediction_hint_updated":
+                    // Phase 6: the background Haiku forecast of a card finished.
+                    this.handlePredictionHintUpdated( envelope );
                     break;
 
                 case "notification_responded":
@@ -27892,11 +27899,95 @@ class NotificationsUI {
         if ( id ) this._reportPredictionSeen( id, 'rendered' );
         return `
             <details class="prediction-hint prediction-hint-fold${extraClass}" data-testid="prediction-hint-fold"
-                     data-notification-id="${this.escapeHtml( String( id ) )}" data-hint-state="${state}"${open}>
+                     data-notification-id="${this.escapeHtml( String( id ) )}" data-hint-state="${state}"
+                     data-response-type="${this.escapeHtml( String( notification.response_type ) )}"${open}>
                 <summary class="prediction-hint-summary">Forecast</summary>
                 ${innerHtml}
+                ${this._buildContextForecastLine( notification )}
             </details>
         `;
+    }
+
+    /**
+     * Words the card's background Haiku forecast for its fold.
+     *
+     * Ensures:
+     *   - forecasting, unavailable and forecast_timed_out each read their own text
+     *   - a ready forecast reads "Haiku forecast: <value> (<confidence>%)", a yes/no value capitalised and a multiple-choice value as header: choice pairs
+     */
+    _contextForecastText( responseType, forecast ) {
+        if ( forecast.state !== 'ready' ) {
+            const text = {
+                forecasting        : 'Haiku forecast: still forecasting',
+                unavailable        : 'Haiku forecast unavailable',
+                forecast_timed_out : 'Haiku forecast timed out'
+            };
+            return text[ forecast.state ] || text.unavailable;
+        }
+        const value   = forecast.predicted_value;
+        const answers = value && value.answers;
+        let shown;
+        if ( responseType === 'yes_no' && typeof value === 'string' ) shown = value.charAt( 0 ).toUpperCase() + value.slice( 1 );
+        else if ( answers ) shown = Object.entries( answers ).map( ( [ header, val ] ) => Array.isArray( val ) ? `${header}: [${val.join( ', ' )}]` : `${header}: ${val}` ).join( '; ' );
+        else shown = typeof value === 'string' ? value : JSON.stringify( value );
+        return `Haiku forecast: ${shown} (${Math.round( Number( forecast.confidence ) * 100 )}%)`;
+    }
+
+    /**
+     * Builds the fold's line for the card's background Haiku forecast, or an empty string.
+     *
+     * The forecast comes from the last prediction_hint_updated frame for the card, or else from the hint the card arrived with.
+     */
+    _buildContextForecastLine( notification ) {
+        const id       = notification.id;
+        const hint     = notification.prediction_hint;
+        const forecast = ( id && this._contextForecasts && this._contextForecasts[ id ] ) || ( hint && hint.context_forecast );
+        if ( !forecast ) return '';
+        return `<div class="prediction-hint-context" data-testid="prediction-hint-context" data-context-state="${this.escapeHtml( String( forecast.state ) )}">${this.escapeHtml( this._contextForecastText( notification.response_type, forecast ) )}</div>`;
+    }
+
+    /**
+     * Puts a card's new background Haiku forecast into every fold of that card on the page.
+     *
+     * Requires:
+     *   - envelope is a prediction_hint_updated frame, or carries the same two fields: notification_id and context_forecast
+     */
+    handlePredictionHintUpdated( envelope ) {
+        const id       = envelope.notification_id;
+        const forecast = envelope.context_forecast;
+        if ( !id || !forecast ) return;
+        this._contextForecasts = this._contextForecasts || {};
+        this._contextForecasts[ id ] = forecast;
+        document.querySelectorAll( 'details.prediction-hint-fold' ).forEach( ( fold ) => {
+            if ( fold.dataset.notificationId !== id ) return;
+            let line = fold.querySelector( '.prediction-hint-context' );
+            if ( !line ) {
+                line = document.createElement( 'div' );
+                line.className = 'prediction-hint-context';
+                line.setAttribute( 'data-testid', 'prediction-hint-context' );
+                fold.appendChild( line );
+            }
+            line.setAttribute( 'data-context-state', forecast.state );
+            line.textContent = this._contextForecastText( fold.dataset.responseType, forecast );
+        } );
+    }
+
+    /**
+     * Reads a card's current Haiku forecast when its fold opens mid-forecast.
+     *
+     * A failed call changes nothing; the next open asks again.
+     */
+    async _refreshContextForecast( fold ) {
+        if ( !fold.querySelector( '[data-context-state="forecasting"]' ) ) return;
+        const id = fold.dataset.notificationId;
+        try {
+            const response = await this.authedFetch( `/api/notify/prediction-hint/${encodeURIComponent( id )}` );
+            if ( !response.ok ) return;
+            const body = await response.json();
+            this.handlePredictionHintUpdated( { notification_id: id, context_forecast: body.context_forecast } );
+        } catch ( err ) {
+            this.log( 'Context forecast refresh failed:', err );
+        }
     }
 
     /**
@@ -28042,6 +28133,7 @@ class NotificationsUI {
             this._predictionFoldOpen = this._predictionFoldOpen || new Set();
             this._predictionFoldOpen.add( id );
             this._reportPredictionSeen( id, 'fold_opened', this._draftAtReveal( id ) );
+            this._refreshContextForecast( fold );
         }, true );
         document.addEventListener( 'click', ( e ) => {
             const voteBtn = e.target.closest( '.prediction-vote-btn' );

@@ -3706,6 +3706,79 @@
                 }
             }
         },
+        "/api/notify/prediction-hint/{notification_id}": {
+            "get": {
+                "tags": [
+                    "notifications"
+                ],
+                "summary": "Read the card's current context forecast payload",
+                "description": "The late-forecast fetch: a fold opened after the prediction_hint_updated event reads the card's current payload here. States are forecasting, ready, unavailable and forecast_timed_out. With the display switch off the payload is null.",
+                "operationId": "get_prediction_hint_api_notify_prediction_hint__notification_id__get",
+                "parameters": [
+                    {
+                        "name": "notification_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Notification Id"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/notifications/broadcast-acks/{broadcast_id}": {
             "get": {
                 "tags": [

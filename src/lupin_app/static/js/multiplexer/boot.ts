@@ -38,6 +38,7 @@ import { createSessionTranscriptStore } from "./stores/SessionTranscriptStore";
 import { createSessionTranscriptRoster } from "./stores/SessionTranscriptRoster";
 import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
 import { createAwaitingResponseHydration } from "./stores/awaitingResponseHydration";
+import { createContextForecastFetcher } from "./stores/contextForecastFetch";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { PodcastAutoplay, wirePodcastAutoplay } from "./wirePodcastAutoplay";
@@ -592,6 +593,8 @@ function bootMultiplexer(): void {
     // Row ed6db05a — the thumbs on a card's prediction hint POST through the same store the
     // notification cards use. Without it the controls are not mounted at all (row 2650df28).
     predictionVoteStore : stores.predictionVote,
+    // Phase 6 — a fold opened after the Haiku forecast finished reads it from the server.
+    contextForecastFetch : createContextForecastFetcher(apiClient, stores.actionRequired),
     revealSection : () => sectionToolbarRenderer.showSection("action-required-section"),
     // A-2 #2j/#2k/#2l — the card 🎤s upload with the operator's token, as every other mic does.
     getAuthToken  : () => cachedAccessToken,

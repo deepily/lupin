@@ -174,6 +174,9 @@ export interface ActionRequiredRendererOptions {
   // through the store, repaint the card on a refused or thrown cast), as the notifications
   // list renderer does for its cards. `predictionVote` wins when both are given.
   predictionVoteStore? : Pick<PredictionVoteStore, "getVote" | "setContext" | "vote" | "isFoldOpen" | "reportSeen">;
+  // Phase 6 — refreshes a card's background Haiku forecast when its fold opens. Boot passes
+  // the fetcher; a harness that omits it opens the fold with the forecast it already has.
+  contextForecastFetch? : ( idHash: string ) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +238,10 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.predictionSeen = voteStore;
     this.predictionFold = voteStore === undefined ? undefined : {
       isOpen : (id) => voteStore.isFoldOpen(id),
-      onOpen : (id) => { void voteStore.reportSeen(id, "fold_opened", this.draftOf(id)); },
+      onOpen : (id) => {
+        void voteStore.reportSeen(id, "fold_opened", this.draftOf(id));
+        if (opts.contextForecastFetch !== undefined) void opts.contextForecastFetch(id);
+      },
     };
     /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
     this.recorder = opts.recorder ?? recordingManager;

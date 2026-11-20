@@ -58,6 +58,7 @@ import type {
   ActionRequiredStep,
   ConnectionLifecyclePayload,
   ConnectionStateChangePayload,
+  ContextForecastPayload,
   LupinEvent,
   PredictionHint,
   StoreActionRequiredChangedPayload,
@@ -264,6 +265,12 @@ export interface ServerNotificationFields {
   prediction_hint     ?: PredictionHint;
 }
 
+/** The `prediction_hint_updated` frame: the card's id and its current Haiku forecast. */
+interface HintUpdatedPayload {
+  notification_id? : string;
+  context_forecast?: ContextForecastPayload;
+}
+
 interface RespondedPayload {
   id_hash         ?: string;
   notification_id ?: string;
@@ -319,6 +326,16 @@ export interface ActionRequiredStore {
    *   - returns true when the card is now paused, false otherwise
    */
   togglePause(idHash: string): boolean;
+  /**
+   * Replace a card's background Haiku forecast.
+   *
+   * Requires:
+   *   - idHash names a card the store holds; forecast is the payload of a `prediction_hint_updated` frame or of the fetch route
+   * Ensures:
+   *   - the card's hint carries the new forecast and "context-forecast" is emitted, so the card repaints with the fold as it was
+   *   - an unknown id, or a card that has no hint, is left alone and emits nothing
+   */
+  applyContextForecast(idHash: string, forecast: ContextForecastPayload): void;
   /**
    * Remember a multiple_choice card's stepper position — parity A-1c2.
    *
@@ -512,6 +529,11 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   // -------------------------------------------------------------------------
 
   private subscribe(): void {
+    this.unsubscribers.push(
+      this.bus.on<HintUpdatedPayload>("prediction_hint_updated", (e) => {
+        if (e.payload.notification_id && e.payload.context_forecast) this.applyContextForecast(e.payload.notification_id, e.payload.context_forecast);
+      }),
+    );
     this.unsubscribers.push(
       this.bus.on<QueueUpdatePayload>("notification_queue_update", (e) => this.onQueueUpdate(e)),
     );
@@ -737,6 +759,16 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     }
     this.emitCountdown("resumed", entry);
     return false;
+  }
+
+  /**
+   * Puts a new background forecast on a card's hint and repaints the card.
+   */
+  applyContextForecast(idHash: string, forecast: ContextForecastPayload): void {
+    const entry = this.entries.get(idHash);
+    if (entry === undefined || entry.data.prediction_hint === undefined) return;
+    entry.data = { ...entry.data, prediction_hint: { ...entry.data.prediction_hint, context_forecast: forecast } };
+    this.emit("context-forecast", idHash);
   }
 
   /**

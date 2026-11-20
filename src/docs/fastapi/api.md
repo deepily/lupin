@@ -1230,6 +1230,29 @@ Stores the first rendered time, the first fold-open time and the optional draft 
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/notify/prediction-hint/{notification_id}`
+
+> **Read the card's current context forecast payload**
+
+The late-forecast fetch: a fold opened after the prediction_hint_updated event reads the card's current payload here. States are forecasting, ready, unavailable and forecast_timed_out. With the display switch off the payload is null.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| notification_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/broadcast-acks/{broadcast_id}`
 
 > **Get the saved acks for one broadcast**

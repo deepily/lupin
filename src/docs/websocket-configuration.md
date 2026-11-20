@@ -76,7 +76,8 @@ Added: `task_store_changed`, the task panes' invalidation push. No other key is 
 
 Added: `cron_job_switch_changed`, sent after an administrator flips a scheduled job's switch. The legacy page's `_buildQueueAuthMessage` and the multiplexer's `QUEUE_SUBSCRIBED_EVENTS` subscribe to it, on the queue socket only.
 
-Added: `prediction_hint_updated`, sent when the background Haiku forecast of a card finishes, so an open fold replaces "still forecasting" with the result. A fold opened later reads the same payload from `GET /api/notify/prediction-hint/{notification_id}`. The legacy page's `_buildQueueAuthMessage` and the multiplexer's `QUEUE_SUBSCRIBED_EVENTS` subscribe to it, on the queue socket only.
+Added: `prediction_hint_updated`, sent when a card's background Haiku forecast job ends, whatever the outcome. The outcome is ready, unavailable or timed out, and an open fold replaces "still forecasting" with it. It is sent only while `prediction engine context display enabled` is on. A fold opened later reads the same payload from `GET /api/notify/prediction-hint/{notification_id}`.
+The server sends it to each session of the card's user that subscribed to it or to `*`. The legacy page's `_buildQueueAuthMessage` and the multiplexer's `QUEUE_SUBSCRIBED_EVENTS` subscribe to it on the queue socket. Those are the two web clients that receive it today. A client that subscribes with `*` on another socket would receive it too.
 
 Warning: **That reader is a bare `value.split( ", " )` with no per-token strip.**
 

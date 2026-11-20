@@ -88,6 +88,8 @@ export type LupinEventType =
   | "task_store_changed"
   // Row 063fc1a8 — an administrator flipped a scheduled job's switch; the payload is the job's row.
   | "cron_job_switch_changed"
+  // Phase 6 — the background Haiku forecast of a card finished; the payload is { notification_id, context_forecast }.
+  | "prediction_hint_updated"
   // R5 (2026-07-01) — session-name/topic control event. NotificationStore
   // intercepts a `session_topic` notification (raw notification_type), skips
   // carding it (legacy notifications.js:5862 "skip history card"), and re-emits
@@ -583,6 +585,23 @@ export interface VoicePersona {
 /** The four states of a forecast card; the server names the state. */
 export type PredictionHintState = "ready" | "insufficient_evidence" | "below_threshold" | "unavailable";
 
+/** The states of the background Haiku forecast a card may also carry. */
+export type ContextForecastState = "forecasting" | "ready" | "unavailable" | "forecast_timed_out";
+
+/**
+ * The card's background Haiku forecast.
+ *
+ * It rides on the hint at first paint and is replaced by a `prediction_hint_updated` frame or by `GET /api/notify/prediction-hint/{id}`. `predicted_value` and `confidence` come only when the state is `ready`, and `reason` only when it is `unavailable`.
+ */
+export interface ContextForecastPayload {
+  state            : ContextForecastState;
+  retrieval_metric?: string;
+  strategy?        : string;
+  predicted_value? : unknown;
+  confidence?      : number;
+  reason?          : string;
+}
+
 /** The share of past yes/no answers that were yes: `yes` of `n`, as `rate` from 0 to 1. */
 export interface AlwaysYesRate {
   yes  : number;
@@ -607,6 +626,8 @@ export interface PredictionHint {
   // value (notifications.js:23592, `formatStrategyLabel`). Optional: the server omits
   // it on hints that carry no strategy, and the line is then not drawn.
   strategy?       : string;
+  // Phase 6 — the card's background Haiku forecast; present only while its display switch is on.
+  context_forecast?: ContextForecastPayload;
 }
 
 /**
@@ -1089,7 +1110,8 @@ export type ActionRequiredChangeKind =
   | "activated"             // 360de81b — the card reached the active slot; its countdown started
   | "removed"               // 360de81b — the card left the store (grace over, or queued and finished)
   | "paused"                // A-2 #2f — the operator paused the active card; countdownMs is the frozen remainder
-  | "resumed";              // A-2 #2f — the operator resumed it; countdownMs is the remainder it resumes from
+  | "resumed"               // A-2 #2f — the operator resumed it; countdownMs is the remainder it resumes from
+  | "context-forecast";     // Phase 6 — the card's Haiku forecast changed; the card repaints with the new text
 
 /**
  * Payload of `store_action_required_changed`.
