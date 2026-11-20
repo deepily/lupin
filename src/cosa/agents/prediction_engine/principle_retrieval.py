@@ -26,7 +26,7 @@ from cosa.utils.notification_utils import sender_session_suffix
 
 PRINCIPLE_BOUND = 500
 DEFAULT_K       = 5
-RECIPE          = "statement-and-rationale-v1"
+RECIPE          = "statement-rationale-v1"
 DROPPED         = ( CONTESTED, RETRACTED )
 
 
@@ -51,13 +51,15 @@ def encoder_version_of( model_name ):
     """
     Name an encoder as the table stores it: the embedding model and the text recipe.
 
+    The extractor job stores its rows through this function, and retrieval filters on it, so the two cannot disagree.
+
     Requires:
         - model_name is a non-empty string
 
     Ensures:
-        - returns "<model_name>|<RECIPE>", so a change of either re-embeds
+        - returns "<model_name>:<RECIPE>", so a change of either re-embeds
     """
-    return f"{model_name}|{RECIPE}"
+    return f"{model_name}:{RECIPE}"
 
 
 def reembed_principles( session, owner_id, provider, encoder_version ):
