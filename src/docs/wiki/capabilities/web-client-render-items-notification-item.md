@@ -2,7 +2,7 @@
 capability: web-client-render-items-notification-item
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.renderNotificationItem@dca5c43eeb
+  - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.renderNotificationItem@0645da1400
   - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.expiredBadge@fd988874c8
   - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.cornerPauseButton@35b3ce7da1
   - src.lupin_app.static.js.multiplexer.render.templates.notificationItem.cornerStopButton@62f089c470
@@ -14,7 +14,7 @@ pins:
 Builds one chat-bubble row for a notification, plus the thumbs vote buttons a prediction hint can carry.
 
 ## Item
-- `renderNotificationItem( notification, opts )` returns a `.sender-message` div with `data-id-hash` set. `opts` takes `appTimezone` and `predictionVote`. `dateAccordion.ts` calls it; `senderCard.ts` only forwards the options.
+- `renderNotificationItem( notification, opts )` returns a `.sender-message` div with `data-id-hash` set. `opts` takes `appTimezone` and `predictionVote`. Vote controls are drawn only for a hint that carries a confidence, which only a ready forecast does. `dateAccordion.ts` calls it; `senderCard.ts` only forwards the options.
 - The class adds `incoming` or `outgoing` from `direction` (default incoming), and `expired-response` when `was_expired` is true.
 - It shows `time_display` or the formatted `ts`, and the message as inline markdown. A progress group wraps this in a head with a toggle and an empty history block.
 - `expiredBadge()` returns the "EXPIRED" span nested after the message text.

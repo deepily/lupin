@@ -6,7 +6,7 @@ pins:
   - lupin_mcp.reuse_tools.check_exists_impl@95010dcb48
   - lupin_mcp.reuse_tools.sweep_need_impl@42d37fe736
   - lupin_mcp.reuse_tools.unstored_need_impl@30148391b0
-  - lupin_mcp.reuse_tools.fetch_similar_impl@4a28930fcf
+  - lupin_mcp.reuse_tools.fetch_similar_impl@d2d43e0067
   - lupin_mcp.reuse_tools.read_capability_impl@9e12c9ae0d
   - lupin_mcp.reuse_tools.replay_impl@af3f456876
 ---
@@ -24,7 +24,7 @@ The functions the voice tools call to ask a reuse question. Hashing and receipts
 - The `provides` question asks the pair question, which has no candidate stage, so `candidates` is ignored for it.
 
 ## Looking up one symbol
-- `fetch_similar_impl` returns the shortlist for an indexed symbol, excluding itself. The language is stated by the caller and never inferred from the entry. With `include_tests` it looks among test files too, and accepts a test definition as the entry.
+- `fetch_similar_impl` returns the shortlist for an indexed symbol, excluding itself. The language is stated by the caller and never inferred from the entry. With `include_tests` it looks among test files too, and accepts a test definition as the entry. A single-use context closes its ledger run on every exit, an early error return and an exception included; `_fetch_similar` holds the work and closes nothing.
 - A definition the screen would not send returns `EXCLUDED_PREFIX` or `EXCLUDED_SENSITIVE_CONTENT` with no receipt. An id in no healthy index returns `UNKNOWN_ENTRY`.
 - `read_capability_impl` reads pages by slug with no Jev call. A slug that is not letters, digits, `_` and `-` gives `BAD_NAME`; a missing page gives `NOT_FOUND`.
 

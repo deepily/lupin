@@ -6,8 +6,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.boot.pickRandom@62e50e5d1a
   - src.lupin_app.static.js.multiplexer.boot.generateSessionId@8f4888cd39
   - src.lupin_app.static.js.multiplexer.boot.buildWebSocketBaseUrl@68517da5cd
-  - src.lupin_app.static.js.multiplexer.boot.emitLifecycle@ec9db4ad08
-  - src.lupin_app.static.js.multiplexer.boot.attachLifecycleListeners@e8dc9f9795
+  - src.lupin_app.static.js.multiplexer.boot.attachLifecycleListeners@878c6c139e
   - src.lupin_app.static.js.multiplexer.console.consolePage.createStandaloneConsolePane@6c52554518
   - src.lupin_app.static.js.multiplexer.console.consolePage.redirectTargetKeepingQuery@c7b447902b
   - src.lupin_app.static.js.multiplexer.console.consolePage.generateConsoleSessionId@b387e63544
@@ -23,14 +22,17 @@ pins:
   - src.lupin_app.static.js.multiplexer.docPodcast.docPodcast.bindDocPodcast@077dc607c0
   - src.lupin_app.static.js.multiplexer.docPodcast.docPodcast.choicesBody@283230b958
   - src.lupin_app.static.js.multiplexer.wireQaMetrics.wireQaMetrics@13cf7a4d27
+  - src.lupin_app.static.js.multiplexer.shared.lifecycleEvents.emitLifecycleEvent@60fe9553b9
+  - src.lupin_app.static.js.multiplexer.shared.lifecycleEvents.attachLifecycleEvents@5801df17cb
 ---
 # Web client boot, console and podcast
 
 The page boot, the console page and the document podcast control of the multiplexer. [[web-client-jobs-and-session-panes]] describes the panes they mount. `boot.ts` imports `wireQaMetrics.ts`. `consolePage.ts` imports `consolePageUrl.ts`.
 
 ## What it does
-- `boot.ts`. `phase6cSenderSort`: Orders senders with conversation mode active first, then by most recent activity. `pickRandom`: Returns a random element of a non-empty array. `generateSessionId`: Builds a fallback session ID from a random adjective and animal. `buildWebSocketBaseUrl`: Returns this page's WebSocket base URL, using wss on HTTPS pages. `emitLifecycle`: Emits a page or network lifecycle event on the event bus with the current time. `attachLifecycleListeners`: Turns visibility, online, offline and page restore events into lifecycle events. Visibility, online and offline come from the shared `attachLifecycleEvents` in `shared/lifecycleEvents.ts`. The page restore emit stays in `boot.ts`.
+- `boot.ts`. `phase6cSenderSort`: Orders senders with conversation mode active first, then by most recent activity. `pickRandom`: Returns a random element of a non-empty array. `generateSessionId`: Builds a fallback session ID from a random adjective and animal. `buildWebSocketBaseUrl`: Returns this page's WebSocket base URL, using wss on HTTPS pages. `attachLifecycleListeners`: Turns visibility, online, offline and page restore events into lifecycle events. Visibility, online and offline come from the shared `attachLifecycleEvents`. The page restore emit calls the shared `emitLifecycleEvent` with source `boot` and the `bfcache` flag.
 - `consolePage.ts`. `createStandaloneConsolePane`: The reading-pane collaborator for a page that is the console. `redirectTargetKeepingQuery`: A redirect target whose "where I was" keeps the query string. `generateConsoleSessionId`: A server-valid, per-load queue session id. `bootConsolePage`: Boot the console page. It forwards page visibility and network events onto the event bus through the shared `attachLifecycleEvents`. `requireElement`: Returns the element with the given id from the document.
 - `consolePageUrl.ts`. `buildConsolePageHref`: The console page's URL for one seat. `parseConsolePageQuery`: Read the console page's query string.
 - `docPodcast.ts`. `humanSize`: A byte count a person can read. `confirmCopy`: The question the confirmation asks. Names the file and its size. `refusalText`: The sentence for a refusal or a failure, from the server's `{ detail: { code, message } }` when it sent one. `readJson`: Parses a response body as JSON and returns null if it is not valid JSON. `createDocPodcast`: Build the button's behaviour over the page's elements. `bindDocPodcast`: Attach the button to the page. `choicesBody`: Turns the confirm panel's choices into optional request keys. Nothing picked gives `{}`; Spanish on gives `languages` `["en", "es-MX"]`. The panel's yes posts them with `path`.
 - `wireQaMetrics.ts`. `wireQaMetrics`: Subscribe the first-audio capture point.
+- `shared/lifecycleEvents.ts`. `emitLifecycleEvent`: Emits one lifecycle event on the bus, stamped with the current time and the caller's source. `attachLifecycleEvents`: Forwards visibility, online and offline events to the bus. Both boot pages call it.

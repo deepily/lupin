@@ -12,6 +12,7 @@ pins:
   - src.lupin_app.static.js.shared.approve-link.normalizeDocLinkHref@8f734ce906
   - src.lupin_app.static.js.multiplexer.render.docLink.isDocLinkHref@247cc56b79
   - src.lupin_app.static.js.multiplexer.render.docLink.isPaneResidentAnchor@a6526e76db
+  - src.lupin_app.static.js.multiplexer.render.dom.setValueFocusCaret@c725711c06
 ---
 # DOM merge helpers and doc-link rules
 
@@ -23,6 +24,7 @@ pins:
 - It removes children whose key is not wanted or is missing, builds missing entries with `create`, and runs the optional `update` on matched ones.
 - It then walks the entries in order and moves only elements that are out of position, so unchanged elements keep scroll and focus.
 - `updateAndLocate` runs `update` and returns the element now in that place, in case `update` replaced the node.
+- `setValueFocusCaret( el, value, caret )` sets a text field's value, focuses it and puts the caret after the inserted text. A null caret only focuses.
 - `placeBefore` uses `moveBefore` when the browser has it and the element is already a child. It falls back to `insertBefore`.
 - `cssEscape` is the one copy for every renderer. It uses `CSS.escape` when present. Otherwise it puts a backslash before every character outside letters, digits, `_` and `-`.
 - `messageEl( prefix, className, text )` returns the status `<p>` a board shows instead of its table, with class `<prefix>-message <className>`.

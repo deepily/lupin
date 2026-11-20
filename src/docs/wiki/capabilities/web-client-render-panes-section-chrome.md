@@ -10,6 +10,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.templates.sectionToolbar.renderSectionToolbar@7f60ba2645
   - src.lupin_app.static.js.multiplexer.render.templates.navBar.isActivePage@589199b5ab
   - src.lupin_app.static.js.multiplexer.render.templates.navBar.renderNavBar@9e0474995a
+  - src.lupin_app.static.js.multiplexer.render.templates.sectionHeader.mountStaticHeaderSection@6c47138965
 ---
 # Render panes: section chrome
 
@@ -21,6 +22,7 @@ Builders for the bars that frame every multiplexer pane: the section header with
 - `headerClickShouldCollapse( target, toggleEl )` says whether a click collapses. It is false for a null target and for a click inside any other button, link, input or select. It is true for the chevron and for any click outside those controls.
 - `setSectionCollapsed( section, handle, collapsed )` sets `data-collapsed` on the section and flips the chevron between a down and a right glyph.
 - `wireSectionCollapse( section, handle, persist? )` adds one click listener to the header and returns a function that removes it. With `persist`, it applies the stored state first and writes each toggle back.
+- `mountStaticHeaderSection( root, opts, body )` paints a header and then the body into `root`. It wires a session-only collapse and returns the header handle and a function that removes the listener.
 - Sixteen renderers call `renderSectionHeader` and fifteen call `wireSectionCollapse`. `NotificationsHeaderRenderer` also calls the predicate and `setSectionCollapsed`, and `ActionRequiredRenderer` calls `setSectionCollapsed`.
 
 ## Toolbar and nav bar

@@ -11,9 +11,9 @@ pins:
   - cosa.research.preference_replay.replay_loop.always_yes_arm@0a68cf15a6
   - cosa.research.preference_replay.replay_loop.predicted_value_for@ce4a593836
   - cosa.research.preference_replay.replay_loop.prior_majority_arm@e0977a44e3
-  - cosa.research.preference_replay.replay_loop.replay@b6cfa520fe
+  - cosa.research.preference_replay.replay_loop.replay@f14490afde
   - cosa.research.preference_replay.replay_loop.rows_as_of@60687ff8cd
-  - cosa.research.preference_replay.replay_loop.summarize@0f75e6985d
+  - cosa.research.preference_replay.replay_loop.summarize@c4f0767ab9
   - cosa.research.preference_replay.calibration_fit.fit_and_evaluate@4670219359
 ---
 # Preference replay core
@@ -26,10 +26,10 @@ Offline tools that replay the live prediction engine over past asks, using only 
 
 ## Replay
 - `TimeSlicedDecisionStore` stands in for the decision embeddings. A case is visible only when its `responded_at` is at or before the moment the harness advanced to. So a forecast never sees a later answer. Its `add_decision`, `advance_to`, `find_similar` and `visible_ids` follow that rule.
-- `replay( asks, engine, snapshot_sha256, baselines, store_factory, target_types )` predicts every replayable ask in time order with the real engine and with each baseline. `rows_as_of( cases, asked_at, excluded_ids )` builds store rows as they stood at that moment.
+- `replay( asks, engine, snapshot_sha256, baselines, store_factory, target_types, context_arms, episode_view_provider, principles_provider )` predicts every replayable ask in time order. It runs the real engine and each baseline. A baseline named in `context_arms` also gets a copy of the ask cut to its known fields. It gets the providers' episode view and principles too. A name not in `baselines` raises `ValueError`. `rows_as_of( cases, asked_at, excluded_ids )` builds store rows as they stood at that moment.
 - `predicted_value_for( result )` wraps a forecast the way the engine does before comparing it with an answer.
 - The baselines: `always_yes_arm` forecasts yes. `prior_majority_arm` forecasts the stance most often given before among visible yes/no cases.
-- `summarize( run, baseline_arm, operational_floor )` compares the engine with one baseline, paired on the same asks.
+- `summarize( run, baseline_arm, operational_floor, arm )` compares the engine, or another arm named by `arm`, with one baseline, paired on the same asks.
 
 ## Calibration
 - `fit_and_evaluate( tune_rows, final_rows, cohort_sha, fit_time, n_bins )` fits on the tune rows and scores on the final rows. The final window never reaches the fit ([[prediction-calibration]]).

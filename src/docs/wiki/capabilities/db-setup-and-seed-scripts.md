@@ -15,7 +15,7 @@ pins:
   - scripts.migrate_solution_snapshots.SolutionSnapshotMigrator@63d93bb174
   - scripts.migrate_solution_snapshots.main@65bda25f5b
   - scripts.seed_proxy_decisions.generate_embedding_via_api@52b6010d1f
-  - scripts.seed_proxy_decisions.seed_decisions@48bc9fe5d6
+  - scripts.seed_proxy_decisions.seed_decisions@6dd813e021
   - scripts.seed_proxy_decisions.ratify_suggested@a87ede1d93
   - scripts.seed_proxy_decisions.verify@4a5d2ff1a4
   - scripts.seed_proxy_decisions.clean_seed_data@fd23a3d4f5
@@ -34,7 +34,7 @@ One-off setup scripts under `src/scripts/`. Most are idempotent or have a dry ru
 - `create_notifications_table` creates the SQLite notifications table with its indexes, through `create_table_with_indexes`. `validate_schema` checks every field and index.
 - `seed_if_missing` copies the companion users and API keys from the dev database to the test database. It skips the copy when `LUPIN_TEST_SEED_FROM_DEV` is `0`, as on the VM test server.
 - `export_test_companions` runs inside the :7999 container and prints the same companions as one SQL script, so the VM test server needs no dev database. `fetch_rows` reads them. `placeholder_rows` describes a disabled stand-in for each missing companion except the primary admin. `build_sql` writes the transaction, `sql_literal` quotes the JSON payload, and `main --check` prints counts only. Run it through `lupin-vm.sh test-server seed-companions`.
-- `seed_decisions` inserts 50 proxy decision scenarios into Postgres and the pgvector store. `ratify_suggested`, `verify` and `clean_seed_data` ratify, check and remove them.
+- `seed_decisions` inserts 50 proxy decision scenarios into Postgres and the pgvector store. Each row is stored with no owner (`owner_user_id` None) and `answer_source` `proxy`, so the personal-vote filter never counts it as a human answer. `ratify_suggested`, `verify` and `clean_seed_data` ratify, check and remove them.
 - `generate_embedding_via_api` gets an embedding from the running server.
 - `build_statements` builds a throwaway clone of the embedding tables in its own schema. `drop_statements` removes it in one statement.
 - Each `main` is the command line entry of its script, and `quick_smoke_test` of the mock user migration checks password format.
