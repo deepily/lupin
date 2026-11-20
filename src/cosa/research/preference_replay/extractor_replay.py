@@ -322,13 +322,16 @@ def main( argv=None, query_fn=None ):
 
     Requires:
         - argv is a list of arguments or None for sys.argv; query_fn is None for the live model, or a double
+        - a live run, with no --dry-run and no double, names its model with --model
 
     Ensures:
         - reads --export, loads it into a scratch copy, and runs one replay per --lag-seconds value (default 0 and 300)
         - with --dry-run the model is canned_model and no model is called; otherwise --model, with each call limited to --timeout-seconds,
           is called through model_transport.complete unless a query_fn double was given
-        - each variant prints a line ending with the model id and the number of model calls it made, then a line with the token
-          counts the transport reported for it; the cost there is the SDK's notional figure, not a charge, and a canned model reports none
+        - without --dry-run, a double or --model, it exits with a usage error before it reads the export or makes any call
+        - each variant prints a line ending with the model id and the number of finished model calls, then a line with the token
+          counts the transport reported for it; a call that failed or timed out is not counted in the first, so the second is the spend
+          figure; its cost is the SDK's notional figure, not a charge, and a canned model reports none
         - writes the last variant's principle list to --out as JSON, and prints one line of counts per variant
         - returns 0
     """
@@ -337,9 +340,11 @@ def main( argv=None, query_fn=None ):
     parser.add_argument( "--out", required=True )
     parser.add_argument( "--lag-seconds", type=int, action="append", dest="lags" )
     parser.add_argument( "--dry-run", action="store_true" )
-    parser.add_argument( "--model", default="replay-model" )
+    parser.add_argument( "--model", default=None, help="model id for a live run; required unless --dry-run is given" )
     parser.add_argument( "--timeout-seconds", type=int, default=30 )
     args = parser.parse_args( argv )
+    if args.model is None and not args.dry_run and query_fn is None: parser.error( "--model is required for a live run: give --model <id>, or --dry-run for the canned model" )
+    if args.model is None: args.model = "replay-model"
     with open( args.export, encoding="utf-8" ) as handle: export = json.load( handle )
     chosen = canned_model if args.dry_run else query_fn
     listing = []
@@ -350,7 +355,7 @@ def main( argv=None, query_fn=None ):
             PredictionEngine.reset()
             outcome = run_replay( session, PredictionEngine( debug=False ), timedelta( seconds=lag ), query_fn=chosen, model=args.model, timeout_seconds=args.timeout_seconds )
             listing = principle_list( session )
-        print( f"lag {lag}s: {outcome[ 'counts' ]}, leakage checked {outcome[ 'leakage_checked' ]}, model {args.model}, model calls {len( calls )}", file=sys.stdout )
+        print( f"lag {lag}s: {outcome[ 'counts' ]}, leakage checked {outcome[ 'leakage_checked' ]}, model {args.model}, finished model calls {len( calls )}", file=sys.stdout )
         usage_after = model_transport.claude_usage_summary()
         used        = { key: usage_after[ key ] - usage_before[ key ] for key in usage_after }
         print( f"  usage reported by the transport: {used[ 'calls' ]} calls, input {used[ 'input_tokens' ]}, output {used[ 'output_tokens' ]}, "
