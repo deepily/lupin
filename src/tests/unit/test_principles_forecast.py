@@ -25,6 +25,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+import cosa.agents.prediction_engine.context_baseline as cb
 import cosa.agents.prediction_engine.episode_view as ev
 import cosa.agents.prediction_engine.principle_retrieval as pr
 import cosa.agents.prediction_engine.principles_forecast as pf
@@ -526,3 +527,19 @@ def test_no_forecast_prompt_renders_the_owners_draft_even_when_the_episode_is_re
         episode, _, block, system, user = pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5, use_principles=use_principles )
         assert episode[ "exposure" ][ "draft_at_reveal" ] == { "value": draft_marker }
         assert draft_marker not in pf.card_text( episode ) and draft_marker not in block[ "text" ] and draft_marker not in system and draft_marker not in user
+
+
+def test_the_real_context_baseline_prompt_never_renders_the_owners_draft_even_when_the_episode_is_read_after_the_reveal( factory, monkeypatch, tmp_path ):
+    draft_marker = "UNAIDED-DRAFT-TEXT-0451"
+    options      = { "fields": [ { "key": "plan", "prompt": "Which plan?", "options": [ { "label": "alpha" }, { "label": "beta" } ] } ] }
+    nid          = ask( factory, response_type="multiple_choice", response_options=options )
+    with factory() as db:
+        db.add( PredictionLog( id=uuid.uuid4(), notification_id=uuid.UUID( nid ), response_type="multiple_choice", category="c", prediction_strategy="s", predicted_at=T0,
+                               prediction_confidence=0.5, similar_case_count=0, fold_opened_at=T0 + timedelta( minutes=1 ), draft_at_reveal={ "value": draft_marker } ) )
+        db.commit()
+    late = T0 + timedelta( minutes=5 )
+    with factory() as db: episode = ev.episode_view( db, nid, as_of=late )
+    assert episode[ "exposure" ][ "draft_at_reveal" ] == { "value": draft_marker }
+    baseline = cb.ContextBaseline( "haiku-x", 30, cb.ALL_LAYERS, cb.open_ledger( str( tmp_path / "ledger.jsonl" ) ) )
+    system, user = baseline.build_prompts( episode )
+    assert "Which plan?" in user and draft_marker not in system and draft_marker not in user
