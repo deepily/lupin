@@ -4,22 +4,16 @@ The repository writes rule_agreement to the row, and a reader gets it back.
 The other repository tests mock the session, so a repository that dropped the argument would stay green.
 These write through log_shadow and log_decision into the real ProxyDecision table, built in in-memory SQLite,
 then read the column back in a fresh session. The migration is not applied to any shared database, and none is touched.
-The SQLite stand-in renders JSONB as JSON and nothing else about the table changes.
+The SQLite type hooks come from the scratch_db module, which renders JSONB as JSON.
 """
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import cosa.research.preference_replay.scratch_db   # noqa: F401  importing it registers the SQLite type hooks, JSONB included
 from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
 from cosa.rest.postgres_models import ProxyDecision
-
-
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( element, compiler, **kw ):
-    return "JSON"
 
 
 _ROW = dict( notification_id="n-1", domain="swe", category="deployment", question="deploy?", sender_id="lead" )
