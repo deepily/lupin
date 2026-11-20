@@ -64,6 +64,10 @@ def test_the_plan_limit_text_a_live_call_returned_raises_the_rate_limited_error(
     with pytest.raises( mt.ModelRateLimited, match="reached your Fable limit" ): call( result( None, None, error=True, text=REAL_PLAN_LIMIT ) )
 
 
+def test_the_plan_limit_text_for_opus_raises_the_rate_limited_error_too():
+    with pytest.raises( mt.ModelRateLimited, match="reached your Opus limit" ): call( result( None, None, error=True, text="You've reached your Opus limit." ) )
+
+
 def test_any_other_error_result_stays_a_plain_model_call_error():
     with pytest.raises( mt.ModelCallError ) as caught: call( result( None, None, error=True, text="boom" ) )
     assert not isinstance( caught.value, mt.ModelRateLimited )

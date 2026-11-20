@@ -305,6 +305,24 @@ def write_job_summary( folder, now, rows=None ):
     return path
 
 
+def zero_text( snap ):
+    """
+    Say what the page and the note show for the projected zero date.
+
+    Requires:
+        - snap is snapshot's answer
+
+    Ensures:
+        - returns the projected date when there is one
+        - returns "stalled" when work is left and the net clearing rate (drain less inflow, an unknown inflow taken as 0) is not above 0
+        - otherwise returns "not at the present rates", the case where the backlog or the clearing rate is unknown
+    """
+    if snap[ "projected_zero" ]: return snap[ "projected_zero" ]
+    drain = snap[ "drain" ][ "judged_per_day" ]
+    if snap[ "backlog" ][ "total" ] and drain is not None and drain - ( snap[ "backlog" ][ "inflow_per_day" ] or 0 ) <= 0: return "stalled"
+    return "not at the present rates"
+
+
 def note_of( line, snap ):
     """
     Say in one short sentence what a run did.
@@ -318,8 +336,9 @@ def note_of( line, snap ):
     total = snap[ "backlog" ][ "total" ]
     if not line.get( "judge_calls" ) and not total and line[ "status" ] != "failed": return None
     left  = "unknown" if total is None else f"{total:,}"
-    zero  = snap[ "projected_zero" ] or "not at the present rates"
-    return f"Duplicate check {line['mode']} run: {line.get( 'judged' ) or 0} judged in {line.get( 'judge_calls' ) or 0} calls; {left} left to judge; zero by {zero}."
+    zero  = zero_text( snap )
+    tail  = "stalled, no zero at the present rates" if zero == "stalled" else f"zero by {zero}"
+    return f"Duplicate check {line['mode']} run: {line.get( 'judged' ) or 0} judged in {line.get( 'judge_calls' ) or 0} calls; {left} left to judge; {tail}."
 
 
 def number( value, spec="," ):
@@ -345,7 +364,7 @@ def render_html( snap ):
     return ( "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Duplicate check status</title>"
              "<style>body{font-family:sans-serif;margin:2rem}table{border-collapse:collapse;margin:1rem 0}td,th{border:1px solid #ccc;padding:.25rem .6rem;text-align:right}"
              ".big{font-size:1.4rem}</style></head><body>"
-             f"<h1>Duplicate check <small>({esc( snap[ 'health' ] )})</small></h1><p class=\"big\">Projected zero: <b>{esc( snap[ 'projected_zero' ] or 'not at the present rates' )}</b></p>"
+             f"<h1>Duplicate check <small>({esc( snap[ 'health' ] )})</small></h1><p class=\"big\">Projected zero: <b>{esc( zero_text( snap ) )}</b></p>"
              f"<table><tr><th>left to judge (daily)</th><th>baseline remaining</th><th>total left to judge</th><th>inflow / day</th><th>cleared / day</th></tr><tr><td>{number( b[ 'left_to_judge' ] )}</td><td>{number( b[ 'baseline_remaining' ] )}</td>"
              f"<td>{number( b[ 'total' ] )}</td><td>{number( b[ 'inflow_per_day' ] )}</td><td>{number( snap[ 'drain' ][ 'judged_per_day' ] )}</td></tr></table>"
              f"<h2>Recent runs</h2><table><tr>{head}</tr>{runs}</table>"

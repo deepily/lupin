@@ -202,6 +202,17 @@ def test_the_page_shows_the_backlog_by_kind_the_runs_and_the_days_and_escapes_wh
     assert "not at the present rates" in none and "<td>-</td>" in none
 
 
+def test_a_backlog_that_the_runs_do_not_shrink_reads_stalled_not_a_bare_null( tmp_path ):
+    snap  = snapshot_of( tmp_path )
+    stuck = { **snap, "projected_zero": None, "drain": { "judged_per_day": 100 }, "backlog": { **snap[ "backlog" ], "total": 700, "inflow_per_day": 100 } }
+    assert st.zero_text( snap ) == "2026-11-09" and st.zero_text( stuck ) == "stalled"
+    assert "Projected zero: <b>stalled</b>" in st.render_html( stuck )
+    assert st.note_of( row( 8, 12 ), stuck ).endswith( "700 left to judge; stalled, no zero at the present rates." )
+    unknown_drain = { **stuck, "drain": { "judged_per_day": None } }
+    nothing_left  = { **stuck, "backlog": { **stuck[ "backlog" ], "total": 0 } }
+    assert st.zero_text( unknown_drain ) == "not at the present rates" and st.zero_text( nothing_left ) == "not at the present rates"
+
+
 def test_the_folder_of_a_root_is_the_runs_folder_under_the_code_health_data_folder_not_io( tmp_path ):
     folder = st.folder_of( tmp_path )
     assert folder == tmp_path / "fleet-data" / tmp_path.name / "code-health" / "duplicate-check-daily"
