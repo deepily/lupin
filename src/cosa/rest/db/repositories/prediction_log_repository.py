@@ -26,7 +26,7 @@ STATUS_INSUFFICIENT  = "insufficient data"
 LEDGER_COLUMNS = frozenset( {
     "asked_at", "rendered_at", "fold_opened_at", "forecast_ready_at", "forecast_source", "predictor_version",
     "config_version", "encoder_version", "context_version", "owner_email", "evidence_ids", "evidence_scores",
-    "abstention_reason", "latency_ms", "display_decision", "original_message", "batch_question_key", "code_identity", "always_yes_rate",
+    "abstention_reason", "latency_ms", "display_decision", "original_message", "batch_question_key", "code_identity", "always_yes_rate", "field_forecasts",
 } )
 
 

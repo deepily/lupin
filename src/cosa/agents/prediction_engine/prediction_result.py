@@ -32,6 +32,9 @@ class PredictionResult:
         - confidence is 0.0 for cold_start predictions
         - to_hint_dict() returns a JSON-serializable payload for WebSocket push, in every state
         - to_log_dict() returns a dict suitable for prediction_log insertion
+        - fields is None for every forecast the per-field multiple-choice predictor did not make; otherwise it maps
+          each header of the card to { "candidate", "confidence", "cases" } for an answered field or
+          { "reason" } for an abstained one, and it never carries a header the card does not have
     """
 
     response_type      : str
@@ -42,6 +45,7 @@ class PredictionResult:
     similar_case_count : int                      = 0
     predicted_qualifier: Optional[str]            = None
     metadata           : Optional[Dict[str, Any]] = field( default_factory=dict )
+    fields             : Optional[Dict[str, Any]] = None
 
     @property
     def is_cold_start( self ) -> bool:
@@ -86,6 +90,7 @@ class PredictionResult:
             - never returns None: the payload always carries state, retrieval_metric, strategy and category
             - state is hint_state( confidence_threshold )
             - predicted_value, confidence and predicted_qualifier appear only when state is ready
+            - fields appears only when state is ready and the result carries per-field output
             - always_yes_rate appears only for a yes/no forecast whose rate is given
             - all values are JSON-serializable
         """
@@ -102,6 +107,8 @@ class PredictionResult:
             hint[ "confidence" ]      = round( self.confidence, 3 )
             if self.predicted_qualifier:
                 hint[ "predicted_qualifier" ] = self.predicted_qualifier
+            if self.fields is not None:
+                hint[ "fields" ] = self.fields
 
         if self.response_type == "yes_no" and always_yes_rate is not None:
             hint[ "always_yes_rate" ] = always_yes_rate

@@ -15,6 +15,9 @@ from cosa.agents.prediction_engine.config import (
     RESPONSE_TYPE_OPEN_ENDED,
     RESPONSE_TYPE_OPEN_ENDED_BATCH,
     OPEN_ENDED_SIMILARITY_THRESHOLD,
+    FIELD_OUTCOME_EXACT,
+    FIELD_OUTCOME_MISS,
+    FIELD_OUTCOME_OTHER_WRITE_IN,
 )
 from cosa.utils.notification_utils import extract_qualifier_comment, parse_field_selections
 
@@ -228,7 +231,23 @@ def confidence_band( confidence ):
     return lower
 
 
-def score_field( field_schema, predicted, actual ):
+def offered_labels( field_schema ):
+    """
+    Name the labels one field of a stored schema offered.
+
+    Requires:
+        - field_schema is a dict (one entry of a notification's response_options "questions" list)
+
+    Ensures:
+        - Returns the set of stripped string labels of the field's option dicts
+        - Returns an empty set when the field lists no options or "options" is not a list of dicts
+    """
+    options = field_schema.get( "options" )
+    if not isinstance( options, list ): return set()
+    return { option[ "label" ].strip() for option in options if isinstance( option, dict ) and isinstance( option.get( "label" ), str ) }
+
+
+def score_field( field_schema, predicted, actual, per_field=False ):
     """
     Score one answer field by the mode its schema names, ignoring the shape of the answers.
 
@@ -236,9 +255,14 @@ def score_field( field_schema, predicted, actual ):
         - field_schema is a dict with "header" and optionally "multi_select" (the shape of
           one entry of a notification's response_options "questions" list)
         - predicted and actual are the field's values: a string, a list or None
+        - per_field is True only when the per-field multiple-choice switch is on
 
     Ensures:
         - Returns { "header", "mode", "exact", "jaccard", "predicted", "actual" }
+        - with per_field True the record also carries "outcome": "other_write_in" when the field's
+          schema lists its options and the actual picks include one that is not an offered label,
+          else "exact" or "miss" by "exact"; a field that lists no options is never other_write_in
+        - with per_field False the record has no "outcome" key, exactly as before
         - mode is "multi" or "single", taken from the schema
         - jaccard is a float for "multi" and None for "single"; two empty sets give 1.0
         - predicted and actual are the sorted picks, so the record does not depend on order
@@ -261,7 +285,7 @@ def score_field( field_schema, predicted, actual ):
         union   = set( picks[ "predicted" ] ) | set( picks[ "actual" ] )
         jaccard = len( set( picks[ "predicted" ] ) & set( picks[ "actual" ] ) ) / len( union ) if union else 1.0
 
-    return {
+    record = {
         "header"    : header,
         "mode"      : "multi" if multi else "single",
         "exact"     : exact,
@@ -269,9 +293,17 @@ def score_field( field_schema, predicted, actual ):
         "predicted" : picks[ "predicted" ],
         "actual"    : picks[ "actual" ],
     }
+    if per_field:
+        offered = offered_labels( field_schema )
+        if offered and any( pick not in offered for pick in picks[ "actual" ] ):
+            record[ "outcome" ] = FIELD_OUTCOME_OTHER_WRITE_IN
+        else:
+            record[ "outcome" ] = FIELD_OUTCOME_EXACT if exact else FIELD_OUTCOME_MISS
+
+    return record
 
 
-def compare_multiple_choice( predicted, actual, response_options ):
+def compare_multiple_choice( predicted, actual, response_options, per_field=False ):
     """
     Score a multiple-choice card field by field, by the schema stored with the notification.
 
@@ -290,6 +322,15 @@ def compare_multiple_choice( predicted, actual, response_options ):
           scored, so a half-right card is 1 of 2 with match False
         - detail["fields"] holds one score_field record per header the actual answer has;
           a header the schema does not list is scored as single-select
+        - with per_field True (the per-field switch is on):
+          a header the forecast does not answer abstained, and a field whose actual pick is a typed
+          Other (outcome other_write_in) is its own outcome; neither is a miss and neither is in
+          "total", so match and "matches" / "total" cover the fields the forecast answered and the
+          answer chose from the offered labels
+        - detail["other_write_in"] counts the other fields, detail["abstained"] the abstained ones,
+          and detail["field_coverage"] is the answered fields over all fields (0.0 for none)
+        - a card with nothing left to score returns ( None, detail ), so it is not scored at all
+        - a record's "abstained" is True for an abstained field, so an abstained Other is told from an answered one
     """
     if predicted is None or actual is None:
         return ( None, { "reason": "missing_data" } )
@@ -303,17 +344,33 @@ def compare_multiple_choice( predicted, actual, response_options ):
     malformed = not isinstance( questions, list ) or not all( isinstance( q, dict ) and isinstance( q.get( "header" ), str ) for q in questions )
     schemas   = {} if malformed else { q[ "header" ]: q for q in questions }
     fields  = [
-        score_field( schemas.get( header, { "header": header } ), predicted_answers.get( header ), value )
+        score_field( schemas.get( header, { "header": header } ), predicted_answers.get( header ), value, per_field=per_field )
         for header, value in actual_answers.items()
     ]
-    matches = sum( 1 for f in fields if f[ "exact" ] )
-    detail  = { "matches": matches, "total": len( fields ), "fields": fields }
+
+    if not per_field:
+        matches = sum( 1 for f in fields if f[ "exact" ] )
+        detail  = { "matches": matches, "total": len( fields ), "fields": fields }
+        if malformed: detail[ "schema_reason" ] = "malformed_schema"
+        return ( matches == len( fields ), detail )
+
+    for f in fields: f[ "abstained" ] = f[ "header" ] not in predicted_answers
+    scored  = [ f for f in fields if f[ "outcome" ] != FIELD_OUTCOME_OTHER_WRITE_IN and not f[ "abstained" ] ]
+    matches = sum( 1 for f in scored if f[ "exact" ] )
+    detail  = {
+        "matches"        : matches,
+        "total"          : len( scored ),
+        "other_write_in" : sum( 1 for f in fields if f[ "outcome" ] == FIELD_OUTCOME_OTHER_WRITE_IN ),
+        "abstained"      : sum( 1 for f in fields if f[ "abstained" ] ),
+        "field_coverage" : round( sum( 1 for f in fields if not f[ "abstained" ] ) / len( fields ), 3 ),
+        "fields"         : fields,
+    }
     if malformed: detail[ "schema_reason" ] = "malformed_schema"
 
-    return ( matches == len( fields ), detail )
+    return ( matches == len( scored ) if scored else None, detail )
 
 
-def get_comparator( response_type: str, open_ended_threshold: Optional[float] = None, response_options: Optional[Dict] = None ):
+def get_comparator( response_type: str, open_ended_threshold: Optional[float] = None, response_options: Optional[Dict] = None, per_field: bool = False ):
     """
     Return the appropriate comparator function for a given response type.
 
@@ -321,17 +378,20 @@ def get_comparator( response_type: str, open_ended_threshold: Optional[float] = 
         - response_type is a valid response type string
         - open_ended_threshold: float in [0, 1] or None (None keeps OPEN_ENDED_SIMILARITY_THRESHOLD)
         - response_options: the notification's stored schema, or None for a card that has none
+        - per_field: True when the per-field multiple-choice switch is on
 
     Ensures:
         - Returns a callable (predicted, actual) -> (match, detail)
         - For multiple_choice: compare_multiple_choice bound to response_options, whatever shape
-          the answers have; with no schema every field is scored as a single select
+          the answers have, and to per_field only when it is True; with no schema every field is scored as a single select
         - When open_ended_threshold is given, the open-ended and batch comparators
           (including the unknown-type fallback) are bound to it
         - Returns compare_open_ended as fallback for unknown types
     """
     if response_type == RESPONSE_TYPE_MULTIPLE_CHOICE:
-        return partial( compare_multiple_choice, response_options={} if response_options is None else response_options )
+        bound = { "response_options": {} if response_options is None else response_options }
+        if per_field: bound[ "per_field" ] = True   # bound only when on, so the switch-off binding is exactly as before
+        return partial( compare_multiple_choice, **bound )
 
     comparators = {
         RESPONSE_TYPE_YES_NO           : compare_yes_no,

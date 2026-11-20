@@ -160,6 +160,7 @@ def test_init_with_config_mgr_reads_keys():
             "prediction engine failure visibility enabled"    : True,
             "prediction engine three way enabled"             : True,
             "prediction engine recency half life days"        : 21.0,
+                "prediction engine per field multiple choice enabled" : True,
                 "prediction engine lancedb table"                 : "tbl_x",
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
@@ -1215,7 +1216,7 @@ def test_record_outcome_open_ended_enriches( wired_engine, monkeypatch ):
 def test_record_outcome_scores_open_ended_at_the_engine_match_threshold( wired_engine, monkeypatch ):
     """record_outcome hands the engine's own match threshold to get_comparator."""
     seen = {}
-    def fake_get_comparator( response_type, open_ended_threshold=None, response_options=None ):
+    def fake_get_comparator( response_type, open_ended_threshold=None, response_options=None, per_field=False ):
         seen[ "threshold" ] = open_ended_threshold
         return lambda predicted, actual: ( True, {} )
     session = _FakeSession()
