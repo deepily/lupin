@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -30,8 +31,10 @@ from sqlalchemy.orm import Session
 from cosa.agents.prediction_engine import context_baseline, opus_twins, principle_retrieval, principles_forecast
 from cosa.agents.prediction_engine.episode_view import fields_of
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
-from cosa.agents.principle_learner import opus_call, principles_call
+from cosa.agents.principle_learner import extractor_job, opus_call, principles_call
+from cosa.agents.principle_learner.extractor_store import NEIGHBOURS
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
+from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
 from cosa.research.preference_replay.extractor_replay import ExtractorReplay, asks_from_session, check_no_leakage, make_recorder
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM, _score, replay, summarize
@@ -51,7 +54,6 @@ ELIGIBLE_TYPES  = ( "yes_no", "multiple_choice" )
 OPERATIONAL_FLOOR = 10
 REPLAY_LAG      = timedelta( seconds=0 )
 CHUNK_SIZE      = 250
-EXTRACTOR_MODEL = "claude-sonnet-5-5"
 RECORDER_ARM    = "recorder"
 STAND_IN_PRIORITY = "medium"
 FLUSH_EVERY     = 500
@@ -73,6 +75,78 @@ def read_jsonl( path ):
         - returns the objects in file order, skipping blank lines
     """
     with open( path, encoding="utf-8" ) as handle: return [ json.loads( line ) for line in handle if line.strip() ]
+
+
+class FreezeMismatch( RuntimeError ):
+    """Raised when a run is asked to continue under other settings than it started with."""
+
+
+def extractor_settings():
+    """
+    Read the extractor's model id and timeout from the INI file, as the live job does.
+
+    Ensures:
+        - returns ( model id, timeout seconds ) from the keys the extractor job reads
+
+    Raises:
+        - MissingConfigKeyError if either key is absent
+    """
+    config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return config.get_required( extractor_job.MODEL_KEY ), config.get_required( extractor_job.TIMEOUT_KEY, return_type="int" )
+
+
+def tree_state( folder ):
+    """
+    Name the git commit of a folder's tree, and whether tracked files differ from it.
+
+    Requires:
+        - folder is inside a git working tree
+
+    Ensures:
+        - returns { sha, dirty }; dirty is True when a tracked file has an uncommitted change
+    """
+    sha   = subprocess.run( [ "git", "-C", folder, "rev-parse", "HEAD" ], capture_output=True, text=True, check=True ).stdout.strip()
+    state = subprocess.run( [ "git", "-C", folder, "status", "--porcelain", "--untracked-files=no" ], capture_output=True, text=True, check=True ).stdout.strip()
+    return { "sha": sha, "dirty": bool( state ) }
+
+
+def current_freeze( models, code ):
+    """
+    List every setting that must not change inside one evaluation window.
+
+    Requires:
+        - models is a ModelArms; code is tree_state's result
+
+    Ensures:
+        - returns a dict of the code commit, the vocabulary and extractor versions, the extractor timeout, the encoder, neighbours, k, bound,
+          lag seconds, floor and the baseline and Opus model ids
+    """
+    return { "code_sha": code[ "sha" ], "code_dirty": code[ "dirty" ], "vocabulary_version": PROMPT_VERSION, "extractor_version": models.extractor,
+             "extractor_timeout_seconds": extractor_settings()[ 1 ], "encoder": models.encoder, "neighbours": NEIGHBOURS, "k": principle_retrieval.DEFAULT_K,
+             "bound": principle_retrieval.PRINCIPLE_BOUND, "lag_seconds": REPLAY_LAG.total_seconds(), "floor": OPERATIONAL_FLOOR,
+             "baseline_model": models.c0.model, "twin_model": opus_twins.opus_model() }
+
+
+def check_freeze( state, current ):
+    """
+    Record the freeze on the first start, and refuse any later start that differs from it.
+
+    Requires:
+        - state is the checkpoint dict; current is current_freeze's result
+
+    Ensures:
+        - with no freeze in the state, stores current there and returns True so the caller saves it
+        - with a freeze that equals current, returns False and changes nothing
+
+    Raises:
+        - FreezeMismatch naming each setting that differs
+    """
+    if "freeze" not in state:
+        state[ "freeze" ] = current
+        return True
+    differing = sorted( key for key in set( state[ "freeze" ] ) | set( current ) if state[ "freeze" ].get( key ) != current.get( key ) )
+    if differing: raise FreezeMismatch( f"this work folder was started under other settings; differing: {', '.join( differing )}" )
+    return False
 
 
 class PeriodicFlush:
@@ -349,9 +423,9 @@ def load_state( path ):
     Read the checkpoint of the first stage.
 
     Ensures:
-        - returns { extracted_ids, done_ids, not_replayable, unrebuildable, context_asks }, empty when the file is absent
+        - returns { extracted_ids, done_ids, skipped_ids, not_replayable, unrebuildable, context_asks }, plus freeze once one was written; empty when the file is absent
     """
-    if not os.path.exists( path ): return { "extracted_ids": [], "done_ids": [], "not_replayable": 0, "unrebuildable": 0, "context_asks": 0 }
+    if not os.path.exists( path ): return { "extracted_ids": [], "done_ids": [], "skipped_ids": [], "not_replayable": 0, "unrebuildable": 0, "context_asks": 0 }
     with open( path, encoding="utf-8" ) as handle: return json.load( handle )
 
 
@@ -406,7 +480,7 @@ def checkpoint_line( done, total, state, session, counts, context_in_chunk ):
              f"asks with an episode history {context_in_chunk} in this chunk and {state[ 'context_asks' ]} so far; {results}" )
 
 
-def run_first_stage( session, asks, ids, engine, embed, models, work, model=EXTRACTOR_MODEL, timeout_seconds=30, query_fn=None, chunk=CHUNK_SIZE, out=print ):
+def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=None, chunk=CHUNK_SIZE, out=print, code=None ):
     """
     Predict the evaluation asks in time order with every arm but the twins.
 
@@ -418,12 +492,19 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, model=EXTR
         - principles are extracted from every answer once time reaches it, so no arm sees a later answer
         - each chunk of asks is replayed by replay_loop.replay, checked for leakage, then written to records.jsonl and the checkpoint
         - a chunk already done in the checkpoint is skipped, and an answer already extracted is not extracted again
+        - the extractor's model and timeout come from the INI file, as the live job reads them
+        - an ask with no vector is counted once, kept in the checkpoint as skipped, and left out of every later chunk
+        - a line already in records.jsonl is not written again, so a stop between the write and the checkpoint never doubles an ask
+        - the first start stores the freeze in the checkpoint, and a later start under other settings is refused
         - returns the number of asks predicted in this call
 
     Raises:
         - LeakageError if any arm was handed evidence from after its ask
+        - FreezeMismatch if the work folder was started under other settings
     """
     state     = load_state( work.state )
+    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ) ): save_state( work.state, state )
+    model, timeout_seconds = extractor_settings()
     version   = f"{model}:{PROMPT_VERSION}"
     extracted = set( state[ "extracted_ids" ] ) | extracted_in_db( session, version )
     runner    = ExtractorReplay( session, asks, REPLAY_LAG, query_fn=query_fn, embed_fn=embed, model=model, encoder=embed.encoder, timeout_seconds=timeout_seconds )
@@ -443,8 +524,8 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, model=EXTR
         counts.update( models.run( ask_at_ask[ "id" ], HAIKU_ARMS ) )
         return found
 
-    done_ids = set( state[ "done_ids" ] )
-    todo     = [ ask_id for ask_id in ids if ask_id not in done_ids ]
+    settled  = set( state[ "done_ids" ] ) | set( state[ "skipped_ids" ] )
+    todo     = [ ask_id for ask_id in ids if ask_id not in settled ]
     baselines = { ARM_FIXED: fixed_rules_arm, ARM_BASELINE: models.reader( ARM_BASELINE ), ARM_PRINCIPLES: models.reader( ARM_PRINCIPLES ), RECORDER_ARM: make_recorder( seen ) }
     sha       = hashlib.sha256( "\n".join( ids ).encode( "utf-8" ) ).hexdigest()
     for start in range( 0, len( todo ), chunk ):
@@ -455,16 +536,18 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, model=EXTR
                       episode_view_provider=episode_provider, principles_provider=principles_provider, target_ids=set( part ) )
         check_no_leakage( seen )
         seen.clear()
-        append_lines( work.records, _record_lines( run, models ) )
+        recorded = { line[ "id" ] for line in read_jsonl( work.records ) } if os.path.exists( work.records ) else set()
+        append_lines( work.records, [ line for line in _record_lines( run, models ) if line[ "id" ] not in recorded ] )
         state[ "done_ids" ]      = state[ "done_ids" ] + [ r[ "meta" ][ "notification_id" ] for r in run[ "records" ][ ENGINE_ARM ] ]
         state[ "extracted_ids" ] = sorted( extracted | { item[ "notification_id" ] for item in runner.summaries } | { a for a in state[ "extracted_ids" ] } )
-        state[ "not_replayable" ] += run[ "not_replayable" ]
+        state[ "skipped_ids" ]    = sorted( set( state[ "skipped_ids" ] ) | set( run[ "not_replayable_ids" ] ) )
+        state[ "not_replayable" ] = len( state[ "skipped_ids" ] )
         state[ "unrebuildable" ]  += run[ "unrebuildable_cases" ]
         state[ "context_asks" ]   += chunk_context[ 0 ]
         session.commit()
         embed.flush()
         save_state( work.state, state )
-        line = checkpoint_line( len( state[ "done_ids" ] ), len( ids ), state, session, counts, chunk_context[ 0 ] )
+        line = checkpoint_line( len( state[ "done_ids" ] ) + len( state[ "skipped_ids" ] ), len( ids ), state, session, counts, chunk_context[ 0 ] )
         append_lines( work.log, [ { "line": line } ] )
         out( line )
         models.rows.clear()
@@ -492,7 +575,7 @@ def _record_lines( run, models ):
     return lines
 
 
-def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds=60, sleep=time.sleep, chunk=CHUNK_SIZE, out=print ):
+def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds=60, sleep=time.sleep, chunk=CHUNK_SIZE, out=print, code=None ):
     """
     Run the Opus twins over the evaluation asks, trailing the first stage.
 
@@ -506,7 +589,13 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
         - an ask already in twin-records.jsonl is skipped
         - with follow True the stage waits for the first stage to record more asks; otherwise it stops when none is ready
         - returns the number of asks the twins ran in this call
+        - a work folder started under other settings is refused, as in the first stage
+
+    Raises:
+        - FreezeMismatch if the settings differ from the ones the first stage froze
     """
+    state = load_state( work.state )
+    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ) ): save_state( work.state, state )
     by_id = { ask[ "id" ]: ask for ask in asks }
     ran   = 0
     while True:
@@ -572,7 +661,7 @@ def build_report( records, twin_records, state, floor=OPERATIONAL_FLOOR ):
         - state is the first stage's checkpoint; floor is the discordant-pair floor stated before the run
 
     Ensures:
-        - returns { asks, floor, pairings, context_asks, not_replayable, unrebuildable_cases_chunk_sum, twin_stretch }
+        - returns { asks, floor, freeze, pairings, context_asks, not_replayable, unrebuildable_cases_chunk_sum, twin_stretch }, the freeze as the run stored it
         - each pairing is replay_loop.summarize over the two arms on the same asks, with coverage and accuracy on the asks answered beside it
         - an Opus pairing covers only the asks both twins have a line for, and its Haiku twin is cut to the same asks
         - a pairing whose arm has no line at all is reported as not run, with no verdict
@@ -593,7 +682,7 @@ def build_report( records, twin_records, state, floor=OPERATIONAL_FLOOR ):
         result = summarize( run, baseline, floor, arm=arm )
         pairings.append( { "arm": LABELS.get( arm, arm ), "baseline": LABELS.get( baseline, baseline ), "summary": result,
                            "arm_coverage": _coverage( shaped, arm ), "baseline_coverage": _coverage( shaped, baseline ) } )
-    return { "asks": len( records ), "floor": floor, "pairings": pairings, "context_asks": state[ "context_asks" ], "not_replayable": state[ "not_replayable" ],
+    return { "asks": len( records ), "floor": floor, "freeze": state.get( "freeze" ), "pairings": pairings, "context_asks": state[ "context_asks" ], "not_replayable": state[ "not_replayable" ],
              "unrebuildable_cases_chunk_sum": state[ "unrebuildable" ], "twin_stretch": len( stretch ) }
 
 
@@ -673,7 +762,7 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
         asks   = asks_from_session( session, engine, embed )
         embed.flush()
         ids    = evaluation_ids( asks, fixture_ids( args.fixture ) )[ :args.limit ]
-        models = default_models( session, embed, embed.encoder, f"{EXTRACTOR_MODEL}:{PROMPT_VERSION}", work ) if make_models is None else make_models( session, embed )
+        models = default_models( session, embed, embed.encoder, f"{extractor_settings()[ 0 ]}:{PROMPT_VERSION}", work ) if make_models is None else make_models( session, embed )
         if args.stage == "first": run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=query_fn, chunk=args.chunk, out=out )
         else: run_twin_stage( session, asks, ids, models, work, follow=args.follow, poll_seconds=args.poll_seconds, chunk=args.chunk, out=out )
         embed.flush()

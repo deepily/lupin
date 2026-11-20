@@ -74,7 +74,7 @@ def _models( session, embed, c0=None, caps=( 2, 2, 1, 1 ) ):
     c0    = Haiku() if c0 is None else c0
     gates = { ar.ARM_BASELINE: principles_forecast.CapGate( caps[ 0 ] ), ar.ARM_PRINCIPLES: principles_forecast.CapGate( caps[ 1 ] ),
               ar.TWIN_ARMS[ 0 ]: principles_forecast.CapGate( caps[ 2 ] ), ar.TWIN_ARMS[ 1 ]: principles_forecast.CapGate( caps[ 3 ] ) }
-    return ar.ModelArms( ar.locked_sessions( session.get_bind() ), c0, embed, embed.encoder, f"{ar.EXTRACTOR_MODEL}:{ar.PROMPT_VERSION}", gates ), c0
+    return ar.ModelArms( ar.locked_sessions( session.get_bind() ), c0, embed, embed.encoder, f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}", gates ), c0
 
 
 @pytest.fixture
@@ -216,7 +216,7 @@ def test_a_stopped_run_resumes_from_its_checkpoint_without_repeating_an_ask_or_a
 def test_an_answer_whose_evidence_is_in_the_database_is_not_extracted_again_even_without_a_checkpoint( loaded ):
     session, asks, ids, embed, work, _ = loaded
     _, c0, _ = _first_stage_counted( loaded, chunk=40, ids=ids[ :30 ] )
-    version  = f"{ar.EXTRACTOR_MODEL}:{ar.PROMPT_VERSION}"
+    version  = f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}"
     held     = ar.extracted_in_db( session, version )
     assert held, "the first run left no evidence to resume from"
     os.remove( work.state )
@@ -285,7 +285,7 @@ def test_the_python_search_orders_rows_by_cosine_and_cuts_at_the_limit( loaded )
 
 def test_state_and_lines_are_written_whole_and_read_back( tmp_path ):
     work = ar.WorkFolder( str( tmp_path ) )
-    assert ar.load_state( work.state ) == { "extracted_ids": [], "done_ids": [], "not_replayable": 0, "unrebuildable": 0, "context_asks": 0 }
+    assert ar.load_state( work.state ) == { "extracted_ids": [], "done_ids": [], "skipped_ids": [], "not_replayable": 0, "unrebuildable": 0, "context_asks": 0 }
     ar.save_state( work.state, { "done_ids": [ "a" ] } )
     assert ar.load_state( work.state ) == { "done_ids": [ "a" ] } and not os.path.exists( f"{work.state}.tmp" )
     ar.append_lines( work.records, [ { "n": 1 }, { "n": 2 } ] )
@@ -548,3 +548,105 @@ def test_main_without_an_injected_embedder_builds_the_periodic_one_over_the_cach
     assert ar.main( argv, query_fn=er.canned_model, make_models=lambda session, e: _models( session, e )[ 0 ], out=lambda line: None ) == 0
     assert len( made ) == 1 and os.path.exists( ar.WorkFolder( str( tmp_path ) ).cache ) and len( made[ 0 ].vectors ) > 100
     PredictionEngine.reset()
+
+
+class Stopped( Exception ):
+    """A stand-in for the process dying at one moment."""
+
+
+CODE = { "sha": "a" * 40, "dirty": False }
+
+
+def test_a_stop_between_the_record_write_and_the_checkpoint_never_doubles_an_ask( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    real_save = ar.save_state
+    def die_at_the_first_checkpoint( path, state ):
+        if state[ "done_ids" ]: raise Stopped( "killed after the append, before the checkpoint" )
+        real_save( path, state )
+    monkeypatch.setattr( ar, "save_state", die_at_the_first_checkpoint )
+    models, _ = _models( session, embed )
+    with pytest.raises( Stopped ):
+        ar.run_first_stage( session, asks, ids[ :40 ], PredictionEngine( debug=False ), embed, models, work, query_fn=er.canned_model, chunk=20, out=lambda line: None, code=CODE )
+    assert len( ar.read_jsonl( work.records ) ) == 20 and ar.load_state( work.state )[ "done_ids" ] == [], "the stop must leave the lines written and no checkpoint"
+    monkeypatch.setattr( ar, "save_state", real_save )
+    models2, _ = _models( session, embed )
+    ar.run_first_stage( session, asks, ids[ :40 ], PredictionEngine( debug=False ), embed, models2, work, query_fn=er.canned_model, chunk=20, out=lambda line: None, code=CODE )
+    lines = ar.read_jsonl( work.records )
+    assert [ r[ "id" ] for r in lines ] == ids[ :40 ], "one line per ask, in order, after the resume"
+    report = ar.build_report( lines, [], ar.load_state( work.state ) )
+    assert report[ "asks" ] == 40 and _pairing( report, ar.ARM_PRINCIPLES, ar.ARM_BASELINE )[ "summary" ][ "asks_replayed" ] == 40
+
+
+def test_an_ask_with_no_vector_is_counted_once_and_a_resume_does_not_count_it_again( loaded ):
+    session, asks, ids, embed, work, _ = loaded
+    victim = ids[ 6 ]
+    next( a for a in asks if a[ "id" ] == victim )[ "question_embedding" ] = None
+    first  = lambda: ar.run_first_stage( session, asks, ids[ :20 ], PredictionEngine( debug=False ), embed, _models( session, embed )[ 0 ], work, query_fn=er.canned_model,
+                                        chunk=10, out=lambda line: None, code=CODE )
+    first()
+    state = ar.load_state( work.state )
+    assert ( state[ "not_replayable" ], state[ "skipped_ids" ] ) == ( 1, [ victim ] ) and victim not in state[ "done_ids" ] and len( state[ "done_ids" ] ) == 19
+    assert victim not in {r[ "id" ] for r in ar.read_jsonl( work.records )}
+    assert first() == 0, "a resume found work to do although every ask was settled"
+    again = ar.load_state( work.state )
+    assert ( again[ "not_replayable" ], again[ "skipped_ids" ] ) == ( 1, [ victim ] )
+
+
+def test_the_freeze_is_stored_on_the_first_start_and_a_start_under_other_settings_is_refused( loaded ):
+    session, asks, ids, embed, work, _ = loaded
+    run = lambda code, upto=10: ar.run_first_stage( session, asks, ids[ :upto ], PredictionEngine( debug=False ), embed, _models( session, embed )[ 0 ], work,
+                                                    query_fn=er.canned_model, chunk=10, out=lambda line: None, code=code )
+    run( CODE )
+    freeze = ar.load_state( work.state )[ "freeze" ]
+    assert freeze[ "code_sha" ] == CODE[ "sha" ] and freeze[ "floor" ] == 10 and freeze[ "lag_seconds" ] == 0.0
+    assert ( freeze[ "neighbours" ], freeze[ "k" ], freeze[ "bound" ] ) == ( 5, 5, 500 ) and freeze[ "vocabulary_version" ] == ar.PROMPT_VERSION
+    assert freeze[ "encoder" ] == "test-encoder:v1" and freeze[ "baseline_model" ] == "haiku-x" and freeze[ "twin_model" ] == opus_twins.opus_model()
+    assert freeze[ "extractor_version" ] == f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}" and freeze[ "extractor_timeout_seconds" ] == ar.extractor_settings()[ 1 ]
+    run( CODE, upto=20 )
+    with pytest.raises( ar.FreezeMismatch, match="code_sha" ):
+        run( { "sha": "b" * 40, "dirty": False }, upto=30 )
+    with pytest.raises( ar.FreezeMismatch, match="code_dirty" ):
+        run( { "sha": CODE[ "sha" ], "dirty": True }, upto=30 )
+    assert len( ar.read_jsonl( work.records ) ) == 20, "a refused start must not predict anything"
+
+
+def test_the_twin_stage_refuses_settings_the_first_stage_did_not_freeze_and_the_report_carries_the_freeze( loaded ):
+    session, asks, ids, embed, work, _ = loaded
+    models, _ = _models( session, embed )
+    ar.run_first_stage( session, asks, ids[ :5 ], PredictionEngine( debug=False ), embed, models, work, query_fn=er.canned_model, chunk=5, out=lambda line: None, code=CODE )
+    with pytest.raises( ar.FreezeMismatch, match="code_sha" ):
+        ar.run_twin_stage( session, asks, ids[ :5 ], models, work, out=lambda line: None, code={ "sha": "c" * 40, "dirty": False } )
+    assert ar.run_twin_stage( session, asks, ids[ :5 ], models, work, out=lambda line: None, code=CODE ) == 5
+    report = ar.build_report( ar.read_jsonl( work.records ), ar.read_jsonl( work.twins ), ar.load_state( work.state ) )
+    assert report[ "freeze" ] == ar.load_state( work.state )[ "freeze" ] and report[ "freeze" ][ "code_sha" ] == CODE[ "sha" ]
+
+
+def test_a_twin_stage_on_a_fresh_folder_stores_the_freeze_it_starts_under( loaded ):
+    session, asks, ids, embed, work, _ = loaded
+    models, _ = _models( session, embed )
+    assert ar.run_twin_stage( session, asks, ids[ :3 ], models, work, out=lambda line: None, code=CODE ) == 0
+    assert ar.load_state( work.state )[ "freeze" ][ "code_sha" ] == CODE[ "sha" ]
+
+
+def test_the_tree_state_names_the_commit_and_whether_tracked_files_changed( tmp_path ):
+    import subprocess
+    run = lambda *args: subprocess.run( [ "git", "-C", str( tmp_path ), *args ], check=True, capture_output=True )
+    run( "init", "-q" )
+    run( "config", "user.email", "t@example.com" )
+    run( "config", "user.name", "t" )
+    ( tmp_path / "f.txt" ).write_text( "one" )
+    run( "add", "f.txt" )
+    run( "commit", "-q", "-m", "first" )
+    clean = ar.tree_state( str( tmp_path ) )
+    assert len( clean[ "sha" ] ) == 40 and clean[ "dirty" ] is False
+    ( tmp_path / "f.txt" ).write_text( "two" )
+    assert ar.tree_state( str( tmp_path ) ) == { "sha": clean[ "sha" ], "dirty": True }
+    ( tmp_path / "untracked.txt" ).write_text( "x" )
+    run( "checkout", "f.txt" )
+    assert ar.tree_state( str( tmp_path ) )[ "dirty" ] is False, "an untracked file must not count"
+
+
+def test_the_extractor_settings_are_read_from_the_ini_file_as_the_live_job_reads_them():
+    model, timeout = ar.extractor_settings()
+    assert model.startswith( "claude-" ) and isinstance( timeout, int ) and timeout >= 30
+    assert not hasattr( ar, "EXTRACTOR_MODEL" ), "a model id literal must not live in the runner"
