@@ -450,3 +450,77 @@ class TestTheBackgroundCallsRunAsTasksTheRouteHolds:
         assert r.status_code == 200 and len( harness.queue.calls_to( "push_notification" ) ) == 1
         assert returned_with == [], "the ask waited for the baseline job to finish"
         assert seen[ "held" ] and seen[ "held" ][ 0 ] >= 1, "the running task was not held in the route's set"
+
+
+class TestTheOpusTwinsStartBesideTheOthersBehindTheirOwnSwitches:
+    """Each Opus twin starts from the notify route behind its own switch."""
+
+    @pytest.fixture
+    def started( self, monkeypatch ):
+        import cosa.agents.prediction_engine.context_baseline as cb
+        import cosa.agents.prediction_engine.opus_twins as ot
+        import cosa.agents.prediction_engine.principles_forecast as pf
+        import cosa.agents.principle_learner.opus_call as oc
+        import cosa.agents.principle_learner.principles_call as pc
+        calls, state = [], { ot.BASELINE_SWITCH_KEY: True, ot.PRINCIPLES_SWITCH_KEY: True, "others": False }
+
+        async def recorder( nid, run=None ): calls.append( ( nid, run ) )
+        monkeypatch.setattr( pc, "run_quietly", recorder )
+        monkeypatch.setattr( pf, "switch_enabled", lambda key: state.get( key, False ) )
+        monkeypatch.setattr( pf, "principles_forecast_enabled", lambda: state[ "others" ] )
+        monkeypatch.setattr( cb, "context_forecast_enabled", lambda: state[ "others" ] )
+        state.update( calls=calls, oc=oc, ot=ot )
+        return state
+
+    def test_both_twins_start_with_their_own_runner_and_change_nothing_on_the_card( self, harness, wired, started ):
+        _post( harness )
+        assert sorted( ( nid, run.__name__ ) for nid, run in started[ "calls" ] ) == [ ( _NID, "run_baseline_twin" ), ( _NID, "run_principles_twin" ) ]
+        assert all( run in ( started[ "oc" ].run_baseline_twin, started[ "oc" ].run_principles_twin ) for _, run in started[ "calls" ] )
+        assert "context_forecast" not in harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ], "the twins are never shown"
+
+    def test_each_twin_starts_alone_on_its_own_switch( self, harness, wired, started ):
+        started[ started[ "ot" ].PRINCIPLES_SWITCH_KEY ] = False
+        _post( harness )
+        assert [ run.__name__ for _, run in started[ "calls" ] ] == [ "run_baseline_twin" ]
+        started[ "calls" ].clear()
+        started[ started[ "ot" ].PRINCIPLES_SWITCH_KEY ], started[ started[ "ot" ].BASELINE_SWITCH_KEY ] = True, False
+        _post( harness )
+        assert [ run.__name__ for _, run in started[ "calls" ] ] == [ "run_principles_twin" ]
+
+    def test_with_both_switches_off_no_twin_starts_even_with_the_haiku_switches_on( self, harness, wired, started ):
+        started[ started[ "ot" ].BASELINE_SWITCH_KEY ] = started[ started[ "ot" ].PRINCIPLES_SWITCH_KEY ] = False
+        started[ "others" ] = True
+        _post( harness )
+        assert [ run for _, run in started[ "calls" ] if run is not None ] == []
+
+    def test_cards_the_baseline_does_not_read_start_no_twin( self, harness, wired, started ):
+        _post( harness, response_type="open_ended" )
+        _post( harness, response_options=json.dumps( { "review_card": True } ) )
+        _post( harness, prediction_hint_override=json.dumps( { "predicted_value": "yes" } ) )
+        assert started[ "calls" ] == []
+
+    def test_a_twin_that_cannot_start_does_not_cost_the_ask( self, harness, wired, monkeypatch, capsys ):
+        import cosa.agents.prediction_engine.principles_forecast as pf
+        def boom( key ): raise RuntimeError( "settings unreadable" )
+        monkeypatch.setattr( pf, "switch_enabled", boom )
+        r = _post( harness )
+        assert r.status_code == 200 and len( harness.queue.calls_to( "push_notification" ) ) == 1
+        assert "Could not start the Opus twins" in capsys.readouterr().out
+
+    def test_slow_twins_are_held_tasks_and_the_ask_does_not_wait_for_them( self, harness, wired, started, monkeypatch ):
+        import cosa.agents.principle_learner.principles_call as pc
+        import cosa.rest.routers.notifications as notif
+        seen, release = { "held": [], "finished": [] }, threading.Event()
+        async def slow( nid, run=None ):
+            seen[ "held" ].append( len( notif._CONTEXT_FORECAST_TASKS ) )
+            for _ in range( 500 ):
+                if release.is_set(): break
+                await asyncio.sleep( 0.01 )
+            seen[ "finished" ].append( True )
+        monkeypatch.setattr( pc, "run_quietly", slow )
+        r = _post( harness )
+        returned_with = list( seen[ "finished" ] )
+        release.set()
+        assert r.status_code == 200 and len( harness.queue.calls_to( "push_notification" ) ) == 1
+        assert returned_with == [], "the ask waited for a twin to finish"
+        assert len( seen[ "held" ] ) == 2 and min( seen[ "held" ] ) >= 1, "each running twin was held in the route's set"
