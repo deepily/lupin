@@ -16,6 +16,18 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-20 (Mr. Radio 🦉 `b53537e4`, build manager for preference learning; crew Rio, Clayton, Sam, Chloé, Krishna, all reaped; times Eastern)
+
+The retro is [the 20 Nov post-game](src/docs/post-games/v0.2.4/2026.11.20-mr-radio-opl-remediation-crew-post-game.md). The re-plan rulings are amended on gate `47865511`.
+
+- 2026-11-20 — **Build order after the checkpoint** → **Phase seven, then a shrunk phase six, then eight. Then the failure half of eleven, and twelve last. Phase ten is deferred (chase 11 Dec). The recall half of eleven waits until seven and six are measured** (Rick, morning re-plan walkthrough).
+- 2026-11-20 — **Skeleton crew** → **Off, with a fleet cap of 12** (Rick, broadcast at about 11:00).
+- 2026-11-20 — **The Opus judge's accuracy proof** → **Label the 15 disputed flags first and hold the inter-rater study** (Rick, card, about 11:12). Then **the pooled 0.80 bar decides** (Rick, about 11:33).
+- 2026-11-20 — **The Fable-to-Opus inter-rater study** → **Dropped; switch the judge to Opus when Jason's labels land** (Rick, card, about 11:36). The switch merged at `ca95a43d8`; Rick restores the crontab himself.
+- 2026-11-20 — **A fallback for phase seven's low coverage** → **None; merge as built** (Rick, about 12:40). Why: header and label overlap between cards is near zero, so a fallback adds nothing (Rio's probes).
+- 2026-11-20 — **Trust "success" scoring in phase twelve** → **Leave as is, pinned as an expected failure, and file it for Rick** (Mr. Radio, 13:47). Why: changing it changes trust counts, which is Rick's call (decision `ae3fb0a0`).
+- 2026-11-20 — **Bouncing `:7999` or `:8000`** → **Neither until migrations `7a3e9c5d1b28` and `c4d8e1a6b392` are applied** (Mr. Radio and Cheech, 13:34). Why: merged phase seven code cannot read a database without the column (gate `73548e6e`).
+
 ## 📚 Decisions log 2026-11-19 (Mr. Radio 🦉 `67865d63`, build manager for preference learning, missing question vectors; times Eastern)
 
 The full table of today's rulings is in the [missing-vectors plan](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.18-missing-question-vectors-plan.md). The cross-track agreements are on re-plan row `47865511`.
