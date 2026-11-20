@@ -119,3 +119,18 @@ def test_the_draft_route_accepts_each_cards_draft_as_the_value_it_stores():
     for card in CARDS:
         for name in ( "draft_same", "draft_other", "draft_empty" ):
             assert PredictionSeenRequest( fold_opened=True, draft_at_reveal={ "value": card[ name ] } ).draft_at_reveal == { "value": card[ name ] }
+
+
+def test_the_extractor_reader_and_the_switch_decoder_accept_every_real_producer_draft():
+    from cosa.agents.principle_learner.extractor_rules import WHOLE_ANSWER_KEY, drafted_text
+    read = 0
+    for card in CARDS:
+        for name in ( "draft_same", "draft_other", "draft_empty" ):
+            draft   = { "value": card[ name ] }
+            decoded = ex.decode_answer_fields( card[ "response_type" ], draft )
+            assert decoded is not None, f"decode_answer_fields could not read the {name} draft of a {card[ 'response_type' ]} card"
+            for key in decoded: drafted_text( draft, key )
+            if card[ "response_type" ] == "yes_no": drafted_text( draft, WHOLE_ANSWER_KEY )
+            read += 1
+    assert read == len( CARDS ) * 3 == 9
+

@@ -304,7 +304,7 @@ def test_main_replays_an_export_with_the_canned_model_and_writes_the_principle_l
     assert [ line.split( ":" )[ 0 ] for line in lines if line.startswith( "lag" ) ] == [ "lag 0s", "lag 300s" ]
     assert all( "'principles': 2, 'evidence': 85" in line for line in lines if line.startswith( "lag" ) )
     assert [ p[ "dimension" ] for p in json.loads( out.read_text() ) ] == [ "decision.$answer", "decision.approve" ]
-    assert all( "model replay-model, model calls " in line and not line.endswith( "model calls 0" ) for line in lines if line.startswith( "lag" ) )
+    assert all( "model replay-model, finished model calls " in line and not line.endswith( "finished model calls 0" ) for line in lines if line.startswith( "lag" ) )
     assert all( p[ "status" ] is not None for p in json.loads( out.read_text() ) )
 
 
@@ -323,7 +323,7 @@ def test_main_takes_the_model_id_and_the_call_limit_from_its_arguments( tmp_path
     monkeypatch.setattr( er, "PrincipleExtractorJob", spy )
     out = tmp_path / "principles.json"
     assert er.main( [ "--export", FIXTURE, "--out", str( out ), "--lag-seconds", "0", "--model", "m-1", "--timeout-seconds", "9" ], query_fn=er.canned_model ) == 0
-    assert "model m-1, model calls " in capsys.readouterr().out
+    assert "model m-1, finished model calls " in capsys.readouterr().out
     assert seen and set( seen ) == { ( "m-1", 9 ) }
 
 
@@ -334,4 +334,21 @@ def test_main_reports_the_usage_the_transport_saw_during_each_variant( tmp_path,
     out = tmp_path / "principles.json"
     assert er.main( [ "--export", FIXTURE, "--out", str( out ), "--lag-seconds", "0" ], query_fn=er.canned_model ) == 0
     assert "usage reported by the transport: 3 calls, input 100, output 20, cache read 30, cache write 0, notional cost 1.25 USD" in capsys.readouterr().out
+
+
+def test_a_live_run_with_no_model_is_refused_before_the_export_is_read_or_any_model_is_called( tmp_path, monkeypatch ):
+    def refuse( *args, **kwargs ): pytest.fail( "the check came too late: the run reached " + repr( args[ :1 ] ) )
+    monkeypatch.setattr( er.model_transport, "complete", refuse )
+    monkeypatch.setattr( er, "scratch_session", refuse )
+    monkeypatch.setattr( er, "run_replay", refuse )
+    with pytest.raises( SystemExit ) as stop:
+        er.main( [ "--export", str( tmp_path / "missing-export.json" ), "--out", str( tmp_path / "out.json" ) ] )
+    assert stop.value.code == 2, "a usage error, raised before the missing export file could be opened"
+    assert not ( tmp_path / "out.json" ).exists()
+
+
+def test_a_dry_run_or_a_double_needs_no_model_id_and_runs_under_the_canned_name( tmp_path, capsys ):
+    for argv, double in ( ( [ "--dry-run" ], None ), ( [], er.canned_model ) ):
+        assert er.main( [ "--export", FIXTURE, "--out", str( tmp_path / "out.json" ), "--lag-seconds", "0", *argv ], query_fn=double ) == 0
+        assert "model replay-model, finished model calls " in capsys.readouterr().out
 
