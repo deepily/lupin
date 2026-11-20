@@ -348,6 +348,23 @@ def test_target_types_limit_which_asks_are_predicted_but_every_ask_stays_a_case(
     assert run[ "not_replayable" ] == 0
 
 
+def test_target_ids_limit_which_asks_are_predicted_but_every_ask_stays_a_case( engine ):
+    """An ask left out of target_ids is not predicted, yet a later ask can retrieve it."""
+    asks = [ _ask( engine, "left-out", 2, 0, "yes" ), _ask( engine, "wanted", 2, 10, "yes" ), _ask( engine, "also-left-out", 3, 20, "no" ) ]
+    run  = replay( asks, engine, SHA, target_ids={ "wanted" } )
+    records = run[ "records" ][ ENGINE_ARM ]
+    assert [ r[ "meta" ][ "notification_id" ] for r in records ] == [ "wanted" ]
+    assert "left-out" in records[ 0 ][ "meta" ][ "neighbour_ids" ], "the ask left out of target_ids was not kept as a case"
+    assert run[ "not_replayable" ] == 0
+
+
+def test_target_ids_none_predicts_every_ask( engine ):
+    """With no target_ids every ask the types allow is predicted, as before."""
+    asks = [ _ask( engine, "a", 1, 0, "yes" ), _ask( engine, "b", 2, 10, "no" ) ]
+    run  = replay( asks, engine, SHA, target_ids=None )
+    assert [ r[ "meta" ][ "notification_id" ] for r in run[ "records" ][ ENGINE_ARM ] ] == [ "a", "b" ]
+
+
 def test_the_replay_uses_the_time_sliced_store_by_default( engine ):
     """The store the engine reads in the replay is the time-sliced one."""
     seen = []

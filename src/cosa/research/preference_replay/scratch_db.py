@@ -3,6 +3,7 @@ A scratch SQLite copy of the tables the extractor replay reads and writes.
 
 The replay never touches the live database.
 It loads an export into this throwaway copy, runs the extractor against it, and drops it.
+A long run can give the copy a file path, so a stopped run resumes from what it already wrote.
 SQLite renders the two Postgres-only column types as plain text.
 It also reads a UUID made only of digits and "e" back as a float.
 A real export holds random ids, so that happens about five times in a million.
@@ -19,10 +20,10 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from cosa.rest.postgres_models import Notification, PredictionLog, PreferenceEvidence, PreferencePrinciple
+from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog, PreferenceEvidence, PreferencePrinciple
 from cosa.utils.iso_timestamp import aware_moment
 
-TABLES = ( Notification, PredictionLog, PreferencePrinciple, PreferenceEvidence )
+TABLES = ( Notification, PredictionLog, PreferencePrinciple, PreferenceEvidence, PredictionArmForecast )
 
 
 @compiles( JSONB, "sqlite" )
@@ -54,16 +55,20 @@ def _vector_as_text( element, compiler, **kw ):
 
 
 @contextmanager
-def scratch_session():
+def scratch_session( path=None ):
     """
-    Open a session over empty in-memory copies of the replay's tables.
+    Open a session over copies of the replay's tables.
+
+    Requires:
+        - path is None for an empty in-memory copy, or the path of a SQLite file whose folder exists
 
     Ensures:
         - yields an active session that works from any thread, because one connection is shared
+        - with a path, a table the file lacks is created and one it has is left as it is, so a second call finds the first call's rows
         - the engine is disposed when the block ends
     """
-    engine = create_engine( "sqlite://", connect_args={ "check_same_thread": False }, poolclass=StaticPool )
-    for model in TABLES: model.__table__.create( engine )
+    engine = create_engine( "sqlite://" if path is None else f"sqlite:///{path}", connect_args={ "check_same_thread": False }, poolclass=StaticPool )
+    for model in TABLES: model.__table__.create( engine, checkfirst=True )
     with Session( engine ) as session:
         yield session
     engine.dispose()
