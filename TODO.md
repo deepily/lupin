@@ -30,6 +30,8 @@ The full table of today's rulings is in the [missing-vectors plan](src/rnd/v0.2.
 - 2026-11-19 — **The model forecaster in the remediation's sixth phase** → **Disabled behind its switch, never dropped** (Rick, about 15:44, via Maria). Its background call keeps running as the learner's control arm (plan 3031c865a).
 - 2026-11-19 — **record_forecast and the learner** → **An optional pre-commit hook** (Rick). Maria's crew builds it, and Krishna reviews it.
 - 2026-11-19 — **Review cards in the cohort** → **Excluded on `response_options.review_card` alone, the ask-time field** (Mr. Radio and Cheech).
+- 2026-11-19 — **When does Rick re-plan the later phases?** → **Tomorrow morning, about 10:30, in one sitting** (Rick, about 21:38, card). Why: the numbers are humbling and deserve a fresh read, and no crew waits on it overnight.
+- 2026-11-19 — **Reap Krishna?** → **Yes, at 18:57** (Mr. Radio, after Cheech confirmed). Why: both reviews he was waiting for were already done and merged, and Cheech's crew takes the cohort re-read.
 
 ## 📚 Decisions log 2026-11-19 (Cheech 🌿 `ec5dd3e7`, Principle learner walkthrough, cascade row `8e53fc1b`; times Eastern)
 

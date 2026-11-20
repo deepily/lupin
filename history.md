@@ -10,13 +10,14 @@
 
 ## 2026.11.19 - Session 67865d63 (Mr. Radio 🦉, build manager; crew Rio, Tiffany, Sam, Clayton, Maya, Chloé, Krishna) | Preference learning: missing question vectors done, report read by Rick, 3,608 vectors in the database, no added context helps
 
-**Resume here**: memento `.claude-memento-mr-radio-67865d63.md`. Crew reaped with mementos in `io/mementos/` except Krishna, who stays for Cheech's reviews. Working-branch head is 1a46bb748 or later.
+**Resume here**: memento `.claude-memento-mr-radio-67865d63.md` (self re-spin at 17:45; the evening is the last numbered line below). Every crew seat is reaped with a memento in `io/mementos/`, Krishna last at 18:57. Working-branch head is 343507a4d or later.
 1. **Four-column report** merged at 84d30f247 and read by Rick (P0 row baf87206 closed). Before and the same asks on new vectors both give 177 of 391, because the vectors are unchanged. All 3,608 asks give 392 of 1,083. Always-yes beats the predictor on yes/no in every column.
 2. **Database**: on Rick's typed go, Clayton wrote 2,306 cases and stamped all 3,608 asks with one encoder version (log 910a68efc; row 52f3baee).
 3. **Context comparison** merged at c617d07bc, 971715807 and 1a46bb748 (row 06ba9708). Of 1,083 asks: Q 392, Q+A 384, Q+O 392, Q+P 358 (worse), Q+H 389. Report: `src/conf/prediction-context-arms-report.md`.
 4. **Cross-track with the Principle learner** (Maria, Cheech): the agreements are recorded on re-plan row 47865511. Krishna reviewed four of Cheech's changes for the remediation side.
-5. **Open for Rick**: apply Cheech's three lupin_db_dev migrations (d3a6c1e8b5f2, e5b7d9a2c418, f8c2d6a14e37). Until then :7999 stays up without a bounce, because the branch model already has `draft_at_reveal`. Then the re-plan of the later phases (row 47865511).
+5. **Migrations**: Rick applied Cheech's three migrations at about 21:34. Both databases are at f8c2d6a14e37, and Cheech posted that the servers may be restarted.
 6. **Held for a lupin-mobile session**: Tiffany's 74 uncommitted wiki edits (rows 8ffe2165 and 1b39821a; the file list is on 8ffe2165).
+7. **Evening**: the eight blocked phase rows now point at the re-plan gate, not the closed checkpoint row. Each is chased at 10:30 on 20 Nov. Krishna was reaped once Cheech confirmed that no review needed him. For Rick's broadcast I wrote a status report, `io/tmp/2026.11.19-preference-learning-remediation-status-mr-radio.md`, and started its podcast (job pg-d837d3eb). Rick set the re-plan (row 47865511) for 10:30 tomorrow morning.
 
 **Files**: history.md, TODO.md, the remediation plan (3031c865a)
 
