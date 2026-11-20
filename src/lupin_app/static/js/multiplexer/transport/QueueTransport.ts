@@ -492,6 +492,8 @@ const QUEUE_SUBSCRIBED_EVENTS: ReadonlyArray<string> = [
   "task_store_changed",
   // Row 063fc1a8: an administrator flipped a scheduled job's switch. Queue socket only.
   "cron_job_switch_changed",
+  // Phase 6: the late Haiku forecast of a card. Queue socket only.
+  "prediction_hint_updated",
   "auth_success",
   "auth_error",
   "connect",

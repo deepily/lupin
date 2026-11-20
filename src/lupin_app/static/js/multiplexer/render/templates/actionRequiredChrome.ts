@@ -24,7 +24,7 @@ import { renderMarkdown } from "../markdown";
 import { projectFromSenderId } from "../senderProject";
 import { renderPredictionVoteControls } from "./predictionVoteControls";
 import type { PredictionVoteIntegration } from "./predictionVoteControls";
-import type { VoicePersona, PredictionHint } from "../../shared/types";
+import type { VoicePersona, PredictionHint, ContextForecastPayload } from "../../shared/types";
 import { ownLookup } from "../../shared/ownLookup";
 
 /**
@@ -148,6 +148,34 @@ const HINT_STATE_TEXT: Record<string, string> = {
   unavailable           : "Forecast unavailable",
 };
 
+/** The text of each Haiku forecast state; a ready forecast shows its value. */
+const CONTEXT_STATE_TEXT: Record<string, string> = {
+  forecasting        : "Haiku forecast: still forecasting",
+  unavailable        : "Haiku forecast unavailable",
+  forecast_timed_out : "Haiku forecast timed out",
+};
+
+/**
+ * Build the line for a card's Haiku forecast, or null when it carries none.
+ *
+ * Requires:
+ *   - forecast is the hint's `context_forecast`, or undefined while the display switch is off
+ * Ensures:
+ *   - the element has `data-testid="prediction-hint-context"` and `data-context-state` set to the state
+ *   - a ready forecast reads "Haiku forecast: <value> (<confidence>%)", the value shown as the hint shows it
+ */
+export function contextForecastLine( responseType: string, forecast: ContextForecastPayload | undefined ): HTMLElement | null {
+  if ( forecast === undefined ) return null;
+  const line = document.createElement( "div" );
+  line.className = "prediction-hint-context";
+  line.setAttribute( "data-testid", "prediction-hint-context" );
+  line.setAttribute( "data-context-state", forecast.state );
+  line.textContent = forecast.state === "ready"
+    ? `Haiku forecast: ${ predictedText( responseType, forecast.predicted_value ) } (${ Math.round( ( forecast.confidence ?? 0 ) * 100 ) }%)`
+    : ownLookup<string>( CONTEXT_STATE_TEXT, forecast.state, "Haiku forecast unavailable" );
+  return line;
+}
+
 /**
  * Build the forecast fold of a card. It is always returned.
  *
@@ -178,9 +206,11 @@ export function predictionHintBox(
   const label = document.createElement( "div" );
   label.className = "prediction-hint-label";
   root.appendChild( label );
+  const context = contextForecastLine( item.response_type, hint?.context_forecast );
   if ( hint == null || state !== "ready" ) {
     label.textContent = ownLookup<string>( HINT_STATE_TEXT, state, "Forecast unavailable" );
     if ( hint != null ) appendAlwaysYes( root, hint );
+    if ( context !== null ) root.appendChild( context );
     return root;
   }
   label.textContent = predictedText( item.response_type, hint.predicted_value, hint.predicted_qualifier );
@@ -196,6 +226,7 @@ export function predictionHintBox(
     root.appendChild( strategy );
   }
   appendAlwaysYes( root, hint );
+  if ( context !== null ) root.appendChild( context );
   if ( vote === undefined ) return root;
   const cast = vote.getVote( item.id_hash );
   const controls = renderPredictionVoteControls(

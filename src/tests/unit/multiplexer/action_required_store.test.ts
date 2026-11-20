@@ -865,7 +865,7 @@ test("bcf15f08: the store's surface is UNCHANGED — a new member must be classi
   // Row 4ca5776c (2026-10-09) added, both classified NOT an answer path — neither POSTs, they only
   // add a waiting card to the store: hydrateAwaiting, ingest.
   const EXPECTED = [
-    "activateHead", "api", "audioControl", "audioPausedByPrompt", "bus", "clearIntervalFn",
+    "activateHead", "api", "applyContextForecast", "audioControl", "audioPausedByPrompt", "bus", "clearIntervalFn",
     "clearTimeoutFn", "clockOffset",
     "constructor", "disposeForTesting", "emit", "emitCountdown", "emitWithDetails", "entries",
     "expireEntry", "freezeAll", "getById", "hydrateAwaiting", "ingest", "list", "nowFn", "onConnectionState",
