@@ -165,7 +165,7 @@ BASELINE_ARMS = { "always_yes": always_yes_arm, "prior_majority": prior_majority
 
 
 def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSlicedDecisionStore, target_types=None,
-            context_arms=(), episode_view_provider=None, principles_provider=None ):
+            context_arms=(), episode_view_provider=None, principles_provider=None, target_ids=None ):
     """
     Predict every replayable ask in time order with the live engine, and with each baseline.
 
@@ -177,6 +177,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
         - baselines is a dict of arm name to function( ask, visible_rows ), default BASELINE_ARMS
         - target_types is None to predict every ask, or the response types to predict; the other asks still
           serve as cases and are neither predicted nor counted
+        - target_ids is None, or the ask ids to predict; any other ask stays a case and is neither predicted nor counted
         - context_arms names the baselines that receive context; each name is a key of baselines. The default,
           an empty tuple, leaves every baseline called as arm( ask, visible_rows ), exactly as before
         - episode_view_provider is None or a function( ask_at_ask, visible_rows ); principles_provider is None
@@ -223,6 +224,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
         for index in order:
             ask = asks[ index ]
             if target_types is not None and ask[ "response_type" ] not in target_types: continue
+            if target_ids is not None and ask[ "id" ] not in target_ids: continue
             if ask[ "question_embedding" ] is None:
                 not_replayable.append( ask[ "id" ] )
                 continue
