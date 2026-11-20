@@ -12,6 +12,7 @@ Each test names what it would catch:
 """
 
 import asyncio
+import uuid
 from datetime import timedelta
 
 import pytest
@@ -22,7 +23,9 @@ from cosa.agents.prediction_engine.principles_forecast import CAP_KEY, SWITCH_KE
 from cosa.agents.principle_learner import extractor_job
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
 from cosa.agents.principle_learner.review_card_sweep import extractor_version_of
+from cosa.research.preference_replay.arm_summary import per_arm_summary, render_summary
 from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
+from cosa.rest.postgres_models import PredictionLog
 from test_principles_forecast import Baseline, ENCODER, EXTRACT, Embedder, T0, ask, factory, principle, rows, vec  # noqa: F401  factory is a fixture
 
 NOW = T0 + timedelta( minutes=1 )
@@ -205,3 +208,34 @@ def test_the_committed_ini_has_the_switch_off_and_a_positive_cap():
     assert SWITCH_KEY == "prediction learner principles forecast enabled" and CAP_KEY == "prediction learner principles forecast max concurrent"
     assert principles_forecast_enabled() is False
     assert concurrency_cap() >= 1
+
+
+def test_the_arm_summary_reports_the_learners_own_rows_with_timeliness_and_the_cap_named( factory, monkeypatch ):
+    """
+    The real call writes the rows, and the per-arm summary reads them back.
+
+    One card is timely, one is turned away by the cap, one is late, and one answered card has no row.
+    So the summary names the cap effect and the missing row beside the timeliness. A call that wrote no row,
+    or wrote it under another arm name, would leave the arm out and fail here.
+    """
+    monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
+    monkeypatch.setattr( pc, "extractor_version_of", lambda model: EXTRACT )
+    settings( monkeypatch )
+    answered_at = T0 + timedelta( minutes=30 )
+    cards       = [ ask( factory, minutes=n ) for n in range( 4 ) ]
+    with factory() as db:
+        for nid in cards:
+            db.add( PredictionLog( notification_id=uuid.UUID( nid ), response_type="yes_no", category="c", predicted_at=T0, prediction_confidence=0.5,
+                                   prediction_strategy="s", similar_case_count=0, responded_at=answered_at, actual_value={ "value": "yes" } ) )
+        db.commit()
+    full = CapGate( 1 )
+    assert full.try_enter() is True
+    for nid, gate, ready in ( ( cards[ 0 ], CapGate( 2 ), T0 + timedelta( minutes=10 ) ), ( cards[ 1 ], full, NOW ), ( cards[ 2 ], CapGate( 2 ), T0 + timedelta( minutes=40 ) ) ):
+        asyncio.run( pc.run_principles_forecast( nid, session_factory=factory, c0=Baseline(), gate=gate, embedder=Embedder(), enabled=True, clock=lambda ready=ready: ready ) )
+    with factory() as db: summaries = per_arm_summary( db )
+    assert [ s[ "arm" ] for s in summaries ] == [ "B1" ]
+    b1 = summaries[ 0 ]
+    assert ( b1[ "forecasts" ], b1[ "answered" ], b1[ "timely" ], b1[ "late" ], b1[ "not_ready" ], b1[ "capped" ], b1[ "no_row" ] ) == ( 3, 3, 1, 1, 0, 1, 1 )
+    assert b1[ "timeliness" ] == pytest.approx( 1 / 3 )
+    assert "| B1 | 3 | 0 | 1 | 3 | 1 | 1 | 0 | 1 | 0.333 |" in render_summary( summaries )
+
