@@ -1748,6 +1748,24 @@ async def notify_user(
             print( f"[PRINCIPLES] ⚠️ Could not start the principles call (non-fatal): {principles_error}" )
         # ---- End Principles forecast ----
 
+        # ---- Opus twins: each Haiku forecast again on Opus, never shown, each behind its own switch ----
+        # Same card rules and task set. Each twin has its own switch, gate and arm, so one can run without the other or its Haiku twin.
+        try:
+            from cosa.agents.prediction_engine import context_hint, opus_twins, principles_forecast
+            if context_hint.should_forecast( response_type, review_card, parsed_prediction_hint_override is not None ):
+                baseline_twin_on   = principles_forecast.switch_enabled( opus_twins.BASELINE_SWITCH_KEY )
+                principles_twin_on = principles_forecast.switch_enabled( opus_twins.PRINCIPLES_SWITCH_KEY )
+                if baseline_twin_on or principles_twin_on:
+                    from cosa.agents.principle_learner import opus_call, principles_call
+                    for on, twin_run in ( ( baseline_twin_on, opus_call.run_baseline_twin ), ( principles_twin_on, opus_call.run_principles_twin ) ):
+                        if not on: continue
+                        twin_task = asyncio.create_task( principles_call.run_quietly( notification_id, run=twin_run ) )
+                        _CONTEXT_FORECAST_TASKS.add( twin_task )
+                        twin_task.add_done_callback( _CONTEXT_FORECAST_TASKS.discard )
+        except Exception as twin_error:
+            print( f"[PRINCIPLES] ⚠️ Could not start the Opus twins (non-fatal): {twin_error}" )
+        # ---- End Opus twins ----
+
         # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields).
         # voice_persona_payload was resolved ONCE above the offline branch (§4.2) —
         # reuse it here instead of re-reading the bridge file.
