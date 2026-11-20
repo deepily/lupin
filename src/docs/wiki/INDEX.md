@@ -761,6 +761,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[rest-core-podcast-cards]] — the podcast approval card, the start checks and the dry-run switch. `cosa.rest` (podcast_proxy)
 - [[web-client-render-abstract-tooltip]] — the floating popover that shows a card's abstract in vertical layout. `src.lupin_app.static.js.multiplexer.render` (abstractTooltip)
 - [[web-client-render-action-required-chrome]] — the badges, abstract and prediction hint that sit around an action-required card's prompt. `src.lupin_app.static.js.multiplexer.render` (templates/actionRequiredChrome)
+- [[web-client-render-dictation-toggle]] — the one start and toggle logic every dictation mic shares. `src.lupin_app` (multiplexer.render.dictationToggle)
+- [[web-client-shared-read-and-button-helpers]] — the fresh-read stamp, the single-flight store read and the armed button reset. `src.lupin_app` (multiplexer.shared.afterWriteRead, stores.polling, render.holdingAreaBatch)
 - [[web-client-render-action-required-interactive]] — the answer forms of an action-required card, one per response type, and their shared microphone handler. `src.lupin_app.static.js.multiplexer.render` (templates/actionRequiredInteractive, actionRequiredMic)
 - [[web-client-render-action-required-readonly-and-queue]] — the non-interactive card, the empty line and the minimized row for a queued card. `src.lupin_app.static.js.multiplexer.render` (templates/actionRequiredReadOnly, actionRequiredQueueRow)
 - [[web-client-render-broadcast-and-commons-cards]] — the broadcast compose card and one row of its recent-activity list. `src.lupin_app.static.js.multiplexer.render` (templates/broadcastCard, commonsActivityEntry)

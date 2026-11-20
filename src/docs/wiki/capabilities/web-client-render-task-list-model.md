@@ -13,6 +13,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.taskListModel.asRows@709bdedc7a
   - src.lupin_app.static.js.multiplexer.render.taskListModel.groupTasksByOwner@7de262dee0
   - src.lupin_app.static.js.multiplexer.render.taskListModel.taskCellOrDash@9f97737767
+  - src.lupin_app.static.js.multiplexer.render.taskListModel.byUrgency@d409f4e4d6
 ---
 # Web client: task list model
 

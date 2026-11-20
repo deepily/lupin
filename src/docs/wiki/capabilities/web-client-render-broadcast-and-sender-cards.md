@@ -14,7 +14,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.SenderCardConsoleButtons.SenderCardConsoleButtonsImpl@99d87b1068
   - src.lupin_app.static.js.multiplexer.render.SenderCardConsoleButtons.setPressed@9f879b1d2f
   - src.lupin_app.static.js.multiplexer.render.SenderCardConsoleButtons.createSenderCardConsoleButtons@fd3b0632ec
-  - src.lupin_app.static.js.multiplexer.render.SenderCardRecorderRenderer.SenderCardRecorderRendererImpl@2560ccdf84
+  - src.lupin_app.static.js.multiplexer.render.SenderCardRecorderRenderer.SenderCardRecorderRendererImpl@026ad3087f
   - src.lupin_app.static.js.multiplexer.render.SenderCardRecorderRenderer.createSenderCardRecorderRenderer@934910110c
   - src.lupin_app.static.js.multiplexer.render.SessionStripRenderer.SessionStripRendererImpl@c6df7c0a20
   - src.lupin_app.static.js.multiplexer.render.SessionStripRenderer.defaultStorage@4b08cf64c8
@@ -32,7 +32,7 @@ These six render modules draw the broadcast card and tally, the commons activity
 - Until the recipient list has loaded, the summary shows only the acknowledged count, with no total or "waiting on" row. A failed load says it could not load the list.
 - `createCommonsActivityRenderer` throws without `stores.commons`, and `mount` throws if `#commons-activity-entries` is missing. It follows `store_commons_changed`, loads history without blocking, and saves collapse state only when `viewState` is passed.
 - `SenderCardConsoleButtonsImpl` watches the card container with a MutationObserver. Each card whose seat resolves gets one `▤` button, left of the persona badge or at the header's end. `setPressed` writes `aria-pressed` only when the value changes.
-- `SenderCardRecorderRendererImpl` wires the mic, send and conversation-mode controls on rows `senderCard.ts` already drew. `createSenderCardRecorderRenderer` needs the current user's email; send posts to `/api/notify`, and the mode toggle makes no optimistic flip.
+- `SenderCardRecorderRendererImpl` wires the mic through the shared `startDictation`, then the send and conversation-mode controls on rows `senderCard.ts` already drew. `createSenderCardRecorderRenderer` needs the current user's email; send posts to `/api/notify`, and the mode toggle makes no optimistic flip.
 - `SessionStripRendererImpl` merges one icon per session, sorted by `assigned_at`, and runs the focus and hide-inactive toggles. `defaultStorage` returns `localStorage`, or null when reading it throws.
 
 ## How the parts work together
