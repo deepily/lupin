@@ -1735,6 +1735,19 @@ async def notify_user(
             print( f"[CONTEXT-FORECAST] ⚠️ Could not start the baseline job (non-fatal): {context_error}" )
         # ---- End Context forecast ----
 
+        # ---- Principles forecast: the learner's second call per ask, behind its own switch ----
+        # Same card rules and the same task set as the baseline job above. Its row goes to the sibling table and is never shown.
+        try:
+            from cosa.agents.prediction_engine import context_hint, principles_forecast
+            if context_hint.should_forecast( response_type, review_card, parsed_prediction_hint_override is not None ) and principles_forecast.principles_forecast_enabled():
+                from cosa.agents.principle_learner import principles_call
+                principles_task = asyncio.create_task( principles_call.run_quietly( notification_id ) )
+                _CONTEXT_FORECAST_TASKS.add( principles_task )
+                principles_task.add_done_callback( _CONTEXT_FORECAST_TASKS.discard )
+        except Exception as principles_error:
+            print( f"[PRINCIPLES] ⚠️ Could not start the principles call (non-fatal): {principles_error}" )
+        # ---- End Principles forecast ----
+
         # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields).
         # voice_persona_payload was resolved ONCE above the offline branch (§4.2) —
         # reuse it here instead of re-reading the bridge file.
