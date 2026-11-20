@@ -53,7 +53,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
 
     def log_shadow( self, notification_id, domain, category, question,
                     sender_id="", confidence=0.0, trust_level=1, reason="",
-                    metadata_json=None, data_origin="organic" ):
+                    metadata_json=None, data_origin="organic", rule_agreement=None ):
         """
         Log a shadow decision (trust level 1: observe only, no action taken).
 
@@ -79,6 +79,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             reason: Human-readable reason
             metadata_json: Optional JSONB metadata
             data_origin: Provenance tag (organic, synthetic_seed, synthetic_generated)
+            rule_agreement: True, False or None, as agreement.rule_agreement answers it
 
         Returns:
             Created ProxyDecision instance
@@ -97,13 +98,14 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             ratification_state   = "not_required",
             metadata_json        = metadata_json,
             data_origin          = data_origin,
+            rule_agreement       = rule_agreement,
         )
 
     def log_decision( self, notification_id, domain, category, question,
                       action, decision_value=None, sender_id="",
                       confidence=0.0, trust_level=1, reason="",
                       requires_ratification=False, metadata_json=None,
-                      data_origin="organic" ):
+                      data_origin="organic", rule_agreement=None ):
         """
         Log a decision with specified action (suggest, act, defer).
 
@@ -133,6 +135,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             requires_ratification: Whether decision needs human approval
             metadata_json: Optional JSONB metadata
             data_origin: Provenance tag (organic, synthetic_seed, synthetic_generated)
+            rule_agreement: True, False or None, as agreement.rule_agreement answers it
 
         Returns:
             Created ProxyDecision instance
@@ -153,6 +156,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             ratification_state   = ratification_state,
             metadata_json        = metadata_json,
             data_origin          = data_origin,
+            rule_agreement       = rule_agreement,
         )
 
     def get_pending( self, domain=None, category=None, limit=100 ):
