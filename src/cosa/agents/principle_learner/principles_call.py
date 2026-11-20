@@ -9,6 +9,7 @@ It has its own switch and its own cap gate, both read by ``principles_forecast``
 So it cannot take a slot from the baseline, and a card past its cap gets a row with the capped reason.
 The gate is made once per process, so two asks share one cap.
 The call never selects, prefills or submits anything on the card.
+The notify route starts it beside the baseline job, through ``run_quietly``.
 """
 
 import threading
@@ -58,6 +59,25 @@ def provider_embedder():
         - returns an object whose encode( text ) is the extractor's own embedding call, so card and principle vectors share one encoder
     """
     return SimpleNamespace( encode=lambda text: extractor_job.default_embed( text ) )
+
+
+async def run_quietly( notification_id, run=None ):
+    """
+    Run the principles forecast for one ask, and never let a failure reach the ask.
+
+    Requires:
+        - notification_id names a committed ask
+        - run is None (run_principles_forecast) or a stand-in with its signature, for tests
+
+    Ensures:
+        - returns the call's { status, reason }
+        - a failure of the call is printed and not raised, and the return is then None
+    """
+    try:
+        return await ( run_principles_forecast if run is None else run )( notification_id )
+    except Exception as call_error:
+        print( f"[PRINCIPLES] ⚠️ Call for {notification_id} raised (non-fatal): {call_error}" )
+        return None
 
 
 async def run_principles_forecast( notification_id, session_factory=None, c0=None, gate=None, enabled=None, embedder=None, clock=None ):

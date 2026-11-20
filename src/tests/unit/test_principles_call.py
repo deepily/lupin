@@ -169,6 +169,28 @@ def test_the_cap_is_not_the_baselines( factory, monkeypatch ):
     assert result == { "status": "ran", "reason": None } and pc.get_gate() is not full
 
 
+def test_run_quietly_returns_the_calls_result():
+    """The caller gets the call's own answer, and the ask id is the only argument it passes."""
+    seen = []
+    async def stand_in( nid ): seen.append( nid ); return { "status": "ran", "reason": None }
+    assert asyncio.run( pc.run_quietly( "n1", run=stand_in ) ) == { "status": "ran", "reason": None } and seen == [ "n1" ]
+
+
+def test_run_quietly_defaults_to_the_principles_call( monkeypatch ):
+    """With no stand-in given it runs run_principles_forecast, looked up at call time."""
+    async def stand_in( nid ): return { "status": "not_run", "reason": "switch off", "nid": nid }
+    monkeypatch.setattr( pc, "run_principles_forecast", stand_in )
+    assert asyncio.run( pc.run_quietly( "n2" ) ) == { "status": "not_run", "reason": "switch off", "nid": "n2" }
+
+
+def test_run_quietly_prints_a_failure_and_never_raises( capsys ):
+    """A failure of the call is printed with the ask id and the return is None."""
+    async def broken( nid ): raise RuntimeError( "model door down" )
+    assert asyncio.run( pc.run_quietly( "n3", run=broken ) ) is None
+    out = capsys.readouterr().out
+    assert "n3" in out and "model door down" in out and "non-fatal" in out
+
+
 def test_the_provider_embedder_uses_the_extractors_own_embedding_call( monkeypatch ):
     """The embedder's encode is default_embed, looked up at call time."""
     received = []

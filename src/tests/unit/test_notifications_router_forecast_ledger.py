@@ -7,7 +7,9 @@ record_forecast that logs what the router handed it. It also logs whether the ca
 
 Fixture: `tests.helpers.notifications_endpoint_harness`.
 """
+import asyncio
 import json
+import threading
 from urllib.parse import urlencode
 
 import pytest
@@ -332,3 +334,119 @@ class TestTheContextForecastStartsBehindItsSwitch:
         r = _post( harness )
         assert r.status_code == 200 and len( harness.queue.calls_to( "push_notification" ) ) == 1
         assert "Could not start the baseline job" in capsys.readouterr().out
+
+
+class TestThePrinciplesCallStartsBesideTheBaselineBehindItsOwnSwitch:
+    """The principles call starts from the notify route behind its own switch."""
+
+    @pytest.fixture
+    def started( self, monkeypatch ):
+        import cosa.agents.prediction_engine.context_baseline as cb
+        import cosa.agents.prediction_engine.context_hint as ch
+        import cosa.agents.prediction_engine.principles_forecast as pf
+        import cosa.agents.principle_learner.principles_call as pc
+        calls, baseline_calls, state = [], [], { "principles": True, "baseline": False, "display": False }
+
+        async def recorder( nid, **kw ): calls.append( nid )
+        async def baseline_recorder( nid, emit, metric, **kw ): baseline_calls.append( nid )
+        monkeypatch.setattr( pc, "run_quietly", recorder )
+        monkeypatch.setattr( ch, "run_and_publish", baseline_recorder )
+        monkeypatch.setattr( pf, "principles_forecast_enabled", lambda: state[ "principles" ] )
+        monkeypatch.setattr( cb, "context_forecast_enabled", lambda: state[ "baseline" ] )
+        monkeypatch.setattr( cb, "context_display_enabled", lambda: state[ "display" ] )
+        state[ "calls" ], state[ "baseline_calls" ] = calls, baseline_calls
+        return state
+
+    def test_a_yes_no_card_starts_one_call_with_its_id_and_changes_nothing_on_the_card( self, harness, wired, started ):
+        _post( harness )
+        assert started[ "calls" ] == [ _NID ]
+        hint = harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ]
+        assert "context_forecast" not in hint, "the principles arm is never shown"
+
+    def test_it_starts_without_the_baseline_and_beside_it_when_both_are_on( self, harness, wired, started ):
+        _post( harness )
+        assert started[ "calls" ] == [ _NID ] and started[ "baseline_calls" ] == []
+        started[ "baseline" ] = True
+        _post( harness )
+        assert started[ "calls" ] == [ _NID, _NID ] and started[ "baseline_calls" ] == [ _NID ]
+
+    def test_with_its_switch_off_no_call_starts_even_with_the_baseline_on( self, harness, wired, started ):
+        started[ "principles" ], started[ "baseline" ] = False, True
+        _post( harness )
+        assert started[ "calls" ] == [] and started[ "baseline_calls" ] == [ _NID ]
+
+    def test_cards_the_baseline_does_not_read_start_no_call( self, harness, wired, started ):
+        _post( harness, response_type="open_ended" )
+        _post( harness, response_options=json.dumps( { "review_card": True } ) )
+        _post( harness, prediction_hint_override=json.dumps( { "predicted_value": "yes" } ) )
+        assert started[ "calls" ] == []
+
+    def test_the_task_is_forgotten_once_it_finishes( self, harness, wired, started ):
+        import cosa.rest.routers.notifications as notif
+        _post( harness )
+        assert notif._CONTEXT_FORECAST_TASKS == set()
+
+    def test_a_call_that_cannot_start_does_not_cost_the_ask( self, harness, wired, monkeypatch, capsys ):
+        import cosa.agents.prediction_engine.principles_forecast as pf
+        def boom(): raise RuntimeError( "settings unreadable" )
+        monkeypatch.setattr( pf, "principles_forecast_enabled", boom )
+        r = _post( harness )
+        assert r.status_code == 200 and len( harness.queue.calls_to( "push_notification" ) ) == 1
+        assert "Could not start the principles call" in capsys.readouterr().out
+
+
+class TestTheBackgroundCallsRunAsTasksTheRouteHolds:
+    """
+    A slow call starts as a task the route holds, and the ask does not wait for it.
+
+    The stand-in waits for a release the test gives only after the ask has returned.
+    So an ask that waited for the call would find it finished, with no wall-clock bar to flake.
+    """
+
+    @staticmethod
+    def _slow_call( seen ):
+        import cosa.rest.routers.notifications as notif
+        release = threading.Event()
+        async def slow( *args, **kwargs ):
+            seen[ "held" ].append( len( notif._CONTEXT_FORECAST_TASKS ) )
+            for _ in range( 500 ):
+                if release.is_set(): break
+                await asyncio.sleep( 0.01 )
+            seen[ "finished" ].append( True )
+        return slow, release
+
+    @staticmethod
+    def _after_the_ask( harness, seen, release ):
+        r = _post( harness )
+        returned_with = list( seen[ "finished" ] )
+        release.set()
+        return r, returned_with
+
+    def test_a_slow_principles_call_is_a_held_task_and_the_ask_does_not_wait_for_it( self, harness, wired, monkeypatch ):
+        import cosa.agents.prediction_engine.context_baseline as cb
+        import cosa.agents.prediction_engine.principles_forecast as pf
+        import cosa.agents.principle_learner.principles_call as pc
+        seen = { "held": [], "finished": [] }
+        slow, release = self._slow_call( seen )
+        monkeypatch.setattr( pc, "run_quietly", slow )
+        monkeypatch.setattr( pf, "principles_forecast_enabled", lambda: True )
+        monkeypatch.setattr( cb, "context_forecast_enabled", lambda: False )
+        r, returned_with = self._after_the_ask( harness, seen, release )
+        assert r.status_code == 200 and len( harness.queue.calls_to( "push_notification" ) ) == 1
+        assert returned_with == [], "the ask waited for the call to finish"
+        assert seen[ "held" ] and seen[ "held" ][ 0 ] >= 1, "the running task was not held in the route's set"
+
+    def test_a_slow_baseline_job_is_a_held_task_and_the_ask_does_not_wait_for_it( self, harness, wired, monkeypatch ):
+        import cosa.agents.prediction_engine.context_baseline as cb
+        import cosa.agents.prediction_engine.context_hint as ch
+        import cosa.agents.prediction_engine.principles_forecast as pf
+        seen = { "held": [], "finished": [] }
+        slow, release = self._slow_call( seen )
+        monkeypatch.setattr( ch, "run_and_publish", slow )
+        monkeypatch.setattr( cb, "context_forecast_enabled", lambda: True )
+        monkeypatch.setattr( cb, "context_display_enabled", lambda: False )
+        monkeypatch.setattr( pf, "principles_forecast_enabled", lambda: False )
+        r, returned_with = self._after_the_ask( harness, seen, release )
+        assert r.status_code == 200 and len( harness.queue.calls_to( "push_notification" ) ) == 1
+        assert returned_with == [], "the ask waited for the baseline job to finish"
+        assert seen[ "held" ] and seen[ "held" ][ 0 ] >= 1, "the running task was not held in the route's set"
