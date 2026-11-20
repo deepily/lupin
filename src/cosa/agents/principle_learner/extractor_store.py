@@ -8,6 +8,7 @@ because a vector from another encoder cannot be compared with the query.
 
 import uuid
 
+from cosa.agents.principle_learner.vocabulary import same_heading
 from cosa.rest.postgres_models import PreferenceEvidence, PreferencePrinciple
 from cosa.rest.repair_attempt_tracker import cosine_similarity
 
@@ -113,7 +114,7 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
 
     Ensures:
         - a hypothesis joins every named principle whose scope equals the hypothesis scope, with the relation the model gave and
-          the hypothesis condition; a named principle whose dimension differs from the field's is listed in dimension_mismatches
+          the hypothesis condition; a named principle whose dimension files under another heading than the field's is listed in dimension_mismatches
           and is still joined
         - a hypothesis that no named principle matches creates a principle, or reuses an identical one, with a supports row
         - a principle created here carries continues_principle_id: the lowest id among the named principles of another extractor
@@ -127,7 +128,7 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
     by_id = { str( row.id ): row for row in neighbours }
     named = { pid: relation for pid, relation in checked[ "relations" ].items() if pid in by_id }
     def record( principle, relation, condition ):
-        if principle.dimension != checked[ "dimension" ]: report[ "dimension_mismatches" ].append( { "principle_id": str( principle.id ), "field_key": field_key } )
+        if not same_heading( principle.dimension, checked[ "dimension" ] ): report[ "dimension_mismatches" ].append( { "principle_id": str( principle.id ), "field_key": field_key } )
         _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report )
     if not checked[ "hypotheses" ]:
         for pid, relation in sorted( named.items() ): record( by_id[ pid ], relation, None )

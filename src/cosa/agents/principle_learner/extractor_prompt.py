@@ -10,8 +10,9 @@ not JSON is reported and never guessed at.
 import json
 
 from cosa.agents.io_models.utils.json_object_recovery import recover_json_object
+from cosa.agents.principle_learner.vocabulary import VOCABULARY_VERSION, headings_block, shown_dimension
 
-PROMPT_VERSION = "extractor-v1"
+PROMPT_VERSION = f"extractor-v2-vocab-{VOCABULARY_VERSION}"
 
 SYSTEM_PROMPT = """You extract short conditional preference principles from one answered question.
 
@@ -23,14 +24,17 @@ Rules:
 - A condition must be words that appear in the card or the answer. If you cannot ground it, leave it empty.
 - Do not name a project in a global statement. Give a project-scoped statement the scope "project:<name>".
 - When the answer is a bare yes, propose no hypothesis. Only say which listed principles the yes supports.
-- Reuse a listed dimension when one fits. Name an existing principle in "relations" when the answer supports,
-  contradicts or refines it, using its id exactly as listed.
+- The dimension must be one of the owner's headings below, written exactly as listed. Pick the closest one.
+  Name an existing principle in "relations" when the answer supports, contradicts or refines it, using its id exactly as listed.
 - An answer marked possibly_influenced was given after the owner saw a forecast: say so in the rationale, and weigh it less.
 
 Reply with JSON only, in this shape:
 {"fields": [{"field_key": "...", "kind": "decision" or "ask_form", "dimension": "...",
              "hypotheses": [{"statement": "...", "rationale": "...", "scope": "global", "condition": "...", "grounded_in": "answer" or "card"}],
-             "relations": {"<principle id>": "supports" or "contradicts" or "refines"}}]}"""
+             "relations": {"<principle id>": "supports" or "contradicts" or "refines"}}]}
+
+The owner's headings:
+""" + headings_block()
 
 
 def build_user_prompt( episode, entries, neighbours ):
@@ -46,10 +50,11 @@ def build_user_prompt( episode, entries, neighbours ):
         - returns one string holding the card, the history, the answers and the principles, as JSON blocks
         - no notification id, owner id or sender id is written into the prompt
         - history entries carry tier, confidence, status, inferred and the answer value, and no ids
+        - a principle's dimension is shown as its approved heading when it has one, so an old name never contradicts the heading rule
     """
     card    = { "title": episode[ "title" ], "abstract": episode[ "abstract" ], "fields": episode[ "fields" ] }
     history = [ { key: entry.get( key ) for key in ( "tier", "confidence", "status", "inferred", "answer" ) } for entry in episode[ "history" ] ]
-    known   = [ { "id": str( row.id ), "dimension": row.dimension, "statement": row.statement, "scope": row.scope } for row in neighbours ]
+    known   = [ { "id": str( row.id ), "dimension": shown_dimension( row.dimension ), "statement": row.statement, "scope": row.scope } for row in neighbours ]
     answers = [ { "field_key": entry[ "field_key" ], "answer": entry[ "text" ], "bare_yes": entry[ "bare_yes" ],
                   "possibly_influenced": entry[ "possibly_influenced" ] } for entry in entries ]
     return "\n\n".join( [ "CARD\n" + json.dumps( card, indent=1, sort_keys=True ), "EARLIER QUESTIONS\n" + json.dumps( history, indent=1, sort_keys=True ),

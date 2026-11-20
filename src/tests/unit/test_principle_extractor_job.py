@@ -208,7 +208,7 @@ def test_a_no_answer_creates_a_principle_and_a_supporting_evidence_row_with_both
     evidence  = db.query( PreferenceEvidence ).one()
     assert out[ "status" ] == "extracted" and ( out[ "principles_created" ], out[ "evidence_written" ] ) == ( 1, 1 )
     assert ( principle.owner_id, principle.kind, principle.scope, principle.encoder_version ) == ( str( OWNER ), "ask_form", "global", ENCODER )
-    assert principle.extractor_version == f"{MODEL}:extractor-v1" and principle.embedding is not None
+    assert principle.extractor_version == f"{MODEL}:extractor-v2-vocab-2026.11.19" and principle.embedding is not None
     assert principle.created_at.replace( tzinfo=timezone.utc ) == NOW
     assert ( evidence.relation, evidence.condition, evidence.source, evidence.field_key ) == ( "supports", "approval", "extractor", "$answer" )
     assert str( evidence.notification_id ) == ask and evidence.extractor_version == principle.extractor_version
@@ -240,7 +240,7 @@ def test_a_new_extractor_version_appends_beside_the_old_rows_and_never_overwrite
                                  model="claude-other-model", timeout_seconds=30, encoder=ENCODER, clock=lambda: NOW )
     asyncio.run( job._execute() )
     assert _counts( db ) == ( 2, 2 )
-    assert { row.extractor_version for row in db.query( PreferenceEvidence ) } == { f"{MODEL}:extractor-v1", "claude-other-model:extractor-v1" }
+    assert { row.extractor_version for row in db.query( PreferenceEvidence ) } == { f"{MODEL}:extractor-v2-vocab-2026.11.19", "claude-other-model:extractor-v2-vocab-2026.11.19" }
 
 
 def test_a_hypothesis_joins_a_named_principle_of_the_same_scope_even_when_the_dimension_differs( db ):
@@ -274,7 +274,7 @@ def test_a_named_principle_of_another_scope_is_not_joined_and_a_new_principle_is
     assert db.query( PreferencePrinciple ).filter( PreferencePrinciple.id != known.id ).one().continues_principle_id == known.id, "it names an earlier-version principle"
 
 
-CURRENT = f"{MODEL}:extractor-v1"
+CURRENT = f"{MODEL}:extractor-v2-vocab-2026.11.19"
 
 
 def _new_principle( db, known_ids ):
@@ -436,9 +436,51 @@ def test_a_global_statement_naming_a_project_the_owner_asked_from_is_rejected_he
     assert _counts( db ) == ( 0, 0 ) and out[ "rejected" ][ 0 ][ "reason" ] == "global_statement_names_project"
 
 
+def test_a_dimension_outside_the_approved_headings_is_reported_and_the_principle_is_still_written( db ):
+    out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ], dimension="ask.approval_needs_link" ) ) ) )
+    assert out[ "off_vocabulary" ] == [ { "field_key": "$answer", "dimension": "ask.approval_needs_link" } ] and _counts( db ) == ( 1, 1 )
+
+
+def test_a_dimension_that_is_an_approved_heading_is_not_reported_and_is_stored_as_written( db ):
+    out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ], dimension="Fix the real cause" ) ) ) )
+    assert out[ "off_vocabulary" ] == [] and _counts( db ) == ( 1, 1 )
+    assert db.query( PreferencePrinciple ).one().dimension == "Fix the real cause"
+
+
+def test_a_heading_in_the_wrong_case_is_off_vocabulary_because_the_match_is_exact( db ):
+    out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ], dimension="fix the real cause" ) ) ) )
+    assert out[ "off_vocabulary" ] == [ { "field_key": "$answer", "dimension": "fix the real cause" } ]
+
+
+def test_an_off_vocabulary_field_that_keeps_one_hypothesis_and_loses_another_is_still_reported_and_written( db ):
+    out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp(), _hyp( "x" * 240 ) ], dimension="ask.approval_needs_link" ) ) ) )
+    assert out[ "off_vocabulary" ] == [ { "field_key": "$answer", "dimension": "ask.approval_needs_link" } ]
+    assert out[ "rejected" ] == [ { "field_key": "$answer", "what": "hypothesis 1", "reason": "statement_too_long" } ] and _counts( db ) == ( 1, 1 )
+
+
+def test_a_bare_yes_field_with_an_off_vocabulary_dimension_writes_no_principle_and_is_not_reported( db ):
+    known  = _principle( db )
+    out, _ = _run( db, _ask( db, answer="yes" ), Model( _reply( _result( dimension="ask.approval_needs_link", relations={ str( known.id ): "supports" } ) ) ) )
+    assert out[ "off_vocabulary" ] == [] and _counts( db ) == ( 1, 1 )
+
+
+def test_a_relation_from_a_heading_to_an_old_name_under_that_heading_is_not_a_mismatch_but_another_heading_is( db ):
+    same  = _principle( db, dimension="fix_depth", statement="Fix roots." )
+    other = _principle( db, dimension="question_deduplication", statement="Ask once." )
+    out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( dimension="Fix the real cause", hypotheses=[ _hyp( "Roots first." ) ],
+                                                                         relations={ str( same.id ): "refines", str( other.id ): "supports" } ) ) ) )
+    assert out[ "dimension_mismatches" ] == [ { "principle_id": str( other.id ), "field_key": "$answer" } ]
+
+
+@pytest.mark.parametrize( "kind, dimension", [ ( "ask_form", "   " ), ( "not_a_kind", "ask.approval_needs_link" ) ] )
+def test_a_wholly_rejected_field_is_not_also_listed_as_off_vocabulary( db, kind, dimension ):
+    out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ], dimension=dimension, kind=kind ) ) ) )
+    assert out[ "off_vocabulary" ] == [] and out[ "rejected" ][ 0 ][ "reason" ] == "kind_or_dimension_invalid" and _counts( db ) == ( 0, 0 )
+
+
 def test_a_reply_that_is_not_json_is_reported_and_nothing_is_written( db ):
     out, _ = _run( db, _ask( db, answer="no", abstract=None ), Model( "I could not decide." ) )
-    assert out[ "status" ] == "unparseable" and _counts( db ) == ( 0, 0 )
+    assert out[ "status" ] == "unparseable" and _counts( db ) == ( 0, 0 ) and out[ "off_vocabulary" ] == []
 
 
 def test_a_missing_notification_is_a_lookup_error_and_a_model_failure_reaches_the_queue( db ):

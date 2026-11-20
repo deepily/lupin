@@ -23,6 +23,7 @@ from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt, parse_reply
 from cosa.agents.principle_learner.extractor_rules import card_text, check_field, field_answers, project_names, unaided_answer
+from cosa.agents.principle_learner.vocabulary import is_heading
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
 from cosa.rest.postgres_models import Notification
@@ -168,8 +169,10 @@ class PrincipleExtractorJob( AgenticJobBase ):
         Read the answer, ask the model once, and write the checked result.
 
         Ensures:
-            - returns a JSON summary: status, counts, the rejections with their reasons, the dimension mismatches
-              and the fields marked possibly influenced
+            - returns a JSON summary: status, counts, the rejections with their reasons, the dimension mismatches,
+              the off-vocabulary dimensions and the fields marked possibly influenced
+            - a kept field with at least one written hypothesis whose dimension is not one of the approved headings
+              is listed in off_vocabulary, and its principles are still written; the check reports, it never blocks
             - status is skipped_review_card, skipped_not_attributed, skipped_nothing_to_read, skipped_no_input, unparseable or extracted
             - evidence rows carry answered_at from the answer and extracted_at from the clock
             - nothing is sent to the owner
@@ -266,7 +269,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         if fields is None: return self._summary( "unparseable", influenced=influenced )
         senders  = [ sender for ( sender, ) in session.query( Notification.sender_id ).filter( Notification.recipient_id == row.recipient_id ).distinct() ]
         projects = project_names( senders )
-        report   = { "principles_created": 0, "principles_reused": 0, "evidence_written": 0, "evidence_existing": 0, "dimension_mismatches": [], "rejected": [] }
+        report   = { "principles_created": 0, "principles_reused": 0, "evidence_written": 0, "evidence_existing": 0, "dimension_mismatches": [], "off_vocabulary": [], "rejected": [] }
         ids      = { str( principle.id ) for principle in neighbours }
         by_key   = { field.get( "field_key" ): field for field in fields }
         for entry in entries:
@@ -276,6 +279,10 @@ class PrincipleExtractorJob( AgenticJobBase ):
             grounding = card_text( episode ) + "\n" + entry[ "text" ]
             checked   = check_field( by_key[ entry[ "field_key" ] ], grounding, projects, entry[ "bare_yes" ], ids )
             report[ "rejected" ].extend( { "field_key": entry[ "field_key" ], **item } for item in checked[ "rejected" ] )
+            # field_kept is redundant today, because a wholly rejected field keeps no hypotheses; it stays so the rule reads as stated
+            field_kept = not any( item[ "what" ] == "field" for item in checked[ "rejected" ] )
+            if field_kept and checked[ "hypotheses" ] and not is_heading( checked[ "dimension" ] ):
+                report[ "off_vocabulary" ].append( { "field_key": entry[ "field_key" ], "dimension": checked[ "dimension" ] } )
             extractor_store.apply_field( session, str( row.recipient_id ), row.id, entry[ "field_key" ], checked, neighbours,
                                          ( aware_moment( row.responded_at ), now ), ( extractor, encoder ), embed,
                                          sender_session_suffix( row.sender_id ), report )
@@ -291,5 +298,5 @@ class PrincipleExtractorJob( AgenticJobBase ):
         Ensures:
             - returns JSON with status, the report counters (zeros when none), and the possibly-influenced field keys
         """
-        base = { "principles_created": 0, "principles_reused": 0, "evidence_written": 0, "evidence_existing": 0, "dimension_mismatches": [], "rejected": [] }
+        base = { "principles_created": 0, "principles_reused": 0, "evidence_written": 0, "evidence_existing": 0, "dimension_mismatches": [], "off_vocabulary": [], "rejected": [] }
         return json.dumps( { "status": status, **( report or base ), "possibly_influenced": influenced or [] }, sort_keys=True )

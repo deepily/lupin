@@ -25,6 +25,7 @@ from cosa.agents.prediction_engine.principle_status import SOURCE_EXTRACT, deriv
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
+from cosa.agents.principle_learner.vocabulary import heading_for
 from cosa.repo.doc_lint import model_transport
 from cosa.research.preference_replay.replay_loop import always_yes_arm, replay
 from cosa.research.preference_replay.scratch_db import load_export, scratch_session, session_scope
@@ -269,7 +270,8 @@ def principle_list( session ):
         - session is an active session over the principle tables
 
     Ensures:
-        - returns [ { owner_id, scope, dimension, statement, status, supports, contradicts, refines, answers } ] sorted by dimension, statement, id
+        - returns [ { owner_id, scope, dimension, heading, statement, status, supports, contradicts, refines, answers } ] sorted by dimension, statement, id
+        - heading is vocabulary.heading_for( dimension ): the approved heading, the heading an old name maps to, or None for an unknown name
         - each relation count is the number of evidence rows with that relation; answers is the number of distinct notifications behind them
         - status is the one principle_status.derive_statuses gives one second after the last extraction, owner by owner and
           extractor version by extractor version; it is None for a principle with no usable evidence then
@@ -284,7 +286,8 @@ def principle_list( session ):
     for principle in session.query( PreferencePrinciple ).order_by( PreferencePrinciple.dimension, PreferencePrinciple.statement, PreferencePrinciple.id ):
         evidence = session.query( PreferenceEvidence ).filter_by( principle_id=principle.id ).all()
         counts   = { relation: sum( 1 for row in evidence if row.relation == relation ) for relation in ( "supports", "contradicts", "refines" ) }
-        rows.append( { "owner_id": principle.owner_id, "scope": principle.scope, "dimension": principle.dimension, "statement": principle.statement,
+        rows.append( { "owner_id": principle.owner_id, "scope": principle.scope, "dimension": principle.dimension, "heading": heading_for( principle.dimension ),
+                       "statement": principle.statement,
                        "status": statuses.get( str( principle.id ) ), **counts, "answers": len( { row.notification_id for row in evidence } ) } )
     return rows
 

@@ -206,3 +206,12 @@ def test_the_user_prompt_carries_card_history_answers_and_principles_and_no_ids(
     assert '"possibly_influenced": true' in prompt and "pid-1" in prompt and "ask.x" in prompt
     assert "must-not-appear" not in prompt and "notification_id" not in prompt
     assert "JSON only" in SYSTEM_PROMPT and "bare yes" in SYSTEM_PROMPT
+
+
+def test_an_old_dimension_name_is_shown_to_the_model_as_its_heading_and_an_unknown_one_as_stored():
+    old     = SimpleNamespace( id="pid-old", dimension="fix_depth", statement="Fix roots.", scope="global" )
+    unknown = SimpleNamespace( id="pid-new", dimension="ask.x", statement="Other.", scope="global" )
+    prompt  = build_user_prompt( EPISODE, [ { "field_key": "a", "text": "no", "bare_yes": False, "possibly_influenced": False } ], [ old, unknown ] )
+    shown   = json.loads( prompt.split( "EXISTING PRINCIPLES\n" )[ 1 ] )
+    assert { row[ "id" ]: row[ "dimension" ] for row in shown } == { "pid-old": "Fix the real cause", "pid-new": "ask.x" }
+    assert "fix_depth" not in prompt

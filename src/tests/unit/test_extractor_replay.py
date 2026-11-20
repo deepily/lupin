@@ -154,7 +154,7 @@ def test_the_first_ask_sees_no_principles_the_last_sees_some_and_a_lag_longer_th
 def test_principles_reach_the_arms_with_a_derived_status_and_later_ones_are_established_across_sessions( instant ):
     seen_status = { p[ "status" ] for r in instant[ 1 ][ "seen" ] for p in r[ "principles" ] }
     assert seen_status == { "hypothesis", "established" }
-    assert [ p[ "status" ] for p in er.principles_as_of( instant[ 0 ], OWNER, T0 + timedelta( days=365 ), "replay-model:extractor-v1" ) ] == [ "established", "established" ]
+    assert [ p[ "status" ] for p in er.principles_as_of( instant[ 0 ], OWNER, T0 + timedelta( days=365 ), "replay-model:extractor-v2-vocab-2026.11.19" ) ] == [ "established", "established" ]
 
 
 def test_an_arm_is_never_handed_a_history_answer_given_after_its_ask( instant ):
@@ -271,8 +271,17 @@ def test_the_principle_list_of_an_empty_store_is_empty_and_a_principle_without_e
         assert er.principle_list( session ) == []
         session.add( PreferencePrinciple( id=uuid.uuid4(), owner_id="o", kind="decision", dimension="d", statement="s", scope="global", encoder_version="e", extractor_version="x" ) )
         session.commit()
-        assert er.principle_list( session ) == [ { "owner_id": "o", "scope": "global", "dimension": "d", "statement": "s", "status": None,
+        assert er.principle_list( session ) == [ { "owner_id": "o", "scope": "global", "dimension": "d", "heading": None, "statement": "s", "status": None,
                                                    "supports": 0, "contradicts": 0, "refines": 0, "answers": 0 } ]
+
+
+def test_the_principle_list_files_an_old_name_under_its_heading_and_keeps_a_heading_as_it_is():
+    with scratch_session() as session:
+        for dimension in ( "fix_depth", "How to ask me" ):
+            session.add( PreferencePrinciple( id=uuid.uuid4(), owner_id="o", kind="decision", dimension=dimension, statement=dimension, scope="global",
+                                              encoder_version="e", extractor_version="x" ) )
+        session.commit()
+        assert { p[ "dimension" ]: p[ "heading" ] for p in er.principle_list( session ) } == { "fix_depth": "Fix the real cause", "How to ask me": "How to ask me" }
 
 
 def test_run_replay_gives_the_extractor_the_model_and_the_call_limit_it_was_given( export, engine, monkeypatch ):
