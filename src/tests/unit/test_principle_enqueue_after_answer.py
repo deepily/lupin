@@ -49,8 +49,9 @@ def keys( monkeypatch ):
     return values
 
 
-def run( queue, options=ASK, **kwargs ):
+def run( queue, options=None, **kwargs ):
     """Enqueue one answer, starting the sweep thread inline; return ( report, threads )."""
+    if options is None: options = dict( ASK )
     threads = []
     report  = eaa.enqueue_after_answer( queue, NID, OWNER, "o@example.com", options, start=threads.append, sleep=lambda s: None, **kwargs )
     return report, threads
@@ -84,8 +85,13 @@ class TestOneAnswerOneExtractorAndOneSweep:
     def test_a_stuck_extractor_does_not_hold_the_sweep_past_the_give_up_time( self, keys ):
         queue   = Queue()
         threads = []
-        eaa.enqueue_after_answer( queue, NID, OWNER, "o@example.com", ASK, poll_seconds=10, give_up_after=30, start=threads.append, sleep=lambda s: None )
+        slept   = []
+        def bounded_sleep( seconds ):
+            slept.append( seconds )
+            if len( slept ) > 10: raise AssertionError( "the wait never gave up" )
+        eaa.enqueue_after_answer( queue, NID, OWNER, "o@example.com", ASK, poll_seconds=10, give_up_after=30, start=threads.append, sleep=bounded_sleep )
         threads[ 0 ].run()
+        assert slept == [ 10, 10, 10 ]
         assert [ type( job ) for job in queue.pushed ] == [ PrincipleExtractorJob, ReviewCardSweepJob ]
 
     def test_a_review_card_answer_queues_neither_job( self, keys ):
