@@ -5,8 +5,9 @@ It runs the same model and the same prompts as the baseline arm.
 The one difference is a block of principles, retrieved as of the ask, added to the user prompt.
 Its result goes to the sibling table ``prediction_arm_forecast`` under its own arm name, never to ``prediction_log``.
 
-The baseline job is the remediation's background forecast job, and it has not landed.
-So this module takes it as an argument, the ``c0`` contract below, and without it reads "blocked" and writes nothing.
+The baseline job is the remediation's background forecast job, ``context_baseline.ContextBaseline``.
+This module takes it as an argument, the ``c0`` contract below, and without it reads "blocked" and writes nothing.
+The learner's ``principles_call.run_principles_forecast`` supplies the process's own baseline, gate and embedder.
 It has its own switch (``prediction learner principles forecast enabled``, default off).
 It has its own concurrency cap (``prediction learner principles forecast max concurrent``).
 So it cannot take a slot from the baseline job.
