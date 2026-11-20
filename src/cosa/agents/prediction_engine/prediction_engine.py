@@ -752,9 +752,9 @@ class PredictionEngine:
         Ensures:
             - one query for all ids; reads only
             - returns { case id: _extract_valid_options( row.response_options, normalise=True ) }
+            - a lookup error is not caught here: it reaches _predict_core, which reports reason prediction_error with the error class
             - a case with no notification row, an id that is not a UUID, or options that do not parse maps to None:
               its options are unknown and it casts no option evidence
-            - returns {} when the lookup fails
         """
         import uuid
         parsed = {}
@@ -765,15 +765,11 @@ class PredictionEngine:
                 continue
         found = { case_id: None for case_id in case_ids }
         if not parsed: return found
-        try:
-            from cosa.rest.db.database import get_db
-            from cosa.rest.postgres_models import Notification
-            with get_db() as session:
-                rows = session.query( Notification.id, Notification.response_options ).filter( Notification.id.in_( list( parsed ) ) ).all()
-            for row in rows: found[ parsed[ row.id ] ] = self._extract_valid_options( row.response_options, normalise=True )
-        except Exception as e:
-            if self.debug: print( f"[PredictionEngine] neighbour options lookup error: {e}" )
-            return {}
+        from cosa.rest.db.database import get_db
+        from cosa.rest.postgres_models import Notification
+        with get_db() as session:
+            rows = session.query( Notification.id, Notification.response_options ).filter( Notification.id.in_( list( parsed ) ) ).all()
+        for row in rows: found[ parsed[ row.id ] ] = self._extract_valid_options( row.response_options, normalise=True )
         return found
 
     def _predict_multiple_choice_per_field( self, category: str, similar_cases: list, options: Any ) -> PredictionResult:

@@ -283,13 +283,14 @@ def test_neighbour_options_with_no_usable_id_does_no_query( engine, monkeypatch 
     assert engine._neighbour_options( [ "x" ] ) == { "x": None }
 
 
-def test_neighbour_options_lookup_failure_returns_nothing( engine, monkeypatch ):
+def test_a_neighbour_lookup_error_is_recorded_as_prediction_error_with_its_class( engine, monkeypatch ):
+    cases = [ _case( str( uuid.uuid4() ), { "Approach": "Proceed", "Tags": [ "A" ] } ) ]
+    monkeypatch.setattr( engine, "_get_embedding_store", lambda: FakeStore( cases ) )
     def broken(): raise RuntimeError( "db down" )
     monkeypatch.setattr( "cosa.rest.db.database.get_db", broken )
-    engine.debug = True
-    assert engine._neighbour_options( [ str( uuid.uuid4() ) ] ) == {}
-    engine.debug = False
-    assert engine._neighbour_options( [ str( uuid.uuid4() ) ] ) == {}
+    result = engine.predict( { "message": "m", "response_type": "multiple_choice", "sender_id": "s", "response_options": CURRENT }, query_vector=[ 0.1 ] )
+    assert result.strategy == cfg.STRATEGY_COLD_START and result.fields is None
+    assert result.metadata[ "reason" ] == "prediction_error" and result.metadata[ "error_class" ] == "RuntimeError"
 
 
 # ---- the result, the hint payload and the forecast row ----------------------
