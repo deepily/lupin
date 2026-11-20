@@ -68,6 +68,8 @@ def wired( harness, monkeypatch ):
         "submit_raises"  : None,
         "ruling_calls"   : [],
         "ruling_raises"  : None,
+        "enqueue_calls"  : [],
+        "enqueue_raises" : None,
     }
 
     # `answered_by` joined the worker's signature in row e20e249a (the door now stamps who
@@ -90,6 +92,12 @@ def wired( harness, monkeypatch ):
         if state[ "ruling_raises" ] is not None: raise state[ "ruling_raises" ]
         return { "rulings_written": 1, "existing": 0, "rejected": [] }
     monkeypatch.setattr( notif, "_record_review_ruling_sync", _ruling )
+
+    def _enqueue( notification_id, submit_result ):
+        state[ "enqueue_calls" ].append( ( notification_id, submit_result ) )
+        if state[ "enqueue_raises" ] is not None: raise state[ "enqueue_raises" ]
+        return { "queued": True, "reason": "queued", "job_id": "pe-test" }
+    monkeypatch.setattr( notif, "_enqueue_extractor_sync", _enqueue )
     monkeypatch.setattr( notif, "get_formatted_time_display",  lambda: "TIME-DISPLAY-VALUE" )
     monkeypatch.setattr( notif, "get_formatted_date_display",  lambda: "DATE-DISPLAY-VALUE" )
     monkeypatch.setattr( notif, "pending_responses", {} )
@@ -475,3 +483,19 @@ class TestTheRefusals:
         wired[ "submit_raises" ] = RuntimeError( "connection reset" )
         r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "X" } )
         assert r.status_code == 500
+
+
+class TestTheDoorQueuesTheExtractorOncePerAnswer:
+
+    def test_one_answer_calls_the_enqueue_once_with_the_stored_submit_result( self, harness, wired ):
+        r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert r.status_code == 200
+        assert wired[ "enqueue_calls" ] == [ ( _NID, wired[ "submit_result" ] ) ]
+
+    def test_a_failed_enqueue_never_loses_the_answer_or_wakes_the_waiter_late( self, harness, wired ):
+        wired[ "enqueue_raises" ] = RuntimeError( "queue down" )
+        entry = _add_waiter( wired )
+        r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert r.status_code == 200
+        assert entry[ "event" ].is_set()
+        assert wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ]

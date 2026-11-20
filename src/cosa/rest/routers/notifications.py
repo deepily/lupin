@@ -754,6 +754,34 @@ def _record_review_ruling_sync( notification_id ):
         return record_card_answer( session, notification_id, aware_moment( cu.get_current_datetime_iso() ) )
 
 
+def _enqueue_extractor_sync( notification_id, submit_result ):
+    """
+    Queue the silent principle extractor, and the sweep behind it, for one answered ask.
+
+    Requires:
+        - submit_result is the dict _submit_response_sync returned, with recipient_id and response_options
+        - the lupin_app main module holds the todo queue
+
+    Ensures:
+        - returns enqueue_after_answer's report, or reason disabled with nothing touched when the enable key is false
+        - the owner's email is read from the user row of the recipient
+
+    Raises:
+        - LookupError if the recipient has no user row
+        - whatever the queue or the database raises; the caller treats it as non-fatal
+    """
+    from cosa.agents.principle_learner.enqueue_after_answer import enqueue_after_answer, is_enabled
+    if not is_enabled(): return { "queued": False, "reason": "disabled", "job_id": None }
+    from cosa.rest.postgres_models import User
+    import lupin_app.main as main_module
+    recipient = uuid.UUID( str( submit_result[ "recipient_id" ] ) )
+    with get_db() as session:
+        owner = session.get( User, recipient )
+        if owner is None: raise LookupError( f"recipient {recipient} has no user row" )
+        email = owner.email
+    return enqueue_after_answer( main_module.jobs_todo_queue, notification_id, str( recipient ), email, submit_result[ "response_options" ] )
+
+
 def _submit_response_sync( notification_id, response_value, answered_by=None ):
     """
     Read, validate and update a notification response synchronously, off the event loop.
@@ -1982,6 +2010,13 @@ async def submit_notification_response(
         except Exception as pred_error:
             print( f"[PREDICTION] ⚠️ Outcome recording error (non-fatal): {pred_error}" )
         # ---- End Prediction Engine Hook 2 ----
+
+        # ---- Principle learner: queue the silent extractor, then the sweep, for this answer ----
+        try:
+            queued = await asyncio.to_thread( _enqueue_extractor_sync, notification_id, submit_result )
+            print( f"[PRINCIPLE-LEARNER] {notification_id}: {queued[ 'reason' ]}" )
+        except Exception as enqueue_error:
+            print( f"[PRINCIPLE-LEARNER] ⚠️ Extractor enqueue error (non-fatal): {enqueue_error}" )
 
         # Task 2: Signal waiting SSE stream (if it exists)
         if notification_id in pending_responses:
