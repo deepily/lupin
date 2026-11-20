@@ -18,12 +18,12 @@ Dependency Rule:
     This module never imports from notification_proxy or swe_team.
 """
 
-import math
 from datetime import datetime, timezone
 import time
 from typing import Dict, List, Optional, Tuple
 
 from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
+from cosa.utils.recency_weight import recency_weight
 from cosa.agents.decision_proxy.config import (
     DEFAULT_BETA_L2_RATE_THRESHOLD,
     DEFAULT_BETA_L3_RATE_THRESHOLD,
@@ -414,15 +414,12 @@ class CategoryTrust:
         """
         self._prune_rolling_window()
         now = time.time()
-        half_life_seconds = self.decay_half_life_days * 86400
         total = 0.0
 
         for timestamp, success in self.decisions:
             if not success:
                 continue  # Only count successes toward graduation
-            age_seconds = now - timestamp
-            weight = math.exp( -0.693 * age_seconds / half_life_seconds )  # ln(2) = 0.693
-            total += weight
+            total += recency_weight( now - timestamp, self.decay_half_life_days )
 
         return total
 

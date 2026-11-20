@@ -36,6 +36,8 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_RETRIEVAL_METRIC,
     DEFAULT_CALIBRATION_ENABLED,
     DEFAULT_FAILURE_VISIBILITY_ENABLED,
+    DEFAULT_THREE_WAY_ENABLED,
+    DEFAULT_RECENCY_HALF_LIFE_DAYS,
     VALID_RETRIEVAL_METRICS,
     DEFAULT_YES_NO_NO_MARGIN,
     DEFAULT_LANCEDB_TABLE,
@@ -130,6 +132,8 @@ class PredictionEngine:
             self.retrieval_metric     = config_mgr.get( "prediction engine retrieval metric", default=DEFAULT_RETRIEVAL_METRIC )
             self.calibration_enabled  = config_mgr.get( "prediction engine calibration enabled", default=str( DEFAULT_CALIBRATION_ENABLED ), return_type="boolean" )
             self.failure_visibility_enabled = config_mgr.get( "prediction engine failure visibility enabled", default=str( DEFAULT_FAILURE_VISIBILITY_ENABLED ), return_type="boolean" )
+            self.three_way_enabled          = config_mgr.get( "prediction engine three way enabled", default=str( DEFAULT_THREE_WAY_ENABLED ), return_type="boolean" )
+            self.recency_half_life_days     = config_mgr.get( "prediction engine recency half life days", default=str( DEFAULT_RECENCY_HALF_LIFE_DAYS ), return_type="float" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -153,6 +157,8 @@ class PredictionEngine:
             self.retrieval_metric     = DEFAULT_RETRIEVAL_METRIC
             self.calibration_enabled  = DEFAULT_CALIBRATION_ENABLED
             self.failure_visibility_enabled = DEFAULT_FAILURE_VISIBILITY_ENABLED
+            self.three_way_enabled          = DEFAULT_THREE_WAY_ENABLED
+            self.recency_half_life_days     = DEFAULT_RECENCY_HALF_LIFE_DAYS
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -1447,6 +1453,24 @@ class PredictionEngine:
                      "open_ended_cbr_threshold": self.open_ended_cbr_threshold,
                      "retrieval_metric": self.retrieval_metric, "calibration_enabled": self.calibration_enabled }
         return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
+
+    def three_way_forecast( self, ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> Optional[Dict[str, Any]]:
+        """
+        Forecast yes, no or neither for a yes/no ask with the three-way challenger, in shadow.
+
+        Requires:
+            - ask has question_embedding, asked_at and owner_user_id
+            - cases are the answered cases visible at the ask, as the replay's visible rows
+
+        Ensures:
+            - with the switch off, returns None and reads nothing
+            - with it on, returns three_way_stance.three_way_forecast for the ask, using this engine's
+              recency half-life
+            - never changes the engine, a stored row or the card; the live ask path does not call it
+        """
+        if not self.three_way_enabled: return None
+        from cosa.agents.prediction_engine import three_way_stance
+        return three_way_stance.three_way_forecast( ask, cases, self.recency_half_life_days )
 
     def _empty_retrieval_reason( self, store_error: Optional[str] ) -> str:
         """
