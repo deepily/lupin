@@ -34,6 +34,16 @@ DEFAULT_THREE_WAY_ENABLED      = False
 # Half-life, in days, of the weight an earlier answer carries. 14 is the trust tracker's own figure.
 DEFAULT_RECENCY_HALF_LIFE_DAYS = 14
 
+# Whether a multiple-choice card is predicted and scored one field at a time (phase 7). False keeps the
+# whole-card predictor and the whole-card scorer exactly as they were.
+DEFAULT_PER_FIELD_MC_ENABLED   = False
+
+# The outcome of a field whose actual pick is not one of the labels the field offered (a typed "Other").
+# It is its own outcome, reported beside matches and misses and never counted as a miss.
+FIELD_OUTCOME_EXACT            = "exact"
+FIELD_OUTCOME_MISS             = "miss"
+FIELD_OUTCOME_OTHER_WRITE_IN   = "other_write_in"
+
 # Yes/no prior-weighted vote. "no" is predicted only when the
 # no tally beats the yes tally by at least this margin (in vote-weight units; an
 # ordinary neighbour counts 1.0). 1.35 = ln( 527 / 137 ), the log-odds of the 79.4%

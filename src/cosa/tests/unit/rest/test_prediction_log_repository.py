@@ -403,7 +403,7 @@ class TestLedgerWrites( _PLRTestBase ):
     def test_every_ledger_column_is_a_real_prediction_log_column( self ):
         names = { c.name for c in PredictionLog.__table__.columns }
         self.assertTrue( LEDGER_COLUMNS <= names )
-        self.assertEqual( len( LEDGER_COLUMNS ), 19 )
+        self.assertEqual( len( LEDGER_COLUMNS ), 20 )
 
     def test_a_second_outcome_is_refused_and_the_first_is_untouched( self ):
         prediction = types.SimpleNamespace( actual_value={ "value": "yes" }, accuracy_match=True, accuracy_detail=None,

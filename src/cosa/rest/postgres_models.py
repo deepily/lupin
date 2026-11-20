@@ -1216,6 +1216,12 @@ class PredictionLog( Base ):
         JSONB,
         nullable=True
     )
+    # Per-header forecast of a multiple-choice card (phase 7): { header: { candidate, confidence, cases } | { reason } }.
+    # NULL = the per-field predictor did not make this forecast.
+    field_forecasts: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
     # The answer controls' state at the moment the forecast fold was first opened (written by the seen route,
     # first write wins). Same JSONB shape as actual_value, so the two compare key for key. NULL = unknown.
     draft_at_reveal: Mapped[Optional[dict]] = mapped_column(

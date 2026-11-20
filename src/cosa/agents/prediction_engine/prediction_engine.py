@@ -38,6 +38,7 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_FAILURE_VISIBILITY_ENABLED,
     DEFAULT_THREE_WAY_ENABLED,
     DEFAULT_RECENCY_HALF_LIFE_DAYS,
+    DEFAULT_PER_FIELD_MC_ENABLED,
     VALID_RETRIEVAL_METRICS,
     DEFAULT_YES_NO_NO_MARGIN,
     DEFAULT_LANCEDB_TABLE,
@@ -134,6 +135,7 @@ class PredictionEngine:
             self.failure_visibility_enabled = config_mgr.get( "prediction engine failure visibility enabled", default=str( DEFAULT_FAILURE_VISIBILITY_ENABLED ), return_type="boolean" )
             self.three_way_enabled          = config_mgr.get( "prediction engine three way enabled", default=str( DEFAULT_THREE_WAY_ENABLED ), return_type="boolean" )
             self.recency_half_life_days     = config_mgr.get( "prediction engine recency half life days", default=str( DEFAULT_RECENCY_HALF_LIFE_DAYS ), return_type="float" )
+            self.per_field_mc_enabled = config_mgr.get( "prediction engine per field multiple choice enabled", default=str( DEFAULT_PER_FIELD_MC_ENABLED ), return_type="boolean" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -159,6 +161,7 @@ class PredictionEngine:
             self.failure_visibility_enabled = DEFAULT_FAILURE_VISIBILITY_ENABLED
             self.three_way_enabled          = DEFAULT_THREE_WAY_ENABLED
             self.recency_half_life_days     = DEFAULT_RECENCY_HALF_LIFE_DAYS
+            self.per_field_mc_enabled = DEFAULT_PER_FIELD_MC_ENABLED
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -616,16 +619,24 @@ class PredictionEngine:
         )
 
     @staticmethod
-    def _extract_valid_options( options: Any ) -> Optional[Dict[str, Dict]]:
+    def _extract_valid_options( options: Any, normalise: bool = False ) -> Optional[Dict[str, Dict]]:
         """
         Extract valid option labels and multi_select flag from the options structure.
 
         Requires:
-            - options: The options parameter from notifications, or None
+            - options: The options parameter from notifications (the current card's or a
+              neighbour's own stored row), or None
+            - normalise: True only for the per-field predictor
 
         Ensures:
             - Returns { header: { "labels": set[str], "multi_select": bool } } if parseable
             - Returns None if options is None or unparseable
+            - with normalise True the keys are normalised headers, and each entry also carries
+              "header" (as written), "by_label" ( { normalised label: [labels as written] } ) and
+              "ambiguous", which is True when two headers normalise alike or two labels of the
+              field normalise alike, so no mapping through that field is safe; headers that normalise
+              alike each keep an entry, the first under the shared key and the rest under keys that add a
+              NUL and a number, all of them ambiguous
 
         Expected input format:
             {"questions": [{"question": "...", "header": "...", "multi_select": bool,
@@ -652,7 +663,19 @@ class PredictionEngine:
                 labels       = { opt[ "label" ] for opt in opt_list if isinstance( opt, dict ) and "label" in opt }
 
                 if header and labels:
-                    result[ header ] = { "labels": labels, "multi_select": multi_select }
+                    if not normalise:
+                        result[ header ] = { "labels": labels, "multi_select": multi_select }
+                        continue
+                    by_label = {}
+                    for label in labels: by_label.setdefault( PredictionEngine._normalise_text( label ), [] ).append( label )
+                    key       = PredictionEngine._normalise_text( header )
+                    ambiguous = key in result or any( len( names ) > 1 for names in by_label.values() )
+                    entry     = { "labels": labels, "multi_select": multi_select, "header": header, "by_label": by_label, "ambiguous": ambiguous }
+                    if key in result:
+                        # Both headers stay in the result, so neither goes missing from fields; both are ambiguous
+                        result[ key ][ "ambiguous" ] = True
+                        key = f"{key}\x00{len( result )}"
+                    result[ key ] = entry
 
             return result if result else None
 
@@ -703,6 +726,174 @@ class PredictionEngine:
                 break
 
         return remapped
+
+    @staticmethod
+    def _normalise_text( text: Any ) -> str:
+        """
+        Fold a header or an option label to the form used to align fields across cards.
+
+        Requires:
+            - text is any value; it is read as its string form
+
+        Ensures:
+            - returns the text case-folded, with each run of whitespace as one space and
+              leading and trailing spaces, periods, colons, semicolons, exclamation and question marks removed
+            - two texts that differ only in those ways return the same string
+        """
+        return " ".join( str( text ).casefold().split() ).strip( " .:;!?" )
+
+    def _neighbour_options( self, case_ids: list ) -> Dict[str, Optional[Dict[str, Dict]]]:
+        """
+        Read what each neighbouring case's own card offered, in one query.
+
+        Requires:
+            - case_ids are the ids of retrieved cases; a case's id is its notification id
+
+        Ensures:
+            - one query for all ids; reads only
+            - returns { case id: _extract_valid_options( row.response_options, normalise=True ) }
+            - a lookup error is not caught here: it reaches _predict_core, which reports reason prediction_error with the error class
+            - a case with no notification row, an id that is not a UUID, or options that do not parse maps to None:
+              its options are unknown and it casts no option evidence
+        """
+        import uuid
+        parsed = {}
+        for case_id in case_ids:
+            try:
+                parsed[ uuid.UUID( str( case_id ) ) ] = case_id
+            except ( ValueError, AttributeError ):
+                continue
+        found = { case_id: None for case_id in case_ids }
+        if not parsed: return found
+        from cosa.rest.db.database import get_db
+        from cosa.rest.postgres_models import Notification
+        with get_db() as session:
+            rows = session.query( Notification.id, Notification.response_options ).filter( Notification.id.in_( list( parsed ) ) ).all()
+        for row in rows: found[ parsed[ row.id ] ] = self._extract_valid_options( row.response_options, normalise=True )
+        return found
+
+    def _predict_multiple_choice_per_field( self, category: str, similar_cases: list, options: Any ) -> PredictionResult:
+        """
+        Forecast a multiple-choice card one field at a time, abstaining on a field alone.
+
+        Requires:
+            - similar_cases is the non-empty list of ( similarity percent, record ) the retrieval returned
+            - options is the current card's response_options, and parses
+
+        Ensures:
+            - a neighbour speaks to a field only when its own card has a field with the same normalised header,
+              its options are known, and neither card's field is ambiguous
+            - an option collects votes only from neighbours that offered it, and a pick that neighbour's card did
+              not offer is a typed Other, counted apart
+            - a single-select field forecasts its most-voted offered label, or abstains with reason other_likely when
+              typed Other answers outweigh it; a multi-select field forecasts the labels chosen by at least half of
+              the neighbours that offered them (or abstains the same way when half or more of the neighbours typed Other)
+            - fields maps every header of the card to { "candidate", "confidence", "cases" } or { "reason" }, with the
+              reasons ambiguous_labels, no_aligned_neighbours, no_positive_evidence, no_option_evidence and other_likely
+            - predicted_value holds only the answered fields; with none, the result is a cold start with reason
+              no_field_candidates, and fields is still set
+            - confidence is the best retrieved similarity times the mean of the answered fields' confidences
+        """
+        current = self._extract_valid_options( options, normalise=True )
+        ids     = [ record.get( "id" ) for _, record in similar_cases ]
+        offered = self._neighbour_options( ids )
+        fields  = {}
+
+        decoded = []
+        max_similarity = 0.0
+        for similarity_pct, record in similar_cases:
+            parsed = self._parse_mc_decision_value( record.get( "decision_value", "" ) )
+            if parsed is None: continue
+            answers = {}
+            for header, value in parsed.get( "answers", {} ).items():
+                key = self._normalise_text( header )
+                answers[ key ] = None if key in answers else value   # two answers under one normalised header cannot be told apart
+            decoded.append( ( record, offered.get( record.get( "id" ) ), answers ) )
+            max_similarity = max( max_similarity, similarity_pct / 100.0 )
+
+        for key, field_info in current.items():
+            header = field_info[ "header" ]
+            if field_info[ "ambiguous" ]:
+                fields[ header ] = { "reason": "ambiguous_labels" }
+                continue
+
+            votes, offered_mass, mass, other_mass, cases = {}, {}, 0.0, 0.0, 0
+            for record, neighbour, answers in decoded:
+                if neighbour is None or key not in neighbour or neighbour[ key ][ "ambiguous" ]: continue
+                if answers.get( key ) is None: continue
+                neighbour_labels = neighbour[ key ][ "by_label" ]
+                weight   = self._ratified_weight( record )
+                positive = max( weight, 0.0 )
+                picks    = answers[ key ] if isinstance( answers[ key ], list ) else [ answers[ key ] ]
+                typed    = False
+                for pick in picks:
+                    name = self._normalise_text( pick )
+                    if name in neighbour_labels:
+                        if name in field_info[ "by_label" ]: votes[ name ] = votes.get( name, 0.0 ) + weight
+                    else:
+                        typed = True
+                for name in neighbour_labels:
+                    if name in field_info[ "by_label" ]: offered_mass[ name ] = offered_mass.get( name, 0.0 ) + positive
+                if typed: other_mass += positive
+                mass  += positive
+                cases += 1
+
+            if cases == 0:
+                fields[ header ] = { "reason": "no_aligned_neighbours" }
+                continue
+            if mass <= 0:
+                fields[ header ] = { "reason": "no_positive_evidence" }
+                continue
+            positive_votes = { name: weight for name, weight in votes.items() if weight > 0 }
+            if not positive_votes:
+                fields[ header ] = { "reason": "other_likely" if other_mass > 0 else "no_option_evidence" }
+                continue
+
+            if field_info[ "multi_select" ]:
+                if other_mass / mass >= 0.5:
+                    fields[ header ] = { "reason": "other_likely" }
+                    continue
+                chosen = [ name for name, weight in positive_votes.items() if weight / offered_mass[ name ] >= 0.5 ]
+                if not chosen: chosen = [ max( positive_votes, key=lambda name: ( positive_votes[ name ], name ) ) ]
+                confidence = sum( min( positive_votes[ name ] / offered_mass[ name ], 1.0 ) for name in chosen ) / len( chosen )
+                candidate  = sorted( field_info[ "by_label" ][ name ][ 0 ] for name in chosen )
+            else:
+                winner = max( positive_votes, key=lambda name: ( positive_votes[ name ], name ) )
+                if other_mass > positive_votes[ winner ]:
+                    fields[ header ] = { "reason": "other_likely" }
+                    continue
+                confidence = min( positive_votes[ winner ] / mass, 1.0 )
+                candidate  = field_info[ "by_label" ][ winner ][ 0 ]
+
+            fields[ header ] = { "candidate": candidate, "confidence": round( confidence, 3 ), "cases": cases }
+
+        answered = { header: f[ "candidate" ] for header, f in fields.items() if "candidate" in f }
+        if not answered:
+            return PredictionResult(
+                response_type      = RESPONSE_TYPE_MULTIPLE_CHOICE,
+                category           = category,
+                strategy           = STRATEGY_COLD_START,
+                similar_case_count = len( similar_cases ),
+                metadata           = { "reason": "no_field_candidates" },
+                fields             = fields
+            )
+
+        confidence = max_similarity * sum( fields[ header ][ "confidence" ] for header in answered ) / len( answered )
+        return PredictionResult(
+            response_type      = RESPONSE_TYPE_MULTIPLE_CHOICE,
+            category           = category,
+            strategy           = STRATEGY_CBR_MAJORITY,
+            predicted_value    = { "answers": answered },
+            confidence         = confidence,
+            similar_case_count = len( similar_cases ),
+            metadata           = {
+                "per_field"      : True,
+                "abstained"      : sorted( header for header in fields if header not in answered ),
+                "max_similarity" : round( max_similarity, 3 ),
+                "valid_cases"    : len( decoded ),
+            },
+            fields             = fields
+        )
 
     def _predict_multiple_choice( self, message: str, category: str,
                                      embedding: Optional[list],
@@ -779,6 +970,10 @@ class PredictionEngine:
                 similar_case_count = 0,
                 metadata           = { "reason": self._empty_retrieval_reason( store_error ) }
             )
+
+        # Per-field predictor (phase 7): each field of the card is judged from its own offered labels
+        if self.per_field_mc_enabled and valid_options:
+            return self._predict_multiple_choice_per_field( category, similar_cases, options )
 
         # Determine multi_select from options structure (fallback to data detection)
         options_multi_select = None
@@ -1444,7 +1639,8 @@ class PredictionEngine:
         Name the settings the forecast ran under.
 
         Ensures:
-            - returns the first 12 hex characters of a sha256 over the retrieval, display, retrieval-metric and calibration settings
+            - returns the first 12 hex characters of a sha256 over the retrieval, display, retrieval-metric and calibration settings,
+              and over the per-field multiple-choice switch only when it is on
             - the same settings give the same string, and a changed setting gives a different one
         """
         settings = { "cbr_top_k": self.cbr_top_k, "similarity_threshold": self.similarity_threshold,
@@ -1452,6 +1648,7 @@ class PredictionEngine:
                      "open_ended_cbr_top_k": self.open_ended_cbr_top_k,
                      "open_ended_cbr_threshold": self.open_ended_cbr_threshold,
                      "retrieval_metric": self.retrieval_metric, "calibration_enabled": self.calibration_enabled }
+        if self.per_field_mc_enabled: settings[ "per_field_mc_enabled" ] = True   # absent when off, so every earlier version string is unchanged
         return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
 
     def three_way_forecast( self, ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> Optional[Dict[str, Any]]:
@@ -1568,6 +1765,7 @@ class PredictionEngine:
             - without a result: confidence and case count are 0, predicted_value is None, the strategy
               and abstention_reason are the arguments, and the category is the classifier's, or "unknown"
             - the row carries the code identity, config version and predictor version
+            - field_forecasts holds the result's per-field output, or None when it has none
             - returns True when the row was written, and False on any failure (a hook's included) or when
               the notification already has a row; never raises
             - with failure visibility on: "no_embedding" is stored as "embedding_missing", a
@@ -1621,6 +1819,7 @@ class PredictionEngine:
                 "batch_question_key" : meta.get( "batch_question_key" ),
                 "code_identity"      : get_code_identity(),
                 "always_yes_rate"    : always_yes_rate,
+                "field_forecasts"    : prediction_result.fields if prediction_result is not None else None,
             }
 
             from cosa.rest.db.database import get_db
@@ -1670,6 +1869,7 @@ class PredictionEngine:
             - strategy, category, response_type, confidence and case count come from their columns
             - predicted_value and predicted_qualifier are un-wrapped from the stored predicted_value
               (a { "value": x } wrapper gives x; any other dict is kept; a "qualifier" key becomes the qualifier)
+            - fields is the stored field_forecasts (None for a row the per-field predictor did not write)
             - metadata carries original_message, batch_question_key, evidence_ids and evidence_scores
         """
         stored    = dict( row.predicted_value ) if row.predicted_value is not None else None
@@ -1683,6 +1883,7 @@ class PredictionEngine:
             confidence          = row.prediction_confidence,
             similar_case_count  = row.similar_case_count,
             predicted_qualifier = qualifier,
+            fields              = row.field_forecasts,
             metadata            = {
                 "original_message"   : row.original_message,
                 "batch_question_key" : row.batch_question_key,
@@ -1780,7 +1981,7 @@ class PredictionEngine:
                 self._enrich_with_embedding_similarity( actual_dict, prediction_result, response_type )
 
             # Compare prediction against actual (a multiple-choice card is scored by its stored schema)
-            comparator = get_comparator( response_type, open_ended_threshold=self.open_ended_match_threshold, response_options=response_options )
+            comparator = get_comparator( response_type, open_ended_threshold=self.open_ended_match_threshold, response_options=response_options, per_field=self.per_field_mc_enabled )
             predicted_dict = prediction_result._wrap_predicted_value()
             accuracy_match, accuracy_detail = comparator( predicted_dict, actual_dict )
 
