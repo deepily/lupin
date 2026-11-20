@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.19 - Session ec5dd3e7 (Cheech 🌿, build manager; crew Tiberius, Rachel, Chloé, Pocholo, John, Tiffany, Clayton) | Principle learner: migrations applied, extractor tested live, headings approved
+
+**Resume here**: memento `.claude-memento-cheech-ec5dd3e7.md`; crew mementos in `io/mementos/`. Open: row 2c1a8dbf, wiring the extractor to Rick's 14 headings (held for approval). Also open: the fixture-replay closing gate c1e30b89. The principles forecast and Opus twins wait on Mr. Radio's re-plan (chase 20 Nov 11:00).
+1. **Merged and reviewed, census green**: the capped review card (dbac381f3) and the per-arm report command (1936d1d3f). Tiberius's tool chain moved every SQLite hook to scratch_db (2d734a09c, 343507a4d). Also merged: two duplicate-check fixes (671cf19af) and the done-queue fix (308a214e1). The extractor enqueue after each answer is off until live shadow (3519c98ab).
+2. **Migrations**: on Rick's approval, Cheech applied d3a6c1e8b5f2, e5b7d9a2c418 and f8c2d6a14e37 to lupin_db_dev and lupin_db_test at about 21:34 (gate 14036043); the no-restart warning was withdrawn.
+3. **Extractor probe** on :8000: one Sonnet call in 3.67 s (row 8be193e8 closed). It found GET /api/get-queue/done returning 500 with an extractor job listed, fixed by John (16cf3384).
+4. **Rick's rulings**: extractor jobs show in his queue (e3f3401d). He found the principles list broadly plausible. The crew merged 60 dimensions into 14 headings, which he approved (a8035781).
+5. **For Rick**: a status report and an explainer on how principles are used, both with podcasts, in `io/tmp/2026.11.19-principle-learner-*-cheech.md`.
+
+**Files**: history.md
+
 ## 2026.11.19 - Session 67865d63 (Mr. Radio 🦉, build manager; crew Rio, Tiffany, Sam, Clayton, Maya, Chloé, Krishna) | Preference learning: missing question vectors done, report read by Rick, 3,608 vectors in the database, no added context helps
 
 **Resume here**: memento `.claude-memento-mr-radio-67865d63.md` (self re-spin at 17:45; the evening is the last numbered line below). Every crew seat is reaped with a memento in `io/mementos/`, Krishna last at 18:57. Working-branch head is 343507a4d or later.
