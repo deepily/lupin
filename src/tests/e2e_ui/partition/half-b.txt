@@ -46,6 +46,8 @@ src/tests/e2e_ui/test_multiplexer_phase6c_section_a_visual.py
 src/tests/e2e_ui/test_multiplexer_phase6c_section_c_visual.py
 src/tests/e2e_ui/test_multiplexer_phase6c_section_d_visual.py
 src/tests/e2e_ui/test_multiplexer_prediction_vote.py
+src/tests/e2e_ui/test_context_forecast_late_delivery_legacy.py
+src/tests/e2e_ui/test_context_forecast_late_delivery_multiplexer.py
 src/tests/e2e_ui/test_prediction_forecast_fold_e2e.py
 src/tests/e2e_ui/test_multiplexer_section_toolbar.py
 src/tests/e2e_ui/test_multiplexer_spinup_symmetry.py
