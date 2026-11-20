@@ -548,6 +548,19 @@ def test_settings_come_from_the_ini_keys_when_not_given_and_the_extractor_versio
     assert job_module.encoder_version() == encoder
 
 
+def test_the_string_the_extractor_stores_is_the_string_retrieval_filters_on():
+    """
+    The extractor stores principles under one encoder string, and retrieval filters on one.
+
+    The two once differed ( ":statement-rationale-v1" against "|statement-and-rationale-v1" ), so a retrieval
+    built from the retrieval side would have matched no stored row. One side is pinned to a literal here.
+    """
+    from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
+    model = "nomic-ai/nomic-embed-text-v1.5"
+    assert encoder_version_of( model ) == "nomic-ai/nomic-embed-text-v1.5:statement-rationale-v1"
+    assert job_module.encoder_version() == encoder_version_of( model )
+
+
 def test_the_default_embedding_and_session_doors_call_the_projects_own_helpers( monkeypatch ):
     import cosa.memory.embedding_provider as provider
     import cosa.rest.db.database as database

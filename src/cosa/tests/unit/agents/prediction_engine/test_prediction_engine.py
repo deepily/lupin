@@ -157,6 +157,9 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine yes no no margin"              : 2.5,
                 "prediction engine retrieval metric"              : "cosine",
                 "prediction engine calibration enabled"           : True,
+            "prediction engine failure visibility enabled"    : True,
+            "prediction engine three way enabled"             : True,
+            "prediction engine recency half life days"        : 21.0,
                 "prediction engine lancedb table"                 : "tbl_x",
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
@@ -187,6 +190,9 @@ def test_init_with_config_mgr_reads_keys():
     assert eng.hint_vote_min_confidence_threshold == 0.5
     assert eng.yes_no_no_margin == 2.5
     assert eng.retrieval_metric == "cosine"
+    assert eng.failure_visibility_enabled is True
+    assert eng.three_way_enabled is True
+    assert eng.recency_half_life_days == 21.0
     assert eng.calibration_enabled is True
     # debug = config(False) OR debug(True) = True
     assert eng.debug is True

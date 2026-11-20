@@ -3,12 +3,12 @@ capability: web-client-notification-panes
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.NotificationsListRendererImpl@539aa8f6a5
-  - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@c17fd2e052
+  - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@18c877aa23
   - src.lupin_app.static.js.multiplexer.stores.ActionRequiredStore.ActionRequiredStoreImpl.respondAndAwait@5bf13c5c25
-  - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@a67ee9d532
+  - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@a9b4064b3a
   - src.lupin_app.static.js.multiplexer.render.BroadcastAckTallyRenderer.BroadcastAckTallyRendererImpl@c827b16ffb
   - src.lupin_app.static.js.multiplexer.render.CommonsActivityRenderer.CommonsActivityRendererImpl@3c39de597e
-  - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.FleetStatusRendererImpl@3c6bf1a792
+  - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.FleetStatusRendererImpl@517019211c
 ---
 # Web client: notification panes
 
@@ -18,13 +18,13 @@ Each pane renderer owns one mount node and repaints from store events on the bus
 - `NotificationsListRendererImpl` paints sender cards and throws on mount without `#sender-cards-container`. Notification, sender and vote events only schedule one microtask render. When the `notifications_keep_place` preference is `true`, a render captures the reader's place and restores it afterwards, and also each card's scrolled notification-history panes ([[web-client-render-operator-state-and-keep-place]]).
 - Action-required rows are filtered out of the cards. A card keeps its node when its inputs or rendered signature are unchanged. Appended rows are patched in only under `canPatchCard`; otherwise the card is replaced.
 - Card controls: ✨ POSTs `/api/notifications/generate-gist`; × DELETEs `/api/notifications/conversation/<sender>/<email>`; a date × DELETEs `/api/notifications/date/...`.
-- `SenderCardRecorderRenderer` wires mic, send (POST `/api/notify`) and conversation mode (POST `/api/cosa-voice/speakerphone/<hash>`). `SenderCardConsoleButtons` adds a console button to a card only when a seat resolves.
+- `SenderCardRecorderRenderer` wires mic (through the shared `startDictation`), send (POST `/api/notify`) and conversation mode (POST `/api/cosa-voice/speakerphone/<hash>`). `SenderCardConsoleButtons` adds a console button to a card only when a seat resolves.
 - `NotificationsHeaderRenderer` counts `list()`. Clear All sends one `DELETE /api/notifications/<id>` per visible entry. The Mine / Not Mine / All Users switch is hidden unless `isAdmin()`.
-- `ActionRequiredRendererImpl` paints the store's first item as the full card and the rest as queue rows, unless the first awaits activation. A change to a queued item repaints only the rows. Given `predictionVoteStore` and no `predictionVote`, it builds the vote bridge itself; a refused or thrown vote repaints the card.
+- `ActionRequiredRendererImpl` paints the store's first item as the full card and the rest as queue rows, unless the first awaits activation. A change to a queued item repaints only the rows. Given `predictionVoteStore` and no `predictionVote`, it builds the vote bridge itself; a refused or thrown vote repaints the card. A card that paints a forecast reports it rendered once. A fold the reader opens is reported and stays open on a repaint.
 - Submit and ✕ call `respondAndAwait`, which POSTs `/api/notify/response`. P and Esc click the first card's own controls, and Y, N, C do on a yes/no card, unless focus is in an input. Esc does nothing while a card microphone is recording, so it stops the recording and not the card.
-- `BroadcastCardRendererImpl` loads `/api/commons/active-sessions`. After a confirm modal it POSTs `/api/commons/broadcast-to-cc-sessions` and hands the returned id to the tally.
+- `BroadcastCardRendererImpl` records its message mic through `startDictation` and loads `/api/commons/active-sessions`. After a confirm modal it POSTs `/api/commons/broadcast-to-cc-sessions` and hands the returned id to the tally.
 - `CommonsActivityRendererImpl` inserts a `prepended` row alone when it matches the filter. `hydrated` and `filter-changed` redraw all rows.
-- `FleetStatusRendererImpl` repaints on `store_fleet_status_changed`. It paints a skeleton crew switch beside the size dial. The switch is hidden when the payload has no `skeleton_crew` field, and disabled while its write is in flight. The store polls `/api/arbiter/fleet-state` every 60000 ms once boot calls `startPolling`.
+- `FleetStatusRendererImpl` repaints on `store_fleet_status_changed` and stamps its updated label with `stampFreshRead`. It paints a skeleton crew switch beside the size dial. The switch is hidden when the payload has no `skeleton_crew` field, and disabled while its write is in flight. The store polls `/api/arbiter/fleet-state` every 60000 ms once boot calls `startPolling`.
 
 ## Don't
 - A card input has to be added to `inputsFor` or the caches dropped, as `setAppTimezone` does. A `Notification` row is never mutated in place, because rows are compared by identity.

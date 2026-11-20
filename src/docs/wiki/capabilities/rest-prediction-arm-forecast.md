@@ -1,0 +1,23 @@
+---
+capability: rest-prediction-arm-forecast
+pin_algorithm: py3.13.xaad549/ts5.9.3
+pins:
+  - cosa.rest.postgres_models.PredictionArmForecast@1e5007acc1
+  - cosa.rest.db.repositories.arm_forecast_repository.displayed_arm_for@7f4ce09bae
+  - cosa.rest.db.repositories.arm_forecast_repository.displayed_arm_hook@25f1481f23
+  - cosa.rest.db.repositories.arm_forecast_repository.notifications_missing_displayed_sibling@d866f73abf
+---
+# Prediction arm forecasts
+
+One forecast per card and arm, kept beside the card's `prediction_log` row ([[rest-data-repos-proxy-predictions]]). The engine that makes the forecasts is in [[prediction-engine]].
+
+## What it does
+- `PredictionArmForecast` is one row per `( notification_id, arm )`. `displayed` is true for the arm whose forecast the card showed.
+- `evidence_ids` means different things by arm. It holds principle ids for the principles forecast, and neighbour case ids for the case-based arm that showed the card.
+- A late forecast is derived from `forecast_ready_at`, never stored. Deleting the notification deletes its rows.
+- `displayed_arm_for( forecast_source )` names the arm a source stands for. It raises `KeyError` for an unregistered source, so a new source must be registered there.
+- `displayed_arm_hook( arm )` returns the `pre_commit_hook` for `record_forecast`. It adds the displayed row and flushes, and the caller's commit stores it with the log row. An empty arm raises `ValueError`.
+- `notifications_missing_displayed_sibling( session, since )` lists, sorted, the cards predicted at or after `since` that have a log row and no displayed sibling. An empty list means the table is reconciled.
+
+## Don't
+- Don't let a sibling row of another arm stand in for the displayed one. The check ignores it.

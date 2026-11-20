@@ -35,6 +35,9 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_RETRIEVAL_METRIC,
     DEFAULT_CALIBRATION_ENABLED,
+    DEFAULT_FAILURE_VISIBILITY_ENABLED,
+    DEFAULT_THREE_WAY_ENABLED,
+    DEFAULT_RECENCY_HALF_LIFE_DAYS,
     VALID_RETRIEVAL_METRICS,
     DEFAULT_YES_NO_NO_MARGIN,
     DEFAULT_LANCEDB_TABLE,
@@ -63,6 +66,7 @@ from cosa.agents.prediction_engine.config import (
 from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.agents.prediction_engine import evidence_recorder
+from cosa.agents.prediction_engine import failure_visibility
 from cosa.rest.code_identity import get_code_identity
 from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
@@ -127,6 +131,9 @@ class PredictionEngine:
             self.yes_no_no_margin     = config_mgr.get( "prediction engine yes no no margin", default=str( DEFAULT_YES_NO_NO_MARGIN ), return_type="float" )
             self.retrieval_metric     = config_mgr.get( "prediction engine retrieval metric", default=DEFAULT_RETRIEVAL_METRIC )
             self.calibration_enabled  = config_mgr.get( "prediction engine calibration enabled", default=str( DEFAULT_CALIBRATION_ENABLED ), return_type="boolean" )
+            self.failure_visibility_enabled = config_mgr.get( "prediction engine failure visibility enabled", default=str( DEFAULT_FAILURE_VISIBILITY_ENABLED ), return_type="boolean" )
+            self.three_way_enabled          = config_mgr.get( "prediction engine three way enabled", default=str( DEFAULT_THREE_WAY_ENABLED ), return_type="boolean" )
+            self.recency_half_life_days     = config_mgr.get( "prediction engine recency half life days", default=str( DEFAULT_RECENCY_HALF_LIFE_DAYS ), return_type="float" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -149,6 +156,9 @@ class PredictionEngine:
             self.yes_no_no_margin     = DEFAULT_YES_NO_NO_MARGIN
             self.retrieval_metric     = DEFAULT_RETRIEVAL_METRIC
             self.calibration_enabled  = DEFAULT_CALIBRATION_ENABLED
+            self.failure_visibility_enabled = DEFAULT_FAILURE_VISIBILITY_ENABLED
+            self.three_way_enabled          = DEFAULT_THREE_WAY_ENABLED
+            self.recency_half_life_days     = DEFAULT_RECENCY_HALF_LIFE_DAYS
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -485,6 +495,7 @@ class PredictionEngine:
             )
 
         # Find similar past notifications (filtered by response_type)
+        store_error = None
         try:
             similar_cases = store.find_similar(
                 query_embedding = embedding,
@@ -504,6 +515,7 @@ class PredictionEngine:
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error: {e}" )
+            store_error   = e.__class__.__name__
             similar_cases = []
         evidence_recorder.note( similar_cases )
 
@@ -516,7 +528,7 @@ class PredictionEngine:
                 category           = category,
                 strategy           = STRATEGY_COLD_START,
                 similar_case_count = 0,
-                metadata           = { "reason": "no_similar_cases" }
+                metadata           = { "reason": self._empty_retrieval_reason( store_error ) }
             )
 
         # Majority vote — ratification-aware (thumbs up/down training signal):
@@ -735,6 +747,7 @@ class PredictionEngine:
         valid_options = self._extract_valid_options( options )
 
         # Find similar past notifications (filtered by response_type)
+        store_error = None
         try:
             similar_cases = store.find_similar(
                 query_embedding = embedding,
@@ -754,6 +767,7 @@ class PredictionEngine:
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error (MC): {e}" )
+            store_error   = e.__class__.__name__
             similar_cases = []
         evidence_recorder.note( similar_cases )
 
@@ -763,7 +777,7 @@ class PredictionEngine:
                 category           = category,
                 strategy           = STRATEGY_COLD_START,
                 similar_case_count = 0,
-                metadata           = { "reason": "no_similar_cases" }
+                metadata           = { "reason": self._empty_retrieval_reason( store_error ) }
             )
 
         # Determine multi_select from options structure (fallback to data detection)
@@ -1051,6 +1065,7 @@ class PredictionEngine:
             )
 
         # Retrieve top K similar cases using open-ended-specific thresholds (filtered by response_type)
+        store_error = None
         try:
             similar_cases = store.find_similar(
                 query_embedding = embedding,
@@ -1070,6 +1085,7 @@ class PredictionEngine:
             )
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error ({label}): {e}" )
+            store_error   = e.__class__.__name__
             similar_cases = []
         evidence_recorder.note( similar_cases )
 
@@ -1079,7 +1095,7 @@ class PredictionEngine:
                 category           = category,
                 strategy           = STRATEGY_COLD_START,
                 similar_case_count = 0,
-                metadata           = { "reason": "no_similar_cases" }
+                metadata           = { "reason": self._empty_retrieval_reason( store_error ) }
             )
 
         # Ratification-aware (Stage 3): rejected (thumbs-downed) cases can never BE the
@@ -1438,13 +1454,93 @@ class PredictionEngine:
                      "retrieval_metric": self.retrieval_metric, "calibration_enabled": self.calibration_enabled }
         return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
 
+    def three_way_forecast( self, ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> Optional[Dict[str, Any]]:
+        """
+        Forecast yes, no or neither for a yes/no ask with the three-way challenger, in shadow.
+
+        Requires:
+            - ask has question_embedding, asked_at and owner_user_id
+            - cases are the answered cases visible at the ask, as the replay's visible rows
+
+        Ensures:
+            - with the switch off, returns None and reads nothing
+            - with it on, returns three_way_stance.three_way_forecast for the ask, using this engine's
+              recency half-life
+            - never changes the engine, a stored row or the card; the live ask path does not call it
+        """
+        if not self.three_way_enabled: return None
+        from cosa.agents.prediction_engine import three_way_stance
+        return three_way_stance.three_way_forecast( ask, cases, self.recency_half_life_days )
+
+    def _empty_retrieval_reason( self, store_error: Optional[str] ) -> str:
+        """
+        Name why a retrieval came back empty.
+
+        Requires:
+            - store_error is the class name of an exception find_similar raised and the engine swallowed, or None
+
+        Ensures:
+            - "store_error: <class>" when failure visibility is on and store_error is not None
+            - "no_similar_cases" otherwise, exactly as before
+        """
+        reason = failure_visibility.LEGACY_NO_SIMILAR_CASES
+        if not self.failure_visibility_enabled: return reason
+        return failure_visibility.name_failure( reason, store_error )
+
+    def _name_and_log_failure( self, notification_id: str, reason: Optional[str] ) -> Optional[str]:
+        """
+        Give a stored abstention reason its failure name and log the failure kinds.
+
+        Requires:
+            - reason is the reason record_forecast is about to store, or None
+
+        Ensures:
+            - with failure visibility off, returns reason unchanged and logs nothing
+            - with it on, returns the named reason ("no_embedding" becomes "embedding_missing")
+            - logs one [PREDICTION-FAILURE] line when the named reason is embedding_missing or a store_error
+        """
+        if not self.failure_visibility_enabled: return reason
+        named = failure_visibility.name_failure( reason )
+        # store_write_failed is logged once, with its exception class, by _record_after_write_failure.
+        if failure_visibility.is_failure_reason( named ) and named != failure_visibility.REASON_STORE_WRITE_FAILED:
+            failure_visibility.log_failure( notification_id, named )
+        return named
+
+    def _record_after_write_failure( self, notification_id: str, notification_dict: Dict[str, Any],
+                                     error: Exception, forecast_source: str, display_decision: Optional[str],
+                                     asked_at: Optional[datetime], owner_email: Optional[str],
+                                     always_yes_rate: Optional[Dict[str, Any]] ) -> bool:
+        """
+        After a forecast write failed, log it and try once to store a bare row naming the failure.
+
+        Requires:
+            - error is the exception the first write raised
+            - the other arguments are those record_forecast was given
+
+        Ensures:
+            - with failure visibility off, returns False and does nothing
+            - a duplicate (IntegrityError: the notification already has its row) is not a failure and returns False
+            - otherwise logs one [PREDICTION-FAILURE] line and writes one row: no forecast, strategy error,
+              abstention_reason "store_write_failed", no pre-commit hook; returns whether that write succeeded
+            - never raises
+        """
+        if not self.failure_visibility_enabled: return False
+        from sqlalchemy.exc import IntegrityError
+        if isinstance( error, IntegrityError ): return False
+        failure_visibility.log_failure( notification_id, failure_visibility.REASON_STORE_WRITE_FAILED, error.__class__.__name__ )
+        return self.record_forecast(
+            notification_id, notification_dict, forecast_source=forecast_source, strategy=STRATEGY_ERROR,
+            abstention_reason=failure_visibility.REASON_STORE_WRITE_FAILED, display_decision=display_decision,
+            asked_at=asked_at, owner_email=owner_email, always_yes_rate=always_yes_rate, _after_write_failure=True )
+
     def record_forecast( self, notification_id: str, notification_dict: Dict[str, Any],
                          prediction_result: Optional[PredictionResult] = None,
                          forecast_source: str = FORECAST_SOURCE_FOUNDATION,
                          strategy: str = STRATEGY_ERROR, abstention_reason: Optional[str] = None,
                          display_decision: Optional[str] = None, asked_at: Optional[datetime] = None,
                          owner_email: Optional[str] = None, always_yes_rate: Optional[Dict[str, Any]] = None,
-                         pre_commit_hook: Optional[Callable[[ Any, Dict[str, Any] ], None]] = None ) -> bool:
+                         pre_commit_hook: Optional[Callable[[ Any, Dict[str, Any] ], None]] = None,
+                         _after_write_failure: bool = False ) -> bool:
         """
         Write the ask-time forecast row for a notification, before the hint is sent.
 
@@ -1474,6 +1570,10 @@ class PredictionEngine:
             - the row carries the code identity, config version and predictor version
             - returns True when the row was written, and False on any failure (a hook's included) or when
               the notification already has a row; never raises
+            - with failure visibility on: "no_embedding" is stored as "embedding_missing", a
+              swallowed store error as "store_error: <class>", each with one [PREDICTION-FAILURE] log line;
+              a failed write is logged and followed by one bare retry row with reason "store_write_failed"
+              (_after_write_failure marks that retry, so a second failure does not retry again)
         """
         try:
             message = notification_dict.get( "message", "" )
@@ -1501,6 +1601,8 @@ class PredictionEngine:
                 confidence = 0.0
                 count      = 0
                 reason     = abstention_reason
+
+            reason = self._name_and_log_failure( notification_id, reason )
 
             now    = datetime.now( timezone.utc )
             ledger = {
@@ -1552,7 +1654,9 @@ class PredictionEngine:
 
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] record_forecast error: {e}" )
-            return False
+            if _after_write_failure: return False
+            return self._record_after_write_failure( notification_id, notification_dict, e, forecast_source,
+                                                     display_decision, asked_at, owner_email, always_yes_rate )
 
     @staticmethod
     def _result_from_row( row ) -> PredictionResult:
@@ -1812,6 +1916,8 @@ class PredictionEngine:
 
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] _store_decision error: {e}" )
+            if self.failure_visibility_enabled:
+                failure_visibility.log_failure( notification_id, failure_visibility.REASON_STORE_WRITE_FAILED, e.__class__.__name__ )
 
     @staticmethod
     def _decision_value_from_predicted( predicted_value ) -> str:

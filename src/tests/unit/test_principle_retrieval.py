@@ -114,7 +114,7 @@ def test_embedding_text_and_encoder_version():
     """The embedded text is statement then rationale; the encoder version names model and recipe."""
     assert embedding_text( type( "P", (), { "statement": "s", "rationale": None } ) ) == "s"
     assert embedding_text( type( "P", (), { "statement": "s", "rationale": "r" } ) ) == "s\nr"
-    assert encoder_version_of( "m" ) == "m|statement-and-rationale-v1"
+    assert encoder_version_of( "m" ) == "m:statement-rationale-v1"
 
 
 def test_retrieval_ranks_by_cosine_and_keeps_k( db, stand_in_topk ):
@@ -184,7 +184,7 @@ def test_ruling_is_as_of_through_retrieval( db ):
 
 def test_same_encoder_only_and_reembed_brings_the_table_back( db ):
     """A principle of another encoder is never compared; after a re-embed it is."""
-    old = add_principle( db, 1, encoder="old-model|statement-and-rationale-v1" )
+    old = add_principle( db, 1, encoder="old-model:statement-rationale-v1" )
     add_evidence( db, old, 1 )
     add_evidence( db, add_principle( db, 2 ), 2 )
     assert statements( retrieve( db ) ) == [ "statement 2" ]

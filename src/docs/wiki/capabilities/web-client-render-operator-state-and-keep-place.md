@@ -16,6 +16,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.keepPlace.captureHistoryScroll@970d858c84
   - src.lupin_app.static.js.multiplexer.render.keepPlace.historyKey@3c1f8c03fd
   - src.lupin_app.static.js.multiplexer.render.keepPlace.restoreHistoryScroll@c37c593834
+  - src.lupin_app.static.js.multiplexer.render.keepPlace.scrollByDelta@225fd4915c
 ---
 # Multiplexer operator state and keep place
 

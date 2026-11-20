@@ -22,7 +22,11 @@ def _engine_with_metric( metric ):
     """Build an engine whose config manager answers the metric key and defaults for the rest."""
     PredictionEngine._instance = None
     cfg = MagicMock()
-    cfg.get.side_effect = lambda key, default=None, return_type=None: metric if key == "prediction engine retrieval metric" else default
+    def answer( key, default=None, return_type=None ):
+        if key == "prediction engine retrieval metric": return metric
+        # A real config manager turns "False" into a boolean; a bare default would stay a truthy string.
+        return str( default ).lower() == "true" if return_type == "boolean" else default
+    cfg.get.side_effect = answer
     return PredictionEngine( config_mgr=cfg )
 
 
