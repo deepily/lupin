@@ -80,7 +80,10 @@ TASK_STORE_EVENTS = frozenset( [ "task_store_changed" ] )
 # Row 063fc1a8 (2026-11-13): the scheduled-job switch flip.
 CRON_SWITCH_EVENTS = frozenset( [ "cron_job_switch_changed" ] )
 
-EXPECTED_EVENTS = COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS | CRON_SWITCH_EVENTS
+# Row 3e63f445 (2026-11-20): the late Haiku forecast reaching an open fold.
+PREDICTION_HINT_EVENTS = frozenset( [ "prediction_hint_updated" ] )
+
+EXPECTED_EVENTS = COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS | CRON_SWITCH_EVENTS | PREDICTION_HINT_EVENTS
 
 
 # ── A2.6 ──────────────────────────────────────────────────────────────────────
@@ -170,7 +173,8 @@ def test_the_four_names_are_not_already_among_the_committed_twenty_five():
     )
     assert not ( TASK_STORE_EVENTS & ( COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS ) )
     assert not ( CRON_SWITCH_EVENTS & ( COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS ) )
-    assert len( EXPECTED_EVENTS ) == 31
+    assert not ( PREDICTION_HINT_EVENTS & ( COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS | CRON_SWITCH_EVENTS ) )
+    assert len( EXPECTED_EVENTS ) == 32
 
 
 # ── A2.7 ──────────────────────────────────────────────────────────────────────

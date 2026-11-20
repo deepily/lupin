@@ -499,3 +499,28 @@ class TestTheDoorQueuesTheExtractorOncePerAnswer:
         assert r.status_code == 200
         assert entry[ "event" ].is_set()
         assert wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ]
+
+
+class TestTheContextForecastSettlesAtAnswerTime:
+
+    def test_the_answered_card_is_settled_with_the_apps_sessions( self, harness, wired, monkeypatch, capsys ):
+        import cosa.agents.prediction_engine.context_hint as ch
+        import cosa.rest.routers.notifications as notif
+        seen = []
+        monkeypatch.setattr( ch, "settle_unfinished", lambda factory, nid: seen.append( ( factory, nid ) ) or True )
+        r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert r.status_code == 200 and seen == [ ( notif.get_db, _NID ) ]
+        assert "stored forecast_timed_out" in capsys.readouterr().out
+
+    def test_a_card_that_needed_no_settle_prints_nothing( self, harness, wired, monkeypatch, capsys ):
+        import cosa.agents.prediction_engine.context_hint as ch
+        monkeypatch.setattr( ch, "settle_unfinished", lambda factory, nid: False )
+        harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert "stored forecast_timed_out" not in capsys.readouterr().out
+
+    def test_a_settle_failure_does_not_lose_the_answer( self, harness, wired, monkeypatch ):
+        import cosa.agents.prediction_engine.context_hint as ch
+        def boom( factory, nid ): raise RuntimeError( "database down" )
+        monkeypatch.setattr( ch, "settle_unfinished", boom )
+        r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert r.status_code == 200 and wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ]

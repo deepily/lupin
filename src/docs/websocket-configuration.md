@@ -76,6 +76,8 @@ Added: `task_store_changed`, the task panes' invalidation push. No other key is 
 
 Added: `cron_job_switch_changed`, sent after an administrator flips a scheduled job's switch. The legacy page's `_buildQueueAuthMessage` and the multiplexer's `QUEUE_SUBSCRIBED_EVENTS` subscribe to it, on the queue socket only.
 
+Added: `prediction_hint_updated`, sent when the background Haiku forecast of a card finishes, so an open fold replaces "still forecasting" with the result. A fold opened later reads the same payload from `GET /api/notify/prediction-hint/{notification_id}`. The legacy page's `_buildQueueAuthMessage` and the multiplexer's `QUEUE_SUBSCRIBED_EVENTS` subscribe to it, on the queue socket only.
+
 Warning: **That reader is a bare `value.split( ", " )` with no per-token strip.**
 
 Every entry must be separated by a comma **and a space**. A comma alone produces one mangled token: the new name never validates *and neither does the one before it*. Nothing raises, because the list is still non-empty.

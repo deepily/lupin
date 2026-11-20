@@ -271,3 +271,64 @@ class TestAReviewCardIsNeverForecast:
     def test_a_marked_ask_is_skipped_even_with_a_test_override_hint( self, harness, wired ):
         _post( harness, response_options=self._MARKED, prediction_hint_override=json.dumps( { "predicted_value": "yes" } ) )
         assert wired[ "forecasts" ] == [] and wired[ "predict_calls" ] == []
+
+
+class TestTheContextForecastStartsBehindItsSwitch:
+    """The baseline job starts from the notify route only behind its switch."""
+
+    @pytest.fixture
+    def started( self, monkeypatch ):
+        import cosa.agents.prediction_engine.context_baseline as cb
+        import cosa.agents.prediction_engine.context_hint as ch
+        calls, state = [], { "forecast": True, "display": False }
+
+        async def recorder( nid, emit, metric, **kw ): calls.append( ( nid, emit, metric ) )
+        monkeypatch.setattr( ch, "run_and_publish", recorder )
+        monkeypatch.setattr( cb, "context_forecast_enabled", lambda: state[ "forecast" ] )
+        monkeypatch.setattr( cb, "context_display_enabled", lambda: state[ "display" ] )
+        state[ "calls" ] = calls
+        return state
+
+    def test_a_yes_no_card_starts_one_job_with_the_ids_and_the_retrieval_metric( self, harness, wired, started ):
+        _post( harness )
+        assert len( started[ "calls" ] ) == 1
+        nid, emit, metric = started[ "calls" ][ 0 ]
+        assert nid == _NID and metric == "dot" and callable( emit )
+        hint = harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ]
+        assert "context_forecast" not in hint, "display is off: the card carries no context payload"
+
+    def test_with_display_on_the_card_opens_in_the_forecasting_state( self, harness, wired, started ):
+        started[ "display" ] = True
+        _post( harness )
+        assert harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ][ "context_forecast" ] == { "state": "forecasting" }
+
+    def test_the_emit_the_job_gets_reaches_the_asking_user( self, harness, wired, started ):
+        _post( harness )
+        emit = started[ "calls" ][ 0 ][ 1 ]
+        emit( "prediction_hint_updated", { "notification_id": _NID } )
+        sent = harness.ws.calls_to( "emit_to_user_or_listener_sync" )[ -1 ].kwargs
+        assert sent[ "event" ] == "prediction_hint_updated" and sent[ "data" ] == { "notification_id": _NID } and sent[ "user_id" ] == _UID
+
+    def test_the_task_is_forgotten_once_it_finishes( self, harness, wired, started ):
+        import cosa.rest.routers.notifications as notif
+        _post( harness )
+        assert notif._CONTEXT_FORECAST_TASKS == set()
+
+    def test_with_the_switch_off_no_job_starts( self, harness, wired, started ):
+        started[ "forecast" ] = False
+        _post( harness )
+        assert started[ "calls" ] == []
+
+    def test_cards_the_job_does_not_read_start_no_job( self, harness, wired, started ):
+        _post( harness, response_type="open_ended" )
+        _post( harness, response_options=json.dumps( { "review_card": True } ) )
+        _post( harness, prediction_hint_override=json.dumps( { "predicted_value": "yes" } ) )
+        assert started[ "calls" ] == []
+
+    def test_a_job_that_cannot_start_does_not_cost_the_ask( self, harness, wired, monkeypatch, capsys ):
+        import cosa.agents.prediction_engine.context_baseline as cb
+        def boom(): raise RuntimeError( "settings unreadable" )
+        monkeypatch.setattr( cb, "context_forecast_enabled", boom )
+        r = _post( harness )
+        assert r.status_code == 200 and len( harness.queue.calls_to( "push_notification" ) ) == 1
+        assert "Could not start the baseline job" in capsys.readouterr().out

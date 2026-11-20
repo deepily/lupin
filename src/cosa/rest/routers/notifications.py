@@ -118,6 +118,9 @@ def _manager_persona_for_sender_id( resolved_sender_id ):
 
 router = APIRouter(prefix="/api", tags=["notifications"])
 
+# Strong references to the running context-forecast tasks, so the loop cannot drop one mid-call.
+_CONTEXT_FORECAST_TASKS = set()
+
 # Global variables that will be injected via dependencies (temporary)
 jobs_notification_queue = None
 websocket_manager = None
@@ -1716,6 +1719,22 @@ async def notify_user(
                 print( f"[PREDICTION] ⚠️ Auto-submit gate stamp error (non-fatal): {auto_error}" )
         # ---- End Prediction Engine Hook ----
 
+        # ---- Context forecast: the Haiku baseline starts now, behind its own switch ----
+        # A task on this loop, not a FastAPI BackgroundTask: those run after the response ends, and this response
+        # stays open until the answer. The job stores its row and, with display on, sends prediction_hint_updated.
+        try:
+            from cosa.agents.prediction_engine import context_baseline, context_hint
+            if context_hint.should_forecast( response_type, review_card, parsed_prediction_hint_override is not None ) and context_baseline.context_forecast_enabled():
+                if context_baseline.context_display_enabled():
+                    prediction_hint[ context_hint.PAYLOAD_KEY ] = { "state": context_hint.STATE_FORECASTING }
+                emit_hint_update = lambda event, data: ws_manager.emit_to_user_or_listener_sync( user_id=target_system_id, job_id=job_id, event=event, data=data )
+                forecast_task    = asyncio.create_task( context_hint.run_and_publish( notification_id, emit_hint_update, prediction_hint[ "retrieval_metric" ] ) )
+                _CONTEXT_FORECAST_TASKS.add( forecast_task )
+                forecast_task.add_done_callback( _CONTEXT_FORECAST_TASKS.discard )
+        except Exception as context_error:
+            print( f"[CONTEXT-FORECAST] ⚠️ Could not start the baseline job (non-fatal): {context_error}" )
+        # ---- End Context forecast ----
+
         # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields).
         # voice_persona_payload was resolved ONCE above the offline branch (§4.2) —
         # reuse it here instead of re-reading the bridge file.
@@ -2010,6 +2029,14 @@ async def submit_notification_response(
         except Exception as pred_error:
             print( f"[PREDICTION] ⚠️ Outcome recording error (non-fatal): {pred_error}" )
         # ---- End Prediction Engine Hook 2 ----
+
+        # ---- Context forecast: a card answered with no baseline row gets its terminal state ----
+        try:
+            from cosa.agents.prediction_engine import context_hint
+            if await asyncio.to_thread( context_hint.settle_unfinished, get_db, notification_id ):
+                print( f"[CONTEXT-FORECAST] {notification_id}: answered with no baseline row, stored forecast_timed_out" )
+        except Exception as settle_error:
+            print( f"[CONTEXT-FORECAST] ⚠️ Settle error (non-fatal): {settle_error}" )
 
         # ---- Principle learner: queue the silent extractor, then the sweep, for this answer ----
         try:
@@ -2762,6 +2789,51 @@ async def record_prediction_seen(
         "draft_recorded"       : recorded[ "draft_recorded" ],
         "timestamp"            : get_local_timestamp()
     }
+
+
+@router.get(
+    "/notify/prediction-hint/{notification_id}",
+    summary     = "Read the card's current context forecast payload",
+    description = "The late-forecast fetch: a fold opened after the prediction_hint_updated event reads the card's current payload here. States are forecasting, ready, unavailable and forecast_timed_out. With the display switch off the payload is null."
+)
+async def get_prediction_hint(
+    notification_id: str,
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)]
+):
+    """
+    Read the card's context forecast payload.
+
+    Requires:
+        - a valid API key or Bearer JWT
+        - notification_id is a UUID
+
+    Ensures:
+        - returns { status, notification_id, context_forecast, timestamp }
+        - context_forecast is context_hint.payload_for's answer for the card, or None while the display switch is off
+        - a card with no baseline row reads forecasting, and forecast_timed_out once 30 seconds have passed since the ask
+
+    Raises:
+        - HTTPException 422 if notification_id is not a UUID
+        - HTTPException 404 if the notification does not exist
+        - HTTPException 500 on read failure
+    """
+    try:
+        uuid.UUID( notification_id )
+    except ValueError:
+        raise HTTPException( status_code=422, detail=f"notification_id is not a UUID: {notification_id}" )
+
+    from cosa.agents.prediction_engine import context_baseline, context_hint, get_prediction_engine
+    if not context_baseline.context_display_enabled():
+        return { "status": "success", "notification_id": notification_id, context_hint.PAYLOAD_KEY: None, "timestamp": get_local_timestamp() }
+    try:
+        payload = await asyncio.to_thread( context_hint.read_payload, get_db, notification_id, datetime.now( timezone.utc ),
+                                           get_prediction_engine().retrieval_metric )
+    except Exception as e:
+        print( f"[NOTIFY] Prediction-hint error for {notification_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to read prediction hint: {str( e )}" )
+    if payload is None:
+        raise HTTPException( status_code=404, detail=f"Notification {notification_id} not found" )
+    return { "status": "success", "notification_id": notification_id, context_hint.PAYLOAD_KEY: payload, "timestamp": get_local_timestamp() }
 
 
 def _project_broadcast_ack( n ) -> dict:
