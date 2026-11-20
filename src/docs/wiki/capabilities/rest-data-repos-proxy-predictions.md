@@ -5,7 +5,7 @@ pins:
   - cosa.rest.db.repositories.proxy_decision_repository.ProxyDecisionRepository@094813f6d3
   - cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository@ddeeee6a9c
   - cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository@6d8c5b6a79
-  - cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository@025a26c471
+  - cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository@bcc8fbaaf1
   - cosa.rest.db.repositories.prediction_log_repository.legacy_similarity_clause@e36d553cbc
   - cosa.rest.db.repositories.prediction_log_repository.legacy_confidence_clause@3978238c95
 ---
@@ -19,7 +19,7 @@ Four repositories hold what the decision proxy decided, how far it is trusted, a
 - `find_similar( question, domain, category, limit=5 )` is a word match, not a vector search. It keeps rows of that domain and category whose stored question contains, ignoring case, each of the first three words longer than three characters. It returns an empty list when the question has no such word. Newest first.
 - `TrustStateRepository` looks rows up by user email, domain and category. `update_after_ratification` adds one to the totals and to the successful or rejected count. It also records the decision under today's UTC date in `decision_history` and drops days past the retention window. A row written before that column is first seeded with its old totals. Its `blr_state` argument stores the BLR trust model's state as given. `None` clears it, and the default leaves the stored value alone.
 - `PredictionDecisionRepository.find_similar` returns `( similarity, row )` pairs by dot-product search over the question embedding, with optional category, origin and response-type filters. Its `threshold` is a fraction from 0 to 1, default 0.75, unlike the 0 to 100 snapshot searches. The threshold drops rows after the limit is applied, so fewer than `limit` pairs can come back.
-- `PredictionLogRepository.log_prediction` writes the guess and `update_outcome` the actual value. `get_accuracy_summary` returns counts, accuracy rate and category and type breakdowns over a day window (30 by default). It leaves out two kinds of legacy row. One was scored with a similarity above 1 (`legacy_similarity_clause`), the other stores a confidence above 1 (`legacy_confidence_clause`). Their counts come back as `excluded_legacy_similarity` and `excluded_legacy_confidence`.
+- `PredictionLogRepository.log_prediction` writes the guess and `update_outcome` the actual value. `record_seen` stores the first render time, the first fold-open time and the draft answer at reveal. The draft is kept only by the call that stores the fold time. `get_accuracy_summary` returns counts, accuracy rate and category and type breakdowns over a day window (30 by default). It leaves out two kinds of legacy row. One was scored with a similarity above 1 (`legacy_similarity_clause`), the other stores a confidence above 1 (`legacy_confidence_clause`). Their counts come back as `excluded_legacy_similarity` and `excluded_legacy_confidence`.
 
 ## Don't
 - Don't call `delete_pending` on a ratified decision. It raises `ValueError`; only pending ones can go.

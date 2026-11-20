@@ -3,8 +3,8 @@ capability: rest-prediction-routes-and-outcome
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.rest.db.repositories.prediction_log_repository.OutcomeAlreadyRecorded@65d086c981
-  - cosa.rest.routers.notifications.PredictionSeenRequest@62eb44ade4
-  - cosa.rest.routers.notifications.record_prediction_seen@60b22542dd
+  - cosa.rest.routers.notifications.PredictionSeenRequest@94dfb61adb
+  - cosa.rest.routers.notifications.record_prediction_seen@af2199fb5a
   - cosa.rest.routers.system.prediction_engine_accuracy@19b1e41095
 ---
 # Prediction routes and the one-outcome rule

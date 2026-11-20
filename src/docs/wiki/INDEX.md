@@ -533,6 +533,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[rest-data-repos-tasks]] — TaskRepository and ApprovalSettingRepository: task rows, the event trail and promotion-gate settings. `cosa.rest.db` (repositories)
 - [[rest-data-repos-notifications]] — the notification, push-token and podcast-proxy-spent repositories. `cosa.rest.db` (repositories)
 - [[rest-data-repos-proxy-predictions]] — the proxy-decision, trust-state, prediction-decision and prediction-log repositories. `cosa.rest.db` (repositories)
+- [[rest-prediction-arm-forecast]] — the per-arm forecast rows, the displayed arm's sibling write and the check for a card that lacks one. `cosa.rest` (postgres_models, db.repositories.arm_forecast_repository)
+- [[rest-preference-principle-tables]] — the principle and evidence tables the principle learner writes, and the rules for who writes them. `cosa.rest` (postgres_models)
 - [[rest-prediction-routes-and-outcome]] — the prediction-seen route, the admin accuracy route and the one-outcome-per-forecast error. `cosa.rest` (routers.notifications, routers.system, prediction_log_repository)
 - [[rest-vector-query-refusal]] — a cosine search refuses a query vector it cannot score and says why. `cosa.rest.db` (vector_errors, prediction_decision_repository)
 - [[rest-data-repos-memory]] — the embedding-cache, question-embedding, input/output, query-log and solution-snapshot repositories. `cosa.rest.db` (repositories)
