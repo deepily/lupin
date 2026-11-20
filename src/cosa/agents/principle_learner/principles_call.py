@@ -61,6 +61,20 @@ def provider_embedder():
     return SimpleNamespace( encode=lambda text: extractor_job.default_embed( text ) )
 
 
+def retrieval_versions():
+    """
+    Name the encoder and extractor versions the principles are read under.
+
+    Ensures:
+        - returns ( encoder version, extractor version ): the extractor's own stored encoder string, and the settings' extractor model with the prompt version
+
+    Raises:
+        - MissingConfigKeyError if a needed INI key is absent
+    """
+    config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return extractor_job.encoder_version(), extractor_version_of( config.get_required( extractor_job.MODEL_KEY ) )
+
+
 async def run_quietly( notification_id, run=None ):
     """
     Run the principles forecast for one ask, and never let a failure reach the ask.
@@ -100,12 +114,11 @@ async def run_principles_forecast( notification_id, session_factory=None, c0=Non
         - the errors get_baseline, get_gate and the settings reads raise when the switch is on and a setting is missing
     """
     if not ( principles_forecast_enabled() if enabled is None else enabled ): return { "status": STATUS_NOT_RUN, "reason": REASON_SWITCH }
-    c0           = get_baseline()[ 0 ] if c0 is None else c0
-    gate         = get_gate() if gate is None else gate
-    embedder     = provider_embedder() if embedder is None else embedder
-    config       = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    extractor    = extractor_version_of( config.get_required( extractor_job.MODEL_KEY ) )
+    c0                 = get_baseline()[ 0 ] if c0 is None else c0
+    gate               = get_gate() if gate is None else gate
+    embedder           = provider_embedder() if embedder is None else embedder
+    encoder, extractor = retrieval_versions()
     if session_factory is None:
         from cosa.rest.db.database import get_db
         session_factory = get_db
-    return await run_b1( session_factory, notification_id, c0, embedder, extractor_job.encoder_version(), extractor, gate, enabled=True, clock=clock )
+    return await run_b1( session_factory, notification_id, c0, embedder, encoder, extractor, gate, enabled=True, clock=clock )
