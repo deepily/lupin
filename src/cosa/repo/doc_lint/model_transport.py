@@ -24,11 +24,13 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import uuid
 
 from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage, ResultMessage, TextBlock, query as sdk_query
 
@@ -41,6 +43,9 @@ PERMISSION_MODE = "default"
 MAX_TURNS       = 1
 NO_TOOLS        = []
 TIMEOUT_SECONDS = 600
+
+# Every Claude Code call carries this variable with a random value, so a timed-out call's child process is found by what it carries.
+CALL_TAG_ENV = "LUPIN_MODEL_CALL_TAG"
 
 
 CLI_PATH = None
@@ -205,6 +210,10 @@ class ModelCallError( Exception ):
     """A model call returned nothing usable or raised."""
 
 
+class ModelCallTimeout( ModelCallError ):
+    """The call ran past its time limit and its Claude Code process was ended."""
+
+
 class ModelRateLimited( ModelCallError ):
     """
     The service refused the call for a rate or usage limit.
@@ -343,6 +352,31 @@ def _charge( model ):
             f.flush()
             os.fsync( f.fileno() )
     if not allowed: raise CallBudgetExceeded( f"{model} has used {used} of its {cap} calls; no model was contacted" )
+
+
+def kill_tagged_processes( tag ):
+    """
+    End every process carrying this call's tag, so a timed-out call leaves no child.
+
+    Requires:
+        - tag is the random string complete() put in CALL_TAG_ENV for one call
+
+    Ensures:
+        - sends SIGKILL to each process of this user, other than this one, whose environment holds CALL_TAG_ENV set to tag
+        - a process that cannot be read or has already gone is skipped, so a peer's process and a finished child are untouched
+        - returns the sorted pids it signalled
+    """
+    needle = f"{CALL_TAG_ENV}={tag}".encode( "utf-8" )
+    killed = []
+    for name in os.listdir( "/proc" ):
+        if not name.isdigit() or int( name ) == os.getpid(): continue
+        try:
+            with open( f"/proc/{name}/environ", "rb" ) as f: carries = needle in f.read().split( b"\0" )
+            if carries:
+                os.kill( int( name ), signal.SIGKILL )
+                killed.append( int( name ) )
+        except OSError: continue
+    return sorted( killed )
 
 
 def configure( cli_path=None, cwd=None ):
@@ -799,6 +833,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         - under agy the system prompt and the user prompt are joined by AGY_PROMPT_JOIN and sent as one
           prompt, query_fn is not used, and the call runs in a worker thread so calls can overlap
         - under agy the reasoning level is part of the model id, so thinking must resolve to "default"
+        - a Claude Code call's environment carries CALL_TAG_ENV set to a random tag, which a timeout or a failure uses to end the call's child processes
 
     Raises:
         - ValueError if model is empty, thinking is not one of THINKING_SETTINGS, or thinking resolves
@@ -808,7 +843,8 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
           seen before the call costs nothing against a cap; one that happens while the call runs is
           found after the charge
         - CallBudgetExceeded if the model has used its cap; nothing is contacted
-        - ModelCallError if the call raises, times out, ends in an error result, or returns no text
+        - ModelCallTimeout, a ModelCallError, if the Claude Code call runs past timeout_seconds; every process carrying the call's tag is killed first
+        - ModelCallError if the call raises, times out, ends in an error result, or returns no text; a call that raised has its tagged processes killed too
     """
     if not model: raise ValueError( "model id is required: the harness has no default model" )
     if thinking not in THINKING_SETTINGS: raise ValueError( f"thinking must be one of {THINKING_SETTINGS}, got {thinking!r}" )
@@ -827,6 +863,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         return text
     _charge( model )
     query_fn = sdk_query if query_fn is None else query_fn
+    tag      = uuid.uuid4().hex[ :16 ]
     extra    = { "thinking": { "type": "disabled" } } if thinking == "off" else {}
     options  = ClaudeAgentOptions(
         model           = model,
@@ -838,6 +875,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         cwd             = CWD if CWD is not None else cu.get_project_root(),
         setting_sources = list( SETTING_SOURCES ),
         extra_args      = dict( ISOLATION_ARGS ),
+        env             = { CALL_TAG_ENV: tag },
         **extra,
     )
     parts = []
@@ -859,8 +897,10 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
     except ModelCallError:
         raise
     except asyncio.TimeoutError as e:
-        raise ModelCallError( f"model call to {model} timed out after {timeout_seconds}s" ) from e
+        kill_tagged_processes( tag )
+        raise ModelCallTimeout( f"model call to {model} timed out after {timeout_seconds}s" ) from e
     except Exception as e:
+        kill_tagged_processes( tag )
         raise ModelCallError( f"model call to {model} failed: {e}" ) from e
     text = "".join( parts ).strip()
     if not text: raise ModelCallError( f"model call to {model} returned no text" )
