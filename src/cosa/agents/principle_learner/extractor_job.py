@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.prediction_engine.episode_view import episode_view, revealed_at
 from cosa.agents.prediction_engine.history_derive import attribution_tier, derive_answer
+from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt, parse_reply
@@ -35,7 +36,6 @@ SESSION_ID         = "principle-extractor"
 MODEL_KEY          = "prediction learner extractor model"
 TIMEOUT_KEY        = "prediction learner extractor timeout seconds"
 ENCODER_MODEL_KEY  = "local embedding prose model name"
-ENCODER_RECIPE     = "statement-rationale-v1"
 OWNER_SOURCE       = "ui"
 PROBE_SYSTEM       = "Answer with the single word ok."
 PROBE_QUESTION     = "Are you there?"
@@ -49,9 +49,9 @@ def encoder_version():
         - the INI file carries the prose embedding model name
 
     Ensures:
-        - returns "<model name>:<recipe>", the string stored in encoder_version
+        - returns "<model name>:<recipe>", the string stored in encoder_version, built by principle_retrieval.encoder_version_of
     """
-    return f"{ConfigurationManager( env_var_name='LUPIN_CONFIG_MGR_CLI_ARGS' ).get_required( ENCODER_MODEL_KEY )}:{ENCODER_RECIPE}"
+    return encoder_version_of( ConfigurationManager( env_var_name='LUPIN_CONFIG_MGR_CLI_ARGS' ).get_required( ENCODER_MODEL_KEY ) )
 
 
 def default_embed( text ):

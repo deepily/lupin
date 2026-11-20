@@ -35,7 +35,7 @@ from cosa.rest.postgres_models import Notification, PredictionArmForecast, Predi
 T0       = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 RECIPIENT = uuid.UUID( "00000000-0000-4000-8000-0000000000aa" )
 SENDER   = "claude.code@lupin.deepily.ai#ab12cd34"
-ENCODER  = "model-x|statement-and-rationale-v1"
+ENCODER  = "model-x:statement-rationale-v1"
 EXTRACT  = "sonnet|v1"
 
 
