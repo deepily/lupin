@@ -1,0 +1,339 @@
+{
+  "arms": {
+    "header": "per-field on, header alignment only (595018312)",
+    "labels": "UNMERGED: per-field on with header then label alignment; commit 9eff4208d, dropped, so this tree has no label-alignment switch",
+    "off": "both switches off (the frozen baseline control)"
+  },
+  "cohort_asks": 1302,
+  "cohort_sha256_all_ids": "7b98474eebaa96b793ed36612a1215c9b9c41ad2878a97fb82f937656b0c82b2",
+  "diagnostics": {
+    "best_label_set_jaccard_per_card_field_and_neighbour_card": {
+      "(0,0.25)": 32,
+      "0": 4598,
+      ">=0.75": 97,
+      "[0.25,0.5)": 17,
+      "[0.5,0.75)": 2
+    },
+    "forecast_outcome_header_alignment_all_723_mc_asks": {
+      "cbr_majority_vote": 23,
+      "cold_start/no_field_candidates": 693,
+      "cold_start/no_similar_cases": 7
+    },
+    "how": "driver script and probes were run from the seat scratchpad; the cohort is src/conf/prediction-before-replayable-ids.txt read through retune_run.read_cohort and restrict_to_ids; control: switch off reproduces 14 of 176 final multiple-choice correct",
+    "measured": "20 Nov 2026, seat tree on 595018312 plus the label-alignment commit, replay over the 1302 frozen replayable asks (723 multiple choice)",
+    "neighbour_header_overlap": {
+      "neighbour_cards_read": 3509,
+      "sharing_a_header_with_the_asking_card": 101
+    }
+  },
+  "facts": {
+    "answer_source_null_rows": 0,
+    "database": "lupin_db_dev",
+    "db_role": "lupin_host",
+    "only_ids_count": 1302,
+    "only_ids_file": "src/conf/prediction-before-replayable-ids.txt",
+    "only_ids_sha256": "b3b81754c8796be05c9e5cb540ae828887f98f890b8f8ccfdde42f1e9b47373a",
+    "prediction_decisions_rows": 3914,
+    "read_at": "2026-11-20 17:08:51.572715+00:00"
+  },
+  "final": {
+    "answered_asks": {
+      "header": 16,
+      "labels": 16,
+      "off": 15
+    },
+    "per_field": {
+      "header": {
+        "abstained": 1,
+        "asks": 176,
+        "asks_all_answered_fields_exact": 14,
+        "asks_no_forecast": 160,
+        "asks_with_forecast": 16,
+        "fields": 17,
+        "fields_answered": 16,
+        "fields_exact": 14,
+        "fields_scored": 15,
+        "other_abstained": 1,
+        "other_write_in": 2
+      },
+      "labels": {
+        "abstained": 1,
+        "asks": 176,
+        "asks_all_answered_fields_exact": 14,
+        "asks_no_forecast": 160,
+        "asks_with_forecast": 16,
+        "fields": 17,
+        "fields_answered": 16,
+        "fields_exact": 14,
+        "fields_scored": 15,
+        "other_abstained": 1,
+        "other_write_in": 2
+      },
+      "off": {
+        "abstained": 0,
+        "asks": 176,
+        "asks_all_answered_fields_exact": 14,
+        "asks_no_forecast": 161,
+        "asks_with_forecast": 15,
+        "fields": 15,
+        "fields_answered": 15,
+        "fields_exact": 14,
+        "fields_scored": 15,
+        "other_abstained": 0,
+        "other_write_in": 0
+      }
+    },
+    "strict_paired": {
+      "header_vs_off": {
+        "arm": "header",
+        "asks_replayed": 176,
+        "baseline": "off",
+        "baseline_correct": 14,
+        "baseline_interval": [
+          0.04797264095437627,
+          0.12908029794799752
+        ],
+        "baseline_only_right": 0,
+        "engine_correct": 14,
+        "engine_interval": [
+          0.04797264095437627,
+          0.12908029794799752
+        ],
+        "engine_only_right": 0,
+        "families": 1201,
+        "floor_met": false,
+        "mcnemar": {
+          "b": 0,
+          "c": 0,
+          "n_discordant": 0,
+          "p_value": 1.0,
+          "scipy_version": "1.17.1",
+          "statistic": 0,
+          "test": "mcnemar_exact"
+        },
+        "not_replayable": 0,
+        "operational_floor": 10,
+        "unrebuildable_cases": 0,
+        "verdict": "not decisive"
+      },
+      "labels_vs_header": {
+        "arm": "labels",
+        "asks_replayed": 176,
+        "baseline": "header",
+        "baseline_correct": 14,
+        "baseline_interval": [
+          0.04797264095437627,
+          0.12908029794799752
+        ],
+        "baseline_only_right": 0,
+        "engine_correct": 14,
+        "engine_interval": [
+          0.04797264095437627,
+          0.12908029794799752
+        ],
+        "engine_only_right": 0,
+        "families": 1201,
+        "floor_met": false,
+        "mcnemar": {
+          "b": 0,
+          "c": 0,
+          "n_discordant": 0,
+          "p_value": 1.0,
+          "scipy_version": "1.17.1",
+          "statistic": 0,
+          "test": "mcnemar_exact"
+        },
+        "not_replayable": 0,
+        "operational_floor": 10,
+        "unrebuildable_cases": 0,
+        "verdict": "not decisive"
+      },
+      "labels_vs_off": {
+        "arm": "labels",
+        "asks_replayed": 176,
+        "baseline": "off",
+        "baseline_correct": 14,
+        "baseline_interval": [
+          0.04797264095437627,
+          0.12908029794799752
+        ],
+        "baseline_only_right": 0,
+        "engine_correct": 14,
+        "engine_interval": [
+          0.04797264095437627,
+          0.12908029794799752
+        ],
+        "engine_only_right": 0,
+        "families": 1201,
+        "floor_met": false,
+        "mcnemar": {
+          "b": 0,
+          "c": 0,
+          "n_discordant": 0,
+          "p_value": 1.0,
+          "scipy_version": "1.17.1",
+          "statistic": 0,
+          "test": "mcnemar_exact"
+        },
+        "not_replayable": 0,
+        "operational_floor": 10,
+        "unrebuildable_cases": 0,
+        "verdict": "not decisive"
+      }
+    }
+  },
+  "final_size": 391,
+  "measured_on_commits": {
+    "header": "per-field phase 7 as reviewed (215154eee, rebased since as 0fbaf4265)",
+    "labels": "9eff4208d, unmerged",
+    "off": "the frozen baseline control"
+  },
+  "replayable": 1302,
+  "tune": {
+    "answered_asks": {
+      "header": 7,
+      "labels": 9,
+      "off": 9
+    },
+    "per_field": {
+      "header": {
+        "abstained": 0,
+        "asks": 547,
+        "asks_all_answered_fields_exact": 7,
+        "asks_no_forecast": 540,
+        "asks_with_forecast": 7,
+        "fields": 7,
+        "fields_answered": 7,
+        "fields_exact": 7,
+        "fields_scored": 7,
+        "other_abstained": 0,
+        "other_write_in": 0
+      },
+      "labels": {
+        "abstained": 3,
+        "asks": 547,
+        "asks_all_answered_fields_exact": 8,
+        "asks_no_forecast": 538,
+        "asks_with_forecast": 9,
+        "fields": 12,
+        "fields_answered": 9,
+        "fields_exact": 8,
+        "fields_scored": 8,
+        "other_abstained": 3,
+        "other_write_in": 4
+      },
+      "off": {
+        "abstained": 0,
+        "asks": 547,
+        "asks_all_answered_fields_exact": 9,
+        "asks_no_forecast": 538,
+        "asks_with_forecast": 9,
+        "fields": 9,
+        "fields_answered": 9,
+        "fields_exact": 9,
+        "fields_scored": 9,
+        "other_abstained": 0,
+        "other_write_in": 0
+      }
+    },
+    "strict_paired": {
+      "header_vs_off": {
+        "arm": "header",
+        "asks_replayed": 547,
+        "baseline": "off",
+        "baseline_correct": 9,
+        "baseline_interval": [
+          0.008679861040005517,
+          0.030971219086488366
+        ],
+        "baseline_only_right": 2,
+        "engine_correct": 7,
+        "engine_interval": [
+          0.006212433977250546,
+          0.026177028607666734
+        ],
+        "engine_only_right": 0,
+        "families": 1201,
+        "floor_met": false,
+        "mcnemar": {
+          "b": 0,
+          "c": 2,
+          "n_discordant": 2,
+          "p_value": 0.5,
+          "scipy_version": "1.17.1",
+          "statistic": 0,
+          "test": "mcnemar_exact"
+        },
+        "not_replayable": 0,
+        "operational_floor": 10,
+        "unrebuildable_cases": 0,
+        "verdict": "not decisive"
+      },
+      "labels_vs_header": {
+        "arm": "labels",
+        "asks_replayed": 547,
+        "baseline": "header",
+        "baseline_correct": 7,
+        "baseline_interval": [
+          0.006212433977250546,
+          0.026177028607666734
+        ],
+        "baseline_only_right": 0,
+        "engine_correct": 8,
+        "engine_interval": [
+          0.007429050893883264,
+          0.028591220461822317
+        ],
+        "engine_only_right": 1,
+        "families": 1201,
+        "floor_met": false,
+        "mcnemar": {
+          "b": 1,
+          "c": 0,
+          "n_discordant": 1,
+          "p_value": 1.0,
+          "scipy_version": "1.17.1",
+          "statistic": 0,
+          "test": "mcnemar_exact"
+        },
+        "not_replayable": 0,
+        "operational_floor": 10,
+        "unrebuildable_cases": 0,
+        "verdict": "not decisive"
+      },
+      "labels_vs_off": {
+        "arm": "labels",
+        "asks_replayed": 547,
+        "baseline": "off",
+        "baseline_correct": 9,
+        "baseline_interval": [
+          0.008679861040005517,
+          0.030971219086488366
+        ],
+        "baseline_only_right": 1,
+        "engine_correct": 8,
+        "engine_interval": [
+          0.007429050893883264,
+          0.028591220461822317
+        ],
+        "engine_only_right": 0,
+        "families": 1201,
+        "floor_met": false,
+        "mcnemar": {
+          "b": 0,
+          "c": 1,
+          "n_discordant": 1,
+          "p_value": 1.0,
+          "scipy_version": "1.17.1",
+          "statistic": 0,
+          "test": "mcnemar_exact"
+        },
+        "not_replayable": 0,
+        "operational_floor": 10,
+        "unrebuildable_cases": 0,
+        "verdict": "not decisive"
+      }
+    }
+  },
+  "yes_no_forecasts_identical_off_and_on": true
+}
