@@ -111,7 +111,8 @@ def test_the_revision_follows_the_field_forecasts_revision_and_lies_on_the_singl
     script = _script()
     assert script.get_revision( _REVISION ).down_revision == _PARENT
     heads = script.get_heads()
-    assert heads == [ _REVISION ], f"the chain must stay linear and end here, got heads {heads}"
+    assert len( heads ) == 1, f"the chain must stay linear, got heads {heads}"
+    assert _REVISION in { r.revision for r in script.walk_revisions( base="base", head=heads[ 0 ] ) }
 
 
 def test_the_model_column_is_a_nullable_boolean_with_no_default():

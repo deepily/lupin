@@ -173,6 +173,24 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         self.session.flush()
         return prediction
 
+    def set_three_way_shadow( self, notification_id: str, stance: Dict[str, Any] ) -> bool:
+        """
+        Store the three-way challenger's stance on an ask's forecast row.
+
+        Requires:
+            - notification_id: UUID string
+            - stance: the JSON-able dict to store
+
+        Ensures:
+            - sets three_way_shadow on the row and returns True
+            - returns False when the notification has no row
+            - changes no other column
+        """
+        row = self.get_by_notification_id( notification_id )
+        if row is None: return False
+        row.three_way_shadow = stance
+        return True
+
     def get_by_notification_id( self, notification_id: str, for_update: bool = False ) -> Optional[PredictionLog]:
         """
         Get prediction log entry by notification ID.
