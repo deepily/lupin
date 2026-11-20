@@ -160,7 +160,45 @@ class TestNeighbours:
         assert len( got ) == 10 and [ n[ "case" ][ "id" ] for n in got ] == [ f"c{i}" for i in range( 10 ) ]
 
 
+class TestPinnedConstants:
+    """
+    The numbers that set the challenger's behaviour.
+
+    Each is pinned at a worked value, or on both sides of its edge.
+    """
+
+    def test_the_prior_strength_is_two( self ):
+        # one no at cosine 1 and age 0, nothing at family or project level: overall prior no 2/4, yes and neither 1/4;
+        # probability = ( count + strength * prior ) / ( total + strength ) with strength 2
+        got = tw.three_way_forecast( _ask( sender_id=None ), [ _case( "a", "no", title="Elsewhere" ) ], HL )[ "probabilities" ]
+        assert got == { "no": pytest.approx( 2 / 3 ), "yes": pytest.approx( 1 / 6 ), "neither": pytest.approx( 1 / 6 ) }
+
+    def test_a_case_at_exactly_the_cosine_floor_is_a_neighbour_and_one_just_under_is_not( self ):
+        ask = _ask( vector=( 1.0, 0.0, 0.0, 0.0 ) )
+        at  = _case( "at", "no", vector=( 1.0, 1.0, 1.0, 1.0 ) )          # dot 1, norms 1 and 2: cosine exactly 0.5
+        under = _case( "under", "no", vector=( 1.0, 1.0, 1.0, 1.0001 ) )  # cosine 0.49998750
+        assert [ n[ "case" ][ "id" ] for n in tw.neighbours_of( ask, [ at ], HL ) ] == [ "at" ]
+        assert tw.neighbours_of( ask, [ under ], HL ) == []
+
+    def test_copies_are_judged_either_side_of_the_duplicate_edge( self ):
+        # cosine 0.9806 to the first is a copy and shares its vote; 0.9701 is not. The exact 0.98 edge is not pinned:
+        # no pair of short vectors gives it without rounding, so only both sides of it are.
+        near = tw.neighbours_of( _ask(), [ _case( "a", "no", vector=( 1.0, 0.0 ) ), _case( "b", "no", vector=( 1.0, 0.2 ) ) ], HL )
+        far  = tw.neighbours_of( _ask(), [ _case( "a", "no", vector=( 1.0, 0.0 ) ), _case( "b", "no", vector=( 1.0, 0.25 ) ) ], HL )
+        assert [ n[ "independence" ] for n in near ] == [ 1.0, pytest.approx( 1 / 2 ) ]
+        assert [ n[ "independence" ] for n in far ] == [ 1.0, 1.0 ]
+
+
 class TestQualifier:
+
+    def test_the_qualifier_follows_weight_not_cosine( self ):
+        # the closest neighbour is 56 days old, so a fresher, less similar one outweighs it
+        cases = [ _case( "close-old", "no [comment: stale]", vector=( 1.0, 0.0 ), days_ago=56 ),
+                  _case( "near-new", "no [comment: fresh]", vector=( 1.0, 0.6 ), days_ago=0 ) ]
+        got = tw.neighbours_of( _ask(), cases, HL )
+        assert got[ 0 ][ "case" ][ "id" ] == "close-old" and got[ 0 ][ "cosine" ] > got[ 1 ][ "cosine" ]
+        assert got[ 1 ][ "weight" ] > got[ 0 ][ "weight" ]
+        assert tw.predict_qualifier( got, "no" ) == "fresh"
 
     def test_the_heaviest_neighbour_of_the_predicted_stance_that_wrote_one_gives_it( self ):
         cases = [ _case( "a", "no [comment: light]", vector=( 1.0, 0.5 ) ), _case( "b", "no [comment: heavy]", vector=( 1.0, 0.0 ) ),

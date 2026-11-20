@@ -55,6 +55,12 @@ class TestBuildReport:
         assert got[ "arms" ][ ENGINE_ARM ][ "counts" ] == {
             "genuine_no": 1, "genuine_neither": 0, "false_alarms": 0, "no_forecast": 0, "answered_no": 6, "answered_neither": 2 }
 
+    def test_a_yes_answer_forecast_neither_is_a_false_alarm_like_a_forecast_no( self ):
+        answers = [ "yes", "yes" ]
+        run = _run( answers, [ "neither", "no" ], [ "yes", "yes" ], [ False, False ], [ True, True ] )
+        counts = report.build_report( run, _asks( answers ), FLOOR )[ "arms" ][ report.THREE_WAY_ARM ][ "counts" ]
+        assert counts[ "false_alarms" ] == 2 and counts[ "genuine_no" ] == 0 and counts[ "genuine_neither" ] == 0
+
     def test_an_arm_with_no_forecast_is_counted_and_never_found_or_falsely_raised( self ):
         answers = [ "no", "yes" ]
         run = _run( answers, [ None, None ], [ "yes", "yes" ], [ False, False ], [ False, True ] )
