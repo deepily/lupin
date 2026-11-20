@@ -260,6 +260,14 @@ def test_a_repeat_of_the_same_prompts_is_a_ledger_read_and_makes_no_call( tmp_pa
     assert asyncio.run( c0.complete( "haiku-x", "SYS", "USER2" ) ) == "second" and len( calls ) == 3
 
 
+def test_the_model_is_part_of_the_ledger_key_so_an_opus_twin_never_reads_haikus_reply( tmp_path ):
+    calls = []
+    c0    = baseline( tmp_path, replying( "haiku reply", "opus reply", calls=calls ) )
+    assert asyncio.run( c0.complete( "haiku-x", "SYS", "USER" ) ) == "haiku reply"
+    assert asyncio.run( c0.complete( "opus-x", "SYS", "USER" ) ) == "opus reply" and len( calls ) == 2, "same prompts, another model: a second call"
+    assert asyncio.run( c0.complete( "haiku-x", "SYS", "USER" ) ) == "haiku reply" and len( calls ) == 2, "each model still reads its own"
+
+
 def test_a_ledger_that_outlives_the_process_answers_a_fresh_baseline_without_a_call( tmp_path ):
     calls = []
     asyncio.run( baseline( tmp_path, replying( "kept", calls=calls ) ).complete( "haiku-x", "S", "U" ) )

@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 import pytest
+from claude_agent_sdk import ResultMessage
 
 from cosa.repo.doc_lint import model_transport as mt
 
@@ -96,3 +97,15 @@ def test_every_call_carries_a_fresh_random_tag():
     for _ in range( 2 ):
         with pytest.raises( mt.ModelCallError ): asyncio.run( mt.complete( "m", "s", "u", query_fn=noting ) )
     assert len( set( seen ) ) == 2 and all( len( tag ) == 16 for tag in seen )
+
+
+def test_an_error_result_kills_the_child_too():
+    children = []
+
+    async def refusing( prompt, options ):
+        children.append( subprocess.Popen( SLEEPER, env=dict( os.environ, **options.env ) ) )
+        yield ResultMessage( subtype="error_during_execution", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1, session_id="s", result="AUTH api error" )
+
+    with pytest.raises( mt.ModelCallError, match="ended in an error result" ):
+        asyncio.run( mt.complete( "m", "sys", "user", query_fn=refusing ) )
+    assert children[ 0 ].wait( timeout=5 ) == -9

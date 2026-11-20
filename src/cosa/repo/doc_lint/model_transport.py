@@ -844,7 +844,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
           found after the charge
         - CallBudgetExceeded if the model has used its cap; nothing is contacted
         - ModelCallTimeout, a ModelCallError, if the Claude Code call runs past timeout_seconds; every process carrying the call's tag is killed first
-        - ModelCallError if the call raises, times out, ends in an error result, or returns no text; a call that raised has its tagged processes killed too
+        - ModelCallError if the call raises, times out, ends in an error result, or returns no text; a call that raised or ended in an error result has its tagged processes killed too
     """
     if not model: raise ValueError( "model id is required: the harness has no default model" )
     if thinking not in THINKING_SETTINGS: raise ValueError( f"thinking must be one of {THINKING_SETTINGS}, got {thinking!r}" )
@@ -895,6 +895,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
     try:
         await asyncio.wait_for( collect(), timeout_seconds )
     except ModelCallError:
+        kill_tagged_processes( tag )
         raise
     except asyncio.TimeoutError as e:
         kill_tagged_processes( tag )
