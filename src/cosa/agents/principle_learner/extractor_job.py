@@ -17,7 +17,7 @@ import uuid
 from contextlib import contextmanager
 
 from cosa.agents.agentic_job_base import AgenticJobBase
-from cosa.agents.prediction_engine.episode_view import episode_view, revealed_at
+from cosa.agents.prediction_engine.episode_view import episode_view, revealed_at, revealed_draft
 from cosa.agents.prediction_engine.history_derive import attribution_tier, derive_answer
 from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
 from cosa.agents.prediction_engine.review_card import is_review_card
@@ -253,7 +253,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         entries = field_answers( derive_answer( raw )[ 0 ] )
         if not entries: return self._summary( "skipped_nothing_to_read" )
         episode    = episode_view( session, row.id )
-        draft      = episode[ "exposure" ][ "draft_at_reveal" ]
+        draft      = revealed_draft( session, row.id )
         reveal     = revealed_at( session, row.id )
         influenced = []
         for entry in entries:

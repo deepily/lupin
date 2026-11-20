@@ -324,7 +324,7 @@ def _log( db, notification_id, **extra ):
     db.commit()
 
 
-def test_exposure_reads_fold_opened_at_once_it_is_known_and_leaves_the_draft_unknown( db ):
+def test_exposure_reads_fold_opened_at_once_it_is_known_and_leaves_a_missing_draft_unknown( db ):
     seen   = _add( db, 0, response_requested=True, response_type="yes_no" )
     unseen = _add( db, 1, response_requested=True, response_type="yes_no" )
     opened = T0 + timedelta( minutes=7 )
@@ -465,3 +465,24 @@ def _fill_from_fixture( db ):
         row.pop( "answer_status_at_target", None )
         db.add( Notification( **row ) )
     db.commit()
+
+
+def test_a_stored_draft_is_returned_with_its_reveal_and_a_draft_stored_after_as_of_is_not( db ):
+    seen   = _add( db, 0, response_requested=True, response_type="yes_no" )
+    opened = T0 + timedelta( minutes=7 )
+    draft  = { "value": "half typed" }
+    _log( db, seen, fold_opened_at=opened, draft_at_reveal=draft )
+    known  = ev.episode_view( db, seen, as_of=opened, limit=50 )[ "exposure" ]
+    assert known == { "revealed_at": opened.isoformat(), "draft_at_reveal": draft }
+    early  = ev.episode_view( db, seen, as_of=opened - timedelta( seconds=1 ), limit=50 )[ "exposure" ]
+    assert early == { "revealed_at": None, "draft_at_reveal": None }
+    assert ev.revealed_draft( db, uuid.UUID( seen ) ) == draft
+
+
+def test_revealed_draft_is_none_with_no_log_row_no_reveal_or_no_draft( db ):
+    nolog = _add( db, 0 )
+    plain = _add( db, 1 )
+    nodr  = _add( db, 2 )
+    _log( db, plain, draft_at_reveal={ "value": "x" } )
+    _log( db, nodr, fold_opened_at=T0 + timedelta( minutes=1 ) )
+    assert [ ev.revealed_draft( db, uuid.UUID( n ) ) for n in ( nolog, plain, nodr ) ] == [ None, None, None ]

@@ -509,3 +509,20 @@ def test_the_summary_reads_the_rows_this_module_writes_and_names_the_cap_and_the
     with factory() as db: summary = { row[ "arm" ]: row for row in arm_summary.per_arm_summary( db ) }[ "B1" ]
     assert ( summary[ "forecasts" ], summary[ "answered" ], summary[ "timely" ], summary[ "capped" ], summary[ "no_row" ] ) == ( 2, 2, 1, 1, 1 )
     assert missing not in [ str( r.notification_id ) for r in rows( factory ) ]
+
+
+def test_no_forecast_prompt_renders_the_owners_draft_even_when_the_episode_is_read_after_the_reveal( factory, monkeypatch ):
+    draft_marker = "UNAIDED-DRAFT-TEXT-0451"
+    nid    = ask( factory, response_type="open_ended" )
+    with factory() as db:
+        db.add( PredictionLog( id=uuid.uuid4(), notification_id=uuid.UUID( nid ), response_type="open_ended", category="c", prediction_strategy="s", predicted_at=T0,
+                               prediction_confidence=0.5, similar_case_count=0, fold_opened_at=T0 + timedelta( minutes=1 ), draft_at_reveal={ "value": draft_marker } ) )
+        db.commit()
+    late = T0 + timedelta( minutes=5 )
+    with factory() as db: assert ev.episode_view( db, nid, as_of=late )[ "exposure" ][ "draft_at_reveal" ] == { "value": draft_marker }
+    monkeypatch.setattr( pf, "episode_view", lambda session, notification_id: ev.episode_view( session, notification_id, as_of=late ) )
+    principle( factory )
+    for use_principles in ( False, True ):
+        episode, _, block, system, user = pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5, use_principles=use_principles )
+        assert episode[ "exposure" ][ "draft_at_reveal" ] == { "value": draft_marker }
+        assert draft_marker not in pf.card_text( episode ) and draft_marker not in block[ "text" ] and draft_marker not in system and draft_marker not in user

@@ -384,6 +384,17 @@ def test_an_answer_after_a_reveal_with_no_draft_is_used_and_reported_as_possibly
     assert out[ "possibly_influenced" ] == [ "$answer" ] and '"possibly_influenced": true' in model.sent[ 0 ] and out[ "status" ] == "extracted"
 
 
+def test_an_answer_after_a_reveal_that_came_after_the_ask_time_uses_the_stored_draft( db ):
+    ask = _ask( db, answer="no" )
+    db.add( PredictionLog( id=uuid.uuid4(), notification_id=uuid.UUID( ask ), response_type="yes_no", category="c", prediction_strategy="s", predicted_at=T0,
+                           prediction_confidence=0.5, similar_case_count=0, fold_opened_at=T0 + timedelta( seconds=30 ),
+                           draft_at_reveal={ "value": "unaided draft text" } ) )
+    db.commit()
+    model  = Model( _reply( _result( hypotheses=[ _hyp() ] ) ) )
+    out, _ = _run( db, ask, model )
+    assert out[ "possibly_influenced" ] == [] and "unaided draft text" in model.sent[ 0 ] and out[ "status" ] == "extracted"
+
+
 def test_an_answer_with_no_reveal_is_not_marked_influenced( db ):
     out, _ = _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ) )
     assert out[ "possibly_influenced" ] == []
