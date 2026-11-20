@@ -213,6 +213,15 @@ def test_a_backlog_that_the_runs_do_not_shrink_reads_stalled_not_a_bare_null( tm
     assert st.zero_text( unknown_drain ) == "not at the present rates" and st.zero_text( nothing_left ) == "not at the present rates"
 
 
+def test_an_unknown_inflow_counts_as_zero_in_the_stalled_reading_and_never_raises( tmp_path ):
+    snap     = snapshot_of( tmp_path )
+    base     = { **snap, "projected_zero": None, "backlog": { **snap[ "backlog" ], "total": 700, "inflow_per_day": None } }
+    no_drain = { **base, "drain": { "judged_per_day": 0 } }
+    some     = { **base, "drain": { "judged_per_day": 100 } }
+    assert st.zero_text( no_drain ) == "stalled", "nothing cleared and nothing known to arrive is still stalled"
+    assert st.zero_text( some ) == "not at the present rates", "a clearing rate above 0 with no inflow is not stalled"
+
+
 def test_the_folder_of_a_root_is_the_runs_folder_under_the_code_health_data_folder_not_io( tmp_path ):
     folder = st.folder_of( tmp_path )
     assert folder == tmp_path / "fleet-data" / tmp_path.name / "code-health" / "duplicate-check-daily"
