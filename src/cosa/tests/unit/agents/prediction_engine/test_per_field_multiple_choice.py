@@ -446,3 +446,44 @@ def test_record_outcome_scores_per_field_when_the_switch_is_on( engine, monkeypa
     result = PredictionResult( "multiple_choice", "c", "cbr_majority_vote", predicted_value={ "answers": { "Approach": "Proceed" } }, confidence=0.9 )
     engine.record_outcome( str( uuid.uuid4() ), result, json.dumps( { "answers": { "Approach": "typed", "Tags": [ "A" ] } } ), "multiple_choice", None, CURRENT )
     assert seen[ "accuracy_match" ] is None and seen[ "accuracy_detail" ][ "other_write_in" ] == 1
+
+
+# ---- review fixes: coverage of an answered typed Other, the half tie, headers that normalise alike ----
+
+def test_an_answered_field_that_turned_out_to_be_a_typed_other_is_outside_coverage():
+    match, detail = compare_multiple_choice(
+        { "answers": { "Approach": "Proceed", "Tags": [ "A" ] } },
+        { "answers": { "Approach": "typed", "Tags": [ "A" ] } }, CURRENT, per_field=True )
+    approach = detail[ "fields" ][ 0 ]
+    assert approach[ "outcome" ] == "other_write_in" and approach[ "abstained" ] is False
+    assert ( detail[ "abstained" ], detail[ "other_write_in" ], detail[ "total" ], detail[ "field_coverage" ] ) == ( 0, 1, 1, 0.5 )
+
+
+def test_a_multi_select_option_chosen_by_exactly_half_of_its_offerers_is_included( engine, monkeypatch ):
+    cases = [ _case( "n1", { "Approach": "Proceed", "Tags": [ "A", "B" ] } ), _case( "n2", { "Approach": "Proceed", "Tags": [ "A" ] } ) ]
+    _wire( engine, monkeypatch, cases, { "n1": CURRENT, "n2": CURRENT } )
+    assert _predict( engine ).fields[ "Tags" ][ "candidate" ] == [ "A", "B" ]      # B: 1 of 2 = 0.5, the boundary is in
+
+
+def test_a_multi_select_option_just_under_half_is_left_out( engine, monkeypatch ):
+    cases = [ _case( "n1", { "Approach": "Proceed", "Tags": [ "A", "B" ] } ), _case( "n2", { "Approach": "Proceed", "Tags": [ "A" ] } ),
+              _case( "n3", { "Approach": "Proceed", "Tags": [ "A" ] } ) ]
+    _wire( engine, monkeypatch, cases, { n: CURRENT for n in ( "n1", "n2", "n3" ) } )
+    assert _predict( engine ).fields[ "Tags" ][ "candidate" ] == [ "A" ]           # B: 1 of 3
+
+
+def test_typed_other_in_exactly_half_of_the_neighbours_abstains_a_single_select( engine, monkeypatch ):
+    cases = [ _case( "n1", { "Approach": "typed", "Tags": [ "A" ] } ), _case( "n2", { "Approach": "Proceed", "Tags": [ "A" ] } ) ]
+    _wire( engine, monkeypatch, cases, { "n1": CURRENT, "n2": CURRENT } )
+    assert _predict( engine ).fields[ "Approach" ][ "candidate" ] == "Proceed"     # other mass 1 does not exceed the winner's 1
+
+
+def test_two_headers_that_normalise_alike_both_stay_in_the_options_and_in_fields( engine, monkeypatch ):
+    twin = _card( ( "Mode", False, [ "x", "y" ] ), ( "mode:", False, [ "p", "q" ] ), ( "Tags", True, [ "A", "B", "C" ] ) )
+    parsed = PredictionEngine._extract_valid_options( twin, normalise=True )
+    assert [ info[ "header" ] for info in parsed.values() ] == [ "Mode", "mode:", "Tags" ] and all( parsed[ k ][ "ambiguous" ] for k in list( parsed )[ :2 ] )
+    cases = [ _case( "n1", { "Mode": "x", "Tags": [ "A" ] } ) ]
+    _wire( engine, monkeypatch, cases, { "n1": twin } )
+    result = _predict( engine, twin )
+    assert result.fields[ "Mode" ] == { "reason": "ambiguous_labels" } and result.fields[ "mode:" ] == { "reason": "ambiguous_labels" }
+    assert result.fields[ "Tags" ][ "candidate" ] == [ "A" ] and result.metadata[ "abstained" ] == [ "Mode", "mode:" ]

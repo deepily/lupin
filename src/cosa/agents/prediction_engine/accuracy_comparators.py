@@ -328,7 +328,8 @@ def compare_multiple_choice( predicted, actual, response_options, per_field=Fals
           "total", so match and "matches" / "total" cover the fields the forecast answered and the
           answer chose from the offered labels
         - detail["other_write_in"] counts the other fields, detail["abstained"] the abstained ones,
-          and detail["field_coverage"] is the answered fields over all fields (0.0 for none)
+          and detail["field_coverage"] is the scored fields over all fields (0.0 for none), so an abstained field and
+          an answered field that turned out to be a typed Other are both outside it
         - a card with nothing left to score returns ( None, detail ), so it is not scored at all
         - a record's "abstained" is True for an abstained field, so an abstained Other is told from an answered one
     """
@@ -362,7 +363,7 @@ def compare_multiple_choice( predicted, actual, response_options, per_field=Fals
         "total"          : len( scored ),
         "other_write_in" : sum( 1 for f in fields if f[ "outcome" ] == FIELD_OUTCOME_OTHER_WRITE_IN ),
         "abstained"      : sum( 1 for f in fields if f[ "abstained" ] ),
-        "field_coverage" : round( sum( 1 for f in fields if not f[ "abstained" ] ) / len( fields ), 3 ),
+        "field_coverage" : round( len( scored ) / len( fields ), 3 ),
         "fields"         : fields,
     }
     if malformed: detail[ "schema_reason" ] = "malformed_schema"

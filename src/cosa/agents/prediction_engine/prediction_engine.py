@@ -634,7 +634,9 @@ class PredictionEngine:
             - with normalise True the keys are normalised headers, and each entry also carries
               "header" (as written), "by_label" ( { normalised label: [labels as written] } ) and
               "ambiguous", which is True when two headers normalise alike or two labels of the
-              field normalise alike, so no mapping through that field is safe
+              field normalise alike, so no mapping through that field is safe; headers that normalise
+              alike each keep an entry, the first under the shared key and the rest under keys that add a
+              NUL and a number, all of them ambiguous
 
         Expected input format:
             {"questions": [{"question": "...", "header": "...", "multi_select": bool,
@@ -668,8 +670,12 @@ class PredictionEngine:
                     for label in labels: by_label.setdefault( PredictionEngine._normalise_text( label ), [] ).append( label )
                     key       = PredictionEngine._normalise_text( header )
                     ambiguous = key in result or any( len( names ) > 1 for names in by_label.values() )
-                    result[ key ] = { "labels": labels, "multi_select": multi_select, "header": header,
-                                      "by_label": by_label, "ambiguous": ambiguous }
+                    entry     = { "labels": labels, "multi_select": multi_select, "header": header, "by_label": by_label, "ambiguous": ambiguous }
+                    if key in result:
+                        # Both headers stay in the result, so neither goes missing from fields; both are ambiguous
+                        result[ key ][ "ambiguous" ] = True
+                        key = f"{key}\x00{len( result )}"
+                    result[ key ] = entry
 
             return result if result else None
 
