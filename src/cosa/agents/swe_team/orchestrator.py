@@ -22,6 +22,7 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from .config import SweTeamConfig
+from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement
 from .state import (
     OrchestratorState,
     SweTeamState,
@@ -329,7 +330,7 @@ class SweTeamOrchestrator:
         if proxy_result and self.proxy:
             try:
                 proxy_would_approve = ( proxy_result.value == "approved" )
-                agreement           = ( proxy_would_approve == user_answer )
+                agreement           = forecast_agreement( proxy_result.value, user_answer )
                 if self.proxy.trust_tracker.trust_model == "blr":
                     # Row cfc7dd01: the BLR model learns only from decisions that carry features
                     self.proxy.trust_tracker.record_decision_with_features( proxy_result.category, agreement, question )
@@ -405,7 +406,7 @@ class SweTeamOrchestrator:
 
         Ensures:
             - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
-            - the row carries data_origin "organic"
+            - the row carries data_origin "organic" and its rule_agreement, which is separate from the trust success
             - failure is logged and never propagates
         """
         try:
@@ -423,6 +424,7 @@ class SweTeamOrchestrator:
                 "reason"          : proxy_result.reason or "",
                 "metadata_json"   : { "job_id": self.job_id, "user_answer": user_answer },
                 "data_origin"     : "organic",
+                "rule_agreement"  : rule_agreement( proxy_result.action, user_answer ),
             }
             with get_db() as session:
                 repo = ProxyDecisionRepository( session )

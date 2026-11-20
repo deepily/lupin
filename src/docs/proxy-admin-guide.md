@@ -16,6 +16,8 @@ This page is an index. The reference itself is in the parts below, in document o
 - [7. The Trust Feedback Loop](proxy-admin-guide/04-trust-feedback-loop.md#7-the-trust-feedback-loop)
 - [8. Quick Reference: API Endpoints](proxy-admin-guide/05-api-quick-reference.md#8-quick-reference-api-endpoints)
 - [9. Known Limitations](proxy-admin-guide/06-known-limitations-and-related-docs.md#9-known-limitations)
+- [10. The Separate Fields](proxy-admin-guide/07-fields-and-components.md#10-the-separate-fields)
+- [11. Components and Switches](proxy-admin-guide/07-fields-and-components.md#11-components-and-switches)
 - [Related Documentation](proxy-admin-guide/06-known-limitations-and-related-docs.md#related-documentation)
 
 ## Parts
@@ -28,3 +30,4 @@ This page is an index. The reference itself is in the parts below, in document o
 | [04-trust-feedback-loop.md](proxy-admin-guide/04-trust-feedback-loop.md) | trust feedback loop |
 | [05-api-quick-reference.md](proxy-admin-guide/05-api-quick-reference.md) | API quick reference |
 | [06-known-limitations-and-related-docs.md](proxy-admin-guide/06-known-limitations-and-related-docs.md) | known limitations, related docs |
+| [07-fields-and-components.md](proxy-admin-guide/07-fields-and-components.md) | the separate fields, the components table |

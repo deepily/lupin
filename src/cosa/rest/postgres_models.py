@@ -813,6 +813,9 @@ class ProxyDecision( Base ):
         - created_at defaults to current timestamp
         - ratification_state defaults to "not_required"
         - metadata stored as JSONB for extensibility
+        - rule_agreement is True when the human answer agrees with what `action` implies (act and suggest imply approval),
+          False when it does not, and NULL for a shadow or defer row and for a row nobody answered. It is separate from
+          success, which is the human answer agreeing with `decision_value`. This is Mr. Radio's reading of "rule", for Rick to confirm.
     """
     __tablename__ = "proxy_decisions"
 
@@ -906,6 +909,15 @@ class ProxyDecision( Base ):
         default="organic",
         server_default="organic",
         index=True
+    )
+
+    # Rule agreement, kept apart from "success" (phase 12). This is Mr. Radio's reading, for Rick to confirm:
+    # True when the human answer agrees with what `action` implies (act or suggest imply approval), False when it
+    # does not, NULL for a shadow or defer row and for a row nobody answered. Success is separate: the human
+    # answer agreeing with `decision_value`. The human answer itself stays on notifications.response_value.
+    rule_agreement: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True
     )
 
     # Timestamps
