@@ -5,11 +5,12 @@ pins:
   - lupin_mcp.duplicate_check_status.snapshot@fd0df99ce2
   - lupin_mcp.duplicate_check_status.job_summary@efcb70bb10
   - lupin_mcp.duplicate_check_status.write_job_summary@100e2842c2
-  - lupin_mcp.duplicate_check_status.note_of@d64275c6ec
+  - lupin_mcp.duplicate_check_status.note_of@567bfc0b2b
   - lupin_mcp.duplicate_check_status.number@0044f93728
-  - lupin_mcp.duplicate_check_status.render_html@97cb26c9e6
+  - lupin_mcp.duplicate_check_status.render_html@bb62f71817
   - lupin_mcp.duplicate_check_status.folder_of@75dee1c79a
   - lupin_mcp.duplicate_check_status.subdir_of@9c74e74620
+  - lupin_mcp.duplicate_check_status.zero_text@4b23a4e0f2
 ---
 # Duplicate check status: snapshot, summary and page
 The second half of `lupin_mcp.duplicate_check_status`. The rate and health functions it uses are in [[duplicate-check-status-rates]]; the history is in [[duplicate-check-run-history]].
@@ -22,6 +23,7 @@ The second half of `lupin_mcp.duplicate_check_status`. The rate and health funct
 - Its fix debt holds the rows queued for retry, the rows filed in the last finished run and the ledger's filed total. With `rows` (the store count of `live_rows_by_mark`) it adds the rows found and open by the filer's mark. It also adds the gap to the ledger's filed total. Without it those three are None, never a gap of 0.
 - A ledger line is cited as `code-health/duplicate-check-daily/runs.jsonl:<n>`. A `boot` trigger is named so. The reader works out health; the record has no health field.
 - `write_job_summary( folder, now, rows )` writes `job-summary.json` beside the ledger by temporary file and rename. So a reader sees the old file or the new one.
-- `note_of( line, snap )` is one sentence on a run: definitions judged, calls, the backlog left and the zero date. It returns None for a quiet run that judged nothing, made no call and left no backlog.
-- `render_html( snap )` makes one HTML page with no script and no outside file. It shows the backlog, the projected zero, the recent runs, the tokens by day and the installed schedule. Every history value is escaped.
+- `zero_text( snap )` is what the page and the note show for the projected zero. It returns the date when there is one. It returns `stalled` when work is left and the clearing rate, drain less inflow with an unknown inflow taken as 0, is not above 0. Otherwise it returns `not at the present rates`, the case where the backlog or the rate is unknown.
+- `note_of( line, snap )` is one sentence on a run: definitions judged, calls, the backlog left and the zero date. When `zero_text` says stalled, it reads `stalled, no zero at the present rates` instead of a date. It returns None for a quiet run that judged nothing, made no call and left no backlog.
+- `render_html( snap )` makes one HTML page with no script and no outside file. It shows the backlog, the projected zero (through `zero_text`), the recent runs, the tokens by day and the installed schedule. Every history value is escaped.
 - `number( value, spec )` formats a value or gives a dash for None. `folder_of( root )` is the run folder `duplicate-check-daily` under the code-health data folder of a project root. `subdir_of( folder )` names that code-health folder from the path, for the evidence label.

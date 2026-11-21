@@ -6,9 +6,10 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.personaBadge@71e95cfe51
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.abstractIndicator@1a884ebdef
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.abstractBlock@6b33186770
-  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.predictionHintBox@21bd3b5a05
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.predictionHintBox@449e2a737e
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.predictedText@0efb2d4413
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.appendAlwaysYes@18ed64f810
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredChrome.contextForecastLine@3b07598929
 ---
 # Action-required card chrome
 
@@ -24,6 +25,7 @@ Small builders for the badges, abstract and prediction hint that sit around an a
 - `predictionHintBox( item, vote, fold )` always returns a closed `details` fold titled "Forecast". A missing hint gives the `prediction-hint-cold` fold reading "Learning, no prediction yet".
 - A state other than `ready` shows its own text. `fold` says whether the fold was opened before, and is called when the reader opens it.
 - A ready hint shows the predicted value, the confidence with its metric and the strategy when there is one.
+- `contextForecastLine( responseType, forecast )` builds the line for the card's background Haiku forecast, a `div` with `data-testid="prediction-hint-context"` and `data-context-state` set to the state. It returns null when `forecast` is undefined, which is the display switch off. A ready forecast reads "Haiku forecast: <value> (<confidence>%)", the value worded as the hint words it. The states forecasting, unavailable and forecast_timed_out each read their own text, and an unknown state reads unavailable. `predictionHintBox` adds the line to the fold, cold or ready, when the hint carries a `context_forecast`.
 - `appendAlwaysYes( root, hint )` adds "Always yes would be right N of M times" when the hint has a rate.
 - `predictedText( responseType, value, qualifier )` capitalizes a non-empty `yes_no` string and adds the qualifier. It leaves other strings alone and turns other values into JSON.
 
