@@ -53,7 +53,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
 
     def log_shadow( self, notification_id, domain, category, question,
                     sender_id="", confidence=0.0, trust_level=1, reason="",
-                    metadata_json=None, data_origin="organic", rule_agreement=None ):
+                    metadata_json=None, data_origin="organic", rule_agreement=None, decision_value=None ):
         """
         Log a shadow decision (trust level 1: observe only, no action taken).
 
@@ -80,6 +80,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             metadata_json: Optional JSONB metadata
             data_origin: Provenance tag (organic, synthetic_seed, synthetic_generated)
             rule_agreement: True, False or None, as agreement.rule_agreement answers it
+            decision_value: the proxy's forecast, or None to leave the column empty as before
 
         Returns:
             Created ProxyDecision instance
@@ -90,6 +91,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             category        = category,
             question        = question,
             action          = "shadow",
+            decision_value  = decision_value,
             sender_id       = sender_id,
             confidence      = confidence,
             trust_level     = trust_level,

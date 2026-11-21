@@ -22,6 +22,7 @@ from cosa.agents.decision_proxy.config import (
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
     DEFAULT_TRUST_MODE,
+    shadow_forecast_recording_enabled,
 )
 from cosa.agents.decision_proxy.smart_router import SmartRouter
 from cosa.agents.prediction_engine.review_card import is_review_card
@@ -395,6 +396,7 @@ class DecisionResponder( BaseResponder ):
                         confidence      = result.confidence,
                         trust_level     = result.trust_level,
                         reason          = result.reason or "shadow mode",
+                        decision_value  = result.value if shadow_forecast_recording_enabled() else None,
                     )
                 else:
                     repo.log_decision(

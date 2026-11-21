@@ -47,6 +47,25 @@ TRUST_MODE_CHOICES = [ "shadow", "suggest", "active" ]
 DEFAULT_TRUST_MODE = "shadow"
 
 
+SHADOW_FORECAST_RECORDING_KEY     = "decision proxy shadow forecast recording enabled"
+DEFAULT_SHADOW_FORECAST_RECORDING = False
+
+
+def shadow_forecast_recording_enabled():
+    """
+    Say whether a shadow row stores the proxy's forecast in its decision value.
+
+    Requires:
+        - LUPIN_CONFIG_MGR_CLI_ARGS names the config file the way every other reader does
+
+    Ensures:
+        - returns the INI switch's value as a bool, False when the key is absent
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return config_mgr.get( SHADOW_FORECAST_RECORDING_KEY, default=str( DEFAULT_SHADOW_FORECAST_RECORDING ), return_type="boolean" )
+
+
 # ============================================================================
 # Trust Model
 # ============================================================================

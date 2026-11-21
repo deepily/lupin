@@ -52,6 +52,7 @@ A test fails when a key under the decision proxy's sections is missing from this
 |---|---|---|---|
 | `swe team enabled` | `false` | Dormant | Nothing reads it, so it gates nothing. Enforcing it is Rick's decision. |
 | `swe team trust mode` | `shadow` | Live | `strategy_builder.py` builds the strategy in this mode: shadow, suggest or active. |
+| `decision proxy shadow forecast recording enabled` | `true` | Live | `shadow_forecast_recording_enabled` in `decision_proxy/config.py`; the swe orchestrator and the responder store the forecast in a shadow row's decision value. |
 | `decision proxy enabled` | `false` | Live | `decision_proxy/__main__.py` refuses to start the proxy when false. |
 | `decision proxy active hours start` | `09` | Live | `user_presence.py` reads them and `SmartRouter` routes by them. |
 | `decision proxy active hours end` | `22` | Live | `user_presence.py` reads them and `SmartRouter` routes by them. |
