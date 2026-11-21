@@ -11,8 +11,8 @@ pins:
   - cosa.research.preference_replay.extractor_replay.make_recorder@d1cae4acf0
   - cosa.research.preference_replay.extractor_replay.check_no_leakage@0f75561045
   - cosa.research.preference_replay.extractor_replay.principle_list@eacd09aa11
-  - cosa.research.preference_replay.extractor_replay.run_replay@6f046c03c0
-  - cosa.research.preference_replay.extractor_replay.main@234666dd99
+  - cosa.research.preference_replay.extractor_replay.run_replay@599e1ebc39
+  - cosa.research.preference_replay.extractor_replay.main@b10042cc42
 ---
 # Preference replay: the extractor replay
 
@@ -26,6 +26,7 @@ Replays a context export through the principle extractor in the order the asks w
 - `make_recorder( seen )` builds a recording arm that forecasts like always-yes and keeps deep copies of what it was handed. `check_no_leakage( seen )` raises `LeakageError` for evidence dated after its ask.
 - `asks_from_session` builds the ask dicts from the scratch copy. `stand_in_vector` gives a text a stable 20-wide vector, so the replay never calls the embedding service.
 - `canned_model` stands in for the model: one grounded hypothesis per field, and none for a bare yes.
-- `run_replay` replays the loaded asks and keeps extracting past the last ask. It returns the run, the seen list, the extractions, the table counts and the leakage count.
+- `run_replay` replays the loaded asks and keeps extracting past the last ask. Its `encoder` argument names the encoder version principles are stored and searched under. It returns the run, the seen list, the extractions, the table counts and the leakage count.
 - `principle_list` lists every principle with its heading, status and evidence counts.
-- `main` replays an export for each `--lag-seconds` value, 0 and 300 by default, and writes the last variant's list to `--out`. A live run needs `--model`, else it exits with a usage error.
+- `main` replays an export for each `--lag-seconds` value, 0 and 300 by default, and writes the last variant's list to `--out`. Each variant also prints the extractor's totals: principles created, reused, off-vocabulary and rejected. A live run needs `--model`, else it exits with a usage error.
+- With `--embeddings service`, vectors come from the embedding service through a side cache ([[preference-replay-service-embeddings]]). `--neighbour-cosines-out` writes the cosine of every neighbour shown to the model.

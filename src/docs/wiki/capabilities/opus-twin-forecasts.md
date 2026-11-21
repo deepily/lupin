@@ -7,7 +7,7 @@ pins:
   - cosa.agents.prediction_engine.opus_twins.opus_model@adc7ec1c23
   - cosa.agents.prediction_engine.opus_twins.principles_gate@5132136808
   - cosa.agents.prediction_engine.opus_twins.run_baseline_opus@556e55fb3e
-  - cosa.agents.prediction_engine.opus_twins.run_principles_opus@768a25e707
+  - cosa.agents.prediction_engine.opus_twins.run_principles_opus@6820c1850d
 ---
 # Opus twin forecasts
 
@@ -21,4 +21,5 @@ Each learner forecast run again on Opus. A twin makes one call per ask, with no 
 - `run_principles_opus` sends the baseline prompts plus the same principle block the Haiku arm gets. Its row carries both version suffixes.
 - With the switch off, or the baseline contract None, nothing is read, called or written. A card past the cap gets a row with the capacity reason and no call.
 - The Opus id is read only when the switch is on and a baseline exists. An off twin never touches that key.
-- Both twins wait on the baseline job, which has not landed. Until then they read the blocked reason and write nothing.
+- Both twins need the baseline contract. Without it they read the blocked reason and write nothing.
+- Both twins take `limits`, passed on to `run_arm` unchanged.
