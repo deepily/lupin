@@ -328,7 +328,7 @@ def _reattach_after_stream_death(
                 if debug:
                     print( f"[DEBUG] Re-attach LANDED (responded_at set) — returning, leaving owed (no ack)", file=sys.stderr )
                 return NotificationResponse(
-                    response_value = val, exit_code = 0, status = "responded",
+                    response_value = val, exit_code = 0, status = "responded", notification_id = notification_id,
                     default_used = False, reattach_state = "reattach_armed",
                     answered_by = answered_by
                 )
@@ -338,13 +338,13 @@ def _reattach_after_stream_death(
                 # expired, default_used, no ack. NEVER responded (the §3 invariant).
                 val = response_value.get( "value" ) if isinstance( response_value, dict ) else response_value
                 return NotificationResponse(
-                    response_value = val, exit_code = 2, status = "expired",
+                    response_value = val, exit_code = 2, status = "expired", notification_id = notification_id,
                     default_used = True, is_timeout = True, reattach_state = "reattach_armed"
                 )
             # responded_at NULL and no value → not answered yet; keep polling until budget.
         if datetime.now() >= deadline:
             return NotificationResponse(
-                response_value = None, exit_code = 2, status = "expired",
+                response_value = None, exit_code = 2, status = "expired", notification_id = notification_id,
                 is_timeout = True, reattach_state = "reattach_armed"
             )
         time.sleep( min( poll_interval, max( 0.0, ( deadline - datetime.now() ).total_seconds() ) ) )
@@ -475,6 +475,7 @@ def _send_sync_notification(
             if debug:
                 print( f"✓ Response received: {event.response}", file=sys.stderr )
             return NotificationResponse(
+                notification_id = ack_capture.get( "notification_id" ),
                 response_value = event.response,
                 exit_code      = 0,
                 status         = "responded",
@@ -487,6 +488,7 @@ def _send_sync_notification(
                 if debug:
                     print( f"⏱️ Timeout - using default: {event.response}", file=sys.stderr )
                 return NotificationResponse(
+                notification_id = ack_capture.get( "notification_id" ),
                     response_value = event.response,
                     exit_code      = 2,
                     status         = "expired",
@@ -496,6 +498,7 @@ def _send_sync_notification(
             else:
                 print( "✗ Notification expired without default", file=sys.stderr )
                 return NotificationResponse(
+                notification_id = ack_capture.get( "notification_id" ),
                     response_value = None,
                     exit_code      = 1,
                     status         = "expired_no_default",
@@ -506,6 +509,7 @@ def _send_sync_notification(
             if debug:
                 print( f"⚠️ User offline - used default: {event.response}", file=sys.stderr )
             return NotificationResponse(
+                notification_id = ack_capture.get( "notification_id" ),
                 response_value = event.response,
                 exit_code      = 0,  # Offline with default = success
                 status         = "offline",
@@ -515,6 +519,7 @@ def _send_sync_notification(
         elif isinstance( event, ErrorEvent ):
             print( f"✗ Server error: {event.message}", file=sys.stderr )
             return NotificationResponse(
+                notification_id = ack_capture.get( "notification_id" ),
                 response_value = None,
                 exit_code      = 1,
                 status         = "error"
@@ -524,6 +529,7 @@ def _send_sync_notification(
             # Should never happen with proper typing
             print( f"✗ Unknown event type: {type( event )}", file=sys.stderr )
             return NotificationResponse(
+                notification_id = ack_capture.get( "notification_id" ),
                 response_value = None,
                 exit_code      = 1,
                 status         = "unknown_event"
