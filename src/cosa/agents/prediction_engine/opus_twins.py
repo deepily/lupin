@@ -96,7 +96,7 @@ def principles_gate():
 
 
 async def _run_twin( arm, switch_key, version_suffix, use_principles, session_factory, notification_id, c0, embedder, encoder_version, extractor_version,
-                     gate, enabled, model, k, clock ):
+                     gate, enabled, model, k, clock, limits=None ):
     """
     Run one twin through the shared arm path with the baseline's model swapped for Opus's.
 
@@ -110,7 +110,7 @@ async def _run_twin( arm, switch_key, version_suffix, use_principles, session_fa
     on   = switch_enabled( switch_key ) if enabled is None else enabled
     twin = None if ( c0 is None or not on ) else OpusBaseline( c0, model if model is not None else opus_model() )
     return await run_arm( arm, switch_key, version_suffix, use_principles, session_factory, notification_id, twin, embedder, encoder_version,
-                          extractor_version, gate, enabled=on, k=k, clock=clock )
+                          extractor_version, gate, enabled=on, k=k, clock=clock, limits=limits )
 
 
 async def run_baseline_opus( session_factory, notification_id, c0, gate, enabled=None, model=None, clock=None ):
@@ -134,7 +134,7 @@ async def run_baseline_opus( session_factory, notification_id, c0, gate, enabled
 
 
 async def run_principles_opus( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, gate, enabled=None, model=None,
-                               k=DEFAULT_K, clock=None ):
+                               k=DEFAULT_K, clock=None, limits=None ):
     """
     Make the principles forecast again on Opus for one ask, and store its row.
 
@@ -149,4 +149,4 @@ async def run_principles_opus( session_factory, notification_id, c0, embedder, e
         - a card past the cap gets a row with the capacity reason and no call
     """
     return await _run_twin( ARM_PRINCIPLES_OPUS, PRINCIPLES_SWITCH_KEY, VERSION_SUFFIX + OPUS_SUFFIX, True, session_factory, notification_id, c0,
-                            embedder, encoder_version, extractor_version, gate, enabled, model, k, clock )
+                            embedder, encoder_version, extractor_version, gate, enabled, model, k, clock, limits )

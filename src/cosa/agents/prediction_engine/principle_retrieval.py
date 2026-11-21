@@ -206,7 +206,7 @@ def retrieve_principles( session, owner_id, project, query_embedding, asked_at, 
     allowed = and_( PreferencePrinciple.owner_id == owner_id, PreferencePrinciple.embedding.isnot( None ),
                     PreferencePrinciple.encoder_version == encoder_version, PreferencePrinciple.scope.in_( scopes ) )
     count   = session.query( PreferencePrinciple ).filter( allowed ).count()
-    if count > bound and multiplier == 0: raise PrincipleBoundExceeded( f"owner {owner_id} holds {count} principles for this ask, above the bound {bound}" )
+    if count > bound and multiplier == 0: raise PrincipleBoundExceeded( f"owner {owner_id} holds {count} principles for this ask, above the limit {bound}" )
     if count == 0: return { "principles": [], "available": 0, "short": True }
     limit   = count if count <= bound else k * multiplier
     # despite its name, dot_topk's exclude_filter is a filter() that keeps the matching rows, before the limit

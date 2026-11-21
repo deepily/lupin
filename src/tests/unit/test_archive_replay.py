@@ -16,6 +16,7 @@ import os
 from datetime import timedelta
 
 import pytest
+from unittest import mock
 
 from cosa.agents.prediction_engine import opus_twins, principles_forecast
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
@@ -694,3 +695,288 @@ def test_the_window_start_is_part_of_the_freeze_so_a_different_window_is_refused
     ar.save_state( work.state, state )
     with pytest.raises( ar.FreezeMismatch, match="window_start" ):
         ar.run_first_stage( session, asks, ids[ :6 ], PredictionEngine( debug=False ), embed, models, work, query_fn=er.canned_model, chunk=3, out=lambda line: None, code=CODE )
+
+
+# ---- the principle limit: progress line, clean stop, resume under a raised limit (row c6544df4) ----
+
+def _limits( monkeypatch, bound, multiplier=0 ):
+    """Read these limits from the INI file's place, for the whole process."""
+    monkeypatch.setattr( ar.principle_retrieval, "retrieval_limits", lambda: { "bound": bound, "multiplier": multiplier } )
+    monkeypatch.setattr( principles_forecast, "retrieval_limits", lambda: { "bound": bound, "multiplier": multiplier } )
+
+
+def _stage_first( loaded, ids, models=None, chunk=10, lines=None, **kwargs ):
+    """Run the first stage over ids with a fresh engine, under the stand-in tree state."""
+    session, asks, _, embed, work, _ = loaded
+    models = _models( session, embed )[ 0 ] if models is None else models
+    return ar.run_first_stage( session, asks, ids, PredictionEngine( debug=False ), embed, models, work, query_fn=er.canned_model, chunk=chunk,
+                               out=( lambda line: None ) if lines is None else lines.append, code=CODE, **kwargs )
+
+
+def _bound_rows( session ):
+    """Count the stored forecast rows that failed on the limit."""
+    return session.query( PredictionArmForecast ).filter( PredictionArmForecast.abstention_reason == ar.BOUND_REASON ).count()
+
+
+def test_the_checkpoint_line_shows_the_principle_count_against_the_limit_and_warns_at_the_stated_fraction( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    lines = []
+    _stage_first( loaded, ids[ :10 ], lines=lines )
+    count = session.query( ar.PreferencePrinciple ).count()
+    assert count == 2 and f"principles {count}/5000 (0%)" in lines[ 0 ] and "WARNING" not in lines[ 0 ] and ar.WARN_FRACTION == 0.8
+    assert ar.principle_progress( session, 4 ) == "2/4 (50%)"
+    assert ar.warning_text( session, 3 ) == "", "2 of 3 is below 80%... 67%"
+    assert ar.warning_text( session, 2 ).startswith( " WARNING: principles are at 100% of the limit 2" )
+    assert ar.warning_text( session, 2.5 ).startswith( " WARNING: principles are at 80% of the limit" ), "the warning starts exactly at the stated fraction"
+
+
+def test_the_first_failure_on_the_limit_stops_the_stage_at_that_ask_with_a_named_message_and_a_saved_checkpoint( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 1 )
+    lines = []
+    models, c0 = _models( session, embed )
+    with pytest.raises( ar.BoundStop ) as stop: _stage_first( loaded, ids, models=models, chunk=10, lines=lines )
+    assert stop.value.bound == 1 and stop.value.principles > 1 and stop.value.ask_id in ids and "STOPPED AT THE PRINCIPLE LIMIT" in str( stop.value )
+    recorded = [ r[ "id" ] for r in ar.read_jsonl( work.records ) ] if os.path.exists( work.records ) else []
+    assert not any( r[ "arms" ][ ar.ARM_PRINCIPLES ][ "reason" ] == ar.BOUND_REASON for r in ( ar.read_jsonl( work.records ) if recorded else [] ) ), "a failed forecast was recorded"
+    assert stop.value.ask_id not in recorded and _bound_rows( session ) == 0, "the stopping ask left a failed row behind"
+    assert lines[ -1 ].startswith( "[stopped]" ) and "prediction learner principle limit" in lines[ -1 ]
+    assert ar.load_state( work.state )[ "freeze" ][ "bound" ] == 1 and ar.read_jsonl( work.log )[ -1 ][ "line" ] == lines[ -1 ]
+    calls_at_stop = len( c0.calls )
+    _limits( monkeypatch, 5000 )
+    done = _stage_first( loaded, ids, models=models, chunk=10, lines=lines )
+    state = ar.load_state( work.state )
+    final = ar.read_jsonl( work.records )
+    assert [ r[ "id" ] for r in final ] == ids and state[ "done_ids" ] == ids and done > 0, "a resume must finish every ask once"
+    assert len( c0.calls ) == 2 * len( ids ), "a model call was spent twice; the stopped chunk's finished asks must keep their stored rows"
+    assert calls_at_stop < len( c0.calls )
+    assert [ ( h[ "changed" ], h[ "accepted_code_change" ] ) for h in state[ "freeze_history" ] ] == [ ( { "bound": [ 1, 5000 ] }, None ) ]
+    assert state[ "freeze" ][ "bound" ] == 5000
+
+
+def _plant_failures( work, session, ids, arm, path ):
+    """Show the limit failure in those asks entries and stored rows; return the original entries."""
+    original = { line[ "id" ]: line for line in ar.read_jsonl( path ) }
+    planted  = { i: { arm: { "correct": False, "forecast": None, "reason": ar.BOUND_REASON } } for i in ids }
+    ar.replace_arms( path, planted )
+    session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm == arm, PredictionArmForecast.notification_id.in_( [ ar.uuid.UUID( i ) for i in ids ] ) ).update(
+        { "forecast": None, "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+    session.commit()
+    return original
+
+
+def test_a_resume_forecasts_again_only_the_asks_that_failed_on_the_limit_and_replaces_their_entries_without_changing_a_count( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :20 ], models=models )
+    hit      = ids[ 3:6 ] + [ ids[ 15 ] ]
+    original = _plant_failures( work, session, hit, ar.ARM_PRINCIPLES, work.records )
+    before   = len( c0.calls )
+    lines    = []
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, out=lines.append, chunk=3 ) == 4
+    after = ar.read_jsonl( work.records )
+    assert [ r[ "id" ] for r in after ] == ids[ :20 ], "an ask was doubled, lost or moved"
+    assert after == list( original.values() ), "a rerun entry must equal the forecast the arm makes under the same inputs, and no other entry may change"
+    assert len( c0.calls ) - before == 4, "only the four failed principles forecasts called a model"
+    assert not any( r[ "arms" ][ ar.ARM_PRINCIPLES ][ "reason" ] == ar.BOUND_REASON for r in after )
+    assert len( lines ) == 2 and lines[ 0 ].startswith( f"[rerun {ar.ARM_PRINCIPLES}] 3/4" ) and lines[ 1 ].startswith( f"[rerun {ar.ARM_PRINCIPLES}] 4/4" )
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000 ) == 0, "nothing is left to run again"
+    assert ar.load_state( work.state )[ "done_ids" ] == ids[ :20 ], "the denominators must not move"
+
+
+def test_a_failure_on_the_limit_that_remains_stops_the_rerun_and_keeps_what_finished( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :20 ], models=models )
+    hit = ids[ 2:5 ]
+    original = _plant_failures( work, session, hit, ar.ARM_PRINCIPLES, work.records )
+    real = ar.ModelArms.run
+    def second_fails( self, ask_id, arms ):
+        if ask_id == hit[ 1 ]: return ar.Counter( { ( arms[ 0 ], "failed", ar.BOUND_REASON ): 1 } )
+        return real( self, ask_id, arms )
+    monkeypatch.setattr( ar.ModelArms, "run", second_fails )
+    with pytest.raises( ar.BoundStop ) as stop: ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, chunk=10 )
+    assert stop.value.ask_id == hit[ 1 ]
+    after = { r[ "id" ]: r for r in ar.read_jsonl( work.records ) }
+    assert after[ hit[ 0 ] ] == original[ hit[ 0 ] ], "the finished rerun was lost"
+    assert [ after[ i ][ "arms" ][ ar.ARM_PRINCIPLES ][ "reason" ] for i in hit[ 1: ] ] == [ ar.BOUND_REASON ] * 2
+    assert _bound_rows( session ) == 1, "only the untouched ask still has its old failed row; the stopping ask's row was deleted for the next start"
+
+
+def test_the_twin_stage_reruns_its_limit_failures_and_stops_on_a_new_one( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :10 ], models=models )
+    _twin_stage( loaded, ids[ :10 ], models, code=CODE )
+    hit      = ids[ 1:3 ]
+    original = _plant_failures( work, session, hit, ar.TWIN_ARMS[ 1 ], work.twins )
+    lines    = []
+    assert _twin_stage( loaded, ids[ :10 ], models, lines=lines, code=CODE ) == 0
+    assert ar.read_jsonl( work.twins ) == list( original.values() ) and lines[ 0 ].startswith( f"[rerun {ar.TWIN_ARMS[ 1 ]}] 2/2" )
+    # a new ask under a limit that fails: the twin stops, writes no line for it and leaves no failed row
+    _stage_first( loaded, ids[ :14 ], models=models )
+    real = ar.ModelArms.run
+    def fails_on_the_limit( self, ask_id, arms ):
+        real( self, ask_id, arms )
+        session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == ar.uuid.UUID( ask_id ), PredictionArmForecast.arm.in_( arms ) ).update( { "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+        session.commit()
+        return ar.Counter( { ( arms[ 1 ], "failed", ar.BOUND_REASON ): 1 } )
+    monkeypatch.setattr( ar.ModelArms, "run", fails_on_the_limit )
+    before = len( ar.read_jsonl( work.twins ) )
+    with pytest.raises( ar.BoundStop ) as stop: _twin_stage( loaded, ids[ :14 ], models, lines=lines, code=CODE )
+    assert stop.value.ask_id == ids[ 10 ] and len( ar.read_jsonl( work.twins ) ) == before and _bound_rows( session ) == 0
+    assert lines[ -1 ].startswith( "[twin stopped] 10 asks run; STOPPED AT THE PRINCIPLE LIMIT" )
+
+
+def test_the_twin_stage_saves_the_state_only_when_it_wrote_the_first_freeze( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 7 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :10 ], models=models )
+    state = ar.load_state( work.state )
+    state[ "done_ids" ] = state[ "done_ids" ] + [ "marker" ]
+    ar.save_state( work.state, state )
+    _limits( monkeypatch, 9 )
+    stale = ar.load_state( work.state )
+    ar.check_freeze( stale, ar.current_freeze( models, CODE ) )
+    _twin_stage( loaded, ids[ :10 ], models, code=CODE )
+    assert ar.load_state( work.state )[ "done_ids" ][ -1 ] == "marker" and ar.load_state( work.state )[ "freeze" ][ "bound" ] == 7
+
+
+def _freeze( **changes ):
+    """A freeze as run 2 stored it, with the changes applied."""
+    base = { "code_sha": "a" * 40, "code_dirty": False, "vocabulary_version": "v", "bound": 500, "fetch_multiplier": 0, "k": 5 }
+    return { **base, **changes }
+
+
+def test_a_raised_limit_is_allowed_only_when_it_is_higher_and_the_old_multiplier_was_zero_and_is_recorded( ):
+    state = { "freeze": { key: value for key, value in _freeze().items() if key != "fetch_multiplier" } }
+    now   = ar.datetime( 2026, 11, 21, tzinfo=ar.timezone.utc )
+    assert ar.check_freeze( state, _freeze( bound=5000 ), now=now ) is True
+    assert state[ "freeze" ][ "bound" ] == 5000 and state[ "freeze" ][ "fetch_multiplier" ] == 0
+    assert state[ "freeze_history" ] == [ { "at": now.isoformat(), "changed": { "bound": [ 500, 5000 ] }, "accepted_code_change": None } ]
+    assert ar.check_freeze( state, _freeze( bound=5000 ) ) is False and len( state[ "freeze_history" ] ) == 1
+
+
+@pytest.mark.parametrize( "old,new,named", [
+    ( _freeze( bound=5000 ), _freeze( bound=500 ), "bound" ),
+    ( _freeze( bound=500 ), _freeze( bound=500, fetch_multiplier=3 ), "fetch_multiplier" ),
+    ( _freeze( bound=500, fetch_multiplier=3 ), _freeze( bound=5000, fetch_multiplier=3 ), "bound" ),
+    ( _freeze( bound=500 ), _freeze( bound=5000, fetch_multiplier=3 ), "fetch_multiplier" ),
+    ( _freeze( bound=500 ), _freeze( bound=5000, k=6 ), "k" ),
+    ( _freeze(), _freeze( vocabulary_version="w" ), "vocabulary_version" ),
+] )
+def test_every_other_freeze_change_is_refused_and_writes_nothing( old, new, named ):
+    state    = { "freeze": dict( old ) }
+    with pytest.raises( ar.FreezeMismatch, match=named ): ar.check_freeze( state, new )
+    assert state == { "freeze": old }
+
+
+@pytest.mark.parametrize( "flag,code,names", [
+    ( None, { "code_sha": "b" * 40 }, "code_sha" ),
+    ( f"{'a' * 40}:{'c' * 40}", { "code_sha": "b" * 40 }, "code_sha" ),
+    ( f"{'c' * 40}:{'b' * 40}", { "code_sha": "b" * 40 }, "code_sha" ),
+    ( f"{'a' * 40}:{'b' * 40}", { "code_sha": "b" * 40, "code_dirty": True }, "code_dirty" ),
+    ( f"{'a' * 40}:{'a' * 40}", { "code_sha": "a" * 40, "code_dirty": True }, "code_dirty" ),
+] )
+def test_a_code_change_is_refused_unless_the_flag_names_exactly_the_old_and_the_new_sha_and_the_tree_is_clean( flag, code, names ):
+    state = { "freeze": _freeze() }
+    with pytest.raises( ar.FreezeMismatch, match=names ): ar.check_freeze( state, _freeze( **code ), accept_code_change=flag )
+    assert state == { "freeze": _freeze() }
+
+
+def test_a_named_code_change_with_a_raised_limit_is_allowed_and_both_shas_enter_the_history():
+    flag  = f"{'a' * 40}:{'b' * 40}"
+    state = { "freeze": _freeze() }
+    assert ar.check_freeze( state, _freeze( code_sha="b" * 40, bound=5000 ), accept_code_change=flag ) is True
+    entry = state[ "freeze_history" ][ 0 ]
+    assert entry[ "accepted_code_change" ] == flag and entry[ "changed" ] == { "code_sha": [ "a" * 40, "b" * 40 ], "bound": [ 500, 5000 ] }
+    assert state[ "freeze" ][ "code_sha" ] == "b" * 40
+    state = { "freeze": _freeze() }
+    ar.check_freeze( state, _freeze( bound=5000 ) )
+    assert state[ "freeze_history" ][ 0 ][ "accepted_code_change" ] is None
+
+
+def test_replace_arms_changes_only_the_named_arm_of_the_named_line( tmp_path ):
+    path = str( tmp_path / "lines.jsonl" )
+    ar.append_lines( path, [ { "id": "a", "arms": { "x": 1, "y": 2 } }, { "id": "b", "arms": { "x": 3, "y": 4 } } ] )
+    ar.replace_arms( path, { "b": { "y": 9 } } )
+    assert ar.read_jsonl( path ) == [ { "id": "a", "arms": { "x": 1, "y": 2 } }, { "id": "b", "arms": { "x": 3, "y": 9 } } ]
+    assert not os.path.exists( path + ".tmp" )
+
+
+def test_a_rerun_of_an_empty_or_missing_file_runs_nothing( loaded, tmp_path ):
+    session, asks, ids, embed, work, _ = loaded
+    models = _models( session, embed )[ 0 ]
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.TWIN_ARMS[ 1 ], str( tmp_path / "absent.jsonl" ), 5000 ) == 0
+
+
+def test_discarding_deletes_only_limit_failures_of_the_named_arms_and_ask( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :4 ], models=models )
+    _plant_failures( work, session, ids[ :2 ], ar.ARM_PRINCIPLES, work.records )
+    session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm == ar.ARM_BASELINE, PredictionArmForecast.notification_id == ar.uuid.UUID( ids[ 0 ] ) ).update(
+        { "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+    session.commit()
+    assert models.discard_bound_failures( ids[ 0 ], ( ar.ARM_PRINCIPLES, ) ) == 1
+    assert models.discard_bound_failures( ids[ 0 ], ( ar.ARM_PRINCIPLES, ) ) == 0
+    assert _bound_rows( session ) == 2, "the other ask's row and the other arm's row must survive"
+
+
+def test_main_returns_the_stop_code_with_the_named_message_and_passes_the_code_change_flag( tmp_path, archive, monkeypatch ):
+    asks_path, non_path, fixture_path, _ = archive
+    _limits( monkeypatch, 1 )
+    monkeypatch.setattr( ar, "tree_state", lambda folder: CODE )
+    printed = []
+    embed   = _open_embedder( tmp_path )
+    common  = [ "first", "--work", str( tmp_path ), "--asks", asks_path, "--non-asks", non_path, "--fixture", fixture_path, "--chunk", "10" ]
+    models  = lambda session, e: _models( session, e )[ 0 ]
+    PredictionEngine.reset()
+    assert ar.main( common, query_fn=er.canned_model, embed=embed, make_models=models, out=printed.append ) == ar.STOP_EXIT == 3
+    assert "STOPPED AT THE PRINCIPLE LIMIT" in printed[ -1 ]
+    _limits( monkeypatch, 5000 )
+    seen = {}
+    monkeypatch.setattr( ar, "run_first_stage", lambda *args, **kwargs: seen.update( kwargs ) )
+    assert ar.main( common + [ "--accept-code-change", "x:y" ], query_fn=er.canned_model, embed=embed, make_models=models, out=printed.append ) == 0
+    assert seen[ "accept_code_change" ] == "x:y"
+
+
+def test_a_limit_raised_above_the_old_one_fetches_the_same_principles_below_the_old_count( loaded, monkeypatch ):
+    """Below the old count, the old and the new limit return identical principles."""
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    _stage_first( loaded, ids[ :20 ] )
+    owner = session.query( ar.PreferencePrinciple ).first().owner_id
+    count = session.query( ar.PreferencePrinciple ).count()
+    assert 0 < count < 500
+    vector = asks[ 0 ][ "question_embedding" ]
+    asked  = ar.aware_moment( asks[ -1 ][ "asked_at" ] )
+    version = embed.encoder
+    pick = lambda bound: ar.principle_retrieval.retrieve_principles( session, owner, None, vector, asked, version, f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}", bound=bound, multiplier=0 )
+    with mock.patch.object( ar.principle_retrieval, "dot_topk", ar.scratch_topk ): old, new = pick( 500 ), pick( 5000 )
+    assert [ p[ "principle" ].id for p in old[ "principles" ] ] == [ p[ "principle" ].id for p in new[ "principles" ] ] and old[ "available" ] == new[ "available" ]
+
+
+def test_a_limit_edited_in_the_ini_file_in_mid_stage_changes_nothing_because_the_forecast_gets_the_frozen_limit( loaded, monkeypatch ):
+    """An INI edit after the freeze is neither read nor allowed to stop the run."""
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    seen = []
+    real = principles_forecast.retrieve_principles
+    def watch( *args, **kwargs ):
+        seen.append( ( kwargs[ "bound" ], kwargs[ "multiplier" ] ) )
+        _limits( monkeypatch, 1 )
+        return real( *args, **kwargs )
+    monkeypatch.setattr( principles_forecast, "retrieve_principles", watch )
+    _stage_first( loaded, ids[ :20 ], models=models )
+    assert seen and set( seen ) == { ( 5000, 0 ) }, "a forecast read the edited limit"
+    assert models.limits == { "bound": 5000, "multiplier": 0 }
+    assert len( ar.read_jsonl( work.records ) ) == 20 and _bound_rows( session ) == 0
+    with pytest.raises( ar.FreezeMismatch, match="bound" ): _stage_first( loaded, ids[ :30 ], models=models )
