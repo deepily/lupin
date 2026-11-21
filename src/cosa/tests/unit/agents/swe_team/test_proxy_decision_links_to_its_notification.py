@@ -170,7 +170,10 @@ def test_a_reattach_that_runs_out_of_budget_keeps_the_id():
 def test_the_dispatcher_hands_the_id_over_once_and_then_forgets_it():
     dispatcher = AgentNotificationDispatcher( agent_type="swe.team", supports_role=True )
     reply      = NotificationResponse( response_value="yes", exit_code=0, status="responded", notification_id=NID )
+
+    async def ask_then_take():
+        answer = await dispatcher.ask_confirmation( "q?", role="lead" )
+        return answer, take_last_ask_notification_id(), take_last_ask_notification_id()
+
     with patch.object( dispatcher_module, "_notify_user_sync", return_value=reply ):
-        assert asyncio.new_event_loop().run_until_complete( dispatcher.ask_confirmation( "q?", role="lead" ) ) is True
-    assert take_last_ask_notification_id() == NID
-    assert take_last_ask_notification_id() is None
+        assert asyncio.new_event_loop().run_until_complete( ask_then_take() ) == ( True, NID, None )
