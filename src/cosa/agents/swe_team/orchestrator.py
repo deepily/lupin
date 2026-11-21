@@ -23,6 +23,7 @@ import cosa.utils.util as cu
 
 from .config import SweTeamConfig
 from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement
+from cosa.agents.decision_proxy.config import shadow_forecast_recording_enabled
 from .state import (
     OrchestratorState,
     SweTeamState,
@@ -429,7 +430,7 @@ class SweTeamOrchestrator:
             with get_db() as session:
                 repo = ProxyDecisionRepository( session )
                 if proxy_result.action == "shadow":
-                    repo.log_shadow( **common )
+                    repo.log_shadow( decision_value=proxy_result.value if shadow_forecast_recording_enabled() else None, **common )
                 else:
                     repo.log_decision(
                         action                = proxy_result.action,
