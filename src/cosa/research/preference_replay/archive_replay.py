@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
@@ -53,6 +53,7 @@ RECORDED_ARMS   = ( ENGINE_ARM, ARM_FIXED ) + HAIKU_ARMS
 ELIGIBLE_TYPES  = ( "yes_no", "multiple_choice" )
 OPERATIONAL_FLOOR = 10
 REPLAY_LAG      = timedelta( seconds=0 )
+WINDOW_START    = datetime( 2026, 9, 10, tzinfo=timezone.utc )
 CHUNK_SIZE      = 250
 RECORDER_ARM    = "recorder"
 STAND_IN_PRIORITY = "medium"
@@ -119,11 +120,11 @@ def current_freeze( models, code ):
 
     Ensures:
         - returns a dict of the code commit, the vocabulary and extractor versions, the extractor timeout, the encoder, neighbours, k, bound,
-          lag seconds, floor and the baseline and Opus model ids
+          lag seconds, window start, floor and the baseline and Opus model ids
     """
     return { "code_sha": code[ "sha" ], "code_dirty": code[ "dirty" ], "vocabulary_version": PROMPT_VERSION, "extractor_version": models.extractor,
              "extractor_timeout_seconds": extractor_settings()[ 1 ], "encoder": models.encoder, "neighbours": NEIGHBOURS, "k": principle_retrieval.DEFAULT_K,
-             "bound": principle_retrieval.PRINCIPLE_BOUND, "lag_seconds": REPLAY_LAG.total_seconds(), "floor": OPERATIONAL_FLOOR,
+             "bound": principle_retrieval.PRINCIPLE_BOUND, "lag_seconds": REPLAY_LAG.total_seconds(), "window_start": WINDOW_START.isoformat(), "floor": OPERATIONAL_FLOOR,
              "baseline_model": models.c0.model, "twin_model": opus_twins.opus_model() }
 
 
@@ -217,19 +218,20 @@ def fixture_ids( export_path ):
     return { target[ "target_notification" ][ "id" ] for target in export[ "targets" ] }
 
 
-def evaluation_ids( asks, fixture ):
+def evaluation_ids( asks, fixture, window_start=WINDOW_START ):
     """
     List the asks the evaluation predicts, in the order the replay predicts them.
 
     Requires:
-        - asks are the replay's ask dicts; fixture is a set of ask ids
+        - asks are the replay's ask dicts; fixture is a set of ask ids; window_start is an aware datetime
 
     Ensures:
-        - returns the ids of yes/no and multiple-choice asks outside the fixture, ordered by ask time and then by position
-        - an ask in the fixture is left out of the list and still serves as a case
+        - returns the ids of yes/no and multiple-choice asks outside the fixture, asked at or after window_start, ordered by ask time and then by position
+        - an ask in the fixture or before the window is left out of the list and still serves as a case and as an extractor input
     """
     order = sorted( range( len( asks ) ), key=lambda i: ( aware_moment( asks[ i ][ "asked_at" ] ), i ) )
-    return [ asks[ i ][ "id" ] for i in order if asks[ i ][ "response_type" ] in ELIGIBLE_TYPES and asks[ i ][ "id" ] not in fixture ]
+    return [ asks[ i ][ "id" ] for i in order if asks[ i ][ "response_type" ] in ELIGIBLE_TYPES and asks[ i ][ "id" ] not in fixture
+             and aware_moment( asks[ i ][ "asked_at" ] ) >= window_start ]
 
 
 def _pick( field ):
