@@ -2,9 +2,9 @@
 capability: decision-proxy
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.responder.DecisionResponder@78fd79c1c7
+  - cosa.agents.decision_proxy.responder.DecisionResponder@3b8adefa25
   - cosa.agents.decision_proxy.trust_tracker.TrustTracker@e6ea84b97f
-  - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@b4cf4a640a
+  - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@03f04c7066
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker@ed1b3c7973
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker.check@37ecd22e31
   - cosa.agents.decision_proxy.smart_router.SmartRouter@6734207a13
@@ -18,7 +18,7 @@ The decision proxy answers questions that ask for a response, on the user's beha
 ## What the responder does
 - `DecisionResponder` reacts to `notification_queue_update` events and ignores notifications that do not ask for a response. Its statistics print under the title `Decision Proxy Statistics`. It skips a review card, the principle learner's own question: no decision row, no answer, counted as `review_cards_skipped`.
 - Checks run in this order. A disabled proxy does nothing. A sender outside the allowlist is rejected, and an empty allowlist rejects everyone. A dry run sends a decline. With no strategy loaded it only counts the event.
-- Otherwise the strategy returns one of four actions. `shadow` logs. `suggest` stores the decision for ratification. `act` stores it and sends the answer when it has a value, unless the smart router defers it (see Smart router). `defer` stores it and sends nothing. A `shadow` or `defer` row keeps an empty decision value, so the proxy's own guess is never cited as precedent.
+- Otherwise the strategy returns one of four actions. `shadow` logs. `suggest` stores the decision for ratification. `act` stores it and sends the answer when it has a value, unless the smart router defers it (see Smart router). `defer` stores it and sends nothing. A `defer` row keeps an empty decision value, so the proxy's own guess is never cited as precedent. A `shadow` row stores the forecast only when `decision proxy shadow forecast recording enabled` is true. The code default is false and the shipped INI is true. An unreadable config blanks only the forecast, never the row ([[decision-proxy-agreement]]).
 - `python -m cosa.agents.decision_proxy --profile swe_team` starts it only when `decision proxy enabled` is true. The shipped INI sets it false, so by default it prints that and exits. If the profile fails to load it also exits.
 
 ## The gate
@@ -29,8 +29,8 @@ The decision proxy answers questions that ask for a response, on the user's beha
 
 ## Trust
 - `TrustTracker` keeps one `CategoryTrust` per category. Its level runs from 1 to 5 and is capped per category.
-- The default model sums only the successful decisions, each weighted down as it ages, against thresholds for levels 2 to 5. A rejection adds nothing. `beta` and `blr` models are the alternatives, chosen by `swe team trust proxy trust model` (see [[decision-proxy-startup]]). A circuit-breaker trip is recorded: the level stays capped at the demoted level until new successes close the gap to the next threshold. A stored trip is restored with the counters, so a demotion survives the next job. `restore_category` restores a category's counters, its per-day decision history and, under the `blr` model only, its saved BLR state. `blr_state_for` returns that state for saving, and `None` under `count` or `beta`. `record_decision_with_features` feeds the BLR model a decision with its question's features.
-- The SWE orchestrator feeds the tracker: a success when the proxy acts alone, otherwise whether the proxy agreed with the user's answer. The ratify route updates stored counters, not the tracker.
+- The default model sums only the successful decisions, each weighted down as it ages by the shared `recency_weight`, against thresholds for levels 2 to 5. A rejection adds nothing. `beta` and `blr` models are the alternatives, chosen by `swe team trust proxy trust model` (see [[decision-proxy-startup]]). A circuit-breaker trip is recorded. The level stays capped at the demoted level until new successes close the gap to the next threshold. A stored trip is restored with the counters, so a demotion survives the next job. `restore_category` restores a category's counters and per-day decision history. Under the `blr` model only, it also restores the saved BLR state. `blr_state_for` returns that state for saving, and `None` under `count` or `beta`. `record_decision_with_features` feeds the BLR model a decision and its question's features.
+- The SWE orchestrator feeds the tracker: a success when the proxy acts alone. Otherwise `forecast_agreement` scores the user's answer against the forecast, and a human approval of a `requires_review` forecast counts as success ([[decision-proxy-agreement]]). The ratify route updates stored counters, not the tracker.
 
 ## Circuit breaker
 - `check` trips a category when at least 10 decisions exist and the error rate is above its threshold. It also trips when 5 or more confidence samples average below the collapse threshold.
