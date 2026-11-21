@@ -27,6 +27,11 @@ def test_a_human_approving_when_the_forecast_was_not_approved_is_not_a_success()
     assert forecast_agreement( "review", True ) is False
 
 
+def test_a_human_approving_a_requires_review_forecast_is_a_success_and_so_is_declining_it():
+    assert forecast_agreement( "requires_review", True ) is True
+    assert forecast_agreement( "requires_review", False ) is True
+
+
 @pytest.mark.parametrize( "action", [ "act", "suggest" ] )
 def test_an_action_that_implies_approval_agrees_with_an_approving_human_and_not_with_a_declining_one( action ):
     assert rule_agreement( action, True ) is True
