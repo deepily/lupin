@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.20 - Session 77f78b28 (Cheech 🌿, build manager; crew Pocholo, Tiffany, Rachel, John, Tiberius) | Principle learner: phases one, three and four freeze closed; archive replay restarts as run 3
+
+**Resume here**: memento `.claude-memento-cheech-77f78b28.md`. Respawn Pocholo from `io/mementos/pocholo-3435e1dc.md` for run 3 (row f76b6d96).
+1. **Closed**: the phase one gate and phase one, the phase three gate and phase three, and the phase four freeze (lag 0). Also closed: the Opus proof (bar met), draft at reveal, the principles forecast and Opus twins (switches off), and John's wiki and duplicate-check rows.
+2. **Archive replay**: Rick ruled the window starts on 10 Sep. Run 2 stopped at ask 1,000 of 1,926, because principles passed the 500 limit near ask 850. Rick ruled (ec0f8813) that the limit moves into `lupin-app.ini` at 5,000 for run 3. Follow-up decision 341e6e3f: how to keep the principle store bounded.
+3. **Duplicate checks** a72cf7dd and b836481a: 16 verdicts, one duplicate (`archive_replay.read_jsonl`), which goes into the run 3 change.
+
+**Files**: history.md
+
 ## 2026.11.20 - Session b53537e4 (Mr. Radio 🦉, build manager; crew Rio, Clayton, Sam, Chloé, Krishna) | Preference learning: phases six, seven, eight and twelve merged; shadow recorders on
 
 **Resume here**: memento `.claude-memento-mr-radio-b53537e4.md`. No live seats; every crew memento is in `io/mementos/`. The recall half of phase eleven (`59862dcb`) waits on live measurement of phases six and seven.
