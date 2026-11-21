@@ -263,10 +263,11 @@ class TestEngineMethod:
         assert cfg.DEFAULT_THREE_WAY_ENABLED is False and cfg.DEFAULT_RECENCY_HALF_LIFE_DAYS == 14
         assert engine.three_way_enabled is False and engine.recency_half_life_days == 14
 
-    def test_the_committed_ini_keeps_the_switch_off_and_the_half_life_at_fourteen( self ):
+    def test_the_committed_ini_turns_the_switch_on_and_keeps_the_half_life_at_fourteen( self ):
+        # Rick ruled on 20 Nov 2026 at about 19:10 EST that the challenger records its stance in shadow on live asks (e11515d85)
         import cosa.utils.util as cu
         ini = open( cu.get_project_root() + "/src/conf/lupin-app.ini" ).read()
-        assert "prediction engine three way enabled                         = false" in ini
+        assert "prediction engine three way enabled                         = true" in ini
         assert "prediction engine recency half life days                    = 14" in ini
 
     def test_with_the_switch_off_it_returns_none( self, engine ):

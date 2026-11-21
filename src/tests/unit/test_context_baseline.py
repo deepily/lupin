@@ -410,10 +410,11 @@ def test_the_episode_carries_the_cards_message_type_default_and_timeout( factory
     assert ( ep[ "message" ], ep[ "response_type" ], ep[ "default" ], ep[ "timeout_seconds" ] ) == ( "Should the worker ship?", "yes_no", "no", 120 )
 
 
-@pytest.mark.parametrize( "key", [ cb.SWITCH_KEY, cb.DISPLAY_KEY ] )
-def test_each_switch_is_off_in_the_shipped_ini_and_has_an_explainer( key ):
+# Rick ruled on 21 Nov 2026 at about 12:35 EST: the forecast runs on live asks for measurement, and is not displayed
+@pytest.mark.parametrize( "key, shipped", [ ( cb.SWITCH_KEY, "true" ), ( cb.DISPLAY_KEY, "false" ) ] )
+def test_each_switch_ships_as_ruled_in_the_ini_and_has_an_explainer( key, shipped ):
     import os
     root = os.environ[ "LUPIN_ROOT" ]
     line = [ l for l in open( f"{root}/src/conf/lupin-app.ini", encoding="utf-8" ).read().splitlines() if l.startswith( key + " " ) ]
-    assert len( line ) == 1 and line[ 0 ].split( "=", 1 )[ 1 ].strip() == "false"
+    assert len( line ) == 1 and line[ 0 ].split( "=", 1 )[ 1 ].strip() == shipped
     assert sum( 1 for l in open( f"{root}/src/conf/lupin-app-splainer.ini", encoding="utf-8" ) if l.startswith( key + " " ) ) == 1
