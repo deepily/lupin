@@ -457,6 +457,33 @@ def test_an_opus_pairing_with_no_twin_lines_is_reported_as_not_run_with_no_verdi
         assert pairing[ "status" ].startswith( "not run, blocked by" ) and "summary" not in pairing
 
 
+def _verdict_cell( text, arm, baseline ):
+    """Read the verdict cell of one rendered pairing row, found by its two labels."""
+    row = next( line for line in text.splitlines() if line.startswith( f"| {ar.LABELS.get( arm, arm )} | {ar.LABELS.get( baseline, baseline )} | " ) )
+    return [ cell.strip() for cell in row.strip( "|" ).split( "|" ) ][ 6 ]
+
+
+def test_a_pairing_where_the_engine_is_second_names_the_engine_when_it_won_and_the_first_arm_when_it_lost():
+    won   = [ _line( f"a{i}", engine=True, baseline=False ) for i in range( 12 ) ]
+    lost  = [ _line( f"b{i}", engine=False, baseline=True ) for i in range( 12 ) ]
+    first = ar.render_report( ar.build_report( won, [], STATE ) )
+    other = ar.render_report( ar.build_report( lost, [], STATE ) )
+    assert _verdict_cell( first, ar.ARM_BASELINE, ENGINE_ARM ) == "A1 better"
+    assert _verdict_cell( other, ar.ARM_BASELINE, ENGINE_ARM ) == "C0 better"
+    assert "engine better" not in first + other and "baseline better" not in first + other
+
+
+def test_a_pairing_with_no_engine_in_it_never_says_engine_and_names_the_arm_that_won():
+    records = [ _line( f"a{i}", baseline=True, principles=False ) for i in range( 12 ) ] + [ _line( f"b{i}", baseline=False, principles=True ) for i in range( 12 ) ]
+    text    = ar.render_report( ar.build_report( records[ :12 ], [], STATE ) )
+    both    = ar.render_report( ar.build_report( records[ 12: ], [], STATE ) )
+    assert _verdict_cell( text, ar.ARM_PRINCIPLES, ar.ARM_BASELINE ) == "C0 better"
+    assert _verdict_cell( both, ar.ARM_PRINCIPLES, ar.ARM_BASELINE ) == "B1 better"
+    assert "engine better" not in text + both and "baseline better" not in text + both
+    assert [ ar._named_verdict( v, "B1", "C0" ) for v in ( "no difference", "not decisive" ) ] == [ "no difference", "not decisive" ]
+    assert ( ar._named_verdict( "engine better", "B1", "C0" ), ar._named_verdict( "baseline better", "B1", "C0" ) ) == ( "B1 better", "C0 better" )
+
+
 def test_the_report_renders_one_row_per_pairing_with_dashes_for_what_was_not_measured():
     records = [ _line( f"a{i}", principles=True ) for i in range( 3 ) ]
     text    = ar.render_report( ar.build_report( records, [], STATE ) )
