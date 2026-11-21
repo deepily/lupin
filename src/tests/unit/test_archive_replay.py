@@ -1018,3 +1018,69 @@ def test_a_resume_after_a_stop_replaces_the_freeze_and_adds_one_history_entry( l
     assert state[ "freeze" ][ "bound" ] == 5000 and [ h[ "changed" ] for h in state[ "freeze_history" ] ] == [ { "bound": [ 1, 5000 ] } ]
     _stage_first( loaded, ids[ :20 ], models=models )
     assert len( ar.load_state( work.state )[ "freeze_history" ] ) == 1, "a start with nothing changed adds no entry"
+
+
+def test_a_stage_start_deletes_limit_failures_stored_for_unrecorded_asks_so_they_are_forecast_fresh( loaded, monkeypatch ):
+    """A stopped chunk leaves limit failure rows with no record; a start must not score them."""
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :10 ], models=models )
+    # rows as the old partial chunk left them: asks 10 to 14 have forecasts stored as limit failures but no record line
+    _stage_first( loaded, ids[ :15 ], models=models )
+    records = ar.read_jsonl( work.records )
+    with open( work.records, "w", encoding="utf-8" ) as handle:
+        for line in records[ :10 ]: handle.write( ar.json.dumps( line ) + "\n" )
+    state = ar.load_state( work.state )
+    state[ "done_ids" ] = ids[ :10 ]
+    ar.save_state( work.state, state )
+    orphans = ids[ 10:15 ]
+    session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm == ar.ARM_PRINCIPLES, PredictionArmForecast.notification_id.in_( [ ar.uuid.UUID( i ) for i in orphans ] ) ).update(
+        { "forecast": None, "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+    session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm == ar.ARM_BASELINE, PredictionArmForecast.notification_id == ar.uuid.UUID( orphans[ 0 ] ) ).update(
+        { "abstention_reason": "unreadable_forecast" }, synchronize_session=False )
+    session.commit()
+    before = len( c0.calls )
+    _stage_first( loaded, ids[ :15 ], models=models )
+    final = ar.read_jsonl( work.records )
+    assert [ r[ "id" ] for r in final ] == ids[ :15 ] and _bound_rows( session ) == 0
+    assert all( r[ "arms" ][ ar.ARM_PRINCIPLES ][ "reason" ] is None for r in final[ 10: ] ), "an unrecorded limit failure was scored as a miss"
+    assert len( c0.calls ) - before == 5, "each of the five asks got one fresh principles forecast and no other call"
+    assert final[ 10 ][ "arms" ][ ar.ARM_BASELINE ][ "reason" ] == "unreadable_forecast", "a failure that is not the limit was kept"
+
+
+def test_the_unrecorded_limit_failure_delete_leaves_recorded_asks_other_arms_and_other_failures_alone( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :6 ], models=models )
+    query = lambda arm, ask_id: session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm == arm, PredictionArmForecast.notification_id == ar.uuid.UUID( ask_id ) )
+    query( ar.ARM_PRINCIPLES, ids[ 0 ] ).update( { "forecast": None, "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+    query( ar.ARM_PRINCIPLES, ids[ 1 ] ).update( { "forecast": None, "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+    query( ar.ARM_PRINCIPLES, ids[ 2 ] ).update( { "forecast": None, "abstention_reason": "unreadable_forecast" }, synchronize_session=False )
+    session.commit()
+    assert models.discard_unrecorded_limit_failures( ar.HAIKU_ARMS, { ids[ 0 ] } ) == 1
+    assert query( ar.ARM_PRINCIPLES, ids[ 0 ] ).count() == 1 and query( ar.ARM_PRINCIPLES, ids[ 1 ] ).count() == 0 and query( ar.ARM_PRINCIPLES, ids[ 2 ] ).count() == 1
+    assert models.discard_unrecorded_limit_failures( ar.HAIKU_ARMS, set() ) == 1 and query( ar.ARM_PRINCIPLES, ids[ 0 ] ).count() == 0
+    assert models.discard_unrecorded_limit_failures( ar.TWIN_ARMS, set() ) == 0
+
+
+def test_a_twin_stage_start_deletes_limit_failures_stored_for_asks_with_no_twin_record( loaded, monkeypatch ):
+    """A stopped twin leaves limit failure rows with no record; a start forecasts them fresh."""
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :10 ], models=models )
+    _twin_stage( loaded, ids[ :5 ], models, code=CODE )
+    orphans = ids[ 5:8 ]
+    for ask_id in orphans: models.run( ask_id, ar.TWIN_ARMS )
+    session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm == ar.TWIN_ARMS[ 1 ], PredictionArmForecast.notification_id.in_( [ ar.uuid.UUID( i ) for i in orphans ] ) ).update(
+        { "forecast": None, "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+    session.commit()
+    assert _bound_rows( session ) == 3
+    before = len( c0.calls )
+    assert _twin_stage( loaded, ids[ :10 ], models, code=CODE ) == 5
+    lines = ar.read_jsonl( work.twins )
+    assert [ t[ "id" ] for t in lines ] == ids[ :10 ] and _bound_rows( session ) == 0
+    assert all( t[ "arms" ][ ar.TWIN_ARMS[ 1 ] ][ "reason" ] is None for t in lines[ 5: ] ), "an unrecorded limit failure was recorded as a miss"
+    assert len( c0.calls ) - before == 3 + 2 * 2, "the three orphans got one fresh principles twin call each (their baseline twin rows were kept); the two new asks got both twins"
