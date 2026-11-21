@@ -642,6 +642,24 @@ else
     esac
 fi
 
+# B8 — the VM's global ~/.claude/CLAUDE.md is the one in the VM's planning-is-prompting copy (row 138c1c8f, Rick 21 Nov 2026).
+# A deploy pushes planning-is-prompting and then that copy's global/CLAUDE.md to ~/.claude/CLAUDE.md. A VM whose global file
+# differs from the copy, or has none, runs its seats on stale rules. WARN: the app runs either way, but the seats read the rules.
+VM_PIP_GLOBAL="${PLANNING_IS_PROMPTING_ROOT:-/mnt/lupin-data/planning-is-prompting}/global/CLAUDE.md"
+VM_USER_GLOBAL="$HOME/.claude/CLAUDE.md"
+if [ ! -f "$VM_PIP_GLOBAL" ]; then
+    report fail WARN "no $VM_PIP_GLOBAL, so the global CLAUDE.md cannot be checked" \
+                  "lupin-vm.sh deploy   # refreshes planning-is-prompting, then the global CLAUDE.md"
+elif [ ! -f "$VM_USER_GLOBAL" ]; then
+    report fail WARN "no $VM_USER_GLOBAL on the VM, so its seats run with no global rules" \
+                  "lupin-vm.sh deploy   # pushes it from planning-is-prompting"
+elif cmp -s "$VM_PIP_GLOBAL" "$VM_USER_GLOBAL"; then
+    report pass WARN "$VM_USER_GLOBAL matches the planning-is-prompting copy"
+else
+    report fail WARN "$VM_USER_GLOBAL differs from $VM_PIP_GLOBAL, so the VM's seats run on stale global rules" \
+                  "lupin-vm.sh deploy   # pushes it from planning-is-prompting"
+fi
+
 # B7 — the built esbuild bundles are on the checkout (bug 527fec6e).
 # The compose file bind-mounts this checkout's ./src over the image's, so the bundles baked into the image are
 # hidden, and static/dist/ is gitignored so a code sync does not carry it. A script 404s and the feature it

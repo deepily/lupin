@@ -480,7 +480,9 @@ do_push_bundle() {
     # the reset, nothing is touched); WITH it, it saves `git diff HEAD` (staged + unstaged tracked
     # edits) under $VM_DISCARD_DIR/<utc ts>.diff, names that path, and lets the reset go on.
     # Untracked files are not listed: reset does not remove them, and the VM keeps data/env/keys there.
-    local dirty_guard="dirty=\"\$( sudo git $safe status --porcelain --untracked-files=no )\"; if [ -n \"\$dirty\" ]; then echo \"VM_DIRTY_TREE: uncommitted changes in $VM_ROOT that a reset would discard:\"; echo \"\$dirty\"; if [ \"$DISCARD_VM_CHANGES\" = 1 ]; then ts=\"\$( date -u +%Y%m%dT%H%M%SZ )\" && sudo mkdir -p $VM_DISCARD_DIR && sudo git $safe diff HEAD | sudo tee $VM_DISCARD_DIR/\$ts.diff >/dev/null && echo \"VM_DIRTY_SAVED: patch at $VM_DISCARD_DIR/\$ts.diff; discarding because --discard-vm-changes was given\"; else echo \"VM_DIRTY_REFUSED: deploy stopped before the reset; commit them, or re-run with --discard-vm-changes to save a patch and discard\"; false; fi; fi"
+    # The two INI config files are exempt (Rick, 21 Nov 2026, row 138c1c8f): a deploy always overwrites them with
+    # dev's copy. A VM-only setting belongs in the [Lupin: Testing] block of the dev file, never in a hand edit.
+    local dirty_guard="dirty=\"\$( sudo git $safe status --porcelain --untracked-files=no -- . ':(exclude)src/conf/lupin-app.ini' ':(exclude)src/conf/lupin-app-splainer.ini' )\"; if [ -n \"\$dirty\" ]; then echo \"VM_DIRTY_TREE: uncommitted changes in $VM_ROOT that a reset would discard:\"; echo \"\$dirty\"; if [ \"$DISCARD_VM_CHANGES\" = 1 ]; then ts=\"\$( date -u +%Y%m%dT%H%M%SZ )\" && sudo mkdir -p $VM_DISCARD_DIR && sudo git $safe diff HEAD | sudo tee $VM_DISCARD_DIR/\$ts.diff >/dev/null && echo \"VM_DIRTY_SAVED: patch at $VM_DISCARD_DIR/\$ts.diff; discarding because --discard-vm-changes was given\"; else echo \"VM_DIRTY_REFUSED: deploy stopped before the reset; commit them, or re-run with --discard-vm-changes to save a patch and discard\"; false; fi; fi"
     local rcmd="cp /tmp/lupin-wip.bundle $vm_bundle && rm -f /tmp/lupin-wip.bundle && cd $VM_ROOT && sudo git $safe fetch origin $branch && sudo chown -R 1001:1001 .git && echo FETCHED && git $safe log --oneline -1 FETCH_HEAD"
     case "$mode" in
         checkout)
@@ -957,6 +959,23 @@ case "$SUBCMD" in
             PIP_SYNC_ARGS=( push-repo "$PLANNING_IS_PROMPTING_ROOT" "$( basename "$VM_PIP_ROOT" )" )
             [ "$DRY_RUN" -eq 1 ] && PIP_SYNC_ARGS=( --dry-run "${PIP_SYNC_ARGS[@]}" )
             bash "${BASH_SOURCE[0]}" "${PIP_SYNC_ARGS[@]}" || log "WARN: the planning-is-prompting refresh FAILED; the VM copy may be stale (the refresh cron needs its crontab_lock.py)"
+        fi
+        # 1b2. The VM's seats read ~/.claude/CLAUDE.md, so it must be the global CLAUDE.md of the planning-is-prompting
+        #      checkout this deploy just refreshed (Rick, 21 Nov 2026, row 138c1c8f). Same loud-warning rule as 1b.
+        #      The preflight's global CLAUDE.md check (B8) asserts it afterwards.
+        if [ "${LUPIN_SKIP_PIP_SYNC:-0}" = "1" ]; then
+            log "global CLAUDE.md sync SKIPPED (LUPIN_SKIP_PIP_SYNC=1)"
+        elif [ -z "${PLANNING_IS_PROMPTING_ROOT:-}" ] || [ ! -f "$PLANNING_IS_PROMPTING_ROOT/global/CLAUDE.md" ]; then
+            log "WARN: no global/CLAUDE.md under PLANNING_IS_PROMPTING_ROOT, so the VM's ~/.claude/CLAUDE.md was NOT refreshed"
+        else
+            log "pushing $PLANNING_IS_PROMPTING_ROOT/global/CLAUDE.md to the VM's ~/.claude/CLAUDE.md"
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log "(dry-run) on VM: mkdir -p ~/.claude; then push-file global/CLAUDE.md '~/.claude/CLAUDE.md'"
+            else
+                { bash "${BASH_SOURCE[0]}" run "mkdir -p ~/.claude" \
+                    && bash "${BASH_SOURCE[0]}" push-file "$PLANNING_IS_PROMPTING_ROOT/global/CLAUDE.md" '~/.claude/CLAUDE.md'; } \
+                    || log "WARN: the global CLAUDE.md push FAILED; the VM's seats may run on stale global rules"
+            fi
         fi
         # 1c. The pages load gitignored bundles from static/dist/, and the VM's bind mount hides the image's copy,
         #     so ship them from the local build. A failure is a loud warning: the app deploy is unaffected, the pages are not.
