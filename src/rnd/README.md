@@ -170,3 +170,5 @@ Naming convention: `YYYY.MM.DD-descriptive-kebab-case-name.md`
 
 
 
+
+**Code reuse review**: [**The shared proxy decision writer (2026-11-21)**](2026.11.21-proxy-decision-writer-reuse-review.md) — row `dd1c4169`. One definition, `write_proxy_decision`, ruled DISTINCT: the responder and the SWE orchestrator now share its shadow-or-log branch. The document holds the search lines and the REUSE-OUTCOME line.
