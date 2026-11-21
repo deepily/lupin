@@ -28,6 +28,13 @@ The retro is [the 20 Nov post-game](src/docs/post-games/v0.2.4/2026.11.20-mr-rad
 - 2026-11-20 — **Trust "success" scoring in phase twelve** → **Leave as is, pinned as an expected failure, and file it for Rick** (Mr. Radio, 13:47). Why: changing it changes trust counts, which is Rick's call (decision `ae3fb0a0`).
 - 2026-11-20 — **Bouncing `:7999` or `:8000`** → **Neither until migrations `7a3e9c5d1b28` and `c4d8e1a6b392` are applied** (Mr. Radio and Cheech, 13:34). Why: merged phase seven code cannot read a database without the column (gate `73548e6e`).
 
+## 📚 Decisions log 2026-11-20 evening (Cheech 🌿 `77f78b28`, Principle learner build; crew Pocholo, Tiffany, Rachel, John; times Eastern)
+
+- 2026-11-20 — **Apply migrations `7a3e9c5d1b28` and `c4d8e1a6b392` to the dev and test databases** → **Apply both** (Rick, card, about 17:22). Alembic run from the host was refused, because the host login does not own the tables. The servers' own startup migration applied them, and `lupin_db_test` reads `c4d8e1a6b392`.
+- 2026-11-20 — **Stop the first half B browser run** → **Stop it** (Rick, card, about 17:32). Why: both client bundles were stale at `9c692f48f`, so it tested client code from before phase six.
+- 2026-11-20 — **The archive replay's evaluation window** → **Restart from 10 Sep 2026** (Rick, card, about 18:45). Why: no answers are attributed to the owner before 10 Sep, so the principles forecast could not differ from the baseline Haiku forecast there. The window is 1,926 asks, set before any of them was replayed, with every other frozen value unchanged (row `f76b6d96`, merged at `d25569c00`).
+- 2026-11-20 — **The 13 unit tests that failed under -n 4** → **Not a test defect** (Cheech, row `c73c66f8`). Why: they were out-of-memory kills from a bare pytest inside a seat's 8 GiB limit. The tier is green through `src/tests/run-unit-tests.sh`, which runs inside the 16 GiB scope.
+
 ## 📚 Decisions log 2026-11-19 (Mr. Radio 🦉 `67865d63`, build manager for preference learning, missing question vectors; times Eastern)
 
 The full table of today's rulings is in the [missing-vectors plan](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.18-missing-question-vectors-plan.md). The cross-track agreements are on re-plan row `47865511`.
