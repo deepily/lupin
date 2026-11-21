@@ -24,6 +24,7 @@ from cosa.agents.decision_proxy.config import (
     DEFAULT_TRUST_MODE,
     shadow_forecast_recording_enabled,
 )
+from cosa.agents.decision_proxy.decision_writer import write_proxy_decision
 from cosa.agents.decision_proxy.smart_router import SmartRouter
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.decision_proxy.user_presence import user_connected_or_default
@@ -380,37 +381,16 @@ class DecisionResponder( BaseResponder ):
             requires_ratification: Override for ratification state (None = infer from action)
         """
         try:
-            from cosa.rest.db.database import get_db
-            from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
-
-            with get_db() as session:
-                repo = ProxyDecisionRepository( session )
-
-                if result.action == "shadow":
-                    repo.log_shadow(
-                        notification_id = notification_id,
-                        domain          = getattr( self.domain_strategy, "name", "unknown" ),
-                        category        = result.category,
-                        question        = question[ :500 ],
-                        sender_id       = "",
-                        confidence      = result.confidence,
-                        trust_level     = result.trust_level,
-                        reason          = result.reason or "shadow mode",
-                        decision_value  = result.value if shadow_forecast_recording_enabled() else None,
-                    )
-                else:
-                    repo.log_decision(
-                        notification_id      = notification_id,
-                        domain               = getattr( self.domain_strategy, "name", "unknown" ),
-                        category             = result.category,
-                        question             = question[ :500 ],
-                        action               = result.action,
-                        decision_value       = result.value,
-                        confidence           = result.confidence,
-                        trust_level          = result.trust_level,
-                        reason               = result.reason or "",
-                        requires_ratification = requires_ratification if requires_ratification is not None else ( result.action == "suggest" ),
-                    )
+            write_proxy_decision(
+                result                = result,
+                notification_id       = notification_id,
+                domain                = getattr( self.domain_strategy, "name", "unknown" ),
+                question              = question,
+                sender_id             = "",
+                requires_ratification = requires_ratification if requires_ratification is not None else ( result.action == "suggest" ),
+                shadow_reason_default = "shadow mode",
+                shadow_decision_value = result.value if shadow_forecast_recording_enabled() else None,
+            )
 
         except Exception as e:
             if self.debug:
