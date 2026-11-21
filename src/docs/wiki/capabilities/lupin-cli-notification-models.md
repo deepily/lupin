@@ -7,7 +7,7 @@ pins:
   - lupin_cli.notifications.notification_models.ErrorEvent@7db65ef6ed
   - lupin_cli.notifications.notification_models.ExpiredEvent@286274ea04
   - lupin_cli.notifications.notification_models.NotificationPriority@de9751b245
-  - lupin_cli.notifications.notification_models.NotificationResponse@6d55e81788
+  - lupin_cli.notifications.notification_models.NotificationResponse@7ec70e44cc
   - lupin_cli.notifications.notification_models.NotificationType@c1ee83ce4f
   - lupin_cli.notifications.notification_models.OfflineEvent@c2fa4dc945
   - lupin_cli.notifications.notification_models.RespondedEvent@9c9b282aab
@@ -25,6 +25,7 @@ The typed values the notification clients build and read: enums, the answer even
 - Four events come off the answer stream, all built on `SSEEventBase`. `RespondedEvent` carries the answer and who posted it. `ExpiredEvent` carries the default if one was set. `OfflineEvent` always used the default. `ErrorEvent` carries a message and no answer.
 - `NotificationResponse` is what the blocking client returns. Its `success` is true for exit code 0 and `is_error` is true for exit code 1. Exit code 2 is neither.
 - It also carries `error_detail`, the server's own sentence for a non-200, and `reattach_state`, which says whether a dead stream was re-attached.
+- It also carries `answered_by`, who the server saw post the answer: `user_id`, `account_email` and `method`, either `jwt` or `api_key`. It is None for a timeout or offline default, and from a server that predates the field. `notification_id` is the id of the notification that carried the question, the id in the server's opening ack frame. It is None when the stream never opened or the ack frame was not captured.
 - `AsyncNotificationRequest` is the fire-and-forget request. It has no response type. Its timeout is 1 to 30 seconds and defaults to 5. It strips the message and refuses a blank one.
 - Its `to_api_params` makes the query parameters for `/api/notify`. It raises `ValueError` while `target_user` is unset. The API key is not in it.
 - `AsyncNotificationResponse` holds `success`, `status`, the target and a connection count. `is_queued` is true for the status queued. `is_error` is true for error, connection_error and timeout.
