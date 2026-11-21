@@ -1663,11 +1663,57 @@ class PredictionEngine:
             - with the switch off, returns None and reads nothing
             - with it on, returns three_way_stance.three_way_forecast for the ask, using this engine's
               recency half-life
-            - never changes the engine, a stored row or the card; the live ask path does not call it
+            - never changes the engine, a stored row or the card; record_three_way_shadow calls it on every live yes/no ask
         """
         if not self.three_way_enabled: return None
         from cosa.agents.prediction_engine import three_way_stance
         return three_way_stance.three_way_forecast( ask, cases, self.recency_half_life_days )
+
+    def record_three_way_shadow( self, notification_id: str, notification_dict: Dict[str, Any],
+                                 asked_at: Optional[datetime] = None ) -> Optional[Dict[str, Any]]:
+        """
+        Run the three-way challenger on a live yes/no ask and store its stance on the row.
+
+        Requires:
+            - the ask's prediction_log row is written, because the stance is added to it
+            - notification_dict has message, response_type, sender_id, recipient_id and title
+
+        Ensures:
+            - with the switch off, or for an ask that is not yes/no, returns None and reads nothing
+            - otherwise stores { value, qualifier, confidence, probabilities, neighbours } in three_way_shadow and returns it
+            - an ask the engine cannot embed stores { status: no_embedding }, and any failure stores
+              { status: error, error_class }; neither changes the forecast row's other fields
+            - never changes the card, the displayed forecast or any other column
+            - never raises
+        """
+        if not self.three_way_enabled or notification_dict.get( "response_type" ) != RESPONSE_TYPE_YES_NO: return None
+        from cosa.agents.prediction_engine import three_way_shadow
+        try:
+            message   = notification_dict[ "message" ]
+            embedding = self._generate_embedding( message )
+            if embedding is None:
+                stance = three_way_shadow.unavailable( "no_embedding" )
+            else:
+                category, _ = self.classifier.classify( message, sender_id=notification_dict[ "sender_id" ] )
+                ask = { "question_embedding": embedding, "asked_at": asked_at or datetime.now( timezone.utc ),
+                        "owner_user_id": notification_dict[ "recipient_id" ], "response_type": RESPONSE_TYPE_YES_NO,
+                        "category": category, "title": notification_dict[ "title" ], "message": message,
+                        "sender_id": notification_dict[ "sender_id" ] }
+                from cosa.rest.db.database import get_db
+                with get_db() as session:
+                    cases = three_way_shadow.live_cases( session, notification_dict[ "recipient_id" ] )
+                stance = three_way_shadow.stance_of( self.three_way_forecast( ask, cases ) )
+        except Exception as e:
+            if self.debug: print( f"[PredictionEngine] three-way shadow error: {e}" )
+            stance = three_way_shadow.unavailable( "error", e.__class__.__name__ )
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
+            with get_db() as session:
+                PredictionLogRepository( session ).set_three_way_shadow( notification_id, stance )
+        except Exception as e:
+            if self.debug: print( f"[PredictionEngine] three-way shadow write error: {e}" )
+        return stance
 
     def _empty_retrieval_reason( self, store_error: Optional[str] ) -> str:
         """

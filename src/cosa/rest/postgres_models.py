@@ -1234,6 +1234,12 @@ class PredictionLog( Base ):
         JSONB,
         nullable=True
     )
+    # The three-way challenger's stance for a yes/no ask, recorded beside the live forecast and never shown:
+    # { value, qualifier, confidence, probabilities, neighbours } or { status, error_class }. NULL = it did not run.
+    three_way_shadow: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
     # The answer controls' state at the moment the forecast fold was first opened (written by the seen route,
     # first write wins). Same JSONB shape as actual_value, so the two compare key for key. NULL = unknown.
     draft_at_reveal: Mapped[Optional[dict]] = mapped_column(

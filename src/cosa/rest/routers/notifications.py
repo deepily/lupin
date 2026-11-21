@@ -619,6 +619,9 @@ def _update_notification_state_sync( notification_id, state ):
         repo.update_state( uuid.UUID( notification_id ), state )
 
 
+_shadow_tasks = set()   # holds each running three-way shadow task, so the loop does not drop it
+
+
 def _arm_forecast_ledger_enabled() -> bool:
     """
     Say whether the displayed arm's sibling row is written with each ask-time forecast row.
@@ -1683,6 +1686,22 @@ async def notify_user(
                 )
             except Exception as ledger_error:
                 print( f"[PREDICTION] ⚠️ Forecast ledger error (non-fatal): {ledger_error}" )
+
+        # ---- Three-way challenger, in shadow: its stance is stored beside the forecast and never shown ----
+        # A task on this loop that starts after the ledger row is written, so it adds no time to the card.
+        try:
+            if not review_card and parsed_prediction_hint_override is None and response_type == "yes_no" and forecast_engine is not None and forecast_engine.three_way_enabled:
+                shadow_task = asyncio.create_task( asyncio.to_thread( forecast_engine.record_three_way_shadow, notification_id, {
+                    "message"       : message.strip(),
+                    "response_type" : response_type,
+                    "sender_id"     : resolved_sender_id,
+                    "recipient_id"  : str( target_system_id ),
+                    "title"         : title,
+                } ) )
+                _shadow_tasks.add( shadow_task )
+                shadow_task.add_done_callback( _shadow_tasks.discard )
+        except Exception as shadow_error:
+            print( f"[PREDICTION] ⚠️ Three-way shadow error (non-fatal): {shadow_error}" )
 
         # Stage 3 (Krishna's drift-fix): the client gates its 👍🏼/👎🏼 vote controls on the
         # INI vote gate — carry it IN the hint payload so notifications.js cannot drift
