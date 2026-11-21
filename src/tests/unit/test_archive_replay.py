@@ -980,3 +980,41 @@ def test_a_limit_edited_in_the_ini_file_in_mid_stage_changes_nothing_because_the
     assert models.limits == { "bound": 5000, "multiplier": 0 }
     assert len( ar.read_jsonl( work.records ) ) == 20 and _bound_rows( session ) == 0
     with pytest.raises( ar.FreezeMismatch, match="bound" ): _stage_first( loaded, ids[ :30 ], models=models )
+
+
+def test_a_rerun_picks_only_limit_failures_and_leaves_unreadable_and_model_failures_as_recorded( loaded, monkeypatch ):
+    """An unreadable or model-error failure is a result, not a second chance."""
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :12 ], models=models )
+    limit_id, unreadable_id, model_id, good_id = ids[ 2 ], ids[ 4 ], ids[ 6 ], ids[ 8 ]
+    original = { line[ "id" ]: line for line in ar.read_jsonl( work.records ) }
+    ar.replace_arms( work.records, { limit_id: { ar.ARM_PRINCIPLES: { "correct": False, "forecast": None, "reason": ar.BOUND_REASON } },
+                                     unreadable_id: { ar.ARM_PRINCIPLES: { "correct": False, "forecast": None, "reason": "unreadable_forecast" } },
+                                     model_id: { ar.ARM_PRINCIPLES: { "correct": False, "forecast": None, "reason": "model_error: Failed" } } } )
+    session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm == ar.ARM_PRINCIPLES, PredictionArmForecast.notification_id == ar.uuid.UUID( limit_id ) ).update(
+        { "forecast": None, "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+    session.commit()
+    before  = len( c0.calls )
+    planted = { line[ "id" ]: line for line in ar.read_jsonl( work.records ) }
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000 ) == 1
+    after = { line[ "id" ]: line for line in ar.read_jsonl( work.records ) }
+    assert len( c0.calls ) - before == 1, "only the limit failure called a model"
+    assert after[ limit_id ] == original[ limit_id ], "the limit failure was not forecast again"
+    for kept in ( unreadable_id, model_id, good_id ): assert after[ kept ] == planted[ kept ], "a failure that is not the limit was touched"
+    assert after[ unreadable_id ][ "arms" ][ ar.ARM_PRINCIPLES ][ "reason" ] == "unreadable_forecast" and after[ model_id ][ "arms" ][ ar.ARM_PRINCIPLES ][ "reason" ] == "model_error: Failed"
+
+
+def test_a_resume_after_a_stop_replaces_the_freeze_and_adds_one_history_entry( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    models = _models( session, embed )[ 0 ]
+    _limits( monkeypatch, 1 )
+    with pytest.raises( ar.BoundStop ): _stage_first( loaded, ids[ :20 ], models=models )
+    assert "freeze_history" not in ar.load_state( work.state ) and _bound_rows( session ) == 0, "the stop row must be deleted"
+    _limits( monkeypatch, 5000 )
+    _stage_first( loaded, ids[ :20 ], models=models )
+    state = ar.load_state( work.state )
+    assert state[ "freeze" ][ "bound" ] == 5000 and [ h[ "changed" ] for h in state[ "freeze_history" ] ] == [ { "bound": [ 1, 5000 ] } ]
+    _stage_first( loaded, ids[ :20 ], models=models )
+    assert len( ar.load_state( work.state )[ "freeze_history" ] ) == 1, "a start with nothing changed adds no entry"
