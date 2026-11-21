@@ -27,6 +27,12 @@ The retro is [the 20 Nov post-game](src/docs/post-games/v0.2.4/2026.11.20-mr-rad
 - 2026-11-20 — **A fallback for phase seven's low coverage** → **None; merge as built** (Rick, about 12:40). Why: header and label overlap between cards is near zero, so a fallback adds nothing (Rio's probes).
 - 2026-11-20 — **Trust "success" scoring in phase twelve** → **Leave as is, pinned as an expected failure, and file it for Rick** (Mr. Radio, 13:47). Why: changing it changes trust counts, which is Rick's call (decision `ae3fb0a0`).
 - 2026-11-20 — **Bouncing `:7999` or `:8000`** → **Neither until migrations `7a3e9c5d1b28` and `c4d8e1a6b392` are applied** (Mr. Radio and Cheech, 13:34). Why: merged phase seven code cannot read a database without the column (gate `73548e6e`).
+- 2026-11-20 — **Phase eight's challenger** → **Wire it into live yes/no asks in shadow, then merge it** (Rick, cards about 18:30 and 19:06). Merged at `1f95f6732`; the card is unchanged.
+- 2026-11-20 — **Trust success and a human approval of a requires_review forecast** → **Count the approval as success** (Rick, about 18:31; decision `ae3fb0a0`). Merged at `04f2c093b`; the expected-failure pin came off.
+- 2026-11-20 — **What rule_agreement means as built** → **Confirmed as built** (Rick, about 19:03; decision `0389a9e1`).
+- 2026-11-20 — **Shadow rows with no forecast value** → **Record the forecast behind a switch** (Rick, about 19:03; decision `2f2b295c`). Merged at `57ae9c765` and `1a5726c39` (row `8c935b96`). Readers of `proxy_decisions` must now key on `action`, not on a blank value (Chloé's review note).
+- 2026-11-20 — **Both shadow recorders** → **Turn each on as it lands** (Rick, about 19:10). Both switches ship true in `lupin-app.ini`.
+- 2026-11-20 — **Proxy decision rows that never link to their notification** → **Fix it at P0** (Rick, about 22:50; row `663f08d4`). Sam builds and Chloé reviews.
 
 ## 📚 Decisions log 2026-11-20 evening (Cheech 🌿 `77f78b28`, Principle learner build; crew Pocholo, Tiffany, Rachel, John; times Eastern)
 

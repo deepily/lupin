@@ -8,6 +8,18 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.20 - Session b53537e4 (Mr. Radio 🦉, build manager; crew Rio, Clayton, Sam, Chloé, Krishna) | Preference learning: phases six, seven, eight and twelve merged; shadow recorders on
+
+**Resume here**: memento `.claude-memento-mr-radio-b53537e4.md`. Open: P0 bug `663f08d4` (notification link), with Sam building and Chloé reviewing. The recall half of phase eleven (`59862dcb`) waits on live measurement of phases six and seven.
+1. **Merged and reviewed, census green**: phases six, seven, eight (shadow) and twelve, and the judge switch. The retro is `src/docs/post-games/v0.2.4/2026.11.20-mr-radio-opl-remediation-crew-post-game.md`.
+2. **Evening**: phase eight wired into live asks in shadow (`1f95f6732`). Trust success counts an approval (`04f2c093b`). Shadow rows store the forecast (`57ae9c765`, `1a5726c39`). `:7999` was bounced after each merge.
+3. **Rick's rulings** are in the TODO.md 20 Nov decisions log.
+
+### Checkpoint | 2026.11.20 23:00 | Tonight's rulings into the decisions log; history entry
+
+**Files**: history.md, TODO.md
+**Commit**: 024a56423
+
 ## 2026.11.19 - Session ec5dd3e7 (Cheech 🌿, build manager; crew Tiberius, Rachel, Chloé, Pocholo, John, Tiffany, Clayton) | Principle learner: migrations applied, extractor tested live, headings approved
 
 **Resume here**: memento `.claude-memento-cheech-ec5dd3e7.md`; crew mementos in `io/mementos/`. Open: row 2c1a8dbf, wiring the extractor to Rick's 14 headings (held for approval). Also open: the fixture-replay closing gate c1e30b89. The principles forecast and Opus twins wait on Mr. Radio's re-plan (chase 20 Nov 11:00).
