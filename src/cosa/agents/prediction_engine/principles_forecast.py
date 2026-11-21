@@ -36,6 +36,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieval_limits, retrieve_principles
 from cosa.config.configuration_manager import ConfigurationManager
+from cosa.config.switch_reader import read_switch
 from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
 from cosa.rest.postgres_models import Notification, PredictionArmForecast
 from cosa.utils.iso_timestamp import aware_moment
@@ -72,10 +73,8 @@ def switch_enabled( key ):
         - returns True only when the INI key is true
         - never raises, so a settings failure cannot stop an ask
     """
-    try: return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( key, default=False, return_type="boolean" )
-    except Exception as settings_error:
-        print( f"[PRINCIPLES] ⚠️ Switch '{key}' unreadable, treated as off: {settings_error}" )
-        return False
+    return read_switch( lambda env_var_name: ConfigurationManager( env_var_name=env_var_name ), key, False,
+                        lambda settings_error: f"[PRINCIPLES] ⚠️ Switch '{key}' unreadable, treated as off: {settings_error}" )
 
 
 def principles_forecast_enabled():

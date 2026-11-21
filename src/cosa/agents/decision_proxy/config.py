@@ -11,6 +11,7 @@ Dependency Rule:
 """
 
 from cosa.config.app_timezone import get_decision_proxy_timezone
+from cosa.config.switch_reader import read_switch
 from cosa.agents.decision_proxy.errors import InvalidTrustModelError
 from cosa.agents.utils.proxy_agents.base_config import (   # noqa: F401
     DEFAULT_SERVER_HOST,
@@ -62,13 +63,12 @@ def shadow_forecast_recording_enabled():
         - returns the INI switch's value as a bool, False when the key is absent
         - returns False and prints one line when the config cannot be read, so the caller's row is still written
     """
-    try:
+    def manager( env_var_name ):
         from cosa.config.configuration_manager import ConfigurationManager
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        return config_mgr.get( SHADOW_FORECAST_RECORDING_KEY, default=str( DEFAULT_SHADOW_FORECAST_RECORDING ), return_type="boolean" )
-    except Exception as e:
-        print( f"[DECISION-PROXY] shadow forecast switch unreadable, recording no forecast: {e.__class__.__name__}: {e}" )
-        return False
+        return ConfigurationManager( env_var_name=env_var_name )
+
+    return read_switch( manager, SHADOW_FORECAST_RECORDING_KEY, str( DEFAULT_SHADOW_FORECAST_RECORDING ),
+                        lambda e: f"[DECISION-PROXY] shadow forecast switch unreadable, recording no forecast: {e.__class__.__name__}: {e}" )
 
 
 # ============================================================================
