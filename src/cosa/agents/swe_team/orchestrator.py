@@ -48,6 +48,7 @@ from .hooks import build_can_use_tool, post_tool_hook, notification_hook, wrap_p
 from .state_files import FeatureList, ProgressLog
 from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.utils.voice_io import read_gate_answer
+from cosa.agents.utils.agent_notification_dispatcher import take_last_ask_notification_id
 
 # Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
 # ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
@@ -325,7 +326,9 @@ class SweTeamOrchestrator:
                 abstract = ( abstract or "" ) + suggestion_note
 
         # Step 3: Fall through to user confirmation
-        user_answer = await team_io.ask_confirmation( question, role, default, timeout, abstract )
+        take_last_ask_notification_id()  # forget any id left by an earlier ask in this task
+        user_answer     = await team_io.ask_confirmation( question, role, default, timeout, abstract )
+        notification_id = take_last_ask_notification_id()
 
         # Step 4: Record trust feedback (shadow observes, suggest tracks follow-through)
         if proxy_result and self.proxy:
@@ -344,7 +347,7 @@ class SweTeamOrchestrator:
                 self._persist_trust_feedback( proxy_result.category, agreement )
 
                 # Row 5ac3d5d7: the ratify page reads proxy_decisions, and this path wrote none
-                self._persist_proxy_decision( role, question, proxy_result, user_answer )
+                self._persist_proxy_decision( role, question, proxy_result, user_answer, notification_id )
 
                 # Phase 7: Emit proxy summary notification for pending ratification decisions
                 # "suggest" and "defer" actions produce pending ratification decisions;
@@ -396,7 +399,7 @@ class SweTeamOrchestrator:
             logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
             return 0
 
-    def _persist_proxy_decision( self, role, question, proxy_result, user_answer ):
+    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None ):
         """
         Write one organic proxy_decisions row for a gated confirmation (non-fatal best-effort).
 
@@ -404,9 +407,11 @@ class SweTeamOrchestrator:
             - role is a string; question is a string
             - proxy_result has action, value, category, confidence, trust_level, reason
             - user_answer is the user's bool answer, or None when the proxy auto-approved
+            - notification_id is the id of the notification that carried the question, or None when none was asked
 
         Ensures:
             - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
+            - the row's notification_id is the carrying notification's id; a fresh uuid only when no notification carried the question (auto-approval, or the id was not captured)
             - the row carries data_origin "organic" and its rule_agreement, which is separate from the trust success
             - failure is logged and never propagates
         """
@@ -415,7 +420,7 @@ class SweTeamOrchestrator:
             from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
 
             common = {
-                "notification_id" : str( uuid.uuid4() ),
+                "notification_id" : notification_id or str( uuid.uuid4() ),
                 "domain"          : "swe",
                 "category"        : proxy_result.category,
                 "question"        : question[ :500 ],
