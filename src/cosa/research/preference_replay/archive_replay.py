@@ -43,6 +43,7 @@ from cosa.research.preference_replay.service_embeddings import CachedServiceEmbe
 from cosa.rest.repair_attempt_tracker import cosine_similarity
 from cosa.rest.postgres_models import Notification, PredictionArmForecast, PreferenceEvidence, PreferencePrinciple
 from cosa.utils.iso_timestamp import aware_moment
+from cosa.utils.jsonl_file import read_jsonl
 
 ARM_FIXED       = "A0"
 ARM_BASELINE    = context_baseline.ARM
@@ -57,6 +58,11 @@ WINDOW_START    = datetime( 2026, 9, 10, tzinfo=timezone.utc )
 CHUNK_SIZE      = 250
 RECORDER_ARM    = "recorder"
 STAND_IN_PRIORITY = "medium"
+WARN_FRACTION   = 0.8
+BOUND_REASON    = f"{principles_forecast.REASON_INPUT}: {principle_retrieval.PrincipleBoundExceeded.__name__}"
+LEGACY_FREEZE   = { "fetch_multiplier": 0 }
+STOP_EXIT       = 3
+CODE_KEYS       = ( "code_sha", "code_dirty" )
 FLUSH_EVERY     = 500
 LABELS          = { ENGINE_ARM: "A1", ARM_FIXED: "A0" }
 PAIRINGS        = ( ( ARM_PRINCIPLES, ARM_BASELINE ), ( ARM_PRINCIPLES, ENGINE_ARM ), ( ARM_PRINCIPLES, ARM_FIXED ), ( ARM_BASELINE, ENGINE_ARM ),
@@ -65,21 +71,23 @@ PAIRINGS        = ( ( ARM_PRINCIPLES, ARM_BASELINE ), ( ARM_PRINCIPLES, ENGINE_A
 _DB_LOCK = threading.RLock()
 
 
-def read_jsonl( path ):
-    """
-    Read a JSON-lines file.
-
-    Requires:
-        - path names a readable file with one JSON object per line
-
-    Ensures:
-        - returns the objects in file order, skipping blank lines
-    """
-    with open( path, encoding="utf-8" ) as handle: return [ json.loads( line ) for line in handle if line.strip() ]
-
-
 class FreezeMismatch( RuntimeError ):
     """Raised when a run is asked to continue under other settings than it started with."""
+
+
+class BoundStop( RuntimeError ):
+    """
+    Raised when a principles forecast fails on the limit and the stage stops.
+
+    Carries ask_id, principles (the count held when it stopped) and bound (the limit read); the message names all three and the fix.
+    """
+
+    def __init__( self, ask_id, principles, bound ):
+        self.ask_id     = ask_id
+        self.principles = principles
+        self.bound      = bound
+        super().__init__( f"STOPPED AT THE PRINCIPLE LIMIT: ask {ask_id} could not be forecast, {principles} principles held against a limit of {bound}. "
+                          f"Raise 'prediction learner principle limit' in the INI file and start the same stage again; finished work is kept." )
 
 
 def extractor_settings():
@@ -119,35 +127,54 @@ def current_freeze( models, code ):
         - models is a ModelArms; code is tree_state's result
 
     Ensures:
-        - returns a dict of the code commit, the vocabulary and extractor versions, the extractor timeout, the encoder, neighbours, k, bound,
-          lag seconds, window start, floor and the baseline and Opus model ids
+        - returns a dict of the code commit, the vocabulary and extractor versions, the extractor timeout, the encoder, neighbours, k,
+          the principle limit and fetch multiplier as read from the INI file, lag seconds, window start, floor and the baseline and Opus model ids
     """
+    limits = principle_retrieval.retrieval_limits()
     return { "code_sha": code[ "sha" ], "code_dirty": code[ "dirty" ], "vocabulary_version": PROMPT_VERSION, "extractor_version": models.extractor,
              "extractor_timeout_seconds": extractor_settings()[ 1 ], "encoder": models.encoder, "neighbours": NEIGHBOURS, "k": principle_retrieval.DEFAULT_K,
-             "bound": principle_retrieval.PRINCIPLE_BOUND, "lag_seconds": REPLAY_LAG.total_seconds(), "window_start": WINDOW_START.isoformat(), "floor": OPERATIONAL_FLOOR,
+             "bound": limits[ "bound" ], "fetch_multiplier": limits[ "multiplier" ], "lag_seconds": REPLAY_LAG.total_seconds(), "window_start": WINDOW_START.isoformat(), "floor": OPERATIONAL_FLOOR,
              "baseline_model": models.c0.model, "twin_model": opus_twins.opus_model() }
 
 
-def check_freeze( state, current ):
+def check_freeze( state, current, accept_code_change=None, now=None ):
     """
-    Record the freeze on the first start, and refuse any later start that differs from it.
+    Record the freeze on the first start and refuse a later start that differs.
 
     Requires:
         - state is the checkpoint dict; current is current_freeze's result
+        - accept_code_change is None or "<old sha>:<new sha>", the caller's word that the code change does not alter what the run measures
+        - now is None or an aware datetime stamped on the history entry
 
     Ensures:
         - with no freeze in the state, stores current there and returns True so the caller saves it
         - with a freeze that equals current, returns False and changes nothing
+        - a freeze written before a key existed reads that key as its shipped default (LEGACY_FREEZE): a run frozen before the fetch multiplier existed ran with 0
+        - a higher principle limit is allowed when the old multiplier was 0 and the multiplier is unchanged, because below the old limit both limits fetch the same principles
+        - a code change is allowed only when accept_code_change names the frozen sha and the current sha as written, and the current tree is clean
+        - an allowed change replaces the freeze with current and appends { at, changed, accepted_code_change } to state["freeze_history"]; returns True
+        - nothing is written to the state on a refusal
 
     Raises:
-        - FreezeMismatch naming each setting that differs
+        - FreezeMismatch naming each setting that differs, when any difference is not one of the two allowed changes
     """
     if "freeze" not in state:
         state[ "freeze" ] = current
         return True
-    differing = sorted( key for key in set( state[ "freeze" ] ) | set( current ) if state[ "freeze" ].get( key ) != current.get( key ) )
-    if differing: raise FreezeMismatch( f"this work folder was started under other settings; differing: {', '.join( differing )}" )
-    return False
+    old       = { **LEGACY_FREEZE, **state[ "freeze" ] }
+    differing = sorted( key for key in set( old ) | set( current ) if old.get( key ) != current.get( key ) )
+    if not differing: return False
+    refused   = [ key for key in differing if key not in ( "bound", *CODE_KEYS ) ]
+    if "bound" in differing and not ( current[ "bound" ] > old[ "bound" ] and old[ "fetch_multiplier" ] == 0 ): refused.append( "bound" )
+    if any( key in differing for key in CODE_KEYS ):
+        named = f"{old[ 'code_sha' ]}:{current[ 'code_sha' ]}"
+        if accept_code_change != named or old[ "code_sha" ] == current[ "code_sha" ] or current[ "code_dirty" ]: refused.extend( key for key in CODE_KEYS if key in differing )
+    if refused: raise FreezeMismatch( f"this work folder was started under other settings; differing: {', '.join( sorted( set( refused ) ) )}" )
+    stamp = ( datetime.now( timezone.utc ) if now is None else now ).isoformat()
+    state.setdefault( "freeze_history", [] ).append( { "at": stamp, "changed": { key: [ old.get( key ), current.get( key ) ] for key in differing },
+                                                       "accepted_code_change": accept_code_change if any( key in differing for key in CODE_KEYS ) else None } )
+    state[ "freeze" ] = current
+    return True
 
 
 class PeriodicFlush:
@@ -312,13 +339,15 @@ class ModelArms:
         - factory is a locked_sessions factory; c0 is the baseline contract
         - embed maps a text to a vector; encoder and extractor name the principle versions in use
         - gates maps each arm in HAIKU_ARMS and TWIN_ARMS to its CapGate
+        - limits is None, or { bound, multiplier } handed to every principles forecast in place of a read of the INI file; a stage sets it from the freeze
 
     Ensures:
         - an arm runs through its own job with its switch forced on, so no INI switch changes
         - a result row is read back as ( forecast, reason ); a missing row reads as ( None, "no_row" )
     """
 
-    def __init__( self, factory, c0, embed, encoder, extractor, gates ):
+    def __init__( self, factory, c0, embed, encoder, extractor, gates, limits=None ):
+        self.limits    = limits
         self.factory   = factory
         self.c0        = c0
         self.embedder  = SimpleNamespace( encode=embed )
@@ -339,9 +368,9 @@ class ModelArms:
         """
         gate = self.gates[ arm ]
         if arm == ARM_BASELINE: return context_baseline.run_context_forecast( ask_id, self.factory, self.c0, gate, enabled=True )
-        if arm == ARM_PRINCIPLES: return principles_forecast.run_b1( self.factory, ask_id, self.c0, self.embedder, self.encoder, self.extractor, gate, enabled=True )
+        if arm == ARM_PRINCIPLES: return principles_forecast.run_b1( self.factory, ask_id, self.c0, self.embedder, self.encoder, self.extractor, gate, enabled=True, limits=self.limits )
         if arm == TWIN_ARMS[ 0 ]: return opus_twins.run_baseline_opus( self.factory, ask_id, self.c0, gate, enabled=True )
-        return opus_twins.run_principles_opus( self.factory, ask_id, self.c0, self.embedder, self.encoder, self.extractor, gate, enabled=True )
+        return opus_twins.run_principles_opus( self.factory, ask_id, self.c0, self.embedder, self.encoder, self.extractor, gate, enabled=True, limits=self.limits )
 
     async def _gather( self, arms, ask_id ):
         """
@@ -369,6 +398,23 @@ class ModelArms:
                 row = session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == uuid.UUID( ask_id ), PredictionArmForecast.arm == arm ).first()
                 self.rows[ ( ask_id, arm ) ] = ( None, "no_row" ) if row is None else ( row.forecast, row.abstention_reason )
         return Counter( ( arm, result[ "status" ], result[ "reason" ] ) for arm, result in zip( arms, results ) )
+
+    def discard_bound_failures( self, ask_id, arms ):
+        """
+        Delete an ask's stored limit failures so the arm can be forecast again.
+
+        Requires:
+            - ask_id names a loaded notification; arms are in HAIKU_ARMS or TWIN_ARMS
+
+        Ensures:
+            - only a row whose reason is BOUND_REASON is deleted; a forecast, or a failure of another kind, is never touched
+            - returns the number of rows deleted
+        """
+        with self.factory() as session:
+            deleted = session.query( PredictionArmForecast ).filter( PredictionArmForecast.notification_id == uuid.UUID( ask_id ), PredictionArmForecast.arm.in_( arms ),
+                                                                     PredictionArmForecast.abstention_reason == BOUND_REASON ).delete( synchronize_session=False )
+            session.commit()
+        return deleted
 
     def reader( self, arm ):
         """
@@ -467,22 +513,143 @@ def extracted_in_db( session, version ):
     return { str( row.notification_id ) for row in session.query( PreferenceEvidence ).filter( PreferenceEvidence.extractor_version == version ) }
 
 
-def checkpoint_line( done, total, state, session, counts, context_in_chunk ):
+def checkpoint_line( done, total, state, session, counts, context_in_chunk, bound ):
     """
     Describe one checkpoint in a line.
 
     Requires:
-        - done and total are ask counts; counts is a Counter of job results for the chunk
+        - done and total are ask counts; counts is a Counter of job results for the chunk; bound is the frozen principle limit
 
     Ensures:
-        - returns a line with the asks done, the principles and evidence held, the asks with an episode history, and the job results by reason
+        - returns a line with the asks done, the principles held against the frozen limit, the evidence held, the asks with an episode history, and the job results by reason
+        - the line ends with a warning once the principles reach WARN_FRACTION of the limit
     """
     results = ", ".join( f"{arm} {status}/{reason}={n}" for ( arm, status, reason ), n in sorted( counts.items(), key=str ) )
-    return ( f"[checkpoint] {done}/{total} asks, principles {session.query( PreferencePrinciple ).count()}, evidence {session.query( PreferenceEvidence ).count()}, "
-             f"asks with an episode history {context_in_chunk} in this chunk and {state[ 'context_asks' ]} so far; {results}" )
+    return ( f"[checkpoint] {done}/{total} asks, principles {principle_progress( session, bound )}, evidence {session.query( PreferenceEvidence ).count()}, "
+             f"asks with an episode history {context_in_chunk} in this chunk and {state[ 'context_asks' ]} so far; {results}" ) + warning_text( session, bound )
 
 
-def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=None, chunk=CHUNK_SIZE, out=print, code=None ):
+def principle_progress( session, bound ):
+    """
+    Show the principle count against the limit.
+
+    Requires:
+        - bound is the frozen limit
+
+    Ensures:
+        - returns "<count>/<limit> (<percent>%)"
+    """
+    count = session.query( PreferencePrinciple ).count()
+    return f"{count}/{bound} ({count * 100 / bound:.0f}%)"
+
+
+def warning_text( session, bound ):
+    """
+    Warn when the principle count nears the limit.
+
+    Requires:
+        - bound is the frozen limit
+
+    Ensures:
+        - returns "" below WARN_FRACTION of the limit, else a warning naming the setting to raise
+    """
+    count = session.query( PreferencePrinciple ).count()
+    if count < bound * WARN_FRACTION: return ""
+    return f" WARNING: principles are at {count * 100 / bound:.0f}% of the limit {bound}; above it the principles forecasts fail and the stage stops (raise 'prediction learner principle limit')"
+
+
+def freeze_limits( models, state ):
+    """
+    Hand the frozen limit and multiplier to the model arms.
+
+    No forecast then rereads the INI file.
+
+    Requires:
+        - state holds a freeze, as check_freeze leaves it; models is a ModelArms
+
+    Ensures:
+        - models.limits is { bound, multiplier } from the freeze
+        - returns the frozen bound
+    """
+    models.limits = { "bound": state[ "freeze" ][ "bound" ], "multiplier": state[ "freeze" ][ "fetch_multiplier" ] }
+    return models.limits[ "bound" ]
+
+
+def bound_failed( counts ):
+    """
+    Say whether any job result in a Counter is a failure on the principle limit.
+
+    Requires:
+        - counts is a Counter of ( arm, status, reason )
+
+    Ensures:
+        - returns True when any key carries BOUND_REASON
+    """
+    return any( reason == BOUND_REASON for ( _arm, _status, reason ) in counts )
+
+
+def replace_arms( path, replacements ):
+    """
+    Replace arm entries inside a JSON-lines file without ever leaving a half-written file.
+
+    Requires:
+        - replacements maps an ask id to { arm: entry }; every id is a line of the file
+
+    Ensures:
+        - each named arm of each named line holds the new entry; every other line and arm is byte-for-byte as read, in the same order
+        - the line count is unchanged, so no ask is doubled or lost
+    """
+    lines = read_jsonl( path )
+    for line in lines:
+        if line[ "id" ] in replacements: line[ "arms" ].update( replacements[ line[ "id" ] ] )
+    temporary = f"{path}.tmp"
+    with open( temporary, "w", encoding="utf-8" ) as handle:
+        for line in lines: handle.write( json.dumps( line ) + "\n" )
+    os.replace( temporary, path )
+
+
+def rerun_bound_failures( session, asks, models, work, arm, path, bound, out=print, chunk=CHUNK_SIZE ):
+    """
+    Forecast again every ask whose arm failed on the limit, and replace its entry.
+
+    Requires:
+        - arm is ARM_PRINCIPLES with path work.records, or TWIN_ARMS[ 1 ] with path work.twins; bound is the frozen limit, which models hands to the forecast
+        - the scratch database holds the principles and evidence extracted so far, which are kept and never extracted again
+
+    Ensures:
+        - only a line whose arm reason is BOUND_REASON is run again; the arm's stored failure row is deleted first, then the arm alone runs, so no other arm is called
+        - the new entry is scored as the harness scores a forecast; a new failure of another kind is recorded as that failure
+        - the file is rewritten after every `chunk` asks and at the end, so a stop keeps what finished and the next start reruns only what still shows the limit failure
+        - a failure on the limit again stops the stage at that ask: its row is deleted, the finished entries are written, and BoundStop is raised
+        - returns the number of asks run again
+
+    Raises:
+        - BoundStop when the limit fails again
+    """
+    if not os.path.exists( path ): return 0
+    by_id    = { ask[ "id" ]: ask for ask in asks }
+    todo     = [ line[ "id" ] for line in read_jsonl( path ) if line[ "arms" ][ arm ][ "reason" ] == BOUND_REASON ]
+    replaced = {}
+    for position, ask_id in enumerate( todo, start=1 ):
+        models.discard_bound_failures( ask_id, ( arm, ) )
+        if bound_failed( models.run( ask_id, ( arm, ) ) ):
+            models.discard_bound_failures( ask_id, ( arm, ) )
+            if replaced: replace_arms( path, replaced )
+            raise BoundStop( ask_id, session.query( PreferencePrinciple ).count(), bound )
+        forecast, reason = models.rows[ ( ask_id, arm ) ]
+        ask              = by_id[ ask_id ]
+        replaced[ ask_id ] = { arm: { "correct": _score( ask[ "response_type" ], forecast, ask[ "actual_value" ], ask[ "response_options" ] ), "forecast": forecast, "reason": reason } }
+        models.rows.clear()
+        if position % chunk == 0 or position == len( todo ):
+            replace_arms( path, replaced )
+            replaced.clear()
+            line = f"[rerun {arm}] {position}/{len( todo )} failed forecasts run again under the frozen limit, principles {principle_progress( session, bound )}"
+            append_lines( work.log, [ { "line": line } ] )
+            out( line )
+    return len( todo )
+
+
+def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=None, chunk=CHUNK_SIZE, out=print, code=None, accept_code_change=None ):
     """
     Predict the evaluation asks in time order with every arm but the twins.
 
@@ -497,15 +664,22 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
         - the extractor's model and timeout come from the INI file, as the live job reads them
         - an ask with no vector is counted once, kept in the checkpoint as skipped, and left out of every later chunk
         - a line already in records.jsonl is not written again, so a stop between the write and the checkpoint never doubles an ask
-        - the first start stores the freeze in the checkpoint, and a later start under other settings is refused
+        - the first start stores the freeze in the checkpoint, and a later start under other settings is refused, except a higher principle limit
+          (old multiplier 0) and a code change named by accept_code_change; both are recorded in the freeze history
+        - before the first chunk, every ask whose principles forecast failed on the limit is forecast again under the frozen limit, as of that ask
+        - on the first failure on the limit the stage saves its checkpoint, writes a named stop line and raises BoundStop; that ask and every later one
+          has no failed forecast recorded, and the asks before it in the chunk keep their stored rows, so a restart does not call their models again
         - returns the number of asks predicted in this call
 
     Raises:
         - LeakageError if any arm was handed evidence from after its ask
         - FreezeMismatch if the work folder was started under other settings
+        - BoundStop when the principle limit stops a forecast
     """
     state     = load_state( work.state )
-    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ) ): save_state( work.state, state )
+    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ), accept_code_change ): save_state( work.state, state )
+    frozen_bound = freeze_limits( models, state )
+    rerun_bound_failures( session, asks, models, work, ARM_PRINCIPLES, work.records, frozen_bound, out=out, chunk=chunk )
     model, timeout_seconds = extractor_settings()
     version   = f"{model}:{PROMPT_VERSION}"
     extracted = set( state[ "extracted_ids" ] ) | extracted_in_db( session, version )
@@ -523,7 +697,11 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
 
     def principles_provider( ask_at_ask, asked_at ):
         found = runner.principles_provider( ask_at_ask, asked_at )
-        counts.update( models.run( ask_at_ask[ "id" ], HAIKU_ARMS ) )
+        ran   = models.run( ask_at_ask[ "id" ], HAIKU_ARMS )
+        if bound_failed( ran ):
+            models.discard_bound_failures( ask_at_ask[ "id" ], HAIKU_ARMS )
+            raise BoundStop( ask_at_ask[ "id" ], session.query( PreferencePrinciple ).count(), frozen_bound )
+        counts.update( ran )
         return found
 
     settled  = set( state[ "done_ids" ] ) | set( state[ "skipped_ids" ] )
@@ -534,8 +712,18 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
         part = todo[ start:start + chunk ]
         chunk_context[ 0 ] = 0
         counts.clear()
-        run = replay( asks, engine, sha, baselines=baselines, target_types=ELIGIBLE_TYPES, context_arms=( ARM_BASELINE, ARM_PRINCIPLES, RECORDER_ARM ),
-                      episode_view_provider=episode_provider, principles_provider=principles_provider, target_ids=set( part ) )
+        try:
+            run = replay( asks, engine, sha, baselines=baselines, target_types=ELIGIBLE_TYPES, context_arms=( ARM_BASELINE, ARM_PRINCIPLES, RECORDER_ARM ),
+                          episode_view_provider=episode_provider, principles_provider=principles_provider, target_ids=set( part ) )
+        except BoundStop as stop:
+            state[ "extracted_ids" ] = sorted( extracted | { item[ "notification_id" ] for item in runner.summaries } | { a for a in state[ "extracted_ids" ] } )
+            session.commit()
+            embed.flush()
+            save_state( work.state, state )
+            line = f"[stopped] {len( state[ 'done_ids' ] ) + len( state[ 'skipped_ids' ] )}/{len( ids )} asks recorded; {stop}"
+            append_lines( work.log, [ { "line": line } ] )
+            out( line )
+            raise
         check_no_leakage( seen )
         seen.clear()
         recorded = { line[ "id" ] for line in read_jsonl( work.records ) } if os.path.exists( work.records ) else set()
@@ -549,7 +737,7 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
         session.commit()
         embed.flush()
         save_state( work.state, state )
-        line = checkpoint_line( len( state[ "done_ids" ] ) + len( state[ "skipped_ids" ] ), len( ids ), state, session, counts, chunk_context[ 0 ] )
+        line = checkpoint_line( len( state[ "done_ids" ] ) + len( state[ "skipped_ids" ] ), len( ids ), state, session, counts, chunk_context[ 0 ], frozen_bound )
         append_lines( work.log, [ { "line": line } ] )
         out( line )
         models.rows.clear()
@@ -577,7 +765,7 @@ def _record_lines( run, models ):
     return lines
 
 
-def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds=60, sleep=time.sleep, chunk=CHUNK_SIZE, out=print, code=None ):
+def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds=60, sleep=time.sleep, chunk=CHUNK_SIZE, out=print, code=None, accept_code_change=None ):
     """
     Run the Opus twins over the evaluation asks, trailing the first stage.
 
@@ -591,13 +779,20 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
         - an ask already in twin-records.jsonl is skipped
         - with follow True the stage waits for the first stage to record more asks; otherwise it stops when none is ready
         - returns the number of asks the twins ran in this call
-        - a work folder started under other settings is refused, as in the first stage
+        - a work folder started under other settings is refused, as in the first stage, with the same two allowed changes; this stage saves the state only
+          when it wrote the first freeze, so it never overwrites the first stage's progress
+        - before it runs a new ask, every twin line whose principles twin failed on the limit is forecast again under the limit now read
+        - on the first failure on the limit it deletes that ask's failed rows, writes a named stop line and raises BoundStop; no failed twin line is written for it
 
     Raises:
         - FreezeMismatch if the settings differ from the ones the first stage froze
+        - BoundStop when the principle limit stops a twin
     """
     state = load_state( work.state )
-    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ) ): save_state( work.state, state )
+    fresh = "freeze" not in state
+    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ), accept_code_change ) and fresh: save_state( work.state, state )
+    frozen_bound = freeze_limits( models, state )
+    rerun_bound_failures( session, asks, models, work, TWIN_ARMS[ 1 ], work.twins, frozen_bound, out=out, chunk=chunk )
     by_id = { ask[ "id" ]: ask for ask in asks }
     ran   = 0
     while True:
@@ -611,7 +806,15 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
             return ran
         counts = Counter()
         for position, ask_id in enumerate( ready, start=1 ):
-            counts.update( models.run( ask_id, TWIN_ARMS ) )
+            outcome = models.run( ask_id, TWIN_ARMS )
+            if bound_failed( outcome ):
+                models.discard_bound_failures( ask_id, TWIN_ARMS )
+                stop = BoundStop( ask_id, session.query( PreferencePrinciple ).count(), frozen_bound )
+                line = f"[twin stopped] {len( finished ) + position - 1} asks run; {stop}"
+                append_lines( work.log, [ { "line": line } ] )
+                out( line )
+                raise stop
+            counts.update( outcome )
             ask = by_id[ ask_id ]
             arms = { arm: { "correct": _score( ask[ "response_type" ], models.rows[ ( ask_id, arm ) ][ 0 ], ask[ "actual_value" ], ask[ "response_options" ] ),
                             "forecast": models.rows[ ( ask_id, arm ) ][ 0 ], "reason": models.rows[ ( ask_id, arm ) ][ 1 ] } for arm in TWIN_ARMS }
@@ -619,7 +822,7 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
             ran += 1
             models.rows.clear()
             if ( len( finished ) + position ) % chunk == 0:
-                line = f"[twin checkpoint] {len( finished ) + position} asks run; " + ", ".join( f"{arm} {status}/{reason}={n}" for ( arm, status, reason ), n in sorted( counts.items(), key=str ) )
+                line = f"[twin checkpoint] {len( finished ) + position} asks run, principles {principle_progress( session, frozen_bound )}; " + ", ".join( f"{arm} {status}/{reason}={n}" for ( arm, status, reason ), n in sorted( counts.items(), key=str ) )
                 append_lines( work.log, [ { "line": line } ] )
                 out( line )
                 counts.clear()
@@ -734,6 +937,8 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
         - stage first predicts the evaluation asks with the engine, the fixed rules and the two Haiku arms, and stops with the work saved at each chunk
         - stage twins runs the Opus twins over the asks the first stage has recorded; --follow keeps waiting for more until all are recorded
         - stage report writes report.json and prints the pairing table
+        - a stop on the principle limit prints its named message and returns STOP_EXIT (3) with the work saved; any other return is 0
+        - --accept-code-change <old sha>:<new sha> names the one code change a resume may carry
         - --limit N cuts the evaluation asks to the first N, so a trial never reaches a real run's work folder
         - returns 0
     """
@@ -746,6 +951,7 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
     parser.add_argument( "--follow", action="store_true" )
     parser.add_argument( "--poll-seconds", type=int, default=60 )
     parser.add_argument( "--chunk", type=int, default=CHUNK_SIZE )
+    parser.add_argument( "--accept-code-change", default=None, help="<old sha>:<new sha>, the caller's word that the code change does not alter what the run measures; recorded in the freeze history" )
     parser.add_argument( "--limit", type=int, default=None, help="predict only the first N evaluation asks, for a short trial in its own work folder" )
     args = parser.parse_args( argv )
     work = WorkFolder( args.work )
@@ -765,8 +971,13 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
         embed.flush()
         ids    = evaluation_ids( asks, fixture_ids( args.fixture ) )[ :args.limit ]
         models = default_models( session, embed, embed.encoder, f"{extractor_settings()[ 0 ]}:{PROMPT_VERSION}", work ) if make_models is None else make_models( session, embed )
-        if args.stage == "first": run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=query_fn, chunk=args.chunk, out=out )
-        else: run_twin_stage( session, asks, ids, models, work, follow=args.follow, poll_seconds=args.poll_seconds, chunk=args.chunk, out=out )
+        try:
+            if args.stage == "first": run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=query_fn, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change )
+            else: run_twin_stage( session, asks, ids, models, work, follow=args.follow, poll_seconds=args.poll_seconds, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change )
+        except BoundStop as stop:
+            embed.flush()
+            out( str( stop ) )
+            return STOP_EXIT
         embed.flush()
     return 0
 

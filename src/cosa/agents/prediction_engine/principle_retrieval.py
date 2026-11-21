@@ -8,8 +8,9 @@ Every principle that passes the SQL filter is fetched, and its status is derived
 (``principle_status.derive_statuses``). Contested, retracted and evidence-less ones are dropped, and the first ``k`` are kept.
 Contested principles therefore never use up a slot.
 
-Below ``PRINCIPLE_BOUND`` principles per owner no multiplier is used.
-Above it this module refuses, because the plan leaves the multiplier to be stated when the bound is first crossed.
+The limit and the fetch multiplier are read from the INI file (``retrieval_limits``), shipped at 5,000 and 0 by Rick's ruling of 20 Nov 2026.
+At or below the limit every principle is fetched and no multiplier is used.
+Above it, a multiplier of 0 refuses, and a positive multiplier M fetches only the ``k x M`` nearest.
 
 A change of encoder re-embeds the table (``reembed_principles``) and never mixes two encoders' vectors.
 """
@@ -20,18 +21,46 @@ from sqlalchemy import and_
 
 from cosa.agents.prediction_engine.principle_features import feature_lookup
 from cosa.agents.prediction_engine.principle_status import CONTESTED, RETRACTED, derive_statuses
+from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.db.repositories.vector_search import dot_topk
 from cosa.rest.postgres_models import Notification, PreferenceEvidence, PreferencePrinciple
 from cosa.utils.notification_utils import sender_session_suffix
 
-PRINCIPLE_BOUND = 500
-DEFAULT_K       = 5
-RECIPE          = "statement-rationale-v1"
-DROPPED         = ( CONTESTED, RETRACTED )
+PRINCIPLE_BOUND  = 5000
+FETCH_MULTIPLIER = 0
+DEFAULT_K        = 5
+RECIPE           = "statement-rationale-v1"
+DROPPED          = ( CONTESTED, RETRACTED )
+BOUND_KEY        = "prediction learner principle limit"
+MULTIPLIER_KEY   = "prediction learner principle fetch multiplier"
 
 
 class PrincipleBoundExceeded( RuntimeError ):
-    """An owner holds more principles than the bound the plan set for fetching them all."""
+    """
+    An owner holds more principles than the limit for fetching them all.
+
+    Raised only when no fetch multiplier is set.
+    """
+
+
+def retrieval_limits():
+    """
+    Read the principle limit and the fetch multiplier from the INI file.
+
+    Ensures:
+        - returns { bound, multiplier } as ints, read from BOUND_KEY and MULTIPLIER_KEY
+        - PRINCIPLE_BOUND and FETCH_MULTIPLIER are the shipped INI values and the parameter defaults; they are never a fallback here
+
+    Raises:
+        - MissingConfigKeyError if either key is absent
+        - ValueError if the limit is not positive or the multiplier is negative
+    """
+    config     = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    bound      = config.get_required( BOUND_KEY, return_type="int" )
+    multiplier = config.get_required( MULTIPLIER_KEY, return_type="int" )
+    if bound < 1: raise ValueError( f"{BOUND_KEY} must be a positive integer, got {bound}" )
+    if multiplier < 0: raise ValueError( f"{MULTIPLIER_KEY} must be 0 or a positive integer, got {multiplier}" )
+    return { "bound": bound, "multiplier": multiplier }
 
 
 def embedding_text( principle ):
@@ -149,7 +178,8 @@ def select_principles( scored, statuses, k=DEFAULT_K ):
     return kept
 
 
-def retrieve_principles( session, owner_id, project, query_embedding, asked_at, encoder_version, extractor_version, k=DEFAULT_K, bound=PRINCIPLE_BOUND ):
+def retrieve_principles( session, owner_id, project, query_embedding, asked_at, encoder_version, extractor_version, k=DEFAULT_K, bound=PRINCIPLE_BOUND,
+                         multiplier=FETCH_MULTIPLIER ):
     """
     Retrieve the principles that apply to one ask, as of the ask.
 
@@ -158,26 +188,29 @@ def retrieve_principles( session, owner_id, project, query_embedding, asked_at, 
         - project is the ask's project name, or None for global principles only
         - query_embedding came from the encoder named encoder_version
         - asked_at is an aware datetime; extractor_version is the version the config names
+        - bound is a positive int; multiplier is 0 or a positive int (retrieval_limits reads both from the INI file)
 
     Ensures:
         - the SQL filter holds owner, an embedding, the same encoder_version and scope global or project:<project>;
           no vector of another encoder is compared
-        - every principle passing it is fetched, cosine order, none cut by SQL
+        - at or below `bound`, every principle passing it is fetched, cosine order, none cut by SQL
+        - above `bound` with a positive multiplier, only the k x multiplier nearest are fetched
         - returns { principles, available, short }: principles from select_principles, available the count that
           passed the SQL filter, short True when fewer than k were kept (the count is the caller's to record)
         - nothing is written
 
     Raises:
-        - PrincipleBoundExceeded when more than `bound` principles pass the filter
+        - PrincipleBoundExceeded when more than `bound` principles pass the filter and multiplier is 0
     """
     scopes  = [ "global" ] + ( [ f"project:{project}" ] if project else [] )
     allowed = and_( PreferencePrinciple.owner_id == owner_id, PreferencePrinciple.embedding.isnot( None ),
                     PreferencePrinciple.encoder_version == encoder_version, PreferencePrinciple.scope.in_( scopes ) )
     count   = session.query( PreferencePrinciple ).filter( allowed ).count()
-    if count > bound: raise PrincipleBoundExceeded( f"owner {owner_id} holds {count} principles for this ask, above the bound {bound}" )
+    if count > bound and multiplier == 0: raise PrincipleBoundExceeded( f"owner {owner_id} holds {count} principles for this ask, above the limit {bound}" )
     if count == 0: return { "principles": [], "available": 0, "short": True }
+    limit   = count if count <= bound else k * multiplier
     # despite its name, dot_topk's exclude_filter is a filter() that keeps the matching rows, before the limit
-    scored = dot_topk( session, PreferencePrinciple, PreferencePrinciple.embedding, query_embedding, limit=count, exclude_filter=allowed, metric="cosine" )
+    scored = dot_topk( session, PreferencePrinciple, PreferencePrinciple.embedding, query_embedding, limit=limit, exclude_filter=allowed, metric="cosine" )
     principles, evidence = load_owner_ledger( session, owner_id )
     statuses = derive_statuses( principles, evidence, asked_at, extractor_version, session_lookup( session, [ e.notification_id for e in evidence if e.session_key is None ] ),
                                feature_lookup( session, [ e.notification_id for e in evidence ] ) )

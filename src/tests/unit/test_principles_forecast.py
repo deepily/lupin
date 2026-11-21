@@ -512,6 +512,26 @@ def test_the_summary_reads_the_rows_this_module_writes_and_names_the_cap_and_the
     assert missing not in [ str( r.notification_id ) for r in rows( factory ) ]
 
 
+def test_prepare_retrieves_under_the_limits_read_from_the_ini_file_for_each_ask( factory, monkeypatch ):
+    """
+    The forecast reads the principle limit and multiplier on each ask.
+
+    A limit below the store's size refuses, a multiplier fetches the nearest, and an arm without principles reads neither.
+    """
+    nid = ask( factory )
+    principle( factory, statement="near", embedding=vec( 1, 0 ) )
+    principle( factory, statement="far", embedding=vec( 0, 1 ) )
+    monkeypatch.setattr( pf, "retrieval_limits", lambda: { "bound": 1, "multiplier": 0 } )
+    with pytest.raises( pr.PrincipleBoundExceeded, match="2 principles" ): pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )
+    monkeypatch.setattr( pf, "retrieval_limits", lambda: { "bound": 2, "multiplier": 0 } )
+    assert len( pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )[ 1 ] ) == 2
+    asked = []
+    monkeypatch.setattr( pf, "retrieval_limits", lambda: asked.append( 1 ) or { "bound": 1, "multiplier": 1 } )
+    assert len( pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 1 )[ 1 ] ) == 1 and asked == [ 1 ]
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 1, use_principles=False )
+    assert asked == [ 1 ], "an arm without principles read the limits"
+
+
 def test_no_forecast_prompt_renders_the_owners_draft_even_when_the_episode_is_read_after_the_reveal( factory, monkeypatch ):
     draft_marker = "UNAIDED-DRAFT-TEXT-0451"
     nid    = ask( factory, response_type="open_ended" )
