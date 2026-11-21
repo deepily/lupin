@@ -5,6 +5,7 @@ The repository test writes through log_shadow into the real ProxyDecision table 
 The caller tests fake the database and the switch, and read what log_shadow was handed.
 The switch test builds a real ConfigurationManager over a temporary file.
 """
+import re
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -92,9 +93,9 @@ def test_the_switch_reads_the_ini_as_production_does_and_ships_on( tmp_path, fli
     conf = proxy_config.__file__.split( "/src/cosa/" )[ 0 ] + "/src/conf"
     text = open( f"{conf}/lupin-app.ini" ).read()
     if flip is not None:
-        old  = f"{proxy_config.SHADOW_FORECAST_RECORDING_KEY} = true"
-        assert text.count( old ) == 1
-        text = text.replace( old, f"{proxy_config.SHADOW_FORECAST_RECORDING_KEY} = {flip}" )
+        line = re.compile( rf"^({re.escape( proxy_config.SHADOW_FORECAST_RECORDING_KEY )}\s*=\s*)true$", re.MULTILINE )
+        assert len( line.findall( text ) ) == 1
+        text = line.sub( rf"\g<1>{flip}", text )
     copy = tmp_path / "copy.ini"
     copy.write_text( text )
     try:
