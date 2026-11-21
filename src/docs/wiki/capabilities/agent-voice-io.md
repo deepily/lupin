@@ -8,11 +8,12 @@ pins:
   - cosa.agents.utils.voice_io.present_choices@b1c28fbb38
   - cosa.agents.utils.voice_io.read_gate_answer@c775d66871
   - cosa.agents.utils.voice_io.VoiceGateNoDefaultError@8a7e015aa2
-  - cosa.agents.utils.agent_notification_dispatcher.AgentNotificationDispatcher@9be777adbd
+  - cosa.agents.utils.agent_notification_dispatcher.AgentNotificationDispatcher@e48fe888d8
   - cosa.agents.utils.agent_notification_dispatcher.set_dispatch_context@fcab3323d7
   - cosa.agents.deep_research.voice_io.reconfigure@8265f4719a
   - cosa.agents.utils.sender_id.build_sender_id@e3f42ed236
   - cosa.agents.utils.sync_notify.notify@71446723de
+  - cosa.agents.utils.agent_notification_dispatcher.take_last_ask_notification_id@ca80b0f635
 ---
 # Agent voice I/O
 
@@ -25,13 +26,12 @@ How a job tells the user something or asks a question: by voice when a notificat
 
 ## When nobody can answer
 - On a run with no terminal, when voice is unavailable or the dispatch raises, `ask_yes_no` returns the caller's `unattended_default`. It raises `VoiceGateNoDefaultError` if none was given. At a terminal `default` is only what the prompt offers. On the dispatched path it is also sent on as the notification's `response_default`, so the two are not fully separate.
-- `AgentNotificationDispatcher.ask_confirmation` raises when no answer arrives or the asking breaks. An offline user does not raise: the server streams the `response_default` straight back (exit code 0, `default_used`), and `ask_confirmation` returns it as the answer. A timeout (exit code 2), another non-zero code, a validation error or a connection error is raised as `VoiceGateTimeoutError`. Any other unexpected error is raised as `VoiceGateUnreachableError`. It is not a timeout, because the question may never have been asked.
+- `AgentNotificationDispatcher.ask_confirmation` raises when no answer arrives or the asking breaks. An offline user does not raise: the server streams the `response_default` straight back (exit code 0, `default_used`), and `ask_confirmation` returns it as the answer. The id of the notification that carried an answered question is kept in a per-task context variable. `take_last_ask_notification_id` returns it once and clears it, so concurrent jobs on one dispatcher never read each other's id. A timeout (exit code 2), another non-zero code, a validation error or a connection error is raised as `VoiceGateTimeoutError`. Any other unexpected error is raised as `VoiceGateUnreachableError`. It is not a timeout, because the question may never have been asked.
 - `read_gate_answer` returns the answer under a header. A missing header raises `VoiceGateNoDefaultError` unless the caller passed an `unattended_default`, which is then returned; a default used is logged as a warning.
 
 ## Invariants
 - One module-level interface binding serves the whole process, so the last `configure()` wins. Six agents define `voice_io.reconfigure()` (bug_fix_expediter, deep_research, podcast_generator, presentation_generator, swe_team, test_suite); it re-asserts that agent's binding, so call it at the start of a job.
-- Inside the agentic pool, set the sender, user, session name and session id with `set_dispatch_context()` (ContextVars), defined in `agent_notification_dispatcher` and re-exported by each agent's `cosa_interface`. Writing the module-level `SENDER_ID` or `TARGET_USER` leaks one job's identity onto a concurrent job's notifications.
-- `notify` never raises: a failed dispatch falls back to `print`.
+- Inside the agentic pool, set the sender, user, session name and session id with `set_dispatch_context()` (ContextVars), defined in `agent_notification_dispatcher` and re-exported by each agent's `cosa_interface`. Writing the module-level `SENDER_ID` or `TARGET_USER` leaks one job's identity onto a concurrent job's notifications. `notify` never raises: a failed dispatch falls back to `print`.
 
 ## How to extend
 - A new agent adds a `cosa_interface.py` that wraps an `AgentNotificationDispatcher( agent_type=... )` and a `voice_io.py` that calls `configure` and re-exports the core functions. Copy deep_research's pair.

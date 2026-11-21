@@ -5,10 +5,10 @@ pins:
   - cosa.agents.principle_learner.enqueue_after_answer.enqueue_after_answer@ab3b706698
   - cosa.agents.principle_learner.enqueue_after_answer.is_enabled@b49876fbb2
   - cosa.agents.principle_learner.enqueue_after_answer.register_job@09d7d1cfa0
-  - cosa.agents.principle_learner.extractor_job.PrincipleExtractorJob@a0fd19f94e
+  - cosa.agents.principle_learner.extractor_job.PrincipleExtractorJob@0dd1b4ded7
   - cosa.agents.principle_learner.extractor_job.default_embed@e98982141d
   - cosa.agents.principle_learner.extractor_job.default_session@42b97853f4
-  - cosa.agents.principle_learner.extractor_job.encoder_version@73943729ee
+  - cosa.agents.principle_learner.extractor_job.encoder_version@226928f982
 ---
 # Principle extractor job
 
@@ -22,6 +22,6 @@ A queued job that turns one human answer into evidence. It sends the owner nothi
 - `register_job( queue, job, show )` gives the job a user-scoped id when `show` is true, so the owner's queue listing can find it. Otherwise it leaves the job out.
 - `PrincipleExtractorJob` has the fixed session id `principle-extractor`. A skipped answer, one not attributed to its owner or with nothing to read, writes nothing and calls no model.
 - `do_all` runs the extraction and returns the summary the queue stores. It raises what the work raises, after marking the job failed. `last_question_asked` shows `[Principle extractor]` and the notification id.
-- `encoder_version()` names the embedding model and the text recipe, as `<model name>:<recipe>`. `default_embed` embeds a text with the configured provider.
+- `encoder_version()` names the embedding model and the text recipe, as `<model name>:<recipe>`, built by `principle_retrieval.encoder_version_of`. The extractor reads the draft with `revealed_draft`. `default_embed` embeds a text with the configured provider.
 - The provider must make 768-dimension vectors. Another width fails loudly when a principle is stored.
 - `default_session` opens a database session that commits on success and rolls back on error.
