@@ -25,4 +25,4 @@ A challenger to the engine's fixed `no` margin rule for yes/no asks ([[predictio
 
 ## In shadow on live asks
 - `live_cases` loads the owner's answered yes/no cases in the shape the challenger reads. `stance_of` reduces a forecast to what the row stores. `unavailable` names why there is no stance, so the row says so instead of staying empty.
-- `PredictionEngine.record_three_way_shadow` runs on each live yes/no ask when `prediction engine three way enabled` is true. It runs after the forecast row is written and stores the stance in `prediction_log.three_way_shadow`. It never reaches the card, never changes another column and never raises.
+- `PredictionEngine.record_three_way_shadow` runs on each live yes/no ask when `prediction engine three way enabled` is true. The code default is off and the shipped INI sets it true. It runs after the forecast row is written and stores the stance in `prediction_log.three_way_shadow`. It never reaches the card, never changes another column and never raises.

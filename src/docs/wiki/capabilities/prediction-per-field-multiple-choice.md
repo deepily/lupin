@@ -11,12 +11,13 @@ pins:
 ---
 # Prediction per-field multiple choice
 
-With `prediction engine per field multiple choice enabled` on, a multiple-choice card is forecast and scored one field at a time ([[prediction-engine]], [[prediction-accuracy-comparators]]). The switch is off by default, and off keeps the whole-card forecast and scorer exactly as they were.
+With `prediction engine per field multiple choice enabled` on, a multiple-choice card is forecast and scored one field at a time ([[prediction-engine]], [[prediction-accuracy-comparators]]). The code default is off and the shipped INI sets it true. Off keeps the whole-card forecast and scorer exactly as they were.
 
 ## The forecast
 - A neighbour speaks to a field only when its own stored card has a field with the same normalised header. Neither card's field may be ambiguous.
-- A field forecasts its most-voted offered label. It abstains with a reason: `ambiguous_labels`, `no_aligned_neighbours`, `no_positive_evidence`, `no_option_evidence` or `other_likely`.
-- A pick the neighbour's card did not offer is a typed Other, counted apart. When typed Others outweigh the best label, the field abstains as `other_likely`.
+- A single-select field forecasts its most-voted offered label. A multi-select field forecasts every label chosen by at least half of the neighbours that offered it, or the most-voted label when none reaches half.
+- A field abstains with a reason: `ambiguous_labels`, `no_aligned_neighbours`, `no_positive_evidence`, `no_option_evidence` or `other_likely`.
+- A pick the neighbour's card did not offer is a typed Other, counted apart. A single-select field abstains as `other_likely` when typed Others outweigh its best label. A multi-select field does so when half or more of the neighbours typed an Other.
 - With no answered field the result is a cold start with reason `no_field_candidates`. `PredictionResult.fields` holds each header's answer or reason, and `to_hint_dict` adds it to a ready hint.
 - A neighbour-options lookup error is reported as `prediction_error`.
 
