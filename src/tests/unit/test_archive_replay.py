@@ -1063,3 +1063,24 @@ def test_the_unrecorded_limit_failure_delete_leaves_recorded_asks_other_arms_and
     assert query( ar.ARM_PRINCIPLES, ids[ 0 ] ).count() == 1 and query( ar.ARM_PRINCIPLES, ids[ 1 ] ).count() == 0 and query( ar.ARM_PRINCIPLES, ids[ 2 ] ).count() == 1
     assert models.discard_unrecorded_limit_failures( ar.HAIKU_ARMS, set() ) == 1 and query( ar.ARM_PRINCIPLES, ids[ 0 ] ).count() == 0
     assert models.discard_unrecorded_limit_failures( ar.TWIN_ARMS, set() ) == 0
+
+
+def test_a_twin_stage_start_deletes_limit_failures_stored_for_asks_with_no_twin_record( loaded, monkeypatch ):
+    """A stopped twin leaves limit failure rows with no record; a start forecasts them fresh."""
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, c0 = _models( session, embed )
+    _stage_first( loaded, ids[ :10 ], models=models )
+    _twin_stage( loaded, ids[ :5 ], models, code=CODE )
+    orphans = ids[ 5:8 ]
+    for ask_id in orphans: models.run( ask_id, ar.TWIN_ARMS )
+    session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm == ar.TWIN_ARMS[ 1 ], PredictionArmForecast.notification_id.in_( [ ar.uuid.UUID( i ) for i in orphans ] ) ).update(
+        { "forecast": None, "abstention_reason": ar.BOUND_REASON }, synchronize_session=False )
+    session.commit()
+    assert _bound_rows( session ) == 3
+    before = len( c0.calls )
+    assert _twin_stage( loaded, ids[ :10 ], models, code=CODE ) == 5
+    lines = ar.read_jsonl( work.twins )
+    assert [ t[ "id" ] for t in lines ] == ids[ :10 ] and _bound_rows( session ) == 0
+    assert all( t[ "arms" ][ ar.TWIN_ARMS[ 1 ] ][ "reason" ] is None for t in lines[ 5: ] ), "an unrecorded limit failure was recorded as a miss"
+    assert len( c0.calls ) - before == 3 + 2 * 2, "the three orphans got one fresh principles twin call each (their baseline twin rows were kept); the two new asks got both twins"
