@@ -416,6 +416,25 @@ class ModelArms:
             session.commit()
         return deleted
 
+    def discard_unrecorded_limit_failures( self, arms, recorded_ids ):
+        """
+        Delete limit failures stored for asks that no record file holds.
+
+        Requires:
+            - arms are in HAIKU_ARMS or TWIN_ARMS; recorded_ids are the ask ids the stage's record file already holds
+
+        Ensures:
+            - a limit failure row of those arms for an ask not in recorded_ids is deleted, so that ask is forecast fresh
+            - rows for recorded asks, other failures and forecasts are never touched
+            - returns the number of rows deleted
+        """
+        with self.factory() as session:
+            rows    = session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm.in_( arms ), PredictionArmForecast.abstention_reason == BOUND_REASON ).all()
+            orphans = [ row for row in rows if str( row.notification_id ) not in recorded_ids ]
+            for row in orphans: session.delete( row )
+            session.commit()
+        return len( orphans )
+
     def reader( self, arm ):
         """
         Make the baseline function that hands the harness an arm's stored forecast.
@@ -666,7 +685,7 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
         - a line already in records.jsonl is not written again, so a stop between the write and the checkpoint never doubles an ask
         - the first start stores the freeze in the checkpoint, and a later start under other settings is refused, except a higher principle limit
           (old multiplier 0) and a code change named by accept_code_change; both are recorded in the freeze history
-        - before the first chunk, every ask whose principles forecast failed on the limit is forecast again under the frozen limit, as of that ask
+        - before the first chunk, limit failures stored for asks with no record (a stopped chunk's) are deleted, then every recorded ask whose principles forecast failed on the limit is forecast again under the frozen limit
         - on the first failure on the limit the stage saves its checkpoint, writes a named stop line and raises BoundStop; that ask and every later one
           has no failed forecast recorded, and the asks before it in the chunk keep their stored rows, so a restart does not call their models again
         - returns the number of asks predicted in this call
@@ -679,6 +698,7 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
     state     = load_state( work.state )
     if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ), accept_code_change ): save_state( work.state, state )
     frozen_bound = freeze_limits( models, state )
+    models.discard_unrecorded_limit_failures( HAIKU_ARMS, { line[ "id" ] for line in read_jsonl( work.records ) } if os.path.exists( work.records ) else set() )
     rerun_bound_failures( session, asks, models, work, ARM_PRINCIPLES, work.records, frozen_bound, out=out, chunk=chunk )
     model, timeout_seconds = extractor_settings()
     version   = f"{model}:{PROMPT_VERSION}"
@@ -792,6 +812,7 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
     fresh = "freeze" not in state
     if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ), accept_code_change ) and fresh: save_state( work.state, state )
     frozen_bound = freeze_limits( models, state )
+    models.discard_unrecorded_limit_failures( TWIN_ARMS, { line[ "id" ] for line in read_jsonl( work.twins ) } if os.path.exists( work.twins ) else set() )
     rerun_bound_failures( session, asks, models, work, TWIN_ARMS[ 1 ], work.twins, frozen_bound, out=out, chunk=chunk )
     by_id = { ask[ "id" ]: ask for ask in asks }
     ran   = 0
