@@ -60,10 +60,15 @@ def shadow_forecast_recording_enabled():
 
     Ensures:
         - returns the INI switch's value as a bool, False when the key is absent
+        - returns False and prints one line when the config cannot be read, so the caller's row is still written
     """
-    from cosa.config.configuration_manager import ConfigurationManager
-    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    return config_mgr.get( SHADOW_FORECAST_RECORDING_KEY, default=str( DEFAULT_SHADOW_FORECAST_RECORDING ), return_type="boolean" )
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        return config_mgr.get( SHADOW_FORECAST_RECORDING_KEY, default=str( DEFAULT_SHADOW_FORECAST_RECORDING ), return_type="boolean" )
+    except Exception as e:
+        print( f"[DECISION-PROXY] shadow forecast switch unreadable, recording no forecast: {e.__class__.__name__}: {e}" )
+        return False
 
 
 # ============================================================================

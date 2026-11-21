@@ -114,3 +114,40 @@ def test_the_code_default_is_off_and_the_shipped_ini_turns_it_on_with_an_explain
     ini  = [ l for l in open( f"{root}/src/conf/lupin-app.ini" ) if l.startswith( key ) ]
     expl = [ l for l in open( f"{root}/src/conf/lupin-app-splainer.ini" ) if l.startswith( key ) ]
     assert len( ini ) == 1 and ini[ 0 ].split( "=" )[ 1 ].strip() == "true" and len( expl ) == 1
+
+
+def test_an_unreadable_config_gives_false_and_a_printed_line( capsys ):
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", side_effect=RuntimeError( "no config" ) ):
+        assert proxy_config.shadow_forecast_recording_enabled() is False
+    assert "unreadable" in capsys.readouterr().out
+
+
+def test_a_failed_switch_read_blanks_the_value_and_the_shadow_row_still_lands( factory ):
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", side_effect=RuntimeError( "no config" ) ):
+        value = "approved" if proxy_config.shadow_forecast_recording_enabled() else None
+    row = _shadow_row( factory, decision_value=value )
+    assert row.action == "shadow" and row.decision_value is None and row.category == "deployment"
+
+
+def test_the_orchestrator_row_is_still_logged_with_no_value_when_the_config_is_unreadable():
+    repo = MagicMock()
+    orch = SweTeamOrchestrator( task_description="Build X", config=SweTeamConfig( dry_run=True, trust_mode="disabled" ), job_id="swe-1" )
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", side_effect=RuntimeError( "no config" ) ), \
+         patch( "cosa.rest.db.database.get_db" ) as get_db, \
+         patch( "cosa.rest.db.repositories.proxy_decision_repository.ProxyDecisionRepository", return_value=repo ):
+        get_db.return_value.__enter__.return_value = MagicMock()
+        orch._persist_proxy_decision( "lead", "deploy?", _result( "requires_review" ), True )
+    repo.log_shadow.assert_called_once()
+    assert repo.log_shadow.call_args.kwargs[ "decision_value" ] is None
+
+
+def test_the_responder_row_is_still_logged_with_no_value_when_the_config_is_unreadable():
+    responder = DecisionResponder.__new__( DecisionResponder )
+    responder.domain_strategy = SimpleNamespace( name="swe" )
+    responder._persist_embedding = MagicMock()
+    repo_cls = MagicMock()
+    modules = { "cosa.rest.db.database": MagicMock(), "cosa.rest.db.repositories.proxy_decision_repository": MagicMock( ProxyDecisionRepository=repo_cls ) }
+    with patch.dict( sys.modules, modules ), patch( "cosa.config.configuration_manager.ConfigurationManager", side_effect=RuntimeError( "no config" ) ):
+        responder._persist_decision( "nid", _result( "approved" ), "question text" )
+    repo_cls.return_value.log_shadow.assert_called_once()
+    assert repo_cls.return_value.log_shadow.call_args.kwargs[ "decision_value" ] is None
