@@ -24,6 +24,7 @@ import cosa.utils.util as cu
 from .config import SweTeamConfig
 from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement
 from cosa.agents.decision_proxy.config import shadow_forecast_recording_enabled
+from cosa.agents.decision_proxy.decision_writer import write_proxy_decision
 from .state import (
     OrchestratorState,
     SweTeamState,
@@ -416,34 +417,22 @@ class SweTeamOrchestrator:
             - failure is logged and never propagates
         """
         try:
-            from cosa.rest.db.database import get_db
-            from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
-
-            common = {
-                "notification_id" : notification_id or str( uuid.uuid4() ),
-                "domain"          : "swe",
-                "category"        : proxy_result.category,
-                "question"        : question[ :500 ],
-                "sender_id"       : get_sender_id( role, self.session_id ),
-                "confidence"      : proxy_result.confidence,
-                "trust_level"     : proxy_result.trust_level,
-                "reason"          : proxy_result.reason or "",
-                "metadata_json"   : { "job_id": self.job_id, "user_answer": user_answer },
-                "data_origin"     : "organic",
-                "rule_agreement"  : rule_agreement( proxy_result.action, user_answer ),
-            }
-            with get_db() as session:
-                repo = ProxyDecisionRepository( session )
-                if proxy_result.action == "shadow":
-                    repo.log_shadow( decision_value=proxy_result.value if shadow_forecast_recording_enabled() else None, **common )
-                else:
-                    repo.log_decision(
-                        action                = proxy_result.action,
-                        decision_value        = proxy_result.value,
-                        requires_ratification = proxy_result.action in ( "suggest", "defer" ),
-                        **common
-                    )
-                session.commit()
+            write_proxy_decision(
+                result                = proxy_result,
+                notification_id       = notification_id or str( uuid.uuid4() ),
+                domain                = "swe",
+                question              = question,
+                sender_id             = get_sender_id( role, self.session_id ),
+                requires_ratification = proxy_result.action in ( "suggest", "defer" ),
+                shadow_reason_default = "",
+                shadow_decision_value = proxy_result.value if shadow_forecast_recording_enabled() else None,
+                extra                 = {
+                    "metadata_json"  : { "job_id": self.job_id, "user_answer": user_answer },
+                    "data_origin"    : "organic",
+                    "rule_agreement" : rule_agreement( proxy_result.action, user_answer ),
+                },
+                commit                = True,
+            )
         except Exception as e:
             logger.warning( f"Proxy decision DB persistence failed (non-fatal): {e}" )
 
