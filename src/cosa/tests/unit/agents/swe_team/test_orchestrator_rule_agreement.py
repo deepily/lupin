@@ -42,11 +42,6 @@ def _database():
 
 class TestSuccessAndRuleAgreementStayApart( unittest.TestCase ):
 
-    # Measured 20 Nov 2026: the strategy forecasts "requires_review" for a deployment, so a human approval scores as a
-    # rejection today. The plan's acceptance says it must compute as success, but changing the scoring changes what the
-    # trust gate does, which decision 5 rules out. It is Rick's call (Mr. Radio, 20 Nov 2026). When Rick rules and the
-    # scoring changes, this test starts passing, the expected failure breaks the suite, and the decorator comes off.
-    @unittest.expectedFailure
     def test_a_human_approving_a_deployment_scores_as_success_through_the_real_strategy_and_tracker( self ):
         o       = _orch()
         tracker = TrustTracker()

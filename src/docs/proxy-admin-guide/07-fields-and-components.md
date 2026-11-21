@@ -14,7 +14,7 @@ A human who approves a deployment has not made the proxy fail. The gate therefor
 | Rule agreement | `proxy_decisions.rule_agreement` | whether the human answer agreed with what the action implies |
 
 **Success** means the human answer agreed with the forecast. It is computed by `forecast_agreement` in `decision_proxy/agreement.py`.
-A human approving a deployment scores as success when the forecast was "approved".
+A human approving a deployment scores as success when the forecast was "approved" or "requires_review".
 
 **Rule agreement** is a separate nullable column. It is never folded into success.
 An act or suggest row implies approval, so the column is true when the human approved and false when they did not.
@@ -24,13 +24,10 @@ This is Mr. Radio's reading of "rule", for Rick to confirm, because the plan doe
 The column came with alembic revision `c4d8e1a6b392`, chained after `7a3e9c5d1b28`. The revision is written and not applied.
 Rows written before it read NULL, and nothing backfills them.
 
-### An open conflict for Rick
+### A forecast of requires_review
 
-The plan says a human approval of a deployment must compute as success. Today it scores as a rejection.
-The strategy forecasts `requires_review` for a deployment, and success is `( forecast == "approved" ) == human answer`.
-A human who approves a `requires_review` forecast therefore scores False, and one who declines scores True.
-Changing that changes what the trust gate does, which is outside this phase. Rick decides.
-`test_orchestrator_rule_agreement.py` pins the conflict as an expected failure.
+A forecast of `requires_review` asks for a human look, so a human approval of it scores as success (ruled 20 Nov 2026).
+A decline still scores True, and an approval against any other non-"approved" forecast still scores False.
 
 ### What the 5 Nov rows show
 
