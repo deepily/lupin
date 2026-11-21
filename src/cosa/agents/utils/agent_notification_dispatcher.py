@@ -137,6 +137,28 @@ def reset_dispatch_context( tokens: dict ) -> None:
         ctx_session_id.reset( tokens[ "session_id" ] )
 
 
+# Row 663f08d4: ask_confirmation returns a bool, so the id of the notification that carried the
+# question travels beside it. A ContextVar is per task, so concurrent jobs sharing one dispatcher
+# never read each other's id.
+_last_ask_notification_id = ContextVar( "last_ask_notification_id", default=None )
+
+
+def take_last_ask_notification_id():
+    """
+    Return and forget the id of the notification that carried the latest confirmation.
+
+    Requires:
+        - called from the task that awaited ask_confirmation
+
+    Ensures:
+        - returns the notifications row id string, or None when no ask has answered in this task
+        - a second call returns None
+    """
+    notification_id = _last_ask_notification_id.get()
+    _last_ask_notification_id.set( None )
+    return notification_id
+
+
 def _prepend_operator_routing( abstract: Optional[ str ], original_target: str ) -> str:
     """
     Prefix an abstract with an operator-routing context line.
@@ -403,7 +425,9 @@ class AgentNotificationDispatcher:
                 job_id            = job_id,
             )
 
+            _last_ask_notification_id.set( None )
             response: NotificationResponse = await asyncio.to_thread( _notify_user_sync, request )
+            _last_ask_notification_id.set( response.notification_id )
 
             if response.exit_code == 0 and response.response_value:
                 return response.response_value.lower().strip().startswith( "yes" )

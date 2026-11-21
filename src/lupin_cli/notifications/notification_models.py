@@ -575,6 +575,11 @@ class NotificationResponse(BaseModel):
         description="The server's OWN sentence for a non-200, verbatim (its JSON `detail` when present, else the raw body, truncated). `status` stays the bare `http_error_<code>` string that callers match on; this carries the reason that string throws away. Row cd283a77: a 503 rendered as `error: http_error_503` cost six attempts across two boots and a P1 row, while the body had said `User is offline and no default response provided` the whole time."
     )
 
+    notification_id: Optional[str] = Field(
+        default=None,
+        description="Id of the notification that carried the question: the id in the server's opening ack frame, which is the notifications row id. None when the stream never opened or the ack frame was not captured. Row 663f08d4: proxy_decisions rows join to notifications through it."
+    )
+
     reattach_state: Optional[str] = Field(
         default=None,
         description="Late-answer re-attach signal (§4.5 E-c): 'reattach_armed' (stream died, poll fired against the remaining budget) | 'reattach_unavailable' (stream died but the ack id was never captured, so no re-attach was possible — the silent-no-op failure, surfaced loud) | None (no stream death). Assertable + queryable."
