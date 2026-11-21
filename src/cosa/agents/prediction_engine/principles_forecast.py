@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from cosa.agents.prediction_engine.episode_view import episode_view
-from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieve_principles
+from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieval_limits, retrieve_principles
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
 from cosa.rest.postgres_models import Notification, PredictionArmForecast
@@ -301,14 +301,16 @@ def _prepare( session_factory, notification_id, c0, embedder, encoder_version, e
     Ensures:
         - returns ( episode, selected, block, system prompt, user prompt ), everything as of the ask and nothing later
         - without principles the selection is empty, the block is principle_block of none, and the prompts are the baseline's own
+        - with principles, the limit and fetch multiplier are read from the INI file for this ask (retrieval_limits)
     """
     with session_factory() as session:
         episode  = episode_view( session, notification_id )
         selected = []
         if use_principles:
+            limits   = retrieval_limits()
             vector   = embedder.encode( card_text( episode ) )
             selected = retrieve_principles( session, episode[ "owner_id" ], episode[ "project" ], vector, aware_moment( episode[ "asked_at" ] ),
-                                            encoder_version, extractor_version, k=k )[ "principles" ]
+                                            encoder_version, extractor_version, k=k, bound=limits[ "bound" ], multiplier=limits[ "multiplier" ] )[ "principles" ]
     block            = principle_block( selected )
     system, user     = with_principles( *c0.build_prompts( episode ), block )
     return episode, selected, block, system, user

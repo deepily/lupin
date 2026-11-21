@@ -599,7 +599,7 @@ def test_the_freeze_is_stored_on_the_first_start_and_a_start_under_other_setting
     run( CODE )
     freeze = ar.load_state( work.state )[ "freeze" ]
     assert freeze[ "code_sha" ] == CODE[ "sha" ] and freeze[ "floor" ] == 10 and freeze[ "lag_seconds" ] == 0.0
-    assert ( freeze[ "neighbours" ], freeze[ "k" ], freeze[ "bound" ] ) == ( 5, 5, 500 ) and freeze[ "vocabulary_version" ] == ar.PROMPT_VERSION
+    assert ( freeze[ "neighbours" ], freeze[ "k" ], freeze[ "bound" ], freeze[ "fetch_multiplier" ] ) == ( 5, 5, 5000, 0 ) and freeze[ "vocabulary_version" ] == ar.PROMPT_VERSION
     assert freeze[ "encoder" ] == "test-encoder:v1" and freeze[ "baseline_model" ] == "haiku-x" and freeze[ "twin_model" ] == opus_twins.opus_model()
     assert freeze[ "extractor_version" ] == f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}" and freeze[ "extractor_timeout_seconds" ] == ar.extractor_settings()[ 1 ]
     run( CODE, upto=20 )
@@ -608,6 +608,24 @@ def test_the_freeze_is_stored_on_the_first_start_and_a_start_under_other_setting
     with pytest.raises( ar.FreezeMismatch, match="code_dirty" ):
         run( { "sha": CODE[ "sha" ], "dirty": True }, upto=30 )
     assert len( ar.read_jsonl( work.records ) ) == 20, "a refused start must not predict anything"
+
+
+def test_the_freeze_records_the_principle_limit_as_read_and_a_changed_limit_is_refused_on_resume( loaded, monkeypatch ):
+    """
+    The freeze holds the limits as read, not the code constant.
+
+    A resume under another limit or multiplier is refused.
+    """
+    session, asks, ids, embed, work, _ = loaded
+    run = lambda upto: ar.run_first_stage( session, asks, ids[ :upto ], PredictionEngine( debug=False ), embed, _models( session, embed )[ 0 ], work,
+                                           query_fn=er.canned_model, chunk=10, out=lambda line: None, code=CODE )
+    monkeypatch.setattr( ar.principle_retrieval, "retrieval_limits", lambda: { "bound": 7, "multiplier": 3 } )
+    run( 10 )
+    freeze = ar.load_state( work.state )[ "freeze" ]
+    assert ( freeze[ "bound" ], freeze[ "fetch_multiplier" ] ) == ( 7, 3 )
+    for limits, field in ( ( { "bound": 8, "multiplier": 3 }, "bound" ), ( { "bound": 7, "multiplier": 4 }, "fetch_multiplier" ) ):
+        monkeypatch.setattr( ar.principle_retrieval, "retrieval_limits", lambda limits=limits: limits )
+        with pytest.raises( ar.FreezeMismatch, match=field ): run( 20 )
 
 
 def test_the_twin_stage_refuses_settings_the_first_stage_did_not_freeze_and_the_report_carries_the_freeze( loaded ):

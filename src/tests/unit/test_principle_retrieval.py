@@ -23,6 +23,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 import cosa.agents.prediction_engine.principle_retrieval as pr
+import cosa.config.configuration_manager as pr_config
 from cosa.agents.prediction_engine.principle_retrieval import ( PrincipleBoundExceeded, embedding_text, encoder_version_of, load_owner_ledger, principle_block,
                                                                  reembed_principles, retrieve_principles, select_principles, session_lookup )
 from cosa.research.preference_replay import scratch_db  # noqa: F401  registers the one shared SQLite hooks for JSONB and Vector
@@ -273,11 +274,80 @@ def test_short_is_reported_when_fewer_than_k_survive( db ):
     assert result[ "short" ] is True and result[ "available" ] == 1 and len( result[ "principles" ] ) == 1
 
 
-def test_the_bound_is_refused_not_worked_around( db ):
-    """Above the bound retrieval raises; at the bound it runs, with no multiplier."""
+def test_the_bound_is_refused_not_worked_around( db, stand_in_topk ):
+    """
+    Above the bound with no multiplier retrieval raises.
+
+    At the bound it fetches every principle, whatever the multiplier.
+    """
     for n in range( 1, 4 ): add_evidence( db, add_principle( db, n ), n )
     with pytest.raises( PrincipleBoundExceeded, match="3 principles" ): retrieve( db, bound=2 )
-    assert len( retrieve( db, bound=3 )[ "principles" ] ) == 3
+    assert len( retrieve( db, bound=3 )[ "principles" ] ) == 3 and stand_in_topk[ -1 ][ "limit" ] == 3
+    assert len( retrieve( db, bound=3, multiplier=1, k=1 )[ "principles" ] ) == 1 and stand_in_topk[ -1 ][ "limit" ] == 3
+
+
+def test_above_the_bound_a_multiplier_fetches_only_the_k_times_m_nearest( db, stand_in_topk ):
+    """
+    Above the bound a multiplier fetches only the k x M nearest.
+
+    The rows fetched are the nearest ones, and the count available is still the whole store.
+    """
+    for n in range( 1, 6 ): add_evidence( db, add_principle( db, n, embedding=vec( 1, n - 1 ) ), n )
+    result = retrieve( db, bound=2, multiplier=2, k=1 )
+    assert stand_in_topk[ -1 ][ "limit" ] == 2 and result[ "available" ] == 5
+    assert statements( result ) == [ "statement 1" ]
+
+
+def test_the_shipped_defaults_are_a_limit_of_5000_and_no_multiplier():
+    """The shipped defaults are pinned as literals, so a changed default is seen."""
+    assert ( pr.PRINCIPLE_BOUND, pr.FETCH_MULTIPLIER ) == ( 5000, 0 )
+
+
+def test_retrieval_limits_reads_both_keys_from_the_ini_file_as_shipped():
+    """
+    The INI file ships the limit at 5,000 and the multiplier at 0.
+
+    The reader returns both as ints.
+    """
+    assert pr.retrieval_limits() == { "bound": 5000, "multiplier": 0 }
+
+
+class FakeConfig:
+    """A configuration manager stand-in holding only the given keys."""
+
+    values = {}
+
+    def __init__( self, env_var_name ):
+        """Accept the env var name the real manager needs."""
+        self.env_var_name = env_var_name
+
+    def get_required( self, key, return_type="string" ):
+        """Return the key's value as an int, or raise as the real manager does for an absent key."""
+        if key not in self.values: raise pr_config.MissingConfigKeyError( key, "default", None )
+        return int( self.values[ key ] )
+
+
+@pytest.mark.parametrize( "values, error", [
+    ( { pr.BOUND_KEY: 0, pr.MULTIPLIER_KEY: 0 }, "must be a positive integer" ),
+    ( { pr.BOUND_KEY: 10, pr.MULTIPLIER_KEY: -1 }, "must be 0 or a positive integer" ),
+] )
+def test_retrieval_limits_refuses_a_limit_below_one_or_a_negative_multiplier( monkeypatch, values, error ):
+    """A limit of 0 or a negative multiplier is refused by name, never used."""
+    monkeypatch.setattr( FakeConfig, "values", values )
+    monkeypatch.setattr( pr, "ConfigurationManager", FakeConfig )
+    with pytest.raises( ValueError, match=error ): pr.retrieval_limits()
+
+
+@pytest.mark.parametrize( "missing", [ "bound", "multiplier" ] )
+def test_retrieval_limits_raises_for_an_absent_key_and_never_falls_back( monkeypatch, missing ):
+    """An absent key raises; the code defaults are not substituted."""
+    values = { pr.BOUND_KEY: 7, pr.MULTIPLIER_KEY: 3 }
+    del values[ pr.BOUND_KEY if missing == "bound" else pr.MULTIPLIER_KEY ]
+    monkeypatch.setattr( FakeConfig, "values", values )
+    monkeypatch.setattr( pr, "ConfigurationManager", FakeConfig )
+    with pytest.raises( pr_config.MissingConfigKeyError ): pr.retrieval_limits()
+    monkeypatch.setattr( FakeConfig, "values", { pr.BOUND_KEY: 7, pr.MULTIPLIER_KEY: 3 } )
+    assert pr.retrieval_limits() == { "bound": 7, "multiplier": 3 }
 
 
 def test_load_owner_ledger_returns_every_version_and_only_this_owner( db ):

@@ -43,6 +43,7 @@ from cosa.research.preference_replay.service_embeddings import CachedServiceEmbe
 from cosa.rest.repair_attempt_tracker import cosine_similarity
 from cosa.rest.postgres_models import Notification, PredictionArmForecast, PreferenceEvidence, PreferencePrinciple
 from cosa.utils.iso_timestamp import aware_moment
+from cosa.utils.jsonl_file import read_jsonl
 
 ARM_FIXED       = "A0"
 ARM_BASELINE    = context_baseline.ARM
@@ -63,19 +64,6 @@ PAIRINGS        = ( ( ARM_PRINCIPLES, ARM_BASELINE ), ( ARM_PRINCIPLES, ENGINE_A
                     ( TWIN_ARMS[ 0 ], ARM_BASELINE ), ( TWIN_ARMS[ 1 ], ARM_PRINCIPLES ) )
 
 _DB_LOCK = threading.RLock()
-
-
-def read_jsonl( path ):
-    """
-    Read a JSON-lines file.
-
-    Requires:
-        - path names a readable file with one JSON object per line
-
-    Ensures:
-        - returns the objects in file order, skipping blank lines
-    """
-    with open( path, encoding="utf-8" ) as handle: return [ json.loads( line ) for line in handle if line.strip() ]
 
 
 class FreezeMismatch( RuntimeError ):
@@ -119,12 +107,13 @@ def current_freeze( models, code ):
         - models is a ModelArms; code is tree_state's result
 
     Ensures:
-        - returns a dict of the code commit, the vocabulary and extractor versions, the extractor timeout, the encoder, neighbours, k, bound,
-          lag seconds, window start, floor and the baseline and Opus model ids
+        - returns a dict of the code commit, the vocabulary and extractor versions, the extractor timeout, the encoder, neighbours, k,
+          the principle limit and fetch multiplier as read from the INI file, lag seconds, window start, floor and the baseline and Opus model ids
     """
+    limits = principle_retrieval.retrieval_limits()
     return { "code_sha": code[ "sha" ], "code_dirty": code[ "dirty" ], "vocabulary_version": PROMPT_VERSION, "extractor_version": models.extractor,
              "extractor_timeout_seconds": extractor_settings()[ 1 ], "encoder": models.encoder, "neighbours": NEIGHBOURS, "k": principle_retrieval.DEFAULT_K,
-             "bound": principle_retrieval.PRINCIPLE_BOUND, "lag_seconds": REPLAY_LAG.total_seconds(), "window_start": WINDOW_START.isoformat(), "floor": OPERATIONAL_FLOOR,
+             "bound": limits[ "bound" ], "fetch_multiplier": limits[ "multiplier" ], "lag_seconds": REPLAY_LAG.total_seconds(), "window_start": WINDOW_START.isoformat(), "floor": OPERATIONAL_FLOOR,
              "baseline_model": models.c0.model, "twin_model": opus_twins.opus_model() }
 
 
