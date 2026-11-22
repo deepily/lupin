@@ -14,18 +14,19 @@ Notes:
     - Summing VmRSS does not recover the scope figure either, because shared pages count once per process and once per cgroup.
     - So no arithmetic over rss_gb is offered.
 """
+import os
 import sys
 import re
 import collections
 
-from pathlib import Path
-
 # The default log lives in the session-bridge folder, so it is resolved through the one
-# seam, `sessions_dir()` (row f40c5b75). This bootstrap resolves `src/` from this file, not
-# from LUPIN_ROOT, for the reason `report-orphaned-dm-buffers.py` gives beside its own copy.
-_SRC = Path( __file__ ).resolve().parents[ 1 ]
-if str( _SRC ) not in sys.path:
-    sys.path.insert( 0, str( _SRC ) )
+# seam, `sessions_dir()` (row f40c5b75). Standard bootstrap for a standalone script
+# (CLAUDE.md, Path management): `src/` comes from LUPIN_ROOT.
+lupin_root = os.environ.get( "LUPIN_ROOT" )
+if lupin_root is None:
+    raise RuntimeError( "LUPIN_ROOT not set — export LUPIN_ROOT=/path/to/project" )
+src_path = os.path.join( lupin_root, "src" )
+if src_path not in sys.path: sys.path.insert( 0, src_path )
 
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
