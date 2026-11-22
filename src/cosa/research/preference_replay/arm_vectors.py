@@ -24,6 +24,7 @@ from cosa.research.preference_replay.context_arms import ARMS, build_arm_texts, 
 from cosa.research.preference_replay.question_vectors import BATCH_SIZE, FACTS_SQL, PROBE_SIZE, generate, write_side_file
 from cosa.rest.db.database import get_db
 from cosa.utils.file_hash import file_sha256
+from cosa.utils.jsonl_file import read_jsonl
 
 ARM_TEXT_RULES = { "Q": "message.strip()", "Q+A": "message.strip() + abstract", "Q+O": "message.strip() + options and recommended flag",
                    "Q+P": "message.strip() + project and sender session",
@@ -32,7 +33,7 @@ ARM_TEXT_RULES = { "Q": "message.strip()", "Q+A": "message.strip() + abstract", 
 
 def load_frozen_ids( path: str ) -> List[str]:
     """
-    Read the frozen cohort's ask ids in file order.
+    Read the frozen cohort's ask ids in file order, through read_jsonl.
 
     Requires:
         - path names a JSON-lines file with an id on each line
@@ -43,7 +44,7 @@ def load_frozen_ids( path: str ) -> List[str]:
     Raises:
         - ValueError if the file holds no id or an id twice
     """
-    with open( path, encoding="utf-8" ) as handle: ids = [ json.loads( line )[ "id" ] for line in handle if line.strip() ]
+    ids = [ record[ "id" ] for record in read_jsonl( path ) ]
     if not ids: raise ValueError( f"{path} holds no ids" )
     if len( set( ids ) ) != len( ids ): raise ValueError( f"{path} holds an id twice" )
     return ids

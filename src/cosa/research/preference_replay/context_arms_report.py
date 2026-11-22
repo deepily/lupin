@@ -106,9 +106,9 @@ def _kinds( run: Dict[str, Any] ) -> List[str]:
         - run is the dict replay returns
 
     Ensures:
-        - returns each response type once
+        - returns each response type once, the keys of _per_100_by_type
     """
-    return sorted( { record[ "meta" ][ "response_type" ] for record in _engine_records( run ) } )
+    return sorted( _per_100_by_type( run ) )
 
 
 def compare_arms( runs: Dict[str, Dict[str, Any]], operational_floor: int ) -> List[Dict[str, Any]]:

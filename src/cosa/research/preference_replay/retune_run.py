@@ -26,6 +26,7 @@ import cosa.utils.util as cu
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.repo.doc_lint.pool_builder import resolve_commit
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows
+from cosa.research.preference_replay.arm_vectors import load_frozen_ids
 from cosa.research.preference_replay.cohorts import cohort_asks
 from cosa.research.preference_replay.question_vectors import load_side_file
 from cosa.research.preference_replay.retune import ELIGIBLE_TYPES, eligible_asks, frozen_settings, report_only_sweep, retune
@@ -75,15 +76,16 @@ def read_id_list( ids_path: str ) -> List[str]:
 
     Ensures:
         - returns the ids in file order, blank lines skipped
-        - a line starting with an opening brace is JSON; any other line is a bare id
+        - a line starting with an opening brace is JSON, read by arm_vectors.load_frozen_ids; any other line is a bare id
 
     Raises:
         - ValueError naming the file when its lines mix the two forms
+        - ValueError from load_frozen_ids when a JSON-lines file holds an id twice
     """
     with open( ids_path, encoding="utf-8" ) as handle: lines = [ line.strip() for line in handle if line.strip() ]
     as_json = [ line.startswith( "{" ) for line in lines ]
     if any( as_json ) and not all( as_json ): raise ValueError( f"{ids_path} mixes JSON lines and bare ids" )
-    return [ json.loads( line )[ "id" ] for line in lines ] if any( as_json ) else lines
+    return load_frozen_ids( ids_path ) if any( as_json ) else lines
 
 
 def restrict_to_ids( asks: List[Dict[str, Any]], ids_path: str ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:

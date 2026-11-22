@@ -9,10 +9,11 @@ The replay code it ran against is commit 086f95590, and the frozen settings are 
 Run from the repository root with LUPIN_ROOT and PYTHONPATH pinned to the tree.
 """
 
-import json, subprocess, collections, hashlib, sys
+import json, subprocess, hashlib, sys
 from cosa.rest.db.database import get_db
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.preference_replay import retune as rt
+from cosa.research.preference_replay.before_after_columns import _mix, _scores
 from cosa.research.preference_replay.retune_run import read_cohort, _open_engine
 from cosa.research.preference_replay.replay_loop import replay, summarize, ENGINE_ARM
 from cosa.research.preference_replay.checkpoint_report import render_report, write_checkpoint, refuse_post_checkpoint_report
@@ -37,8 +38,8 @@ run = replay( asks, eng, snapshot, target_types=rt.ELIGIBLE_TYPES )
 engine_records = run[ "records" ][ ENGINE_ARM ]
 tune_n, final_n = rt.split_windows( len( engine_records ) )
 final_ids = { r[ "meta" ][ "notification_id" ] for r in engine_records[ tune_n: ] }
-tune_mix  = dict( collections.Counter( r[ "meta" ][ "response_type" ] for r in engine_records[ :tune_n ] ) )
-final_mix = dict( collections.Counter( r[ "meta" ][ "response_type" ] for r in engine_records[ tune_n: ] ) )
+tune_mix  = _mix( engine_records[ :tune_n ] )
+final_mix = _mix( engine_records[ tune_n: ] )
 final_correct = sum( 1 for r in engine_records[ tune_n: ] if r[ "meta" ][ "correct" ] )
 print( "final correct", final_correct, "frozen", frozen[ "best_point" ][ "final_correct" ], flush=True )
 assert final_correct == frozen[ "best_point" ][ "final_correct" ], "replay at the frozen settings disagrees with the freeze"
@@ -52,9 +53,8 @@ final_by_type = { kind: len( final_run( kind )[ "records" ][ ENGINE_ARM ] ) for 
 summaries = { "yes_no": { arm: json.loads( json.dumps( summarize( final_run( "yes_no" ), arm, FLOOR ), default=float ) ) for arm in ( "always_yes", "prior_majority" ) } }
 
 prov = frozen[ "provenance" ]
-def _score( recs ): return { k: { "asks": sum( 1 for r in recs if r[ "meta" ][ "response_type" ] == k ), "correct": sum( 1 for r in recs if r[ "meta" ][ "response_type" ] == k and r[ "meta" ][ "correct" ] ) } for k in rt.ELIGIBLE_TYPES }
 coverage = { "cohort_asks": len( asks ), "replayable": len( engine_records ), "tune_mix": tune_mix, "final_mix": final_mix,
-             "scores": { "tune": _score( engine_records[ :tune_n ] ), "final": _score( engine_records[ tune_n: ] ) } }
+             "scores": { "tune": _scores( engine_records[ :tune_n ] ), "final": _scores( engine_records[ tune_n: ] ) } }
 print( "scores", coverage[ "scores" ], flush=True )
 ys = summaries[ "yes_no" ][ "always_yes" ]
 bp = frozen[ "best_point" ]
