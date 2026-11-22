@@ -73,7 +73,8 @@ EXCLUDED_SENSITIVE_CONTENT = "EXCLUDED_SENSITIVE_CONTENT"   # sendable() dropped
 EXCLUDED_PREFIX            = "EXCLUDED_PREFIX"              # sendable() dropped the entry: its id is under an excluded prefix
 INDEX_REFRESH_SLOW         = "INDEX_REFRESH_SLOW"           # note: from the call's start to the end of its lookup took longer than INDEX_REFRESH_BOUND_SECONDS
 INDEX_REFRESH_BOUND_SECONDS = 30                            # 30 s proposed by the plan; measured 25 Oct 2026 on dual-rtx-4090s: the index rebuild after one edited file takes 13.2 s (symbol layer only)
-PURPOSE_LINE_TORN          = "PURPOSE_LINE_TORN"            # note: the purpose file ends in a line that is still being written, so it was skipped
+JEV_PAYMENT_REQUIRED       = "JEV_PAYMENT_REQUIRED"         # note: Jev answered 402, so the account needs paying; the cause stays CALL_FAILED
+PURPOSE_LINE_TORN          = "PURPOSE_LINE_TORN"         # note: the purpose file ends in a line that is still being written, so it was skipped
 DROPPED_IDS_SHOWN          = 10                             # ids of each dropped reason a result and a receipt name
 SYMBOL_FIELDS = ( "id", "sig", "doc", "file", "lang" )
 
@@ -475,8 +476,8 @@ class LiveJevTransport:
 
     Ensures:
         - the key is read from the environment on each post and is never stored on this object
-        - once Jev refuses the key (JevConfigError with no status, 401 or 403), later posts raise at once without
-          any HTTP, so a bad key costs one refusal per in-flight call and not one per index entry
+        - once Jev refuses the key or the account (JevConfigError with no status, 401, 402 or 403), later posts raise at
+          once without any HTTP, so a bad key or an unpaid account costs one refusal per in-flight call and not one per index entry
         - a 422 refuses only the request that drew it; the next post is sent
         - with a budget (a jev_transport.CallBudget), every HTTP attempt takes one from it, retries included
         - transient is the retry policy send_with_meta takes: the packed and first-trial paths set it, the default path does not
@@ -1634,6 +1635,8 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if redactions: rec[ "need_redactions" ], rec[ "routes_source" ], rec[ "need_sent" ] = redactions, routes_source, need     # only when the redactor changed the need, so an untouched need keeps its pinned receipt bytes
     unscreened = unscreened_path_count( entries, routes )
     dropped = dropped_view( ctx.dropped )
+    unpaid = sum( 1 for sweep_ in routed[ "sweeps" ] for log in sweep_[ "attempt_logs" ] for a in log if a[ "status" ] == 402 )
+    if unpaid: ctx.notes.append( { "note": JEV_PAYMENT_REQUIRED, "detail": f"Jev answered 402 Payment Required to {unpaid} attempt(s): the TypeSafe account needs paying, and every lookup fails until it is" } )
     if ctx.notes: rec[ "notes" ] = list( ctx.notes )                             # written only when there is one, so a clean call keeps its pinned receipt bytes
     if dropped: rec[ "dropped" ] = dropped                                       # written only when something was dropped, so a clean call keeps its pinned receipt bytes
     if unscreened: rec[ "unscreened_entry_paths" ] = unscreened                  # the plan's K14 count; written only when nonzero, so a clean index keeps its pinned receipt bytes

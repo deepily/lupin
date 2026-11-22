@@ -80,7 +80,7 @@ def test_the_final_failure_carries_the_last_http_status_so_a_5xx_is_told_from_a_
     assert out.status is None
 
 
-@pytest.mark.parametrize( "status", [ 401, 403, 422 ] )
+@pytest.mark.parametrize( "status", [ 401, 402, 403, 422 ] )
 def test_a_refusal_is_never_retried( status ):
     out, calls, sleeps = send( [ ( status, "x" ), ( 200, "ok" ) ] )
     assert isinstance( out, jt.JevConfigError ) and out.status == status and len( calls ) == 1 and sleeps == []
