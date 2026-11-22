@@ -5,6 +5,9 @@ Rick ruled on 21 Nov 2026 that the test VM keeps its own settings in the block i
 The disk readers and the writer therefore use the active block's definition.
 Each test writes a small INI to a temporary folder and reads it back through the production parser.
 """
+import os
+import re
+
 import pytest
 
 from lupin_mcp import fleet_cap_ini_io as io
@@ -48,6 +51,17 @@ def test_a_block_the_file_does_not_hold_is_a_chain_of_one_and_a_cycle_ends():
     assert io.inherit_chain( BODY.split( "\n" ), "Lupin: Nowhere" ) == [ "Lupin: Nowhere" ]
     cycle = "[a]\ninherits = b\n[b]\ninherits = a\n".split( "\n" )
     assert io.inherit_chain( cycle, "a" ) == [ "a", "b" ]
+
+
+def test_every_inherits_line_of_the_shipped_ini_names_a_section_and_none_a_file_path():
+    """The manager follows a file inherits and inherit_chain does not, so none may exist."""
+    root  = os.environ[ "LUPIN_ROOT" ]
+    lines = open( os.path.join( root, "src", "conf", "lupin-app.ini" ), encoding="utf-8" ).read().split( "\n" )
+    sections  = { line.strip()[ 1:-1 ] for line in lines if line.startswith( "[" ) and line.strip().endswith( "]" ) }
+    inherited = [ line.split( "=", 1 )[ 1 ].strip() for line in lines if re.match( r"^inherits[ \t]*=", line ) ]
+    assert len( inherited ) == 4, "the census moved: count the inherits lines again and rule on each"
+    assert all( parent in sections for parent in inherited ), f"an inherits names no section here: {inherited}"
+    assert not any( os.path.isfile( parent ) for parent in inherited )
 
 
 def test_the_vm_block_reads_its_own_value_and_the_host_reads_the_base( tmp_path, monkeypatch ):
