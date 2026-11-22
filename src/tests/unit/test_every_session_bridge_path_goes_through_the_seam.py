@@ -6,10 +6,12 @@ that resolves the session-bridge folder. Its default is to move to a folder Lupi
 only works if no reader or writer spells the old path itself.
 
 The guard reads each file's syntax tree, not its text. Comments are not in the tree, and a
-string that stands alone as a statement (a docstring) is prose, so both are skipped. Every
-other string constant is code and is checked. Two spellings are refused: a string containing
-`.claude/sessions`, and a `.claude` string followed directly by a `sessions` string, as in
-`Path.home() / ".claude" / "sessions"`.
+string that stands alone as a statement (a docstring) is prose, so both are skipped. Each
+path expression is read as one text: a string, an f-string, a chain of `+` or `/`, or the
+arguments of a `join` call. A name assigned such a chain ending in `.claude` counts as
+`.claude` wherever the file uses it. The expression is refused when its text, with repeated
+slashes collapsed, holds `.claude/sessions` as whole path parts. Not seen: a base passed in
+from another module or built across a function call that is not a join.
 
 The population is every tracked `.py` file outside the test folders and the R&D folders,
 taken from `git ls-files`. The seam module itself is left out, because it holds the default.
@@ -17,13 +19,15 @@ taken from `git ls-files`. The seam module itself is left out, because it holds 
 
 import ast
 import os
+import re
 import subprocess
 
 import pytest
 
 SEAM        = "src/lupin_cli/claude_code/hooks/lib/sessions_dir.py"
-LITERAL     = ".claude/sessions"
-CLAUDE_PART = { ".claude", "~/.claude" }
+PATTERN     = re.compile( r"(?:^|/)\.claude/sessions(?:/|$)" )
+JOINERS     = { "join", "joinpath" }
+PASSERS     = { "expanduser", "expandvars", "abspath", "realpath", "normpath", "Path", "PurePath", "PosixPath", "str", "fspath" }
 SKIP_PREFIX = ( "src/rnd/", "src/cosa/rnd/", "src/tests/", "src/cosa/tests/" )
 
 
@@ -46,39 +50,101 @@ def _prose_nodes( tree ):
     return ids
 
 
+def _call_name( node ):
+    """
+    Return the bare name a call is made through.
+
+    Requires:
+        - node is an `ast.Call`
+
+    Ensures:
+        - returns `join` for `os.path.join( ... )`, `Path` for `Path( ... )`, and "" for anything else
+    """
+    func = node.func
+    if isinstance( func, ast.Attribute ): return func.attr
+    if isinstance( func, ast.Name ): return func.id
+    return ""
+
+
+def _path_text( node, bases ):
+    """
+    Read one expression as the path text it builds.
+
+    Requires:
+        - node is an `ast` expression node
+        - bases is a set of names known to hold a `.claude` folder
+
+    Ensures:
+        - a string gives its value; an f-string gives its literal parts, with "{}" for each field
+        - a name in bases gives ".claude"
+        - `a + b` gives the two texts joined; `a / b` gives them joined with "/"
+        - a `join` or `joinpath` call gives its arguments joined with "/"
+        - a call of a passing-through name (expanduser, Path, str, and the like) gives its first argument's text
+        - anything else gives "{}"
+    """
+    if isinstance( node, ast.Constant ) and isinstance( node.value, str ): return node.value
+    if isinstance( node, ast.JoinedStr ):
+        return "".join( v.value if isinstance( v, ast.Constant ) else "{}" for v in node.values )
+    if isinstance( node, ast.Name ) and node.id in bases: return ".claude"
+    if isinstance( node, ast.BinOp ) and isinstance( node.op, ast.Add ):
+        return _path_text( node.left, bases ) + _path_text( node.right, bases )
+    if isinstance( node, ast.BinOp ) and isinstance( node.op, ast.Div ):
+        return _path_text( node.left, bases ) + "/" + _path_text( node.right, bases )
+    if isinstance( node, ast.Call ):
+        name = _call_name( node )
+        if name in JOINERS: return "/".join( _path_text( a, bases ) for a in node.args )
+        if name in PASSERS and node.args: return _path_text( node.args[ 0 ], bases )
+    return "{}"
+
+
+def _names_holding_claude( tree ):
+    """
+    Return the names a file assigns a path ending in the `.claude` folder.
+
+    Requires:
+        - tree is a parsed `ast.Module`
+
+    Ensures:
+        - returns the set of plain names whose assigned value reads, by _path_text, as a path whose last part is `.claude`
+        - a name assigned from another such name is included, to a depth of three assignments
+    """
+    bases = set()
+    for _ in range( 3 ):
+        for node in ast.walk( tree ):
+            if isinstance( node, ( ast.Assign, ast.AnnAssign ) ) and node.value is not None:
+                targets = node.targets if isinstance( node, ast.Assign ) else [ node.target ]
+                text    = re.sub( "/+", "/", _path_text( node.value, bases ) ).rstrip( "/" )
+                if text == ".claude" or text.endswith( "/.claude" ):
+                    bases.update( t.id for t in targets if isinstance( t, ast.Name ) )
+    return bases
+
+
 def offending_strings( source ):
     """
-    Return the code strings in one file's source that spell the session-bridge folder.
+    Return the code expressions in one file's source that spell the session-bridge folder.
 
     Requires:
         - source is the text of a Python file that parses
 
     Ensures:
-        - returns a list of ( line number, string value ) pairs, in source order
-        - a pair is listed when a code string contains `.claude/sessions`, or when a `.claude`
-          string is directly followed by a string that is `sessions` or starts `sessions/`
+        - returns a list of ( line number, path text ) pairs, in line order, one per line, holding the longest text on that line
+        - a pair is listed when an expression's path text, with repeated slashes collapsed, holds
+          `.claude/sessions` as whole path parts
+        - a dict or call that merely holds both words, not joined as a path, is not listed
         - comments and standalone strings (docstrings) are never listed
 
     Raises:
         - SyntaxError when the source does not parse
     """
-    tree    = ast.parse( source )
-    prose   = _prose_nodes( tree )
-    strings = sorted(
-        ( node.lineno, node.col_offset, node.value )
-        for node in ast.walk( tree )
-        if isinstance( node, ast.Constant ) and isinstance( node.value, str ) and id( node ) not in prose
-    )
-    found = []
-    for i, ( line, _col, value ) in enumerate( strings ):
-        if LITERAL in value:
-            found.append( ( line, value ) )
-            continue
-        if value in CLAUDE_PART and i + 1 < len( strings ):
-            following = strings[ i + 1 ][ 2 ]
-            if following == "sessions" or following.startswith( "sessions/" ):
-                found.append( ( line, value + " / " + following ) )
-    return found
+    tree  = ast.parse( source )
+    prose = _prose_nodes( tree )
+    bases = _names_holding_claude( tree )
+    found = { }
+    for node in ast.walk( tree ):
+        if id( node ) in prose or not isinstance( node, ( ast.Constant, ast.JoinedStr, ast.BinOp, ast.Call ) ): continue
+        text = re.sub( "/+", "/", _path_text( node, bases ) )
+        if PATTERN.search( text ) and len( text ) > len( found.get( node.lineno, "" ) ): found[ node.lineno ] = text
+    return sorted( found.items() )
 
 
 def _population( root ):
@@ -103,13 +169,18 @@ def _population( root ):
 
 
 @pytest.mark.parametrize( "source, expected", [
-    ( 'X = "~/.claude/sessions"\n',                          [ ( 1, "~/.claude/sessions" ) ] ),
-    ( 'X = f"{h}/.claude/sessions/cc-1.json"\n',             [ ( 1, "/.claude/sessions/cc-1.json" ) ] ),
-    ( 'X = Path.home() / ".claude" / "sessions"\n',          [ ( 1, ".claude / sessions" ) ] ),
-    ( 'X = os.path.join( h, ".claude", "sessions/x" )\n',    [ ( 1, ".claude / sessions/x" ) ] ),
-    ( '"""Reads ~/.claude/sessions."""\n# ~/.claude/sessions\n', [ ] ),
+    ( 'X = "~/.claude/sessions"\n',                                   [ ( 1, "~/.claude/sessions" ) ] ),
+    ( 'X = f"{h}/.claude/sessions/cc-1.json"\n',                      [ ( 1, "{}/.claude/sessions/cc-1.json" ) ] ),
+    ( 'X = Path.home() / ".claude" / "sessions"\n',                   [ ( 1, "{}/.claude/sessions" ) ] ),
+    ( 'X = os.path.join( h, ".claude", "sessions/x" )\n',             [ ( 1, "{}/.claude/sessions/x" ) ] ),
+    ( 'X = os.path.expanduser( "~/.claude/" ) + "sessions"\n',        [ ( 1, "~/.claude/sessions" ) ] ),
+    ( 'X = home + "/.claude" + "/sessions"\n',                        [ ( 1, "{}/.claude/sessions" ) ] ),
+    ( 'C = Path.home() / ".claude"\nY = "x"\nZ = C / "sessions"\n',   [ ( 3, ".claude/sessions" ) ] ),
+    ( '"""Reads ~/.claude/sessions."""\n# ~/.claude/sessions\n',      [ ] ),
     ( 'def f():\n    """Writes ~/.claude/sessions."""\n    return 1\n', [ ] ),
-    ( 'X = Path.home() / ".claude" / "mementos"\n',          [ ] ),
+    ( 'X = Path.home() / ".claude" / "mementos"\n',                   [ ] ),
+    ( 'X = { "dir": ".claude", "sessions": 1 }\n',                    [ ] ),
+    ( 'X = "~/.claude/sessions-test"\n',                              [ ] ),
 ] )
 def test_the_detector_tells_a_use_from_a_mention( source, expected ):
     assert offending_strings( source ) == expected
