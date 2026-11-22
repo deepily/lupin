@@ -20,7 +20,19 @@
 ### Checkpoint | 2026.11.21 21:53 | Decisions log and history entry
 
 **Files**: history.md, TODO.md
-**Commit**: [pending]
+**Commit**: 6007f5af7
+
+## 2026.11.21 - Session 756b6129 (Cheech 🌿, build manager; crew Pocholo, Tiffany, Tiberius, Rachel, all reaped) | Principle learner: run 2 finished, the paper, Rick's stop ruling, the post-game, and a yes, no and neither review
+
+**Resume here**: memento `.claude-memento-cheech-756b6129.md`. No live seats.
+1. **Run 2 and the paper**: the limit fixes merged (`fe3f226c0`, `59dcaec06`). The paper merged at `e3f3cd809`. Rick ruled to stop before layer 2 (decision c0ea73ef).
+2. **Post-game** committed at `cf8c3f9de`. Rulings are in the TODO.md 21 Nov decisions log. Two open threads are filed as held rows (b690a3a9, 7588ecc2).
+3. **Evening review, preview only, the paper unchanged**: every forecaster could answer only yes or no. So the 108 neither cards (14% of yes/no) were misses for all of them, and comments were stripped.
+   The stop count (67 against 115) holds for the question as frozen, but that question left out neither, qualified answers and re-frames.
+   The yes/no default is usually "no" while the written advice is usually "yes".
+   Previews are in `io/tmp/principle-learner-briefs/` (the two addendum reviews and the explainer); explainer podcast pg-10d3e247. Rick's decisions on reopening and on an addendum are not yet asked (row bc6d0f28).
+
+**Files**: history.md, TODO.md, src/docs/post-games/README.md, src/docs/post-games/v0.2.4/2026.11.21-principle-learner-phase-4-post-game.md
 
 ## 2026.11.20 - Session 77f78b28 (Cheech 🌿, build manager; crew Pocholo, Tiffany, Rachel, John, Tiberius) | Principle learner: phases one, three and four freeze closed; archive replay restarts as run 3
 
