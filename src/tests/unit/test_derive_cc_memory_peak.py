@@ -127,3 +127,30 @@ class TestMain:
         monkeypatch.setattr( sys, "argv", [ "derive_cc_memory_peak.py" ] )
         dcm.main()
         assert "concurrency peak" in capsys.readouterr().out
+
+
+def _load_fresh():
+    """Load a fresh copy of the script, so its import-time constants are re-derived."""
+    spec = importlib.util.spec_from_file_location( "derive_cc_memory_peak_fresh", _SCRIPT )
+    mod  = importlib.util.module_from_spec( spec )
+    spec.loader.exec_module( mod )
+    return mod
+
+
+class TestDefaultLogSeam:
+
+    def test_default_log_is_resolved_through_the_sessions_dir_seam( self, tmp_path, monkeypatch ):
+        monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )
+        assert _load_fresh().DEFAULT_LOG == str( tmp_path / "cc-memory-samples.log" )
+
+    def test_default_log_without_the_override_is_the_old_home_path( self, tmp_path, monkeypatch ):
+        monkeypatch.delenv( "LUPIN_HOOK_SESSIONS_DIR", raising=False )
+        monkeypatch.setenv( "HOME", str( tmp_path ) )
+        assert _load_fresh().DEFAULT_LOG == str( tmp_path ) + "/.claude/sessions/cc-memory-samples.log"
+
+    def test_loading_with_src_off_sys_path_puts_it_back_at_the_front( self, monkeypatch ):
+        src = os.path.join( cu.get_project_root(), "src" )
+        monkeypatch.setattr( sys, "path", [ p for p in sys.path if p != src ] )
+        _load_fresh()
+        assert sys.path[ 0 ] == src
+        assert sys.path.count( src ) == 1

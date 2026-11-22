@@ -18,7 +18,18 @@ import sys
 import re
 import collections
 
-DEFAULT_LOG = "/home/rruiz/.claude/sessions/cc-memory-samples.log"
+from pathlib import Path
+
+# The default log lives in the session-bridge folder, so it is resolved through the one
+# seam, `sessions_dir()` (row f40c5b75). This bootstrap resolves `src/` from this file, not
+# from LUPIN_ROOT, for the reason `report-orphaned-dm-buffers.py` gives beside its own copy.
+_SRC = Path( __file__ ).resolve().parents[ 1 ]
+if str( _SRC ) not in sys.path:
+    sys.path.insert( 0, str( _SRC ) )
+
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+
+DEFAULT_LOG = str( sessions_dir() / "cc-memory-samples.log" )
 
 # Post-fix lines only: both a timestamp (to group passes) and the enforced noun.
 USABLE_LINE = re.compile(

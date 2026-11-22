@@ -324,7 +324,7 @@ def main( argv=None ):
     )
     parser.add_argument( "--sessions-dir",
                          default = str( sessions_dir() ),   # row 8ccc20ab: the one seam
-                         help    = "Dir holding cc-buffer-*.jsonl (default: ~/.claude/sessions)" )
+                         help    = "Dir holding cc-buffer-*.jsonl (default: the sessions-dir seam)" )
     parser.add_argument( "--quarantine-dir", default=None,
                          help = "Move target for --apply (default: <sessions-dir>/cc-buffer-quarantine)" )
     parser.add_argument( "--apply", action="store_true",
