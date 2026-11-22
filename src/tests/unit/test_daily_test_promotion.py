@@ -135,9 +135,18 @@ def test_start_and_restore_make_the_calls_each_state_needs():
 
 
 def test_the_deployed_sha_is_the_first_field_of_the_stamp():
-    assert vm_of( Runner( run=( 0, "abc123 2026-11-14T00:00:00Z push-bundle-reset\n" ) ) ).deployed_sha() == "abc123"
-    assert vm_of( Runner( run=( 1, "abc123" ) ) ).deployed_sha() is None
+    sha = "67456220d1972800f5bc00254274162c57028261"
+    assert vm_of( Runner( run=( 0, f"{sha} 2026-11-14T00:00:00Z push-bundle-reset\n" ) ) ).deployed_sha() == sha
+    assert vm_of( Runner( run=( 1, sha ) ) ).deployed_sha() is None
     assert vm_of( Runner( run=( 0, "" ) ) ).deployed_sha() is None
+
+
+def test_the_wrappers_echo_line_is_never_read_as_the_sha():
+    sha  = "27e646d0edc7fd64e8b9c8fbe962016ce06d4f38"
+    echo = "[lupin-vm] + gcloud compute ssh lupin-host-test --command cat /mnt/lupin-data/lupin/.deployed-ref\n"
+    assert vm_of( Runner( run=( 0, f"{echo}{sha} 2026-11-17T02:39:55Z push-bundle-reset\n" ) ) ).deployed_sha() == sha
+    assert vm_of( Runner( run=( 0, echo ) ) ).deployed_sha() is None
+    assert vm_of( Runner( run=( 0, f"{echo}not-a-sha 2026-11-17T02:39:55Z x\n" ) ) ).deployed_sha() is None
 
 
 def test_smoke_names_the_first_check_that_failed():
@@ -201,6 +210,7 @@ def test_a_row_names_its_kind_and_sha_in_its_key_and_is_filed_by_the_job():
     row = dtp.row_payload( "failed", "a" * 40, "why", "mr radio" )
     assert row[ "correlation_key" ] == "epic:daily-test-promotion-failed-" + "a" * 12
     assert row[ "owner_persona" ] == row[ "accountable_manager" ] == "mr radio" and row[ "created_by" ].endswith( "(test-promotion)" )
+    assert row[ "priority" ] == "P5"
     assert "URGENT" in dtp.row_payload( "rollback-failed", "b" * 40, "x", "mr radio" )[ "title" ]
     assert dtp.row_payload( "stale", "c" * 40, "x", "m", "2026-11-10" )[ "correlation_key" ].endswith( "stale-2026-11-10" )
 

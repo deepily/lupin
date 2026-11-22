@@ -23,6 +23,7 @@ import fcntl
 import json
 import os
 import pathlib
+import re
 import sys
 
 import cosa.utils.util as cu
@@ -43,7 +44,9 @@ VM_SCRIPT      = "src/scripts/lupin-vm.sh"
 VM_DEPLOYED    = "/mnt/lupin-data/lupin/.deployed-ref"      # first field: the sha the last completed deploy left on the VM
 REF_PREFIX     = "promote/test-"
 KEY_PREFIX     = "epic:daily-test-promotion-"
+ROW_PRIORITY   = "P5"      # the store lets a worker file only at P5, and a stamp with no session id reads as a worker; a manager raises the row
 RUNNING        = "RUNNING"
+SHA_LINE       = re.compile( r"^([0-9a-f]{40})(?:\s|$)" )      # the stamp's first field: a full sha, never the wrapper's own "[lupin-vm] + ..." log line
 TRIGGER_NAMES  = { "cron": "cron", "reboot": "boot", "hand": "hand" }
 TIMEOUTS       = { "status": 120, "start": 900, "suspend": 300, "stop": 300, "sha": 300, "idle": 300, "deploy": 3600, "preflight": 900 }
 
@@ -123,10 +126,20 @@ class Vm:
         return True
 
     def deployed_sha( self ):
-        """Ensures: returns the sha the VM's last deploy stamped, or None when it could not be read."""
+        """
+        Read the sha the VM's last deploy stamped.
+
+        Ensures:
+            - returns the first field of the first output line that starts with a 40-digit hex sha
+            - skips the wrapper's own "[lupin-vm] + ..." echo, which comes first on stdout
+            - returns None when the call failed or no line carries a sha
+        """
         code, out = self.call( "sha", "run", f"cat {VM_DEPLOYED}" )
-        words = out.split()
-        return words[ 0 ] if code == 0 and words else None
+        if code != 0: return None
+        for line in out.splitlines():
+            found = SHA_LINE.match( line.strip() )
+            if found: return found.group( 1 )
+        return None
 
     def idle( self ):
         """Ensures: returns venue_idle's exit code there: 0 idle, 1 busy, 2 unknown, 127 not reached."""
@@ -194,12 +207,12 @@ def row_payload( kind, sha, detail, owner, extra_key=None ):
         - kind is failed, rollback-failed, vm-unreachable or stale; sha is the picked sha; owner is a persona
 
     Ensures:
-        - returns a payload whose correlation key names the kind and the sha (or extra_key), so a repeat of the same fault is one row
+        - returns a payload at ROW_PRIORITY whose correlation key names the kind and the sha (or extra_key), so a repeat of the same fault is one row
     """
     titles = { "failed": "the daily promotion failed and was rolled back", "rollback-failed": "URGENT, the daily promotion failed and its rollback failed too",
                "vm-unreachable": "the daily promotion could not reach the test VM", "stale": f"the test VM has been behind the branch for {STALE_DAYS} days" }
     return { "item_class": "task", "title": f"[LUPIN] Daily test promotion: {titles[ kind ]} ({sha[ :12 ]})", "project": "lupin", "body": detail, "owner_persona": owner,
-             "accountable_manager": owner, "priority": "P2", "created_by": filer_created_by( owner, JOB ),
+             "accountable_manager": owner, "priority": ROW_PRIORITY, "created_by": filer_created_by( owner, JOB ),
              "correlation_key": f"{KEY_PREFIX}{kind}-{extra_key or sha[ :12 ]}" }
 
 

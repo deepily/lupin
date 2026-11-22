@@ -151,3 +151,44 @@ def test_dry_run_narration_names_the_guard_when_the_flag_is_given( run_deploy ):
     proc = run_deploy( "--dry-run", "deploy", "somebranch", "--discard-vm-changes" )
     assert "discard-vm-changes" in proc.stdout + proc.stderr
     assert "deploy-discards" in proc.stdout + proc.stderr
+
+
+def _tree_with_config( vm_tree ):
+    """Add the two config files and a compose file to the stand-in checkout, committed clean."""
+    conf = vm_tree / "src" / "conf"
+    conf.mkdir( parents=True )
+    for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ): ( conf / name ).write_text( "k = dev\n" )
+    ( vm_tree / "docker-compose.cloud-gpu.yml" ).write_text( "a: 1\n" )
+    _git( vm_tree, "add", "." )
+    _git( vm_tree, "commit", "-q", "-m", "config" )
+    return conf
+
+
+def test_an_edit_to_the_two_ini_files_alone_does_not_stop_the_deploy( vm_tree, tmp_path ):
+    """Rick, 21 Nov 2026: a deploy overwrites them with dev's copy, so they never stop it."""
+    conf = _tree_with_config( vm_tree )
+    ( conf / "lupin-app.ini" ).write_text( "k = vm\n" )
+    ( conf / "lupin-app-splainer.ini" ).write_text( "k = vm\n" )
+    proc, discards = _run_guard( vm_tree, tmp_path, discard=False )
+    assert proc.returncode == 0, proc.stdout
+    assert proc.stdout == "" and not discards.exists()
+
+
+def test_the_ini_exemption_does_not_hide_another_dirty_file( vm_tree, tmp_path ):
+    conf = _tree_with_config( vm_tree )
+    ( conf / "lupin-app.ini" ).write_text( "k = vm\n" )
+    ( vm_tree / "docker-compose.cloud-gpu.yml" ).write_text( "a: 2\n" )
+    proc, _ = _run_guard( vm_tree, tmp_path, discard=False )
+    assert proc.returncode != 0
+    assert "docker-compose.cloud-gpu.yml" in proc.stdout
+    assert "lupin-app.ini" not in proc.stdout
+
+
+def test_deploy_pushes_the_global_claude_md_after_the_planning_sync_and_preflight_checks_it():
+    """The push sits after the planning sync, before the dist push; preflight checks it."""
+    sync, push, dist = ( SOURCE.index( m ) for m in ( "# 1b. The VM's planning-is-prompting copy", "# 1b2. The VM's seats read ~/.claude/CLAUDE.md", "# 1c. The pages load" ) )
+    assert sync < push < dist
+    assert "push-file \"$PLANNING_IS_PROMPTING_ROOT/global/CLAUDE.md\" '~/.claude/CLAUDE.md'" in SOURCE
+    preflight = ( SCRIPT.parent / "preflight-vm.sh" ).read_text()
+    assert "# B8 — the VM's global ~/.claude/CLAUDE.md" in preflight
+    assert 'cmp -s "$VM_PIP_GLOBAL" "$VM_USER_GLOBAL"' in preflight
