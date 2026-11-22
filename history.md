@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.21 - Session 189a73eb (Mr. Radio 🦉, build manager; crew John, Rio, Sam, Krishna, Maya, Clayton, Chloé) | Preference learning: phases six and seven on live, reuse gate green, test VM promotion fixed
+
+**Resume here**: memento `.claude-memento-mr-radio-189a73eb.md`. No live seats; every crew memento is in `io/mementos/`. Row `138c1c8f` waits on Rick's word for one hand deploy to the test VM (chase 22 Nov 10:30).
+1. **Switched on**: phases six and seven, for live measurement (`b88aa15b7`). **Merged**: eight wiki rollups, the shared proxy writer (`d5bf23f2f`) and the shared switch reader (`01ebc9005`).
+2. **Reuse gate** (row `6bae9162`, done): 404 refusals down to 0 across all lanes; Maya's lane merged at `950440ee9`.
+3. **Test VM promotion** (row `138c1c8f`): four faults are fixed in `372ab5b92`, `c1bb54335` and `a9400d928`. They are the sha misread, the refused alert rows, the INI overwrite with a VM block, and the CLAUDE.md and planning-is-prompting sync. The VM itself is untouched.
+4. **Filed, held for Rick**: `831b5c3d` (spawn-session tests fail when the config block variable is set) and `7916fc6f` (`fetch_similar` returned CALL_FAILED for two seats).
+5. **Rick's rulings** are in the TODO.md 21 Nov decisions log.
+
+### Checkpoint | 2026.11.21 21:53 | Decisions log and history entry
+
+**Files**: history.md, TODO.md
+**Commit**: [pending]
+
 ## 2026.11.20 - Session 77f78b28 (Cheech 🌿, build manager; crew Pocholo, Tiffany, Rachel, John, Tiberius) | Principle learner: phases one, three and four freeze closed; archive replay restarts as run 3
 
 **Resume here**: memento `.claude-memento-cheech-77f78b28.md`. Respawn Pocholo from `io/mementos/pocholo-3435e1dc.md` for run 3 (row f76b6d96).

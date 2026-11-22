@@ -28,6 +28,15 @@ The retro is [the 21 Nov post-game](src/docs/post-games/v0.2.4/2026.11.21-princi
 - 2026-11-21 — **The Monday store-growth row** → **Drop it** (Rick, card, about 20:40; row `83707ad2`). Why: the store no longer grows once the learner stops.
 - 2026-11-21 — **The three duplicate-code rows** → **Leave them held** (Rick, card, about 20:40; rows `c33f699e`, `348623b2`, `81ec2c6b`).
 
+## 📚 Decisions log 2026-11-21 (Mr. Radio 🦉 `189a73eb`, build manager for preference learning; crew John, Rio, Sam, Krishna, Maya, Clayton, Chloé, all reaped; times Eastern)
+
+- 2026-11-21 — **Phases six and seven** → **Switches on for live measurement; the context forecast display stays off** (Rick, card, about 12:35; `b88aa15b7`). Measurement row `1bcd71c3` chases 24 Nov.
+- 2026-11-21 — **The reuse gate's refusals** → **Each lane fixes its own: Cheech the principle learner lines, Mr. Radio the rest** (Rick, card, about 18:15). The gate passes at `950440ee9` (row `6bae9162`, done).
+- 2026-11-21 — **The global CLAUDE.md and planning-is-prompting on the test VM** → **Kept in sync with dev on every push** (Rick, voice, about 18:55). Merged at `372ab5b92` and `a9400d928`.
+- 2026-11-21 — **The test VM's configuration** → **Dev's INI always overwrites the VM's** (Rick, card, about 19:08). VM-only settings live in the block the VM already uses (Rick, card, about 19:22). The VM keeps fleet cap 1 and skeleton crew on in `[Lupin: Testing-GCS]` (`a9400d928`).
+- 2026-11-21 — **A test that contradicts how the system really runs** → **Rewrite it or throw it out** (Rick, card, about 19:22). Never bend the design to fit a test. Four single-definition tests were rewritten in `a9400d928`.
+- 2026-11-21 — **The one hand deploy to the test VM** → **Not yet answered** (the ask timed out at about 20:20). Row `138c1c8f` is blocked on Rick, chase 22 Nov 10:30.
+
 ## 📚 Decisions log 2026-11-20 (Mr. Radio 🦉 `b53537e4`, build manager for preference learning; crew Rio, Clayton, Sam, Chloé, Krishna, all reaped; times Eastern)
 
 The retro is [the 20 Nov post-game](src/docs/post-games/v0.2.4/2026.11.20-mr-radio-opl-remediation-crew-post-game.md). The re-plan rulings are amended on gate `47865511`.
