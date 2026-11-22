@@ -1720,7 +1720,10 @@ fi
 echo "$f: $state"
 touch "$HOME/.bashrc"
 if grep -qxF "$src_line" "$HOME/.bashrc"; then echo "~/.bashrc already sources it"
-else printf '%s\n' "$src_line" >> "$HOME/.bashrc"; echo "~/.bashrc now sources it"; fi
+else
+    [ -z "$(tail -c1 "$HOME/.bashrc")" ] || echo >> "$HOME/.bashrc"     # a last line with no newline would swallow ours
+    printf '%s\n' "$src_line" >> "$HOME/.bashrc"; echo "~/.bashrc now sources it"
+fi
 JKEOF
         RCMD_JK="rel='$JK_REL'
 src_line='$JK_SOURCE_LINE'

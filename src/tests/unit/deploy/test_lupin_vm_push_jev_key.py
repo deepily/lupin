@@ -74,9 +74,11 @@ def test_a_second_run_changes_nothing_and_a_new_key_replaces_the_old( vm ):
     assert ( vm.home / ".lupin" / "jev.env" ).read_text() == "export JEV_API_TOASTER='another-key-42'\n"
 
 
-def test_a_shell_that_sources_the_new_bashrc_line_gets_the_key( vm ):
+def test_a_shell_that_sources_the_written_bashrc_gets_the_key_even_after_a_last_line_with_no_newline( vm ):
+    ( vm.home / ".bashrc" ).write_text( "alias ll='ls -l'" )
     vm( VERB )
-    out = subprocess.run( [ "bash", "-c", f"cd; {SOURCE_LINE}; printf '%s' \"$JEV_API_TOASTER\"" ],
+    assert ( vm.home / ".bashrc" ).read_text() == f"alias ll='ls -l'\n{SOURCE_LINE}\n"
+    out = subprocess.run( [ "bash", "-c", "source ~/.bashrc; printf '%s' \"$JEV_API_TOASTER\"" ],
                           capture_output=True, text=True, env={ "HOME": str( vm.home ), "PATH": os.environ[ "PATH" ] } )
     assert out.stdout == KEY
 
