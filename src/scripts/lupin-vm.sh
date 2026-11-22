@@ -251,7 +251,13 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           on stdin: they are never in a command line, a log or this verb's output. It says
                           only set / replaced / unchanged. The refresh cron line names this
                           file in REUSE_VECTOR_REFRESH_ENV.
-  push-dist               ship the built static/dist bundles (multiplexer, console, doc-podcast) from this
+  push-jev-key            put the Jev key the reuse tools need on the VM (row a65a6de3). Reads JEV_API_TOASTER
+                          from your shell, writes it to the owner-only (mode 600) file ~/.lupin/jev.env on the
+                          VM, and adds one line to the VM's ~/.bashrc that sources that file. Without it, cctmx
+                          on the VM starts every seat without the key and the reuse tools answer KEY_UNREADABLE.
+                          The value travels on stdin: it is never in a command line, a log or this verb's output.
+                          It says only set / replaced / unchanged. deploy runs it after the code sync.
+  push-dist             ship the built static/dist bundles (multiplexer, console, doc-podcast) from this
                           checkout to the VM checkout, which git cannot carry. Prints each bundle's build time beside the newest
                           source time, warning only. Refuses, sending nothing, naming
                           any bundle not built here (npm run build). deploy runs it after the code sync.
@@ -991,6 +997,12 @@ case "$SUBCMD" in
                     || log "WARN: the global CLAUDE.md push FAILED; the VM's seats may run on stale global rules"
             fi
         fi
+        # 1b3. The VM's seats need the Jev key, which git cannot carry (row a65a6de3). Same loud-warning rule as 1b: the app
+        #      deploy is unaffected, the reuse tools are not. The preflight's Jev key check (B13) asserts it afterwards.
+        JK_ARGS=( push-jev-key )
+        [ "$DRY_RUN" -eq 1 ] && JK_ARGS=( --dry-run push-jev-key )
+        bash "${BASH_SOURCE[0]}" "${JK_ARGS[@]}" \
+            || log "WARN: push-jev-key FAILED; seats started on the VM will have no Jev key and the reuse tools will answer KEY_UNREADABLE"
         # 1c. The pages load gitignored bundles from static/dist/, and the VM's bind mount hides the image's copy,
         #     so ship them from the local build. A failure is a loud warning: the app deploy is unaffected, the pages are not.
         DIST_SYNC_ARGS=( push-dist )
@@ -1679,6 +1691,55 @@ $RCMD_TM"
             unset tm_email tm_password
             log "done. Install the cron lines on that host with: src/scripts/lupin-vm.sh install-refresh-cron (a person runs it)."
         fi
+        ;;
+
+    push-jev-key)
+        # Row a65a6de3 (P0, Rick 22 Nov 2026). start-cc-with-tmux.sh (cctmx) gives a seat the Jev key only when the
+        # launching shell or the tmux global environment holds JEV_API_TOASTER. On the dev box it is an export in
+        # ~/.bashrc; nothing ever put it on the VM, so every VM seat started without it and the reuse tools answered
+        # KEY_UNREADABLE. The value comes from the caller's shell and rides on stdin; the writer below holds no secret.
+        require_project
+        JK_REL=".lupin/jev.env"
+        JK_SOURCE_LINE='[ -r ~/.lupin/jev.env ] && . ~/.lupin/jev.env'   # PFV_JEV_SOURCE_LINE in preflight-vm-lib.sh checks this exact line
+        read -r -d '' RCMD_JK <<'JKEOF' || true
+set -e
+umask 077
+d="$HOME/${rel%/*}"; f="$HOME/$rel"
+IFS= read -r key
+[ -n "$key" ] || { echo "no value arrived on stdin" >&2; exit 4; }
+mkdir -p "$d"
+new=$(mktemp "$d/.tmp-jev.XXXXXX")
+trap 'rm -f "$new"' EXIT
+printf "export JEV_API_TOASTER='%s'\n" "$key" > "$new"
+chmod 600 "$new"
+state=unchanged
+if ! { cmp -s "$new" "$f" && [ "$(stat -c '%a' "$f")" = 600 ]; }; then
+    state=set; [ -e "$f" ] && state=replaced
+    mv -f "$new" "$f"
+fi
+echo "$f: $state"
+touch "$HOME/.bashrc"
+if grep -qxF "$src_line" "$HOME/.bashrc"; then echo "~/.bashrc already sources it"
+else printf '%s\n' "$src_line" >> "$HOME/.bashrc"; echo "~/.bashrc now sources it"; fi
+JKEOF
+        RCMD_JK="rel='$JK_REL'
+src_line='$JK_SOURCE_LINE'
+$RCMD_JK"
+        jk_key="${JEV_API_TOASTER:-}"
+        [ -n "$jk_key" ] || die "JEV_API_TOASTER is not set in this shell, so there is nothing to send. Run from an interactive shell that has it (~/.bashrc)."
+        # The same character set start-cc-with-tmux.sh passes through tmux. Outside it, the VM's launcher would refuse the
+        # key anyway, and a quote would end the string the env file wraps it in. The value is not printed.
+        [[ "$jk_key" =~ ^[A-Za-z0-9._~+/=:-]+$ ]] || die "JEV_API_TOASTER holds characters the VM's launcher will not pass through tmux (value not shown); nothing was sent"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would send JEV_API_TOASTER from this shell on stdin and write ~/$JK_REL on $VM_NAME (mode 600). The command, which holds no secret:"
+            printf '%s\n' "$RCMD_JK" | sed 's/^/    /'
+        else
+            printf '%s\n' "$jk_key" | gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_JK"
+            log "done. A new interactive shell on the VM has the key; cctmx started from it hands the key to the seat."
+        fi
+        unset jk_key
         ;;
 
     push-dist)

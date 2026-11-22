@@ -1477,6 +1477,28 @@ pfv_test_login_env_status() {
     esac
 }
 
+# ── pfv_jev_key_status ───────────────────────────────────────────────────────
+# Does a new interactive shell on this host get the Jev key? (row a65a6de3)
+# cctmx hands a seat the key only when its launching shell holds JEV_API_TOASTER. `lupin-vm.sh
+# push-jev-key` writes `export JEV_API_TOASTER='<key>'` to an owner-only file and adds the line
+# PFV_JEV_SOURCE_LINE to ~/.bashrc. This checks both halves without sourcing anything.
+#
+# Requires:  $1 = path to the key file, $2 = path to the ~/.bashrc to check
+# Ensures:
+#   - prints OK and returns 0 when the file is mode 600, holds a non-empty export line, and $2 sources it
+#   - prints MISSING (1), MODE:<octal> (2), EMPTY (3) or UNSOURCED (4) for the first half that fails
+#   - never prints the value
+PFV_JEV_SOURCE_LINE='[ -r ~/.lupin/jev.env ] && . ~/.lupin/jev.env'
+pfv_jev_key_status() {
+    local file="$1" rc_file="$2" mode
+    [ -f "$file" ] || { printf 'MISSING'; return 1; }
+    mode="$( stat -c '%a' "$file" )"
+    [ "$mode" = "600" ] || { printf 'MODE:%s' "$mode"; return 2; }
+    grep -qE "^export JEV_API_TOASTER='[^']+'$" "$file" || { printf 'EMPTY'; return 3; }
+    grep -qxF "$PFV_JEV_SOURCE_LINE" "$rc_file" 2>/dev/null || { printf 'UNSOURCED'; return 4; }
+    printf 'OK'
+}
+
 # ── pfv_cron_status ──────────────────────────────────────────────────────────
 # Is the reuse-vector-refresh cron line in the crontab text? (row c22e5ec1)
 # `lupin-vm.sh install-refresh-cron vm` is a separate by-hand step and nothing said whether it had run.

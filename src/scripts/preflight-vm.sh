@@ -660,6 +660,19 @@ else
                   "lupin-vm.sh deploy   # pushes it from planning-is-prompting"
 fi
 
+# B13 — an interactive shell on the VM gets the Jev key (row a65a6de3, Rick 22 Nov 2026). cctmx hands a seat the key only
+# when its launching shell holds JEV_API_TOASTER; push-jev-key writes it to an owner-only file that ~/.bashrc sources.
+# WARN: the app runs either way, but every seat's reuse tools answer KEY_UNREADABLE. The value is never read out.
+JEV_FILE="$HOME/.lupin/jev.env"
+jev_status="$( pfv_jev_key_status "$JEV_FILE" "$HOME/.bashrc" )" || true
+case "$jev_status" in
+    OK)      report pass WARN "the Jev key file is in place (mode 600) and ~/.bashrc sources it" ;;
+    MODE:*)  report fail WARN "$JEV_FILE is mode ${jev_status#MODE:}, not 600; it holds a key" \
+                           "chmod 600 $JEV_FILE" ;;
+    *)       report fail WARN "the Jev key is not reachable from a new shell ($jev_status: $JEV_FILE), so seats started with cctmx have no key and the reuse tools answer KEY_UNREADABLE" \
+                           "from the dev box: src/scripts/lupin-vm.sh push-jev-key" ;;
+esac
+
 # B7 — the built esbuild bundles are on the checkout (bug 527fec6e).
 # The compose file bind-mounts this checkout's ./src over the image's, so the bundles baked into the image are
 # hidden, and static/dist/ is gitignored so a code sync does not carry it. A script 404s and the feature it
