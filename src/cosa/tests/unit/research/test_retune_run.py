@@ -199,16 +199,22 @@ def test_the_id_list_cuts_the_cohort_to_exactly_those_asks_in_cohort_order_and_r
         restrict_to_ids( asks, _ids_file( tmp_path, [ "a", "zz" ] ) )
 
 
-def test_a_duplicate_id_in_the_list_keeps_the_ask_once_and_counts_it_once( tmp_path ):
+def test_a_repeated_id_in_a_json_lines_list_is_refused_by_the_shared_reader( tmp_path ):
     asks = [ { "id": name } for name in ( "a", "b", "c" ) ]
-    kept, facts = restrict_to_ids( asks, _ids_file( tmp_path, [ "b", "a", "b" ] ) )
-    assert [ ask[ "id" ] for ask in kept ] == [ "a", "b" ] and facts[ "only_ids_count" ] == 2
+    with pytest.raises( ValueError, match = "twice" ):
+        restrict_to_ids( asks, _ids_file( tmp_path, [ "b", "a", "b" ] ) )
 
 
 def _bare_ids_file( tmp_path, ids ):
     path = tmp_path / "ids.txt"
     path.write_text( "".join( ask_id + "\n" for ask_id in ids ), encoding="utf-8" )
     return str( path )
+
+
+def test_a_repeated_id_in_a_bare_list_keeps_the_ask_once_and_counts_it_once( tmp_path ):
+    asks = [ { "id": name } for name in ( "a", "b", "c" ) ]
+    kept, facts = restrict_to_ids( asks, _bare_ids_file( tmp_path, [ "b", "a", "b" ] ) )
+    assert [ ask[ "id" ] for ask in kept ] == [ "a", "b" ] and facts[ "only_ids_count" ] == 2
 
 
 def test_a_bare_id_list_cuts_the_cohort_like_a_json_lines_one( tmp_path ):

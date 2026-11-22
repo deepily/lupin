@@ -55,6 +55,7 @@ try:
     import sqlalchemy as sa
     from cosa.research.preference_replay.cohorts import answer_source_of
     from cosa.research.preference_replay.question_vectors import read_side_records
+    from cosa.research.preference_replay.retune_run import read_id_list
     from cosa.rest.db.embedding_regeneration import validate_fresh_vector
 except ImportError as err:  # pragma: no cover -- run by a subprocess test, which coverage does not follow
     print( f"FATAL: import failed ({err!r}). Run with the repo's interpreter and PYTHONPATH=<tree>/src.", file=sys.stderr )
@@ -465,10 +466,10 @@ def _read_id_file( path: Optional[ str ] ) -> Optional[ Set[ str ] ]:
         - path is None or a readable UTF-8 file
 
     Ensures:
-        - returns None for None, otherwise the set of non-blank stripped lines
+        - returns None for None, otherwise the set of ids read_id_list returns, bare or JSON lines
     """
     if path is None: return None
-    with open( path, encoding="utf-8" ) as handle: return { line.strip() for line in handle if line.strip() }
+    return set( read_id_list( path ) )
 
 
 def main( argv: Optional[ List[ str ] ] = None ) -> int:
