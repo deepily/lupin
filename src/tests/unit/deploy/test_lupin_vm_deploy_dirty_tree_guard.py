@@ -190,5 +190,5 @@ def test_deploy_pushes_the_global_claude_md_after_the_planning_sync_and_prefligh
     assert sync < push < dist
     assert "push-file \"$PLANNING_IS_PROMPTING_ROOT/global/CLAUDE.md\" '~/.claude/CLAUDE.md'" in SOURCE
     preflight = ( SCRIPT.parent / "preflight-vm.sh" ).read_text()
-    assert "# B8 — the VM's global ~/.claude/CLAUDE.md" in preflight
+    assert "# B12 — the VM's global ~/.claude/CLAUDE.md" in preflight
     assert 'cmp -s "$VM_PIP_GLOBAL" "$VM_USER_GLOBAL"' in preflight

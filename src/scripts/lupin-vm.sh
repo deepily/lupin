@@ -962,7 +962,7 @@ case "$SUBCMD" in
         fi
         # 1b2. The VM's seats read ~/.claude/CLAUDE.md, so it must be the global CLAUDE.md of the planning-is-prompting
         #      checkout this deploy just refreshed (Rick, 21 Nov 2026, row 138c1c8f). Same loud-warning rule as 1b.
-        #      The preflight's global CLAUDE.md check (B8) asserts it afterwards.
+        #      The preflight's global CLAUDE.md check (B12) asserts it afterwards.
         if [ "${LUPIN_SKIP_PIP_SYNC:-0}" = "1" ]; then
             log "global CLAUDE.md sync SKIPPED (LUPIN_SKIP_PIP_SYNC=1)"
         elif [ -z "${PLANNING_IS_PROMPTING_ROOT:-}" ] || [ ! -f "$PLANNING_IS_PROMPTING_ROOT/global/CLAUDE.md" ]; then

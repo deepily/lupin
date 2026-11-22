@@ -642,7 +642,7 @@ else
     esac
 fi
 
-# B8 — the VM's global ~/.claude/CLAUDE.md is the one in the VM's planning-is-prompting copy (row 138c1c8f, Rick 21 Nov 2026).
+# B12 — the VM's global ~/.claude/CLAUDE.md is the one in the VM's planning-is-prompting copy (row 138c1c8f, Rick 21 Nov 2026).
 # A deploy pushes planning-is-prompting and then that copy's global/CLAUDE.md to ~/.claude/CLAUDE.md. A VM whose global file
 # differs from the copy, or has none, runs its seats on stale rules. WARN: the app runs either way, but the seats read the rules.
 VM_PIP_GLOBAL="${PLANNING_IS_PROMPTING_ROOT:-/mnt/lupin-data/planning-is-prompting}/global/CLAUDE.md"
