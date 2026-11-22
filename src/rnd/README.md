@@ -171,6 +171,8 @@ Naming convention: `YYYY.MM.DD-descriptive-kebab-case-name.md`
 
 
 
+**Negative result paper**: [**Learned principles did not improve forecasts of one owner's answers (2026-11-21)**](v0.2.4/2026.11.21-principle-learner-negative-result-paper.md) — row `e8a6241a`. Run 2 (1,926 cards) and the four-model sample (400 cards) with Wilson intervals, exact McNemar tests and paired bootstrap intervals, the re-spin misapplication case, the lookup engine's selection effect, and a direct test of the recommended-option hypothesis.
+
 **Code reuse review**: [**The shared proxy decision writer (2026-11-21)**](v0.2.4/2026.11.21-proxy-decision-writer-reuse-review.md) — row `dd1c4169`. One definition, `write_proxy_decision`, ruled DISTINCT: the responder and the SWE orchestrator now share its shadow-or-log branch. The document holds the search lines and the REUSE-OUTCOME line.
 
 **Code reuse review**: [**The principle learner definitions the reuse gate listed (2026-11-21)**](v0.2.4/2026.11.21-principle-learner-reuse-lane-reuse-review.md) — row `3f484e45`. Every principle learner definition the gate listed has its searches, one ruling and one REUSE-OUTCOME line; real twins are written as FINDING lines and no code was changed.
