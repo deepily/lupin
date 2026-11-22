@@ -347,3 +347,9 @@ def test_a_flip_leaves_the_configuration_file_readable_by_everyone( ini, state_d
     ini.chmod( 0o600 )
     _client().put( PUT_PATH, json={ "on": True } )
     assert stat.S_IMODE( ini.stat().st_mode ) == 0o644
+
+
+@pytest.fixture( autouse=True )
+def _pinned_config_block( monkeypatch ):
+    """Pin the loaded block to Development, so the shell's own block never decides a result."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )

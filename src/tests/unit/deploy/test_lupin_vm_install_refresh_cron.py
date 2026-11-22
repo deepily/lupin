@@ -211,7 +211,7 @@ def test_deploy_warns_loudly_when_there_is_no_local_checkout_to_push( tmp_path )
     done = deploy( { "PLANNING_IS_PROMPTING_ROOT": str( tmp_path ) } )
     assert "was NOT refreshed" in done.stdout + done.stderr
     assert "archiving" not in done.stdout + done.stderr
-    assert "was NOT refreshed" in deploy( {} ).stdout + deploy( {} ).stderr
+    # An unset root is no longer a warning: the deploy looks beside the main lupin checkout (test_lupin_vm_resolve_pip_root.py).
 
 
 def test_deploy_skips_the_refresh_on_request( tmp_path ):

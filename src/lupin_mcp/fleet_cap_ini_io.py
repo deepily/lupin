@@ -110,6 +110,70 @@ def find_definitions( lines: List[ str ], key: str ) -> List[ Definition ]:
     return found
 
 
+DEFAULT_BLOCK = "Lupin: Development"
+BLOCK_ENV     = "LUPIN_CONFIG_MGR_CLI_ARGS"
+
+
+def active_block( environ=None ) -> str:
+    """
+    The configuration block this process loaded.
+
+    Requires:
+        - environ is a mapping, or None for the process environment
+
+    Ensures:
+        - returns the config_block_id the process's LUPIN_CONFIG_MGR_CLI_ARGS names, with "+" read as a space
+        - returns DEFAULT_BLOCK when the variable is absent or names no block, so the host reads the development block
+    """
+    args = ( os.environ if environ is None else environ ).get( BLOCK_ENV, "" )
+    for part in args.split():
+        if part.startswith( "config_block_id=" ) and part.split( "=", 1 )[ 1 ]: return part.split( "=", 1 )[ 1 ].replace( "+", " " )
+    return DEFAULT_BLOCK
+
+
+def inherit_chain( lines: List[ str ], block: str ) -> List[ str ]:
+    """
+    The block and every block it inherits from, nearest first.
+
+    Requires:
+        - lines is the file split on newlines; block is a section name without brackets
+
+    Ensures:
+        - returns [ block, its parent, its grandparent, ... ] following each section's `inherits =` line
+        - stops at a section with no inherits line, and never repeats a section, so a cycle ends
+    """
+    chain = []
+    while block and block not in chain:
+        chain.append( block )
+        start = next( ( i for i, line in enumerate( lines ) if line.strip() == f"[{block}]" ), None )
+        block = ""
+        for line in lines[ start + 1: ] if start is not None else []:
+            if line.strip().startswith( "[" ): break
+            if re.match( r"^inherits[ \t]*=", line ):
+                block = line.split( "=", 1 )[ 1 ].strip()
+                break
+    return chain
+
+
+def pick_definition( lines: List[ str ], found: List[ Definition ], block: Optional[ str ] = None ) -> Optional[ Definition ]:
+    """
+    The one definition the active block reads, or None when the file leaves it ambiguous.
+
+    Requires:
+        - found is find_definitions( lines, key ) for one key
+
+    Ensures:
+        - returns the sole definition when there is exactly one, whatever its section
+        - with several, returns the one in the nearest section of the active block's inherit chain, so a VM-only override beats the base
+        - returns None when none of them is in that chain, or the nearest section defines the key twice
+    """
+    if len( found ) == 1: return found[ 0 ]
+    for section in inherit_chain( lines, active_block() if block is None else block ):
+        here = [ d for d in found if d.section == section ]
+        if here: return here[ 0 ] if len( here ) == 1 else None
+    return None
+
+
 def locate_key( path: str, key: str ) -> Definition:
     """
     The ONE line defining `key`, or a refusal naming exactly what stopped it.
@@ -118,7 +182,7 @@ def locate_key( path: str, key: str ) -> Definition:
         - path names a readable INI file
 
     Ensures:
-        - returns the sole Definition when the key is defined exactly once
+        - returns the sole Definition when the key is defined exactly once, or the one the active block reads (see pick_definition)
         - raises KeyNotFound when it is defined nowhere, naming key and file
         - raises KeyDefinedTwice when defined more than once, naming EVERY
           section and line number
@@ -141,16 +205,15 @@ def locate_key( path: str, key: str ) -> Definition:
             f"this writer edits an existing definition and never invents one, "
             f"because the section it landed in would decide which processes read it."
         )
-    if len( found ) > 1:
-        where = "; ".join( f"[{d.section}] line {d.index + 1}" for d in found )
-        raise KeyDefinedTwice(
-            f"Refusing to write: the key `{key}` is defined {len( found )} times in "
-            f"{path} — {where}. Nothing was written. Configuration blocks inherit, so "
-            f"which of these a process reads depends on the block it loaded; picking "
-            f"one would write a value half the fleet never sees. Collapse them to a "
-            f"single definition and try again."
-        )
-    return found[ 0 ]
+    chosen = pick_definition( lines, found )
+    if chosen is not None: return chosen
+    where = "; ".join( f"[{d.section}] line {d.index + 1}" for d in found )
+    raise KeyDefinedTwice(
+        f"Refusing to write: the key `{key}` is defined {len( found )} times in "
+        f"{path} — {where}, and none of them is in the block this process loaded "
+        f"({active_block()}) or one it inherits from, or that block defines it twice. Nothing was written. "
+        f"Keep one definition in the base block and at most one override in a block that inherits from it."
+    )
 
 
 def read_value_from_disk( path: str, key: str ) -> Optional[ str ]:
@@ -175,10 +238,10 @@ def read_value_from_disk( path: str, key: str ) -> Optional[ str ]:
             lines = handle.read().split( "\n" )
     except OSError:
         return None
-    found = find_definitions( lines, key )
-    if len( found ) != 1:
+    chosen = pick_definition( lines, find_definitions( lines, key ) )
+    if chosen is None:
         return None
-    match = _key_pattern( key ).match( found[ 0 ].line )
+    match = _key_pattern( key ).match( chosen.line )
     return match.group( 2 ).strip() if match else None
 
 

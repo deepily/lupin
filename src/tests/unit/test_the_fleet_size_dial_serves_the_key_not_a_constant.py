@@ -349,13 +349,13 @@ def test_a_DUPLICATED_key_surfaces_the_writer_s_refusal_as_a_409( client, monkey
     cap would report a successful no-op.
     """
     path = _pin_ini( monkeypatch, tmp_path,
-                     REAL_SHAPED_INI + "\n[Lupin: Development]\ncc session fleet size cap = 4\n" )
+                     REAL_SHAPED_INI + "\n[Lupin: Production]\ncc session fleet size cap = 4\n" )
     _pin_config( monkeypatch, FakeConfig( { CEILING_KEY: 18, CAP_KEY: 8 } ) )
 
     response = client.put( "/api/arbiter/fleet-size-cap", json={ "cap": 12 } )
 
     assert response.status_code == 409
-    assert "Lupin: Development" in response.json()[ "detail" ]
+    assert "Lupin: Production" in response.json()[ "detail" ]
     assert "= 8" in path.read_text( encoding="utf-8" )
 
 
@@ -489,3 +489,9 @@ def test_a_write_the_OS_refuses_is_a_500_that_names_the_failure_and_changes_noth
     assert response.status_code == 500
     assert "could not be written" in response.json()[ "detail" ] and "disk full" in response.json()[ "detail" ]
     assert path.read_text( encoding="utf-8" ) == REAL_SHAPED_INI
+
+
+@pytest.fixture( autouse=True )
+def _pinned_config_block( monkeypatch ):
+    """Pin the loaded block to Development, so the shell's own block never decides a result."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )
