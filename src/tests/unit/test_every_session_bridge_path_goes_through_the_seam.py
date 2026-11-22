@@ -29,12 +29,13 @@ SEAM        = "src/lupin_cli/claude_code/hooks/lib/sessions_dir.py"
 WHOLE       = re.compile( r"(?:^|/)\.claude/+sessions(?:/|$)" )
 CLAUDE_END  = re.compile( r"(?:^|/)\.claude/*$" )
 SESSIONS    = re.compile( r"(?:^|/)sessions(?:/|$)" )
+KEY_READERS = { "get", "pop", "setdefault" }
 SKIP_PREFIX = ( "src/rnd/", "src/cosa/rnd/", "src/tests/", "src/cosa/tests/" )
 
 
 def _skipped_nodes( tree ):
     """
-    Return the ids of every string node that is prose or a dict key.
+    Return the ids of every string node that is prose or a key.
 
     Requires:
         - tree is a parsed `ast.Module`
@@ -42,7 +43,8 @@ def _skipped_nodes( tree ):
     Ensures:
         - returns a set of `id()` values covering each bare string statement (docstrings and
           any other standalone string, f-strings included) and all nodes under it
-        - also covers every dict key, which labels a value and is not a path
+        - also covers every key, which labels a value and is not a path: a dict literal's keys, a
+          string subscript such as `snap[ "sessions" ]`, and the first argument of `.get`, `.pop` and `.setdefault`
         - every other string constant is left out of the set, so it is checked as code
     """
     ids = set()
@@ -51,6 +53,10 @@ def _skipped_nodes( tree ):
             ids.update( id( sub ) for sub in ast.walk( node.value ) )
         if isinstance( node, ast.Dict ):
             ids.update( id( k ) for k in node.keys if k is not None )
+        if isinstance( node, ast.Subscript ) and isinstance( node.slice, ast.Constant ):
+            ids.add( id( node.slice ) )
+        if isinstance( node, ast.Call ) and isinstance( node.func, ast.Attribute ) and node.func.attr in KEY_READERS and node.args:
+            ids.add( id( node.args[ 0 ] ) )
     return ids
 
 
@@ -133,6 +139,8 @@ MENTIONS = [
     'X = { ".claude": 1, "sessions": 2 }\n',
     'X = "~/.claude/sessions-test"\n',
     'X = "/api/sessions"\n',
+    'W = os.path.join( root, ".claude", "worktrees" )\nn = snap[ "sessions" ]\n',
+    'W = Path.home() / ".claude"\nn = snap.get( "sessions", [] )\nm = d.pop( "sessions" )\nd.setdefault( "sessions", 0 )\n',
 ]
 
 
