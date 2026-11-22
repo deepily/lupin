@@ -188,6 +188,18 @@ def test_the_shipped_ini_defines_the_key_in_baseline_with_one_vm_override_as_boo
     assert io.read_value_from_disk( path, sc.SKELETON_CREW_KEY ) in ( "true", "false" )
 
 
+def test_the_shipped_ini_gives_the_vm_block_cap_one_and_skeleton_crew_on_and_dev_the_base( monkeypatch ):
+    root = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    path = os.path.join( root, "src", "conf", "lupin-app.ini" )
+    cap  = "cc session fleet size cap"
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Testing-GCS" )
+    assert io.read_int_from_disk( path, cap ) == 1
+    assert sc.read_state_from_disk( path, quiet=True ) is True
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )
+    assert io.read_int_from_disk( path, cap ) == 12
+    assert sc.read_state_from_disk( path, quiet=True ) is False
+
+
 def test_the_splainer_explains_the_key():
     root = os.environ.get( "LUPIN_ROOT", os.getcwd() )
     path = os.path.join( root, "src", "conf", "lupin-app-splainer.ini" )
@@ -206,3 +218,9 @@ def test_without_an_override_the_record_lives_in_the_lock_folder( tmp_path, monk
     monkeypatch.delenv( sc.INI_OVERRIDE_ENV, raising=False )
     monkeypatch.setenv( sc.config_write_lock.LOCK_DIR_ENV, str( tmp_path / "locks" ) )
     assert sc.state_path() == str( tmp_path / "locks" / sc.STATE_FILENAME )
+
+
+@pytest.fixture( autouse=True )
+def _pinned_config_block( monkeypatch ):
+    """Pin the loaded block to Development, so the shell's own block never decides a result."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )

@@ -82,3 +82,9 @@ def test_the_cap_writer_still_refuses_an_absent_key( tmp_path ):
     path = _ini( tmp_path, "[Lupin: Baseline]\nother = 1\n" )
     with pytest.raises( io.KeyNotFound ):
         io.write_int_to_disk( path, "cc session fleet size cap", 5 )
+
+
+@pytest.fixture( autouse=True )
+def _pinned_config_block( monkeypatch ):
+    """Pin the loaded block to Development, so the shell's own block never decides a result."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )

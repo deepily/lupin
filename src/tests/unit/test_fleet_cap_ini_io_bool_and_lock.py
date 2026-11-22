@@ -165,3 +165,9 @@ def test_the_lock_folder_on_the_host_is_under_the_fleet_data_root( monkeypatch )
     monkeypatch.delenv( "LUPIN_FLOW_RATIO_DIR", raising=False )
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
     assert cb.lock_dir() == os.path.join( str( fleet_data_root() ), "flow-ratio" )
+
+
+@pytest.fixture( autouse=True )
+def _pinned_config_block( monkeypatch ):
+    """Pin the loaded block to Development, so the shell's own block never decides a result."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )

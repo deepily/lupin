@@ -86,3 +86,9 @@ def test_definitions_only_outside_the_chain_leave_the_file_ambiguous( tmp_path )
         io.locate_key( path, KEY )
     assert "Lupin: Production" in str( refusal.value ) and "Lupin: Testing" in str( refusal.value )
     assert io.pick_definition( text.split( "\n" ), io.find_definitions( text.split( "\n" ), KEY ), "Lupin: Testing" ).section == "Lupin: Testing"
+
+
+@pytest.fixture( autouse=True )
+def _pinned_config_block( monkeypatch ):
+    """Pin the loaded block to Development, so the shell's own block never decides a result."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )

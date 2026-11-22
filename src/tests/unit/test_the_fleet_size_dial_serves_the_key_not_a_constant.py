@@ -489,3 +489,9 @@ def test_a_write_the_OS_refuses_is_a_500_that_names_the_failure_and_changes_noth
     assert response.status_code == 500
     assert "could not be written" in response.json()[ "detail" ] and "disk full" in response.json()[ "detail" ]
     assert path.read_text( encoding="utf-8" ) == REAL_SHAPED_INI
+
+
+@pytest.fixture( autouse=True )
+def _pinned_config_block( monkeypatch ):
+    """Pin the loaded block to Development, so the shell's own block never decides a result."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )

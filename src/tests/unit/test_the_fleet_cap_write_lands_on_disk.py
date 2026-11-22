@@ -175,3 +175,9 @@ def test_the_reader_fails_SOFT_where_the_writer_refuses( tmp_path ):
 def test_the_section_a_definition_lives_in_is_reported( tmp_path ):
     path = _ini( tmp_path, WELL_FORMED )
     assert io.locate_key( path, KEY ).section == "Lupin: Baseline"
+
+
+@pytest.fixture( autouse=True )
+def _pinned_config_block( monkeypatch ):
+    """Pin the loaded block to Development, so the shell's own block never decides a result."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )
