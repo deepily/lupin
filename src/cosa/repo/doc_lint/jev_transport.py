@@ -52,8 +52,8 @@ class JevConfigError( _JevError ):
     """
     Jev cannot be called as configured.
 
-    The cause is no key, or a server that refused the key or the request. The status is the
-    refusal (401, 403 or 422), or None when no request was made.
+    The cause is no key, an unpaid account, or a server that refused the key or the request. The
+    status is the refusal (401, 402, 403 or 422), or None when no request was made.
     """
 
 
@@ -285,7 +285,8 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
         - every error this raises after an attempt carries the same attempt_log
 
     Raises:
-        - JevConfigError if the key variable is absent or empty (status None), or the server answers 401, 403 or 422 (status set)
+        - JevConfigError if the key variable is absent or empty (status None), or the server answers 401, 402, 403 or 422 (status set);
+          a 402 is an unpaid account, never retried, and its message says so
         - JevBudgetSpent before any attempt the budget has no room for; no HTTP is made for it
         - whatever the charge hook raises, before the attempt it refuses; no HTTP is made for it
         - JevCallError if retries run out or any other status is not 200; its status is the last HTTP status seen,
@@ -331,6 +332,7 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
                 jitter = 1 - JITTER + 2 * JITTER * random_fn()
                 sleep_fn( max( min( asked, RETRY_AFTER_CAP ) if asked is not None else 0.0, BACKOFF_SECONDS * 2 ** attempt * jitter ) )
             continue
+        if status == 402: raise JevConfigError( "Jev answered 402 Payment Required: the TypeSafe account needs paying before any call can succeed", status, log )
         if status in ( 401, 403, 422 ): raise JevConfigError( f"Jev refused the request with status {status}", status, log )
         raise JevCallError( f"Jev answered status {status}", status, log )
     if failure is not None: raise JevCallError( f"call to Jev failed after {MAX_ATTEMPTS} sends: {type( failure ).__name__}", None, log ) from failure
