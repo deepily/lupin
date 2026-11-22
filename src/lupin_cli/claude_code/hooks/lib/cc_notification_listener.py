@@ -1440,7 +1440,7 @@ def parse_args():
     parser.add_argument(
         "--buffer-path",
         default = None,
-        help    = "Path to JSONL buffer file (default: ~/.claude/sessions/cc-buffer-{hash}.jsonl)"
+        help    = "Path to JSONL buffer file (default: cc-buffer-{hash}.jsonl in the sessions-dir seam)"
     )
     parser.add_argument(
         "--tmux-session",
