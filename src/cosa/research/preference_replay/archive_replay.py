@@ -931,9 +931,27 @@ def render_report( report ):
             lines.append( f"| {item[ 'arm' ]} | {item[ 'baseline' ]} | {item[ 'status' ]} | | | | | | | | |" )
             continue
         s, a, b = item[ "summary" ], item[ "arm_coverage" ], item[ "baseline_coverage" ]
-        lines.append( f"| {item[ 'arm' ]} | {item[ 'baseline' ]} | {s[ 'asks_replayed' ]} | {s[ 'engine_only_right' ]} | {s[ 'baseline_only_right' ]} | {s[ 'floor_met' ]} | {s[ 'verdict' ]} | "
+        lines.append( f"| {item[ 'arm' ]} | {item[ 'baseline' ]} | {s[ 'asks_replayed' ]} | {s[ 'engine_only_right' ]} | {s[ 'baseline_only_right' ]} | {s[ 'floor_met' ]} | {_named_verdict( s[ 'verdict' ], item[ 'arm' ], item[ 'baseline' ] )} | "
                       f"{_pct( a[ 'coverage' ] )} | {_pct( a[ 'accuracy_on_answered' ] )} | {_pct( b[ 'coverage' ] )} | {_pct( b[ 'accuracy_on_answered' ] )} |" )
     return "\n".join( lines )
+
+
+def _named_verdict( verdict, arm, baseline ):
+    """
+    Name the arm that came out ahead, in place of summarize's engine and baseline words.
+
+    Requires:
+        - verdict is a word summarize returns: "engine better", "baseline better", "no difference" or "not decisive"
+        - arm and baseline are the labels of the pairing's first and second arm
+
+    Ensures:
+        - "engine better" reads as the first arm's label plus " better", and "baseline better" as the second arm's
+        - "no difference" and "not decisive" come back unchanged
+        - no arm called "engine" is claimed unless a label says so
+    """
+    if verdict == "engine better": return f"{arm} better"
+    if verdict == "baseline better": return f"{baseline} better"
+    return verdict
 
 
 def _pct( value ):
