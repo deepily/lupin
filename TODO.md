@@ -16,6 +16,18 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-21 (Cheech 🌿 `756b6129`, Principle learner build; crew Pocholo, Tiffany, Tiberius, Rachel, all reaped; times Eastern)
+
+The retro is [the 21 Nov post-game](src/docs/post-games/v0.2.4/2026.11.21-principle-learner-phase-4-post-game.md).
+
+- 2026-11-21 — **Keeping the principle store small** → **Hand it to Rick's external job** (Rick, card, about 13:33; decision `341e6e3f`). The package is in `io/tmp/principle-store-handoff/`.
+- 2026-11-21 — **How to name the forecasters to Rick** → **Plain names, never code letters** (Rick, 18:15). Why: the letter codes meant nothing to him as a reader.
+- 2026-11-21 — **Reuse lines** → **Each project fixes its own, routed through Mr. Radio** (Rick, about 18:15).
+- 2026-11-21 — **A four-model sample, then a negative-result paper with a research podcast** → **Both** (Rick; rows `56fdcdc7` and `e8a6241a`, merged at `e3f3cd809`).
+- 2026-11-21 — **Build layer 2** → **Stop before layer 2** (Rick, about 19:20; decision `c0ea73ef`). Phase four closes, and the 17 rows for layers 2 and 3 are dropped. Why: the principles forecast did not beat plain Haiku, and the fixed rules beat both.
+- 2026-11-21 — **The Monday store-growth row** → **Drop it** (Rick, card, about 20:40; row `83707ad2`). Why: the store no longer grows once the learner stops.
+- 2026-11-21 — **The three duplicate-code rows** → **Leave them held** (Rick, card, about 20:40; rows `c33f699e`, `348623b2`, `81ec2c6b`).
+
 ## 📚 Decisions log 2026-11-20 (Mr. Radio 🦉 `b53537e4`, build manager for preference learning; crew Rio, Clayton, Sam, Chloé, Krishna, all reaped; times Eastern)
 
 The retro is [the 20 Nov post-game](src/docs/post-games/v0.2.4/2026.11.20-mr-radio-opl-remediation-crew-post-game.md). The re-plan rulings are amended on gate `47865511`.
