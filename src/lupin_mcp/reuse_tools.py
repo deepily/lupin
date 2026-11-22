@@ -74,6 +74,7 @@ EXCLUDED_PREFIX            = "EXCLUDED_PREFIX"              # sendable() dropped
 INDEX_REFRESH_SLOW         = "INDEX_REFRESH_SLOW"           # note: from the call's start to the end of its lookup took longer than INDEX_REFRESH_BOUND_SECONDS
 INDEX_REFRESH_BOUND_SECONDS = 30                            # 30 s proposed by the plan; measured 25 Oct 2026 on dual-rtx-4090s: the index rebuild after one edited file takes 13.2 s (symbol layer only)
 JEV_PAYMENT_REQUIRED       = "JEV_PAYMENT_REQUIRED"         # note: Jev answered 402, so the account needs paying; the cause stays CALL_FAILED
+PAYMENT_NOTE               = { "note": JEV_PAYMENT_REQUIRED, "detail": "Jev answered 402 Payment Required during this call: the TypeSafe account needs paying, and every lookup fails until it is" }
 PURPOSE_LINE_TORN          = "PURPOSE_LINE_TORN"         # note: the purpose file ends in a line that is still being written, so it was skipped
 DROPPED_IDS_SHOWN          = 10                             # ids of each dropped reason a result and a receipt name
 SYMBOL_FIELDS = ( "id", "sig", "doc", "file", "lang" )
@@ -493,7 +494,8 @@ class LiveJevTransport:
 
     def post_with_meta( self, body ):
         """Ensures: returns ( parsed response, meta ) as send_with_meta reports; raises as post does."""
-        if self.refusal is not None: raise self.refusal
+        # A repeat refusal made no HTTP, so it carries an empty attempt log: the first refusal's log, re-raised, was counted once per post
+        if self.refusal is not None: raise type( self.refusal )( str( self.refusal ), self.refusal.status, [] )
         try:
             text, meta = jev_transport.send_with_meta( json.dumps( body ).encode( "utf-8" ), self.post_fn, self.sleep_fn, self.environ,
                                                        self.budget, self.random_fn, self.clock_fn, self.transient )
@@ -1356,6 +1358,7 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
 
     Ensures:
         - everything _run_question ensures
+        - when any attempt of this call drew a 402, the returned receipt's notes end with PAYMENT_NOTE; the note is never stored
         - a single-use context closes its run in the ledger when the question ends, however it ends
         - sweep_only turns the candidate stage off for a check_exists question, so every entry is asked
     """
@@ -1635,8 +1638,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if redactions: rec[ "need_redactions" ], rec[ "routes_source" ], rec[ "need_sent" ] = redactions, routes_source, need     # only when the redactor changed the need, so an untouched need keeps its pinned receipt bytes
     unscreened = unscreened_path_count( entries, routes )
     dropped = dropped_view( ctx.dropped )
-    unpaid = sum( 1 for sweep_ in routed[ "sweeps" ] for log in sweep_[ "attempt_logs" ] for a in log if a[ "status" ] == 402 )
-    if unpaid: ctx.notes.append( { "note": JEV_PAYMENT_REQUIRED, "detail": f"Jev answered 402 Payment Required to {unpaid} attempt(s): the TypeSafe account needs paying, and every lookup fails until it is" } )
+    unpaid = any( a[ "status" ] == 402 for sweep_ in routed[ "sweeps" ] for log in sweep_[ "attempt_logs" ] for a in log )
     if ctx.notes: rec[ "notes" ] = list( ctx.notes )                             # written only when there is one, so a clean call keeps its pinned receipt bytes
     if dropped: rec[ "dropped" ] = dropped                                       # written only when something was dropped, so a clean call keeps its pinned receipt bytes
     if unscreened: rec[ "unscreened_entry_paths" ] = unscreened                  # the plan's K14 count; written only when nonzero, so a clean index keeps its pinned receipt bytes
@@ -1653,7 +1655,12 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if pair:
         rec[ "question" ]          = question
         rec[ "stats" ][ "oversize" ] = sw[ "oversize" ] if "oversize" in sw else []                  # the empty sweep of a hard flag has no such key
-    return store_receipt( ctx, rec ) if write else rec
+    if not write: return rec
+    stored = store_receipt( ctx, rec )
+    # The payment note describes this call, not the receipt: it is never written, because a stored receipt is reused by a later
+    # call with the same id, which may have been answered or have failed for another reason
+    if unpaid: stored = dict( stored, notes=( stored[ "notes" ] if "notes" in stored else [] ) + [ PAYMENT_NOTE ] )
+    return stored
 
 
 def _public( receipt, extra=None ):
