@@ -349,13 +349,13 @@ def test_a_DUPLICATED_key_surfaces_the_writer_s_refusal_as_a_409( client, monkey
     cap would report a successful no-op.
     """
     path = _pin_ini( monkeypatch, tmp_path,
-                     REAL_SHAPED_INI + "\n[Lupin: Development]\ncc session fleet size cap = 4\n" )
+                     REAL_SHAPED_INI + "\n[Lupin: Production]\ncc session fleet size cap = 4\n" )
     _pin_config( monkeypatch, FakeConfig( { CEILING_KEY: 18, CAP_KEY: 8 } ) )
 
     response = client.put( "/api/arbiter/fleet-size-cap", json={ "cap": 12 } )
 
     assert response.status_code == 409
-    assert "Lupin: Development" in response.json()[ "detail" ]
+    assert "Lupin: Production" in response.json()[ "detail" ]
     assert "= 8" in path.read_text( encoding="utf-8" )
 
 

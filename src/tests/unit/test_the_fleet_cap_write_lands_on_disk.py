@@ -125,7 +125,7 @@ def test_a_key_defined_TWICE_is_REFUSED_and_nothing_is_written( tmp_path ):
     enforced value depends on which block a process loaded. A writer that picked one
     would report success while the number half the fleet reads never moved.
     """
-    path = _ini( tmp_path, WELL_FORMED + "\n[Lupin: Development]\ncc session fleet size cap = 4\n" )
+    path = _ini( tmp_path, WELL_FORMED + "\n[Lupin: Production]\ncc session fleet size cap = 4\n" )
     before = open( path, encoding="utf-8" ).read()
 
     with pytest.raises( io.KeyDefinedTwice ) as refusal:
@@ -133,7 +133,7 @@ def test_a_key_defined_TWICE_is_REFUSED_and_nothing_is_written( tmp_path ):
 
     assert open( path, encoding="utf-8" ).read() == before, "a refusal must write NOTHING"
     message = str( refusal.value )
-    assert "Lupin: Baseline" in message and "Lupin: Development" in message, \
+    assert "Lupin: Baseline" in message and "Lupin: Production" in message, \
            f"the refusal must name EVERY line it found: {message}"
     # Line numbers are 1-based and are the point: an operator has to be able to GO to
     # them. Derived from the fixture rather than hand-counted, because a hand-counted
@@ -167,7 +167,7 @@ def test_the_reader_fails_SOFT_where_the_writer_refuses( tmp_path ):
     back to the configuration manager — the behaviour that existed before this module.
     The writer is an operator action with a human waiting on the answer.
     """
-    path = _ini( tmp_path, WELL_FORMED + "\n[Lupin: Development]\ncc session fleet size cap = 4\n" )
+    path = _ini( tmp_path, WELL_FORMED + "\n[Lupin: Production]\ncc session fleet size cap = 4\n" )
     assert io.read_int_from_disk( path, KEY ) is None          # ambiguous → None
     assert io.read_int_from_disk( str( tmp_path / "nope.ini" ), KEY ) is None   # absent → None
 

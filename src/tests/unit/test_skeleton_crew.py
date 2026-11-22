@@ -174,16 +174,17 @@ def test_the_door_argument_reaches_the_text():
 
 # ── 4. the shipped file ──────────────────────────────────────────────────────
 
-def test_the_shipped_ini_defines_the_key_once_in_baseline_as_a_boolean():
-    # The value is Rick's operator switch, flipped from the UI and always committed
-    # (CLAUDE.md, lupin-app.ini rule), so the test checks its shape, never which way it is set.
+def test_the_shipped_ini_defines_the_key_in_baseline_with_one_vm_override_as_booleans():
+    # The Baseline value is Rick's operator switch, flipped from the UI and always committed
+    # (CLAUDE.md, lupin-app.ini rule), so the test checks shape, never which way it is set.
+    # The one override is the test VM's own switch in its block (Rick, 21 Nov 2026, row 138c1c8f).
     root = os.environ.get( "LUPIN_ROOT", os.getcwd() )
     path = os.path.join( root, "src", "conf", "lupin-app.ini" )
     with open( path, encoding="utf-8" ) as handle:
         lines = handle.read().split( "\n" )
     found = io.find_definitions( lines, sc.SKELETON_CREW_KEY )
-    assert len( found ) == 1
-    assert found[ 0 ].section == "Lupin: Baseline"
+    assert sorted( d.section for d in found ) == [ "Lupin: Baseline", "Lupin: Testing-GCS" ]
+    assert all( d.line.split( "=", 1 )[ 1 ].strip() in ( "true", "false" ) for d in found )
     assert io.read_value_from_disk( path, sc.SKELETON_CREW_KEY ) in ( "true", "false" )
 
 

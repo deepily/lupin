@@ -500,6 +500,19 @@ do_push_bundle() {
         --command "$rcmd"
 }
 
+# ---- resolve_pip_root ----------------------------------------------------
+# Cron's environment is bare, so a cron deploy has no PLANNING_IS_PROMPTING_ROOT (row 138c1c8f, 21 Nov 2026).
+# Prints the variable when it is set. Otherwise prints the planning-is-prompting checkout that sits beside the MAIN lupin
+# checkout (git's common dir, so a worktree finds it too), and prints nothing when there is none. Never fails.
+resolve_pip_root() {
+    if [ -n "${PLANNING_IS_PROMPTING_ROOT:-}" ]; then printf '%s' "$PLANNING_IS_PROMPTING_ROOT"; return 0; fi
+    local common beside
+    common="$( git -C "${1:-.}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null )" || return 0
+    beside="$( dirname "$( dirname "$common" )" )/planning-is-prompting"
+    if [ -d "$beside/.git" ]; then printf '%s' "$beside"; fi
+    return 0
+}
+
 # ---- dispatch ------------------------------------------------------------
 case "$SUBCMD" in
     vm-status)
@@ -950,6 +963,7 @@ case "$SUBCMD" in
         #     (workflow/scripts/crontab_lock.py) arrived in it after the first snapshot. Refresh it from the
         #     local checkout at its HEAD. A failure is a loud warning, not a stop: the app deploy is unaffected.
         #     LUPIN_SKIP_PIP_SYNC=1 skips it.
+        PLANNING_IS_PROMPTING_ROOT="$( resolve_pip_root "$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )" )"
         if [ "${LUPIN_SKIP_PIP_SYNC:-0}" = "1" ]; then
             log "planning-is-prompting sync SKIPPED (LUPIN_SKIP_PIP_SYNC=1)"
         elif [ -z "${PLANNING_IS_PROMPTING_ROOT:-}" ] || [ ! -d "$PLANNING_IS_PROMPTING_ROOT/.git" ]; then
