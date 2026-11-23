@@ -13,7 +13,7 @@ pins:
   - cosa.repo.doc_lint.jev_transport.parse_answer@1930963bd0
   - cosa.repo.doc_lint.jev_transport.has_key@5b2a281554
   - cosa.repo.doc_lint.jev_transport.set_charge_hook@986d84594a
-  - cosa.repo.doc_lint.jev_transport.send_with_meta@f7cdba7a41
+  - cosa.repo.doc_lint.jev_transport.send_with_meta@c7d1a7d0e8
   - cosa.repo.doc_lint.jev_transport.send@a32c309734
   - cosa.repo.doc_lint.jev_transport.ask_noul@3f4070c783
 ---
@@ -37,4 +37,4 @@ The one door the judge harness uses to reach Jev, TypeSafe's yes/no model. [[doc
 
 ## Budget and errors
 - `CallBudget` caps HTTP attempts across all threads of one sweep. `take` counts one attempt or raises `JevBudgetSpent` without counting, and `used` never exceeds the limit.
-- `JevConfigError` means no key or a refused request. `JevCallError` means no usable answer after retries. Both extend a private `_JevError`, which holds the message, the HTTP status and the attempt log. They are siblings, so catching one never catches the other.
+- `JevConfigError` means no key, an unpaid account (a 402, never retried) or a refused request (401, 403 or 422). `JevCallError` means no usable answer after retries. Both extend a private `_JevError`, which holds the message, the HTTP status and the attempt log. They are siblings, so catching one never catches the other.
