@@ -76,6 +76,7 @@ export function newTabLinkHtml( entry ) {
  * @param {Element | null} anchor
  * @returns {boolean}
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line, as approve-link.js rowIdAfter; both arms of the condition below are tested.
 export function isNewTabAnchor( anchor ) {
   return anchor !== null && anchor.hasAttribute( NEW_TAB_ATTR );
 }
