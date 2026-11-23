@@ -24,7 +24,7 @@
 # Overridable for testing without touching the live service:
 #   DEPLOY_DIR  where the module copy goes   (default ~/.local/lib/lupin-cc-memory-watch)
 #   UNIT_DIR    where the unit is installed  (default ~/.config/systemd/user)
-#   LOG_DIR     where the streams are kept   (default ~/.claude/sessions)
+#   LOG_DIR     where the streams are kept   (default ~/.claude/lupin-sessions)
 
 set -euo pipefail
 
@@ -42,7 +42,7 @@ UNIT_NAME="lupin-cc-memory-watch.service"
 
 DEPLOY_DIR="${DEPLOY_DIR:-$HOME/.local/lib/lupin-cc-memory-watch}"
 UNIT_DIR="${UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
-LOG_DIR="${LOG_DIR:-$HOME/.claude/sessions}"
+LOG_DIR="${LOG_DIR:-${LUPIN_HOOK_SESSIONS_DIR:-$HOME/.claude/lupin-sessions}}"
 UNIT="${UNIT_DIR}/${UNIT_NAME}"
 
 [ -f "${TEMPLATE}" ] || { echo "ERROR: template not found: ${TEMPLATE}" >&2; exit 1; }

@@ -75,7 +75,7 @@ services:
     user: "1001:1001"
     # The host user's gid, as in lupin-rest. It reads the root:<gid> 0440 password files below.
     group_add:
-      - "${LUPIN_BRIDGE_GID:?set LUPIN_BRIDGE_GID (host gid owning ~/.claude/sessions)}"
+      - "${LUPIN_BRIDGE_GID:?set LUPIN_BRIDGE_GID (host gid owning ~/.claude/lupin-sessions)}"
     secrets:
       - db_app_password
       - db_test_password
@@ -128,7 +128,7 @@ services:
       # claude-creds-test on purpose. `test-server prep` makes the folder (2775, setgid).
       - type: bind
         source: /mnt/lupin-data/projects-data/lupin/sessions-test
-        target: /home/rruiz/.claude/sessions
+        target: /home/rruiz/.claude/lupin-sessions
         bind:
           create_host_path: false
       # Flow-ratio operator settings, the same host folder as lupin-rest; the heartbeat

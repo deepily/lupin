@@ -3,7 +3,7 @@ Bridge-directory contact guard — shared logic (row e2ae4102).
 
 WHY THIS MODULE EXISTS
 Two unit files drive `register_session.main()` for real and must never leave a
-mark on the operator's live bridge directory (`~/.claude/sessions`). The hazard
+mark on the operator's live bridge directory (`~/.claude/lupin-sessions`). The hazard
 is genuine (row 8ccc20ab): a hook that resolves its directory from a hardcoded
 real path instead of the seam merges into a LIVE session's bridge and can null
 that seat's voice_persona.
@@ -39,9 +39,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
+from lupin_cli.claude_code.hooks.lib.sessions_dir import DEFAULT_DIR
 
-# The operator's live bridge directory. Bound here so both callers agree on it.
-REAL_SESSIONS_DIR = Path( os.path.expanduser( "~/.claude/sessions" ) )
+
+# The operator's live bridge directory: the seam's production default, which ignores the test
+# override on purpose (`~/.claude/lupin-sessions` since row f40c5b75). Bound here so both callers agree on it.
+REAL_SESSIONS_DIR = Path( os.path.expanduser( DEFAULT_DIR ) )
 
 # Fleet-shared append-only logs — every live listener / idle-waiter writes them
 # continuously, so a change is not attributable to the observing test. Named, not

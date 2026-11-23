@@ -303,7 +303,7 @@ voice_registration_check "$CLAUDE_JSON" warn user
 voice_registration_check "$PROJECT_MCP_JSON" silent project
 
 # A4/A5 — the CC session-bridge surface (persona-404's two halves).
-SESSIONS_DIR="${LUPIN_HOST_SESSIONS_DIR:-$HOME/.claude/sessions}"
+SESSIONS_DIR="${LUPIN_HOST_SESSIONS_DIR:-$HOME/.claude/lupin-sessions}"
 if [ -d "$SESSIONS_DIR" ]; then
     dmode="$( stat -c '%a' "$SESSIONS_DIR" 2>/dev/null || printf '' )"
     pfv_mode_matches "$dmode" "2770"; rc=$?
@@ -825,7 +825,7 @@ PY
     #      host's sessions bind unless both are present. That shadowing was persona-404.
     has_creds=false; has_sessions=false
     grep -qx "/home/rruiz/.claude" <<< "$running_mounts"          && has_creds=true
-    grep -qx "/home/rruiz/.claude/sessions" <<< "$running_mounts" && has_sessions=true
+    grep -qx "/home/rruiz/.claude/lupin-sessions" <<< "$running_mounts" && has_sessions=true
     if [ "$has_creds" = true ] && [ "$has_sessions" = true ]; then
         report pass BLOCK "both CC mounts present (creds volume + sessions bind)"
     else

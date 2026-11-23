@@ -85,9 +85,9 @@ class TestBufferPath:
         assert path.name == "cc-buffer-00000000.jsonl"
 
     def test_path_in_sessions_dir( self ):
-        """Buffer path lives in ~/.claude/sessions/."""
+        """Buffer path lives in the session-bridge folder, ~/.claude/lupin-sessions/."""
         path = get_buffer_path( "abc12345" )
-        assert str( path ).endswith( "/.claude/sessions/cc-buffer-abc12345.jsonl" )
+        assert str( path ).endswith( "/.claude/lupin-sessions/cc-buffer-abc12345.jsonl" )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

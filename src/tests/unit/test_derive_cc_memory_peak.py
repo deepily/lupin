@@ -143,10 +143,10 @@ class TestDefaultLogSeam:
         monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )
         assert _load_fresh().DEFAULT_LOG == str( tmp_path / "cc-memory-samples.log" )
 
-    def test_default_log_without_the_override_is_the_old_home_path( self, tmp_path, monkeypatch ):
+    def test_default_log_without_the_override_is_under_home_lupin_sessions( self, tmp_path, monkeypatch ):
         monkeypatch.delenv( "LUPIN_HOOK_SESSIONS_DIR", raising=False )
         monkeypatch.setenv( "HOME", str( tmp_path ) )
-        assert _load_fresh().DEFAULT_LOG == str( tmp_path ) + "/.claude/sessions/cc-memory-samples.log"
+        assert _load_fresh().DEFAULT_LOG == str( tmp_path ) + "/.claude/lupin-sessions/cc-memory-samples.log"
 
     def test_loading_with_src_off_sys_path_puts_it_back_at_the_front( self, monkeypatch ):
         src = os.path.join( cu.get_project_root(), "src" )

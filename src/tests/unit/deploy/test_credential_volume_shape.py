@@ -42,7 +42,7 @@ if PROJECT_ROOT is None:
 
 COMPOSE_FILE = "docker-compose.yml"
 CLAUDE_HOME  = "/home/rruiz/.claude"
-SESSIONS_DIR = "/home/rruiz/.claude/sessions"
+SESSIONS_DIR = "/home/rruiz/.claude/lupin-sessions"
 
 # service name -> the named volume it must mount at CLAUDE_HOME
 SERVICES = {
@@ -108,7 +108,7 @@ def test_sessions_bind_is_declared_after_the_volume( compose, service ):
     Ordering is load-bearing, not cosmetic.
 
     The claude-creds volume mounts over the WHOLE .claude directory and shadows
-    `sessions/`. The nested bind wins only because compose applies it afterwards.
+    `lupin-sessions/`. The nested bind wins only because compose applies it afterwards.
     Get the order wrong and request_persona() 404s — which is exactly what happened
     to the VM on 2026-07-24 (fixed in b7ea000f).
     """
@@ -133,7 +133,7 @@ def _sessions_source( compose, service ):
 def test_the_test_server_has_its_own_sessions_folder( compose ):
     """
     Row d849a6d9: the fleet-size census counts every manager bridge under the host's
-    ~/.claude/sessions, and the integration fixtures write manager-seat bridges into the
+    ~/.claude/lupin-sessions, and the integration fixtures write manager-seat bridges into the
     folder the test server reads. If :8000 binds the host's real folder, a test seat is
     counted as a live manager. So its bind source must be its own variable and its own default,
     and must not be the dev server's.
@@ -150,9 +150,13 @@ def test_the_test_server_has_its_own_sessions_folder( compose ):
 
 
 def test_the_dev_server_still_binds_the_hosts_real_sessions_folder( compose ):
-    """The other side: dev reads live seats, so its bind must stay the host's real folder."""
+    """
+    The other side: dev reads live seats, so its bind must be the host's real folder.
+
+    That folder is `~/.claude/lupin-sessions`; `~/.claude/sessions` belongs to Claude Code.
+    """
     dev_src = _sessions_source( compose, "lupin-rest-dev" )
-    assert dev_src == "${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/sessions}", dev_src
+    assert dev_src == "${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/lupin-sessions}", dev_src
 
 
 def test_the_test_sessions_bind_still_fails_loud_on_a_missing_host_folder( compose ):

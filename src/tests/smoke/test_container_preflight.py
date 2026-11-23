@@ -202,7 +202,7 @@ def test_worktree_bind_mount_end_to_end():
 # request door resolves a requester's persona from them (Sword of Damocles, row ab8c5728:
 # "it better be yours"). Measured 2026-09-14 23:01: both containers resolve. If the mount
 # goes, every pledged admit request 403s — so the preflight names it before that happens.
-SESSIONS_DIR     = "/home/rruiz/.claude/sessions"
+SESSIONS_DIR     = "/home/rruiz/.claude/lupin-sessions"
 RESOLVE_SNIPPET  = (
     "import sys; "
     "from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona; "
@@ -215,7 +215,7 @@ def _host_sessions_dir():
     """
     The HOST directory bound at SESSIONS_DIR in CONTAINER, read from `docker inspect`.
 
-    Row d849a6d9: the test container's sessions folder is its own, not ~/.claude/sessions,
+    Row d849a6d9: the test container's sessions folder is its own, not ~/.claude/lupin-sessions,
     so the host side is read from the running container rather than assumed.
 
     Ensures:
@@ -236,12 +236,12 @@ def _seed_probe_bridge( host_dir ):
 
     Ensures:
         - returns ( path, session_id, name ), or None when host_dir is the real
-          ~/.claude/sessions (a synthetic bridge must never land among live seats)
+          ~/.claude/lupin-sessions (a synthetic bridge must never land among live seats)
         - the bridge has role "worker", so no census counts it as a manager
     """
     import json
     import uuid
-    if os.path.realpath( host_dir ) == os.path.realpath( os.path.expanduser( "~/.claude/sessions" ) ): return None
+    if os.path.realpath( host_dir ) == os.path.realpath( os.path.expanduser( "~/.claude/lupin-sessions" ) ): return None
     session_id = str( uuid.uuid4() )
     path       = os.path.join( host_dir, f"cc-itest-preflight-{session_id[ :8 ]}.json" )
     with open( path, "w" ) as handle:
@@ -257,11 +257,11 @@ def _newest_host_bridge_with_persona( host_dir=None ):
         - returns ( session_id, name ) or None when no bridge carries a persona
         - reads the HOST side only, so the container's answer is compared against an
           independent source rather than against itself
-        - looks in host_dir when given, else in ~/.claude/sessions
+        - looks in host_dir when given, else in ~/.claude/lupin-sessions
     """
     import glob
     import json
-    base  = host_dir if host_dir is not None else os.path.expanduser( "~/.claude/sessions" )
+    base  = host_dir if host_dir is not None else os.path.expanduser( "~/.claude/lupin-sessions" )
     paths = sorted( glob.glob( os.path.join( base, "cc-*.json" ) ),
                     key=os.path.getmtime, reverse=True )
     for path in paths:

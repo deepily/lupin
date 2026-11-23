@@ -109,7 +109,7 @@ PRIMARY_FIXTURE = os.path.join( FIXTURE_DIR, "primary.jsonl" )
 
 # The one rw path that means the same thing to the host and to the container — see the
 # module docstring. Overridable for a non-default compose setup.
-HOST_SESSIONS_DIR = os.environ.get( "LUPIN_HOST_SESSIONS_DIR", os.path.expanduser( "~/.claude/sessions" ) )
+HOST_SESSIONS_DIR = os.environ.get( "LUPIN_HOST_SESSIONS_DIR", os.path.expanduser( "~/.claude/lupin-sessions" ) )
 SEAT_WORK_DIR     = os.path.join( HOST_SESSIONS_DIR, "cc-transcript-itest" )
 
 

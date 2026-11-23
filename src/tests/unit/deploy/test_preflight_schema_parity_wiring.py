@@ -69,7 +69,7 @@ case "$1 $2" in
         printf '%s\n' "$PFV_STUB_CONTAINER"; exit 0 ;;
 esac
 if [ "$1" = "ps" ]; then printf '%s\n' "$PFV_STUB_CONTAINER"; exit 0; fi
-if [ "$1" = "inspect" ]; then printf '/var/lupin\n/home/rruiz/.claude\n/home/rruiz/.claude/sessions\n'; exit 0; fi
+if [ "$1" = "inspect" ]; then printf '/var/lupin\n/home/rruiz/.claude\n/home/rruiz/.claude/lupin-sessions\n'; exit 0; fi
 if [ "$1" = "exec" ]; then
     shift
     case "$*" in

@@ -26,7 +26,7 @@ if [[ "${1:-}" == "--dry-run" ]]; then
 fi
 
 LR="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
-SESS_DIR="$HOME/.claude/sessions"
+SESS_DIR="${LUPIN_HOOK_SESSIONS_DIR:-$HOME/.claude/lupin-sessions}"
 
 export LUPIN_ROOT="$LR"
 export PYTHONPATH="$LR/src:${PYTHONPATH:-}"

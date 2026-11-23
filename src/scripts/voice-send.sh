@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-SESSIONS_DIR="$HOME/.claude/sessions"
+SESSIONS_DIR="${LUPIN_HOOK_SESSIONS_DIR:-$HOME/.claude/lupin-sessions}"
 
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <session_id_hash> [tmux_session] \"command text\""

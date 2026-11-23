@@ -39,7 +39,7 @@ from cosa.utils.cc_memory_watch import (
 LISTENER_ARGV = [
     "python3", "-m", "lupin_cli.claude_code.hooks.lib.cc_notification_listener",
     "--session-id", "0b7675fc", "--owner-pid", "751918",
-    "--log-file", "/home/x/.claude/sessions/cc-listener-0b7675fc.log",
+    "--log-file", "/home/x/.claude/lupin-sessions/cc-listener-0b7675fc.log",
 ]
 
 

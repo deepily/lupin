@@ -97,7 +97,7 @@ def test_the_overlay_adds_exactly_the_two_services_and_the_base_file_is_untouche
 def test_the_test_server_listens_on_8000_as_uid_1001_with_the_host_gid_and_no_gpu( overlay ):
     svc = overlay[ "services" ][ "lupin-rest-test" ]
     assert svc[ "ports" ] == [ "8000:7999" ] and svc[ "user" ] == "1001:1001"
-    assert svc[ "group_add" ] == [ "${LUPIN_BRIDGE_GID:?set LUPIN_BRIDGE_GID (host gid owning ~/.claude/sessions)}" ]
+    assert svc[ "group_add" ] == [ "${LUPIN_BRIDGE_GID:?set LUPIN_BRIDGE_GID (host gid owning ~/.claude/lupin-sessions)}" ]
     assert "1002" not in str( svc[ "group_add" ] )
     assert "deploy" not in svc and "driver: nvidia" not in OVERLAY.read_text()
     assert svc[ "extra_hosts" ] == [ "host.docker.internal:host-gateway" ]
@@ -150,7 +150,7 @@ def test_the_test_server_has_its_own_claude_creds_and_sessions_folder_and_joins_
     assert "claude-creds-test:/home/rruiz/.claude" in svc[ "volumes" ]
     assert "claude-creds-test" in overlay[ "volumes" ] and "claude-creds" not in overlay[ "volumes" ]
     binds = { v[ "target" ]: v for v in svc[ "volumes" ] if isinstance( v, dict ) and v.get( "type" ) == "bind" }
-    sessions = binds[ "/home/rruiz/.claude/sessions" ]
+    sessions = binds[ "/home/rruiz/.claude/lupin-sessions" ]
     assert sessions[ "source" ].endswith( "/projects-data/lupin/sessions-test" ) and sessions[ "bind" ] == { "create_host_path": False }
     assert svc[ "networks" ] == [ "lupin-cloud-network" ]
     assert svc[ "volumes" ].index( "claude-creds-test:/home/rruiz/.claude" ) < svc[ "volumes" ].index( sessions )

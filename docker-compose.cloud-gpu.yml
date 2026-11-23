@@ -92,7 +92,7 @@ services:
     # gid, it differs per VM/OS-Login account. See src/rnd/v0.1.9/2026.07.24-vm-persona-
     # bridge-mount-uid-divergence.md (FINAL PLAN v3).
     group_add:
-      - "${LUPIN_BRIDGE_GID:?set LUPIN_BRIDGE_GID (host gid owning ~/.claude/sessions; see 2026.07.24 R&D)}"
+      - "${LUPIN_BRIDGE_GID:?set LUPIN_BRIDGE_GID (host gid owning ~/.claude/lupin-sessions; see 2026.07.24 R&D)}"
     ports:
       - "7999:7999"
     # host.docker.internal → host gateway so the in-container :7999 reverse-proxy
@@ -162,8 +162,8 @@ services:
       # CREATES an empty dir when HOME is wrong (root/automation) or the path is absent,
       # which looks identical to "mounted but empty". Fail loud instead.
       - type: bind
-        source: ${LUPIN_HOST_SESSIONS_DIR:?set LUPIN_HOST_SESSIONS_DIR (absolute path to the host's ~/.claude/sessions)}
-        target: /home/rruiz/.claude/sessions
+        source: ${LUPIN_HOST_SESSIONS_DIR:?set LUPIN_HOST_SESSIONS_DIR (absolute path to the host's ~/.claude/lupin-sessions)}
+        target: /home/rruiz/.claude/lupin-sessions
         bind:
           create_host_path: false
       # ---------------------------------------------------------------- multi-repo doc viewer
