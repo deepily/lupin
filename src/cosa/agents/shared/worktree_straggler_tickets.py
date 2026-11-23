@@ -633,8 +633,8 @@ class RepositoryStragglerStore:
             rows = TaskRepository( session ).query_tasks( correlation_key=key, limit=1 )
             return str( rows[ 0 ].id ) if rows else None
 
-    def create( self, title, body, owner, accountable, project, correlation_key ) -> str:
-        """Mint one queued row; returns its id."""
+    def create( self, title, body, owner, accountable, project, correlation_key, priority=STRAGGLER_PRIORITY ) -> str:
+        """Mint one queued row at `priority` (P3 unless the caller names one); returns its id."""
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.task_repository import TaskRepository
         from lupin_mcp.persona_normalization import canonical_persona_key
@@ -650,12 +650,24 @@ class RepositoryStragglerStore:
                 body                = body,
                 owner_persona       = canonical_persona_key( owner ) or owner,
                 accountable_manager = canonical_persona_key( accountable ) or accountable,
-                priority            = STRAGGLER_PRIORITY,
+                priority            = priority,
                 status              = "queued",
                 correlation_key     = correlation_key,
             )
             session.flush()
             return str( item.id )
+
+    def amend( self, ticket_id: str, note: str, reason: str ) -> None:
+        """Append `note` to a live row's body; a missing or closed row is left alone."""
+        import uuid
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.task_repository import TaskRepository
+        with get_db() as session:
+            repo = TaskRepository( session )
+            item = repo.get_by_id_for_update( uuid.UUID( ticket_id ) )
+            if item is None or item.status in ( "done", "dropped" ):
+                return
+            repo.apply_amendment( item, note, actor=ARBITER_ACTOR, authority="standing", now=datetime.now( timezone.utc ), reason=reason )
 
     def drop( self, ticket_id: str, reason: str ) -> None:
         """Move the row to dropped with `reason`; a row already terminal is left alone."""

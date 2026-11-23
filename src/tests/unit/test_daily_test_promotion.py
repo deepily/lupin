@@ -472,6 +472,26 @@ def test_main_builds_the_vm_and_the_live_store_and_maps_reboot_to_boot( repo, mo
     assert js.read_summary( _folder( repo ) / "job-summary.json" )[ "last_attempt" ][ "trigger" ] == "boot"
 
 
+def test_with_no_owner_flag_the_failure_rows_go_to_the_registry_owner_as_the_stores_persona_key( repo, monkeypatch ):
+    store = Store()
+    monkeypatch.setattr( filing, "LiveStore", lambda: store )
+    root  = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    shipped = next( j[ "owner" ] for j in json.loads( ( pathlib.Path( root ) / "src/conf/job-registry.json" ).read_text() )[ "jobs" ] if j[ "job" ] == "test-promotion" )
+    assert shipped == "mr-radio" and dtp.registry_owner( root ) == "mr radio"      # the registry's slug and the store's key are one persona
+    ( repo / "src" / "conf" ).mkdir( parents=True )
+    ( repo / "src" / "conf" / "job-registry.json" ).write_text( ( pathlib.Path( root ) / "src/conf/job-registry.json" ).read_text() )
+    runner = Runner( **{ "vm-status": ( 0, "RUNNING" ), "run": ( 0, repo.old ), "deploy": [ ( 5, "" ), ( 0, "" ) ] } )
+    assert dtp.main( [], environ={ "LUPIN_ROOT": str( repo ) }, runner=runner, now=NOW, config=Config() ) == 1
+    row = next( iter( store.rows.values() ) )
+    assert row[ "owner_persona" ] == row[ "accountable_manager" ] == "mr radio" and row[ "created_by" ] == "mr radio (test-promotion)"
+
+
+def test_a_registry_with_no_entry_for_this_job_refuses_to_pick_an_owner( tmp_path ):
+    ( tmp_path / "src" / "conf" ).mkdir( parents=True )
+    ( tmp_path / "src" / "conf" / "job-registry.json" ).write_text( json.dumps( { "schema": "job-registry/1", "defaults": {}, "jobs": [] } ) )
+    with pytest.raises( ValueError, match="no test-promotion entry" ): dtp.registry_owner( str( tmp_path ) )
+
+
 def test_main_with_check_builds_no_store_and_takes_the_root_from_the_project_when_the_environment_has_none( repo, monkeypatch, capsys ):
     monkeypatch.setattr( dtp.cu, "get_project_root", lambda: str( repo ) )
     assert dtp.main( [ "--check" ], environ={ }, runner=Runner(), config=Config() ) == 0
