@@ -3,7 +3,7 @@ capability: reuse-tools-transport-and-screening
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.reuse_tools.append_call_log@13cbe4da35
-  - lupin_mcp.reuse_tools.LiveJevTransport@7d78a6e851
+  - lupin_mcp.reuse_tools.LiveJevTransport@d0ae5c8966
   - lupin_mcp.reuse_tools.RefusalBreaker@65c246e71a
   - lupin_mcp.reuse_tools.JevCache@6eba1d0642
   - lupin_mcp.reuse_tools.blank_string_defaults@7102e67f36
@@ -24,7 +24,7 @@ What leaves the machine, how it is sent, and what is counted afterwards. The que
 - `sendable` applies both. A symbol that still matches after blanking is dropped, and no module or language is excluded. `entry_text` is what Jev sees of one symbol: id, signature and first docstring line. It adds the whole docstring and purpose line when they differ or exist. `sendable_report` also names the ids dropped under an excluded prefix.
 
 ## Transport
-- `LiveJevTransport` reads the key from the environment on each post and never stores it. Once Jev refuses the key, later posts raise with no HTTP call. A 422 refuses only its own request.
+- `LiveJevTransport` reads the key from the environment on each post and never stores it. Once Jev refuses the key or the account (no status, 401, 402 or 403), later posts raise with no HTTP call. Their attempt log is empty, so one refusal counts once. A 422 refuses only its own request. A call whose attempts drew a 402 returns the note `JEV_PAYMENT_REQUIRED`, meaning the TypeSafe account needs paying. The note is added to that call's result and never stored in the receipt. The cause stays `CALL_FAILED`.
 - With a budget, every HTTP attempt takes one from it, retries included. A spent budget raises without sending.
 - `RefusalBreaker` counts distinct refused keys since the last answer and stops at its limit. Resending the halves of a refused pack under one key counts once.
 - `RefusalBreaker.mismatched` stops it at once and keeps the first wrong model name served. Every method is safe across threads.
