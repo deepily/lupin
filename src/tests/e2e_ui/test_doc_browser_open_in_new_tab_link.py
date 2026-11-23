@@ -78,6 +78,8 @@ def _prove_glyph_behaviour( page, context ):
     entry = entries.nth( files[ 0 ] )
     name  = entry.locator( ".doc-dir-name" ).inner_text()
     name_href = entry.locator( "a" ).first.get_attribute( "href" )
+    name_link = entry.locator( f"a[href='{name_href}']:not(.doc-dir-newtab)" )   # this row's own name link, by its href
+    assert name_link.count() == 1
     glyph = entry.locator( "a.doc-dir-newtab" )
     assert glyph.get_attribute( "aria-label" ) == f"Open {name} in a new tab"
     assert glyph.get_attribute( "title" ) == f"Open {name} in a new tab"
@@ -86,7 +88,7 @@ def _prove_glyph_behaviour( page, context ):
     assert glyph.get_attribute( "href" ) == name_href, "↗ must open the document the name link renders"
 
     # Keyboard reach: the glyph is a real link, so Tab lands on it after the name link.
-    entry.locator( "a" ).first.focus()
+    name_link.focus()
     page.keyboard.press( "Tab" )
     assert frame.locator( "a.doc-dir-newtab:focus" ).count() == 1, "Tab from the name link must reach the ↗ link"
 
@@ -102,7 +104,7 @@ def _prove_glyph_behaviour( page, context ):
 
     # The name still renders the file in the pane, in no new tab.
     pages_before = len( context.pages )
-    entry.locator( "a" ).first.click()
+    name_link.click()
     page.wait_for_function(
         "( was ) => document.querySelector( '#content-pane-body iframe' ).getAttribute( 'src' ) !== was",
         arg=pane_before, timeout=TIMEOUT_MS,
