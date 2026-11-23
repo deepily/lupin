@@ -12,8 +12,8 @@ pins:
   - cosa.research.preference_replay.archive_replay.checkpoint_line@2724b71a61
   - cosa.research.preference_replay.archive_replay.principle_progress@bf3abb5db9
   - cosa.research.preference_replay.archive_replay.warning_text@e9a80093eb
-  - cosa.research.preference_replay.archive_replay.run_first_stage@fa50affa10
-  - cosa.research.preference_replay.archive_replay.run_twin_stage@917e036aa9
+  - cosa.research.preference_replay.archive_replay.run_first_stage@fd5da2d7bb
+  - cosa.research.preference_replay.archive_replay.run_twin_stage@9d046b3243
   - cosa.research.preference_replay.archive_replay.main@4f9c5f720d
 ---
 # Preference replay: archive stages and checkpoints
@@ -31,6 +31,7 @@ Runs the archive of asks through every arm in stages, each able to stop and resu
 - `run_first_stage` predicts the evaluation asks in time order with the engine, the fixed rules and the two Haiku arms. Principles are extracted from each answer as time reaches it. Each chunk is replayed, leak-checked, written to the records file and checkpointed.
 - A chunk already done is skipped, and a line already recorded is never written twice. An ask with no vector is counted once and skipped from then on.
 - `run_twin_stage` runs the Opus twins only on asks the first stage has recorded, so they never set its pace. With `follow` it waits for more asks.
+- Each stage first calls `discard_unrecorded_limit_failures`, which deletes limit failures stored for asks its record file does not hold. It then re-forecasts the recorded asks whose principles forecast failed on the limit.
 - Both stages raise `FreezeMismatch` and `BoundStop` as described on the freeze page. On a stop the work is saved and a named line is logged.
 
 ## Command line

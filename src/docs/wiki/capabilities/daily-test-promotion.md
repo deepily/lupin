@@ -3,10 +3,10 @@ capability: daily-test-promotion
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - lupin_mcp.daily_test_promotion.run_command@a527b067c4
-  - lupin_mcp.daily_test_promotion.Vm@bd2312abdf
+  - lupin_mcp.daily_test_promotion.Vm@ae33149811
   - lupin_mcp.daily_test_promotion.app_zone@e031c76b17
   - lupin_mcp.daily_test_promotion.due@3f37e475b2
-  - lupin_mcp.daily_test_promotion.row_payload@6233950d78
+  - lupin_mcp.daily_test_promotion.row_payload@3e2f5b0afd
   - lupin_mcp.daily_test_promotion.pick_sha@133bd46536
   - lupin_mcp.daily_test_promotion.with_ref@2b0a221483
   - lupin_mcp.daily_test_promotion.holds_commit@8459d49b48
@@ -27,7 +27,7 @@ pins:
 ## One run
 - `run` takes a lock, then asks `due`. A cron or hand entry is always due. A boot entry runs only when no attempt follows the latest 18:00 slot. `job_cron.cron_last` finds it in the zone `app_zone` reads from the `app timezone` key.
 - `pick_sha` takes the tip of the working branch. A stored `last_promoted_sha` equal to it ends the run with no VM call.
-- Otherwise `decide` starts the VM if it is not running and reads the sha it runs. An equal sha ends the run. A busy or unknown test server defers it. The VM goes back to its earlier power state.
+- Otherwise `decide` starts the VM if it is not running and reads the sha it runs. That is the first field of the first output line that starts with a 40-digit sha. The wrapper's own `[lupin-vm] + ...` echo line is skipped. An equal sha ends the run. A busy or unknown test server defers it. The VM goes back to its earlier power state.
 
 ## Deploy and rollback
 - `promote` puts a temporary branch `promote/test-<sha>` at the pick, runs `lupin-vm.sh deploy` on it, then smokes. `with_ref` deletes the branch whether the action returns or raises.
@@ -35,4 +35,4 @@ pins:
 - A failed deploy or smoke redeploys the sha the VM ran before the deploy, then smokes again. A previous sha this checkout lacks makes the rollback fail, and the row says so.
 
 ## Rows
-- `conclude` writes the job summary and the state, and files at most one row through `row_payload`. The key names the kind and the sha, so a repeat is one row. Kinds are failed, rollback-failed, vm-unreachable and stale. `behind_state` and `stale_due` file stale once per stretch, after 3 days behind, counting deferrals.
+- `conclude` writes the job summary and the state, and files at most one row through `row_payload`, at priority P5. The store lets a worker file only at P5, and a manager raises it. The key names the kind and the sha, so a repeat is one row. Kinds are failed, rollback-failed, vm-unreachable and stale. `behind_state` and `stale_due` file stale once per stretch, after 3 days behind, counting deferrals.

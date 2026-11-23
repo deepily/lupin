@@ -2,7 +2,8 @@
 capability: decision-proxy
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.responder.DecisionResponder@3b8adefa25
+  - cosa.agents.decision_proxy.decision_writer.write_proxy_decision@db5c1f009f
+  - cosa.agents.decision_proxy.responder.DecisionResponder@2ea618d0c1
   - cosa.agents.decision_proxy.trust_tracker.TrustTracker@e6ea84b97f
   - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@03f04c7066
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker@ed1b3c7973
@@ -18,13 +19,12 @@ The decision proxy answers questions that ask for a response, on the user's beha
 ## What the responder does
 - `DecisionResponder` reacts to `notification_queue_update` events and ignores notifications that do not ask for a response. Its statistics print under the title `Decision Proxy Statistics`. It skips a review card, the principle learner's own question: no decision row, no answer, counted as `review_cards_skipped`.
 - Checks run in this order. A disabled proxy does nothing. A sender outside the allowlist is rejected, and an empty allowlist rejects everyone. A dry run sends a decline. With no strategy loaded it only counts the event.
-- Otherwise the strategy returns one of four actions. `shadow` logs. `suggest` stores the decision for ratification. `act` stores it and sends the answer when it has a value, unless the smart router defers it (see Smart router). `defer` stores it and sends nothing. A `defer` row keeps an empty decision value, so the proxy's own guess is never cited as precedent. A `shadow` row stores the forecast only when `decision proxy shadow forecast recording enabled` is true. The code default is false and the shipped INI is true. An unreadable config blanks only the forecast, never the row ([[decision-proxy-agreement]]).
+- Otherwise the strategy returns one of four actions. `shadow` logs. `suggest` stores the decision for ratification. `act` stores it and sends the answer when it has a value, unless the smart router defers it (see Smart router). `defer` stores it and sends nothing. A `defer` row keeps an empty decision value, so the proxy's own guess is never cited as precedent. A `shadow` row stores the forecast only when `decision proxy shadow forecast recording enabled` is true. The code default is false and the shipped INI is true. An unreadable config blanks only the forecast, never the row ([[decision-proxy-agreement]]). `write_proxy_decision` is the one writer of a `proxy_decisions` row, shared by `DecisionResponder` and the SWE orchestrator. A `shadow` result goes to `log_shadow`, with the caller's default reason and the decision value the caller chose, since the caller reads the forecast switch. Any other action goes to `log_decision` with the result's value and the caller's ratification flag. It cuts the question to 500 characters, passes `extra` (metadata, data origin, rule agreement) on unchanged, and commits only when `commit` is true. Database errors propagate; both callers catch them as non-fatal.
 - `python -m cosa.agents.decision_proxy --profile swe_team` starts it only when `decision proxy enabled` is true. The shipped INI sets it false, so by default it prints that and exits. If the profile fails to load it also exits.
 
 ## The gate
 - `EngineeringStrategy.gate` first asks the circuit breaker: a tripped category gives `defer`.
-- The conformal and Thompson options exist in `EngineeringStrategy`, but its three callers never turn them on. So trust mode `shadow` (the default) always gives `shadow`. In `suggest` mode, level 2 and above give `suggest` and level 1 gives `shadow`.
-- In `active` mode, level 1 gives `shadow` and level 2 gives `suggest`. Level 3 gives `act` at classification confidence 0.80 or more, else `suggest`.  Level 4 gives `act`, except `suggest` for the destructive category, below confidence 0.50, and for a 10% audit sample. Level 5 always gives `act`. A Thompson draw can only lower the result.
+- The conformal and Thompson options exist in `EngineeringStrategy`, but its three callers never turn them on. So trust mode `shadow` (the default) always gives `shadow`. In `suggest` mode, level 2 and above give `suggest` and level 1 gives `shadow`. In `active` mode, level 1 gives `shadow` and level 2 gives `suggest`. Level 3 gives `act` at classification confidence 0.80 or more, else `suggest`.  Level 4 gives `act`, except `suggest` for the destructive category, below confidence 0.50, and for a 10% audit sample. Level 5 always gives `act`. A Thompson draw can only lower the result.
 - The strategy's heuristic answer is `approved`, except for deployment, destructive and architecture questions, which get `requires_review`. `EngineeringStrategy` has an optional model fallback, but no caller supplies the client and case store it needs, so it never runs.
 
 ## Trust

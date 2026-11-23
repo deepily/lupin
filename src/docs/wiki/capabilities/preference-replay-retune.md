@@ -13,7 +13,7 @@ pins:
   - cosa.research.preference_replay.retune_run.check_vectors_cover@0ec4d5bc1d
   - cosa.research.preference_replay.retune_run.main@1bbcf37e9d
   - cosa.research.preference_replay.retune_run.read_cohort@d966335b99
-  - cosa.research.preference_replay.retune_run.read_id_list@7a6df0df5d
+  - cosa.research.preference_replay.retune_run.read_id_list@cb6b8c61aa
   - cosa.research.preference_replay.retune_run.restrict_to_ids@873d297f85
   - cosa.research.preference_replay.retune_run.run_report@fd317d8403
   - cosa.research.preference_replay.retune_run.write_control_ids@5acfa74615
@@ -30,6 +30,6 @@ Retunes the two retrieval settings on a tune window and scores them on a final w
 
 ## The run
 - `read_cohort( session, vectors, response_types )` reads the scored cohort and the facts that date it in a read-only transaction. `check_vectors_cover( asks, header )` refuses an ask with no vector the side file explains.
-- `read_id_list( ids_path )` reads a committed id list, one bare id per line or JSON lines. A file that mixes the two is refused. `restrict_to_ids` keeps those asks in cohort order.
+- `read_id_list( ids_path )` reads a committed id list, one bare id per line or JSON lines (read by `arm_vectors.load_frozen_ids`, which refuses a repeated id). A file that mixes the two is refused. `restrict_to_ids` keeps those asks in cohort order.
 - `run_report` replays the grid and the sweep. `build_report` assembles the JSON with settings, cohort checksums, every point and the command and code that made it.
 - `write_control_ids` writes the replayable ids only when the run reproduces the committed baseline, else raises `ControlMismatch`. `main` runs it from the command line.
