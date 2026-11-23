@@ -241,6 +241,8 @@ class FakeRepo:
         return self.s.item
     def apply_transition( self, item, to_status, actor, authority, reason ):
         self.s.calls.append( ( "transition", to_status, actor, authority, reason ) )
+    def apply_amendment( self, item, note, actor, authority, now, reason ):
+        self.s.calls.append( ( "amend", note, actor, authority, reason, now.tzinfo is not None ) )
 
 
 @pytest.fixture
@@ -271,6 +273,24 @@ def test_create_mints_a_live_row_with_canonical_personas( fake_db ):
     assert kw[ "created_by" ] == "mr radio (heartbeat-arbiter@lupin.deepily.ai)" and kw[ "priority" ] == "P3"
     assert kw[ "owner_persona" ] == "mr radio" and kw[ "accountable_manager" ] == "mr radio"
     assert kw[ "correlation_key" ] == "worktree:" + SEAT
+
+
+def test_create_takes_the_priority_the_caller_names_and_amend_appends_a_stamped_note( fake_db ):
+    row = st.compose_row( SEAT, [ "io/x" ], "t", False )
+    st.RepositoryStragglerStore().create( **row, priority="P2" )
+    assert fake_db.calls[ 0 ][ 1 ][ "priority" ] == "P2"
+    tid = str( uuid.uuid4() )
+    fake_db.calls.clear()
+    fake_db.item = SimpleNamespace( status="queued" )
+    st.RepositoryStragglerStore().amend( tid, "still red", "why" )
+    assert fake_db.calls == [ ( "lock", uuid.UUID( tid ) ), ( "amend", "still red", st.ARBITER_ACTOR, "standing", "why", True ) ]
+
+
+@pytest.mark.parametrize( "item", [ None, SimpleNamespace( status="done" ), SimpleNamespace( status="dropped" ) ] )
+def test_amend_leaves_a_missing_or_terminal_row_alone( fake_db, item ):
+    fake_db.item = item
+    st.RepositoryStragglerStore().amend( str( uuid.uuid4() ), "n", "r" )
+    assert [ c[ 0 ] for c in fake_db.calls ] == [ "lock" ]
 
 
 def test_drop_moves_a_live_row_to_dropped( fake_db ):

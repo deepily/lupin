@@ -30,6 +30,13 @@ from lupin_arbiter_app.health_watcher import SystemClock
 
 BAD_STATES    = ( "failing", "silent", "behind" )
 STATE_FILE    = "io/jobs/alert-state.json"
+ROW_STATE_FILE   = "io/jobs/job-row-state.json"
+ROW_KEY_PREFIX   = "job-health:"
+ROW_PROJECT      = "lupin"
+ROW_PRIORITY     = "P5"                                   # the floor a cron caller may file at (Rick, 23 Nov 2026); the row's owner raises it
+ROW_STATES       = ( "failing", "silent" )                # behind is alerted but never filed: it is not a failure to run
+FAILURE_ALERT_SECONDS = 3600                              # a row failure repeats its urgent notice at most this often
+UNCONFIRMED      = "the owner is the registry's default and Rick has not confirmed it yet"
 MAX_MESSAGE   = 300
 DELIVERED     = frozenset( DELIVERED_OUTCOMES | { "posted" } )                 # the live channel's delivered outcomes, and the durable post
 
@@ -127,6 +134,127 @@ def delivered( outcomes: Any ) -> bool:
     return isinstance( outcomes, list ) and any( isinstance( o, dict ) and o.get( "outcome" ) in DELIVERED for o in outcomes )
 
 
+def reasons_text( entry: dict ) -> str:
+    """Ensures: returns the entry's failing and silent reasons, joined by spaces."""
+    return " ".join( r[ "text" ] for r in entry[ "reasons" ] if r[ "state" ] in ROW_STATES )
+
+
+def row_fingerprint( entry: dict ) -> str:
+    """
+    Name what a job's row has already been told.
+
+    Ensures:
+        - returns a string of the state, the reasons and the last attempt's start
+        - the same fault seen again gives the same string, so the row is not amended twice for it
+    """
+    attempt = entry[ "last_attempt" ][ "started_at" ] if entry[ "last_attempt" ] else "never"
+    return f"{entry[ 'state' ]}|{reasons_text( entry )}|{attempt}"
+
+
+def compose_job_row( entry: dict, owner: str, confirmed: bool ) -> dict:
+    """
+    Build the row for one failing or silent job.
+
+    Requires:
+        - entry is a job entry of the jobs summary in a state of ROW_STATES; owner is the registry's owner key
+
+    Ensures:
+        - returns { title, body, owner, accountable, project, correlation_key, priority } for the store's create
+        - the key is job-health:<job>, and owner and accountable are the registry owner
+        - the body gives the reasons, says when the owner is unconfirmed, and says the row closes by itself
+    """
+    line = f"Owner: {owner}" + ( " (confirmed)." if confirmed else f" ({UNCONFIRMED})." )
+    body = ( f"Why this row exists: the job alert watcher found {entry[ 'title' ]} ({entry[ 'job' ]}) {entry[ 'state' ]}.\n{reasons_text( entry )}\n{line}\n"
+             f"What to do: open the Background Jobs page, find the cause and fix it. This row closes by itself when the job is healthy again.\n"
+             f"Correlation: one row per job, key {ROW_KEY_PREFIX}{entry[ 'job' ]}; a job that stays red updates this row.\n"
+             f"Filed at {ROW_PRIORITY}, the floor for a cron caller. The owner raises it if the job matters now." )
+    return { "title": f"[LUPIN] Job health: {entry[ 'title' ]} is {entry[ 'state' ]}", "body": body, "owner": owner, "accountable": owner, "project": ROW_PROJECT,
+             "correlation_key": f"{ROW_KEY_PREFIX}{entry[ 'job' ]}", "priority": ROW_PRIORITY }
+
+
+def sync_job_rows( jobs: List[ dict ], owners: Dict[ str, Tuple[ str, bool ] ], store: Any, state: Dict[ str, str ], now: datetime.datetime ) -> dict:
+    """
+    Bring the store's job-health rows in line with the jobs summary.
+
+    Requires:
+        - jobs is the list from the jobs summary, one entry for each job (a job with targets carries its worst state)
+        - owners maps a job id to ( owner key, confirmed )
+        - store has find_open( key ), create( **row ), amend( id, note, reason ) and drop( id, reason )
+        - state maps a job id to the fingerprint its row was last told
+
+    Ensures:
+        - returns { opened, updated, closed, errors, state } as lists of job ids, failure lines and the fingerprints to keep
+        - a failing or silent job has exactly one open row: one opened when there is none, and one amended only when the fingerprint changed
+        - a healthy job's open row is dropped with a reason naming the time
+        - behind and unknown jobs are left as they are
+        - one job's failure is listed in errors and never stops the others, and its fingerprint is not recorded
+    """
+    out, keep = { "opened": [], "updated": [], "closed": [], "errors": [] }, dict( state )
+    for entry in jobs:
+        job, key = entry[ "job" ], f"{ROW_KEY_PREFIX}{entry[ 'job' ]}"
+        if entry[ "state" ] not in ROW_STATES + ( "healthy", ): continue
+        try:
+            found = store.find_open( key )
+            if entry[ "state" ] == "healthy":
+                if found:
+                    store.drop( found, f"The job is healthy again as of {now.isoformat( timespec='minutes' )}; the job alert watcher closes the row." )
+                    out[ "closed" ].append( job )
+                keep.pop( job, None )
+                continue
+            seen = row_fingerprint( entry )
+            if found is None:
+                owner, confirmed = owners[ job ]
+                store.create( **compose_job_row( entry, owner, confirmed ) )
+                out[ "opened" ].append( job )
+            elif keep.get( job ) != seen:
+                store.amend( found, f"Still {entry[ 'state' ]}. {reasons_text( entry )}", "job health row: the job is still red" )
+                out[ "updated" ].append( job )
+            keep[ job ] = seen
+        except Exception as error:                                    # a store, registry or summary fault is named, never swallowed
+            out[ "errors" ].append( f"{key}: {type( error ).__name__}: {error}" )
+    return { **out, "state": keep }
+
+
+def make_row_sync( store: Any, owners_fn: Callable[ [], Dict[ str, Tuple[ str, bool ] ] ], state_path: str, log_fn: Callable,
+                   read_state_fn: Callable = load_json_dict, write_state_fn: Callable = write_json_atomic ) -> Callable[ [ List[ dict ], datetime.datetime ], List[ str ] ]:
+    """
+    Build the function the poll calls to keep the job-health rows.
+
+    Requires:
+        - owners_fn returns { job id: ( owner key, confirmed ) } and may raise
+        - store is as sync_job_rows needs
+
+    Ensures:
+        - the returned function takes ( jobs, now ) and returns the list of failure lines, empty when all went well
+        - it never raises: an unreadable registry is one failure line
+        - the fingerprint file is written only when it changed, and one job_rows event is logged when anything was opened, updated or closed
+    """
+    def sync( jobs: List[ dict ], now: datetime.datetime ) -> List[ str ]:
+        try:
+            owners = owners_fn()
+        except Exception as error:
+            return [ f"job registry unreadable: {type( error ).__name__}: {error}" ]
+        state = read_state_fn( state_path )
+        out   = sync_job_rows( jobs, owners, store, state, now )
+        if out[ "state" ] != state: write_state_fn( state_path, out[ "state" ] )
+        if out[ "opened" ] or out[ "updated" ] or out[ "closed" ]: log_fn( "job_rows", opened=out[ "opened" ], updated=out[ "updated" ], closed=out[ "closed" ] )
+        return out[ "errors" ]
+    return sync
+
+
+def registry_owners( root: str ) -> Dict[ str, Tuple[ str, bool ] ]:
+    """
+    Read each job's owner from the job registry.
+
+    Ensures:
+        - returns { job id: ( owner as the store's persona key, owner_confirmed is True ) }, "mr-radio" becoming "mr radio"
+        - raises what the registry loader raises when the registry is unreadable or invalid
+    """
+    import cosa.rest.job_registry as jr                           # lazy, like the job service
+    from lupin_mcp.persona_normalization import canonical_persona_key
+    return { j[ "job" ]: ( canonical_persona_key( j[ "owner" ] ), j.get( "owner_confirmed" ) is True ) for j in jr.load_registry( root )[ "jobs" ] }
+
+
 def make_live_summary_fn( root: str ) -> Callable[ [], List[ dict ] ]:
     """
     Build the reader of the real job summary.
@@ -162,6 +290,7 @@ class JobAlertLoop( StoppableDaemonMixin ):
         clock            : Any = None,
         read_state_fn    : Callable = load_json_dict,
         write_state_fn   : Callable = write_json_atomic,
+        row_sync_fn      : Any = None,
     ):
         """
         Hold the seams.
@@ -169,6 +298,7 @@ class JobAlertLoop( StoppableDaemonMixin ):
         Requires:
             - summary_fn returns the jobs list; notify_fn( message ) returns the sink's list of outcome dicts
             - interval_seconds is a positive int; clock has now() and sleep( seconds )
+            - row_sync_fn is None, or make_row_sync's function: ( jobs, now ) returning a list of failure lines
         """
         self.summary_fn       = summary_fn
         self.notify_fn        = notify_fn
@@ -178,6 +308,8 @@ class JobAlertLoop( StoppableDaemonMixin ):
         self.clock            = clock if clock is not None else SystemClock()
         self.read_state_fn    = read_state_fn
         self.write_state_fn   = write_state_fn
+        self.row_sync_fn      = row_sync_fn
+        self._failure_alerted = None
         self._stop_event      = threading.Event()
         self._thread          = None
 
@@ -193,7 +325,8 @@ class JobAlertLoop( StoppableDaemonMixin ):
             - raises what summary_fn or notify_fn raises, before anything is saved
         """
         state                 = self.read_state_fn( self.state_path )
-        alerts, new_state     = due_alerts( self.summary_fn(), state, self.clock.now() )
+        jobs, now             = self.summary_fn(), self.clock.now()
+        alerts, new_state     = due_alerts( jobs, state, now )
         sent                  = 0
         for key, message in alerts:
             self.log_fn( "job_alert", message=message )
@@ -204,7 +337,22 @@ class JobAlertLoop( StoppableDaemonMixin ):
             if key in state: new_state[ key ] = state[ key ]
             else: del new_state[ key ]
         if new_state != state: self.write_state_fn( self.state_path, new_state )
+        if self.row_sync_fn is not None: self._sync_rows( jobs, now )
         return sent
+
+    def _sync_rows( self, jobs: List[ dict ], now: datetime.datetime ) -> None:
+        """
+        Keep the job-health rows, and say so loudly when one cannot be kept.
+
+        Ensures:
+            - a failure is logged as job_row_failed and sent through notify_fn as an urgent alert, at most once per FAILURE_ALERT_SECONDS
+        """
+        errors = self.row_sync_fn( jobs, now )
+        if not errors: return
+        self.log_fn( "job_row_failed", errors=errors )
+        if digest_due( self._failure_alerted, now, FAILURE_ALERT_SECONDS ):
+            self.notify_fn( f"Job rows could not be kept in step: {len( errors )} failure(s). {errors[ 0 ]}"[ :MAX_MESSAGE ] )
+            self._failure_alerted = now.isoformat()
 
     def _enabled( self ) -> bool:
         """Ensures: returns True; the arbiter builds this loop only when the watcher is on."""

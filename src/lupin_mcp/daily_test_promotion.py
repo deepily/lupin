@@ -29,10 +29,12 @@ import sys
 import cosa.utils.util as cu
 from cosa.config import app_timezone
 from cosa.rest import job_cron
+from cosa.rest import job_registry as jr
 from cosa.utils.atomic_json import load_json_dict, write_json_atomic
 from lupin_mcp import duplicate_check_daily as dcd
 from lupin_mcp import duplicate_check_filing as filing
 from lupin_mcp import job_summary as js
+from lupin_mcp.persona_normalization import canonical_persona_key
 from lupin_mcp.reuse_harness import commands
 from cosa.rest.task_store_rules import filer_created_by
 
@@ -426,6 +428,22 @@ def run( root, now, trigger, branch, vm, store, owner, zone, check=False ):
         return conclude( parts, now, trigger, result, stage, detail, started, state )
 
 
+def registry_owner( root ):
+    """
+    Read this job's owner from the job registry.
+
+    Requires:
+        - the registry under root lists test-promotion
+    Ensures:
+        - returns the owner of the registry's test-promotion entry as the store's persona key (the registry's "mr-radio" is "mr radio"), so a failure row and the jobs page name one owner
+    Raises:
+        - ValueError when the registry has no entry for this job, or is invalid
+    """
+    owners = [ j[ "owner" ] for j in jr.load_registry( root )[ "jobs" ] if j[ "job" ] == JOB ]
+    if not owners: raise ValueError( f"the job registry has no {JOB} entry, so the failure rows have no owner" )
+    return canonical_persona_key( owners[ 0 ] )
+
+
 def main( argv=None, environ=None, runner=run_command, store=None, now=None, config=None ):
     """
     Run the job from the command line.
@@ -441,13 +459,14 @@ def main( argv=None, environ=None, runner=run_command, store=None, now=None, con
     parser  = argparse.ArgumentParser( description="Promote the newest merged build to the cloud test VM, then smoke it." )
     parser.add_argument( "--branch", default=dcd.BRANCH_AUTO )
     parser.add_argument( "--trigger", default="cron", choices=sorted( TRIGGER_NAMES ) )
-    parser.add_argument( "--owner", default="mr radio", help="the persona the failure rows are filed for" )
+    parser.add_argument( "--owner", default=None, help="the persona the failure rows are filed for; default is this job's owner in the job registry" )
     parser.add_argument( "--check", action="store_true", help="print what would happen and change nothing" )
     args    = parser.parse_args( argv )
     root    = environ.get( "LUPIN_ROOT" ) or cu.get_project_root()
     now     = now or datetime.datetime.now().astimezone()
     trigger = TRIGGER_NAMES[ args.trigger ]
-    return run( root, now, trigger, args.branch, Vm( root, runner ), store or ( None if args.check else filing.LiveStore() ), args.owner, app_zone( config ), args.check )
+    owner   = args.owner or ( None if args.check else registry_owner( root ) )      # a check files no row, so it needs no owner
+    return run( root, now, trigger, args.branch, Vm( root, runner ), store or ( None if args.check else filing.LiveStore() ), owner, app_zone( config ), args.check )
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point

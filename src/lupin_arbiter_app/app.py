@@ -299,6 +299,7 @@ def _build_job_alert_loop( cfg, gateway, live_notify_fn, *, log_fn, clock=None )
 
     Alerts go to Rick only, as a durable post plus a best-effort live push, through the shared
     escalation sink. There is no manager fanout.
+    The same poll keeps one P5 row per failing or silent job, through the arbiter's repository store.
 
     Requires:
         - cfg exposes .get( key, default, return_type ) (real or fake)
@@ -314,7 +315,8 @@ def _build_job_alert_loop( cfg, gateway, live_notify_fn, *, log_fn, clock=None )
 
     import cosa.utils.util as cu
     from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn
-    from lupin_arbiter_app.job_alert_watcher import JobAlertLoop, STATE_FILE, make_live_summary_fn
+    from lupin_arbiter_app.job_alert_watcher import JobAlertLoop, ROW_STATE_FILE, STATE_FILE, make_live_summary_fn, make_row_sync, registry_owners
+    from cosa.agents.shared.worktree_straggler_tickets import RepositoryStragglerStore
 
     root = cu.get_project_root()
     return JobAlertLoop(
@@ -324,6 +326,7 @@ def _build_job_alert_loop( cfg, gateway, live_notify_fn, *, log_fn, clock=None )
         log_fn           = log_fn,
         interval_seconds = int( cfg.get( "arbiter job alert interval seconds", default=300, return_type="int" ) ),
         clock            = clock,
+        row_sync_fn      = make_row_sync( RepositoryStragglerStore(), lambda: registry_owners( root ), root + "/" + ROW_STATE_FILE, log_fn ),
     )
 
 

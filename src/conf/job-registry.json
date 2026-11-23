@@ -14,7 +14,7 @@
       "DEEPILY_DATA_DIR": "{deepily_data}",
       "COSA_VOICE_MANAGERS__LUPIN": "Cheech, Mr. Radio"
     },
-    "owner_note": "owner_confirmed false means the owner is cheech by default and no open row names another seat (Cheech, 2026-11-07)",
+    "owner_note": "owner_confirmed true means Rick confirmed the owner on 23 Nov 2026 (row 967302fd); the job watcher files a failure row to this owner. A new job starts false until he confirms it (Cheech, 2026-11-07; updated 2026-11-23)",
     "schedule_note": "A job with cron_tag takes its schedule from the installed crontab lines that end with # <tag>; the schedule here is the fallback when none is installed or the crontab cannot be read; the duplicate-check fallback is the three lines installed on 2026-11-07, which any hourly run also covers; a job with cron_managed true has its lines written by lupin_mcp.cron_generate from this entry, and cron_replaces names hand-written lines its install removes"
   },
   "jobs": [
@@ -81,7 +81,8 @@
       "cron_tag": "duplicate-check-daily",
       "cron_managed": true,
       "cron_log": "{code_health}/duplicate-check-daily/daily.log",
-      "own_summary": true
+      "own_summary": true,
+      "owner_confirmed": true
     },
     {
       "job": "wiki-librarian",
@@ -131,7 +132,8 @@
       "cron_tag": "wiki-librarian-tick",
       "cron_managed": true,
       "cron_log": "{data}/librarian/librarian.log",
-      "own_summary": true
+      "own_summary": true,
+      "owner_confirmed": true
     },
     {
       "job": "reuse-behaviour",
@@ -176,7 +178,8 @@
       "cron_tag": "reuse-behaviour-weekly",
       "cron_managed": true,
       "cron_log": "{data}/behaviour/weekly.log",
-      "own_summary": true
+      "own_summary": true,
+      "owner_confirmed": true
     },
     {
       "job": "vector-refresh",
@@ -217,7 +220,7 @@
           "REUSE_VECTOR_REFRESH_ENV": "{home}/.lupin/reuse-vector-refresh.env"
         }
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_tag": "reuse-vector-refresh",
       "cron_managed": true,
       "cron_log": "{data}/refresh/refresh.log",
@@ -256,7 +259,7 @@
           "REUSE_SHADOW_AUDIT_PYTHON": "{python}"
         }
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_tag": "reuse-shadow-audit",
       "cron_managed": true,
       "cron_log": "{data}/shadow-audit/shadow-audit.log"
@@ -268,7 +271,7 @@
       "catalog": "P1",
       "title": "Context-pressure tick (fleet)",
       "description": "Every ten minutes this checks how full each working session's memory is. When one is past its limit, it tells that session, its manager and Rick, so the session can be restarted before it gets confused.",
-      "owner": "cheech",
+      "owner": "maria",
       "schedule": [
         {
           "cron": "9,19,29,39,49,59 * * * *"
@@ -278,7 +281,7 @@
       "audience": [
         "managers"
       ],
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_exclusion_reason": "planning-is-prompting owns this script and its fleet timer install (slot-fleet tag), so it is not a Lupin line to generate. Its installer writes the line as cron-job.sh context-tick cron -- <tick>, so job_run records each run; there is no run block, so the page offers no Run now (Rick, decision 317d5101, 2026-11-14)"
     },
     {
@@ -287,7 +290,7 @@
       "catalog": "P3",
       "title": "Doc-parity tick",
       "description": "Each morning this checks that paragraphs which should say the same thing in two documents still do. It prints nothing when they match and speaks up only when one copy has drifted.",
-      "owner": "cheech",
+      "owner": "maria",
       "schedule": [
         {
           "cron": "30 7 * * *"
@@ -303,7 +306,7 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_tag": "doc-parity-tick",
       "cron_managed": true,
       "cron_log": "{home}/.lupin/logs/doc-parity-tick.log",
@@ -317,7 +320,7 @@
       "catalog": "P4",
       "title": "Worktree census",
       "description": "Each week this lists the temporary working copies and branches that have been left behind: stale ones, ones git says are gone, and ones already merged. It only reports; a person decides what to delete.",
-      "owner": "cheech",
+      "owner": "maria",
       "schedule": [
         {
           "cron": "0 13 * * 1"
@@ -335,7 +338,7 @@
           "PLANNING_IS_PROMPTING_ROOT": "{pip}"
         }
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_tag": "worktree-hygiene-report",
       "cron_managed": true,
       "cron_log": "{home}/.lupin/logs/worktree-hygiene-report.log",
@@ -364,7 +367,7 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_managed": true,
       "cron_log": "{root}/io/claude_code_hooks/logs/disk-hygiene-report.log",
       "cron_replaces": [
@@ -393,7 +396,7 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_managed": true,
       "cron_log": "{root}/io/claude_code_hooks/logs/disk-hygiene-sweep.log",
       "cron_replaces": [
@@ -425,7 +428,7 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_managed": true,
       "cron_log": "{root}/io/claude_code_hooks/logs/io-tmp-sweep.log",
       "cron_replaces": [
@@ -439,7 +442,7 @@
       "catalog": "L15",
       "title": "Host snapshot (crontab and units, for the container)",
       "description": "Every five minutes this saves a copy of the computer's scheduled-job list and service states where the server container can read it. The container cannot see them itself, and without the copy the page would show schedules as unverified.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "schedule": [
         {
           "cron": "*/5 * * * *"
@@ -454,7 +457,7 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_tag": "job-host-snapshot",
       "cron_managed": true,
       "cron_log": "{root}/io/jobs/host-snapshot/cron.log"
@@ -465,7 +468,7 @@
       "catalog": "L31",
       "title": "Daily test promotion",
       "description": "Each day this puts the newest merged build on the cloud test machine and runs a quick health check. It rolls back and files a task if the check fails, and returns the machine to the power state it found it in.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "schedule": [
         {
           "cron": "0 18 * * *"
@@ -490,7 +493,7 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_managed": true,
       "cron_log": "{home}/.lupin/logs/test-promotion.log",
       "cron_tag": "test-promotion"
@@ -501,7 +504,7 @@
       "catalog": "L9",
       "title": "Hook-link tick",
       "description": "Every ten minutes this checks that the commit and push safety hooks are still linked to the scripts this project ships. It stays silent when they are, and warns when something has swapped them out, which would turn a safety check off for everyone.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "schedule": [
         {
           "cron": "2,12,22,32,42,52 * * * *"
@@ -514,7 +517,7 @@
         ],
         "env": {}
       },
-      "owner_confirmed": false,
+      "owner_confirmed": true,
       "cron_tag": "hook-link-tick",
       "cron_managed": true,
       "cron_log": "{home}/.lupin/logs/hook-link-tick.log",
@@ -547,7 +550,8 @@
       "audience": [
         "rick"
       ],
-      "cron_exclusion_reason": "one-shot personal reminders for Rick, run by their own script lines; not a Lupin background job"
+      "cron_exclusion_reason": "one-shot personal reminders for Rick, run by their own script lines; not a Lupin background job",
+      "owner_confirmed": true
     },
     {
       "job": "fleet-arbiter",
@@ -557,7 +561,7 @@
       "catalog": "L11",
       "title": "Fleet arbiter (:8001)",
       "description": "This service runs all the time on its own port and watches the working sessions. It wakes sessions that have gone quiet, checks that managers answer when tapped, and warns Rick when the whole fleet stalls.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "schedule": [],
       "summary_path": "{root}/io/jobs/fleet-arbiter/job-summary.json",
       "liveness": {
@@ -565,7 +569,7 @@
         "unit": "lupin-arbiter-app.service",
         "health_url": "http://host.docker.internal:8001/health"
       },
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "context-pressure-writer",
@@ -574,7 +578,7 @@
       "catalog": "L13",
       "title": "Context-pressure writer",
       "description": "Inside the fleet arbiter, this keeps a current figure for how full each session's memory is. The ten-minute context check reads that figure; this job only writes it and takes no action itself.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "schedule": [],
       "summary_path": "{root}/io/jobs/context-pressure-writer/job-summary.json",
       "liveness": {
@@ -582,7 +586,7 @@
         "unit": "lupin-arbiter-app.service",
         "health_url": "http://host.docker.internal:8001/health"
       },
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "health-watcher",
@@ -592,7 +596,7 @@
       "catalog": "L14",
       "title": "Health watcher",
       "description": "This service checks the development and test server containers and tells people when one becomes unhealthy or keeps flipping between healthy and not. It only reports; it does not restart anything.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "schedule": [],
       "summary_path": "{root}/io/jobs/health-watcher/job-summary.json",
       "liveness": {
@@ -600,7 +604,7 @@
         "unit": "lupin-arbiter-app.service",
         "health_url": "http://host.docker.internal:8001/health"
       },
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "worktree-janitor",
@@ -610,7 +614,7 @@
       "catalog": "L12",
       "title": "Worktree janitor",
       "description": "Every minute the fleet arbiter looks for idle temporary working copies that nobody is using. It saves anything worth keeping, removes the copy, and keeps archived work for 14 days. It runs once for each of the repositories listed as targets.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "reporting": "off",
       "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
@@ -631,7 +635,7 @@
           "target": "cosa-voice"
         }
       ],
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "notification-expiry",
@@ -640,7 +644,7 @@
       "catalog": "L18",
       "title": "Notification expiry",
       "description": "Every five minutes this closes notifications that asked for an answer when nobody is left to give one. Without it they would show as waiting forever.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "reporting": "off",
       "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
@@ -650,7 +654,7 @@
       ],
       "summary_path": "{root}/io/jobs/notification-expiry/job-summary.json",
       "grace_seconds": 300,
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "commons-archival",
@@ -659,7 +663,7 @@
       "catalog": "L19",
       "title": "Commons archival",
       "description": "Every hour this moves messages older than a day out of the shared message folders into dated archive folders. That keeps the live folders short without losing the history.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "reporting": "off",
       "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
@@ -669,7 +673,7 @@
       ],
       "summary_path": "{root}/io/jobs/commons-archival/job-summary.json",
       "grace_seconds": 600,
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "notify-outbox",
@@ -679,7 +683,7 @@
       "catalog": "L20",
       "title": "Notify outbox flush",
       "description": "When a notification cannot be delivered, it is saved to disk. Every 30 seconds this tries again until it goes through or gets too old.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "reporting": "off",
       "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
@@ -690,7 +694,7 @@
       "summary_path": "{root}/io/jobs/notify-outbox/job-summary.json",
       "grace_seconds": 60,
       "scan_debt": true,
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "socket-housekeeping",
@@ -700,7 +704,7 @@
       "catalog": "L22",
       "title": "Socket heartbeat, cleanup and transcript tailer",
       "description": "Every 30 seconds this checks that browser connections to the server are still alive and removes dead ones. Once an hour it also clears out old sessions that have been idle for more than a day.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "reporting": "off",
       "reporting_off_reason": "no run record: runs inside a server",
       "schedule": [
@@ -715,7 +719,7 @@
       ],
       "summary_path": "{root}/io/jobs/socket-housekeeping/job-summary.json",
       "grace_seconds": 120,
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "side-services",
@@ -724,7 +728,7 @@
       "catalog": "L28",
       "title": "Side services",
       "description": "Two small helper services run beside the main server. One serves the dev-server restart button, and one measures memory use of running Claude sessions so a runaway process can be named when the system kills it.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "reporting": "off",
       "reporting_off_reason": "no schedule",
       "schedule": [],
@@ -745,7 +749,7 @@
           }
         }
       ],
-      "owner_confirmed": false
+      "owner_confirmed": true
     },
     {
       "job": "pokes",
@@ -754,12 +758,12 @@
       "catalog": "L30",
       "title": "Pokes (when started)",
       "description": "When started, this wakes chosen sessions at a fixed interval to keep work moving, and stops on a clear signal or a hard time limit. It runs only on request, so it is usually idle.",
-      "owner": "cheech",
+      "owner": "mr-radio",
       "reporting": "off",
       "reporting_off_reason": "no schedule",
       "schedule": [],
       "summary_path": "{root}/io/jobs/pokes/job-summary.json",
-      "owner_confirmed": false
+      "owner_confirmed": true
     }
   ]
 }
