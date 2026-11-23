@@ -616,13 +616,10 @@ def _get_qualitative_enabled():
         - a missing key or unreadable config returns False rather than raising — the
           judge must never take a DM send down, and False is the safe direction here
     """
-    try:
-        from cosa.config.configuration_manager import ConfigurationManager
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        return config_mgr.get( "dm quality qualitative enabled", default=False, return_type="boolean" )
-    except Exception as e:
-        print( f"[DmQualityJudge] could not read the qualitative toggle ({type( e ).__name__}) — defaulting OFF" )
-        return False
+    from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.config.switch_reader import read_switch
+    return read_switch( ConfigurationManager, "dm quality qualitative enabled", False,
+                        lambda e: f"[DmQualityJudge] could not read the qualitative toggle ({type( e ).__name__}) — defaulting OFF" )
 
 
 def grade_body( body_text, qualitative_enabled, word_limit, grade_qualitative ):
