@@ -486,3 +486,14 @@ def test_revealed_draft_is_none_with_no_log_row_no_reveal_or_no_draft( db ):
     _log( db, plain, draft_at_reveal={ "value": "x" } )
     _log( db, nodr, fold_opened_at=T0 + timedelta( minutes=1 ) )
     assert [ ev.revealed_draft( db, uuid.UUID( n ) ) for n in ( nolog, plain, nodr ) ] == [ None, None, None ]
+
+
+_CARD = { "title": "T", "abstract": "", "fields": [ { "prompt": "P1", "options": [ { "label": "A" }, { "label": "" } ] }, { "prompt": "P2", "options": [ { "label": "B" } ] } ] }
+
+
+def test_card_text_leaves_the_option_labels_out_unless_asked():
+    assert ev.card_text( _CARD ) == "T\nP1\nP2"
+
+
+def test_card_text_with_options_puts_each_field_s_labels_after_its_prompt_and_skips_blanks():
+    assert ev.card_text( _CARD, include_options=True ) == "T\nP1\nA\nP2\nB"

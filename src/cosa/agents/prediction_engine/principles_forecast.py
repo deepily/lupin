@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from cosa.agents.prediction_engine.episode_view import episode_view
+from cosa.agents.prediction_engine.episode_view import card_text, episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieval_limits, retrieve_principles
 from cosa.agents.shared.config_loader import required_positive_int
 from cosa.config.configuration_manager import ConfigurationManager
@@ -219,20 +219,6 @@ def with_principles( system_prompt, user_prompt, block ):
     """
     if not block[ "text" ]: return system_prompt, user_prompt
     return system_prompt, f"{user_prompt}\n\n{BLOCK_HEADING}\n{block[ 'text' ]}"
-
-
-def card_text( episode ):
-    """
-    Build the text a card is searched for principles by.
-
-    Requires:
-        - episode is episode_view's result
-
-    Ensures:
-        - returns the title, the abstract and each field's prompt, one per line, skipping empty parts
-    """
-    parts = [ episode[ "title" ], episode[ "abstract" ] ] + [ field[ "prompt" ] for field in episode[ "fields" ] ]
-    return "\n".join( part for part in parts if part )
 
 
 def _row_present( session, key, arm=ARM ):

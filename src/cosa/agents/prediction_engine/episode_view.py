@@ -34,6 +34,24 @@ LINK_KINDS       = ( ( "/app/docs?", "supporting_doc" ), ( "/app/tasks/approve?"
 RECOMMENDED_TAG  = "recommended"
 
 
+def card_text( episode, include_options=False ):
+    """
+    Gather the text of a card, one part per line.
+
+    Requires:
+        - episode is episode_view's result
+
+    Ensures:
+        - returns the title, the abstract and each field's prompt, one per line, skipping empty parts
+        - with include_options each field's option labels follow its prompt
+    """
+    parts = [ episode[ "title" ], episode[ "abstract" ] ]
+    for field in episode[ "fields" ]:
+        parts.append( field[ "prompt" ] )
+        if include_options: parts.extend( option[ "label" ] for option in field[ "options" ] )
+    return "\n".join( part for part in parts if part )
+
+
 def pool_limit():
     """
     Read how many rows each tier of the pool may hold.

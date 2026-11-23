@@ -14,6 +14,7 @@ An answer given after a reveal with no draft is marked possibly influenced.
 import re
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
+from cosa.agents.prediction_engine.episode_view import card_text as episode_card_text
 from cosa.agents.prediction_engine.exposure import revealed_before_answer
 from cosa.utils.iso_timestamp import aware_moment
 from cosa.utils.notification_utils import parse_field_selections
@@ -39,11 +40,7 @@ def card_text( episode ):
         - returns the title, the abstract, each field prompt and each option label, one per line
         - a missing title or abstract adds nothing
     """
-    parts = [ episode[ "title" ], episode[ "abstract" ] ]
-    for field in episode[ "fields" ]:
-        parts.append( field[ "prompt" ] )
-        parts.extend( option[ "label" ] for option in field[ "options" ] )
-    return "\n".join( part for part in parts if part )
+    return episode_card_text( episode, include_options=True )
 
 
 def project_names( sender_ids ):
