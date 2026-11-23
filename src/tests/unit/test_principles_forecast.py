@@ -288,7 +288,7 @@ class Stub:
     def get( self, key, default=None, return_type=None ):
         if self.error: raise self.error
         return self.value
-    def get_required( self, key, return_type=None ): return self.value
+    def get_required( self, key, return_type=None, silent=False ): return self.value
 
 
 def test_the_switch_reads_the_ini_and_an_unreadable_setting_reads_as_off( monkeypatch ):

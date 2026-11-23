@@ -410,7 +410,7 @@ def test_pool_limit_reads_the_live_ini_key_as_fifty():
 def test_pool_limit_refuses_a_non_positive_value( monkeypatch ):
     class _Manager:
         def __init__( self, env_var_name ): pass
-        def get_required( self, key, return_type ): return 0
+        def get_required( self, key, return_type=None ): return 0
     monkeypatch.setattr( ev, "ConfigurationManager", _Manager )
     with pytest.raises( ValueError, match="positive integer" ):
         ev.pool_limit()

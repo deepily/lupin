@@ -35,6 +35,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from cosa.agents.prediction_engine.episode_view import episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieval_limits, retrieve_principles
+from cosa.agents.shared.config_loader import required_positive_int
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.config.switch_reader import read_switch
 from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
@@ -105,9 +106,7 @@ def read_cap( key ):
         - MissingConfigKeyError if the key is missing or blank, so a missing cap never becomes unbounded
         - ValueError if the value is not a positive integer
     """
-    cap = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( key, return_type="int" )
-    if cap < 1: raise ValueError( f"'{key}' must be a positive integer, got {cap}" )
-    return cap
+    return required_positive_int( key, ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
 
 
 def concurrency_cap():

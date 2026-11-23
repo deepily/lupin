@@ -131,7 +131,7 @@ def test_load_dataclass_passes_debug_and_label_through( capsys ):
 # ----------------------------------------------------------------------------
 from dataclasses import MISSING, field, fields
 
-from cosa.agents.shared.config_loader import model_field, required_model_id
+from cosa.agents.shared.config_loader import model_field, required_model_id, required_positive_int
 from cosa.config.configuration_manager import MissingConfigKeyError
 
 
@@ -216,3 +216,43 @@ def test_a_field_with_another_default_factory_is_read_with_get():
         items : list = field( default_factory=list )
     mgr = _Mgr( { "x items": [ 1 ] } )
     assert load_kwargs_from_ini( _Listy, mgr, { "items": "x items" } ) == { "items": [ 1 ] }
+
+
+class _CountMgr:
+    """A manager stand-in whose get_required answers one number and records how it was asked."""
+    def __init__( self, value ): self.value, self.calls = value, []
+    def get_required( self, key, return_type=None ):
+        self.calls.append( ( key, return_type ) )
+        return self.value
+
+
+def test_required_positive_int_reads_the_key_as_an_int():
+    mgr = _CountMgr( 7 )
+    assert required_positive_int( "x count", mgr ) == 7
+    assert mgr.calls == [ ( "x count", "int" ) ]
+
+
+@pytest.mark.parametrize( "value", [ 0, -3 ] )
+def test_required_positive_int_refuses_a_value_below_one_and_names_the_key( value ):
+    with pytest.raises( ValueError, match=f"'x count' must be a positive integer, got {value}" ):
+        required_positive_int( "x count", _CountMgr( value ) )
+
+
+def test_required_positive_int_builds_the_process_manager_and_keeps_its_banner_off_stdout( capsys ):
+    built = []
+    class _Builds( _CountMgr ):
+        def __init__( self, env_var_name=None ):
+            super().__init__( 2 )
+            built.append( env_var_name )
+            print( "BANNER" )
+    from unittest.mock import patch
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", _Builds ):
+        assert required_positive_int( "x count" ) == 2
+    captured = capsys.readouterr()
+    assert built == [ "LUPIN_CONFIG_MGR_CLI_ARGS" ]
+    assert ( captured.out, captured.err ) == ( "", "BANNER\n" )
+
+
+def test_required_positive_int_refuses_a_key_the_real_ini_lacks():
+    with pytest.raises( MissingConfigKeyError, match="no such count key for the test" ):
+        required_positive_int( "no such count key for the test" )
