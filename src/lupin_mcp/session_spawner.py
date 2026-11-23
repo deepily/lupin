@@ -2684,7 +2684,7 @@ def quick_smoke_test():
         # tmux session name on sep="-" ("cc-author-mr-radio-1") — the two MUST NOT
         # share a separator (one-name mandate 2026-06-22).
         mw = spawn_sessions( 1, "t", "mgr-mw", script_path="x", manager_persona="Mr. Radio",
-                             role="author", runner=runner, session_dir=sd )
+                             role="author", runner=runner, session_dir=sd, **smoke_fleet )
         assert mw[ "collection_topic" ] == "dm-mr_radio", mw[ "collection_topic" ]
         assert mw[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-mr-radio-1"
         listed = list_spawned_sessions( "mgr-abc", runner=runner, session_dir=sd )
@@ -2703,13 +2703,13 @@ def quick_smoke_test():
         print( "  ✓ dismiss (explicit + all) reaps + clears manifest" )
 
         # dry-run does NOT persist
-        dr = spawn_sessions( 2, "t", "mgr-dry", script_path="x", dry_run=True, runner=runner, session_dir=sd )
+        dr = spawn_sessions( 2, "t", "mgr-dry", script_path="x", dry_run=True, runner=runner, session_dir=sd, **smoke_fleet )
         assert dr[ "dry_run" ] and not _manifest_path( "mgr-dry", sd ).exists()
         print( "  ✓ dry-run leaves no manifest" )
 
         # idle-TTL auto-reap: predicate flags one of two as stale
         spawn_sessions( 2, "t", "mgr-reap", script_path="x", manager_persona="Rio",
-                        runner=runner, session_dir=sd )
+                        runner=runner, session_dir=sd, **smoke_fleet )
         none_stale = reap_stale_spawned( "mgr-reap", is_stale=lambda n: False, runner=runner, session_dir=sd )
         assert none_stale[ "reaped" ] == [] and len( none_stale[ "remaining" ] ) == 2
         one_stale  = reap_stale_spawned( "mgr-reap", is_stale=lambda n: n.endswith( "-1" ),
@@ -2720,7 +2720,7 @@ def quick_smoke_test():
 
         # role in the name + lowest-free index across roles AND batches
         author = spawn_sessions( 1, "t", "mgr-roles", script_path="x", manager_persona="Rio",
-                                 role="author", runner=runner, session_dir=sd )
+                                 role="author", runner=runner, session_dir=sd, **smoke_fleet )
         assert author[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-rio-1"
         spawn_sessions( 3, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner,
                         session_dir=sd, **smoke_fleet )
