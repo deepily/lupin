@@ -188,16 +188,33 @@ def test_the_shipped_ini_defines_the_key_in_baseline_with_one_vm_override_as_boo
     assert io.read_value_from_disk( path, sc.SKELETON_CREW_KEY ) in ( "true", "false" )
 
 
-def test_the_shipped_ini_gives_the_vm_block_cap_one_and_skeleton_crew_on_and_dev_the_base( monkeypatch ):
-    root = os.environ.get( "LUPIN_ROOT", os.getcwd() )
-    path = os.path.join( root, "src", "conf", "lupin-app.ini" )
-    cap  = "cc session fleet size cap"
-    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Testing-GCS" )
-    assert io.read_int_from_disk( path, cap ) == 1
-    assert sc.read_state_from_disk( path, quiet=True ) is True
-    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_block_id=Lupin:+Development" )
-    assert io.read_int_from_disk( path, cap ) == 12
-    assert sc.read_state_from_disk( path, quiet=True ) is False
+def _value_in( lines, key, section ):
+    """
+    Return the value one section of the shipped INI gives a key.
+
+    Requires:
+        - lines is the INI split on newlines; key is an INI key as written
+
+    Ensures:
+        - returns the stripped value of the key's definition in that section
+        - fails the calling test when the section does not define the key
+    """
+    found = [ d for d in io.find_definitions( lines, key ) if d.section == section ]
+    assert len( found ) == 1, f"[{section}] should define {key!r} once, found {len( found )}"
+    return found[ 0 ].line.split( "=", 1 )[ 1 ].strip()
+
+
+def test_the_vm_block_reads_its_own_cap_and_switch_and_dev_reads_the_base_whatever_their_values( monkeypatch ):
+    # Rick, 22 Nov 2026: tests adapt to a system whose settings change while it runs. The cap slider and the
+    # skeleton-crew switch rewrite these values at any time, so this pins where each block reads them, never the values.
+    root  = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    path  = os.path.join( root, "src", "conf", "lupin-app.ini" )
+    cap   = "cc session fleet size cap"
+    lines = open( path, encoding="utf-8" ).read().split( "\n" )
+    for block, section in ( ( "Lupin:+Testing-GCS", "Lupin: Testing-GCS" ), ( "Lupin:+Development", "Lupin: Baseline" ) ):
+        monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", f"config_block_id={block}" )
+        assert io.read_int_from_disk( path, cap ) == int( _value_in( lines, cap, section ) ), block
+        assert sc.read_state_from_disk( path, quiet=True ) is ( _value_in( lines, sc.SKELETON_CREW_KEY, section ).lower() == "true" ), block
 
 
 def test_the_splainer_explains_the_key():
