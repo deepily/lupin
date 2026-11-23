@@ -16,6 +16,21 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-23 (Cheech 🌿 `64d0ef05`, lost answer signal and the principle learner; crew Pocholo, John, Rachel reaped, Tiberius live; times Eastern)
+
+The plans are [the pipeline plan](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.23-answer-signal-pipeline-plan.md) and [the experiment plan](src/rnd/v0.2.4/2026.11.17-principle-learner-research/2026.11.23-answer-signal-experiment-plan.md), both drafts for María's cascade. They rest on [the expert's response](src/rnd/v0.2.4/2026.11.17-principle-learner-research/2026.11.21-request-for-expertise-information-loss-in-answer-forecasting-response.md) and [the audit](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.23-discarded-answer-signal-audit.md).
+
+- 2026-11-23 — **The R&D folder** → **Two folders** (Rick, voice and card, about 11:30; row `b357e6b4`, commit `94e1f5b98`). Pipeline repairs stay in the upgrades folder. Principle learner research moves to `2026.11.17-principle-learner-research/`.
+- 2026-11-23 — **Growing the reuse known-answer set** → **Approved as drafted, a target of 512** (Rick, card, about 11:27; decision `40e46c73`, build row `c8acc49a`).
+- 2026-11-23 — **The live repairs (the proxy's neither fix, the capture fields, the comment-match report)** → **Wait for the cascade** (Rick, card, about 11:55). Why: one coherent design first. The capture fields lose data every day they wait, and Rick accepted that cost.
+- 2026-11-23 — **The names of the four experiment arms** → **Mechanical rulesets, no answer history, answer history, learned principles** (Rick, card, about 12:35). Why: Rick, about 11:57: code letters for arms or tracks "obfuscate what we're talking about". This repeats the 21 Nov plain-names ruling, which the first draft broke.
+- 2026-11-23 — **The deciding test** → **Learned principles against answer history** (Rick, card, about 12:35). Why: it is the claim the principle learner makes, and the first experiment lacked the answer history arm.
+- 2026-11-23 — **The smallest worthwhile gain** → **Set at the freeze** (Rick, card, about 12:40). Its floor is computed after the data fixes and the re-score. Why: the floor must be recalibrated once the answer handling is fixed.
+- 2026-11-23 — **Boundary with the 18 Nov remediation plan** → **Replace its answer handling only** (Rick, card, about 12:42). The plan's own switches, checkpoint and frozen baseline stay with Mr. Radio.
+- 2026-11-23 — **The rubric bar** → **Kappa 0.7 on the action** (Rick, card, about 12:47). Two human readers must reach it. The material-error bar waits for baselines measured under the new handling. Why: four of the six yes/no answer types were never forecast, so nobody knows today's rates.
+- 2026-11-23 — **The owner-anchoring test** → **After the shadow window** (Rick, card, about 12:50).
+- 2026-11-23 — **One plan or two** → **Two: a pipeline plan and an experiment plan** (Rick, card, about 12:55).
+
 ## 📚 Decisions log 2026-11-21 (Cheech 🌿 `756b6129`, Principle learner build; crew Pocholo, Tiffany, Tiberius, Rachel, all reaped; times Eastern)
 
 The retro is [the 21 Nov post-game](src/docs/post-games/v0.2.4/2026.11.21-principle-learner-phase-4-post-game.md).
