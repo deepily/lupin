@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.22 - Session dbff9ee1 (Mr. Radio 🦉, build manager; skeleton crew, subagents only) | Jev key on the VM, sessions folder cutover, Jev-down reuse re-check
+
+**Resume here**: memento `.claude-memento-mr-radio-dbff9ee1.md`. No live seats.
+1. **Closed**: `a65a6de3` Jev key on the VM (`9487d571c`), `138c1c8f` VM promotion, `7916fc6f` Jev 402 handling (`417812134`), gate `e38a504a` TypeSafe top-up.
+2. **Sessions folder cutover** (row `f40c5b75`, done): Lupin's session bridges moved from `~/.claude/sessions` to `~/.claude/lupin-sessions` (`f30216677`, `e8f253162`); dev, test, arbiter and the VM verified.
+3. **Skeleton crew test** rewritten to pin where the settings are read, not their values (`88b5ee060`, Rick's ruling).
+4. **Reuse re-check** (row `5f177709`, queued): all 260 rulings made while Jev was down were looked up again. 86 now match older code and still need their source read. Files: `io/tmp/mr-radio-jev-down-recheck-*`.
+5. **Last Call** `edb017dc`: closed with session end, push and backup.
+
 ## 2026.11.21 - Session 189a73eb (Mr. Radio 🦉, build manager; crew John, Rio, Sam, Krishna, Maya, Clayton, Chloé) | Preference learning: phases six and seven on live, reuse gate green, test VM promotion fixed
 
 **Resume here**: memento `.claude-memento-mr-radio-189a73eb.md`. No live seats; every crew memento is in `io/mementos/`. Row `138c1c8f` waits on Rick's word for one hand deploy to the test VM (chase 22 Nov 10:30).
