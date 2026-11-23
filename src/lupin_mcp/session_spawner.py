@@ -798,7 +798,13 @@ def spawn_sessions(
         - Raises ValueError when count < 1 or count > spawn_cap (predictable cap,
           no silent truncation)
         - Renders the task prompt once per child with per-child tokens merged in
-          ({role}, {manager_session_id}, {index} always provided)
+          ({role}, {manager_session_id}, {index}, {batch_index} always provided).
+          {batch_index} is the seat's 1-based position in this call (1..count, in
+          launch order, distinct per seat) — use it to pick one brief per seat.
+          {index} is the session-name slot (the "-N" in cc-<role>-<mgr>-N): the
+          lowest free number across roles and earlier batches, so it starts above 1
+          whenever the manager already has seats, and skips slots held by occupied
+          trees. It is distinct per seat but not the position in this spawn
         - Spawns each child via runner(build_spawn_argv(...)); a child whose
           runner returns non-zero is recorded with status "failed" (others still
           proceed — partial success is reported, not raised)
@@ -1131,7 +1137,7 @@ def spawn_sessions(
                            else { "provisioned": False, "status": "dry_run", "exit_code": None,
                                   "target": seat_work_dir, "detail": "dry run - nothing borrowed",
                                   "artifacts": {} } )
-        merged       = { "role": role, "manager_session_id": manager_session_id, "index": n }
+        merged       = { "role": role, "manager_session_id": manager_session_id, "index": n, "batch_index": _k + 1 }
         merged.update( tokens or {} )
         rendered     = render_task_prompt( task_prompt, merged, seed_memento )
 

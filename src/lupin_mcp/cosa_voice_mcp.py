@@ -3015,7 +3015,7 @@ def spawn_sessions(
 
     Args:
         count: number of reviewers (1..INI `cc session spawn max reviewers`)
-        task_prompt: brief template; {role} {manager_session_id} {index} and tokens you supply are substituted
+        task_prompt: brief template; {role} {manager_session_id} {batch_index} {index} and tokens you supply are substituted. {batch_index} = this seat's 1-based position in this call (1..count): use it to pick one brief per seat. {index} = the session-name slot (-N), the lowest free number across roles and earlier batches, so it is not the position when the manager already has seats
         role: reviewer | author | observer | manager (fills the brief's {role})
         project: child project (cwd, CLAUDE.md)
         persona_preference: str | list, an ordered chain ("Rio,Krishna,*" or a list) sent to each child as COSA_VOICE_PERSONA_CHAIN. SessionStart takes the first FREE name, then `*` takes anything free; exhausting the chain without `*` is a LOUD failure (persona-less child, never re-allocated); siblings take successive names.
