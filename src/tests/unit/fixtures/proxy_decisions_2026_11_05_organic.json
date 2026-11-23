@@ -1,0 +1,389 @@
+[
+  {
+    "category": "testing",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "should we run the unit tests?",
+    "created_at": "2026-11-05T16:58:38.120975+00:00"
+  },
+  {
+    "category": "testing",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "should we run the unit tests?",
+    "created_at": "2026-11-05T16:58:38.128708+00:00"
+  },
+  {
+    "category": "testing",
+    "action": "act",
+    "decision_value": "approved",
+    "rule_agreement": null,
+    "user_answer": null,
+    "question": "should we run the unit tests?",
+    "created_at": "2026-11-05T16:58:38.169035+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "Incorporate 1 queued message(s) into the next task?",
+    "created_at": "2026-11-05T16:59:26.620637+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "Incorporate 1 queued message(s) into the next task?",
+    "created_at": "2026-11-05T16:59:26.632408+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T16:59:40.782302+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T16:59:40.789608+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T16:59:40.796254+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 2 subtasks. Proceed?",
+    "created_at": "2026-11-05T16:59:40.803055+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T16:59:40.810402+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T16:59:40.817290+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "Incorporate 1 queued message(s) into the next task?",
+    "created_at": "2026-11-05T17:00:56.928286+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "Incorporate 1 queued message(s) into the next task?",
+    "created_at": "2026-11-05T17:00:56.941166+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:00:57.542294+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:00:57.550114+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:00:57.557845+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:00:57.566415+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:00:57.573934+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:00:57.581228+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:00.019727+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:00.028281+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:00.034079+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 2 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:00.040373+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:00.047434+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:00.053829+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:01.512884+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:01.519989+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:01.530116+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:01.538903+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:01.546294+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:01.553599+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:22.354966+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:22.362384+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": false,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:22.368301+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 2 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:22.374053+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:22.381202+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:22.387190+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:25.482293+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:25.490374+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:25.497262+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:25.505609+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:25.512531+00:00"
+  },
+  {
+    "category": "general",
+    "action": "shadow",
+    "decision_value": null,
+    "rule_agreement": null,
+    "user_answer": true,
+    "question": "SWE Team decomposed the task into 1 subtasks. Proceed?",
+    "created_at": "2026-11-05T17:02:25.519006+00:00"
+  }
+]

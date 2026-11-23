@@ -76,6 +76,7 @@ from .orchestrator import SweTeamOrchestrator
 from .cosa_interface import (
     notify_progress,
     ask_confirmation,
+    ask_confirmation_answer,
     request_decision,
     get_feedback,
     is_approval,
@@ -160,6 +161,7 @@ __all__ = [
     # COSA Interface Functions
     "notify_progress",
     "ask_confirmation",
+    "ask_confirmation_answer",
     "request_decision",
     "get_feedback",
 

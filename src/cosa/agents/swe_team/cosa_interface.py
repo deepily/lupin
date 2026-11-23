@@ -94,7 +94,7 @@ TARGET_USER: Optional[ str ] = None
 # Primary Interface Functions
 # =============================================================================
 
-notify_progress, ask_confirmation, request_decision, get_feedback = make_role_interface_functions( globals() )
+notify_progress, ask_confirmation, request_decision, get_feedback, ask_confirmation_answer = make_role_interface_functions( globals() )
 
 
 # =============================================================================
@@ -155,6 +155,7 @@ def quick_smoke_test():
         assert inspect.iscoroutinefunction( ask_confirmation )
         assert inspect.iscoroutinefunction( request_decision )
         assert inspect.iscoroutinefunction( get_feedback )
+        assert inspect.iscoroutinefunction( ask_confirmation_answer )
         print( "✓ Async functions have correct signatures" )
 
         # Test 6: notify_progress has role parameter

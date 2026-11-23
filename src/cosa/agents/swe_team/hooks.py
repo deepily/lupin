@@ -282,9 +282,12 @@ def quick_smoke_test():
         guard = SafetyGuard( max_iterations=5 )
 
         # Use a simple mock for team_io
+        from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
+
         class MockTeamIO:
             async def notify_progress( self, **kwargs ): pass
             async def ask_confirmation( self, **kwargs ): return False
+            async def ask_confirmation_answer( self, **kwargs ): return ConfirmationAnswer( stance="no", comment=None, raw="no" )
 
         callback = build_can_use_tool( MockTeamIO(), guard )
         assert callable( callback )

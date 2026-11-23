@@ -22,7 +22,7 @@ import asyncio
 import json
 import logging
 from contextvars import ContextVar
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from lupin_cli.notifications.notification_models import (
     NotificationRequest,
@@ -34,7 +34,7 @@ from lupin_cli.notifications.notification_models import (
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync as _notify_user_sync
 from lupin_cli.notifications.notify_user_async import notify_user_async as _notify_user_async
-from cosa.utils.notification_utils import format_questions_for_tts, convert_questions_for_api
+from cosa.utils.notification_utils import format_questions_for_tts, convert_questions_for_api, extract_qualifier_comment
 from cosa.agents.utils.sender_id import build_sender_id
 
 logger = logging.getLogger( __name__ )
@@ -135,6 +135,25 @@ def reset_dispatch_context( tokens: dict ) -> None:
         ctx_session_name.reset( tokens[ "session_name" ] )
     if "session_id" in tokens:
         ctx_session_id.reset( tokens[ "session_id" ] )
+
+
+class ConfirmationAnswer( NamedTuple ):
+    """
+    One answer to a yes/no card, kept whole.
+
+    The stance is "yes", "no" or "neither". It is None when the text is not one of those shapes.
+    The comment is the qualifier typed with the answer, or None.
+    The raw text is the response value exactly as the card returned it.
+    """
+
+    stance  : Optional[ str ]
+    comment : Optional[ str ]
+    raw     : str
+
+    @property
+    def approved( self ):
+        """Say whether the raw text starts with "yes", the bool ask_confirmation has always returned."""
+        return self.raw.lower().strip().startswith( "yes" )
 
 
 # Row 663f08d4: ask_confirmation returns a bool, so the id of the notification that carried the
@@ -392,6 +411,15 @@ class AgentNotificationDispatcher:
         """
         Ask a yes/no question and return boolean result.
 
+        A thin wrapper over ask_confirmation_answer, so the stance and comment are available to callers that want them.
+
+        Requires:
+            - the arguments of ask_confirmation_answer
+
+        Ensures:
+            - returns the answer's approved value: True exactly when the raw answer, lowercased and stripped, starts with "yes"
+            - raises whatever ask_confirmation_answer raises
+
         Args:
             question: The yes/no question to ask
             default: Default answer if timeout ("yes" or "no")
@@ -403,6 +431,36 @@ class AgentNotificationDispatcher:
 
         Returns:
             bool: True if user said yes, False otherwise
+        """
+        answer = await self.ask_confirmation_answer(
+            question, default=default, timeout=timeout, abstract=abstract, job_id=job_id, role=role, priority=priority
+        )
+        return answer.approved
+
+    async def ask_confirmation_answer(
+        self,
+        question: str,
+        default: str = "no",
+        timeout: int = 60,
+        abstract: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        role: str = None,
+        priority: str = None
+    ) -> ConfirmationAnswer:
+        """
+        Ask a yes/no question and return the whole answer: stance, comment and raw text.
+
+        Args:
+            question: The yes/no question to ask
+            default: Default answer if timeout ("yes" or "no")
+            timeout: Seconds to wait for response
+            abstract: Optional supplementary context
+            job_id: Optional job ID for routing
+            role: Optional agent role (for role-aware dispatchers)
+            priority: "low"/"medium"/"high"/"urgent" (default: "high" for blocking calls)
+
+        Returns:
+            ConfirmationAnswer: stance and comment parsed by extract_qualifier_comment, and the raw text
 
         Raises:
             VoiceGateTimeoutError: when the question was asked and no answer was received
@@ -430,7 +488,8 @@ class AgentNotificationDispatcher:
             _last_ask_notification_id.set( response.notification_id )
 
             if response.exit_code == 0 and response.response_value:
-                return response.response_value.lower().strip().startswith( "yes" )
+                stance, comment = extract_qualifier_comment( response.response_value )
+                return ConfirmationAnswer( stance=stance, comment=comment, raw=response.response_value )
 
             # exit_code == 2 is the MCP server's explicit "user-unavailable timeout"
             # signal. Raise VoiceGateTimeoutError so checkpoint-resume can trigger
@@ -802,7 +861,7 @@ def make_interface_functions( namespace, notify_extras=(), ask_extras=(), feedba
 
 def make_role_interface_functions( namespace ):
     """
-    Build the four async wrappers of a role-aware agent's cosa_interface module.
+    Build the five async wrappers of a role-aware agent's cosa_interface module.
 
     The SWE team sends each notification under a role of its own, so its module has no SENDER_ID and takes role as its second parameter.
     Each wrapper copies the module's session id and target user onto the module's dispatcher, then awaits one dispatcher method with the role.
@@ -812,7 +871,8 @@ def make_role_interface_functions( namespace ):
         - namespace is the calling module's globals(), holding _dispatcher, SESSION_ID, SESSION_NAME and TARGET_USER
 
     Ensures:
-        - Returns ( notify_progress, ask_confirmation, request_decision, get_feedback ), all coroutine functions
+        - Returns ( notify_progress, ask_confirmation, request_decision, get_feedback, ask_confirmation_answer ), all coroutine functions
+        - ask_confirmation_answer takes the arguments of ask_confirmation and returns the dispatcher's ConfirmationAnswer
         - Each takes its text first and role second, so a positional call such as ask_confirmation( question, role, default, timeout, abstract ) keeps working
         - Only notify_progress copies SESSION_NAME onto the dispatcher
         - request_decision awaits the dispatcher's present_choices
@@ -858,6 +918,21 @@ def make_role_interface_functions( namespace ):
             abstract=abstract, role=role
         )
 
+    async def ask_confirmation_answer(
+        question: str,
+        role: str = "lead",
+        default: str = "no",
+        timeout: int = 120,
+        abstract: Optional[ str ] = None,
+    ) -> ConfirmationAnswer:
+        """Ask a yes/no question from one agent role and return the whole answer."""
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.ask_confirmation_answer(
+            question, default=default, timeout=timeout,
+            abstract=abstract, role=role
+        )
+
     async def request_decision(
         question: str,
         options: list,
@@ -882,7 +957,7 @@ def make_role_interface_functions( namespace ):
         push_identity( dispatcher )
         return await dispatcher.get_feedback( prompt, timeout=timeout, role=role )
 
-    wrappers = ( notify_progress, ask_confirmation, request_decision, get_feedback )
+    wrappers = ( notify_progress, ask_confirmation, request_decision, get_feedback, ask_confirmation_answer )
     for wrapper in wrappers:
         wrapper.__module__ = namespace[ "__name__" ]
     return wrappers
