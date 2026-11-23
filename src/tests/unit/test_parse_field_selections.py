@@ -107,3 +107,14 @@ def test_every_multiple_choice_answer_in_the_synthetic_export_round_trips():
         assert got is not None and list( got ) == list( row[ "actual" ][ "answers" ] )
         for header, value in row[ "actual" ][ "answers" ].items():
             assert got[ header ][ "text" ] == value
+
+
+@pytest.mark.parametrize( "route", [ "typed", { "DB": "typed", "Tags": "click" } ] )
+def test_a_sibling_input_route_key_beside_the_answers_map_changes_nothing( route ):
+    """A sibling input_route key beside answers changes nothing."""
+    answers = { "DB": "PostgreSQL", "Tags": [ "a", "b" ] }
+    plain   = parse_field_selections( _answers( answers ) )
+    with_it = json.dumps( { "answers": answers, "input_route": route } )
+    assert parse_field_selections( with_it ) == plain
+    assert parse_field_selections( { "value": with_it, "source": "ui", "input_route": route } ) == plain
+    assert parse_field_selections( { "answers": answers, "input_route": route } ) == plain
