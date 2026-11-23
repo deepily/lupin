@@ -81,7 +81,7 @@ The full table of today's rulings is in the [missing-vectors plan](src/rnd/v0.2.
 
 ## 📚 Decisions log 2026-11-19 (Cheech 🌿 `ec5dd3e7`, Principle learner walkthrough, cascade row `8e53fc1b`; times Eastern)
 
-Rick's replies are recorded word for word in the [rulings record](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.19-principle-learner-rulings-verbatim.md).
+Rick's replies are recorded word for word in the [rulings record](src/rnd/v0.2.4/2026.11.17-principle-learner-research/2026.11.19-principle-learner-rulings-verbatim.md).
 
 - 2026-11-19 — **Does the learner join the remediation re-plan?** → **No: a separate track.** Why: the baseline must stay an independent comparison.
 - 2026-11-19 — **Who owns any trained ranker?** → **The learner.** Why: the baseline keeps only its untrained parts.
