@@ -30,6 +30,14 @@ The plans are [the pipeline plan](src/rnd/v0.2.4/2026.11.17-online-preference-le
 - 2026-11-23 — **The rubric bar** → **Kappa 0.7 on the action** (Rick, card, about 12:47). Two human readers must reach it. The material-error bar waits for baselines measured under the new handling. Why: four of the six yes/no answer types were never forecast, so nobody knows today's rates.
 - 2026-11-23 — **The owner-anchoring test** → **After the shadow window** (Rick, card, about 12:50).
 - 2026-11-23 — **One plan or two** → **Two: a pipeline plan and an experiment plan** (Rick, card, about 12:55).
+- 2026-11-23 — **Seeding the learned principles arm** → **"Seed from a fresh extraction"** (Rick, voice card, about 13:57). The revised extractor runs over the same answers the answer history arm can see; neither run 2's principles nor an empty store.
+- 2026-11-23 — **Which checkpoint the harness enforces** → **"Keep the 18 Nov checkpoint, add a second one"** (Rick, voice card, about 13:57). The 18 Nov plan's phases six to twelve stay on its checkpoint and are not re-scored; the new baseline is a second checkpoint.
+- 2026-11-23 — **The cohort of record** → **"The 1,926-card window, larger cohort as a second column"** (Rick, voice card, about 13:57).
+- 2026-11-23 — **A neither answer and the proxy's trust counters** → **"No ruling, counted as a re-frame"** (Rick, voice card, about 13:57). The counters stay unchanged.
+- 2026-11-23 — **The shadow window's length** → **"About ten weeks, 1,926 cards, then re-plan"** (Rick, voice card, about 13:57).
+- 2026-11-23 — **Consent for the owner-anchoring test** → **"One opt-in you can withdraw"** (Rick, voice card, about 13:57).
+- 2026-11-23 — **Re-size the reuse diagnostic set (row `80bd7ed3`)** → **Yes, to the 512 known answers** (Rick, by voice, about 13:55). Applying it is row `10fd334b`.
+- 2026-11-23 — **Snooze Cheech's nine expired parked rows** → **Yes** (Rick, by voice, about 13:58). Only his login can move them, so he does it from the board.
 
 ## 📚 Decisions log 2026-11-21 (Cheech 🌿 `756b6129`, Principle learner build; crew Pocholo, Tiffany, Tiberius, Rachel, all reaped; times Eastern)
 
