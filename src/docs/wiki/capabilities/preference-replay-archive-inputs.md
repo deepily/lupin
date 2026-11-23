@@ -9,10 +9,11 @@ pins:
   - cosa.research.preference_replay.archive_replay.fixed_rules_arm@d04dfa7deb
   - cosa.research.preference_replay.archive_replay.scratch_topk@f0b62d5779
   - cosa.research.preference_replay.archive_replay.locked_sessions@a458fcfd00
-  - cosa.research.preference_replay.archive_replay.ModelArms@307cbabefb
+  - cosa.research.preference_replay.archive_replay.ModelArms@c6a9cca37a
   - cosa.research.preference_replay.archive_replay.ModelArms.run@2e9793c55b
   - cosa.research.preference_replay.archive_replay.ModelArms.reader@4c1493feba
   - cosa.research.preference_replay.archive_replay.ModelArms.discard_bound_failures@46ea753209
+  - cosa.research.preference_replay.archive_replay.ModelArms.discard_unrecorded_limit_failures@a85f924971
   - cosa.research.preference_replay.archive_replay.default_models@0c5ad6c2d4
 ---
 # Preference replay: archive inputs and model arms
@@ -34,4 +35,5 @@ It returns None for a card with no option to pick, and for any other type.
 - `run( ask_id, arms )` runs the arms for one ask at once, with the live search swapped for `scratch_topk`. It reads each row back as a forecast and reason. A missing row reads `no_row`.
 - `reader( arm )` gives the harness a baseline function that returns that arm's stored forecast.
 - `discard_bound_failures` deletes only rows whose reason is the principle-limit failure, and returns how many.
+- `discard_unrecorded_limit_failures( arms, recorded_ids )` deletes the limit-failure rows of those arms for asks that no record file holds. A stopped chunk's failed rows are then forecast fresh, not read back as stored misses. Rows for recorded asks, other failures and forecasts stay. It returns the count deleted.
 - `default_models( session, embed, encoder, extractor, work )` builds the arms from the INI model, timeout, layers and caps. The baseline's ledger goes in the work folder.

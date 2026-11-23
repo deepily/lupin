@@ -3,7 +3,7 @@ capability: preference-replay-archive-report
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.research.preference_replay.archive_replay.build_report@6e3feb5d1b
-  - cosa.research.preference_replay.archive_replay.render_report@6ac6779cf6
+  - cosa.research.preference_replay.archive_replay.render_report@61cae3e538
 ---
 # Preference replay: the archive report
 
@@ -15,5 +15,6 @@ Pairs the arms of an archive run and prints a table with no reading of the verdi
 - An Opus pairing covers only the asks both twins have a line for, and its Haiku twin is cut to the same asks.
 - A pairing whose arm has no line is reported as not run, with no verdict.
 - The report also carries the freeze as stored, the asks with an episode history, the skipped asks and the twin stretch.
-- `render_report( report )` writes one markdown row per pairing: asks, wins each way, floor met, the verdict word, and coverage and accuracy per arm.
+- `render_report( report )` writes one markdown row per pairing: asks, wins each way, floor met, the verdict, and coverage and accuracy per arm.
+- The verdict names the arm that came out ahead. "engine better" reads as the pairing's first arm label plus "better". "baseline better" reads as its second arm's label plus "better". "no difference" and "not decisive" are unchanged.
 - The table shows the fixed rules arm and the engine arm under short labels, taken from the code.
