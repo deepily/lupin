@@ -149,6 +149,7 @@ def _plant( count ):
 def test_the_fixture_really_redirects_the_directory():
     """The cheapest half: SESSION_DIR is not the operator's live one."""
     assert "session-bridges-that-do-not-exist" in str( session_bridge.SESSION_DIR )
+    assert ".claude/lupin-sessions" not in str( session_bridge.SESSION_DIR )
     assert ".claude/sessions" not in str( session_bridge.SESSION_DIR )
 
 

@@ -32,18 +32,18 @@ otherwise.
 import hashlib
 import io
 import json
-import os
 import runpy
 import sys
 from contextlib import redirect_stderr
-from pathlib import Path
 
 import pytest
+
+from tests.bridge_dir_guard import REAL_SESSIONS_DIR
 
 
 # ── SERIAL BRIDGE GUARD (bug 2508b1ce) ──────────────────────────────────────────────
 # EVERY test here runs under the autouse `isolate_home_and_detect_real_dir_contact`
-# fixture below, which fingerprints the operator's REAL ~/.claude/sessions directory
+# fixture below, which fingerprints the operator's REAL ~/.claude/lupin-sessions directory
 # before and after the test and asserts it is byte-identical. A LIVE peer session writing
 # its own bridge during the test window moves that fingerprint through no fault of this
 # test — a false accusation, which is exactly what bug 2508b1ce surfaced. So the WHOLE
@@ -56,9 +56,8 @@ pytestmark = pytest.mark.serial_bridge_guard
 
 HOOK_MODULE = "lupin_cli.claude_code.hooks.register_session"
 
-# Captured AT IMPORT, before any fixture rewrites $HOME — this must name the
-# operator's REAL bridge directory or the control below is watching a decoy.
-REAL_SESSIONS_DIR = Path( os.path.expanduser( "~/.claude/sessions" ) )
+# The operator's REAL bridge directory, captured by the shared guard AT IMPORT, before any
+# fixture rewrites $HOME, or the control below is watching a decoy.
 
 
 def _real_bridge_fingerprint():

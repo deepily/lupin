@@ -214,10 +214,11 @@ def test_manager_personas_ignores_unrelated_env_keys():
     assert _manager_personas( env ) == [ ]
 
 
-def test_session_dir_is_home_claude_sessions():
+def test_session_dir_is_home_claude_lupin_sessions():
     # Matches session_spawner.SESSION_DIR — the manifest directory the role
-    # signal reads when no session_dir is injected.
-    assert _session_dir() == Path.home() / ".claude" / "sessions"
+    # signal reads when no session_dir is injected. Lupin's own folder since
+    # row f40c5b75; ~/.claude/sessions belongs to Claude Code.
+    assert _session_dir() == Path.home() / ".claude" / "lupin-sessions"
 
 
 def test_is_manager_persona_fails_open_when_persona_fn_raises():

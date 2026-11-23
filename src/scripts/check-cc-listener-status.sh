@@ -36,7 +36,7 @@ fi
 # ── 2. Bridge files ─────────────────────────────────────────────────
 echo ""
 echo "── Session Bridge Files ──"
-BRIDGE_DIR="$HOME/.claude/sessions"
+BRIDGE_DIR="${LUPIN_HOOK_SESSIONS_DIR:-$HOME/.claude/lupin-sessions}"
 BRIDGES=$( ls "$BRIDGE_DIR"/cc-*.json 2>/dev/null || true )
 
 if [[ -z "$BRIDGES" ]]; then

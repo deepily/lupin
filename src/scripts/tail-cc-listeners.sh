@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-LOG_FILE="$HOME/.claude/sessions/cc-listeners.log"
+LOG_FILE="${LUPIN_HOOK_SESSIONS_DIR:-$HOME/.claude/lupin-sessions}/cc-listeners.log"
 
 SHOW_ALL=false
 FILTER=""

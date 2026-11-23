@@ -25,7 +25,7 @@ import uuid
 from contextlib import contextmanager
 
 # Overridable for a non-default compose setup; the same variable the cc-transcript fixture reads.
-HOST_SESSIONS_DIR = os.environ.get( "LUPIN_HOST_SESSIONS_DIR", os.path.expanduser( "~/.claude/sessions" ) )
+HOST_SESSIONS_DIR = os.environ.get( "LUPIN_HOST_SESSIONS_DIR", os.path.expanduser( "~/.claude/lupin-sessions" ) )
 
 BRIDGE_PREFIX = "cc-itest-mgr-"
 

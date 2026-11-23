@@ -48,12 +48,10 @@ from pathlib import Path
 import pytest
 
 from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json
-from tests.bridge_dir_guard import real_dir_fingerprint, dir_delta, contact_detail
+from tests.bridge_dir_guard import REAL_SESSIONS_DIR, real_dir_fingerprint, dir_delta, contact_detail
 
 
 HOOK_MODULE = "lupin_cli.claude_code.hooks.register_session"
-
-REAL_SESSIONS_DIR = Path( os.path.expanduser( "~/.claude/sessions" ) )
 
 # Every session id this file drives through the real `main()` carries "probe";
 # a peer session never does, which is why the scoped canary cannot false-accuse.

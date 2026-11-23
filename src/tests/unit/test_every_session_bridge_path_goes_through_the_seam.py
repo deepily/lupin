@@ -1,5 +1,5 @@
 """
-Census: no tracked Python code names the session-bridge folder except the seam.
+Census: only the seam names the session-bridge folder, by its old or its new name.
 
 `sessions_dir()` in `src/lupin_cli/claude_code/hooks/lib/sessions_dir.py` is the one place
 that resolves the session-bridge folder. Its default is to move to a folder Lupin owns, which
@@ -26,9 +26,9 @@ import subprocess
 import pytest
 
 SEAM        = "src/lupin_cli/claude_code/hooks/lib/sessions_dir.py"
-WHOLE       = re.compile( r"(?:^|/)\.claude/+sessions(?:/|$)" )
+WHOLE       = re.compile( r"(?:^|/)\.claude/+(?:lupin-)?sessions(?:/|$)" )
 CLAUDE_END  = re.compile( r"(?:^|/)\.claude/*$" )
-SESSIONS    = re.compile( r"(?:^|/)sessions(?:/|$)" )
+SESSIONS    = re.compile( r"(?:^|/)(?:lupin-)?sessions(?:/|$)" )
 KEY_READERS = { "get", "pop", "setdefault" }
 SKIP_PREFIX = ( "src/rnd/", "src/cosa/rnd/", "src/tests/", "src/cosa/tests/" )
 
@@ -114,6 +114,8 @@ def _population( root ):
 
 USES = [
     'X = "~/.claude/sessions"\n',
+    'X = "~/.claude/lupin-sessions"\n',
+    'X = Path.home() / ".claude" / "lupin-sessions"\n',
     'X = f"{h}/.claude/sessions/cc-1.json"\n',
     'X = Path.home() / ".claude" / "sessions"\n',
     'X = os.path.join( h, ".claude", "sessions/x" )\n',

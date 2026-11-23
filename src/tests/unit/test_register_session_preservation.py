@@ -38,6 +38,8 @@ from unittest.mock import MagicMock
 
 import lupin_cli.claude_code.hooks.register_session as register_session
 
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+
 
 TEST_CC_PID         = 99999
 TEST_OLD_SESSION_ID = "old-uuid-1111-2222-3333-444444444444"
@@ -62,10 +64,14 @@ def isolated_session_dir( tmp_path, monkeypatch ):
     """
     Redirect HOME so register_session.main() writes to a tempdir.
 
-    Returns the Path object for <tmp_path>/.claude/sessions.
+    Returns the folder `sessions_dir()` resolves under the redirected home.
+    The fixture asks the seam rather than spelling the path, so it plants
+    bridges where main() reads them.
     """
     monkeypatch.setenv( "HOME", str( tmp_path ) )
-    session_dir = tmp_path / ".claude" / "sessions"
+    monkeypatch.delenv( "LUPIN_HOOK_SESSIONS_DIR", raising=False )
+    session_dir = sessions_dir()
+    assert tmp_path in session_dir.parents, f"the seam left the redirected HOME: {session_dir}"
     session_dir.mkdir( parents=True, exist_ok=True )
     return session_dir
 

@@ -62,7 +62,11 @@ HIJACKED_VAR = "LUPIN_SESSIONS_DIR"
 
 # Captured AT IMPORT, before any fixture rewrites $HOME — this must name the
 # operator's REAL bridge directory or the detector below is watching a decoy.
-REAL_SESSIONS_DIR = Path( os.path.expanduser( "~/.claude/sessions" ) )
+from tests.bridge_dir_guard import REAL_SESSIONS_DIR
+
+# The production default, spelled literally so the resolver tests pin it rather than echo the seam's
+# own constant. Lupin's folder since row f40c5b75; ~/.claude/sessions belongs to Claude Code.
+DEFAULT_LITERAL = "~/.claude/lupin-sessions"
 
 REPO_ROOT  = Path( __file__ ).resolve().parents[ 3 ]
 SEAM_MODULE = REPO_ROOT / "src" / "lupin_cli" / "claude_code" / "hooks" / "lib" / "sessions_dir.py"
@@ -129,7 +133,7 @@ def test_the_real_bridge_dir_is_untouched_SERIAL_GATE( monkeypatch, tmp_path ):
 
     home = tmp_path / "home"
     seam = tmp_path / "seam"
-    ( home / ".claude" / "sessions" ).mkdir( parents=True )
+    ( home / ".claude" / "lupin-sessions" ).mkdir( parents=True )
     seam.mkdir()
     monkeypatch.setenv( "HOME", str( home ) )
     monkeypatch.setenv( SEAM_VAR, str( seam ) )
@@ -161,7 +165,7 @@ def test_the_real_bridge_dir_is_untouched_SERIAL_GATE( monkeypatch, tmp_path ):
 def isolated_home( monkeypatch, tmp_path ):
     """$HOME redirected, seam UNSET — the pre-existing isolation lever, on its own."""
     home = tmp_path / "home"
-    ( home / ".claude" / "sessions" ).mkdir( parents=True )
+    ( home / ".claude" / "lupin-sessions" ).mkdir( parents=True )
     monkeypatch.setenv( "HOME", str( home ) )
     monkeypatch.delenv( SEAM_VAR, raising=False )
     return home
@@ -179,14 +183,17 @@ class TestTheResolver:
         lesson (row 6fc8d78d) is that an import-time constant ignores a fixture
         that runs later.
         """
-        assert sessions_dir() == isolated_home / ".claude" / "sessions"
+        assert sessions_dir() == isolated_home / ".claude" / "lupin-sessions"
 
-    def test_default_matches_the_pre_seam_hardcoded_value( self, monkeypatch ):
-        """Production leaves the seam unset; the default must be byte-identical
-        to what all eleven call sites resolved before this module existed, or the
-        container's ~/.claude/sessions bind-mount silently moves."""
-        monkeypatch.delenv( SEAM_VAR, raising=False )
-        assert str( sessions_dir() ) == os.path.expanduser( "~/.claude/sessions" )
+    def test_default_is_the_lupin_sessions_folder_under_HOME( self, isolated_home ):
+        """
+        The production default is `~/.claude/lupin-sessions`, read from $HOME at call time.
+
+        Production leaves the seam unset. The containers bind the host folder at the same
+        path, so any other default would stop the host and the containers meeting in one folder.
+        """
+        assert str( sessions_dir() ) == os.path.expanduser( DEFAULT_LITERAL )
+        assert str( sessions_dir() ) == str( isolated_home ) + "/.claude/lupin-sessions"
 
     def test_the_seam_variable_wins_when_set( self, monkeypatch, tmp_path ):
         monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
@@ -197,7 +204,7 @@ class TestTheResolver:
         """An exported-but-blank variable must not resolve to Path("") — that
         would put bridges in the CWD, which is worse than either branch."""
         monkeypatch.setenv( SEAM_VAR, "" )
-        assert sessions_dir() == isolated_home / ".claude" / "sessions"
+        assert sessions_dir() == isolated_home / ".claude" / "lupin-sessions"
 
     def test_it_resolves_at_call_time_not_once( self, monkeypatch, tmp_path ):
         """Two different answers from two calls, no re-import."""
@@ -227,7 +234,7 @@ class TestTheSeamCannotBeHijacked:
         """
         monkeypatch.setenv( HIJACKED_VAR, str( REAL_SESSIONS_DIR ) )
         resolved = sessions_dir()
-        assert resolved == isolated_home / ".claude" / "sessions", (
+        assert resolved == isolated_home / ".claude" / "lupin-sessions", (
             f"🔴 {HIJACKED_VAR} hijacked the seam: resolved to {resolved} while $HOME "
             f"was {isolated_home}. That variable is pinned fleet-wide by "
             "tmux-server.service, so honoring it defeats $HOME redirection for every "
@@ -269,7 +276,7 @@ class TestRegisterSessionHonorsTheSeam:
         """
         home = tmp_path / "home"
         seam = tmp_path / "seam"
-        ( home / ".claude" / "sessions" ).mkdir( parents=True )
+        ( home / ".claude" / "lupin-sessions" ).mkdir( parents=True )
         seam.mkdir()
         monkeypatch.setenv( "HOME", str( home ) )
         monkeypatch.setenv( SEAM_VAR, str( seam ) )
@@ -291,16 +298,16 @@ class TestRegisterSessionHonorsTheSeam:
                 pass   # downstream tmux/network/persona failures are not what this asserts
 
         in_seam = sorted( p.name for p in seam.glob( "cc-*.json" ) )
-        in_home = sorted( p.name for p in ( home / ".claude" / "sessions" ).glob( "*" ) )
+        in_home = sorted( p.name for p in ( home / ".claude" / "lupin-sessions" ).glob( "*" ) )
 
         assert in_seam, (
             f"main() wrote no bridge into the seam ({seam}). "
-            f"Entries that landed in $HOME/.claude/sessions instead: {in_home}. "
+            f"Entries that landed in $HOME/.claude/lupin-sessions instead: {in_home}. "
             "If this list is non-empty, Phase 2 is resolving its directory from $HOME "
             "rather than through sessions_dir() — row 8ccc20ab."
         )
         assert not in_home, (
-            f"main() ALSO wrote into $HOME/.claude/sessions: {in_home}. "
+            f"main() ALSO wrote into $HOME/.claude/lupin-sessions: {in_home}. "
             "Every path main() writes must resolve through the one seam; a partially "
             "seamed hook is the 'receipt narrower than its claim' failure."
         )
@@ -312,7 +319,7 @@ class TestRegisterSessionHonorsTheSeam:
         """
         home = tmp_path / "home"
         seam = tmp_path / "seam"
-        ( home / ".claude" / "sessions" ).mkdir( parents=True )
+        ( home / ".claude" / "lupin-sessions" ).mkdir( parents=True )
         seam.mkdir()
         monkeypatch.setenv( "HOME", str( home ) )
         monkeypatch.setenv( SEAM_VAR, str( seam ) )
@@ -423,10 +430,11 @@ class TestEveryModuleResolvesThroughTheSeam:
             f"{stragglers}\nEach is a writer that a seamed test still cannot isolate."
         )
 
-    def test_all_ten_default_to_the_unchanged_production_path( self, tmp_path ):
+    def test_all_ten_default_to_the_lupin_sessions_folder_under_HOME( self, tmp_path ):
         """
-        The other half: the seam must not have MOVED production. Byte-identical to
-        the pre-seam value, or the container bind-mount breaks.
+        The other half: with the seam unset, all ten fall back to the production
+        folder `$HOME/.claude/lupin-sessions`, or the container
+        bind-mount and the host stop meeting in one folder.
 
         ⚠️ Read-only assertion by construction — the probe's only write is the lock
         file, and with the seam unset that would land in the REAL directory. So this
@@ -434,12 +442,12 @@ class TestEveryModuleResolvesThroughTheSeam:
         which yields the same code path with nothing at stake.
         """
         home = tmp_path / "prodhome"
-        ( home / ".claude" / "sessions" ).mkdir( parents=True )
+        ( home / ".claude" / "lupin-sessions" ).mkdir( parents=True )
         resolved = self._resolve_in_subprocess( { SEAM_VAR: "", "HOME": str( home ) } )
-        expected = str( home / ".claude" / "sessions" )
+        expected = str( home / ".claude" / "lupin-sessions" )
         drifted  = { k: v for k, v in resolved.items() if v != expected }
         assert not drifted, (
-            f"with the seam UNSET these did not fall back to $HOME/.claude/sessions: "
+            f"with the seam UNSET these did not fall back to $HOME/.claude/lupin-sessions: "
             f"{drifted} (expected {expected}). A site that ignores $HOME too is one a "
             "test cannot isolate by ANY lever."
         )
@@ -481,8 +489,8 @@ class TestNoNewHardcodedResolution:
     def _offending_lines():
         import re
         pattern = re.compile(
-            r'expanduser\(\s*f?"~/\.claude/sessions'
-            r'|Path\.home\(\)\s*/\s*"\.claude"\s*/\s*"sessions"'
+            r'expanduser\(\s*f?"~/\.claude/(?:lupin-)?sessions'
+            r'|Path\.home\(\)\s*/\s*"\.claude"\s*/\s*"(?:lupin-)?sessions"'
         )
         hits = [ ]
         for path in ( REPO_ROOT / "src" ).rglob( "*.py" ):
@@ -503,14 +511,16 @@ class TestNoNewHardcodedResolution:
             "sessions_dir() — row 8ccc20ab:\n  " + "\n  ".join( offenders )
         )
 
-    def test_the_scanner_can_find_an_offender( self, tmp_path, monkeypatch ):
+    # Planted under the current folder name and the former one; the scanner refuses both.
+    @pytest.mark.parametrize( "folder", [ "lupin-sessions", "sessions" ] )
+    def test_the_scanner_can_find_an_offender( self, folder ):
         """
         🔴 NEGATIVE CONTROL for the scanner. A source scan that matches nothing —
         wrong root, wrong glob, an over-eager skip list — passes exactly like a
         clean tree. This plants a known offender and requires it be found.
         """
         planted = REPO_ROOT / "src" / "lupin_cli" / "_seam_scanner_control.py"
-        planted.write_text( 'import os\nD = os.path.expanduser( "~/.claude/sessions" )\n' )
+        planted.write_text( f'import os\nD = os.path.expanduser( "~/.claude/{folder}" )\n' )
         try:
             offenders = self._offending_lines()
         finally:

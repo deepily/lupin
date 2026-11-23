@@ -32,13 +32,20 @@ redirects their next resolution at any time. Import-time constants (`session_bri
 freshly started process. It does not govern an in-process test that sets it after import.
 Those modules keep a patchable module-level name for that case. The `listener_processes` lock and stderr
 paths resolve at call time. A pinned constant let `_spawn_listener` write `.spawn-lock`
-and `.stderr` files into the live directory, unseen by a detector globbing only `cc-*.json`. Production leaves the variable unset; the default is byte-identical to the
-old value, so the container's `~/.claude/sessions` bind-mount is unaffected.
+and `.stderr` files into the live directory, unseen by a detector globbing only `cc-*.json`. Production leaves the variable unset.
+
+The default is `~/.claude/lupin-sessions` since 22 Nov 2026. It was `~/.claude/sessions`, which Claude
+Code also uses for its own session files and makes private when a session starts. The containers bind the host folder at
+the same path under their own home, so container and host resolve the same default.
 """
 
 import os
 
 from pathlib import Path
+
+# Lupin's own folder (row f40c5b75, Rick 22 Nov 2026). ~/.claude/sessions belongs to Claude Code, which keeps its
+# own <pid>.json files there and sets the folder to 700 when a session starts, so a shared folder never stayed 2770.
+DEFAULT_DIR = "~/.claude/lupin-sessions"
 
 
 def sessions_dir():
@@ -54,9 +61,8 @@ def sessions_dir():
 
     Ensures:
         - `LUPIN_HOOK_SESSIONS_DIR` set and non-empty returns Path( that ), the test and CI override
-        - otherwise returns Path( expanduser( "~/.claude/sessions" ) ), the production default,
-          byte-identical to the old hardcoded value, with `$HOME` read at call time so
-          redirecting it keeps working as before
+        - otherwise returns Path( expanduser( DEFAULT_DIR ) ), the production default `~/.claude/lupin-sessions`,
+          with `$HOME` read at call time so redirecting it keeps working as before
         - Never raises
 
     Returns:
@@ -65,7 +71,7 @@ def sessions_dir():
     override = os.environ.get( "LUPIN_HOOK_SESSIONS_DIR" )
     if override:
         return Path( override )
-    return Path( os.path.expanduser( "~/.claude/sessions" ) )
+    return Path( os.path.expanduser( DEFAULT_DIR ) )
 
 
 def iter_bridge_paths( base ):

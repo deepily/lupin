@@ -13,7 +13,7 @@
 #   ./watch-cc-memory.sh                                   # 16 GB threshold, every 15s
 #   ./watch-cc-memory.sh --threshold-gb 8 --interval 5
 #   ./watch-cc-memory.sh --once --report                   # one pass, list everything
-#   ./watch-cc-memory.sh --log ~/.claude/sessions/cc-memory.log
+#   ./watch-cc-memory.sh --log ~/.claude/lupin-sessions/cc-memory.log
 #
 # Reads only; it never kills, notifies, or touches a session.
 

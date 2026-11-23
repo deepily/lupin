@@ -331,8 +331,8 @@ services:
       # CREATES an empty dir when the path is absent, which looks identical to
       # "mounted but empty". Fail loud instead.
       - type: bind
-        source: ${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/sessions}
-        target: /home/rruiz/.claude/sessions
+        source: ${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/lupin-sessions}
+        target: /home/rruiz/.claude/lupin-sessions
         bind:
           create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
@@ -649,7 +649,7 @@ services:
       # recreate (create_host_path is false): mkdir -p /home/rruiz/.claude/sessions-test
       - type: bind
         source: ${LUPIN_TEST_SESSIONS_DIR:-/home/rruiz/.claude/sessions-test}
-        target: /home/rruiz/.claude/sessions
+        target: /home/rruiz/.claude/lupin-sessions
         bind:
           create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
