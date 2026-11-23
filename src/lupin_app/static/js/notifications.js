@@ -28026,49 +28026,18 @@ class NotificationsUI {
     }
 
     /**
-     * Counts a draft the way the route does, as Python's json.dumps writes it.
-     *
-     * A space follows the colon. Every character outside space to tilde is a six-character escape.
-     * So a character past Basic Latin counts six, and an emoji, which is two UTF-16 units, counts twelve.
-     *
-     * Requires:
-     *   - draft is { value: string }
-     */
-    _draftRouteLength( draft ) {
-        const text = JSON.stringify( draft );
-        let length = text.length + 1;
-        for ( let i = 0; i < text.length; i++ ) if ( text.charCodeAt( i ) > 0x7e ) length += 5;
-        return length;
-    }
-
-    /**
      * Reads the draft from the controls; _draftAtReveal guards the call.
      */
     _readDraftAtReveal( id ) {
         const state = this.actionRequiredNotifications.get( id );
         const card  = document.getElementById( `action-required-${id}` );
         if ( !state || !card ) return null;
-        const type = state.notification.response_type;
-        let wire   = null;
-        if ( type === 'open_ended' ) {
-            const text = card.querySelector( '.response-text-input' ).value.trim();
-            wire = text === '' ? null : text;
-        } else if ( type === 'open_ended_batch' ) {
-            const answers = {};
-            card.querySelectorAll( '.batch-text-input' ).forEach( ( input ) => {
-                const text = input.value.trim();
-                if ( text !== '' ) answers[ input.dataset.header ] = text;
-            } );
-            wire = Object.keys( answers ).length === 0 ? null : JSON.stringify( { answers } );
-        } else if ( type === 'multiple_choice' ) {
-            const answers = { ...state.collectedAnswers };
-            const shown   = this._peekCurrentQuestionAnswer( id );
-            if ( shown ) answers[ shown.header ] = shown.value;
-            wire = Object.keys( answers ).length === 0 ? null : JSON.stringify( { answers } );
-        }
-        if ( wire === null ) return null;
-        const draft = { value: wire };
-        return this._draftRouteLength( draft ) > 4096 ? null : draft;
+        const type  = state.notification.response_type;
+        const text  = type === 'open_ended' ? card.querySelector( '.response-text-input' ).value : '';
+        const batch = Array.from( card.querySelectorAll( '.batch-text-input' ), ( input ) => [ input.dataset.header, input.value ] );
+        const shown = type === 'multiple_choice' ? this._peekCurrentQuestionAnswer( id ) : null;
+        // Without the shared module this throws, and _draftAtReveal then sends no draft.
+        return window.LUPIN_DRAFT_AT_REVEAL.buildDraft( type, { text, batch, saved: state.collectedAnswers, shown } );
     }
 
     /**

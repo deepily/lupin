@@ -1588,6 +1588,9 @@
     <script type="module" src="/static/js/shared/task-lookup.js?v=0a01055b00f8"></script>
     <!-- Row 8eb71f8e: the task-list status chips table. Publishes window.LUPIN_TASK_STATUS_FILTER, read at CALL time. -->
     <script type="module" src="/static/js/shared/task-status-filter.js?v=4cea22f3443d"></script>
+    <!-- Row c33f699e: the forecast fold's draft-at-reveal rules, shared with the multiplexer so the two clients cannot drift.
+         Publishes window.LUPIN_DRAFT_AT_REVEAL, read at CALL time by notifications.js. -->
+    <script type="module" src="/static/js/shared/draft-at-reveal.js?v=f89470c4e1c6"></script>
     <!-- Row 009d2d53: the one-click approve and view links, shared with the multiplexer so the two clients cannot drift.
          Publishes window.LUPIN_APPROVE_LINK, read at CALL time by notifications.js. -->
     <script type="module" src="/static/js/shared/approve-link.js?v=88c9bdb7a2c0"></script>
@@ -1629,7 +1632,7 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=fc32d4e2fe1d"></script>
+    <script src="/static/js/notifications.js?v=5fc5457e42eb"></script>
     <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
     <script src="/static/js/broadcast-panel.js?v=02bdb607cf2a"></script>

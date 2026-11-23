@@ -21,6 +21,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import vm from "node:vm";
 
+import "../../../lupin_app/static/js/shared/draft-at-reveal.js";
+
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 const HERE             = dirname( fileURLToPath( import.meta.url ) );
@@ -159,7 +161,7 @@ test( "a draft is counted as the route counts it, kept at the limit and dropped 
   const card = place( ui, note( "open_ended" ), OPEN_ENDED_HTML );
   const box  = card.querySelector( ".response-text-input" ) as HTMLInputElement;
   for ( const [ text, counted, kept ] of ROUTE_COUNTS ) {
-    assert.equal( ui._draftRouteLength( { value: text } ), counted, `${ text.length } UTF-16 units` );
+    assert.equal( ( window as never as { LUPIN_DRAFT_AT_REVEAL: { routeLength: ( d: { value: string } ) => number } } ).LUPIN_DRAFT_AT_REVEAL.routeLength( { value: text } ), counted, `${ text.length } UTF-16 units` );
     box.value = text;
     assert.deepEqual( ui._draftAtReveal( "n1" ), kept ? { value: text } : null, `${ counted } counted: ${ kept ? "kept" : "dropped" }` );
   }
@@ -170,6 +172,17 @@ test( "a throw while reading the controls gives no draft instead of blocking the
   const card = place( ui, note( "open_ended" ), OPEN_ENDED_HTML );
   card.querySelector( ".response-text-input" )!.remove();   // the reader expects it, and so throws
   assert.equal( ui._draftAtReveal( "n1" ), null );
+} );
+
+test( "a page whose shared draft module did not load sends no draft and does not throw", () => {
+  const ui    = makeUI();
+  const card  = place( ui, note( "open_ended" ), OPEN_ENDED_HTML );
+  ( card.querySelector( ".response-text-input" ) as HTMLInputElement ).value = "typed";
+  const w     = window as never as { LUPIN_DRAFT_AT_REVEAL?: unknown };
+  const saved = w.LUPIN_DRAFT_AT_REVEAL;
+  delete w.LUPIN_DRAFT_AT_REVEAL;
+  try { assert.equal( ui._draftAtReveal( "n1" ), null ); } finally { w.LUPIN_DRAFT_AT_REVEAL = saved; }
+  assert.deepEqual( ui._draftAtReveal( "n1" ), { value: "typed" } );
 } );
 
 test( "a retry after a failed fold-open sends the draft of the first open, not a later one", async () => {
