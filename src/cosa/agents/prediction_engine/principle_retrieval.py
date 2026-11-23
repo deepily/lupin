@@ -19,7 +19,7 @@ import secrets
 
 from sqlalchemy import and_
 
-from cosa.agents.prediction_engine.principle_features import feature_lookup
+from cosa.agents.prediction_engine.principle_features import feature_lookup, notification_lookup
 from cosa.agents.prediction_engine.principle_status import CONTESTED, RETRACTED, derive_statuses
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.db.repositories.vector_search import dot_topk
@@ -63,17 +63,17 @@ def retrieval_limits():
     return { "bound": bound, "multiplier": multiplier }
 
 
-def embedding_text( principle ):
+def embedding_text( statement, rationale ):
     """
     Build the text a principle is embedded from.
 
     Requires:
-        - principle has statement and rationale (a string or None)
+        - statement is a string; rationale is a string or None
 
     Ensures:
         - returns the statement, then the rationale on a new line when there is one
     """
-    return principle.statement if not principle.rationale else f"{principle.statement}\n{principle.rationale}"
+    return statement if not rationale else f"{statement}\n{rationale}"
 
 
 def encoder_version_of( model_name ):
@@ -112,7 +112,7 @@ def reembed_principles( session, owner_id, provider, encoder_version ):
     stale = session.query( PreferencePrinciple ).filter( PreferencePrinciple.owner_id == owner_id ).all()
     stale = [ p for p in stale if p.encoder_version != encoder_version or p.embedding is None ]
     if not stale: return 0
-    vectors = provider.generate_embeddings_batch( [ embedding_text( p ) for p in stale ] )
+    vectors = provider.generate_embeddings_batch( [ embedding_text( p.statement, p.rationale ) for p in stale ] )
     if len( vectors ) != len( stale ): raise ValueError( f"the provider returned {len( vectors )} vectors for {len( stale )} principles" )
     for principle, vector in zip( stale, vectors ):
         principle.embedding       = vector
@@ -150,9 +150,7 @@ def session_lookup( session, notification_ids ):
           when the notification is not found or its sender carries no session
         - one query for all ids; reads only
     """
-    ids = list( set( notification_ids ) )
-    sessions = { row.id: sender_session_suffix( row.sender_id ) for row in session.query( Notification.id, Notification.sender_id ).filter( Notification.id.in_( ids ) ).all() } if ids else {}
-    return lambda notification_id: sessions.get( notification_id )
+    return notification_lookup( session, notification_ids, ( Notification.sender_id, ), lambda row: sender_session_suffix( row.sender_id ) )
 
 
 def select_principles( scored, statuses, k=DEFAULT_K ):

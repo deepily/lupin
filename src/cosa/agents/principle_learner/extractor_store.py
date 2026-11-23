@@ -8,6 +8,7 @@ because a vector from another encoder cannot be compared with the query.
 
 import uuid
 
+from cosa.agents.prediction_engine.principle_retrieval import embedding_text
 from cosa.agents.principle_learner.vocabulary import same_heading
 from cosa.rest.postgres_models import PreferenceEvidence, PreferencePrinciple
 from cosa.rest.repair_attempt_tracker import cosine_similarity
@@ -65,7 +66,7 @@ def _find_or_create_principle( session, owner_id, kind, dimension, hypothesis, e
     if match is not None:
         report[ "principles_reused" ] += 1
         return match
-    text      = hypothesis[ "statement" ] + ( "\n" + hypothesis[ "rationale" ] if hypothesis[ "rationale" ] else "" )
+    text      = embedding_text( hypothesis[ "statement" ], hypothesis[ "rationale" ] )
     principle = PreferencePrinciple( id=uuid.uuid4(), owner_id=owner_id, kind=kind, dimension=dimension, statement=hypothesis[ "statement" ],
                                      rationale=hypothesis[ "rationale" ], scope=hypothesis[ "scope" ], embedding=embed_fn( text ),
                                      encoder_version=encoder_version, extractor_version=extractor_version,
