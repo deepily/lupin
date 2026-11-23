@@ -21,8 +21,7 @@ import cosa.agents.principle_learner.principles_call as pc
 import cosa.rest.db.database as database
 from cosa.agents.prediction_engine.principles_forecast import CAP_KEY, SWITCH_KEY, CapGate
 from cosa.agents.principle_learner import extractor_job
-from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
-from cosa.agents.principle_learner.review_card_sweep import extractor_version_of
+from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION, extractor_version_of
 from cosa.research.preference_replay.arm_summary import per_arm_summary, render_summary
 from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
 from cosa.rest.postgres_models import PredictionLog

@@ -15,8 +15,8 @@ import re
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
 from cosa.agents.prediction_engine.episode_view import card_text as episode_card_text
-from cosa.agents.prediction_engine.history_derive import attribution_tier
 from cosa.agents.prediction_engine.exposure import revealed_before_answer
+from cosa.agents.prediction_engine.history_derive import attribution_tier
 from cosa.utils.iso_timestamp import aware_moment
 from cosa.utils.notification_utils import parse_field_selections
 

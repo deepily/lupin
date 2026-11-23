@@ -19,7 +19,7 @@ from cosa.agents.prediction_engine.context_baseline import get_baseline
 from cosa.agents.prediction_engine.principles_forecast import (
     REASON_SWITCH, STATUS_NOT_RUN, CapGate, concurrency_cap, principles_forecast_enabled, run_b1 )
 from cosa.agents.principle_learner import extractor_job
-from cosa.agents.principle_learner.review_card_sweep import extractor_version_of
+from cosa.agents.principle_learner.extractor_prompt import extractor_version_of
 from cosa.config.configuration_manager import ConfigurationManager
 
 _GATE = None

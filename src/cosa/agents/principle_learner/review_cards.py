@@ -14,8 +14,8 @@ import uuid
 from datetime import timedelta
 
 from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
-from cosa.agents.principle_learner.extractor_rules import owners_own_answer
 from cosa.agents.prediction_engine.review_card import REVIEW_CARD_KEY, REVIEW_CARD_SOURCE, is_review_card
+from cosa.agents.principle_learner.extractor_rules import owners_own_answer
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.postgres_models import Notification, PreferenceEvidence
 from cosa.utils.iso_timestamp import aware_moment
