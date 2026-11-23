@@ -273,6 +273,29 @@ def _decode_json_text( value ):
         return None
 
 
+INPUT_ROUTES = ( "click", "typed", "comment", "voice" )
+
+
+def normalize_input_route( raw ):
+    """
+    Check the route a card reports for how an answer was given.
+
+    Requires:
+        - raw is any value taken from a request body
+
+    Ensures:
+        - returns a route string when raw is one of INPUT_ROUTES
+        - returns { header: route } when raw is a non-empty dict whose every key is a string and every value is a route
+        - returns None for anything else, so a malformed route is dropped and never stored
+
+    Raises:
+        - nothing
+    """
+    if isinstance( raw, str ): return raw if raw in INPUT_ROUTES else None
+    if isinstance( raw, dict ) and raw and all( isinstance( k, str ) and v in INPUT_ROUTES for k, v in raw.items() ): return dict( raw )
+    return None
+
+
 def parse_field_selections( response_value ):
     """
     Read a multiple-choice or batch answer as one record per field.

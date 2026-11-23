@@ -55,6 +55,7 @@ import type {
   ActionRequiredItem,
   ActionRequiredChangeKind,
   ActionRequiredResponse,
+  ActionRequiredRoute,
   ActionRequiredStep,
   ConnectionLifecyclePayload,
   ConnectionStateChangePayload,
@@ -309,7 +310,7 @@ export interface ActionRequiredStore {
    * re-throws so the caller (renderer) can render an inline error stripe and
    * re-enable the widget for retry.
    */
-  respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void>;
+  respondAndAwait(idHash: string, response: ActionRequiredResponse, route?: ActionRequiredRoute): Promise<void>;
   /**
    * The operator's ⏸️ — parity A-2 #2f, legacy `togglePause` / `pauseActionRequired` /
    * `resumeActionRequired`.
@@ -474,7 +475,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   /**
    * Posts the user's answer for a prompt and waits for the server to accept it.
    */
-  async respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void> {
+  async respondAndAwait(idHash: string, response: ActionRequiredResponse, route?: ActionRequiredRoute): Promise<void> {
     const entry = this.entries.get(idHash);
     if (!entry) throw new Error(`Unknown action_required id: ${idHash}`);
     if (entry.data.state !== "pending" && entry.data.state !== "failed") {
@@ -493,6 +494,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       await this.api.post<unknown>("/api/notify/response", {
         notification_id : idHash,
         response_value  : toWireResponseValue(response),
+        ...(route === undefined ? {} : { input_route: route }),
       });
     } catch (err) {
       if (stillOurs()) {

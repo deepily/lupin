@@ -1047,6 +1047,12 @@ export interface ActionRequiredAnswers {
  */
 export type ActionRequiredResponse = string | ActionRequiredAnswers;
 
+/** How one answer was given: a click on a listed option, typed text, a comment box, or voice. */
+export type ActionRequiredInputRoute = "click" | "typed" | "comment" | "voice";
+
+/** The route of a whole answer: one route, or one per question header. */
+export type ActionRequiredRoute = ActionRequiredInputRoute | Readonly<Record<string, ActionRequiredInputRoute>>;
+
 /**
  * One action-required prompt with its countdown.
  *
