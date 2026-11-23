@@ -1291,6 +1291,43 @@ class TestModuleSmoke:
     def test_quick_smoke_test_runs_clean( self ):
         quick_smoke_test()
 
+    @staticmethod
+    def _blocks_in_the_ini():
+        """
+        Name every `[Lupin: <name>]` block of the INI.
+
+        Ensures:
+            - a block added later is covered without an edit here
+        """
+        import configparser
+        parser = configparser.ConfigParser( interpolation=None, strict=False )
+        parser.read( os.path.join( os.environ[ "LUPIN_ROOT" ], "src/conf/lupin-app.ini" ) )
+        return [ section[ len( "Lupin: " ): ] for section in parser.sections() if section.startswith( "Lupin: " ) ]
+
+    def test_every_block_the_ini_holds_is_found( self ):
+        """The block list holds the blocks a host really sets, Testing-GCS among them."""
+        blocks = self._blocks_in_the_ini()
+        assert len( blocks ) >= 5 and "Testing-GCS" in blocks and "Development" in blocks
+
+    def test_quick_smoke_test_does_not_read_the_operators_fleet_cap_from_any_block( self, monkeypatch ):
+        """
+        No config block can redden the smoke body.
+
+        Ensures:
+            - the body states its own fleet world, never the operator's cap
+            - the Testing-GCS block holds a cap of 1, which four spawns in the body once read live
+        """
+        from cosa.config.configuration_manager import ConfigurationManager
+        failures = []
+        for block in self._blocks_in_the_ini():
+            monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS",
+                                f"config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+{block.replace( ' ', '+' )}" )
+            ConfigurationManager.reset_for_testing()
+            try: quick_smoke_test()
+            except Exception as e: failures.append( f"{block}: {type( e ).__name__}: {str( e )[ :80 ]}" )
+        ConfigurationManager.reset_for_testing()
+        assert failures == [], failures
+
 
 def test_default_spawn_cap_constant():
     assert DEFAULT_SPAWN_CAP == 8
