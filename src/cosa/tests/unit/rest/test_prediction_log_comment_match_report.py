@@ -1,8 +1,7 @@
 """
 Unit tests for the comment-match report in PredictionLogRepository.get_accuracy_summary.
 
-The rows are planted in an in-memory SQLite table built from the PredictionLog model.
-The JSONB and UUID column types are rendered as plain JSON and text for SQLite.
+The rows are planted in an in-memory SQLite copy of the PredictionLog table, opened through scratch_db.
 The summary's counts come from real SQL over planted outcomes, not from a mocked scalar.
 No real Postgres is touched.
 """
@@ -12,23 +11,9 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session
-
+from cosa.research.preference_replay.scratch_db import scratch_session
 from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository, COMMENT_MATCH_REPORT_KEY
 from cosa.rest.postgres_models import PredictionLog
-
-
-@compiles( JSONB, "sqlite" )
-def _jsonb_as_json( type_, compiler, **kw ):
-    return "JSON"
-
-
-@compiles( UUID, "sqlite" )
-def _uuid_as_char( type_, compiler, **kw ):
-    return "CHAR(36)"
 
 
 def _config_returning( switch_on ):
@@ -47,9 +32,9 @@ class TestCommentMatchReport( unittest.TestCase ):
     """Planted outcomes: 5 yes/no scored rows, 2 multiple-choice scored rows, 1 unscored row."""
 
     def setUp( self ):
-        self.engine = sa.create_engine( "sqlite://" )
-        PredictionLog.__table__.create( self.engine )
-        self.session = Session( self.engine )
+        scope        = scratch_session()
+        self.session = scope.__enter__()
+        self.addCleanup( scope.__exit__, None, None, None )
         now = datetime.now( timezone.utc )
         rows = [
             # yes/no: stance right, comment right
@@ -75,10 +60,6 @@ class TestCommentMatchReport( unittest.TestCase ):
             ) )
         self.session.commit()
         self.repo = PredictionLogRepository( self.session )
-
-    def tearDown( self ):
-        self.session.close()
-        self.engine.dispose()
 
     def _summary( self, switch_on, **kwargs ):
         config, asked = _config_returning( switch_on )
