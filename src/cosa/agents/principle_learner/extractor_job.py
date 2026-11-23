@@ -18,12 +18,12 @@ from contextlib import contextmanager
 
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.prediction_engine.episode_view import episode_view, revealed_at, revealed_draft
-from cosa.agents.prediction_engine.history_derive import attribution_tier, derive_answer
+from cosa.agents.prediction_engine.history_derive import derive_answer
 from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
 from cosa.agents.principle_learner.extractor_prompt import SYSTEM_PROMPT, extractor_version_of, build_user_prompt, parse_reply
-from cosa.agents.principle_learner.extractor_rules import card_text, check_field, field_answers, project_names, unaided_answer
+from cosa.agents.principle_learner.extractor_rules import card_text, check_field, owners_own_answer, field_answers, project_names, unaided_answer
 from cosa.agents.principle_learner.vocabulary import is_heading
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
@@ -36,7 +36,6 @@ SESSION_ID         = "principle-extractor"
 MODEL_KEY          = "prediction learner extractor model"
 TIMEOUT_KEY        = "prediction learner extractor timeout seconds"
 ENCODER_MODEL_KEY  = "local embedding prose model name"
-OWNER_SOURCE       = "ui"
 PROBE_SYSTEM       = "Answer with the single word ok."
 PROBE_QUESTION     = "Are you there?"
 
@@ -248,7 +247,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         if row is None: raise LookupError( f"notification {self.notification_id} does not exist" )
         if is_review_card( row.response_options ): return self._summary( "skipped_review_card" )
         raw = { "recipient_id": str( row.recipient_id ), "response_type": row.response_type, "response_value": row.response_value }
-        if attribution_tier( raw ) != "recipient" or not isinstance( row.response_value, dict ) or row.response_value.get( "source" ) != OWNER_SOURCE:
+        if not owners_own_answer( row ):
             return self._summary( "skipped_not_attributed" )
         entries = field_answers( derive_answer( raw )[ 0 ] )
         if not entries: return self._summary( "skipped_nothing_to_read" )

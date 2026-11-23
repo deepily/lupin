@@ -15,6 +15,7 @@ import re
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PROJECT
 from cosa.agents.prediction_engine.episode_view import card_text as episode_card_text
+from cosa.agents.prediction_engine.history_derive import attribution_tier
 from cosa.agents.prediction_engine.exposure import revealed_before_answer
 from cosa.utils.iso_timestamp import aware_moment
 from cosa.utils.notification_utils import parse_field_selections
@@ -41,6 +42,25 @@ def card_text( episode ):
         - a missing title or abstract adds nothing
     """
     return episode_card_text( episode, include_options=True )
+
+
+OWNER_SOURCE = "ui"
+
+
+def owners_own_answer( row ):
+    """
+    Say whether the stored answer is the owner's own word, from their own screen.
+
+    Requires:
+        - row is an answered Notification
+
+    Ensures:
+        - returns True only when the answering user is the recipient and the source is the screen
+        - a timeout default, a proxy answer, an answer with no user and another account's answer are all False
+    """
+    value = row.response_value
+    raw   = { "recipient_id": str( row.recipient_id ), "response_value": value }
+    return attribution_tier( raw ) == "recipient" and isinstance( value, dict ) and value.get( "source" ) == OWNER_SOURCE
 
 
 def project_names( sender_ids ):
