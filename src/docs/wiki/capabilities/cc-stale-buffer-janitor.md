@@ -15,7 +15,7 @@ pins:
   - lupin_cli.claude_code.hooks.lib.stale_buffer_janitor.collect_live_hashes@94f3eb302b
   - lupin_cli.claude_code.hooks.lib.stale_buffer_janitor.gather_buffer_meta@8d1e7920bf
   - lupin_cli.claude_code.hooks.lib.stale_buffer_janitor.run@28e540469a
-  - lupin_cli.claude_code.hooks.lib.stale_buffer_janitor.main@851933411f
+  - lupin_cli.claude_code.hooks.lib.stale_buffer_janitor.main@a0b0f43abd
 ---
 # Stale buffer janitor
 Archives `cc-buffer-<hash>.jsonl` files that belong to dead sessions. It never deletes a file and never replays a message.

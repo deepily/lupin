@@ -2,7 +2,7 @@
 capability: cc-session-bridge
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_cli.claude_code.hooks.lib.sessions_dir.sessions_dir@40d97ca400
+  - lupin_cli.claude_code.hooks.lib.sessions_dir.sessions_dir@39571c9852
   - lupin_cli.claude_code.hooks.lib.session_bridge.atomic_write_json@304ee933db
   - lupin_cli.claude_code.hooks.lib.session_bridge.canonical_persona_key@1f4c521dcb
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_path_by_id@2eb138d772
@@ -14,7 +14,7 @@ pins:
 One JSON file per running Claude Code process, named `cc-<pid>.json`, carries the seat's session ids and voice persona. Hooks, the MCP server and fleet scanners mostly read and write it through `session_bridge.py`. Hook timing lives in [[cc-hooks-heartbeat]]; persona allocation in [[voice-persona-allocation]].
 
 ## Where the files live
-- `sessions_dir()` returns `LUPIN_HOOK_SESSIONS_DIR` when it is set and non-empty, otherwise `~/.claude/sessions`. It reads the environment on every call.
+- `sessions_dir()` returns `LUPIN_HOOK_SESSIONS_DIR` when it is set and non-empty, otherwise `~/.claude/lupin-sessions` (since 22 Nov 2026; `~/.claude/sessions` belongs to Claude Code). It reads the environment on every call.
 - `session_bridge.SESSION_DIR` is that value captured once at import, so a changed variable reaches only a freshly started process. In-process tests patch the module name instead.
 - Scanners glob `cc-*.json` and skip any name containing `buffer` or `listener`. The one exception is the working-directory step of `_find_session_file`, which does not skip them.
 
