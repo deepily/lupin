@@ -33,8 +33,9 @@ from datetime import datetime, timezone
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from cosa.agents.prediction_engine.episode_view import episode_view
+from cosa.agents.prediction_engine.episode_view import card_text, episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieval_limits, retrieve_principles
+from cosa.agents.shared.config_loader import required_positive_int
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.config.switch_reader import read_switch
 from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
@@ -105,9 +106,7 @@ def read_cap( key ):
         - MissingConfigKeyError if the key is missing or blank, so a missing cap never becomes unbounded
         - ValueError if the value is not a positive integer
     """
-    cap = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( key, return_type="int" )
-    if cap < 1: raise ValueError( f"'{key}' must be a positive integer, got {cap}" )
-    return cap
+    return required_positive_int( key, ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
 
 
 def concurrency_cap():
@@ -220,20 +219,6 @@ def with_principles( system_prompt, user_prompt, block ):
     """
     if not block[ "text" ]: return system_prompt, user_prompt
     return system_prompt, f"{user_prompt}\n\n{BLOCK_HEADING}\n{block[ 'text' ]}"
-
-
-def card_text( episode ):
-    """
-    Build the text a card is searched for principles by.
-
-    Requires:
-        - episode is episode_view's result
-
-    Ensures:
-        - returns the title, the abstract and each field's prompt, one per line, skipping empty parts
-    """
-    parts = [ episode[ "title" ], episode[ "abstract" ] ] + [ field[ "prompt" ] for field in episode[ "fields" ] ]
-    return "\n".join( part for part in parts if part )
 
 
 def _row_present( session, key, arm=ARM ):

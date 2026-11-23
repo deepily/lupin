@@ -143,7 +143,7 @@ def test_the_cap_turns_a_card_away_at_once_without_a_call_under_the_twins_own_ar
 def test_the_model_id_and_the_switch_are_read_from_the_ini_when_not_given( factory, monkeypatch ):
     """No override: the INI id is the model called, and the INI switch decides."""
     c0 = Baseline()
-    monkeypatch.setattr( ot, "ConfigurationManager", lambda env_var_name=None: Stub( "opus-from-ini" ) )
+    monkeypatch.setattr( "cosa.config.configuration_manager.ConfigurationManager", lambda env_var_name=None: Stub( "opus-from-ini" ) )
     monkeypatch.setattr( pf, "ConfigurationManager", lambda env_var_name=None: Stub( True ) )
     nid = ask( factory )
     assert asyncio.run( ot.run_baseline_opus( factory, nid, c0, pf.CapGate( 1 ) ) ) == { "status": "ran", "reason": None }
@@ -200,7 +200,7 @@ def test_each_gate_takes_its_own_cap_from_the_ini( monkeypatch ):
 
 def test_the_opus_id_is_required_and_read_through_the_manager( monkeypatch ):
     """The id comes through the manager's required read, so a twin never guesses a model."""
-    monkeypatch.setattr( ot, "ConfigurationManager", lambda env_var_name=None: Stub( "opus-z" ) )
+    monkeypatch.setattr( "cosa.config.configuration_manager.ConfigurationManager", lambda env_var_name=None: Stub( "opus-z" ) )
     assert ot.opus_model() == "opus-z"
 
 

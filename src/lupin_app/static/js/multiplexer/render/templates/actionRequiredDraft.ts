@@ -9,34 +9,12 @@
 // It is read only. Nothing here marks a field invalid or changes a control.
 
 import type { ActionRequiredItem } from "../../shared/types";
+import { buildDraft, type DraftAtReveal } from "../../../shared/draft-at-reveal.js";
 import { checkedChoices } from "./actionRequiredInteractive";
 
-/** The server's limit on a draft, counted in characters of its JSON text. */
-export const DRAFT_MAX_CHARS = 4096;
-
-/**
- * Count a draft the way the route does: as Python's json.dumps writes it.
- *
- * json.dumps puts a space after the colon. It writes every character outside space to tilde as a six-character escape.
- * So a character beyond Basic Latin counts six, and an emoji, which is two UTF-16 units, counts twelve.
- *
- * Requires:
- *   - draft is { value: string }
- *
- * Ensures:
- *   - returns the length json.dumps gives the same draft on the server
- */
-export function routeLength(draft: DraftAtReveal): number {
-  const text = JSON.stringify(draft);
-  let length = text.length + 1;
-  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) > 0x7e) length += 5;
-  return length;
-}
-
-/** The draft the seen route takes: the wire string of the answer so far. */
-export interface DraftAtReveal {
-  value : string;
-}
+// The rules (empty answers, the wire text, the size limit) live in shared/draft-at-reveal.js, which the legacy page reads too.
+export { DRAFT_MAX_CHARS, routeLength } from "../../../shared/draft-at-reveal.js";
+export type { DraftAtReveal } from "../../../shared/draft-at-reveal.js";
 
 /**
  * Read the multiple-choice question on screen the way Next would save it.
@@ -59,24 +37,6 @@ function visibleChoice(item: ActionRequiredItem, widget: HTMLElement): { header:
 }
 
 /**
- * Read a batch card's typed answers, leaving out the empty ones.
- *
- * Requires:
- *   - widget is the card's root element
- *
- * Ensures:
- *   - returns { header: trimmed text } for each answer field that holds text
- */
-function batchAnswers(widget: HTMLElement): Record<string, string> {
-  const answers: Record<string, string> = {};
-  for (const input of Array.from(widget.querySelectorAll<HTMLInputElement>(".action-required-batch-input"))) {
-    const text = input.value.trim();
-    if (text !== "") answers[input.dataset.batchHeader!] = text;
-  }
-  return answers;
-}
-
-/**
  * Say what a card's answer would be if submitted now, as the seen route stores it.
  *
  * Requires:
@@ -93,20 +53,9 @@ function batchAnswers(widget: HTMLElement): Record<string, string> {
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 export function draftAtReveal(item: ActionRequiredItem, widget: HTMLElement): DraftAtReveal | null {
-  let wire: string | null = null;
-  if (item.response_type === "open_ended") {
-    const text = widget.querySelector<HTMLInputElement>("[data-draft='response']")!.value.trim();
-    wire = text === "" ? null : text;
-  } else if (item.response_type === "open_ended_batch") {
-    const answers = batchAnswers(widget);
-    wire = Object.keys(answers).length === 0 ? null : JSON.stringify({ answers });
-  } else if (item.response_type === "multiple_choice") {
-    const answers: Record<string, string | ReadonlyArray<string>> = { ...item.step?.answers };
-    const shown = visibleChoice(item, widget);
-    if (shown !== null) answers[shown.header] = shown.value;
-    wire = Object.keys(answers).length === 0 ? null : JSON.stringify({ answers });
-  }
-  if (wire === null) return null;
-  const draft = { value: wire };
-  return routeLength(draft) > DRAFT_MAX_CHARS ? null : draft;
+  const text   = item.response_type === "open_ended" ? widget.querySelector<HTMLInputElement>("[data-draft='response']")!.value : "";
+  const batch  = Array.from(widget.querySelectorAll<HTMLInputElement>(".action-required-batch-input")).map((input): [string, string] => [input.dataset.batchHeader!, input.value]);
+  const saved  = item.step?.answers ?? {};
+  const shown  = item.response_type === "multiple_choice" ? visibleChoice(item, widget) : null;
+  return buildDraft(item.response_type, { text, batch, saved, shown });
 }

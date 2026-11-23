@@ -113,8 +113,8 @@ def statements( result ):
 
 def test_embedding_text_and_encoder_version():
     """The embedded text is statement then rationale; the encoder version names model and recipe."""
-    assert embedding_text( type( "P", (), { "statement": "s", "rationale": None } ) ) == "s"
-    assert embedding_text( type( "P", (), { "statement": "s", "rationale": "r" } ) ) == "s\nr"
+    assert embedding_text( "s", None ) == "s"
+    assert embedding_text( "s", "r" ) == "s\nr"
     assert encoder_version_of( "m" ) == "m:statement-rationale-v1"
 
 

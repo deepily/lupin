@@ -26,6 +26,24 @@ def card_features( row ):
     return { "response_type": row.response_type, "type": row.type, "project": project }
 
 
+def notification_lookup( session, notification_ids, columns, value_of ):
+    """
+    Build the function that gives one value for each of a set of notifications.
+
+    Requires:
+        - session is an active SQLAlchemy session; notification_ids are notification ids
+        - columns are the Notification columns value_of reads, besides id
+        - value_of takes a row of id plus those columns and returns the value to keep
+
+    Ensures:
+        - returns value_for( notification_id ): value_of's answer for that row, or None when the notification is not found
+        - one query for all ids; reads only
+    """
+    ids   = list( set( notification_ids ) )
+    found = { row.id: value_of( row ) for row in session.query( Notification.id, *columns ).filter( Notification.id.in_( ids ) ).all() } if ids else {}
+    return lambda notification_id: found.get( notification_id )
+
+
 def feature_lookup( session, notification_ids ):
     """
     Build the function that gives the card features of an evidence row's ask.
@@ -37,7 +55,4 @@ def feature_lookup( session, notification_ids ):
         - returns features_of( notification_id ): the card features, or None when the ask is not found
         - one query for all ids; reads only
     """
-    ids   = list( set( notification_ids ) )
-    found = { row.id: card_features( row ) for row in session.query( Notification.id, Notification.sender_id, Notification.response_type, Notification.type )
-              .filter( Notification.id.in_( ids ) ).all() } if ids else {}
-    return lambda notification_id: found.get( notification_id )
+    return notification_lookup( session, notification_ids, ( Notification.sender_id, Notification.response_type, Notification.type ), card_features )

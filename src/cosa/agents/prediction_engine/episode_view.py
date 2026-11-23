@@ -20,6 +20,7 @@ from sqlalchemy import or_
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN
 from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, notification_dict, rebuild_context
+from cosa.agents.shared.config_loader import required_positive_int
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.postgres_models import Notification, PredictionLog
 from cosa.utils.iso_timestamp import aware_moment
@@ -31,6 +32,24 @@ INFERRED_TIERS   = ( "session", )
 LINK_PATTERN     = re.compile( r"\[([^\]]*)\]\(([^)\s]+)\)" )
 LINK_KINDS       = ( ( "/app/docs?", "supporting_doc" ), ( "/app/tasks/approve?", "approval" ), ( "/app/tasks/view?", "task_view" ) )
 RECOMMENDED_TAG  = "recommended"
+
+
+def card_text( episode, include_options=False ):
+    """
+    Gather the text of a card, one part per line.
+
+    Requires:
+        - episode is episode_view's result
+
+    Ensures:
+        - returns the title, the abstract and each field's prompt, one per line, skipping empty parts
+        - with include_options each field's option labels follow its prompt
+    """
+    parts = [ episode[ "title" ], episode[ "abstract" ] ]
+    for field in episode[ "fields" ]:
+        parts.append( field[ "prompt" ] )
+        if include_options: parts.extend( option[ "label" ] for option in field[ "options" ] )
+    return "\n".join( part for part in parts if part )
 
 
 def pool_limit():
@@ -47,9 +66,7 @@ def pool_limit():
         - MissingConfigKeyError if the key is missing or blank, so a missing limit never becomes an unbounded read
         - ValueError if the value is not a positive integer
     """
-    limit = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( POOL_LIMIT_KEY, return_type="int" )
-    if limit < 1: raise ValueError( f"'{POOL_LIMIT_KEY}' must be a positive integer, got {limit}" )
-    return limit
+    return required_positive_int( POOL_LIMIT_KEY, ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
 
 
 def _tier_queries( session, target, before, limit, session_window ):

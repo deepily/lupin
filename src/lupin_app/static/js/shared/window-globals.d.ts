@@ -56,6 +56,8 @@ interface Window {
     // Row 8eb71f8e: the task-list status filter chips, for the legacy page.
     // Row 009d2d53: the one-click approve and view links, for the legacy page.
     LUPIN_APPROVE_LINK?: Omit< typeof import( "./approve-link.js" ), "publishOnWindow" >;
+    // The forecast fold's draft-at-reveal rules, for the legacy page.
+    LUPIN_DRAFT_AT_REVEAL?: Omit< typeof import( "./draft-at-reveal.js" ), "publishOnWindow" >;
     LUPIN_TASK_STATUS_FILTER?: Omit< typeof import( "./task-status-filter.js" ), "publishOnWindow" >;
     // Row c9fafb9d: the promote/demote request chip and verdict body, for the legacy page.
     LUPIN_TASK_REQUEST?: Pick< typeof import( "./task-request.js" ),

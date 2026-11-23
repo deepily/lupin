@@ -33,6 +33,30 @@ def required_model_id( key, config_mgr=None ):
     return config_mgr.get_required( key, silent=True )
 
 
+def required_positive_int( key, config_mgr=None ):
+    """
+    Read one INI key that must hold a positive integer, with no default in code.
+
+    Requires:
+        - key is an INI key that holds a count
+        - config_mgr has a ConfigurationManager `get_required` method, or is None to use the process's own
+
+    Ensures:
+        - returns the value of the key as an int of at least 1, read when called
+        - building the process's own manager writes its start-up banner to stderr, never stdout
+
+    Raises:
+        - MissingConfigKeyError naming the key, the block and the file when the key is absent or blank
+        - ValueError naming the key when the value is below 1
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    if config_mgr is None:
+        with contextlib.redirect_stdout( sys.stderr ): config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    value = config_mgr.get_required( key, return_type="int" )
+    if value < 1: raise ValueError( f"'{key}' must be a positive integer, got {value}" )
+    return value
+
+
 def model_field( key ):
     """
     Declare a dataclass field whose model id is read from an INI key at construction.

@@ -14,6 +14,20 @@ from cosa.agents.principle_learner.vocabulary import VOCABULARY_VERSION, heading
 
 PROMPT_VERSION = f"extractor-v2-vocab-{VOCABULARY_VERSION}"
 
+
+def extractor_version_of( model ):
+    """
+    Name the extractor version a model and the current prompt make.
+
+    Requires:
+        - model is the extractor model id
+
+    Ensures:
+        - returns "<model>:<prompt version>", the string the extractor stores on its rows
+    """
+    return f"{model}:{PROMPT_VERSION}"
+
+
 SYSTEM_PROMPT = """You extract short conditional preference principles from one answered question.
 
 You are given a card the owner was asked, the earlier questions that framed it, the owner's answer for each field,

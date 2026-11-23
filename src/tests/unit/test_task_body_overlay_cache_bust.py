@@ -63,6 +63,7 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/js/shared/agent-select.js",
     "/static/js/shared/arg-interview.js",
     "/static/js/shared/approve-link.js",
+    "/static/js/shared/draft-at-reveal.js",
     "/static/js/background-jobs.js",
     "/static/css/background-jobs-legacy.css",
     "/static/js/cron-jobs.js",

@@ -13,7 +13,7 @@ Each result goes to ``prediction_arm_forecast`` under its own arm name, never to
 """
 
 from cosa.agents.prediction_engine.principles_forecast import CapGate, DEFAULT_K, VERSION_SUFFIX, read_cap, run_arm, switch_enabled
-from cosa.config.configuration_manager import ConfigurationManager
+from cosa.agents.shared.config_loader import required_model_id
 
 ARM_BASELINE_OPUS     = "C0-opus"
 ARM_PRINCIPLES_OPUS   = "B1-opus"
@@ -66,7 +66,7 @@ def opus_model():
     Raises:
         - MissingConfigKeyError if the key is missing or blank, so a twin never falls back to another model
     """
-    return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( MODEL_KEY, return_type="str" )
+    return required_model_id( MODEL_KEY )
 
 
 def baseline_gate():
