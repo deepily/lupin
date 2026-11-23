@@ -15,13 +15,14 @@ import threading
 import uuid
 
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
 from cosa.agents.prediction_engine.history_derive import derive_answer
 from cosa.agents.prediction_engine.principle_features import card_features, feature_lookup
 from cosa.agents.prediction_engine.principle_retrieval import load_owner_ledger, session_lookup
 from cosa.agents.prediction_engine.principle_status import CONTESTED, CONTRADICTING, SOURCE_EXTRACT, SOURCE_SPLIT, SUPPORTING, derive_statuses, usable_at
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_job
-from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
+from cosa.agents.principle_learner.extractor_prompt import extractor_version_of
 from cosa.agents.principle_learner.review_cards import PRINCIPLES_KEY, WINDOW, resolve_conflict, review_card_cap, review_card_times, send_review_card
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.postgres_models import Notification, PreferenceEvidence
@@ -36,19 +37,6 @@ ANSWER_CHARS      = 200
 
 _LOCK  = threading.Lock()
 _SENT  = {}
-
-
-def extractor_version_of( model ):
-    """
-    Name the extractor version the config currently uses.
-
-    Requires:
-        - model is the extractor model id
-
-    Ensures:
-        - returns "<model>:<prompt version>", the string the extractor stores on its rows
-    """
-    return f"{model}:{PROMPT_VERSION}"
 
 
 class DetachedDispatcher:
@@ -224,6 +212,11 @@ def contested_items( session, owner_id, now, current_version ):
     return items
 
 
+def _sent_moment( send ):
+    """Ensures: returns the time of one recorded send, a ( moment, ids ) pair."""
+    return send[ 0 ]
+
+
 def _sent_principles( owner_id, now ):
     """
     List the principles sent on a card by this process inside the window.
@@ -235,7 +228,7 @@ def _sent_principles( owner_id, now ):
         - returns the set of principle ids, as text, from sends recorded after now minus the window
     """
     with _LOCK:
-        return { pid for moment, ids in _SENT.get( str( owner_id ), [] ) if now - WINDOW < moment <= now for pid in ids }
+        return { pid for _moment, ids in prune_window( _SENT.get( str( owner_id ), [] ), now, WINDOW.total_seconds(), stamp=_sent_moment, strict=True, drop_future=True ) for pid in ids }
 
 
 def _remember_send( owner_id, now, ids ):
@@ -249,7 +242,7 @@ def _remember_send( owner_id, now, ids ):
         - the send is kept in this process, and sends older than the window are dropped
     """
     with _LOCK:
-        kept = [ ( moment, held ) for moment, held in _SENT.get( str( owner_id ), [] ) if now - WINDOW < moment ]
+        kept = prune_window( _SENT.get( str( owner_id ), [] ), now, WINDOW.total_seconds(), stamp=_sent_moment, strict=True )
         kept.append( ( now, list( ids ) ) )
         _SENT[ str( owner_id ) ] = kept
 

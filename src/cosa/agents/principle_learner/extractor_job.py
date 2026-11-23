@@ -22,7 +22,7 @@ from cosa.agents.prediction_engine.history_derive import attribution_tier, deriv
 from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
-from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt, parse_reply
+from cosa.agents.principle_learner.extractor_prompt import SYSTEM_PROMPT, extractor_version_of, build_user_prompt, parse_reply
 from cosa.agents.principle_learner.extractor_rules import card_text, check_field, field_answers, project_names, unaided_answer
 from cosa.agents.principle_learner.vocabulary import is_heading
 from cosa.config.configuration_manager import ConfigurationManager
@@ -243,7 +243,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
             - returns the JSON summary _execute documents
             - writes through the session only; the caller commits
         """
-        extractor = f"{model}:{PROMPT_VERSION}"
+        extractor = extractor_version_of( model )
         row = session.get( Notification, uuid.UUID( self.notification_id ) )
         if row is None: raise LookupError( f"notification {self.notification_id} does not exist" )
         if is_review_card( row.response_options ): return self._summary( "skipped_review_card" )

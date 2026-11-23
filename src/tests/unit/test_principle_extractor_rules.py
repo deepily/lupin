@@ -215,3 +215,10 @@ def test_an_old_dimension_name_is_shown_to_the_model_as_its_heading_and_an_unkno
     shown   = json.loads( prompt.split( "EXISTING PRINCIPLES\n" )[ 1 ] )
     assert { row[ "id" ]: row[ "dimension" ] for row in shown } == { "pid-old": "Fix the real cause", "pid-new": "ask.x" }
     assert "fix_depth" not in prompt
+
+
+def test_the_extractor_version_is_the_model_then_a_colon_then_the_prompt_version_and_the_job_stores_that_string():
+    from cosa.agents.principle_learner import extractor_job
+    from cosa.agents.principle_learner.extractor_prompt import extractor_version_of
+    assert extractor_version_of( "m-1" ).startswith( "m-1:extractor-v2-vocab-" )
+    assert extractor_job.extractor_version_of is extractor_version_of

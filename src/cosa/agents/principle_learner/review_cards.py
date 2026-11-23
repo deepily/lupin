@@ -13,6 +13,7 @@ import json
 import uuid
 from datetime import timedelta
 
+from cosa.agents.heartbeat_arbiter.ping_throttle import prune_window
 from cosa.agents.prediction_engine.history_derive import attribution_tier
 from cosa.agents.prediction_engine.review_card import REVIEW_CARD_KEY, REVIEW_CARD_SOURCE, is_review_card
 from cosa.config.configuration_manager import ConfigurationManager
@@ -100,7 +101,7 @@ def cards_in_window( sent_times, now ):
     Ensures:
         - counts a time after now minus 24 hours and at or before now; a card sent exactly 24 hours ago no longer counts
     """
-    return sum( 1 for moment in sent_times if now - WINDOW < moment <= now )
+    return len( prune_window( sent_times, now, WINDOW.total_seconds(), strict=True, drop_future=True ) )
 
 
 def plan_card( contested, sent_times, now, cap, batch_max=BATCH_MAX ):
