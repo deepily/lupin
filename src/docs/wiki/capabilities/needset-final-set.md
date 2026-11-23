@@ -35,3 +35,6 @@ Chooses the needs people label, builds the final set and verifies its manifest. 
 - `verify_manifest` checks a finished set against the required shape: 400 rows, 300 matched, 100 nothing, 240 TypeScript and 160 Python.
 - Every nothing and disputed row needs a human final source. No row is a smoke row, no id repeats, and the hash, kappa and the three frozen hashes must be present.
 - `check_committed_set` reads the status file. A pending set with a set file, or a final set that fails verification, raises `MANIFEST_MISMATCH`.
+- The diagnostic set of record is now the 512 known answers, not the 400 above. They pool the old 124 and the new 388, each with its own corpus commit.
+- `known_answers.load_known_answers` opens their manifest by its sha256. It raises `MANIFEST_MISMATCH` for a changed file or a count other than 512. It also refuses a split other than 124 and 388, a repeated id or a different corpus commit.
+- The 400 checks above are a different shape and are unchanged.
