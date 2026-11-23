@@ -21642,6 +21642,9 @@ class NotificationsUI {
             idoc.addEventListener( "click", ( ev ) => {
                 const a = ev.target && ev.target.closest ? ev.target.closest( "a[href]" ) : null;
                 if ( !a ) return;
+                // The folder listing's ↗ link opens its own tab through its target="_blank"; claiming it
+                // would render it in the pane. The marker is NEW_TAB_ATTR in shared/doc-new-tab-link.js.
+                if ( a.hasAttribute( "data-doc-new-tab" ) ) return;
                 const norm = this._normalizeDocLinkHref( a.getAttribute( "href" ) );
                 if ( !norm ) return;
                 if ( norm.startsWith( "/app/docs?path=" ) ) {

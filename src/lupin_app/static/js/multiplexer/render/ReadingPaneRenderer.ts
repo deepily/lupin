@@ -35,6 +35,7 @@ import { renderMarkdown } from "./markdown";
 import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
 import { handleApproveLinkClick, handleApprovePriorityLinkClick, handleBatchApproveLinkClick, handleBatchViewLinkClick, handleViewLinkClick, observeApproveLinks, type ApproveSender, type TaskReader } from "./approveLink";
+import { isNewTabAnchor } from "../../shared/doc-new-tab-link.js";
 import { buildConsolePageHref } from "../console/consolePageUrl";
 import { bindPodcastLinks } from "./podcastLinks";
 import { scrollByDelta } from "./keepPlace";
@@ -686,6 +687,8 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     const target = ev.target as Element | null;
     const a = target !== null ? target.closest("a[href]") : null;
     if (a === null) return;
+    // The folder listing's ↗ link opens its own tab through its target="_blank"; claiming it would render it in the pane.
+    if (isNewTabAnchor(a)) return;
     const norm = this.normalizeDocLinkHref(a.getAttribute("href"));
     if (norm === null) return;
     if (norm.startsWith(DOC_LINK_PREFIX)) {

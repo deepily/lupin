@@ -15,6 +15,7 @@ import type { StorageService } from "../../../../lupin_app/static/js/multiplexer
 import { createReadingPaneStore } from "../../../../lupin_app/static/js/multiplexer/stores/ReadingPaneStore";
 import type { ReadingPaneStore } from "../../../../lupin_app/static/js/multiplexer/stores/ReadingPaneStore";
 import { createReadingPaneRenderer } from "../../../../lupin_app/static/js/multiplexer/render/ReadingPaneRenderer";
+import { NEW_TAB_ATTR } from "../../../../lupin_app/static/js/shared/doc-new-tab-link.js";
 import type {
   ReadingPaneRenderer,
   WindowLike,
@@ -808,4 +809,17 @@ test("scroll anchor: missing .container in left column → null anchor", () => {
   shell.querySelector(".container")?.remove();
   store.open("abstract", "x", "t");
   assert.equal($("#content-pane").hasAttribute("hidden"), false);
+});
+
+test("iframe link: the folder listing's ↗ link is left alone, so its own target=_blank opens the tab", () => {
+  const { renderer, store, win } = setup({ seed: HORIZ });
+  const a = document.createElement("a");
+  a.setAttribute("href", "/app/docs?path=lupin%2Fx.md");
+  a.setAttribute(NEW_TAB_ATTR, "1");
+  const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "target", { value: a, enumerable: true });
+  (renderer as unknown as { handleIframeLinkClick( ev: MouseEvent ): void }).handleIframeLinkClick(ev);
+  assert.equal(ev.defaultPrevented, false, "the browser must still follow the ↗ link");
+  assert.equal(store.isPaneOpen(), false);
+  assert.equal(win.opens.length, 0);
 });

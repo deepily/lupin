@@ -371,6 +371,9 @@
             text-decoration: none;
         }
         .doc-dir-entry a:hover { color: #4f46e5; }
+        /* The ↗ open-in-a-new-tab link beside a file name; the name link keeps the room. */
+        .doc-dir-entry a.doc-dir-newtab { flex: none; margin-left: 8px; padding: 0 6px; font-weight: 600; }
+        .doc-dir-entry a.doc-dir-newtab:focus-visible { outline: 2px solid #4f46e5; border-radius: 4px; }
         .doc-dir-icon {
             margin-right: 12px;
             font-size: 16px;
@@ -694,7 +697,7 @@
                     // A .json FILE is also application/json. Only a listing carries
                     // `entries`; anything else is a document and renders as text.
                     if ( payload && Array.isArray( payload.entries ) && !/\.json$/i.test( filename ) ) {
-                        renderDirectoryListing( payload, target );
+                        await renderDirectoryListing( payload, target );
                         wireUpload( payload, fetchUrl );
                     } else {
                         renderPlainText( JSON.stringify( payload, null, 2 ), target );
@@ -1105,7 +1108,7 @@
                     }
 
                     const fresh = await window.__docViewerAuthedFetch( listingUrl, {} );
-                    if ( fresh.ok ) renderDirectoryListing( await fresh.json(), target );
+                    if ( fresh.ok ) await renderDirectoryListing( await fresh.json(), target );
                     say( ( body.replaced ? 'Replaced ' : 'Uploaded ' ) + body.name, false );
                 } catch ( err ) {
                     say( 'Upload failed: ' + err.message, true );
@@ -1166,7 +1169,13 @@
         // Directory-listing renderer — added 2026-05-12 per
         // src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md
         // Updated 2026-05-16 for path-prefix routing per 2026-05-15 unification.
-        function renderDirectoryListing( listing, target ) {
+        async function renderDirectoryListing( listing, target ) {
+            // The ↗ link's logic is shared with both clients' iframe interception. A missing module leaves
+            // the listing exactly as it was, with no glyph.
+            let newTabLinkHtml = () => '';
+            try { newTabLinkHtml = ( await import( '/static/js/shared/doc-new-tab-link.js' ) ).newTabLinkHtml; }
+            catch ( e ) { console.error( 'shared/doc-new-tab-link.js did not load: no open-in-new-tab links', e ); }
+
             const scope = listing.scope || 'lupin';
             const segments = listing.path ? listing.path.split( '/' ) : [];
 
@@ -1239,6 +1248,7 @@
                     entriesHtml += '<span class="doc-dir-icon">' + iconFor( entry ) + '</span>';
                     entriesHtml += '<span class="doc-dir-name">' + entry.name + '</span>';
                     entriesHtml += '</a>';
+                    entriesHtml += newTabLinkHtml( entry );
                     if ( entry.size !== null && entry.size !== undefined ) {
                         entriesHtml += '<span class="doc-dir-meta">' + formatSize( entry.size ) + '</span>';
                     }
@@ -1249,7 +1259,7 @@
 
             const sanitized = DOMPurify.sanitize( rootsPanelHtml() + breadcrumbHtml + entriesHtml, {
                 ALLOWED_TAGS : [ 'div', 'span', 'a', 'ul', 'li', 'details', 'summary' ],
-                ALLOWED_ATTR : [ 'href', 'class' ]
+                ALLOWED_ATTR : [ 'href', 'class', 'target', 'rel', 'title', 'aria-label', 'data-doc-new-tab' ]
             } );
 
             target.className = 'doc-viewer-content';
