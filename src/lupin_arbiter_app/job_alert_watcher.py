@@ -345,14 +345,13 @@ class JobAlertLoop( StoppableDaemonMixin ):
         Keep the job-health rows, and say so loudly when one cannot be kept.
 
         Ensures:
-            - a failure is logged as job_row_failed and sent through notify_fn as an urgent alert, at most once per FAILURE_ALERT_SECONDS
+            - a failure is logged as job_row_failed and sent through notify_fn as an urgent alert, at most once per FAILURE_ALERT_SECONDS after one was delivered; an undelivered alert is sent again at the next poll
         """
         errors = self.row_sync_fn( jobs, now )
         if not errors: return
         self.log_fn( "job_row_failed", errors=errors )
         if digest_due( self._failure_alerted, now, FAILURE_ALERT_SECONDS ):
-            self.notify_fn( f"Job rows could not be kept in step: {len( errors )} failure(s). {errors[ 0 ]}"[ :MAX_MESSAGE ] )
-            self._failure_alerted = now.isoformat()
+            if delivered( self.notify_fn( f"Job rows could not be kept in step: {len( errors )} failure(s). {errors[ 0 ]}"[ :MAX_MESSAGE ] ) ): self._failure_alerted = now.isoformat()
 
     def _enabled( self ) -> bool:
         """Ensures: returns True; the arbiter builds this loop only when the watcher is on."""

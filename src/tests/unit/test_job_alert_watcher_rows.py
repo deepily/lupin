@@ -224,6 +224,24 @@ def test_a_store_that_refuses_the_row_is_logged_alerted_once_an_hour_and_tried_a
     assert len( store.rows ) == 1, "nothing was marked as done, so the next poll files it"
 
 
+def test_a_failure_alert_that_was_not_delivered_is_sent_again_at_the_next_poll( tmp_path ):
+    store = Store()
+    store.fail.add( "create" )
+    loop, clock, alerts, logs = red_loop( tmp_path, store )
+    answers = [ [], [ { "channel": "live", "outcome": "queued" } ] ]                      # the failure alert reaches nobody once, then arrives
+    ok      = [ { "channel": "live", "outcome": "queued" } ]
+    loop.notify_fn = lambda message: alerts.append( message ) or ( answers.pop( 0 ) if message.startswith( "Job rows could not be kept" ) else ok )
+    count = lambda: len( [ a for a in alerts if a.startswith( "Job rows could not be kept" ) ] )
+    loop.poll_once()
+    assert count() == 1, "the first send reached nobody"
+    clock.t += datetime.timedelta( minutes=10 )
+    loop.poll_once()
+    assert count() == 2, "so the next poll sends it again, not an hour later"
+    clock.t += datetime.timedelta( minutes=10 )
+    loop.poll_once()
+    assert count() == 2, "once delivered, the hour's quiet applies"
+
+
 @pytest.mark.parametrize( "verb", [ "find_open", "amend", "drop" ] )
 def test_every_store_verb_that_fails_is_named_in_the_failure_line( tmp_path, verb ):
     store = Store()
