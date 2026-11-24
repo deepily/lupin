@@ -101,3 +101,16 @@ def test_a_connection_reset_and_an_api_failure_are_not_read_as_a_limit( text, su
 
 def test_an_api_429_under_subtype_success_is_still_a_limit_by_its_marker():
     with pytest.raises( mt.ModelRateLimited ): call( result( None, None, error=True, text="API Error: 429 too many requests", subtype="success" ) )
+
+
+DEAD_REFRESH = "Failed to authenticate: OAuth session expired and could not be refreshed"   # the container's log line of 23 Nov 2026, under subtype success
+
+
+def test_a_failed_login_raises_its_own_error_with_the_login_sentence_and_not_the_rate_limit_error():
+    with pytest.raises( mt.ModelLoginExpired, match="docker exec -it lupin-rest-dev claude /login" ) as caught: call( result( None, None, error=True, text=DEAD_REFRESH, subtype="success" ) )
+    assert isinstance( caught.value, mt.ModelCallError ) and not isinstance( caught.value, mt.ModelRateLimited )
+
+
+def test_a_401_also_raises_the_login_error_and_a_plan_limit_still_raises_the_rate_limit_error():
+    with pytest.raises( mt.ModelLoginExpired ): call( result( None, None, error=True, text="API Error: 401 token expired", subtype="success" ) )
+    with pytest.raises( mt.ModelRateLimited ): call( result( None, None, error=True, text=REAL_PLAN_LIMIT, subtype="success" ) )
