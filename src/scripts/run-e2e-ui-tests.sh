@@ -182,6 +182,19 @@ fi
 
 echo ""
 
+# The served client bundle must not be stale (row 416c967b): dist/ is gitignored and a merge does not rebuild it.
+# shellcheck source=lib/preflight-bundle-probe.sh
+source "$PROJECT_ROOT/src/scripts/lib/preflight-bundle-probe.sh"
+bundle_rc=0
+bundle_freshness_gate || bundle_rc=$?
+if [ "$bundle_rc" -eq 1 ]; then
+    echo -e "${RED}[ERROR] The served client bundle is STALE: merged TypeScript is not what the page loads.${NC}"
+    echo -e "${RED}        Run: src/scripts/preflight-test-container.sh --rebuild-bundle (or: npm run build)${NC}"
+    exit 1
+elif [ "$bundle_rc" -ne 0 ]; then
+    echo -e "${YELLOW}[WARN] The served client bundle could not be checked (exit $bundle_rc); continuing.${NC}"
+fi
+
 # Check that the test server IS running (via health endpoint)
 echo -e "${YELLOW}[SERVER] Checking test server at $BASE_URL ...${NC}"
 

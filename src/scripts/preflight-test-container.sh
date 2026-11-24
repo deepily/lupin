@@ -17,17 +17,20 @@
 # Usage:
 #   src/scripts/preflight-test-container.sh         # run all probes
 #   src/scripts/preflight-test-container.sh -v      # verbose (echo commands)
+#   src/scripts/preflight-test-container.sh --rebuild-bundle   # rebuild a STALE served bundle (npm run build), then re-check
 #
 
 set -u
 
 CONTAINER="${PREFLIGHT_CONTAINER:-lupin-rest-test}"
 VERBOSE=false
+REBUILD_BUNDLE=""
 for arg in "$@"; do
     case "$arg" in
+        --rebuild-bundle) REBUILD_BUNDLE="--rebuild" ;;
         -v|--verbose) VERBOSE=true ;;
         -h|--help)
-            sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
     esac
@@ -223,6 +226,21 @@ probe_test_login_secret
 # shellcheck source=lib/preflight-smoke-admin-probe.sh
 source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-smoke-admin-probe.sh"
 probe_smoke_admin_credentials
+
+# ── 10. Served client bundle is not stale ────────────────────────────────
+# dist/ is gitignored and served from this checkout; a merge does not rebuild it (row 416c967b). STALE blocks:
+# the E2E pyramid would test old bytes. A checker that could not answer only warns.
+# shellcheck source=lib/preflight-bundle-probe.sh
+source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-bundle-probe.sh"
+bundle_rc=0
+bundle_freshness_gate ${REBUILD_BUNDLE} || bundle_rc=$?
+case "$bundle_rc" in
+    0) say_ok "served client bundle is fresh" ;;
+    1) say_fail "served client bundle is STALE: merged TypeScript is not what the page loads"
+       remedy "src/scripts/preflight-test-container.sh --rebuild-bundle (or: npm run build)" ;;
+    *) say_warn "served client bundle could not be checked (exit ${bundle_rc})"
+       remedy "run src/scripts/check_bundle_freshness.py by hand" ;;
+esac
 
 # ── Summary ──────────────────────────────────────────────────────────────
 echo
