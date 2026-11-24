@@ -38,7 +38,7 @@ def _store( factory, rows, category="general" ):
     with factory() as session:
         for i, ( minutes, source, stance ) in enumerate( rows ):
             meta = { "job_id": "j", "user_answer": True, "answer_source": source }
-            if source == "human": meta.update( { "answer_stance": stance, "answer_comment": None, "answer_raw": stance } )
+            if source in ( "human", "not_operator" ): meta.update( { "answer_stance": stance, "answer_comment": None, "answer_raw": stance } )
             row = ProxyDecisionRepository( session ).log_shadow( f"n-{category}-{i}-{minutes}", "swe", category, "q?", metadata_json=meta )
             row.created_at = T0 + timedelta( minutes=minutes )
         session.commit()
@@ -94,6 +94,13 @@ def test_a_note_after_the_rebuild_settles_the_ceiling_first_and_can_lift_it( fac
 def test_default_and_unattributed_rows_never_enter_the_window( factory ):
     rows = [ ( i, source, "neither" ) for i, source in enumerate( [ "default", "unattributed", "proxy" ] * 5 ) ] + [ ( 100 + i, "human", "yes" ) for i in range( 5 ) ]
     _store( factory, rows )
+    strategy = _strategy( factory )
+    assert strategy._stance_history[ "general" ] == [ "yes" ] * 5
+    assert strategy.reframe_blocked( "general" ) is False
+
+
+def test_a_not_operator_row_never_enters_the_window_even_with_a_stance_stored( factory ):
+    _store( factory, [ ( i, "not_operator", "neither" ) for i in range( 5 ) ] + [ ( 100 + i, "human", "yes" ) for i in range( 5 ) ] )
     strategy = _strategy( factory )
     assert strategy._stance_history[ "general" ] == [ "yes" ] * 5
     assert strategy.reframe_blocked( "general" ) is False
