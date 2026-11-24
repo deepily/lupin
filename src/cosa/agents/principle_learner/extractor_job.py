@@ -14,6 +14,7 @@ import json
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 from cosa.agents.agentic_job_base import AgenticJobBase
@@ -284,8 +285,23 @@ class PrincipleExtractorJob( AgenticJobBase ):
                 report[ "off_vocabulary" ].append( { "field_key": entry[ "field_key" ], "dimension": checked[ "dimension" ] } )
             extractor_store.apply_field( session, str( row.recipient_id ), row.id, entry[ "field_key" ], checked, neighbours,
                                          ( aware_moment( row.responded_at ), now ), ( extractor, encoder ), embed,
-                                         sender_session_suffix( row.sender_id ), report )
+                                         sender_session_suffix( row.sender_id ), report, key_complete=lambda system, user: self._complete_sync( model, system, user, timeout ),
+                                         source_key=extractor_store.source_key_for( card_text( episode ), entry[ "text" ] ) )
         return self._summary( "extracted", report=report, influenced=influenced )
+
+    def _complete_sync( self, model, system, user, timeout ):
+        """
+        Ask the model one question from synchronous code that runs inside the job's event loop.
+
+        Requires:
+            - called while the job's loop is running, so the call runs on its own thread and loop
+
+        Ensures:
+            - returns the reply text of model_transport.complete, with this job's query_fn and the given timeout
+            - raises whatever model_transport.complete raises
+        """
+        with ThreadPoolExecutor( max_workers=1 ) as pool:
+            return pool.submit( asyncio.run, model_transport.complete( model, system, user, query_fn=self.query_fn, timeout_seconds=timeout ) ).result()
 
     def _summary( self, status, report=None, influenced=None ):
         """

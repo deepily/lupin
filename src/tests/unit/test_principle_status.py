@@ -11,13 +11,17 @@ Each test names what it would catch:
 The rows are plain objects with the model's column names; no database is touched.
 """
 
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from cosa.agents.prediction_engine.history_context_rebuild import answer_known_at_ask
-from cosa.agents.prediction_engine.principle_status import ( CONTESTED, ESTABLISHED, HYPOTHESIS, RETRACTED, derive_statuses, usable_at )
+from cosa.agents.prediction_engine import principle_status
+from cosa.agents.prediction_engine.principle_status import ( CONDITION_KEYS_SWITCH, CONTESTED, ESTABLISHED, HYPOTHESIS, RETRACTED, compute_condition_key, derive_statuses,
+                                                              normalise_key, usable_at )
 
 ASK  = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 HOUR = timedelta( hours=1 )
@@ -30,11 +34,12 @@ def principle( pid="p1", version=V1, dimension="ask.approval_needs_link", scope=
     return SimpleNamespace( id=pid, owner_id=owner, scope=scope, dimension=dimension, extractor_version=version, continues_principle_id=continues )
 
 
-def row( pid="p1", note="n1", relation="supports", condition=None, answered=-HOUR, extracted=-HOUR, retracted=None, version=V1, source="extractor", session_key=None ):
+def row( pid="p1", note="n1", relation="supports", condition=None, answered=-HOUR, extracted=-HOUR, retracted=None, version=V1, source="extractor", session_key=None,
+         **keys ):
     """Build an evidence row; times are offsets from the ask."""
     return SimpleNamespace( principle_id=pid, notification_id=note, relation=relation, condition=condition, field_key="f",
                             answered_at=ASK + answered, extracted_at=ASK + extracted, retracted_at=None if retracted is None else ASK + retracted,
-                            extractor_version=version, source=source, session_key=session_key )
+                            extractor_version=version, source=source, session_key=session_key, **keys )
 
 
 def ruling( pid="p1", relation="supports", condition=None, answered=-HOUR, extracted=-HOUR, version=V1, retracted=None ):
@@ -331,3 +336,185 @@ def test_a_split_contradicts_row_that_sorts_latest_is_still_no_ruling():
     other   = row( note="card", relation="contradicts", condition="f is b", source="split_step", answered=-HOUR, extracted=-HOUR )
     result  = status_of( [ principle() ], [ other, refines, row( note="n1" ) ] )
     assert result[ "status" ] != RETRACTED and result[ "ruled" ] is True
+
+
+# ---- the two switches: condition keys (row 9) and source dedup (row 10) ----
+
+FIXTURE = json.loads( ( Path( __file__ ).resolve().parents[ 1 ] / "fixtures" / "principle_status" / "condition_key_writer_replies.json" ).read_text() )
+KEYED   = dict( condition_key=None, source_key=None, standing_quote=None )
+
+
+def keyed( **overrides ):
+    """Build an evidence row that carries the three stored columns the switches read."""
+    return row( **{ **KEYED, **overrides } )
+
+
+def replaying( calls ):
+    """Stand in for the model with its recorded replies, matched on the prompt sent."""
+    by_prompt = { call[ "user" ]: call[ "reply" ] for call in calls }
+    return lambda system, user: by_prompt[ user ]
+
+
+def test_the_fixture_holds_real_replies_for_both_pairs():
+    """The committed fixture names its model and carries two calls for each of the two pairs."""
+    assert FIXTURE[ "model" ].startswith( "claude-" )
+    assert sorted( FIXTURE[ "pairs" ] ) == [ "different", "equal" ]
+    assert all( len( pair[ "calls" ] ) == 2 for pair in FIXTURE[ "pairs" ].values() )
+
+
+def key_pair( name ):
+    """Run the key step over one fixture pair; the second sees the first's key."""
+    pair  = FIXTURE[ "pairs" ][ name ]
+    ask   = replaying( pair[ "calls" ] )
+    first = compute_condition_key( pair[ "conditions" ][ 0 ], [], ask )
+    return first, compute_condition_key( pair[ "conditions" ][ 1 ], [ first ], ask )
+
+
+def test_two_conditions_that_mean_the_same_get_one_key_and_different_ones_get_two():
+    """Replayed real replies: equal conditions share a key and different ones do not."""
+    equal, different = key_pair( "equal" ), key_pair( "different" )
+    assert equal[ 0 ] == equal[ 1 ] and list( equal ) == FIXTURE[ "pairs" ][ "equal" ][ "keys" ]
+    assert different[ 0 ] != different[ 1 ] and list( different ) == FIXTURE[ "pairs" ][ "different" ][ "keys" ]
+
+
+def test_derive_statuses_makes_no_model_call_and_reads_stored_keys(monkeypatch):
+    """
+    With the switch on, a transport that fails if called is never called.
+
+    Equal stored keys make a contest.
+
+    The two conditions are worded differently; only the keys the writer stored tie them together.
+    """
+    from cosa.repo.doc_lint import model_transport
+    def refuse( *args, **kwargs ): raise AssertionError( "derive_statuses called the model" )
+    monkeypatch.setattr( model_transport, "complete", refuse )
+    equal       = FIXTURE[ "pairs" ][ "equal" ]
+    key         = equal[ "keys" ][ 0 ]
+    support     = keyed( note="n1", relation="supports", condition=equal[ "conditions" ][ 0 ], condition_key=key )
+    contradict  = keyed( note="n2", relation="contradicts", condition=equal[ "conditions" ][ 1 ], condition_key=key )
+    result      = derive_statuses( [ principle() ], [ support, contradict ], ASK, V1, session_of, condition_keys=True, source_dedup=False )[ "p1" ]
+    assert result[ "status" ] == CONTESTED
+    other       = keyed( note="n2", relation="contradicts", condition=equal[ "conditions" ][ 1 ], condition_key=FIXTURE[ "pairs" ][ "different" ][ "keys" ][ 1 ] )
+    assert derive_statuses( [ principle() ], [ support, other ], ASK, V1, session_of, condition_keys=True, source_dedup=False )[ "p1" ][ "status" ] == HYPOTHESIS
+
+
+def test_a_row_with_no_stored_key_is_compared_by_its_condition_as_before():
+    """A key-less row falls back to its case-folded condition."""
+    rows = [ keyed( note="n1", condition="Same Words" ), keyed( note="n2", relation="contradicts", condition="same words" ) ]
+    assert derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=True, source_dedup=False )[ "p1" ][ "status" ] == CONTESTED
+
+
+def test_conditions_are_listed_once_per_stored_key_with_theswitch_on():
+    """Two supporting rows with one key list one condition; a key-less row still lists its own."""
+    rows   = [ keyed( note="n1", condition="worded one way", condition_key="k" ), keyed( note="n2", condition="worded another way", condition_key="k" ),
+               keyed( note="n3", condition="no key here" ), keyed( note="n4", condition="worded one way", condition_key="k2" ) ]
+    result = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=True, source_dedup=False )[ "p1" ]
+    assert result[ "conditions" ] == [ "worded one way", "no key here" ]
+    off    = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=False, source_dedup=False )[ "p1" ]
+    assert off[ "conditions" ] == [ "worded one way", "worded another way", "no key here" ]
+
+
+def test_with_both_switches_off_the_new_columns_change_nothing():
+    """
+    Switch-off pin: rows with keys, sources and quotes give the result of rows without.
+
+    The result has no standing or inferred entry, and the rows need not carry the columns at all.
+    """
+    plain  = [ row( note="n1", condition="a" ), row( note="n2", condition="A", relation="contradicts" ), row( note="n3", condition="b" ) ]
+    loaded = [ keyed( note="n1", condition="a", condition_key="x", source_key="s", standing_quote="always" ),
+               keyed( note="n2", condition="A", relation="contradicts", condition_key="y", source_key="s" ),
+               keyed( note="n3", condition="b", condition_key="x", source_key="s", standing_quote="never" ) ]
+    off    = { "condition_keys": False, "source_dedup": False }
+    before = derive_statuses( [ principle() ], plain, ASK, V1, session_of, **off )
+    after  = derive_statuses( [ principle() ], loaded, ASK, V1, session_of, **off )
+    assert before == after and "standing" not in after[ "p1" ] and "inferred" not in after[ "p1" ]
+
+
+def test_two_rows_sharing_a_source_key_count_once_and_the_tallies_split_standing_from_inferred():
+    """
+    Source dedup: three rows, two of one source, count as two episodes.
+
+    The tallies report the one standing source and the one inferred refusal apart; a blank quote is not standing.
+    """
+    rows = [ keyed( note="n1", source_key="card-1", standing_quote="always ask first, for every re-spin" ),
+             keyed( note="n2", source_key="card-1", standing_quote="always ask first, for every re-spin" ),
+             keyed( note="n3", source_key="card-2", standing_quote="   " ) ]
+    result = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=False, source_dedup=True )[ "p1" ]
+    assert result[ "episodes" ] == 2 and ( result[ "standing" ], result[ "inferred" ] ) == ( 1, 1 )
+    off = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=False, source_dedup=False )[ "p1" ]
+    assert off[ "episodes" ] == 3
+
+
+def test_rows_without_a_source_key_are_never_merged_and_a_copy_in_another_session_counts_once():
+    """A key-less row is its own source; one source in two sessions is one vote."""
+    keyless = [ keyed( note="n1" ), keyed( note="n2" ), keyed( note="n3" ) ]
+    assert derive_statuses( [ principle() ], keyless, ASK, V1, session_of, condition_keys=False, source_dedup=True )[ "p1" ][ "episodes" ] == 3
+    copies  = [ keyed( note="n1", source_key="same" ), keyed( note="n2", source_key="same" ) ]
+    assert derive_statuses( [ principle() ], copies, ASK, V1, session_of, condition_keys=False, source_dedup=True )[ "p1" ][ "status" ] == HYPOTHESIS
+    assert derive_statuses( [ principle() ], copies, ASK, V1, session_of, condition_keys=False, source_dedup=False )[ "p1" ][ "status" ] == ESTABLISHED
+
+
+def test_compute_condition_key_calls_the_model_only_when_it_must():
+    """A blank condition and a wording that matches an existing key are answered without a call."""
+    def refuse( system, user ): raise AssertionError( "the model was called" )
+    assert compute_condition_key( None, [], refuse ) is None and compute_condition_key( "  . ", [], refuse ) is None
+    assert compute_condition_key( "Has  Unsaved Work.", [ "has unsaved work", None ], refuse ) == "has unsaved work"
+    assert normalise_key( None ) is None and normalise_key( "  Mixed   CASE!? " ) == "mixed case"
+
+
+@pytest.mark.parametrize( "reply, expected", [
+    ( "not json at all",                                   "new wording" ),
+    ( None,                                                "new wording" ),
+    ( "[1, 2]",                                            "new wording" ),
+    ( '{"same_as": null, "key": 7}',                       "new wording" ),
+    ( '{"same_as": null, "key": " "}',                     "new wording" ),
+    ( '{"same_as": 3, "key": "Fresh Key"}',                "fresh key" ),
+    ( '{"same_as": "not an existing key", "key": "Own"}',  "own" ),
+    ( '{"same_as": "Old Key", "key": "ignored"}',          "old key" ),
+] )
+def test_compute_condition_key_survives_a_bad_reply_and_prefers_an_existing_key( reply, expected ):
+    """A reply that is unusable still gives the row a key: the normalised wording."""
+    assert compute_condition_key( "New wording", [ "old key" ], lambda system, user: reply ) == expected
+
+
+def test_the_switches_read_their_ini_keys_and_an_unreadable_setting_is_off( monkeypatch, capsys ):
+    """With no override each key is read by name; a failing read is off and says so."""
+    asked = []
+    class Manager:
+        def __init__( self, env_var_name ): pass
+        def get( self, key, default, return_type ):
+            asked.append( key )
+            return key == CONDITION_KEYS_SWITCH
+    monkeypatch.setattr( principle_status, "ConfigurationManager", Manager )
+    rows = [ keyed( note="n1", source_key="s" ), keyed( note="n2", source_key="s" ) ]
+    result = derive_statuses( [ principle() ], rows, ASK, V1, session_of )[ "p1" ]
+    assert asked == [ "principle learner condition keys enabled", "principle learner source dedup enabled" ]
+    assert result[ "episodes" ] == 2 and "standing" not in result
+    def broken( env_var_name ): raise RuntimeError( "no ini" )
+    monkeypatch.setattr( principle_status, "ConfigurationManager", broken )
+    assert principle_status.switch_on( "any key" ) is False
+    assert "unreadable, treated as off" in capsys.readouterr().out
+
+
+def test_the_tallies_say_which_sources_are_standing_and_which_are_inferred():
+    """Two standing and one inferred give ( 2, 1 ); the reverse gives ( 1, 2 )."""
+    def tally( *quotes ):
+        rows = [ keyed( note=f"n{i}", source_key=f"s{i}", standing_quote=quote ) for i, quote in enumerate( quotes ) ]
+        result = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=False, source_dedup=True )[ "p1" ]
+        return result[ "standing" ], result[ "inferred" ]
+    assert tally( "always ask first", "never skip the link", None ) == ( 2, 1 )
+    assert tally( "always ask first", None, "" ) == ( 1, 2 )
+
+
+def test_after_a_ruling_a_later_contradiction_contests_by_stored_key():
+    """
+    A later contradiction worded differently carries the support's stored key.
+
+    With keys on the principle is contested; with keys off it is not.
+    """
+    rows = [ keyed( note="n1", condition="needs the link", condition_key="link", answered=-3 * HOUR ),
+             keyed( note="card", source="review_card", relation="supports", answered=-2 * HOUR ),
+             keyed( note="n2", relation="contradicts", condition="the link is missing", condition_key="link", answered=-HOUR ) ]
+    on  = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=True, source_dedup=False )[ "p1" ]
+    off = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=False, source_dedup=False )[ "p1" ]
+    assert on[ "status" ] == CONTESTED and off[ "status" ] != CONTESTED and on[ "ruled" ] is True
