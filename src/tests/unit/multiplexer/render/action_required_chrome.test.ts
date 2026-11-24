@@ -26,6 +26,7 @@ import {
   abstractIndicator,
   abstractBlock,
   predictionHintBox,
+  contextForecastLine,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredChrome";
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createPredictionVoteStore } from "../../../../lupin_app/static/js/multiplexer/stores/PredictionVoteStore";
@@ -377,4 +378,18 @@ test( "the indicator takes an extra class, a test id and a title from its option
   assert.equal( plain.getAttribute( "data-testid" ), null, "no test id unless asked" );
   const untitled = abstractIndicator( "details", { title: null } )!;
   assert.equal( untitled.getAttribute( "title" ), null, "title: null leaves the attribute off" );
+} );
+
+// --- A neither forecast (row 321105e7): the lookup arm can forecast "neither", and the card must say so -----
+
+test( "a neither forecast shows as Neither, with its qualifier, and never as yes or no", () => {
+  const neither: Hint = { ...ready, predicted_value: "neither" };
+  assert.equal( box( neither ).querySelector( ".prediction-hint-label" )!.textContent, "Neither" );
+  assert.equal( box( { ...neither, predicted_qualifier: "re-frame it" } ).querySelector( ".prediction-hint-label" )!.textContent, 'Neither — "re-frame it"' );
+  assert.equal( box( neither ).querySelector( ".prediction-hint-confidence" )!.textContent, "Confidence 87% (cosine similarity)" );
+} );
+
+test( "a ready context forecast of neither reads Haiku forecast: Neither", () => {
+  const line = contextForecastLine( "yes_no", { state: "ready", predicted_value: "neither", confidence: 0.6 } );
+  assert.equal( line!.textContent, "Haiku forecast: Neither (60%)" );
 } );

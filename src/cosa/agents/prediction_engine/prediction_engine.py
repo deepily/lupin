@@ -196,6 +196,7 @@ class PredictionEngine:
 
         # Initialize embedding store (lazy — created on first use)
         self._embedding_store    = None
+        self.three_way_case_provider = None
         self._embedding_provider = None
         self._llm_client         = None
 
@@ -648,8 +649,9 @@ class PredictionEngine:
             - returns the likeliest of yes, no or neither as predicted_value, its probability as confidence, and the
               three probabilities and neighbour ids in metadata
             - no embedding, no owner, or no neighbour gives cold_start with a named reason
-            - the cases are read live from the database as of now, not from a replay's time-sliced store, so a replay
-              with the switch on is not bounded to what was known at each ask
+            - with no three_way_case_provider set, the cases are read live from the database as of now
+            - with one set, it is called as provider( owner_user_id ) and returns ( asked_at, cases ); the vote uses that
+              moment and those cases and the database is not read, so a replay is bounded to what was known at each ask
         """
         from cosa.agents.prediction_engine import three_way_shadow, three_way_stance
         from cosa.rest.db.database import get_db
@@ -657,11 +659,14 @@ class PredictionEngine:
             return PredictionResult( response_type=RESPONSE_TYPE_YES_NO, category=category, strategy=STRATEGY_COLD_START, metadata={ "reason": "no_embedding" } )
         if owner_user_id is None:
             return PredictionResult( response_type=RESPONSE_TYPE_YES_NO, category=category, strategy=STRATEGY_COLD_START, metadata={ "reason": "no_owner" } )
-        ask = { "question_embedding": embedding, "asked_at": datetime.now( timezone.utc ), "owner_user_id": owner_user_id,
+        asked_at = datetime.now( timezone.utc )
+        if self.three_way_case_provider is not None: asked_at, cases = self.three_way_case_provider( owner_user_id )
+        ask = { "question_embedding": embedding, "asked_at": asked_at, "owner_user_id": owner_user_id,
                 "response_type": RESPONSE_TYPE_YES_NO, "category": category, "title": ask_context.get( "title", "" ),
                 "message": message, "sender_id": ask_context.get( "sender_id", "" ) }
-        with get_db() as session:
-            cases = three_way_shadow.live_cases( session, owner_user_id )
+        if self.three_way_case_provider is None:
+            with get_db() as session:
+                cases = three_way_shadow.live_cases( session, owner_user_id )
         forecast = three_way_stance.three_way_forecast( ask, cases, self.recency_half_life_days )
         if not forecast[ "neighbour_ids" ]:
             return PredictionResult( response_type=RESPONSE_TYPE_YES_NO, category=category, strategy=STRATEGY_COLD_START, metadata={ "reason": "no_neighbours" } )
