@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from cosa.agents.prediction_engine.full_answer import ReplyRefused
 from cosa.agents.prediction_engine.episode_view import card_text, episode_view
 from cosa.agents.prediction_engine.principle_retrieval import DEFAULT_K, principle_block, retrieval_limits, retrieve_principles
 from cosa.agents.shared.config_loader import required_positive_int
@@ -330,6 +331,7 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
         - otherwise the baseline's prompts plus the principle block go to the baseline's model, once, with no retry
         - a ready forecast is stored with the principle ids it was given and its ready time; an unreadable reply or a
           failed call stores one row with the reason and no forecast
+        - a full-answer reply the parser refuses stores that refusal's own reason (full_answer.REFUSAL_REASONS) and no forecast value
         - the cap place is always given back
     """
     if not ( switch_enabled( switch_key ) if enabled is None else enabled ): return { "status": STATUS_NOT_RUN, "reason": REASON_SWITCH }
@@ -359,6 +361,8 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
             forecast = c0.parse( text, episode )
         except c0.errors as call_error:
             reason = f"model_error: {type( call_error ).__name__}"
+        except ReplyRefused as refusal:
+            reason = refusal.reason
         except ValueError:
             reason = REASON_UNREADABLE
         else:

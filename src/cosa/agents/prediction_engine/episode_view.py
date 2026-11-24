@@ -19,6 +19,7 @@ import uuid
 from sqlalchemy import or_
 
 from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN
+from cosa.agents.prediction_engine import full_answer
 from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW, notification_dict, rebuild_context
 from cosa.agents.shared.config_loader import required_positive_int
 from cosa.config.configuration_manager import ConfigurationManager
@@ -183,19 +184,21 @@ def _is_recommended( option ):
     return option.get( "recommended" ) is True or RECOMMENDED_TAG in str( option.get( "label", "" ) ).lower()
 
 
-def fields_of( response_options, response_default ):
+def fields_of( response_options, response_default, stable_ids=False ):
     """
     Read the card's fields: prompt, mode, options with descriptions and flags, and default.
 
     Requires:
         - response_options is a dict with a "questions" list, or None
         - response_default is the card's default string or None
+        - stable_ids is True to give each option its stable id as well
 
     Ensures:
         - returns [] for a card with no questions
         - each field has key (the header), prompt, mode, options and default
         - mode is "multi" for a multi-select question, "text" for a free-text input, else "single"
         - each option has id (o1, o2, ... per field), label, description (None when absent) and recommended
+        - with stable_ids each option also has stable_id, full_answer.stable_option_id's position id plus label hash, which survives a reordering
         - default is the id of the option whose label equals the field's default text; with no option it is the
           default text itself, and None when there is no default. The field's own default_value wins over the card's
     """
@@ -203,6 +206,8 @@ def fields_of( response_options, response_default ):
     for question in ( response_options or {} ).get( "questions" ) or []:
         options = [ { "id": f"o{number}", "label": option.get( "label" ), "description": option.get( "description" ),
                       "recommended": _is_recommended( option ) } for number, option in enumerate( question.get( "options" ) or [], start=1 ) ]
+        if stable_ids:
+            for option in options: option[ "stable_id" ] = full_answer.stable_option_id( option[ "id" ], option[ "label" ] )
         default = question.get( "default_value", response_default )
         match   = [ o[ "id" ] for o in options if default is not None and str( o[ "label" ] ).strip() == str( default ).strip() ]
         mode    = "multi" if question.get( "multi_select" ) else ( "text" if question.get( "input_type" ) == "text" else "single" )
@@ -320,6 +325,7 @@ def episode_view( session, notification_id, as_of=None, limit=None ):
         - pool is { limit, truncated }, truncated naming each tier that hit the limit; the history may then lack
           older rows of that tier
         - the ask's own answer is never read
+        - with the full-answer switch on each option also carries its stable_id; with it off the record is what it was before
 
     Raises:
         - LookupError if the notification does not exist
@@ -340,6 +346,6 @@ def episode_view( session, notification_id, as_of=None, limit=None ):
     return { "owner_id": str( row.recipient_id ), "project": match.group( 1 ) if match else None, "asker": row.sender_id,
              "asked_at": asked.isoformat(), "title": row.title, "message": row.message, "response_type": row.response_type,
              "default": row.response_default, "timeout_seconds": row.timeout_seconds, "abstract": row.abstract, "links": links_of( row.abstract ),
-             "fields": fields_of( row.response_options, row.response_default ), "history": history_of( context ),
+             "fields": fields_of( row.response_options, row.response_default, full_answer.full_answer_enabled() ), "history": history_of( context ),
              "exposure": { "revealed_at": revealed_at( session, row.id, cutoff ), "draft_at_reveal": revealed_draft( session, row.id, cutoff ) },
              "pool": { "limit": limit, "truncated": truncated } }
