@@ -20,6 +20,7 @@ from cosa.agents.decision_proxy.trust_tracker import TrustTracker
 from cosa.agents.decision_proxy.circuit_breaker import CircuitBreaker
 from cosa.agents.decision_proxy.conformal_wrapper import ConformalDecisionWrapper
 from cosa.agents.decision_proxy.config import DEFAULT_CBR_CONFIDENCE_THRESHOLD
+from cosa.agents.decision_proxy.agreement import reframe_blocks_promotion, REFRAME_WINDOW
 
 from cosa.agents.swe_team.proxy.engineering_classifier import EngineeringClassifier
 from cosa.agents.swe_team.proxy.engineering_categories import (
@@ -137,6 +138,10 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         # Conformal wrapper (lazy-initialized on first use)
         self._conformal_wrapper = None
 
+        # Re-frame gate: the last answer stances per category, and the level a category may not rise above while its re-frame rate is over the bar
+        self._stance_history  = {}
+        self._reframe_ceiling = {}
+
         # Create trust tracker if not provided
         self.trust_tracker = trust_tracker or TrustTracker( debug=debug )
 
@@ -219,15 +224,52 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
     def get_trust_level( self, category ):
         """
-        Return the tracker's current level for a category.
+        Return a category's trust level, held at its ceiling while re-framing blocks promotion.
 
         Requires:
             - category is a category name
 
         Ensures:
             - Returns the level from the trust tracker, 1 for an unregistered category
+            - While reframe_blocked( category ) holds, returns no more than the level the category held when the block began
+            - A category with no recorded stance gets the tracker's level unchanged
         """
-        return self.trust_tracker.get_level( category )
+        level   = self.trust_tracker.get_level( category )
+        ceiling = self._reframe_ceiling.get( category )
+        return level if ceiling is None else min( level, ceiling )
+
+    def note_stance( self, category, stance ):
+        """
+        Remember one answer stance for a category and update its promotion block.
+
+        Requires:
+            - category is a category name; stance is "yes", "no", "neither" or None
+
+        Ensures:
+            - keeps only the last REFRAME_WINDOW stances for the category
+            - when the re-frame rate is above the bar, a ceiling is set at the level the category holds now, unless one is already set
+            - when the rate is at or below the bar, the ceiling is cleared
+            - the trust counters are never touched
+        """
+        history = self._stance_history.setdefault( category, [] )
+        history.append( stance )
+        del history[ :-REFRAME_WINDOW ]
+        if reframe_blocks_promotion( history ):
+            self._reframe_ceiling.setdefault( category, self.trust_tracker.get_level( category ) )
+        else:
+            self._reframe_ceiling.pop( category, None )
+
+    def reframe_blocked( self, category ):
+        """
+        Say whether re-framing currently blocks a category's promotion.
+
+        Requires:
+            - category is a category name
+
+        Ensures:
+            - returns True exactly when a ceiling is set for the category
+        """
+        return category in self._reframe_ceiling
 
     def gate( self, category, trust_level, confidence ):
         """

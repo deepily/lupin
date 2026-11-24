@@ -130,6 +130,7 @@ def test_a_qualified_yes_is_logged_with_its_comment( caplog ):
 
 def test_a_neither_is_no_ruling_leaves_the_counters_alone_and_logs_a_re_frame_request( caplog ):
     orch, proxy = _orch( category="deployment" )
+    proxy.reframe_blocked.return_value = False
     with caplog.at_level( "INFO" ):
         result, write = _ask( orch, _io( "neither [comment: ask it another way]" ), True )
     assert result is False
@@ -181,21 +182,83 @@ def test_with_the_switch_off_every_shape_is_scored_exactly_as_today( raw ):
     assert write.call_args.kwargs[ "extra" ][ "metadata_json" ] == { "job_id": "swe-1", "user_answer": answer }
 
 
-def test_a_run_of_neithers_logs_the_promotion_block_once_the_rate_passes_the_bar( caplog ):
-    orch, _ = _orch( category="deployment" )
+def _real_strategy( category="general" ):
+    """Build a real strategy over a real tracker: level 2 after 4 successes, level 3 after 7."""
+    from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+    from cosa.agents.swe_team.proxy.engineering_strategy import EngineeringStrategy
+    tracker = TrustTracker( l2_threshold=3, l3_threshold=6, l4_threshold=9, l5_threshold=12 )
+    return EngineeringStrategy( trust_tracker=tracker, trust_mode="active", cap_levels={ category: 5 } )
+
+
+def _succeed( strategy, times, category="general" ):
+    for _ in range( times ): strategy.trust_tracker.record_decision( category, success=True )
+
+
+def _rise_while_asking( neithers ):
+    """Reach level 2, record 20 asks with some neithers, then earn level 3."""
+    strategy = _real_strategy()
+    _succeed( strategy, 4 )
+    assert strategy.get_trust_level( "general" ) == 2
+    for stance in [ "neither" ] * neithers + [ "yes" ] * ( 20 - neithers ): strategy.note_stance( "general", stance )
+    _succeed( strategy, 3 )
+    return strategy
+
+
+def test_promotion_is_blocked_one_ask_above_the_bar_and_allowed_at_it():
+    above = _rise_while_asking( 3 )          # 3 of 20 asks: over 1 in 10
+    at    = _rise_while_asking( 2 )          # 2 of 20 asks: exactly 1 in 10
+    assert above.trust_tracker.get_level( "general" ) == 3 and above.get_trust_level( "general" ) == 2 and above.reframe_blocked( "general" ) is True
+    assert at.trust_tracker.get_level( "general" ) == 3 and at.get_trust_level( "general" ) == 3 and at.reframe_blocked( "general" ) is False
+
+
+def test_the_block_reaches_the_gate_through_evaluate():
+    blocked = _rise_while_asking( 3 )
+    free    = _rise_while_asking( 2 )
+    assert blocked.evaluate( "Proceed?" ).trust_level == 2
+    assert free.evaluate( "Proceed?" ).trust_level == 3
+
+
+def test_the_block_lifts_once_the_rate_falls_to_the_bar_and_never_touches_the_counters():
+    strategy = _rise_while_asking( 3 )
+    before   = strategy.trust_tracker.get_stats()
+    assert strategy.reframe_blocked( "general" ) is True
+    strategy.note_stance( "general", "yes" )         # the oldest neither leaves the window: 2 of 20
+    assert strategy.reframe_blocked( "general" ) is False and strategy.get_trust_level( "general" ) == 3
+    assert strategy.trust_tracker.get_stats() == before
+
+
+def test_a_blocked_category_can_still_be_demoted_and_other_categories_are_free():
+    strategy = _rise_while_asking( 3 )
+    assert strategy.get_trust_level( "testing" ) == strategy.trust_tracker.get_level( "testing" )
+    assert strategy.trust_tracker.get_level( "general" ) == 3
+    strategy.trust_tracker.demote_category( "general", levels=1 )
+    after = strategy.trust_tracker.get_level( "general" )
+    assert after < 3 and strategy.get_trust_level( "general" ) == after
+
+
+def test_a_category_with_no_stance_gets_exactly_the_trackers_level():
+    strategy = _real_strategy()
+    _succeed( strategy, 7 )
+    assert strategy.get_trust_level( "general" ) == strategy.trust_tracker.get_level( "general" ) == 3
+
+
+def test_the_stance_history_keeps_only_the_last_twenty():
+    strategy = _real_strategy()
+    for i in range( 25 ): strategy.note_stance( "general", "yes" if i < 24 else "neither" )
+    assert strategy._stance_history[ "general" ] == [ "yes" ] * 19 + [ "neither" ]
+
+
+def test_a_run_of_neithers_through_the_orchestrator_logs_the_block_once_the_rate_passes_the_bar( caplog ):
+    orch, _ = _orch( category="general" )
+    real    = _real_strategy()
+    real.evaluate         = MagicMock( return_value=orch.proxy.evaluate.return_value )
+    orch.proxy            = real
     with caplog.at_level( "INFO" ):
         for raw in [ "yes" ] * 18 + [ "neither" ] * 2:
             _ask( orch, _io( raw ), True )
         assert "promotion blocked" not in caplog.text
         _ask( orch, _io( "neither" ), True )
-    assert "promotion blocked" in caplog.text and "deployment" in caplog.text
-    assert len( orch._stance_history[ "deployment" ] ) == 20
-
-
-def test_the_stance_history_keeps_only_the_last_twenty():
-    orch, _ = _orch()
-    for i in range( 25 ): orch._note_stance( "c", "yes" if i < 24 else "neither" )
-    assert orch._stance_history[ "c" ] == [ "yes" ] * 19 + [ "neither" ]
+    assert "promotion blocked" in caplog.text and real.reframe_blocked( "general" ) is True
 
 
 # --------------------------------------------------------------------------- the replay

@@ -22,7 +22,7 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from .config import SweTeamConfig
-from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement, reframe_blocks_promotion, REFRAME_WINDOW
+from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement, REFRAME_WINDOW
 from cosa.agents.decision_proxy.config import shadow_forecast_recording_enabled, neither_is_no_ruling_enabled
 from cosa.agents.decision_proxy.decision_writer import write_proxy_decision
 from .state import (
@@ -204,7 +204,6 @@ class SweTeamOrchestrator:
 
         # Proxy notification state (Phase 7)
         self._proxy_pending_count = 0
-        self._stance_history      = {}
         self._user_email          = user_email    # The job's user; keys the persisted trust rows
 
         # Decision proxy (Phase 4 + Phase 5 INI integration)
@@ -345,12 +344,12 @@ class SweTeamOrchestrator:
         if proxy_result and self.proxy:
             try:
                 proxy_would_approve = ( proxy_result.value == "approved" )
-                if answer is not None: self._note_stance( proxy_result.category, answer.stance )
+                if answer is not None: self.proxy.note_stance( proxy_result.category, answer.stance )
 
                 if no_ruling:
                     # Rick's ruling V14: a neither is no ruling, a request to re-frame the question. The counters stay as they are.
                     logger.info( f"[PROXY-REFRAME] neither answer, no ruling recorded: cat={proxy_result.category}, comment={answer.comment!r}, question={question[ :80 ]!r}" )
-                    if reframe_blocks_promotion( self._stance_history[ proxy_result.category ] ):
+                    if self.proxy.reframe_blocked( proxy_result.category ):
                         logger.info( f"[PROXY-REFRAME] re-frame rate is above the bar over the last {REFRAME_WINDOW} asks: cat={proxy_result.category} promotion blocked" )
                 else:
                     agreement = forecast_agreement( proxy_result.value, user_answer )
@@ -388,20 +387,6 @@ class SweTeamOrchestrator:
                 logger.warning( f"Trust feedback recording failed: {e}" )
 
         return user_answer
-
-    def _note_stance( self, category, stance ):
-        """
-        Remember one answer stance for a category, keeping only the last REFRAME_WINDOW.
-
-        Requires:
-            - category is a string; stance is "yes", "no", "neither" or None
-
-        Ensures:
-            - self._stance_history[ category ] ends with stance and holds at most REFRAME_WINDOW entries
-        """
-        history = self._stance_history.setdefault( category, [] )
-        history.append( stance )
-        del history[ :-REFRAME_WINDOW ]
 
     def _load_trust_state( self ):
         """
