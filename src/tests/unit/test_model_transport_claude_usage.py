@@ -114,3 +114,8 @@ def test_a_failed_login_raises_its_own_error_with_the_login_sentence_and_not_the
 def test_a_401_also_raises_the_login_error_and_a_plan_limit_still_raises_the_rate_limit_error():
     with pytest.raises( mt.ModelLoginExpired ): call( result( None, None, error=True, text="API Error: 401 token expired", subtype="success" ) )
     with pytest.raises( mt.ModelRateLimited ): call( result( None, None, error=True, text=REAL_PLAN_LIMIT, subtype="success" ) )
+
+
+def test_the_failure_markers_hold_authenticate_so_a_failed_login_is_never_read_as_a_plan_limit():
+    detail = f"success: {DEAD_REFRESH}"
+    assert mt.limit_reply( result( None, None, error=True, text=DEAD_REFRESH, subtype="success" ), detail ) is False

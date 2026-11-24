@@ -108,6 +108,7 @@ class Counting:
 
     def __init__( self, backend ):
         self.backend, self.calls, self.limited, self.failed = backend, 0, 0, 0
+        self.login_dead                        = False
         self.server_label                      = backend.server_label
 
     async def complete( self, model, system_prompt, user_prompt ):
@@ -117,14 +118,20 @@ class Counting:
         Ensures:
             - a call the service refuses for a rate or usage limit is counted in limited and in failed, and raised again
             - any other call that raises a ModelCallError is counted in failed and raised again
-            - every later call of the run raises at once without reaching the service
+            - a call that fails on an expired Claude login is counted in failed, not limited
+            - every later call of the run raises at once without reaching the service, whether it was limited or the login was dead
         """
         if self.limited: raise model_transport.ModelRateLimited( "the service rate-limited an earlier call of this run; no further call is made" )
+        if self.login_dead: raise model_transport.ModelLoginExpired( "the Claude login failed an earlier call of this run; no further call is made" )
         self.calls += 1
         try: return await self.backend.complete( model, system_prompt, user_prompt )
         except model_transport.ModelRateLimited:
             self.limited += 1
             self.failed  += 1
+            raise
+        except model_transport.ModelLoginExpired:
+            self.login_dead = True
+            self.failed    += 1
             raise
         except model_transport.ModelCallError:
             self.failed += 1

@@ -23,6 +23,7 @@ _TOPICS = [ { "topic": f"Topic {n}", "objective": "o" } for n in range( 1, 5 ) ]
 _MAX_TURNS = SimpleNamespace(
     subtype="error_max_turns", result=None, errors=[ "Reached maximum number of turns (20)" ] )
 _LOGIN     = SimpleNamespace( subtype="error_during_execution", result="API Error: 401 bad token", errors=[] )
+_DEAD_REFRESH = SimpleNamespace( subtype="success", result="Failed to authenticate: OAuth session expired and could not be refreshed", errors=[] )
 
 
 def _error_result( message ):
@@ -129,6 +130,13 @@ async def test_ALL_topics_failing_fails_the_job():
 async def test_a_login_expiry_aborts_instead_of_becoming_a_gap():
     result, client, _ = await _run( [ "a", _error_result( _LOGIN ), "c", "d" ] )
     assert isinstance( result, RuntimeError ) and LOGIN_HINT in str( result )
+    assert client.researched == [ 0, 1 ], "no further topic is tried once the login is dead"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_renewal_aborts_instead_of_becoming_a_gap():
+    result, client, _ = await _run( [ "a", _error_result( _DEAD_REFRESH ), "c", "d" ] )
+    assert isinstance( result, RuntimeError ) and LOGIN_HINT in str( result ) and "Failed to authenticate" in str( result )
     assert client.researched == [ 0, 1 ], "no further topic is tried once the login is dead"
 
 

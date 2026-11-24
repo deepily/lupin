@@ -16,7 +16,7 @@
 # Usage:  claude-login-tick.sh [container]      (default lupin-rest-dev)
 #         claude-login-tick.sh --print-install  (prints the crontab line; a person installs it)
 set -uo pipefail
-export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+export PATH="${CLAUDE_LOGIN_PATH:-/usr/local/bin:/usr/bin:/bin:${PATH:-}}"   # CLAUDE_LOGIN_PATH replaces PATH outright (tests)
 HERE="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
 
 if [ "${1:-}" = "--print-install" ]; then

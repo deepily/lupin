@@ -22,6 +22,14 @@ class LimitedBackend( FakeBackend ):
         raise mt.ModelRateLimited( "usage limit reached" )
 
 
+class DeadLoginBackend( FakeBackend ):
+    """A backend whose Claude login has expired, so every call fails on it."""
+
+    async def complete( self, model, system_prompt, user_prompt ):
+        self.calls += 1
+        raise mt.ModelLoginExpired( "Failed to authenticate" )
+
+
 class Meter:
     """A usage tally that grows by 10 calls' worth of tokens every time it is read after a call."""
 
@@ -47,6 +55,14 @@ def test_a_rate_limited_call_is_counted_and_every_later_call_is_refused_without_
     with pytest.raises( mt.ModelRateLimited, match="usage limit" ): asyncio.run( count.complete( "m", "s", "u" ) )
     with pytest.raises( mt.ModelRateLimited, match="no further call" ): asyncio.run( count.complete( "m", "s", "u" ) )
     assert ( count.calls, count.limited, inner.calls ) == ( 1, 1, 1 )
+
+
+def test_a_dead_login_is_counted_as_failed_not_limited_and_stops_the_run_after_one_call():
+    inner = DeadLoginBackend()
+    count = dd.Counting( inner )
+    with pytest.raises( mt.ModelLoginExpired, match="Failed to authenticate" ): asyncio.run( count.complete( "m", "s", "u" ) )
+    with pytest.raises( mt.ModelLoginExpired, match="no further call" ): asyncio.run( count.complete( "m", "s", "u" ) )
+    assert ( count.calls, count.limited, count.failed, inner.calls ) == ( 1, 0, 1, 1 )
 
 
 def test_the_plan_limit_error_from_the_real_transport_is_counted_as_limited_and_stops_the_run_after_one_call():
