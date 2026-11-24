@@ -51,7 +51,11 @@ def engine( monkeypatch ):
     PredictionEngine.reset()
 
 
-def _vote( engine, monkeypatch, cases, embedding=ASK, owner="u1" ):
+ASK_VECTOR = object()    # stands for "the ask's own vector"; None is a real input here, and a list default would be shared
+
+
+def _vote( engine, monkeypatch, cases, embedding=ASK_VECTOR, owner="u1" ):
+    if embedding is ASK_VECTOR: embedding = ASK
     monkeypatch.setattr( three_way_shadow, "live_cases", lambda session, owner_user_id: cases )
     return engine._predict_yes_no( "Proceed?", "permission", embedding, owner_user_id=owner, ask_context={ "title": "T", "sender_id": "S" } )
 
