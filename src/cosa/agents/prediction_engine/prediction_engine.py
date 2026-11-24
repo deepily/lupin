@@ -39,6 +39,7 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_THREE_WAY_ENABLED,
     DEFAULT_RECENCY_HALF_LIFE_DAYS,
     DEFAULT_PER_FIELD_MC_ENABLED,
+    DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED,
     VALID_RETRIEVAL_METRICS,
     DEFAULT_YES_NO_NO_MARGIN,
     DEFAULT_LANCEDB_TABLE,
@@ -141,6 +142,7 @@ class PredictionEngine:
             self.three_way_enabled          = config_mgr.get( "prediction engine three way enabled", default=str( DEFAULT_THREE_WAY_ENABLED ), return_type="boolean" )
             self.recency_half_life_days     = config_mgr.get( "prediction engine recency half life days", default=str( DEFAULT_RECENCY_HALF_LIFE_DAYS ), return_type="float" )
             self.per_field_mc_enabled = config_mgr.get( "prediction engine per field multiple choice enabled", default=str( DEFAULT_PER_FIELD_MC_ENABLED ), return_type="boolean" )
+            self.timeout_defaults_excluded_enabled = config_mgr.get( "prediction engine timeout defaults excluded enabled", default=str( DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED ), return_type="boolean" )
             self.lookup_neither_forecast_enabled = config_mgr.get( "prediction engine lookup neither forecast enabled", default=str( DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED ), return_type="boolean" )
             self.complete_action_scoring_enabled = config_mgr.get( "prediction engine complete action scoring enabled", default=str( DEFAULT_COMPLETE_ACTION_SCORING_ENABLED ), return_type="boolean" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
@@ -169,6 +171,7 @@ class PredictionEngine:
             self.three_way_enabled          = DEFAULT_THREE_WAY_ENABLED
             self.recency_half_life_days     = DEFAULT_RECENCY_HALF_LIFE_DAYS
             self.per_field_mc_enabled = DEFAULT_PER_FIELD_MC_ENABLED
+            self.timeout_defaults_excluded_enabled = DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED
             self.lookup_neither_forecast_enabled = DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED
             self.complete_action_scoring_enabled = DEFAULT_COMPLETE_ACTION_SCORING_ENABLED
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE

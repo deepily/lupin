@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 import sqlalchemy as sa
 
+from cosa.agents.prediction_engine.history_derive import attribution_tier
 from cosa.agents.prediction_engine.review_card import REVIEW_CARD_SOURCE, is_review_card
 from cosa.rest.db.repositories.prediction_log_repository import (
     TEST_OVERRIDE_SOURCE, legacy_confidence_clause, legacy_similarity_clause )
@@ -151,6 +152,7 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None, *, v
           answer_source is "human" when the notification's response_value.source is "ui" and "unknown" when it is
           missing or anything else (Rick's ruling, 19 Nov); the engine votes only with human cases
         - asked_at is the ledger's stamp, or the notification's creation time for a row written before the ledger
+        - carries timeout_default, True when history_derive.attribution_tier says the stored answer is the timeout default, whatever answer_source says
         - carries logged_value and logged_match, what the log recorded, for a baseline arm to score
         - the cases hold their final value, because no revision history is stored
         - a multiple-choice row, which stores {"answers": ...}, gets that dict as sorted JSON text for its fallback decision_value
@@ -177,6 +179,7 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None, *, v
             "created_at"         : decision.created_at if decision is not None else row.predicted_at.isoformat(),
             "owner_user_id"      : decision.owner_user_id if decision is not None else str( notification.recipient_id ),
             "answer_source"      : decision.answer_source if decision is not None else answer_source_of( notification.response_value, notification.response_options ),
+            "timeout_default"    : attribution_tier( { "response_value": notification.response_value } ) == "timeout_default",
             "responded_at"       : row.responded_at,
             "title"              : notification.title,
             "message"            : notification.message,
