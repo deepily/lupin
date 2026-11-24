@@ -63,6 +63,19 @@ def test_columns_are_cut_to_the_replayable_ids_and_the_record_ids_outside_them_a
     assert columns == { "second": { "a", "c" }, "record": { "a", "b" }, "old_1302": { "a" } }
 
 
+def test_the_scripts_tune_fraction_is_the_retunes_own_not_a_second_copy():
+    from cosa.research.preference_replay import retune
+    assert rrm.TUNE_FRACTION is retune.TUNE_FRACTION and rrm.TUNE_FRACTION == 0.7
+
+
+def test_split_by_time_cuts_one_hundred_ids_at_seventy_and_agrees_with_the_retunes_own_split():
+    from cosa.research.preference_replay import retune
+    tune, final = rrm.split_by_time( [ str( i ) for i in range( 100 ) ] )
+    assert ( len( tune ), len( final ) ) == ( 70, 30 ) and tune[ -1 ] == "69" and final[ 0 ] == "70"
+    assert retune.split_windows( 100 ) == ( 70, 30 )
+    assert [ len( part ) for part in rrm.split_by_time( [ str( i ) for i in range( 1302 ) ] ) ] == [ 911, 391 ]   # the freeze's own windows
+
+
 def test_split_by_time_takes_the_first_floor_share_as_tune_and_the_rest_as_final_with_no_shared_id():
     tune, final = rrm.split_by_time( [ str( i ) for i in range( 10 ) ] )
     assert tune == [ "0", "1", "2", "3", "4", "5", "6" ] and final == [ "7", "8", "9" ]

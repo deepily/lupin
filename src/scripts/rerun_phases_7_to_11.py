@@ -25,8 +25,8 @@ import sys
 sys.path.insert( 0, os.path.dirname( os.path.abspath( __file__ ) ) )
 
 import zero_model_proof as zmp
+from cosa.research.preference_replay.retune import TUNE_FRACTION
 
-TUNE_FRACTION     = 0.7
 FROZEN            = { "threshold": 0.5, "top_k": 10, "metric": "cosine" }
 OLD_CONTROL       = { "final_all": 177, "final_yes_no": 163, "final_mc": 14, "final_mc_asks": 176, "final_yes_no_asks": 215, "tune": 911, "final": 391 }
 SWITCHES          = ( "prediction engine full answer reply enabled", "prediction engine per field multiple choice enabled",
