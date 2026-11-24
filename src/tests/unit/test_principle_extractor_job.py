@@ -596,3 +596,80 @@ def test_the_model_is_called_through_the_transport_module_so_a_patch_on_complete
     monkeypatch.setattr( model_transport, "complete", fake_complete )
     out, _ = _run( db, _ask( db, answer="no" ), None )
     assert seen == [ ( MODEL, 30 ) ] and out[ "status" ] == "extracted"
+
+
+def _switches( monkeypatch, *keys ):
+    """Turn only the named learner switches on, as the job reads them."""
+    monkeypatch.setattr( PrincipleExtractorJob, "_flag", lambda self, key: key in keys )
+
+
+def test_with_every_new_switch_off_an_unread_yes_no_text_is_skipped_and_the_version_has_no_tags( db ):
+    ask    = _ask( db, answer="Maybe later" )
+    model  = Model( _reply() )
+    out, _ = _run( db, ask, model )
+    assert out[ "status" ] == "skipped_nothing_to_read" and model.sent == []
+    assert prompt_module.current_extractor_version( MODEL, lambda key: False ) == f"{MODEL}:{prompt_module.PROMPT_VERSION}"
+
+
+def test_an_unread_yes_no_text_reaches_the_writer_with_the_flag_when_the_unread_switch_is_on( db, monkeypatch ):
+    _switches( monkeypatch, prompt_module.UNREAD_KEY )
+    known  = _principle( db )
+    ask    = _ask( db, answer="Maybe later" )
+    model  = Model( _reply( _result( relations={ str( known.id ): "refines" } ) ) )
+    out, _ = _run( db, ask, model )
+    assert out[ "status" ] == "extracted" and '"unread_stance": true' in model.sent[ 0 ] and "Maybe later" in model.sent[ 0 ]
+    row = db.query( PreferenceEvidence ).one()
+    assert row.relation == "refines" and row.extractor_version.endswith( "+unread" )
+
+
+def test_an_unread_yes_no_text_may_create_a_principle_like_any_non_bare_answer( db, monkeypatch ):
+    _switches( monkeypatch, prompt_module.UNREAD_KEY )
+    ask    = _ask( db, answer="Maybe later" )
+    out, _ = _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp( "Hold the ask until the owner is back." ) ] ) ) ) )
+    assert out[ "status" ] == "extracted" and _counts( db ) == ( 1, 1 )
+
+
+def test_an_unreadable_card_answer_stays_skipped_with_the_unread_switch_on( db, monkeypatch ):
+    _switches( monkeypatch, prompt_module.UNREAD_KEY )
+    ask    = _ask( db, answer="{not an answers map", response_type="multiple_choice" )
+    model  = Model( _reply() )
+    out, _ = _run( db, ask, model )
+    assert out[ "status" ] == "skipped_nothing_to_read" and model.sent == []
+
+
+def test_a_bare_yes_contradicting_a_principle_is_stored_as_contradicts_only_with_the_bare_yes_switch_on( db, monkeypatch ):
+    known = _principle( db )
+    reply = _reply( _result( relations={ str( known.id ): "contradicts" } ) )
+    out, _ = _run( db, _ask( db, answer="yes" ), Model( reply ) )
+    assert db.query( PreferenceEvidence ).count() == 0 and { "field_key": "$answer", "what": f"relation {known.id}", "reason": "bare_yes_only_supports" } in out[ "rejected" ]
+    _switches( monkeypatch, prompt_module.BARE_YES_KEY )
+    out, _ = _run( db, _ask( db, minutes=10, answer="yes" ), Model( reply ) )
+    evidence = db.query( PreferenceEvidence ).one()
+    assert evidence.relation == "contradicts" and evidence.condition is None and evidence.extractor_version.endswith( "+bareyes" )
+
+
+def test_an_uninformative_bare_yes_is_stored_with_its_antecedent_quote_and_no_condition_when_the_switch_is_on( db, monkeypatch ):
+    known = _principle( db )
+    field = _result( relations={ str( known.id ): "uninformative" } )
+    field[ "antecedents" ] = { str( known.id ): { "quote": "when the card names a deadline", "card_lacks_it": True } }
+    reply = _reply( field )
+    out, _ = _run( db, _ask( db, answer="yes" ), Model( reply ) )
+    assert db.query( PreferenceEvidence ).count() == 0 and out[ "rejected" ][ 0 ][ "reason" ] == "relation_unknown"
+    _switches( monkeypatch, prompt_module.UNINFORMATIVE_KEY )
+    out, _ = _run( db, _ask( db, minutes=10, answer="yes" ), Model( reply ) )
+    evidence = db.query( PreferenceEvidence ).one()
+    assert evidence.relation == "uninformative" and evidence.antecedent == "when the card names a deadline" and evidence.condition is None
+    assert evidence.extractor_version.endswith( "+uninformative" )
+
+
+def test_an_uninformative_reply_without_the_quote_is_refused_and_writes_no_row( db, monkeypatch ):
+    _switches( monkeypatch, prompt_module.UNINFORMATIVE_KEY )
+    known  = _principle( db )
+    out, _ = _run( db, _ask( db, answer="yes" ), Model( _reply( _result( relations={ str( known.id ): "uninformative" } ) ) ) )
+    assert db.query( PreferenceEvidence ).count() == 0 and out[ "rejected" ][ 0 ][ "reason" ] == "uninformative_without_quote"
+
+
+def test_a_supporting_row_leaves_the_antecedent_column_empty( db ):
+    known = _principle( db )
+    _run( db, _ask( db, answer="yes" ), Model( _reply( _result( relations={ str( known.id ): "supports" } ) ) ) )
+    assert db.query( PreferenceEvidence ).one().antecedent is None

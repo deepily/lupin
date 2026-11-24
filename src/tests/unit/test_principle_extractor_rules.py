@@ -233,3 +233,118 @@ def test_owners_own_answer_needs_the_recipient_to_have_answered_from_their_scree
     assert rules.owners_own_answer( _answered( "timeout" ) ) is False
     assert rules.owners_own_answer( _answered( "ui", user="u-2" ) ) is False
     assert rules.owners_own_answer( SimpleNamespace( recipient_id="u-1", response_value="yes" ) ) is False
+
+
+def _bare( relations, **extra ):
+    """Build a bare-yes field result that names principles and keeps no hypothesis."""
+    return _field( hypotheses=[], relations=relations, **extra )
+
+
+def _quote( pid="p1", quote="when the card names a deadline", lacks=True ):
+    """Build the antecedents map the model returns for one uninformative relation."""
+    return { pid: { "quote": quote, "card_lacks_it": lacks } }
+
+
+def test_with_both_switches_off_a_bare_yes_still_keeps_only_supports_and_uninformative_is_an_unknown_word():
+    got = _check( _bare( { "p1": "contradicts", "p2": "refines", "p3": "uninformative", "p4": "supports" }, antecedents=_quote( "p3" ) ), bare_yes=True, ids=( "p1", "p2", "p3", "p4" ) )
+    assert got[ "relations" ] == { "p4": "supports" } and got[ "antecedents" ] == {}
+    assert [ r[ "reason" ] for r in got[ "rejected" ] ] == [ "bare_yes_only_supports", "bare_yes_only_supports", "relation_unknown" ]
+
+
+def test_a_bare_yes_may_contradict_or_refine_when_the_bare_yes_relations_switch_is_on():
+    field = _bare( { "p1": "contradicts", "p2": "refines" } )
+    got   = rules.check_field( field, "t", [], True, { "p1", "p2" }, bare_yes_relations=True )
+    assert got[ "relations" ] == { "p1": "contradicts", "p2": "refines" } and got[ "rejected" ] == []
+    assert rules.check_field( field, "t", [], True, { "p1", "p2" } )[ "relations" ] == {}
+
+
+def test_an_unknown_word_is_still_refused_with_the_bare_yes_relations_switch_on():
+    got = rules.check_field( _bare( { "p1": "likes" } ), "t", [], True, { "p1" }, bare_yes_relations=True )
+    assert got[ "relations" ] == {} and got[ "rejected" ][ 0 ][ "reason" ] == "relation_unknown"
+
+
+def test_an_uninformative_relation_is_kept_with_its_quote_when_the_switch_is_on():
+    got = rules.check_field( _bare( { "p1": "uninformative" }, antecedents=_quote() ), "t", [], True, { "p1" }, uninformative=True )
+    assert got[ "relations" ] == { "p1": "uninformative" } and got[ "antecedents" ] == { "p1": "when the card names a deadline" } and got[ "rejected" ] == []
+
+
+@pytest.mark.parametrize( "antecedents", [ None, "x", {}, { "p1": "bare string" }, { "p1": { "quote": "  ", "card_lacks_it": True } },
+                                           { "p1": { "quote": 5, "card_lacks_it": True } }, { "p1": { "quote": "q", "card_lacks_it": False } },
+                                           { "p1": { "quote": "q" } } ] )
+def test_an_uninformative_relation_without_the_quote_or_the_card_lacks_it_statement_is_refused( antecedents ):
+    got = rules.check_field( _bare( { "p1": "uninformative" }, antecedents=antecedents ), "t", [], True, { "p1" }, uninformative=True )
+    assert got[ "relations" ] == {} and got[ "antecedents" ] == {} and got[ "rejected" ][ 0 ][ "reason" ] == "uninformative_without_quote"
+
+
+def test_an_uninformative_relation_needs_a_bare_yes_and_a_shown_principle():
+    got = rules.check_field( _field( relations={ "p1": "uninformative" }, antecedents=_quote() ), "t", [], False, { "p1" }, uninformative=True )
+    assert got[ "relations" ] == {} and got[ "rejected" ][ 0 ][ "reason" ] == "uninformative_only_bare_yes"
+    got = rules.check_field( _bare( { "p9": "uninformative" }, antecedents=_quote( "p9" ) ), "t", [], True, { "p1" }, uninformative=True )
+    assert got[ "rejected" ][ 0 ][ "reason" ] == "principle_not_shown"
+
+
+def test_unread_entries_hands_the_raw_yes_no_text_to_the_writer_with_the_flag():
+    assert rules.unread_entries( { "kind": "unread", "text": "yep, but only on fridays" }, "yes_no" ) == [
+        { "field_key": "$answer", "text": "yep, but only on fridays", "bare_yes": False, "unread_stance": True } ]
+
+
+@pytest.mark.parametrize( "answer, response_type", [ ( { "kind": "unread", "text": "x" }, "multiple_choice" ), ( { "kind": "unread", "text": None }, "yes_no" ),
+                                                     ( { "kind": "unread", "text": "  " }, "yes_no" ), ( { "kind": "unread", "text": 5 }, "yes_no" ),
+                                                     ( { "kind": "stance", "stance": "yes", "qualifier": "", "text": "x" }, "yes_no" ), ( { "kind": "none" }, "yes_no" ) ] )
+def test_unread_entries_gives_nothing_for_any_other_answer( answer, response_type ):
+    assert rules.unread_entries( answer, response_type ) == []
+
+
+def test_the_prompt_addenda_names_tags_and_version_follow_the_switches():
+    from cosa.agents.principle_learner import extractor_prompt as ep
+    assert ep.system_prompt_for() == SYSTEM_PROMPT and ep.system_prompt_for( () ) == SYSTEM_PROMPT
+    full = ep.system_prompt_for( ( ep.BARE_YES_TAG, ep.UNINFORMATIVE_TAG, ep.UNREAD_TAG ) )
+    assert full.startswith( SYSTEM_PROMPT ) and "contradicts" in full and "card_lacks_it" in full and "unread_stance" in full
+    assert ep.extractor_version_of( "m" ) == f"m:{ep.PROMPT_VERSION}"
+    assert ep.extractor_version_of( "m", ( "bareyes", "unread" ) ) == f"m:{ep.PROMPT_VERSION}+bareyes+unread"
+
+
+def test_an_entry_marked_unread_stance_carries_the_flag_in_the_prompt_and_no_other_entry_does():
+    entries = [ { "field_key": "a", "text": "hm", "bare_yes": False, "possibly_influenced": False, "unread_stance": True },
+                { "field_key": "b", "text": "no", "bare_yes": False, "possibly_influenced": False } ]
+    answers = json.loads( build_user_prompt( EPISODE, entries, [] ).split( "ANSWERS\n" )[ 1 ].split( "\n\nEXISTING" )[ 0 ] )
+    assert answers[ 0 ][ "unread_stance" ] is True and "unread_stance" not in answers[ 1 ]
+
+
+def _real( case ):
+    """Load a real model reply (claude-sonnet-5-5, 24 Nov 2026) through parse_reply."""
+    import pathlib
+    path    = pathlib.Path( __file__ ).resolve().parents[ 1 ] / "fixtures" / "principle_extractor" / f"real-reply-{case}.json"
+    fixture = json.loads( path.read_text() )
+    return fixture, parse_reply( fixture[ "reply" ] )[ 0 ]
+
+
+def test_a_real_uninformative_reply_is_kept_with_its_quote_with_the_switch_on_and_refused_with_it_off():
+    fixture, field = _real( "bare-yes-uninformative" )
+    ids            = set( fixture[ "neighbour_ids" ] )
+    kept           = rules.check_field( field, "", [], True, ids, bare_yes_relations=True, uninformative=True )
+    assert list( kept[ "relations" ].values() ) == [ "uninformative" ] and list( kept[ "antecedents" ].values() ) == [ "When a deploy ask names a rollback plan" ] and kept[ "rejected" ] == []
+    off = rules.check_field( field, "", [], True, ids )
+    assert off[ "relations" ] == {} and off[ "rejected" ][ 0 ][ "reason" ] == "relation_unknown"
+
+
+def test_a_real_bare_yes_contradicts_reply_is_kept_only_with_the_bare_yes_switch_on():
+    fixture, field = _real( "bare-yes-contradicts" )
+    ids            = set( fixture[ "neighbour_ids" ] )
+    assert list( rules.check_field( field, "", [], True, ids, bare_yes_relations=True )[ "relations" ].values() ) == [ "contradicts" ]
+    assert rules.check_field( field, "", [], True, ids )[ "rejected" ][ 0 ][ "reason" ] == "bare_yes_only_supports"
+
+
+def test_a_real_reply_that_called_a_bare_yes_supports_is_kept_as_supports_under_every_switch_state():
+    fixture, field = _real( "bare-yes-refines" )
+    ids            = set( fixture[ "neighbour_ids" ] )
+    for kwargs in ( {}, { "bare_yes_relations": True, "uninformative": True } ):
+        assert list( rules.check_field( field, "", [], True, ids, **kwargs )[ "relations" ].values() ) == [ "supports" ]
+
+
+def test_a_real_reply_to_an_unread_text_proposes_a_grounded_hypothesis_through_check_field():
+    fixture, field = _real( "unread-text" )
+    entries        = [ { "field_key": "$answer", "text": fixture[ "entries" ][ 0 ][ "text" ], "bare_yes": False, "unread_stance": True } ]
+    assert rules.unread_entries( { "kind": "unread", "text": entries[ 0 ][ "text" ] }, "yes_no" ) == [ { **entries[ 0 ] } ]
+    got = rules.check_field( field, rules.card_text( EPISODE ) + "\n" + entries[ 0 ][ "text" ], [], False, set() )
+    assert len( got[ "hypotheses" ] ) == 1 and got[ "hypotheses" ][ 0 ][ "condition" ] == "unknown"  # the real condition words are not in this card or answer

@@ -1,0 +1,27 @@
+{
+ "case": "bare-yes-uninformative",
+ "model": "claude-sonnet-5-5",
+ "tags": [
+  "bareyes",
+  "uninformative",
+  "unread"
+ ],
+ "neighbour_ids": [
+  "11111111-1111-1111-1111-111111111111"
+ ],
+ "entries": [
+  {
+   "field_key": "$answer",
+   "text": "yes",
+   "bare_yes": true,
+   "possibly_influenced": false
+  }
+ ],
+ "episode": {
+  "title": "Approve the held bugs",
+  "abstract": "Three held bugs wait for approval.",
+  "fields": [],
+  "history": []
+ },
+ "reply": "{\"fields\": [{\"field_key\": \"$answer\", \"kind\": \"decision\", \"dimension\": \"Review and release gates\", \"hypotheses\": [], \"relations\": {\"11111111-1111-1111-1111-111111111111\": \"uninformative\"}, \"antecedents\": {\"11111111-1111-1111-1111-111111111111\": {\"quote\": \"When a deploy ask names a rollback plan\", \"card_lacks_it\": true}}}]}"
+}

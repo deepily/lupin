@@ -51,6 +51,7 @@ VALUE_JOIN      = " or "
 SOURCE_EXTRACT  = "extractor"
 SUPPORTING      = ( "supports", "refines" )
 CONTRADICTING   = "contradicts"
+UNINFORMATIVE   = "uninformative"
 MIN_SESSIONS    = 2
 
 
@@ -189,6 +190,7 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
           (so a principle first extracted after the ask is not there), else
           { status, conditions, episodes, sessions, ruled }
         - extractor rows count only for the current version and for their own principle
+        - an uninformative row (a bare yes whose principle's antecedent the card lacks) counts for nothing: statuses are the same with it and without it
         - a ruling or split row counts across versions; the latest usable one decides: supports stands, refines stands
           under its condition, contradicts retracts
         - a standing ruling clears contested for the contradicting rows answered at or before the ruling's own answer time
@@ -200,7 +202,7 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
     """
     by_id    = { p.id: p for p in principles }
     rulings  = [ e for e in evidence if e.source in RULING_SOURCES ]
-    own      = [ e for e in evidence if e.source == SOURCE_EXTRACT and e.extractor_version == current_version and usable_at( e, asked_at ) ]
+    own      = [ e for e in evidence if e.source == SOURCE_EXTRACT and e.extractor_version == current_version and e.relation != UNINFORMATIVE and usable_at( e, asked_at ) ]
     statuses = {}
     for principle in principles:
         rows        = [ e for e in own if e.principle_id == principle.id ]

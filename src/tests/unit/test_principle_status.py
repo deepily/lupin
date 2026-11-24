@@ -331,3 +331,12 @@ def test_a_split_contradicts_row_that_sorts_latest_is_still_no_ruling():
     other   = row( note="card", relation="contradicts", condition="f is b", source="split_step", answered=-HOUR, extracted=-HOUR )
     result  = status_of( [ principle() ], [ other, refines, row( note="n1" ) ] )
     assert result[ "status" ] != RETRACTED and result[ "ruled" ] is True
+
+
+def test_an_uninformative_row_counts_for_nothing_so_statuses_are_the_same_with_and_without_it():
+    base  = [ row( note="n1" ), row( note="n2" ) ]
+    extra = base + [ row( note="n3", relation="uninformative" ), row( note="n4", relation="uninformative" ) ]
+    assert status_of( [ principle() ], extra ) == status_of( [ principle() ], base )
+    assert status_of( [ principle() ], [ row( relation="uninformative" ) ] ) is None
+    contested = [ row( note="n1" ), row( note="n2", relation="contradicts" ) ]
+    assert status_of( [ principle() ], contested + [ row( note="n3", relation="uninformative" ) ] ) == status_of( [ principle() ], contested )

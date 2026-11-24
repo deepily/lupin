@@ -1,0 +1,27 @@
+{
+ "case": "bare-yes-refines",
+ "model": "claude-sonnet-5-5",
+ "tags": [
+  "bareyes",
+  "uninformative",
+  "unread"
+ ],
+ "neighbour_ids": [
+  "33333333-3333-3333-3333-333333333333"
+ ],
+ "entries": [
+  {
+   "field_key": "$answer",
+   "text": "yes",
+   "bare_yes": true,
+   "possibly_influenced": false
+  }
+ ],
+ "episode": {
+  "title": "Approve the merge",
+  "abstract": "Tests ran green; the change touches the payment module.",
+  "fields": [],
+  "history": []
+ },
+ "reply": "{\"fields\": [{\"field_key\": \"$answer\", \"kind\": \"decision\", \"dimension\": \"Review and release gates\", \"hypotheses\": [], \"relations\": {\"33333333-3333-3333-3333-333333333333\": \"supports\"}}]}"
+}

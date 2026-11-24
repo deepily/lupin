@@ -17,6 +17,7 @@ from cosa.agents.prediction_engine.ask_family import PROJECT_PATTERN, UNKNOWN_PR
 from cosa.agents.prediction_engine.episode_view import card_text as episode_card_text
 from cosa.agents.prediction_engine.exposure import revealed_before_answer
 from cosa.agents.prediction_engine.history_derive import attribution_tier
+from cosa.agents.prediction_engine.principle_status import UNINFORMATIVE
 from cosa.utils.iso_timestamp import aware_moment
 from cosa.utils.notification_utils import parse_field_selections
 
@@ -113,6 +114,24 @@ def field_answers( answer ):
             entries.append( { "field_key": header, "text": text, "bare_yes": record.get( "stance" ) == "yes" and not record.get( "qualifier" ) } )
         return entries
     return []
+
+
+def unread_entries( answer, response_type ):
+    """
+    Turn a yes or no text the answer reader could not recognise into one entry for the writer.
+
+    Requires:
+        - answer is the first value derive_answer returns
+        - response_type is the notification's response type
+
+    Ensures:
+        - returns [ { "field_key", "text", "bare_yes", "unread_stance" } ] with the raw text, the whole-answer key, bare_yes False and unread_stance True
+          for an unread yes or no answer that holds non-blank text
+        - any other answer, a blank text and an unread card answer give []
+    """
+    text = answer.get( "text" )
+    if answer[ "kind" ] != "unread" or response_type != "yes_no" or not isinstance( text, str ) or not text.strip(): return []
+    return [ { "field_key": WHOLE_ANSWER_KEY, "text": text, "bare_yes": False, "unread_stance": True } ]
 
 
 def drafted_text( draft, field_key ):
@@ -228,18 +247,50 @@ def check_hypothesis( hypothesis, grounding_text, projects ):
              "condition": ground_condition( hypothesis.get( "condition" ), grounding_text ), "grounded_in": hypothesis.get( "grounded_in" ) }, None
 
 
-def check_field( field_result, grounding_text, projects, bare_yes, neighbour_ids ):
+def _check_relation( relation, principle_id, field_result, bare_yes, bare_yes_relations, uninformative ):
+    """
+    Check one relation word the model gave for one shown principle.
+
+    Requires:
+        - principle_id is a principle the model was shown
+        - field_result is the model's dict for the field; uninformative relations read its "antecedents" map
+
+    Ensures:
+        - returns ( relation, antecedent, None ) when kept, or ( None, None, reason ) when dropped
+        - the word uninformative is known only with its switch on; it needs a bare yes, and a quote of the antecedent
+          with the statement that the card lacks it, else it is dropped (uninformative_only_bare_yes, uninformative_without_quote)
+        - any word outside the known ones is dropped as relation_unknown
+        - a bare yes keeps only supports, unless the bare yes relations switch is on
+    """
+    if relation == UNINFORMATIVE and uninformative:
+        if not bare_yes: return None, None, "uninformative_only_bare_yes"
+        given    = field_result.get( "antecedents" )
+        record   = given.get( principle_id ) if isinstance( given, dict ) else None
+        quote    = record.get( "quote" ) if isinstance( record, dict ) else None
+        if not isinstance( quote, str ) or not quote.strip() or record.get( "card_lacks_it" ) is not True: return None, None, "uninformative_without_quote"
+        return relation, quote.strip(), None
+    if relation not in RELATIONS: return None, None, "relation_unknown"
+    if bare_yes and relation != "supports" and not bare_yes_relations: return None, None, "bare_yes_only_supports"
+    return relation, None, None
+
+
+def check_field( field_result, grounding_text, projects, bare_yes, neighbour_ids, bare_yes_relations=False, uninformative=False ):
     """
     Check the model's result for one field.
 
     Requires:
-        - field_result is a dict with optional kind, dimension, hypotheses (a list) and relations (a dict of principle id to relation)
+        - field_result is a dict with optional kind, dimension, hypotheses (a list), relations (a dict of principle id to relation)
+          and antecedents (a dict of principle id to { "quote", "card_lacks_it" })
         - neighbour_ids is the set of principle ids the model was shown
+        - bare_yes_relations and uninformative are the two switches' states; both off is the behaviour before they existed
 
     Ensures:
-        - returns { "kind", "dimension", "hypotheses", "relations", "rejected" }
+        - returns { "kind", "dimension", "hypotheses", "relations", "antecedents", "rejected" }
         - more than three hypotheses rejects every hypothesis of the field, with the reason too_many_hypotheses
-        - a bare yes keeps no hypothesis (reason bare_yes_creates_none) and keeps only supports relations
+        - a bare yes keeps no hypothesis (reason bare_yes_creates_none) and keeps only supports relations,
+          or also contradicts and refines when bare_yes_relations is on
+        - with uninformative on, a bare yes may name a principle uninformative; the relation is kept only with the antecedent quote,
+          and antecedents maps that principle id to the quote
         - a relation to a principle the model was not shown, or with an unknown relation word, is dropped and listed in rejected
         - a kind outside the two allowed, or a blank dimension, rejects the whole field: no hypothesis and no relation is kept
         - rejected is a list of { "what", "reason" }; nothing is dropped without an entry
@@ -261,13 +312,18 @@ def check_field( field_result, grounding_text, projects, bare_yes, neighbour_ids
             cleaned, reason = check_hypothesis( hypothesis, grounding_text, projects ) if isinstance( hypothesis, dict ) else ( None, "hypothesis_not_an_object" )
             if cleaned is None: rejected.append( { "what": f"hypothesis {index}", "reason": reason } )
             else: hypotheses.append( cleaned )
-    relations = {}
-    given     = field_result.get( "relations" )
+    relations   = {}
+    antecedents = {}
+    given       = field_result.get( "relations" )
     if rejected and rejected[ 0 ][ "reason" ] == "kind_or_dimension_invalid": given = None
     for principle_id, relation in ( given.items() if isinstance( given, dict ) else [] ):
-        if principle_id not in neighbour_ids: rejected.append( { "what": f"relation {principle_id}", "reason": "principle_not_shown" } )
-        elif relation not in RELATIONS: rejected.append( { "what": f"relation {principle_id}", "reason": "relation_unknown" } )
-        elif bare_yes and relation != "supports": rejected.append( { "what": f"relation {principle_id}", "reason": "bare_yes_only_supports" } )
-        else: relations[ principle_id ] = relation
+        if principle_id not in neighbour_ids:
+            rejected.append( { "what": f"relation {principle_id}", "reason": "principle_not_shown" } )
+            continue
+        kept, quote, reason = _check_relation( relation, principle_id, field_result, bare_yes, bare_yes_relations, uninformative )
+        if reason is not None: rejected.append( { "what": f"relation {principle_id}", "reason": reason } )
+        else:
+            relations[ principle_id ] = kept
+            if quote is not None: antecedents[ principle_id ] = quote
     return { "kind": kind, "dimension": dimension.strip() if isinstance( dimension, str ) else None, "hypotheses": hypotheses,
-             "relations": relations, "rejected": rejected }
+             "relations": relations, "antecedents": antecedents, "rejected": rejected }

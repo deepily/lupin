@@ -19,11 +19,17 @@ PROMPT_VERSION = f"extractor-v2-vocab-{VOCABULARY_VERSION}"
 
 DECISION_STAGES    = ( "who_decides", "what_to_do_once_asked" )
 DECISION_STAGE_KEY = "principle learner decision stage enabled"
+BARE_YES_KEY      = "principle learner bare yes relations enabled"
+UNINFORMATIVE_KEY = "principle learner uninformative relation enabled"
+UNREAD_KEY        = "principle learner unread answers enabled"
+BARE_YES_TAG      = "bareyes"
+UNINFORMATIVE_TAG = "uninformative"
+UNREAD_TAG        = "unread"
 
 # Every switch that changes what the extractor writes tags the version it writes under, so its rows sit beside the old ones
 # and derive_statuses, which counts current-version evidence only, never mixes them. One entry per switch: ( INI key, tag ).
 # The order here is the order of the tags in the version string. A new switch of this kind adds its entry here and nowhere else.
-VERSION_TAGS       = ( ( DECISION_STAGE_KEY, "stage" ), )
+VERSION_TAGS       = ( ( BARE_YES_KEY, BARE_YES_TAG ), ( UNINFORMATIVE_KEY, UNINFORMATIVE_TAG ), ( UNREAD_KEY, UNREAD_TAG ), ( DECISION_STAGE_KEY, "stage" ) )
 
 
 def switch_on( key ):
@@ -51,6 +57,18 @@ def active_tags( reader=None ):
     """
     reader = switch_on if reader is None else reader
     return tuple( tag for key, tag in VERSION_TAGS if reader( key ) )
+
+BARE_YES_ADDENDUM = """
+- A bare yes may also contradict or refine a listed principle: name it in "relations" with "contradicts" or "refines"."""
+
+UNINFORMATIVE_ADDENDUM = """
+- A bare yes says nothing about a listed principle whose antecedent (the situation it applies when) is not in the card.
+  Name it in "relations" as "uninformative" and add it to "antecedents": {"<principle id>": {"quote": "<the principle's antecedent, quoted>", "card_lacks_it": true}}.
+  Without the quote and card_lacks_it true, the relation is refused."""
+
+UNREAD_ADDENDUM = """
+- An answer marked unread_stance is the raw text of a yes or no answer the system could not classify. Read it as written;
+  it is not a bare yes, so propose hypotheses or name relations as for any other answer."""
 
 
 def extractor_version_of( model, tags=() ):
@@ -92,6 +110,21 @@ def active_prompt_version( reader=None ):
         - returns PROMPT_VERSION with "+<tag>" added for each active tag
     """
     return PROMPT_VERSION + "".join( f"+{tag}" for tag in active_tags( reader ) )
+
+
+def system_prompt_for( tags=() ):
+    """
+    Build the system prompt for the active version tags.
+
+    Requires:
+        - tags is a tuple drawn from the tags of VERSION_TAGS, as active_tags returns it
+
+    Ensures:
+        - the base is STAGE_SYSTEM_PROMPT when the stage tag is on, else SYSTEM_PROMPT; no other tag changes the base
+        - returns the base unchanged for no tags, else it with one addendum per tag that has one, appended after the headings block
+    """
+    extra = { BARE_YES_TAG: BARE_YES_ADDENDUM, UNINFORMATIVE_TAG: UNINFORMATIVE_ADDENDUM, UNREAD_TAG: UNREAD_ADDENDUM }
+    return ( STAGE_SYSTEM_PROMPT if "stage" in tags else SYSTEM_PROMPT ) + "".join( extra[ tag ] for tag in tags if tag in extra )
 
 
 SYSTEM_PROMPT = """You extract short conditional preference principles from one answered question.
@@ -140,6 +173,7 @@ def build_user_prompt( episode, entries, neighbours ):
     Ensures:
         - returns one string holding the card, the history, the answers and the principles, as JSON blocks
         - no notification id, owner id or sender id is written into the prompt
+        - an entry marked unread_stance carries that flag; every other entry is written as before
         - history entries carry tier, confidence, status, inferred and the answer value, and no ids
         - a principle's dimension is shown as its approved heading when it has one, so an old name never contradicts the heading rule
         - an entry carrying a "structure" (option ids and linked conditions from the meaning record) shows it under that key; an entry without one is written exactly as before
@@ -148,7 +182,8 @@ def build_user_prompt( episode, entries, neighbours ):
     history = [ { key: entry.get( key ) for key in ( "tier", "confidence", "status", "inferred", "answer" ) } for entry in episode[ "history" ] ]
     known   = [ { "id": str( row.id ), "dimension": shown_dimension( row.dimension ), "statement": row.statement, "scope": row.scope } for row in neighbours ]
     answers = [ { "field_key": entry[ "field_key" ], "answer": entry[ "text" ], "bare_yes": entry[ "bare_yes" ],
-                  "possibly_influenced": entry[ "possibly_influenced" ], **( { "structure": entry[ "structure" ] } if entry.get( "structure" ) is not None else {} ) }
+                  "possibly_influenced": entry[ "possibly_influenced" ], **( { "structure": entry[ "structure" ] } if entry.get( "structure" ) is not None else {} ),
+                  **( { "unread_stance": True } if entry.get( "unread_stance" ) else {} ) }
                 for entry in entries ]
     return "\n\n".join( [ "CARD\n" + json.dumps( card, indent=1, sort_keys=True ), "EARLIER QUESTIONS\n" + json.dumps( history, indent=1, sort_keys=True ),
                           "ANSWERS\n" + json.dumps( answers, indent=1, sort_keys=True ), "EXISTING PRINCIPLES\n" + json.dumps( known, indent=1, sort_keys=True ) ] )
