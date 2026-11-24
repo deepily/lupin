@@ -78,18 +78,19 @@ def _card_ask( db ):
                  response_value={ "value": json.dumps( { "answers": { "held_bugs": "Hold", "budget": "no limit" } } ), "source": "ui", "answered_by": { "user_id": str( OWNER ) } } )
 
 
-def _meaning( db, notification_id, schema_version="answer-meaning-v1", annotator="a", native=None, conditions=None ):
+def _meaning( db, notification_id, schema_version="answer-meaning-v1", annotator="a", native=None, conditions=None, annotated_at=None ):
     """
     Store one meaning record for a notification.
 
     Ensures:
         - the table exists and one row is added through the repository
         - native and conditions, when None, default to the module's sample card record
+        - annotated_at, when None, is the repository's current time
     """
     AnswerMeaning.__table__.create( db.get_bind(), checkfirst=True )
     native     = NATIVE if native is None else native
     conditions = CONDITIONS if conditions is None else conditions
-    AnswerMeaningRepository( db ).add( notification_id, annotator, "human", native, [ { "act": "approve", "depends_on": [] } ], conditions, "aligned", [], schema_version=schema_version )
+    AnswerMeaningRepository( db ).add( notification_id, annotator, "human", native, [ { "act": "approve", "depends_on": [] } ], conditions, "aligned", [], schema_version=schema_version, annotated_at=annotated_at )
     db.commit()
 
 
@@ -187,6 +188,17 @@ def test_the_structure_comes_from_the_newest_record_of_the_current_schema_versio
     model = Model( _card_reply() )
     _run( db, ask, model )
     assert "held_bugs#o2" in model.sent[ 0 ] and "stale#o1" not in model.sent[ 0 ]
+
+
+def test_of_two_records_in_the_current_version_the_one_annotated_last_is_read_whatever_order_they_were_stored( db, monkeypatch ):
+    _switches( monkeypatch, MEANING_INPUT_KEY )
+    ask = _card_ask( db )
+    _meaning( db, ask, annotator="b-newer", annotated_at=T0 + timedelta( hours=2 ), native={ "held_bugs": { **NATIVE[ "held_bugs" ], "selected_option_ids": [ "newer#o1" ] } } )
+    _meaning( db, ask, annotator="a-older", annotated_at=T0 + timedelta( hours=1 ), native={ "held_bugs": { **NATIVE[ "held_bugs" ], "selected_option_ids": [ "older#o1" ] } } )
+    _meaning( db, ask, annotator="c-oldest", annotated_at=T0, native={ "held_bugs": { **NATIVE[ "held_bugs" ], "selected_option_ids": [ "oldest#o1" ] } } )
+    model = Model( _card_reply() )
+    _run( db, ask, model )
+    assert "newer#o1" in model.sent[ 0 ] and "older#o1" not in model.sent[ 0 ] and "oldest#o1" not in model.sent[ 0 ]
 
 
 def test_with_no_meaning_record_the_prompt_has_no_structure_and_the_reading_is_still_logged( db, monkeypatch ):
