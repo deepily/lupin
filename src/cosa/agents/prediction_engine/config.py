@@ -38,6 +38,11 @@ DEFAULT_RECENCY_HALF_LIFE_DAYS = 14
 # whole-card predictor and the whole-card scorer exactly as they were.
 DEFAULT_PER_FIELD_MC_ENABLED   = False
 
+# Whether the replay leaves a timed-out card, an answer the server filled from the card's own default, out of
+# its scores and out of the visible cases its baselines count, and reports the count apart. False keeps every
+# row counted exactly as before.
+DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED = False
+
 # Whether the lookup engine forecasts neither for a yes/no ask when neither is the likeliest stance, through
 # the one three-way vote, instead of abstaining. False keeps today's vote and its abstention.
 DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED = False
