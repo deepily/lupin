@@ -2042,10 +2042,8 @@ async def submit_notification_response(
 
         # Phase 2.4: Validate and sanitize response_value for open-ended responses
         if isinstance( response_value, str ):
-            # Sanitize: Remove HTML/script tags to prevent XSS
-            import re
-            response_value = re.sub( r'<[^>]+>', '', response_value )
-
+            # The answer is stored exactly as typed. Escaping happens where it is shown: every browser
+            # render path runs it through DOMPurify or escapeHtml, and no server code builds HTML from it.
             # Empty check (after stripping whitespace)
             if len( response_value.strip() ) == 0:
                 raise HTTPException(
