@@ -371,7 +371,254 @@ def compare_multiple_choice( predicted, actual, response_options, per_field=Fals
     return ( matches == len( scored ) if scored else None, detail )
 
 
-def get_comparator( response_type: str, open_ended_threshold: Optional[float] = None, response_options: Optional[Dict] = None, per_field: bool = False ):
+def decompose_atoms( predicted_atoms, actual_atoms, single_groups=() ):
+    """
+    Score a forecast's condition atoms against the answer's, atom by atom, in plain code.
+
+    Requires:
+        - predicted_atoms and actual_atoms are iterables of ( group, atom ) pairs whose atoms are option ids,
+          labels or stances, never free text; a group is the field the atom belongs to
+        - single_groups names the groups that take one atom only
+
+    Ensures:
+        - returns { precision, recall, hits, contradictions, omissions, additions }
+        - a contradiction is a forecast atom the answer did not give, in a single group where the answer gave another atom
+        - an addition is any other forecast atom the answer did not give: unsupported by it
+        - an omission is an answer atom the forecast lacks, in a group that holds no contradiction
+        - the three flags are disjoint and sorted, so one miss is never counted under two names
+        - precision is hits over forecast atoms and recall is hits over answer atoms; an empty side gives 1.0
+    """
+    predicted      = set( predicted_atoms )
+    actual         = set( actual_atoms )
+    hits           = predicted & actual
+    actual_groups  = { group for group, _ in actual }
+    contradictions = { atom for atom in predicted - actual if atom[ 0 ] in single_groups and atom[ 0 ] in actual_groups }
+    additions      = ( predicted - actual ) - contradictions
+    omissions      = { atom for atom in actual - predicted if atom[ 0 ] not in { group for group, _ in contradictions } }
+    return {
+        "precision"      : len( hits ) / len( predicted ) if predicted else 1.0,
+        "recall"         : len( hits ) / len( actual ) if actual else 1.0,
+        "hits"           : sorted( hits ),
+        "contradictions" : sorted( contradictions ),
+        "omissions"      : sorted( omissions ),
+        "additions"      : sorted( additions ),
+    }
+
+
+def _abstained_detail( reason="abstained" ):
+    """
+    Build the detail of a forecast that gave no answer to score.
+
+    Requires:
+        - reason is a short word
+
+    Ensures:
+        - returns a detail dict that says abstained and fails the plain-code part, so the caller scores no success
+    """
+    return { "reason": reason, "abstained": True, "plain_code_match": False }
+
+
+def _ask_judge( judge, predicted_text, actual_text ):
+    """
+    Put one pair of free-text conditions to the injected judge.
+
+    Requires:
+        - judge is a callable( predicted_text, actual_text ) returning { keeps_every_restriction, invents_nothing }
+          as booleans; either text may be None for a side that wrote no condition
+
+    Ensures:
+        - returns ( passed, verdict ); passed is True only when the judge says both
+        - the judge is called once, and only here
+    """
+    verdict = judge( predicted_text, actual_text )
+    return ( bool( verdict[ "keeps_every_restriction" ] ) and bool( verdict[ "invents_nothing" ] ), verdict )
+
+
+def _same_text( predicted_text, actual_text ):
+    """
+    Say whether two free-text conditions are the same words, ignoring case and outer space.
+
+    Requires:
+        - each is a string or None
+
+    Ensures:
+        - returns True when both are empty or None, or equal once stripped and lower-cased
+    """
+    return ( predicted_text or "" ).strip().lower() == ( actual_text or "" ).strip().lower()
+
+
+def compare_complete_action_yes_no( predicted: Optional[Dict], actual: Optional[Dict], judge=None ) -> Tuple[Optional[bool], Dict[str, Any]]:
+    """
+    Score a yes/no forecast by the whole action: the stance, then its condition.
+
+    Requires:
+        - predicted and actual are as compare_yes_no reads them, or None
+        - judge is None, or a callable as _ask_judge describes; it is called only for two different free-text
+          conditions on a right stance
+
+    Ensures:
+        - returns ( match, detail ); ( None, missing_data ) when there is no answer to score
+        - an abstention, a forecast with no stance, scores ( False, ... ): no success, with detail["abstained"] True
+        - a wrong stance scores False and never calls the judge
+        - a right stance with the same condition, or none on either side, scores True with no judge
+        - a right stance with differing conditions is decided by the judge; with no judge it is ( None, judge_required )
+        - detail["plain_code_match"] is the stance verdict, which stands without the judge
+        - detail["stance"] holds compare_yes_no's own detail
+    """
+    if actual is None: return ( None, { "reason": "missing_data" } )
+    if predicted is None: return ( False, _abstained_detail() )
+    stance_match, stance_detail = compare_yes_no( predicted, actual )
+    detail = { "plain_code_match": stance_match, "stance": stance_detail, "abstained": False }
+    if stance_detail[ "predicted_binary" ] == "": detail[ "abstained" ] = True
+    if not stance_match:
+        detail[ "conditions_by" ] = "not_reached"
+        return ( False, detail )
+    predicted_condition = stance_detail.get( "predicted_qualifier" )
+    actual_condition    = stance_detail.get( "actual_qualifier" )
+    if _same_text( predicted_condition, actual_condition ):
+        detail[ "conditions_by" ] = "plain_code"
+        return ( True, detail )
+    if judge is None:
+        detail[ "conditions_by" ] = "undecided"
+        detail[ "reason" ]        = "judge_required"
+        return ( None, detail )
+    passed, verdict = _ask_judge( judge, predicted_condition, actual_condition )
+    detail[ "conditions_by" ] = "judge"
+    detail[ "judge" ]         = verdict
+    return ( passed, detail )
+
+
+def compare_complete_action_multiple_choice( predicted, actual, response_options, judge=None ):
+    """
+    Score a multiple-choice forecast by the whole card: every field must pass.
+
+    Requires:
+        - predicted, actual and response_options are as compare_multiple_choice reads them
+        - judge is accepted so every comparator takes the same keyword; it is never called, because the picks,
+          write-ins included, are compared exactly
+
+    Ensures:
+        - returns ( match, detail ); ( None, ... ) when there is no answer to score
+        - a forecast that is None or answers no field scores ( False, abstained )
+        - one abstained field fails the card, and so does one inexact field; the rule reads score_field's records
+          from compare_multiple_choice and adds no per-field logic
+        - detail holds fields_total, fields_passed, fields_abstained, the atom decomposition over ( header, pick ) and
+          plain_code_match
+    """
+    if actual is None or not actual.get( "answers" ): return ( None, { "reason": "missing_data" if actual is None else "empty_answers" } )
+    if predicted is None or not predicted.get( "answers" ): return ( False, _abstained_detail() )
+    _, base      = compare_multiple_choice( predicted, actual, response_options, per_field=True )
+    fields       = base[ "fields" ]
+    single       = { f[ "header" ] for f in fields if f[ "mode" ] == "single" }
+    passed       = sum( 1 for f in fields if f[ "exact" ] and not f[ "abstained" ] )
+    abstained    = sum( 1 for f in fields if f[ "abstained" ] )
+    complete     = passed == len( fields )
+    detail       = {
+        "fields_total"     : len( fields ),
+        "fields_passed"    : passed,
+        "fields_abstained" : abstained,
+        "atoms"            : decompose_atoms( [ ( f[ "header" ], pick ) for f in fields for pick in f[ "predicted" ] ],
+                                          [ ( f[ "header" ], pick ) for f in fields for pick in f[ "actual" ] ], single ),
+        "plain_code_match" : complete,
+        "abstained"        : abstained > 0,
+        "fields"           : fields,
+    }
+    if "schema_reason" in base: detail[ "schema_reason" ] = base[ "schema_reason" ]
+    return ( complete, detail )
+
+
+def compare_complete_action_open_ended( predicted: Optional[Dict], actual: Optional[Dict], threshold: Optional[float] = None, judge=None ) -> Tuple[Optional[bool], Dict[str, Any]]:
+    """
+    Score an open-ended forecast by the whole action, not only by text similarity.
+
+    Requires:
+        - predicted and actual are as compare_open_ended reads them, or None
+        - judge is None, or a callable as _ask_judge describes
+
+    Ensures:
+        - returns ( match, detail ); ( None, missing_data ) when there is no answer to score
+        - a blank or missing forecast scores ( False, abstained ): no success
+        - the same words score True with no judge; different words are decided by the judge, and with none the
+          result is ( None, judge_required )
+        - detail["similarity"] holds compare_open_ended's own verdict beside the measure, never in its place
+    """
+    if actual is None: return ( None, { "reason": "missing_data" } )
+    if predicted is None or not ( predicted.get( "value" ) or "" ).strip(): return ( False, _abstained_detail() )
+    similarity_match, similarity_detail = compare_open_ended( predicted, actual, threshold )
+    detail = { "similarity": similarity_detail, "similarity_match": similarity_match, "abstained": False }
+    if _same_text( predicted[ "value" ], actual.get( "value" ) ):
+        detail[ "plain_code_match" ] = True
+        return ( True, detail )
+    detail[ "plain_code_match" ] = False
+    if judge is None:
+        detail[ "reason" ] = "judge_required"
+        return ( None, detail )
+    passed, verdict = _ask_judge( judge, predicted[ "value" ], actual.get( "value" ) )
+    detail[ "judge" ] = verdict
+    return ( passed, detail )
+
+
+def compare_complete_action_open_ended_batch( predicted: Optional[Dict], actual: Optional[Dict], threshold: Optional[float] = None, judge=None ) -> Tuple[Optional[bool], Dict[str, Any]]:
+    """
+    Score an open-ended batch forecast by the whole card: every question's answer must pass.
+
+    Requires:
+        - predicted and actual are as compare_open_ended_batch reads them, or None
+        - judge is None, or a callable as _ask_judge describes
+
+    Ensures:
+        - returns ( match, detail ); ( None, ... ) when there is no answer to score
+        - a forecast that answers no question, or leaves one out, scores False with that field abstained
+        - an answered question with the same words passes with no judge; different words go to the judge, and if
+          any is left undecided with no judge and none has failed, the card is ( None, judge_required )
+        - detail holds fields_total, fields_passed, fields_abstained and the similarity verdict beside it
+    """
+    if actual is None or not actual.get( "answers" ): return ( None, { "reason": "missing_data" if actual is None else "empty_answers" } )
+    if predicted is None or not predicted.get( "answers" ): return ( False, _abstained_detail() )
+    similarity_match, similarity_detail = compare_open_ended_batch( predicted, actual, threshold )
+    passed = abstained = failed = undecided = 0
+    for header, actual_text in actual[ "answers" ].items():
+        if header not in predicted[ "answers" ]:
+            abstained += 1
+        elif _same_text( str( predicted[ "answers" ][ header ] ), str( actual_text ) ):
+            passed += 1
+        elif judge is None:
+            undecided += 1
+        elif _ask_judge( judge, str( predicted[ "answers" ][ header ] ), str( actual_text ) )[ 0 ]:
+            passed += 1
+        else:
+            failed += 1
+    total  = len( actual[ "answers" ] )
+    detail = { "fields_total": total, "fields_passed": passed, "fields_abstained": abstained,
+               "similarity": similarity_detail, "similarity_match": similarity_match,
+               "plain_code_match": passed == total, "abstained": abstained > 0 }
+    if abstained or failed: return ( False, detail )
+    if undecided:
+        detail[ "reason" ] = "judge_required"
+        return ( None, detail )
+    return ( True, detail )
+
+
+def _complete_action_comparator( response_type, open_ended_threshold, response_options, judge ):
+    """
+    Bind the complete-action comparator of one response type.
+
+    Requires:
+        - the arguments are get_comparator's
+
+    Ensures:
+        - returns a callable( predicted, actual ) -> ( match, detail ) bound to the schema, threshold and judge it takes
+        - an unknown type gets the open-ended one, as get_comparator's fallback does
+    """
+    if response_type == RESPONSE_TYPE_MULTIPLE_CHOICE:
+        return partial( compare_complete_action_multiple_choice, response_options={} if response_options is None else response_options, judge=judge )
+    if response_type == RESPONSE_TYPE_YES_NO:
+        return partial( compare_complete_action_yes_no, judge=judge )
+    comparator = compare_complete_action_open_ended_batch if response_type == RESPONSE_TYPE_OPEN_ENDED_BATCH else compare_complete_action_open_ended
+    return partial( comparator, threshold=open_ended_threshold, judge=judge )
+
+
+def get_comparator( response_type: str, open_ended_threshold: Optional[float] = None, response_options: Optional[Dict] = None, per_field: bool = False, complete_action: bool = False, judge=None ):
     """
     Return the appropriate comparator function for a given response type.
 
@@ -380,15 +627,22 @@ def get_comparator( response_type: str, open_ended_threshold: Optional[float] = 
         - open_ended_threshold: float in [0, 1] or None (None keeps OPEN_ENDED_SIMILARITY_THRESHOLD)
         - response_options: the notification's stored schema, or None for a card that has none
         - per_field: True when the per-field multiple-choice switch is on
+        - complete_action: True only when the complete-action scoring switch is on
+        - judge: None, or the injected free-text judge, bound only when complete_action is True
 
     Ensures:
         - Returns a callable (predicted, actual) -> (match, detail)
+        - with complete_action True, every response type returns its compare_complete_action_* comparator,
+          bound to the same schema, threshold and judge; with it False the binding is exactly as before
         - For multiple_choice: compare_multiple_choice bound to response_options, whatever shape
           the answers have, and to per_field only when it is True; with no schema every field is scored as a single select
         - When open_ended_threshold is given, the open-ended and batch comparators
           (including the unknown-type fallback) are bound to it
         - Returns compare_open_ended as fallback for unknown types
     """
+    if complete_action:
+        return _complete_action_comparator( response_type, open_ended_threshold, response_options, judge )
+
     if response_type == RESPONSE_TYPE_MULTIPLE_CHOICE:
         bound = { "response_options": {} if response_options is None else response_options }
         if per_field: bound[ "per_field" ] = True   # bound only when on, so the switch-off binding is exactly as before

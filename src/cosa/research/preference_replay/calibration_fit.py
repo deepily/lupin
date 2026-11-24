@@ -8,10 +8,11 @@ A cell the fit refused for want of rows is reported as not evaluated. So is a ce
 in the final window. Neither is ever scored as if it were calibrated.
 """
 
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 from sklearn.metrics import brier_score_loss
 
+from cosa.agents.prediction_engine.accuracy_comparators import confidence_band
 from cosa.agents.prediction_engine.calibration import calibrate, fit_calibration, group_by_cell, reliability_report
 
 Row = Tuple[str, str, float, bool]
@@ -56,9 +57,84 @@ def fit_and_evaluate( tune_rows: Iterable[Row], final_rows: Iterable[Row], cohor
                 "status"              : "evaluated",
                 "n_tune"              : fitted[ "n" ],
                 "n_final"             : len( confidences ),
-                "brier_raw"           : float( brier_score_loss( correct, confidences ) ),
-                "brier_calibrated"    : float( brier_score_loss( correct, calibrated ) ),
+                "brier_raw"           : binary_brier( confidences, correct ),
+                "brier_calibrated"    : binary_brier( calibrated, correct ),
                 "reliability_raw"     : reliability_report( confidences, correct, n_bins ),
                 "reliability_calibrated" : reliability_report( calibrated, correct, n_bins ),
             }
     return document, { "tune_size": len( tune_rows ), "final_size": len( final_rows ), "cells": cells }
+
+
+STANCE_ORDER = ( "yes", "no", "neither" )
+
+
+def binary_brier( confidences: Iterable[float], correct: Iterable[bool] ) -> float:
+    """
+    Score confidences against whether each forecast was right, by binary Brier.
+
+    Requires:
+        - confidences and correct are equal-length, non-empty, and confidences lie in [0, 1]
+
+    Ensures:
+        - returns the same float fit_and_evaluate stores as brier_raw, from the same scikit-learn call
+    """
+    return float( brier_score_loss( list( correct ), list( confidences ) ) )
+
+
+def band_calibration( confidences: Iterable[float], correct: Iterable[bool] ) -> Dict[float, Dict]:
+    """
+    Report calibration in the four fixed confidence bands, not in equal-width bins.
+
+    Requires:
+        - confidences and correct are equal-length
+
+    Ensures:
+        - returns { band lower edge: { n, mean_confidence, accuracy } } for every band that holds a row, edges from confidence_band
+        - a confidence outside [0, 1] or NaN belongs to no band and is left out
+        - a band with no rows is absent, never reported as zero
+    """
+    grouped: Dict[float, list] = {}
+    for confidence, right in zip( confidences, correct ):
+        band = confidence_band( confidence )
+        if band is not None: grouped.setdefault( band, [] ).append( ( confidence, bool( right ) ) )
+    return { band: { "n": len( rows ), "mean_confidence": sum( c for c, _ in rows ) / len( rows ),
+                     "accuracy": sum( 1 for _, r in rows if r ) / len( rows ) }
+             for band, rows in sorted( grouped.items() ) }
+
+
+def multiclass_brier( probabilities: Iterable[Dict[str, float]], actual: Iterable[str] ) -> float:
+    """
+    Score yes, no, neither probabilities against the answers, by multiclass Brier.
+
+    Requires:
+        - probabilities are dicts with a probability for each of yes, no and neither
+        - actual holds one of those three words per row; both are equal-length and non-empty
+
+    Ensures:
+        - returns the mean over rows of the summed squared gaps between each probability and 1 for the answer, 0 for the others
+        - a perfect forecast scores 0.0 and a certain wrong one 2.0
+    """
+    rows = list( zip( probabilities, actual ) )
+    return sum( sum( ( row[ stance ] - ( 1.0 if stance == answer else 0.0 ) ) ** 2 for stance in STANCE_ORDER ) for row, answer in rows ) / len( rows )
+
+
+def neither_recall_precision( probabilities: Iterable[Dict[str, float]], actual: Iterable[str], threshold: float ) -> Dict[str, Optional[float]]:
+    """
+    Measure how well forecasts find the neither answers, at a frozen threshold.
+
+    Requires:
+        - probabilities and actual are as multiclass_brier reads them
+        - threshold is the frozen cut on the neither probability
+
+    Ensures:
+        - a row is called neither when its neither probability is at least threshold
+        - returns { recall, precision, called, actual }; recall is None with no actual neither, precision None with no row called
+        - the threshold is never chosen here
+    """
+    pairs  = list( zip( probabilities, actual ) )
+    called = [ row[ "neither" ] >= threshold for row, _ in pairs ]
+    truth  = [ answer == "neither" for _, answer in pairs ]
+    hits   = sum( 1 for c, t in zip( called, truth ) if c and t )
+    return { "recall": hits / sum( truth ) if sum( truth ) else None,
+             "precision": hits / sum( called ) if sum( called ) else None,
+             "called": sum( called ), "actual": sum( truth ) }
