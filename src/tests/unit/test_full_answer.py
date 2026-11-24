@@ -372,6 +372,14 @@ def test_a_change_to_the_full_answer_module_is_a_new_predictor_version( monkeypa
     assert cb.predictor_version( cb.ALL_LAYERS, True ) != full and cb.predictor_version() == plain, "the helper source joins the hash only while the switch is on"
 
 
+@pytest.mark.parametrize( "entry", [ "build_full_user_prompt", "parse_full" ] )
+def test_a_change_to_either_full_answer_entry_point_is_a_new_version_only_while_the_switch_is_on( monkeypatch, entry ):
+    plain, full = cb.predictor_version(), cb.predictor_version( cb.ALL_LAYERS, True )
+    real        = cb.inspect.getsource
+    monkeypatch.setattr( cb.inspect, "getsource", lambda target: real( target ) + "# changed" if target is getattr( cb, entry ) else real( target ) )
+    assert cb.predictor_version( cb.ALL_LAYERS, True ) != full and cb.predictor_version() == plain
+
+
 # The switch-off pins. build_user_prompt, parse_reply and _choice_of are the hashed source, and this slice leaves them byte for byte
 # as they were at a472c7bef, so a switch-off baseline keeps its version, its ledger and its stored rows' version string.
 OLD_VERSION = "context-baseline-5352236008"
