@@ -25,6 +25,7 @@ import cosa.agents.principle_learner.extractor_prompt as prompt_module
 import cosa.agents.principle_learner.extractor_rules as rules_module
 import cosa.agents.principle_learner.extractor_store as store_module
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.prediction_engine.principle_status import derive_statuses
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
 from cosa.repo.doc_lint import model_transport
 from cosa.research.preference_replay.scratch_db import scratch_session, session_scope
@@ -707,3 +708,19 @@ def test_the_stage_prompt_is_the_base_when_the_stage_tag_is_on_and_the_other_add
     assert prompt_module.system_prompt_for( ( "stage", ) ) == base and prompt_module.system_prompt_for( () ) == prompt_module.SYSTEM_PROMPT
     both = prompt_module.system_prompt_for( ( prompt_module.BARE_YES_TAG, "stage" ) )
     assert both == base + prompt_module.BARE_YES_ADDENDUM
+
+
+def test_rows_the_job_writes_with_switches_on_are_found_by_the_status_reader_under_the_same_version( db, monkeypatch ):
+    on     = ( prompt_module.BARE_YES_KEY, prompt_module.UNINFORMATIVE_KEY, prompt_module.UNREAD_KEY, prompt_module.DEDUP_KEY )
+    _switches( monkeypatch, *on )
+    _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ) )
+    principles = db.query( PreferencePrinciple ).all()
+    evidence   = db.query( PreferenceEvidence ).all()
+    reader     = lambda key: key in on
+    version    = prompt_module.current_extractor_version( MODEL, reader )
+    assert version.endswith( "+bareyes+uninformative+unread+dedup" ) and { row.extractor_version for row in evidence } == { version }
+    asked_at   = NOW + timedelta( hours=1 )
+    found      = derive_statuses( principles, evidence, asked_at, version, lambda note: None )
+    assert found[ principles[ 0 ].id ][ "status" ] == "hypothesis" and found[ principles[ 0 ].id ][ "episodes" ] == 1
+    untagged   = derive_statuses( principles, evidence, asked_at, prompt_module.current_extractor_version( MODEL, lambda key: False ), lambda note: None )
+    assert untagged[ principles[ 0 ].id ] is None
