@@ -71,7 +71,7 @@ def shadow_forecast_recording_enabled():
                         lambda e: f"[DECISION-PROXY] shadow forecast switch unreadable, recording no forecast: {e.__class__.__name__}: {e}" )
 
 
-NEITHER_IS_NO_RULING_KEY     = "decision proxy neither is no ruling enabled"
+NEITHER_IS_NO_RULING_KEY     = "decision proxy neither means reframe enabled"
 DEFAULT_NEITHER_IS_NO_RULING = False
 
 

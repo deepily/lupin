@@ -54,13 +54,16 @@ def test_the_re_frame_rate_counts_only_the_last_twenty_asks_and_an_empty_list_is
 
 
 # --------------------------------------------------------------------------- the switch
-def test_the_switch_is_off_by_default_and_shipped_off_with_an_explainer():
+def test_the_code_default_is_off_and_the_shipped_value_is_on_with_an_explainer():
+    # Rick turned the switch on and renamed the key, 24 Nov 2026; the code default stays off for an unreadable INI
     assert proxy_config.DEFAULT_NEITHER_IS_NO_RULING is False
     key  = proxy_config.NEITHER_IS_NO_RULING_KEY
-    assert key == "decision proxy neither is no ruling enabled"
+    assert key == "decision proxy neither means reframe enabled"
     ini  = [ l for l in open( f"{ROOT}/src/conf/lupin-app.ini" ) if l.startswith( key ) ]
     expl = [ l for l in open( f"{ROOT}/src/conf/lupin-app-splainer.ini" ) if l.startswith( key ) ]
-    assert len( ini ) == 1 and ini[ 0 ].split( "=" )[ 1 ].strip() == "false" and len( expl ) == 1
+    assert len( ini ) == 1 and ini[ 0 ].split( "=" )[ 1 ].strip() == "true" and len( expl ) == 1
+    stale = [ l for l in open( f"{ROOT}/src/conf/lupin-app.ini" ) if l.startswith( "decision proxy neither is no ruling enabled" ) ]
+    assert stale == [], "the old key name is retired"
 
 
 @pytest.mark.parametrize( "value", [ True, False ] )

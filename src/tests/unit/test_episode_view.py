@@ -18,6 +18,19 @@ from cosa.agents.prediction_engine.history_context_rebuild import SESSION_WINDOW
 from cosa.research.preference_replay.scratch_db import scratch_session
 from cosa.rest.postgres_models import Notification, PredictionLog
 from cosa.utils.iso_timestamp import aware_moment
+import cosa.agents.prediction_engine.full_answer as fa
+
+
+@pytest.fixture( autouse=True )
+def full_answer_off( monkeypatch ):
+    """
+    Turn the full-answer reply off for every test in this file.
+
+    These tests pin the episode without stable option ids. The INI ships the switch on since 24 Nov 2026.
+    The on path is tested in test_full_answer.py.
+    """
+    monkeypatch.setattr( fa, "full_answer_enabled", lambda: False )
+
 
 FIXTURE   = os.path.join( os.path.dirname( __file__ ), "fixtures", "episode_view", "synthetic-context-50.json" )
 RECIPIENT = uuid.UUID( "00000000-0000-4000-8000-0000000000aa" )

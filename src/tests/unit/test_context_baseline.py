@@ -31,6 +31,19 @@ from cosa.repo.doc_lint import model_transport as mt
 from cosa.research.preference_replay import scratch_db  # noqa: F401  registers the one shared SQLite hooks for JSONB and Vector
 from cosa.rest.db.repositories.arm_forecast_repository import CAPPED_ARM_REASON
 from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog
+import cosa.agents.prediction_engine.full_answer as fa
+
+
+@pytest.fixture( autouse=True )
+def full_answer_off( monkeypatch ):
+    """
+    Turn the full-answer reply off for every test in this file.
+
+    These tests pin the old reply path. The INI ships the switch on since 24 Nov 2026.
+    The on path is tested in test_full_answer.py.
+    """
+    monkeypatch.setattr( fa, "full_answer_enabled", lambda: False )
+
 
 T0        = datetime( 2026, 11, 10, 12, 0, tzinfo=timezone.utc )
 RECIPIENT = uuid.UUID( "00000000-0000-4000-8000-0000000000bb" )

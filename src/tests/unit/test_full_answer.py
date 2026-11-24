@@ -11,6 +11,7 @@ Each test names what it would catch:
 import asyncio
 import copy
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -116,9 +117,15 @@ def test_the_episode_gives_each_option_a_stable_id_only_when_the_switch_is_on( f
     assert all( "stable_id" not in o for f in ev.fields_of( CHOICES, None )  for o in f[ "options" ] ), "fields_of adds the key only on request"
 
 
-def test_switch_off_the_episode_has_no_stable_id_and_the_baseline_reads_the_ini_default_as_off( factory ):
+def test_switch_off_the_episode_has_no_stable_id( factory, monkeypatch ):
+    monkeypatch.setattr( fa, "full_answer_enabled", lambda: False )
     assert all( "stable_id" not in o for f in episode( factory, "multiple_choice" )[ "fields" ] for o in f[ "options" ] )
-    assert fa.full_answer_enabled() is False
+
+
+def test_the_switch_ships_on_in_the_ini():
+    # Rick turned the full-answer reply on for the re-run, 24 Nov 2026; the code default stays off for an unreadable INI
+    lines = [ l for l in open( f"{os.environ[ 'LUPIN_ROOT' ]}/src/conf/lupin-app.ini" ) if l.startswith( fa.SWITCH_KEY ) ]
+    assert len( lines ) == 1 and lines[ 0 ].split( "=" )[ 1 ].strip() == "true"
 
 
 def test_the_switch_reads_the_ini_and_reads_off_when_it_is_unreadable( monkeypatch, capsys ):
@@ -386,7 +393,8 @@ OLD_VERSION = "context-baseline-5352236008"
 OLD_PROMPT_TAIL = 'Reply: {"answer": "yes" or "no", "confidence": a number from 0 to 1}.'
 
 
-def test_switch_off_the_version_the_prompt_the_reply_and_the_row_are_what_they_were( factory, tmp_path ):
+def test_switch_off_the_version_the_prompt_the_reply_and_the_row_are_what_they_were( factory, tmp_path, monkeypatch ):
+    monkeypatch.setattr( fa, "full_answer_enabled", lambda: False )
     from cosa.repo.doc_lint import model_transport
     old_parts = [ "context-baseline", cb.SYSTEM_PROMPT, ",".join( cb.ALL_LAYERS ), cb.inspect.getsource( cb.build_user_prompt ), cb.inspect.getsource( cb.parse_reply ), cb.inspect.getsource( cb._choice_of ) ]
     assert cb.predictor_version() == model_transport.prompt_version( *old_parts ) == OLD_VERSION, "a switch-off version is the one a472c7bef gave, and hashes none of full_answer"
