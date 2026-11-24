@@ -494,3 +494,13 @@ def test_the_switches_read_their_ini_keys_and_an_unreadable_setting_is_off( monk
     monkeypatch.setattr( principle_status, "ConfigurationManager", broken )
     assert principle_status.switch_on( "any key" ) is False
     assert "unreadable, treated as off" in capsys.readouterr().out
+
+
+def test_the_tallies_say_which_sources_are_standing_and_which_are_inferred():
+    """Two standing and one inferred give ( 2, 1 ); the reverse gives ( 1, 2 )."""
+    def tally( *quotes ):
+        rows = [ keyed( note=f"n{i}", source_key=f"s{i}", standing_quote=quote ) for i, quote in enumerate( quotes ) ]
+        result = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=False, source_dedup=True )[ "p1" ]
+        return result[ "standing" ], result[ "inferred" ]
+    assert tally( "always ask first", "never skip the link", None ) == ( 2, 1 )
+    assert tally( "always ask first", None, "" ) == ( 1, 2 )
