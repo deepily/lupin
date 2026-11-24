@@ -1349,6 +1349,53 @@ class PreferenceEvidence( Base ):
         return f"<PreferenceEvidence(principle_id={self.principle_id}, notification_id={self.notification_id}, relation='{self.relation}')>"
 
 
+class AnswerMeaning( Base ):
+    """
+    One versioned reading of a stored answer. Append-only.
+
+    It records what the answer meant, apart from what was literally said.
+
+    Requires:
+        - schema_version names the layout of the JSON columns; annotator names who or what read the answer
+        - source is "labeller" or "human"
+
+    Ensures:
+        - one row per ( notification_id, schema_version, annotator ); a new version is a new row and the old row stays
+        - no foreign key to notifications, so pruning notifications never removes a reading
+        - session_key, when set, is the session of the answered notification, stored when the row is written
+        - native_answer holds, per field key, the selected option ids, an explicit empty selection, write-in text and the
+          options merely referred to; acts, conditions and unknowns are lists; each condition carries modifies_option_id,
+          the option it changes or None when it applies to the whole answer
+    """
+
+    __tablename__ = "answer_meaning"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ), primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid()
+    )
+    notification_id: Mapped[uuid.UUID]         = mapped_column( UUID( as_uuid=True ), nullable=False, index=True )
+    schema_version: Mapped[str]                = mapped_column( String( 50 ), nullable=False )
+    annotator: Mapped[str]                     = mapped_column( String( 100 ), nullable=False )
+    source: Mapped[str]                        = mapped_column( String( 20 ), nullable=False )
+    native_answer: Mapped[dict]                = mapped_column( JSONB, nullable=False )
+    acts: Mapped[list]                         = mapped_column( JSONB, nullable=False )
+    conditions: Mapped[list]                   = mapped_column( JSONB, nullable=False )
+    alignment: Mapped[str]                     = mapped_column( String( 30 ), nullable=False )
+    unknowns: Mapped[list]                     = mapped_column( JSONB, nullable=False )
+    supporting_spans: Mapped[Optional[list]]   = mapped_column( JSONB, nullable=True )
+    uncertainty: Mapped[Optional[float]]       = mapped_column( Float, nullable=True )
+    answered_at: Mapped[Optional[datetime]]    = mapped_column( DateTime( timezone=True ), nullable=True )
+    annotated_at: Mapped[datetime]             = mapped_column( DateTime( timezone=True ), nullable=False )
+    session_key: Mapped[Optional[str]]         = mapped_column( String( 255 ), nullable=True )
+
+    __table_args__ = (
+        UniqueConstraint( 'notification_id', 'schema_version', 'annotator', name='uq_answer_meaning_key' ),
+    )
+
+    def __repr__( self ) -> str:
+        return f"<AnswerMeaning(notification_id={self.notification_id}, schema_version='{self.schema_version}', annotator='{self.annotator}')>"
+
+
 class PredictionArmForecast( Base ):
     """
     One forecast per notification and arm, the displayed arm included.
