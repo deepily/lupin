@@ -187,7 +187,7 @@ def build_summary( job, attempt, scan_debt=None, fix_debt=None, previous=None, w
     }
 
 
-def write_summary( path, job, attempt, scan_debt=None, fix_debt=None, work_found_last_run=None, now=None, target=None, err=None ):
+def write_summary( path, job, attempt, scan_debt=None, fix_debt=None, work_found_last_run=None, now=None, target=None, err=None, keep_failed=False ):
     """
     Write the summary of a run.
 
@@ -198,6 +198,7 @@ def write_summary( path, job, attempt, scan_debt=None, fix_debt=None, work_found
         - attempt passes check_attempt
     Ensures:
         - returns the record that was written
+        - with keep_failed, a stored last_attempt whose outcome is failed stays as last_attempt while the new attempt still joins recent, so the job reads failing and not silent
         - returns None, and says why on err, when the file could not be written: a write failure never fails the job (rule 8)
         - the reader then sees an old written_at and calls the job silent
     Raises:
@@ -205,7 +206,9 @@ def write_summary( path, job, attempt, scan_debt=None, fix_debt=None, work_found
     """
     check_attempt( attempt )
     try:
-        doc = build_summary( job, attempt, scan_debt, fix_debt, read_summary( path ), work_found_last_run, now, target )
+        previous = read_summary( path )
+        doc      = build_summary( job, attempt, scan_debt, fix_debt, previous, work_found_last_run, now, target )
+        if keep_failed and previous is not None and previous[ "last_attempt" ][ "outcome" ] == "failed": doc[ "last_attempt" ] = previous[ "last_attempt" ]
         write_json_atomic( path, doc, indent=2, trailing_newline=True )
         return doc
     except OSError as error:

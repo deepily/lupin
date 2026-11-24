@@ -437,6 +437,17 @@ def test_a_boot_after_the_slot_was_served_records_a_skip_and_a_boot_after_a_miss
     assert js.read_summary( _folder( repo ) / "job-summary.json" )[ "last_attempt" ][ "trigger" ] == "boot"
 
 
+def test_a_boot_after_a_failed_run_in_the_same_slot_keeps_the_failed_last_attempt_and_adds_the_skip( repo ):
+    down = Runner( **{ "vm-status": ( 1, "" ) } )
+    assert _run( repo, down, Store(), now=NOW + datetime.timedelta( seconds=5 ) ) == 1
+    state_before = ( _folder( repo ) / "state.json" ).read_text()
+    assert _run( repo, Runner(), Store(), now=NOW + datetime.timedelta( hours=3 ), trigger="boot" ) == 0
+    summary = js.read_summary( _folder( repo ) / "job-summary.json" )
+    assert summary[ "last_attempt" ][ "outcome" ] == "failed" and summary[ "last_attempt" ][ "trigger" ] == "cron"
+    assert [ r[ "outcome" ] for r in summary[ "recent" ] ] == [ "failed", "skipped" ] and summary[ "consecutive_failures" ] == 1
+    assert ( _folder( repo ) / "state.json" ).read_text() == state_before
+
+
 def test_a_second_run_that_finds_the_lock_held_exits_without_touching_the_vm( repo ):
     _folder( repo ).mkdir( parents=True )
     with open( _folder( repo ) / "run.lock", "w" ) as held:

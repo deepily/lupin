@@ -55,7 +55,7 @@ TIMEOUTS       = { "status": 120, "start": 900, "suspend": 300, "stop": 300, "sh
 PROMOTED       = "promoted"
 UP_TO_DATE     = "up-to-date"
 DEFERRED       = "deferred"
-CAUGHT_UP      = "already-run-this-slot"      # a boot that finds the slot served records a skipped attempt (mode caught-up), so the silence rule sees the boot ran; state.json stays as it was
+CAUGHT_UP      = "already-run-this-slot"      # a boot that finds the slot served records a skipped attempt (mode caught-up), so the silence rule sees the boot ran; a failed last_attempt stays as it was, so the job still reads failing; state.json stays as it was
 ROLLED_BACK    = "rolled-back"
 ROLLBACK_FAIL  = "rollback-failed"
 VM_FAILED      = "vm-unreachable"
@@ -424,7 +424,7 @@ def run( root, now, trigger, branch, vm, store, owner, zone, check=False ):
         if not due( trigger, state, now, zone ):
             note    = f"an attempt is already recorded since the {SLOT_HOUR}:00 slot"
             attempt = { "started_at": started, "finished_at": js.iso_now(), "trigger": trigger, "outcome": "skipped", "stage": None, "failure": None, "evidence": note, "mode": "caught-up" }
-            js.write_summary( parts[ "summary" ], JOB, attempt, now=now )
+            js.write_summary( parts[ "summary" ], JOB, attempt, now=now, keep_failed=True )
             print( f"test-promotion: {CAUGHT_UP}: {note}" )
             return 0
         result, stage, detail = decide( root, vm, sha, state )
