@@ -1,0 +1,26 @@
+{
+ "case": "unread-text",
+ "model": "claude-sonnet-5-5",
+ "tags": [
+  "bareyes",
+  "uninformative",
+  "unread"
+ ],
+ "neighbour_ids": [],
+ "entries": [
+  {
+   "field_key": "$answer",
+   "text": "Maybe later, ask me again on Friday",
+   "bare_yes": false,
+   "possibly_influenced": false,
+   "unread_stance": true
+  }
+ ],
+ "episode": {
+  "title": "Approve the held bugs",
+  "abstract": "Three held bugs wait for approval.",
+  "fields": [],
+  "history": []
+ },
+ "reply": "{\"fields\": [{\"field_key\": \"$answer\", \"kind\": \"decision\", \"dimension\": \"Timing and deferral\", \"hypotheses\": [{\"statement\": \"When asked to approve held bugs, defer the decision and re-ask on a specific later day (Friday) rather than approving or rejecting immediately.\", \"rationale\": \"The answer 'Maybe later, ask me again on Friday' defers the approval and names a re-ask time. It was unclassified as a yes or no, so it is read as written. Single instance, so low confidence.\", \"scope\": \"global\", \"condition\": \"asked to approve held bugs\", \"grounded_in\": \"answer\"}], \"relations\": {}}]}"
+}

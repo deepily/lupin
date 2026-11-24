@@ -23,8 +23,8 @@ from cosa.agents.prediction_engine.history_derive import derive_answer, meaning_
 from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
-from cosa.agents.principle_learner.extractor_prompt import DECISION_STAGE_KEY, DECISION_STAGES, STAGE_SYSTEM_PROMPT, SYSTEM_PROMPT, current_extractor_version, build_user_prompt, parse_reply, switch_on
-from cosa.agents.principle_learner.extractor_rules import card_text, check_field, drafted_text, owners_own_answer, field_answers, project_names, unaided_answer
+from cosa.agents.principle_learner.extractor_prompt import BARE_YES_TAG, DEDUP_TAG, DECISION_STAGE_KEY, DECISION_STAGES, UNINFORMATIVE_TAG, UNREAD_TAG, active_tags, build_user_prompt, current_extractor_version, parse_reply, switch_on, system_prompt_for
+from cosa.agents.principle_learner.extractor_rules import card_text, check_field, drafted_text, owners_own_answer, field_answers, project_names, unaided_answer, unread_entries
 from cosa.agents.principle_learner.vocabulary import is_heading
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
@@ -278,6 +278,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
             - returns the JSON summary _execute documents
             - writes through the session only; the caller commits
         """
+        tags      = active_tags( self._flag )
         staged    = self._flag( DECISION_STAGE_KEY )
         extractor = current_extractor_version( model, self._flag )
         row = session.get( Notification, uuid.UUID( self.notification_id ) )
@@ -286,7 +287,9 @@ class PrincipleExtractorJob( AgenticJobBase ):
         raw = { "recipient_id": str( row.recipient_id ), "response_type": row.response_type, "response_value": row.response_value }
         if not owners_own_answer( row ):
             return self._summary( "skipped_not_attributed" )
-        entries = field_answers( derive_answer( raw )[ 0 ] )
+        answer  = derive_answer( raw )[ 0 ]
+        entries = field_answers( answer )
+        if not entries and UNREAD_TAG in tags: entries = unread_entries( answer, row.response_type )
         if not entries: return self._summary( "skipped_nothing_to_read" )
         episode    = episode_view( session, row.id )
         draft      = revealed_draft( session, row.id )
@@ -300,7 +303,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         now        = self.clock() if self.clock is not None else aware_moment( cu.get_current_datetime_iso() )
         neighbours = extractor_store.fetch_neighbours( session, str( row.recipient_id ), encoder, vectors, now )
         if all( entry[ "bare_yes" ] for entry in entries ) and not neighbours: return self._summary( "skipped_no_input" )
-        reply      = await model_transport.complete( model, STAGE_SYSTEM_PROMPT if staged else SYSTEM_PROMPT, build_user_prompt( episode, entries, neighbours ),
+        reply      = await model_transport.complete( model, system_prompt_for( tags ), build_user_prompt( episode, entries, neighbours ),
                                                      query_fn=self.query_fn, timeout_seconds=timeout )
         fields     = parse_reply( reply )
         read       = { entry[ "field_key" ]: entry[ "answer_read" ] for entry in entries if "answer_read" in entry } or None
@@ -315,7 +318,8 @@ class PrincipleExtractorJob( AgenticJobBase ):
                 report[ "rejected" ].append( { "field_key": entry[ "field_key" ], "what": "field", "reason": "field_missing_from_reply" } )
                 continue
             grounding = card_text( episode ) + "\n" + entry[ "text" ]
-            checked   = check_field( by_key[ entry[ "field_key" ] ], grounding, projects, entry[ "bare_yes" ], ids )
+            checked   = check_field( by_key[ entry[ "field_key" ] ], grounding, projects, entry[ "bare_yes" ], ids,
+                                     bare_yes_relations=BARE_YES_TAG in tags, uninformative=UNINFORMATIVE_TAG in tags, source_dedup=DEDUP_TAG in tags )
             if staged: checked[ "decision_stage" ] = by_key[ entry[ "field_key" ] ].get( "decision_stage" ) if by_key[ entry[ "field_key" ] ].get( "decision_stage" ) in DECISION_STAGES else None
             report[ "rejected" ].extend( { "field_key": entry[ "field_key" ], **item } for item in checked[ "rejected" ] )
             # field_kept is redundant today, because a wholly rejected field keeps no hypotheses; it stays so the rule reads as stated

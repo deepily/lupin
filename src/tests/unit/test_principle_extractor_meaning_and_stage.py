@@ -273,10 +273,12 @@ def test_the_stage_prompt_extends_the_old_one():
 def test_a_version_has_no_tag_with_every_switch_off_and_one_plus_tag_per_switch_that_is_on_in_registry_order():
     assert extractor_version_of( "m" ) == f"m:{PROMPT_VERSION}" and extractor_version_of( "m", ( "stage", ) ) == f"m:{PROMPT_VERSION}+stage"
     assert extractor_version_of( "m", ( "a", "b" ) ) == f"m:{PROMPT_VERSION}+a+b"
-    assert VERSION_TAGS == ( ( DECISION_STAGE_KEY, "stage" ), )
-    assert active_tags( lambda key: False ) == () and active_tags( lambda key: True ) == ( "stage", )
-    assert current_extractor_version( "m", lambda key: True ) == f"m:{PROMPT_VERSION}+stage" and current_extractor_version( "m", lambda key: False ) == f"m:{PROMPT_VERSION}"
-    assert active_prompt_version( lambda key: True ) == f"{PROMPT_VERSION}+stage" and active_prompt_version( lambda key: False ) == PROMPT_VERSION
+    only_stage = lambda key: key == DECISION_STAGE_KEY
+    assert [ tag for _, tag in VERSION_TAGS ] == [ "bareyes", "uninformative", "unread", "dedup", "stage" ] and VERSION_TAGS[ -1 ] == ( DECISION_STAGE_KEY, "stage" )
+    assert active_tags( lambda key: False ) == () and active_tags( only_stage ) == ( "stage", ) and active_tags( lambda key: True ) == ( "bareyes", "uninformative", "unread", "dedup", "stage" )
+    assert current_extractor_version( "m", only_stage ) == f"m:{PROMPT_VERSION}+stage" and current_extractor_version( "m", lambda key: False ) == f"m:{PROMPT_VERSION}"
+    assert current_extractor_version( "m", lambda key: True ) == f"m:{PROMPT_VERSION}+bareyes+uninformative+unread+dedup+stage"
+    assert active_prompt_version( only_stage ) == f"{PROMPT_VERSION}+stage" and active_prompt_version( lambda key: False ) == PROMPT_VERSION
 
 
 def test_the_live_version_reads_the_ini_file_and_is_untagged_as_shipped():
@@ -286,7 +288,7 @@ def test_the_live_version_reads_the_ini_file_and_is_untagged_as_shipped():
 def test_the_job_writes_under_the_version_every_reader_asks_for( db, monkeypatch ):
     _switches( monkeypatch, DECISION_STAGE_KEY )
     _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ) )
-    assert { row.extractor_version for row in db.query( PreferenceEvidence ) } == { current_extractor_version( MODEL, lambda key: True ) }
+    assert { row.extractor_version for row in db.query( PreferenceEvidence ) } == { current_extractor_version( MODEL, lambda key: key == DECISION_STAGE_KEY ) }
 
 
 def test_the_committed_prompts_are_what_build_user_prompt_writes_today():

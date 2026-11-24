@@ -119,7 +119,7 @@ def evidence_keys( session, principle, condition, hypothesis, source_key, comple
     return keys
 
 
-def _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report, keys=None, decision_stage=None ):
+def _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report, keys=None, decision_stage=None, antecedent=None ):
     """
     Add one evidence row unless its unique key already exists.
 
@@ -133,6 +133,7 @@ def _write_evidence( session, principle, notification_id, field_key, relation, c
         - a row with the same principle, notification, field, extractor version and source "extractor" is never added twice
         - a new row carries session_key, so status can count sessions after the notification is pruned
         - a new row also carries each of keys, a dict of evidence column to value, or none when keys is None
+        - a new row carries antecedent only when one is given (an uninformative row's quote); otherwise the column is not written
         - report counts the row as written or already present
     """
     key = dict( principle_id=principle.id, notification_id=notification_id, field_key=field_key, extractor_version=extractor_version, source="extractor" )
@@ -141,7 +142,7 @@ def _write_evidence( session, principle, notification_id, field_key, relation, c
         return
     fields = { "id": uuid.uuid4(), "relation": relation, "condition": condition, "answered_at": answered_at, "extracted_at": extracted_at,
                "decision_stage": decision_stage,
-               "session_key": session_key }
+               "session_key": session_key, **( { "antecedent": antecedent } if antecedent is not None else {} ) }
     fields.update( keys or {} )
     session.add( PreferenceEvidence( **fields, **key ) )
     session.flush()
@@ -172,6 +173,7 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
         - every evidence row written carries checked[ "decision_stage" ] when the check result has one, else none
         - with the condition-keys or source-dedup switch on, a row also carries what evidence_keys gives; with both off, nothing is added
         - with no hypothesis, each named principle gets one evidence row with the relation given and no condition
+        - an uninformative relation's row carries the quoted antecedent from checked["antecedents"], and no condition
         - the same input written twice adds nothing the second time
     """
     answered_at, extracted_at   = times
@@ -181,7 +183,8 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
     def record( principle, relation, condition, hypothesis=None ):
         if not same_heading( principle.dimension, checked[ "dimension" ] ): report[ "dimension_mismatches" ].append( { "principle_id": str( principle.id ), "field_key": field_key } )
         _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report,
-                         keys=evidence_keys( session, principle, condition, hypothesis, source_key, key_complete ), decision_stage=checked.get( "decision_stage" ) )
+                         keys=evidence_keys( session, principle, condition, hypothesis, source_key, key_complete ), decision_stage=checked.get( "decision_stage" ),
+                         antecedent=checked.get( "antecedents", {} ).get( str( principle.id ) ) )
     if not checked[ "hypotheses" ]:
         for pid, relation in sorted( named.items() ): record( by_id[ pid ], relation, None )
         return

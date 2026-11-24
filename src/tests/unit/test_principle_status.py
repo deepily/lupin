@@ -338,6 +338,15 @@ def test_a_split_contradicts_row_that_sorts_latest_is_still_no_ruling():
     assert result[ "status" ] != RETRACTED and result[ "ruled" ] is True
 
 
+def test_an_uninformative_row_counts_for_nothing_so_statuses_are_the_same_with_and_without_it():
+    base  = [ row( note="n1" ), row( note="n2" ) ]
+    extra = base + [ row( note="n3", relation="uninformative" ), row( note="n4", relation="uninformative" ) ]
+    assert status_of( [ principle() ], extra ) == status_of( [ principle() ], base )
+    assert status_of( [ principle() ], [ row( relation="uninformative" ) ] ) is None
+    contested = [ row( note="n1" ), row( note="n2", relation="contradicts" ) ]
+    assert status_of( [ principle() ], contested + [ row( note="n3", relation="uninformative" ) ] ) == status_of( [ principle() ], contested )
+
+
 # ---- the two switches: condition keys (row 9) and source dedup (row 10) ----
 
 FIXTURE = json.loads( ( Path( __file__ ).resolve().parents[ 1 ] / "fixtures" / "principle_status" / "condition_key_writer_replies.json" ).read_text() )

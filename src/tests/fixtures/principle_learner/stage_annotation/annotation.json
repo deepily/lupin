@@ -1,0 +1,171 @@
+{
+ "annotator": "John (author seat cc-author-cheech-1), read from label-free-input.json only",
+ "stages": [
+  "who_decides",
+  "what_to_do_once_asked"
+ ],
+ "rule": "what_to_do_once_asked when the card asks 'Re-spin X now?' and the answer decides what to do with that ask; who_decides only when the answer states who should decide or whether to ask first, beyond this card",
+ "rows": [
+  {
+   "row": 1,
+   "evidence_id": "b4586a50259f46d49660ffd8b78ec0c7",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 2,
+   "evidence_id": "edf31962399d401bb9daa7eefdc2e080",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 3,
+   "evidence_id": "4dda68102d1c488091939c63c3890e89",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 4,
+   "evidence_id": "3500d566e1b14218b34d7404e382272b",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": true,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The comment sets a precondition on the act (do something first), and states no rule about who decides or whether to ask."
+  },
+  {
+   "row": 5,
+   "evidence_id": "2b820eb2e4ac4e1793ca60c9a4c03ca0",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": true,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The comment sets a precondition on the act (do something first), and states no rule about who decides or whether to ask."
+  },
+  {
+   "row": 6,
+   "evidence_id": "246cd9296e494ff3857d7aacffff7aa9",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 7,
+   "evidence_id": "e1ccc3213a704e4e9be10940d04ef824",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 8,
+   "evidence_id": "b6ff62467a884278886d38c7ba541a50",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": true,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The comment sets a precondition on the act (do something first), and states no rule about who decides or whether to ask."
+  },
+  {
+   "row": 9,
+   "evidence_id": "6a3887b8274d457f96f37562d4334e35",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 10,
+   "evidence_id": "fec766864fdd4a8380557b9c71516dd5",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 11,
+   "evidence_id": "7707e77b99c84c929a75ecc3949e3c8e",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 12,
+   "evidence_id": "e6eb419f51354cd0b36585e6e47a3068",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 13,
+   "evidence_id": "88a75b26cfdb4ca6bc71b0ae01c587ff",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 14,
+   "evidence_id": "c1211610497c432da93436f1860d1296",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 15,
+   "evidence_id": "2a37d38f89f74eea8801781c2f1b675a",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 16,
+   "evidence_id": "5d84f159b2ec4879ad368a44a9e4f96c",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": true,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The comment sets a precondition on the act (do something first), and states no rule about who decides or whether to ask."
+  },
+  {
+   "row": 17,
+   "evidence_id": "7dc47a77fb844d9ba99f744b05349c86",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 18,
+   "evidence_id": "9ce1e1cd663b4569b69b6cd4bf2a6d52",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 19,
+   "evidence_id": "7c8c471fe40c4c74ba88f71ec482ca4f",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 20,
+   "evidence_id": "5c41a99f4b7b405a984de58130495ca5",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 21,
+   "evidence_id": "3ce36490d273415e8d99a4e2dfdaf74b",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 22,
+   "evidence_id": "60425f185c2347d3a27c9f4e91f78533",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  },
+  {
+   "row": 23,
+   "evidence_id": "26b10795a80141c68f435045c3725b3f",
+   "stage": "what_to_do_once_asked",
+   "answer_has_precondition": false,
+   "reason": "The card is the ask itself ('Re-spin X now?'); the owner's answer says what to do once asked. The answer is a bare stance and states no rule about who decides."
+  }
+ ]
+}

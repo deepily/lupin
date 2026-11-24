@@ -1,0 +1,23 @@
+{
+ "case": "standing-instruction",
+ "model": "claude-sonnet-5-5",
+ "tags": [
+  "dedup"
+ ],
+ "neighbour_ids": [],
+ "entries": [
+  {
+   "field_key": "$answer",
+   "text": "No. From now on, never approve held bugs without showing me the diff first.",
+   "bare_yes": false,
+   "possibly_influenced": false
+  }
+ ],
+ "episode": {
+  "title": "Approve the held bugs",
+  "abstract": "Three held bugs wait for approval.",
+  "fields": [],
+  "history": []
+ },
+ "reply": "{\"fields\": [{\"field_key\": \"$answer\", \"kind\": \"decision\", \"dimension\": \"Review and release gates\", \"hypotheses\": [{\"statement\": \"Never approve held bugs without first showing the owner the diff.\", \"rationale\": \"The owner declined the approval and stated a rule that held bugs need the diff shown before any approval.\", \"scope\": \"global\", \"condition\": \"approving held bugs\", \"grounded_in\": \"answer\", \"standing_instruction\": true, \"standing_quote\": \"From now on, never approve held bugs without showing me the diff first.\"}], \"relations\": {}}]}"
+}

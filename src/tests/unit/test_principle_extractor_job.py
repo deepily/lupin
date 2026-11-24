@@ -11,6 +11,7 @@ import asyncio
 import concurrent.futures
 import inspect
 import json
+import os
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,7 @@ import cosa.agents.principle_learner.extractor_prompt as prompt_module
 import cosa.agents.principle_learner.extractor_rules as rules_module
 import cosa.agents.principle_learner.extractor_store as store_module
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.prediction_engine.principle_status import derive_statuses
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
 from cosa.repo.doc_lint import model_transport
 from cosa.research.preference_replay.scratch_db import scratch_session, session_scope
@@ -596,3 +598,129 @@ def test_the_model_is_called_through_the_transport_module_so_a_patch_on_complete
     monkeypatch.setattr( model_transport, "complete", fake_complete )
     out, _ = _run( db, _ask( db, answer="no" ), None )
     assert seen == [ ( MODEL, 30 ) ] and out[ "status" ] == "extracted"
+
+
+def _switches( monkeypatch, *keys ):
+    """Turn only the named learner switches on, as the job reads them."""
+    monkeypatch.setattr( PrincipleExtractorJob, "_flag", lambda self, key: key in keys )
+
+
+def test_with_every_new_switch_off_an_unread_yes_no_text_is_skipped_and_the_version_has_no_tags( db ):
+    ask    = _ask( db, answer="Maybe later" )
+    model  = Model( _reply() )
+    out, _ = _run( db, ask, model )
+    assert out[ "status" ] == "skipped_nothing_to_read" and model.sent == []
+    assert prompt_module.current_extractor_version( MODEL, lambda key: False ) == f"{MODEL}:{prompt_module.PROMPT_VERSION}"
+
+
+def test_an_unread_yes_no_text_reaches_the_writer_with_the_flag_when_the_unread_switch_is_on( db, monkeypatch ):
+    _switches( monkeypatch, prompt_module.UNREAD_KEY )
+    known  = _principle( db )
+    ask    = _ask( db, answer="Maybe later" )
+    model  = Model( _reply( _result( relations={ str( known.id ): "refines" } ) ) )
+    out, _ = _run( db, ask, model )
+    assert out[ "status" ] == "extracted" and '"unread_stance": true' in model.sent[ 0 ] and "Maybe later" in model.sent[ 0 ]
+    row = db.query( PreferenceEvidence ).one()
+    assert row.relation == "refines" and row.extractor_version.endswith( "+unread" )
+
+
+def test_an_unread_yes_no_text_may_create_a_principle_like_any_non_bare_answer( db, monkeypatch ):
+    _switches( monkeypatch, prompt_module.UNREAD_KEY )
+    ask    = _ask( db, answer="Maybe later" )
+    out, _ = _run( db, ask, Model( _reply( _result( hypotheses=[ _hyp( "Hold the ask until the owner is back." ) ] ) ) ) )
+    assert out[ "status" ] == "extracted" and _counts( db ) == ( 1, 1 )
+
+
+def test_an_unreadable_card_answer_stays_skipped_with_the_unread_switch_on( db, monkeypatch ):
+    _switches( monkeypatch, prompt_module.UNREAD_KEY )
+    ask    = _ask( db, answer="{not an answers map", response_type="multiple_choice" )
+    model  = Model( _reply() )
+    out, _ = _run( db, ask, model )
+    assert out[ "status" ] == "skipped_nothing_to_read" and model.sent == []
+
+
+def test_a_bare_yes_contradicting_a_principle_is_stored_as_contradicts_only_with_the_bare_yes_switch_on( db, monkeypatch ):
+    known = _principle( db )
+    reply = _reply( _result( relations={ str( known.id ): "contradicts" } ) )
+    out, _ = _run( db, _ask( db, answer="yes" ), Model( reply ) )
+    assert db.query( PreferenceEvidence ).count() == 0 and { "field_key": "$answer", "what": f"relation {known.id}", "reason": "bare_yes_only_supports" } in out[ "rejected" ]
+    _switches( monkeypatch, prompt_module.BARE_YES_KEY )
+    out, _ = _run( db, _ask( db, minutes=10, answer="yes" ), Model( reply ) )
+    evidence = db.query( PreferenceEvidence ).one()
+    assert evidence.relation == "contradicts" and evidence.condition is None and evidence.extractor_version.endswith( "+bareyes" )
+
+
+def test_an_uninformative_bare_yes_is_stored_with_its_antecedent_quote_and_no_condition_when_the_switch_is_on( db, monkeypatch ):
+    known = _principle( db )
+    field = _result( relations={ str( known.id ): "uninformative" } )
+    field[ "antecedents" ] = { str( known.id ): { "quote": "when the card names a deadline", "card_lacks_it": True } }
+    reply = _reply( field )
+    out, _ = _run( db, _ask( db, answer="yes" ), Model( reply ) )
+    assert db.query( PreferenceEvidence ).count() == 0 and out[ "rejected" ][ 0 ][ "reason" ] == "relation_unknown"
+    _switches( monkeypatch, prompt_module.UNINFORMATIVE_KEY )
+    out, _ = _run( db, _ask( db, minutes=10, answer="yes" ), Model( reply ) )
+    evidence = db.query( PreferenceEvidence ).one()
+    assert evidence.relation == "uninformative" and evidence.antecedent == "when the card names a deadline" and evidence.condition is None
+    assert evidence.extractor_version.endswith( "+uninformative" )
+
+
+def test_an_uninformative_reply_without_the_quote_is_refused_and_writes_no_row( db, monkeypatch ):
+    _switches( monkeypatch, prompt_module.UNINFORMATIVE_KEY )
+    known  = _principle( db )
+    out, _ = _run( db, _ask( db, answer="yes" ), Model( _reply( _result( relations={ str( known.id ): "uninformative" } ) ) ) )
+    assert db.query( PreferenceEvidence ).count() == 0 and out[ "rejected" ][ 0 ][ "reason" ] == "uninformative_without_quote"
+
+
+def test_a_supporting_row_leaves_the_antecedent_column_empty( db ):
+    known = _principle( db )
+    _run( db, _ask( db, answer="yes" ), Model( _reply( _result( relations={ str( known.id ): "supports" } ) ) ) )
+    assert db.query( PreferenceEvidence ).one().antecedent is None
+
+
+@pytest.mark.skipif( not os.environ.get( "LUPIN_LIVE_UNREAD_TEXTS" ), reason="live check: set LUPIN_LIVE_UNREAD_TEXTS to a JSON list of { title, message, abstract, text } for the unread yes/no texts" )
+def test_live_the_unread_yes_no_texts_each_produce_a_stored_row_through_the_real_model( db, monkeypatch ):
+    """Live check (plan row 3): the real model reads each unread text; none is skipped."""
+    _switches( monkeypatch, job_module.UNREAD_KEY )
+    texts = json.load( open( os.environ[ "LUPIN_LIVE_UNREAD_TEXTS" ] ) )
+    assert len( texts ) == 4
+    for item in texts:
+        ask = _ask( db, answer=item[ "text" ], title=item[ "title" ], message=item[ "message" ], abstract=item[ "abstract" ] )
+        job = PrincipleExtractorJob( ask, str( OWNER ), "owner@example.com", embed_fn=embed, session_factory=_factory( db ), model="claude-sonnet-5-5",
+                                     timeout_seconds=180, encoder=ENCODER, clock=lambda: NOW )
+        before = db.query( PreferenceEvidence ).count()
+        assert json.loads( asyncio.run( job._execute() ) )[ "status" ] == "extracted"
+        assert db.query( PreferenceEvidence ).count() > before
+
+
+def test_a_standing_instruction_reply_without_its_quote_is_refused_only_with_the_source_dedup_switch_on( db, monkeypatch ):
+    reply = _reply( _result( hypotheses=[ _hyp( "Never approve without the diff.", standing_instruction=True ) ] ) )
+    out, _ = _run( db, _ask( db, answer="no" ), Model( reply ) )
+    assert out[ "rejected" ] == [] and _counts( db ) == ( 1, 1 )
+    _switches( monkeypatch, prompt_module.DEDUP_KEY )
+    out, _ = _run( db, _ask( db, minutes=10, answer="no" ), Model( reply ) )
+    assert out[ "rejected" ] == [ { "field_key": "$answer", "what": "hypothesis 0", "reason": "standing_instruction_without_quote" } ] and _counts( db ) == ( 1, 1 )
+    assert prompt_module.current_extractor_version( MODEL, lambda key: key == prompt_module.DEDUP_KEY ).endswith( "+dedup" )
+    assert '"standing_quote"' in prompt_module.system_prompt_for( ( prompt_module.DEDUP_TAG, ) )
+
+
+def test_the_stage_prompt_is_the_base_when_the_stage_tag_is_on_and_the_other_addenda_follow_it():
+    base = prompt_module.STAGE_SYSTEM_PROMPT
+    assert prompt_module.system_prompt_for( ( "stage", ) ) == base and prompt_module.system_prompt_for( () ) == prompt_module.SYSTEM_PROMPT
+    both = prompt_module.system_prompt_for( ( prompt_module.BARE_YES_TAG, "stage" ) )
+    assert both == base + prompt_module.BARE_YES_ADDENDUM
+
+
+def test_rows_the_job_writes_with_switches_on_are_found_by_the_status_reader_under_the_same_version( db, monkeypatch ):
+    on     = ( prompt_module.BARE_YES_KEY, prompt_module.UNINFORMATIVE_KEY, prompt_module.UNREAD_KEY, prompt_module.DEDUP_KEY )
+    _switches( monkeypatch, *on )
+    _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ) )
+    principles = db.query( PreferencePrinciple ).all()
+    evidence   = db.query( PreferenceEvidence ).all()
+    reader     = lambda key: key in on
+    version    = prompt_module.current_extractor_version( MODEL, reader )
+    assert version.endswith( "+bareyes+uninformative+unread+dedup" ) and { row.extractor_version for row in evidence } == { version }
+    asked_at   = NOW + timedelta( hours=1 )
+    found      = derive_statuses( principles, evidence, asked_at, version, lambda note: None )
+    assert found[ principles[ 0 ].id ][ "status" ] == "hypothesis" and found[ principles[ 0 ].id ][ "episodes" ] == 1
+    untagged   = derive_statuses( principles, evidence, asked_at, prompt_module.current_extractor_version( MODEL, lambda key: False ), lambda note: None )
+    assert untagged[ principles[ 0 ].id ] is None

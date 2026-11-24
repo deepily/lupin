@@ -1,0 +1,140 @@
+[
+ {
+  "row": 1,
+  "evidence_id": "b4586a50259f46d49660ffd8b78ec0c7",
+  "relation": "supports",
+  "condition": "unknown"
+ },
+ {
+  "row": 2,
+  "evidence_id": "edf31962399d401bb9daa7eefdc2e080",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 3,
+  "evidence_id": "4dda68102d1c488091939c63c3890e89",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 4,
+  "evidence_id": "3500d566e1b14218b34d7404e382272b",
+  "relation": "refines",
+  "condition": "before you re-spin"
+ },
+ {
+  "row": 5,
+  "evidence_id": "2b820eb2e4ac4e1793ca60c9a4c03ca0",
+  "relation": "supports",
+  "condition": "multiple choice questions including pros cons and recommendations"
+ },
+ {
+  "row": 6,
+  "evidence_id": "246cd9296e494ff3857d7aacffff7aa9",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 7,
+  "evidence_id": "e1ccc3213a704e4e9be10940d04ef824",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 8,
+  "evidence_id": "b6ff62467a884278886d38c7ba541a50",
+  "relation": "refines",
+  "condition": "unknown"
+ },
+ {
+  "row": 9,
+  "evidence_id": "6a3887b8274d457f96f37562d4334e35",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 10,
+  "evidence_id": "fec766864fdd4a8380557b9c71516dd5",
+  "relation": "supports",
+  "condition": "unknown"
+ },
+ {
+  "row": 11,
+  "evidence_id": "7707e77b99c84c929a75ecc3949e3c8e",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 12,
+  "evidence_id": "e6eb419f51354cd0b36585e6e47a3068",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 13,
+  "evidence_id": "88a75b26cfdb4ca6bc71b0ae01c587ff",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 14,
+  "evidence_id": "c1211610497c432da93436f1860d1296",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 15,
+  "evidence_id": "2a37d38f89f74eea8801781c2f1b675a",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 16,
+  "evidence_id": "5d84f159b2ec4879ad368a44a9e4f96c",
+  "relation": "refines",
+  "condition": "before you re-spin"
+ },
+ {
+  "row": 17,
+  "evidence_id": "7dc47a77fb844d9ba99f744b05349c86",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 18,
+  "evidence_id": "9ce1e1cd663b4569b69b6cd4bf2a6d52",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 19,
+  "evidence_id": "7c8c471fe40c4c74ba88f71ec482ca4f",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 20,
+  "evidence_id": "5c41a99f4b7b405a984de58130495ca5",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 21,
+  "evidence_id": "3ce36490d273415e8d99a4e2dfdaf74b",
+  "relation": "supports",
+  "condition": "unknown"
+ },
+ {
+  "row": 22,
+  "evidence_id": "60425f185c2347d3a27c9f4e91f78533",
+  "relation": "supports",
+  "condition": null
+ },
+ {
+  "row": 23,
+  "evidence_id": "26b10795a80141c68f435045c3725b3f",
+  "relation": "supports",
+  "condition": null
+ }
+]

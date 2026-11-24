@@ -1,0 +1,23 @@
+{
+ "case": "inferred-refusal",
+ "model": "claude-sonnet-5-5",
+ "tags": [
+  "dedup"
+ ],
+ "neighbour_ids": [],
+ "entries": [
+  {
+   "field_key": "$answer",
+   "text": "No",
+   "bare_yes": false,
+   "possibly_influenced": false
+  }
+ ],
+ "episode": {
+  "title": "Approve the held bugs",
+  "abstract": "Three held bugs wait for approval.",
+  "fields": [],
+  "history": []
+ },
+ "reply": "{\"fields\": [{\"field_key\": \"$answer\", \"kind\": \"decision\", \"dimension\": \"Review and release gates\", \"hypotheses\": [], \"relations\": {}}]}"
+}
