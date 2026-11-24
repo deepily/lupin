@@ -19,7 +19,7 @@
 2. **Pipeline merged** (row `5eca85f8`): `b4296b9c6`, `9a21ee5a4`, `a472c7bef`, `88ce93a7d`, `c1db41a84`, `0e39cbc02`, `30d43d020`, `9d09b0b97`, `1219cf4f1`, `57705a085`, `adfea7d44` and `d046c4a5d`.
 3. **End-to-end answer audit** (row `c7b573e3`): 271 cells, of which 109 kept and 85 lost. The write-ups are in `io/write-ups/online-preference-learning/`. Audit fixes merged at `4456ac7b1`, `08fe45961` and `167cce452`.
 4. **Login fix** (bug `807ffebc`): `caf7383aa` adds a read-only login tick. A failed login no longer reads as a plan limit.
-5. **Also**: the bundle gate `1bd924b5e` (bug `416c967b`). Four endpoint tests have been red since `08fe45961`; the fix `b8edaee79` is in review.
+5. **Also**: the bundle gate `1bd924b5e` (bug `416c967b`). Four endpoint tests went red at `08fe45961`; they are green again at `05e2accde`. An undeclared venv test is fixed at `587e92968`. Census guards are green at `05e2accde`. Sam's slice `d856c902c` is reviewed but unmerged, carried to 24 Nov.
 
 ## 2026.11.22 - Session dbff9ee1 (Mr. Radio 🦉, build manager; skeleton crew, subagents only) | Jev key on the VM, sessions folder cutover, Jev-down reuse re-check
 
