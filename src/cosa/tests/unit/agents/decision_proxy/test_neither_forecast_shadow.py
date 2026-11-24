@@ -98,11 +98,11 @@ def _repo( row ):
     return patch( "cosa.rest.db.database.get_db" ), patch( "cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository", repo ), repo
 
 
-def _ask( orch, io, shadow, neither=False, row=None, notification_id="n-1", full=NO_BASELINE ):
+def _ask( orch, io, shadow, neither=False, row=None, notification_id="n-1", full=None ):
     db, repo_patch, repo = _repo( row )
     with patch( SHADOW_SWITCH, return_value=shadow ), patch( NEITHER_SWITCH, return_value=neither ), \
          patch( "cosa.agents.swe_team.orchestrator.take_last_ask_notification_id", side_effect=[ None, notification_id ] ), \
-         patch( FULL_READER, return_value=full ), \
+         patch( FULL_READER, return_value=NO_BASELINE if full is None else full ), \
          patch( "cosa.agents.swe_team.orchestrator.write_proxy_decision" ) as write, db, repo_patch:
         result = asyncio.run( orch._gated_confirmation( "Proceed?", "lead", "no", 60, None, io ) )
     return result, write, repo
