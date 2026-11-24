@@ -902,7 +902,7 @@ class ProxyDecision( Base ):
         nullable=True
     )
 
-    # Data provenance (organic, synthetic_seed, synthetic_generated)
+    # Data provenance (organic, proxy, uncarded, synthetic_seed, synthetic_generated)
     data_origin: Mapped[str] = mapped_column(
         String( 50 ),
         nullable=False,
@@ -1320,6 +1320,15 @@ class PreferenceEvidence( Base ):
         - no foreign key to notifications, so pruning notifications never removes evidence
         - session_key, when set, is the session of the answered notification, stored when the row is written so
           that status can count sessions after the notification is pruned; NULL when the writer had none
+        - source_key, when set, names the one source behind the row (the same card asked twice, or one instruction restated),
+          so status counts copies of a source once
+        - condition_key, when set, is the writer's canonical form of condition, stored when the row is written so
+          status compares keys and makes no model call
+        - caveat, when set, is the writer's short warning for the forecaster (cut to 200 characters where it is read)
+        - decision_stage, when set, is who_decides or what_to_do_once_asked; antecedent, when set, is the principle's
+          antecedent as the extractor quoted it
+        - standing_quote, when set, is the answer's own words stating a rule beyond its card; NULL means an inferred refusal
+        - all six are NULL on every row written before they existed, and are never backfilled
     """
 
     __tablename__ = "preference_evidence"
@@ -1340,6 +1349,12 @@ class PreferenceEvidence( Base ):
     retracted_at: Mapped[Optional[datetime]]   = mapped_column( DateTime( timezone=True ), nullable=True )
     source: Mapped[str]                        = mapped_column( String( 20 ), nullable=False )
     session_key: Mapped[Optional[str]]         = mapped_column( String( 255 ), nullable=True )
+    source_key: Mapped[Optional[str]]          = mapped_column( String( 255 ), nullable=True )
+    condition_key: Mapped[Optional[str]]       = mapped_column( Text, nullable=True )
+    caveat: Mapped[Optional[str]]              = mapped_column( Text, nullable=True )
+    decision_stage: Mapped[Optional[str]]      = mapped_column( String( 100 ), nullable=True )
+    antecedent: Mapped[Optional[str]]          = mapped_column( Text, nullable=True )
+    standing_quote: Mapped[Optional[str]]      = mapped_column( Text, nullable=True )
 
     __table_args__ = (
         UniqueConstraint( 'principle_id', 'notification_id', 'field_key', 'extractor_version', 'source', name='uq_preference_evidence_key' ),
@@ -1410,6 +1425,8 @@ class PredictionArmForecast( Base ):
         - a late forecast is derived from forecast_ready_at, never stored
         - evidence_ids holds different ids by arm: the principle ids the forecast was given for the principles forecast,
           and the neighbour case ids for the case-based arm that showed the card, so a report never mixes the two
+        - applicability, when set, lists { principle_id, rule } for each principle the applicability checks dropped for this card;
+          it is written only with that switch on, so NULL means the checks did not run and [] means they ran and dropped none
     """
 
     __tablename__ = "prediction_arm_forecast"
@@ -1427,6 +1444,7 @@ class PredictionArmForecast( Base ):
     evidence_ids: Mapped[Optional[list]]       = mapped_column( JSONB, nullable=True )
     forecast_ready_at: Mapped[Optional[datetime]] = mapped_column( DateTime( timezone=True ), nullable=True )
     abstention_reason: Mapped[Optional[str]]   = mapped_column( Text, nullable=True )
+    applicability: Mapped[Optional[list]]      = mapped_column( JSONB, nullable=True )
     displayed: Mapped[bool]                    = mapped_column( nullable=False, default=False, server_default=text( "false" ) )
 
     __table_args__ = (

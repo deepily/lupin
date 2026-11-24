@@ -9,6 +9,8 @@ Each test names the repository method that ran and the one that did not.
 import contextlib
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from cosa.agents.decision_proxy.decision_writer import write_proxy_decision
 
 
@@ -126,3 +128,36 @@ def test_commit_defaults_to_no_commit():
     with _database() as ( _, session ):
         _write( _result( action="act" ) )
     session.commit.assert_not_called()
+
+
+@pytest.mark.parametrize( "database", [ "lupin_db_dev", "lupin_db", "lupin_db_prod", "scratch_db", "lupin_db_testing", "contest" ] )
+def test_a_write_to_any_non_scratch_database_under_pytest_is_refused_and_no_repository_call_is_made( database ):
+    with _database() as ( repo, session ):
+        session.get_bind.return_value.url.database = database
+        with pytest.raises( RuntimeError, match=database ):
+            _write( _result( action="suggest" ) )
+    repo.log_decision.assert_not_called()
+    repo.log_shadow.assert_not_called()
+
+
+@pytest.mark.parametrize( "database", [ "lupin_db_test", "lupin_lane_b_test_4242", "test", None ] )
+def test_a_write_bound_to_a_scratch_database_or_to_no_named_database_goes_through( database ):
+    with _database() as ( repo, session ):
+        session.get_bind.return_value.url.database = database
+        _write( _result( action="suggest" ) )
+    repo.log_decision.assert_called_once()
+
+
+def test_a_faked_session_whose_bind_names_no_string_goes_through():
+    with _database() as ( repo, session ):
+        _write( _result( action="suggest" ) )
+    repo.log_decision.assert_called_once()
+
+
+@pytest.mark.parametrize( "database", [ "lupin_db_dev", "lupin_db" ] )
+def test_outside_pytest_a_non_scratch_database_write_is_not_refused( monkeypatch, database ):
+    monkeypatch.delenv( "PYTEST_CURRENT_TEST" )
+    with _database() as ( repo, session ):
+        session.get_bind.return_value.url.database = database
+        _write( _result( action="suggest" ) )
+    repo.log_decision.assert_called_once()

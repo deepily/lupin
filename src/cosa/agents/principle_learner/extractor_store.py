@@ -6,9 +6,11 @@ already there and adds nothing, so a replay is safe. The nearest-principle read 
 because a vector from another encoder cannot be compared with the query.
 """
 
+import hashlib
 import uuid
 
 from cosa.agents.prediction_engine.principle_retrieval import embedding_text
+from cosa.agents.prediction_engine.principle_status import CONDITION_KEYS_SWITCH, SOURCE_DEDUP_SWITCH, compute_condition_key, normalise_key, switch_on
 from cosa.agents.principle_learner.vocabulary import same_heading
 from cosa.rest.postgres_models import PreferenceEvidence, PreferencePrinciple
 from cosa.rest.repair_attempt_tracker import cosine_similarity
@@ -77,7 +79,47 @@ def _find_or_create_principle( session, owner_id, kind, dimension, hypothesis, e
     return principle
 
 
-def _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report ):
+def source_key_for( card, answer ):
+    """
+    Name the one source behind an answer, so a card asked twice shares a key.
+
+    Requires:
+        - card and answer are strings or None
+
+    Ensures:
+        - returns the first 32 hex digits of the sha-256 of the normalised card text and the normalised answer text
+        - texts that differ only in case, spacing or end punctuation give one key
+    """
+    return hashlib.sha256( f"{normalise_key( card ) or ''}\x1f{normalise_key( answer ) or ''}".encode( "utf-8" ) ).hexdigest()[ :32 ]
+
+
+def evidence_keys( session, principle, condition, hypothesis, source_key, complete ):
+    """
+    Work out the stored keys of one evidence row, each behind its own switch.
+
+    Requires:
+        - principle is a flushed principle row; hypothesis is the checked hypothesis dict, or None
+        - complete maps ( system, user ) to a model reply, or is None
+
+    Ensures:
+        - with the condition-keys switch off, or no condition, no condition_key is returned
+        - with it on, condition_key is the key compute_condition_key gives, reusing the keys already stored for the principle;
+          with complete None it is the normalised condition and no model is called
+        - with the source-dedup switch off, neither source_key nor standing_quote is returned
+        - with it on, source_key is the one given, and standing_quote is the hypothesis's stripped standing_quote, or None when it has none
+    """
+    keys = {}
+    if condition and switch_on( CONDITION_KEYS_SWITCH ):
+        stored = [ key for ( key, ) in session.query( PreferenceEvidence.condition_key ).filter( PreferenceEvidence.principle_id == principle.id,
+                                                                                                    PreferenceEvidence.condition_key.isnot( None ) ).distinct() ]
+        keys[ "condition_key" ] = normalise_key( condition ) if complete is None else compute_condition_key( condition, stored, complete )
+    if switch_on( SOURCE_DEDUP_SWITCH ):
+        keys[ "source_key"     ] = source_key
+        keys[ "standing_quote" ] = ( ( hypothesis or {} ).get( "standing_quote" ) or "" ).strip() or None
+    return keys
+
+
+def _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report, keys=None ):
     """
     Add one evidence row unless its unique key already exists.
 
@@ -88,6 +130,7 @@ def _write_evidence( session, principle, notification_id, field_key, relation, c
     Ensures:
         - a row with the same principle, notification, field, extractor version and source "extractor" is never added twice
         - a new row carries session_key, so status can count sessions after the notification is pruned
+        - a new row also carries each of keys, a dict of evidence column to value, or none when keys is None
         - report counts the row as written or already present
     """
     key = dict( principle_id=principle.id, notification_id=notification_id, field_key=field_key, extractor_version=extractor_version, source="extractor" )
@@ -96,12 +139,13 @@ def _write_evidence( session, principle, notification_id, field_key, relation, c
         return
     fields = { "id": uuid.uuid4(), "relation": relation, "condition": condition, "answered_at": answered_at, "extracted_at": extracted_at,
                "session_key": session_key }
+    fields.update( keys or {} )
     session.add( PreferenceEvidence( **fields, **key ) )
     session.flush()
     report[ "evidence_written" ] += 1
 
 
-def apply_field( session, owner_id, notification_id, field_key, checked, neighbours, times, versions, embed_fn, session_key, report ):
+def apply_field( session, owner_id, notification_id, field_key, checked, neighbours, times, versions, embed_fn, session_key, report, key_complete=None, source_key=None ):
     """
     Write what one checked field result adds: new principles and evidence rows.
 
@@ -112,6 +156,7 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
         - versions is ( extractor_version, encoder_version )
         - session_key is the session of the answered notification, or None
         - report holds the counters principles_created, principles_reused, evidence_written, evidence_existing and dimension_mismatches
+        - key_complete is None or maps ( system, user ) to a model reply, for the condition key; source_key is None or the source's key
 
     Ensures:
         - a hypothesis joins every named principle whose scope equals the hypothesis scope, with the relation the model gave and
@@ -121,6 +166,7 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
         - a principle created here carries continues_principle_id: the lowest id among the named principles of another extractor
           version, or None when none is named; a relation within one version never sets it, whatever the relation word
         - every evidence row written carries session_key
+        - with the condition-keys or source-dedup switch on, a row also carries what evidence_keys gives; with both off, nothing is added
         - with no hypothesis, each named principle gets one evidence row with the relation given and no condition
         - the same input written twice adds nothing the second time
     """
@@ -128,17 +174,19 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
     extractor_version, encoder_version = versions
     by_id = { str( row.id ): row for row in neighbours }
     named = { pid: relation for pid, relation in checked[ "relations" ].items() if pid in by_id }
-    def record( principle, relation, condition ):
+    def record( principle, relation, condition, hypothesis=None ):
         if not same_heading( principle.dimension, checked[ "dimension" ] ): report[ "dimension_mismatches" ].append( { "principle_id": str( principle.id ), "field_key": field_key } )
-        _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report )
+        _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report,
+                         keys=evidence_keys( session, principle, condition, hypothesis, source_key, key_complete ) )
     if not checked[ "hypotheses" ]:
         for pid, relation in sorted( named.items() ): record( by_id[ pid ], relation, None )
         return
     for hypothesis in checked[ "hypotheses" ]:
         targets = sorted( pid for pid in named if by_id[ pid ].scope == hypothesis[ "scope" ] )
-        for pid in targets: record( by_id[ pid ], named[ pid ], hypothesis[ "condition" ] )
+        for pid in targets: record( by_id[ pid ], named[ pid ], hypothesis[ "condition" ], hypothesis )
         if not targets:
             earlier   = sorted( pid for pid in named if by_id[ pid ].extractor_version != extractor_version )
             continues = by_id[ earlier[ 0 ] ].id if earlier else None
             principle = _find_or_create_principle( session, owner_id, checked[ "kind" ], checked[ "dimension" ], hypothesis, extractor_version, encoder_version, embed_fn, continues, extracted_at, report )
-            _write_evidence( session, principle, notification_id, field_key, "supports", hypothesis[ "condition" ], answered_at, extracted_at, extractor_version, session_key, report )
+            _write_evidence( session, principle, notification_id, field_key, "supports", hypothesis[ "condition" ], answered_at, extracted_at, extractor_version, session_key, report,
+                             keys=evidence_keys( session, principle, hypothesis[ "condition" ], hypothesis, source_key, key_complete ) )

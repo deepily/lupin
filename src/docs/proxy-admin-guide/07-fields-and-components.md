@@ -31,7 +31,7 @@ A decline still scores True, and an approval against any other non-"approved" fo
 
 ### What the 5 Nov rows show
 
-The audit of the 43 organic rows of 5 Nov is in `src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.20-trust-gate-5-nov-audit.md`.
+The 43 rows of 5 Nov were tagged organic but came from a mocked orchestrator run, not from Rick's answers. Their audit is in `src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.20-trust-gate-5-nov-audit.md`.
 Forty-two rows are shadow rows with no stored forecast, because `log_shadow` writes NULL there. The row cannot show what the proxy forecast.
 One row is an act row that auto-approved with no human answer.
 None of the 43 notification ids joins to a row of `notifications`, because the orchestrator mints a fresh id for each decision.
@@ -53,7 +53,7 @@ A test fails when a key under the decision proxy's sections is missing from this
 | `swe team enabled` | `false` | Dormant | Nothing reads it, so it gates nothing. Enforcing it is Rick's decision. |
 | `swe team trust mode` | `shadow` | Live | `strategy_builder.py` builds the strategy in this mode: shadow, suggest or active. |
 | `decision proxy shadow forecast recording enabled` | `true` | Live | `shadow_forecast_recording_enabled` in `decision_proxy/config.py`; the swe orchestrator and the responder store the forecast in a shadow row's decision value. |
-| `decision proxy neither is no ruling enabled` | `false` | Live | `neither_is_no_ruling_enabled` in `decision_proxy/config.py`; the swe orchestrator's `_gated_confirmation` reads a neither answer as no ruling: counters unchanged, `record_decision` skipped, a re-frame line logged. |
+| `decision proxy neither means reframe enabled` | `true` | Live | `neither_is_no_ruling_enabled` in `decision_proxy/config.py`; the swe orchestrator's `_gated_confirmation` stores a neither as a neither and counts it as a request to re-frame: the trust counters do not move (the `record_decision` trust update is skipped) and a re-frame line is logged. The decision row is written either way. |
 | `decision proxy enabled` | `false` | Live | `decision_proxy/__main__.py` refuses to start the proxy when false. |
 | `decision proxy active hours start` | `09` | Live | `user_presence.py` reads them and `SmartRouter` routes by them. |
 | `decision proxy active hours end` | `22` | Live | `user_presence.py` reads them and `SmartRouter` routes by them. |

@@ -225,3 +225,16 @@ test( "a real drawn fold, opened, asks the hint route for its card", async () =>
   await new Promise( ( r ) => setTimeout( r, 20 ) );
   assert.ok( urls.includes( "GET /api/notify/prediction-hint/late-1" ), `asked: ${ JSON.stringify( urls ) }` );
 } );
+
+// A neither forecast (row 321105e7): the legacy page shows it as Neither, with its qualifier.
+test( "a neither forecast reads Neither in the hint and in the Haiku line", () => {
+  const ui   = makeUI();
+  const card = ( qualifier?: string ) => ( ui.buildPredictionHintSection as ( n: unknown ) => string )( {
+    id: "n-neither", response_type: "yes_no",
+    prediction_hint: { state: "ready", retrieval_metric: "dot", confidence: 0.7, strategy: "cbr_majority", predicted_value: "neither", predicted_qualifier: qualifier },
+  } );
+  const label = ( html: string ) => { const host = document.createElement( "div" ); host.innerHTML = html; return host.querySelector( ".prediction-hint-label" )!.textContent; };
+  assert.equal( label( card() ), "Predicted: Neither (70%)" );
+  assert.equal( label( card( "re-frame it" ) ), 'Predicted: Neither — "re-frame it" (70%)' );
+  assert.equal( ui._contextForecastText( "yes_no", { state: "ready", predicted_value: "neither", confidence: 0.6 } ), "Haiku forecast: Neither (60%)" );
+} );

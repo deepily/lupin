@@ -229,6 +229,10 @@ def test_asks_are_built_from_stored_answers_with_stand_in_vectors_and_the_answer
     loaded.commit()
     unknown = [ a for a in er.asks_from_session( loaded, engine ) if a[ "answer_source" ] == "unknown" ]
     assert [ a[ "id" ] for a in unknown ] == [ str( row.id ) ]
+    row.response_value = { "value": "yes", "source": "timeout_default" }
+    loaded.commit()
+    flagged = [ a[ "id" ] for a in er.asks_from_session( loaded, engine ) if a[ "timeout_default" ] ]
+    assert flagged == [ str( row.id ) ]
     row.response_value = None
     loaded.commit()
     assert len( er.asks_from_session( loaded, engine ) ) == 139

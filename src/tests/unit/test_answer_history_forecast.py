@@ -154,6 +154,7 @@ def test_emit_a_neither( factory ):
     result, _, row = run( factory, ask( factory ), [ case ], reply() )
     assert result == { "status": "ran", "reason": None } and row.arm == "answer_history"
     assert row.forecast[ "value" ] == "neither" and row.evidence_ids == [ nid ]
+    assert row.applicability is None, "this arm runs no applicability check, so its row reads NULL"
 
 
 def test_emit_a_qualified_answer( factory ):

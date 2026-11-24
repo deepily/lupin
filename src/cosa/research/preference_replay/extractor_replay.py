@@ -101,6 +101,7 @@ def asks_from_session( session, engine, embed_fn=stand_in_vector ):
         - returns one dict per notification with a stored answer, in creation order, shaped as replay_loop.replay reads them
         - the case value and the actual value are the stored answer text; the answer source is human only for an answer
           attributed to its recipient, and unknown otherwise
+        - each carries timeout_default, True when the stored answer is the timeout default
         - the vector comes from embed_fn over the message, never from a service
     """
     asks = []
@@ -112,6 +113,7 @@ def asks_from_session( session, engine, embed_fn=stand_in_vector ):
                        "decision_value": value.get( "value" ), "ratification_state": "not_required", "data_origin": "organic", "response_type": row.response_type,
                        "question_embedding": embed_fn( row.message ), "created_at": aware_moment( row.created_at ).isoformat(), "owner_user_id": str( row.recipient_id ),
                        "answer_source": "human" if attribution_tier( raw ) == "recipient" else "unknown", "responded_at": aware_moment( row.responded_at ),
+                       "timeout_default": attribution_tier( raw ) == "timeout_default",
                        "title": row.title, "message": row.message, "sender_id": row.sender_id, "asked_at": aware_moment( row.created_at ),
                        "recipient_id": str( row.recipient_id ), "response_options": row.response_options, "actual_value": value.get( "value" ) } )
     return asks

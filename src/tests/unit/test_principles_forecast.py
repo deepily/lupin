@@ -563,3 +563,140 @@ def test_the_real_context_baseline_prompt_never_renders_the_owners_draft_even_wh
     baseline = cb.ContextBaseline( "haiku-x", 30, cb.ALL_LAYERS, cb.open_ledger( str( tmp_path / "ledger.jsonl" ) ) )
     system, user = baseline.build_prompts( episode )
     assert "Which plan?" in user and draft_marker not in system and draft_marker not in user
+
+
+def test_prepare_passes_the_applicability_check_and_the_caveat_flag_only_when_their_switches_are_on( factory, monkeypatch, capsys ):
+    """
+    Each switch gates its own repair, and the dropped principles are printed.
+
+    Both off: no check goes to retrieval and the block takes no caveats. Both on: the card text goes as the check and the dropped ones are printed.
+    """
+    nid, seen, blocks = ask( factory ), [], []
+    def fake_retrieve( session, owner, project, vector, asked, enc, ext, k, bound, multiplier, applicability, caveats ):
+        seen.append( ( applicability, caveats ) )
+        return { "principles": [], "applicability": [ { "principle_id": "p1", "rule": "antecedent" } ] }
+    monkeypatch.setattr( pf, "retrieve_principles", fake_retrieve )
+    monkeypatch.setattr( pf, "principle_block", lambda selected, caveats: blocks.append( caveats ) or { "text": "", "principle_ids": [], "suffix": None } )
+    monkeypatch.setattr( pf, "retrieval_limits", lambda: { "bound": 5, "multiplier": 0 } )
+    on = set()
+    monkeypatch.setattr( pf, "switch_enabled", lambda key: key in on )
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )
+    assert seen == [ ( None, False ) ] and blocks == [ False ] and "applicability dropped" not in capsys.readouterr().out
+    on.update( { pf.APPLICABILITY_KEY, pf.CAVEATS_KEY } )
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )
+    assert seen[ 1 ][ 0 ][ "card_stage" ] is None and "the plan" in seen[ 1 ][ 0 ][ "card" ] and seen[ 1 ][ 1 ] is True and blocks[ 1 ] is True
+    assert "applicability dropped: [{'principle_id': 'p1', 'rule': 'antecedent'}]" in capsys.readouterr().out
+    on.discard( pf.APPLICABILITY_KEY )
+    seen.clear()
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )
+    assert seen == [ ( None, True ) ] and "applicability dropped" not in capsys.readouterr().out
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5, use_principles=False )
+    assert len( seen ) == 1 and blocks[ -1 ] is False
+
+
+def test_the_two_new_switches_ship_off_with_an_explainer():
+    """The keys are in the shipped INI as false and in the explainer file."""
+    import os
+    root = os.environ[ "LUPIN_ROOT" ] + "/src/conf/"
+    for name, expect in ( ( "lupin-app.ini", True ), ( "lupin-app-splainer.ini", False ) ):
+        text = open( root + name ).read()
+        for key in ( "principle learner applicability checks enabled", "principle learner caveats enabled" ):
+            line = [ l for l in text.splitlines() if l.startswith( key ) ]
+            assert len( line ) == 1 and ( line[ 0 ].split( "=" )[ 1 ].strip() == "false" ) is expect
+
+
+def test_a_reply_the_full_answer_parser_refuses_stores_that_refusals_own_reason( factory ):
+    """
+    A reply the parser refuses stores that refusal's own reason.
+
+    The reason is stored alone, not the generic unreadable one, and no forecast.
+    """
+    from cosa.agents.prediction_engine.full_answer import REFUSAL_REASONS, ReplyRefused
+    reason = sorted( REFUSAL_REASONS )[ 0 ]
+    class Refusing( Baseline ):
+        def parse( self, text, episode ): raise ReplyRefused( reason, "planted" )
+    nid = ask( factory )
+    assert run( factory, nid, Refusing() ) == { "status": "failed", "reason": reason }
+    assert [ ( r.abstention_reason, r.forecast ) for r in rows( factory ) ] == [ ( reason, None ) ]
+
+
+def antecedent_principle( factory, antecedent ):
+    """Insert one principle with one supporting row quoting the antecedent, and return its id."""
+    pid = principle( factory )
+    with factory() as db:
+        row = db.query( PreferenceEvidence ).filter( PreferenceEvidence.principle_id == pid ).one()
+        row.antecedent = antecedent
+        db.commit()
+    return pid
+
+
+def test_the_dropped_principles_are_stored_on_the_row_only_with_the_applicability_switch_on( factory, monkeypatch ):
+    """
+    The row names each dropped principle with its rule, and the evidence ids omit it.
+
+    With the switch off the column is NULL, so NULL means the checks did not run.
+    """
+    dropped = antecedent_principle( factory, "never on this card" )
+    kept    = antecedent_principle( factory, "the plan" )
+    on      = set()
+    monkeypatch.setattr( pf, "switch_enabled", lambda key: key in on )
+    off_nid = ask( factory )
+    run( factory, off_nid, Baseline() )
+    on.add( pf.APPLICABILITY_KEY )
+    on_nid  = ask( factory, minutes=1 )
+    run( factory, on_nid, Baseline() )
+    by_card = { str( r.notification_id ): r for r in rows( factory ) }
+    assert by_card[ off_nid ].applicability is None and sorted( by_card[ off_nid ].evidence_ids ) == sorted( [ str( dropped ), str( kept ) ] )
+    assert by_card[ on_nid ].applicability == [ { "principle_id": str( dropped ), "rule": "antecedent" } ]
+    assert by_card[ on_nid ].evidence_ids == [ str( kept ) ]
+
+
+def test_a_failed_call_and_a_check_that_dropped_nothing_still_store_their_applicability( factory, monkeypatch ):
+    """An unreadable reply keeps the dropped list; a check that dropped none stores []."""
+    dropped = antecedent_principle( factory, "never on this card" )
+    monkeypatch.setattr( pf, "switch_enabled", lambda key: key == pf.APPLICABILITY_KEY )
+    failed  = ask( factory )
+    run( factory, failed, Baseline( bad_reply=True ) )
+    with factory() as db:
+        db.query( PreferenceEvidence ).filter( PreferenceEvidence.principle_id == dropped ).one().antecedent = None
+        db.commit()
+    clean   = ask( factory, minutes=1 )
+    run( factory, clean, Baseline() )
+    by_card = { str( r.notification_id ): r for r in rows( factory ) }
+    assert by_card[ failed ].abstention_reason == "unreadable_forecast" and by_card[ failed ].applicability == [ { "principle_id": str( dropped ), "rule": "antecedent" } ]
+    assert by_card[ clean ].applicability == []
+
+
+def test_a_capped_card_and_an_input_error_store_no_applicability( factory, monkeypatch ):
+    """Rows written before any retrieval happened carry NULL."""
+    antecedent_principle( factory, "never on this card" )
+    monkeypatch.setattr( pf, "switch_enabled", lambda key: key == pf.APPLICABILITY_KEY )
+    gate = pf.CapGate( 1 )
+    gate.try_enter()
+    capped = ask( factory )
+    run( factory, capped, Baseline(), gate=gate )
+    monkeypatch.setattr( pf, "retrieval_limits", lambda: { "bound": 0, "multiplier": 0 } )
+    broken = ask( factory, minutes=1 )
+    assert run( factory, broken, Baseline() )[ "status" ] == "failed"
+    by_card = { str( r.notification_id ): r for r in rows( factory ) }
+    assert by_card[ capped ].applicability is None and by_card[ broken ].applicability is None
+
+
+def test_a_block_with_no_applicability_key_stores_null_and_raises_nothing( factory, monkeypatch ):
+    """
+    run_arm accepts a block with no applicability key, as the answer history arm gives.
+
+    The row stores NULL, for a ready forecast and for a failed call alike.
+    """
+    real = pf._prepare
+    def without_key( *args, **kwargs ):
+        episode, selected, block, system, user = real( *args, **kwargs )
+        return episode, selected, { k: v for k, v in block.items() if k != "applicability" }, system, user
+    monkeypatch.setattr( pf, "_prepare", without_key )
+    principle( factory )
+    ready, failed = ask( factory ), ask( factory, minutes=1 )
+    assert run( factory, ready, Baseline() )[ "status" ] == "ran"
+    assert run( factory, failed, Baseline( bad_reply=True ) )[ "reason" ] == "unreadable_forecast"
+    by_card = { str( r.notification_id ): r for r in rows( factory ) }
+    assert by_card[ ready ].applicability is None and by_card[ ready ].forecast is not None
+    assert by_card[ failed ].applicability is None and by_card[ failed ].abstention_reason == "unreadable_forecast"

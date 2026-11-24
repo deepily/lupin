@@ -245,10 +245,16 @@ def _capture_upgrade( module, monkeypatch ):
 
 # Columns a later revision adds to a table this revision created; the models carry them, this revision does not.
 # f8c2d6a14e37 adds continues_principle_id and session_key, and has its own migration test.
-_ADDED_LATER = { ( "preference_principles", "continues_principle_id" ), ( "preference_evidence", "session_key" ) }
+# a9d4e7b2c615 adds six evidence columns, and has its own migration test.
+_ADDED_LATER = { ( "preference_principles", "continues_principle_id" ), ( "preference_evidence", "session_key" ),
+                 ( "preference_evidence", "source_key" ), ( "preference_evidence", "condition_key" ), ( "preference_evidence", "caveat" ),
+                 ( "preference_evidence", "decision_stage" ), ( "preference_evidence", "antecedent" ), ( "preference_evidence", "standing_quote" ) }
 
 _PAIRS = ( ( PreferencePrinciple, "PRINCIPLES_TABLE" ), ( PreferenceEvidence, "EVIDENCE_TABLE" ),
            ( PredictionArmForecast, "ARM_TABLE" ) )
+
+# b3f7d1a94e62 adds applicability to the arm table, and has its own migration test.
+_ADDED_LATER.add( ( "prediction_arm_forecast", "applicability" ) )
 
 
 def test_the_migration_and_the_models_name_the_same_tables_and_columns( monkeypatch ):

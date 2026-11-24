@@ -5,7 +5,36 @@ The one writer for a proxy_decisions row, shared by the responder and the SWE te
 
 Both callers choose between a shadow row and a decision row on the result's action. Only the
 fields around that choice differ, so the choice lives here and the differences are arguments.
+A test run may write only to a scratch database; the guard below refuses any other write.
 """
+
+from lupin_cli.notifications.human_ask_containment import test_node_id
+
+
+def refuse_non_scratch_database_under_pytest( session ):
+    """
+    Refuse a test's proxy_decisions write to any database that is not a scratch one.
+
+    Requires:
+        - session is the database session the write will use
+
+    Ensures:
+        - returns None outside pytest
+        - under pytest, returns None when the session's bind names a scratch database: one that
+          prediction_decision_repository.TEST_DATABASE_NAME matches, a "test" word as in lupin_db_test
+        - under pytest, returns None when the bind names no string at all (a faked session, or an in-memory database)
+        - under pytest, raises when the bind names any other database, dev, production or a stranger, naming the test that tried
+        - the check reads the session's own bind, so a test that fakes the session is not refused
+
+    Raises:
+        - RuntimeError when pytest is running and the session is bound to a named database that is not a scratch one
+    """
+    node = test_node_id()
+    if node is None: return
+    from cosa.rest.db.repositories.prediction_decision_repository import TEST_DATABASE_NAME
+    database = session.get_bind().url.database
+    if not isinstance( database, str ) or TEST_DATABASE_NAME.search( database ): return
+    raise RuntimeError( f"test {node} tried to write a proxy_decisions row to {database}, which is not a scratch database; bind one with a test word in its name or fake the session" )
 
 
 def write_proxy_decision( result, notification_id, domain, question, sender_id, requires_ratification,
@@ -31,6 +60,7 @@ def write_proxy_decision( result, notification_id, domain, question, sender_id, 
         - extra reaches the repository call unchanged
 
     Raises:
+        - RuntimeError from refuse_non_scratch_database_under_pytest when a test is bound to a named database that is not a scratch one
         - whatever the database session or the repository raises; the callers treat the write as
           non-fatal and catch it
     """
@@ -40,6 +70,7 @@ def write_proxy_decision( result, notification_id, domain, question, sender_id, 
     extra = extra if extra is not None else {}
 
     with get_db() as session:
+        refuse_non_scratch_database_under_pytest( session )
         repo = ProxyDecisionRepository( session )
 
         if result.action == "shadow":

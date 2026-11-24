@@ -1,7 +1,7 @@
 """
 Capture the organic proxy_decisions rows of one day as a fixture, read-only.
 
-The neither-fix replay needs the 43 organic rows of one day. A unit test cannot reach the database from a worktree.
+The neither-fix replay used the 43 rows tagged organic on 5 Nov 2026, which were a mocked orchestrator run, not Rick's answers. A unit test cannot reach the database from a worktree.
 So this script reads the rows once from the dev database and prints them as JSON on standard output.
 It writes nothing to the database. The transaction is read-only before the first query.
 

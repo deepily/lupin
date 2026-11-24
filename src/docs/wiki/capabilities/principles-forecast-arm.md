@@ -8,7 +8,7 @@ pins:
   - cosa.agents.prediction_engine.principles_forecast.concurrency_cap@d37390c64c
   - cosa.agents.prediction_engine.principles_forecast.principles_forecast_enabled@6af619ae07
   - cosa.agents.prediction_engine.principles_forecast.read_cap@e6185c263b
-  - cosa.agents.prediction_engine.principles_forecast.run_arm@ac1d4c9481
+  - cosa.agents.prediction_engine.principles_forecast.run_arm@47b5723c9c
   - cosa.agents.prediction_engine.principles_forecast.run_b1@960238fc6e
   - cosa.agents.prediction_engine.principles_forecast.switch_enabled@46cb445fd3
   - cosa.agents.prediction_engine.principles_forecast.with_principles@eb7580c939

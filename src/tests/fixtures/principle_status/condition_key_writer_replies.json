@@ -1,0 +1,45 @@
+{
+  "model": "claude-sonnet-5-5",
+  "pairs": {
+    "equal": {
+      "conditions": [
+        "the agent being re-spun has unsaved work in its tree",
+        "the agent to re-spin has uncommitted changes"
+      ],
+      "keys": [
+        "respun agent has unsaved work in tree",
+        "respun agent has unsaved work in tree"
+      ],
+      "calls": [
+        {
+          "user": "{\"condition\": \"the agent being re-spun has unsaved work in its tree\", \"existing_keys\": []}",
+          "reply": "{\"same_as\": null, \"key\": \"respun agent has unsaved work in tree\"}"
+        },
+        {
+          "user": "{\"condition\": \"the agent to re-spin has uncommitted changes\", \"existing_keys\": [\"respun agent has unsaved work in tree\"]}",
+          "reply": "{\"same_as\": \"respun agent has unsaved work in tree\", \"key\": \"respun agent has unsaved work in tree\"}"
+        }
+      ]
+    },
+    "different": {
+      "conditions": [
+        "the agent being re-spun has unsaved work in its tree",
+        "the card was sent outside working hours"
+      ],
+      "keys": [
+        "respun agent has unsaved work in tree",
+        "card sent outside working hours"
+      ],
+      "calls": [
+        {
+          "user": "{\"condition\": \"the agent being re-spun has unsaved work in its tree\", \"existing_keys\": []}",
+          "reply": "{\"same_as\": null, \"key\": \"respun agent has unsaved work in tree\"}"
+        },
+        {
+          "user": "{\"condition\": \"the card was sent outside working hours\", \"existing_keys\": [\"respun agent has unsaved work in tree\"]}",
+          "reply": "{\"same_as\": null, \"key\": \"card sent outside working hours\"}"
+        }
+      ]
+    }
+  }
+}

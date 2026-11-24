@@ -199,10 +199,9 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
     Predict every replayable ask in time order with the live engine, and with each baseline.
 
     Requires:
-        - asks is a list of dicts with the store record fields, responded_at and these ask fields:
+        - asks is a list of dicts with the store record fields, responded_at, timeout_default (read only with the switch on) and these ask fields:
           title, message, sender_id, asked_at, recipient_id, response_options, actual_value
-        - an ask with no question_embedding is not replayable
-        - engine is a PredictionEngine; its embedding store is replaced for the run
+        - an ask with no question_embedding is not replayable; engine is a PredictionEngine whose embedding store is replaced for the run
         - baselines is a dict of arm name to function( ask, visible_rows ), default BASELINE_ARMS
         - target_types is None to predict every ask, or the response types to predict; the other asks still
           serve as cases and are neither predicted nor counted
@@ -214,18 +213,19 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
         - the real episode_view and principle store are never imported here; the caller passes them in
 
     Ensures:
-        - the forecast of an ask is made by engine.predict() with the ask's stored vector, so no embedding
-          service is called
+        - the forecast of an ask is made by engine.predict() with the ask's stored vector, so no embedding service is called;
+          the engine's embedding store and three-way case provider are put back as they were
         - each ask is predicted from the cases answered at or before its ask time, as they stood then,
-          without its own retry group
+          without its own retry group; the lookup vote reads those same cases
         - returns { records, not_replayable, unrebuildable_cases, families } where records maps each arm to
           one record per replayable ask, in the same order, with arm, row_index, frozen_index, body,
           snapshot_sha256 and meta; meta["correct"] is a bool
+        - with engine.timeout_defaults_excluded_enabled, a flagged ask is neither predicted nor scored but counted in
+          timeout_defaults, and a baseline sees no flagged case; with it off timeout_defaults is 0 and nothing changes
         - not_replayable counts the asks with no vector and not_replayable_ids names them, in ask order;
           meta carries notification_id, the ask's id; unrebuildable_cases counts the distinct cases
           left out for want of a rebuildable value, however many asks they were left out of
         - families counts the distinct families replayed; complete_action True (switch on) adds meta complete_action and complete_action_decided
-        - the engine's embedding store is put back as it was
         - a context arm is called as arm( ask_at_ask, visible_rows, episode_view=..., principles=... ), where
           each value is the provider's answer for this ask, or None when that provider was not passed
         - ask_at_ask is the ask cut to its ASK_KNOWN_FIELDS, so a provider and a context arm are
@@ -247,13 +247,19 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
     records.update( { name: [] for name in baselines } )
     not_replayable = []
     unrebuildable  = set()
+    timeout_defaults = 0
+    exclude          = engine.timeout_defaults_excluded_enabled
     families       = set()
     saved_store    = engine._embedding_store
+    saved_provider = engine.three_way_case_provider
     try:
         for index in order:
             ask = asks[ index ]
             if target_types is not None and ask[ "response_type" ] not in target_types: continue
             if target_ids is not None and ask[ "id" ] not in target_ids: continue
+            if exclude and ask[ "timeout_default" ]:
+                timeout_defaults += 1
+                continue
             if ask[ "question_embedding" ] is None:
                 not_replayable.append( ask[ "id" ] )
                 continue
@@ -263,9 +269,11 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             store        = store_factory( rows )
             store.advance_to( asked_at )
             engine._embedding_store = store
+            visible = [ row for row in rows if row[ "responded_at" ] is not None and aware_moment( row[ "responded_at" ] ) <= asked_at
+                        and not ( exclude and row[ "timeout_default" ] ) ]
+            engine.three_way_case_provider = lambda owner_user_id, asked_at=asked_at, visible=visible: ( asked_at, visible )
             result = engine.predict( _notification_dict( ask ), query_vector=ask[ "question_embedding" ] )
             families.add( classes[ index ][ "family" ] )
-            visible = [ row for row in rows if row[ "responded_at" ] is not None and aware_moment( row[ "responded_at" ] ) <= asked_at ]
             forecasts = { ENGINE_ARM: _forecast_of( result ) }
             if context_arms:
                 view       = None if episode_view_provider is None else episode_view_provider( _ask_at_ask( ask ), copy.deepcopy( visible ) )
@@ -297,12 +305,14 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             engine_meta[ "confidence" ]    = result.confidence if isinstance( result, PredictionResult ) else None
             engine_meta[ "strategy" ]      = result.strategy if isinstance( result, PredictionResult ) else None
     finally:
-        engine._embedding_store = saved_store
+        engine._embedding_store        = saved_store
+        engine.three_way_case_provider = saved_provider
     return {
         "records"             : records,
         "not_replayable"      : len( not_replayable ),
         "not_replayable_ids"  : not_replayable,
         "unrebuildable_cases" : len( unrebuildable ),
+        "timeout_defaults"    : timeout_defaults,
         "families"            : len( families ),
     }
 

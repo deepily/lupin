@@ -5,8 +5,8 @@ pins:
   - cosa.agents.prediction_engine.answer_history_forecast.answer_history_enabled@9bc9af68c9
   - cosa.agents.prediction_engine.answer_history_forecast.approx_tokens@9a2d98df73
   - cosa.agents.prediction_engine.answer_history_forecast.eligible_cases@291f580eee
-  - cosa.agents.prediction_engine.answer_history_forecast.history_code_hash@84c6099ccb
-  - cosa.agents.prediction_engine.answer_history_forecast.history_provider@91786fa024
+  - cosa.agents.prediction_engine.answer_history_forecast.history_code_hash@fb301e9b84
+  - cosa.agents.prediction_engine.answer_history_forecast.history_provider@93f31356b2
   - cosa.agents.prediction_engine.answer_history_forecast.render_answer@e6d6aa3853
   - cosa.agents.prediction_engine.answer_history_forecast.render_history@760682d76f
   - cosa.agents.prediction_engine.answer_history_forecast.run_answer_history@49e415ed13

@@ -169,3 +169,17 @@ def test_the_open_ended_paths_are_scored_by_the_complete_action_measure( engine,
     engine.record_outcome( str( uuid.uuid4() ), result, actual, response_type, None, None )
     assert seen[ "accuracy_match" ] is True and seen[ "accuracy_detail" ][ "plain_code_match" ] is True
     assert "similarity_match" in seen[ "accuracy_detail" ]
+
+
+# ---- a neither hint through the vote path (row 321105e7) ---------------------------------------------
+
+@pytest.mark.parametrize( "vote, state", [ ( "up", "approved" ), ( "down", "rejected" ) ] )
+def test_a_vote_on_a_neither_hint_stores_the_case_as_neither( engine, vote, state ):
+    store = MagicMock()
+    store.exists.return_value = False
+    engine._get_embedding_store    = lambda: store
+    engine._get_embedding_provider = lambda: SimpleNamespace( generate_embedding=lambda text, content_type: ASK )
+    result = engine.record_hint_vote( "n1", "Proceed?", "neither", "c", "yes_no", vote )
+    stored = store.add_decision.call_args.kwargs
+    assert ( stored[ "decision_value" ], stored[ "ratification_state" ], stored[ "response_type" ] ) == ( "neither", state, "yes_no" )
+    assert result[ "ratification_state" ] == state
