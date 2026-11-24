@@ -1174,7 +1174,9 @@ def _spy_on_archive_score( monkeypatch ):
     return seen
 
 
-def test_the_first_stage_rerun_scores_with_the_engines_own_switch( loaded, monkeypatch ):
+# Both switch states, so a hard-coded True or a hard-coded False at either scoring site turns a named case red (Maya's nit, row c7b573e3)
+@pytest.mark.parametrize( "switch", [ True, False ] )
+def test_the_first_stage_rerun_scores_with_the_engines_own_switch( loaded, monkeypatch, switch ):
     session, asks, ids, embed, work, _ = loaded
     _limits( monkeypatch, 5000 )
     models, _ = _models( session, embed )
@@ -1182,20 +1184,21 @@ def test_the_first_stage_rerun_scores_with_the_engines_own_switch( loaded, monke
     _plant_failures( work, session, ids[ 3:5 ], ar.ARM_PRINCIPLES, work.records )
     seen   = _spy_on_archive_score( monkeypatch )
     engine = PredictionEngine( debug=False )
-    engine.per_field_mc_enabled = True
+    engine.per_field_mc_enabled = switch
     ar.run_first_stage( session, asks, ids[ :20 ], engine, embed, models, work, query_fn=er.canned_model, chunk=10, out=lambda line: None, code=CODE )
-    assert seen == [ True, True ], "the two rerun entries must be scored on the engine's switch, which is True here"
+    assert seen == [ switch, switch ], f"the two rerun entries must be scored on the engine's switch, which is {switch} here"
 
 
-def test_main_hands_the_engines_switch_to_the_twin_stage_scoring( tmp_path, archive, monkeypatch ):
+@pytest.mark.parametrize( "switch", [ True, False ] )
+def test_main_hands_the_engines_switch_to_the_twin_stage_scoring( tmp_path, archive, monkeypatch, switch ):
     asks_path, non_path, fixture_path, fixture = archive
-    class SwitchedOnEngine:
+    class SwitchedEngine:
         reset = staticmethod( PredictionEngine.reset )
         def __new__( cls, *args, **kwargs ):
             engine = PredictionEngine( *args, **kwargs )
-            engine.per_field_mc_enabled = True
+            engine.per_field_mc_enabled = switch
             return engine
-    monkeypatch.setattr( ar, "PredictionEngine", SwitchedOnEngine )
+    monkeypatch.setattr( ar, "PredictionEngine", SwitchedEngine )
     base  = [ "--work", str( tmp_path ), "--asks", asks_path, "--non-asks", non_path, "--fixture", fixture_path, "--chunk", "50", "--limit", "10" ]
     embed = _open_embedder( tmp_path )
     make  = lambda session, e: _models( session, e )[ 0 ]
@@ -1203,4 +1206,4 @@ def test_main_hands_the_engines_switch_to_the_twin_stage_scoring( tmp_path, arch
     assert ar.main( [ "first" ] + base, query_fn=er.canned_model, embed=embed, make_models=make, out=lambda line: None ) == 0
     seen = _spy_on_archive_score( monkeypatch )
     assert ar.main( [ "twins", "--poll-seconds", "1" ] + base, embed=embed, make_models=make, out=lambda line: None ) == 0
-    assert seen and set( seen ) == { True }, "the twin arms must be scored on the engine's switch, which is True here"
+    assert seen and set( seen ) == { switch }, f"the twin arms must be scored on the engine's switch, which is {switch} here"
