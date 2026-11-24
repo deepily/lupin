@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 import sqlalchemy as sa
 from sqlalchemy import func, and_
 
+from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.db.repositories.base import BaseRepository
 from cosa.rest.postgres_models import Notification, PredictionLog
 from cosa.utils.notification_utils import extract_qualifier_comment
@@ -21,6 +22,7 @@ from cosa.utils.notification_utils import extract_qualifier_comment
 
 TEST_OVERRIDE_SOURCE = "test_override"   # forecast_source of a row a test planted; never counted
 STATUS_INSUFFICIENT  = "insufficient data"
+COMMENT_MATCH_REPORT_KEY = "prediction engine comment match report enabled"
 
 
 LEDGER_COLUMNS = frozenset( {
@@ -322,6 +324,11 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
               excluded_legacy_confidence, so the two counts add up
             - by_abstention_reason counts rows per named abstention reason ( embedding_missing,
               store_write_failed, "store_error: <class>", beside the older reasons ), same filters as the totals
+            - With the INI switch COMMENT_MATCH_REPORT_KEY on, also returns comment_match: the stance-only
+              figure beside "stance and comment right", over yes/no scored rows only ( rows whose
+              accuracy_detail carries a qualifier_match; multiple-choice rows carry none and are left out
+              of its denominator ). The stance-only keys above are unchanged
+            - With the switch off, the returned dict has no comment_match key and issues no extra query
         """
         cutoff = datetime.now( timezone.utc ) - timedelta( days=window_days )
 
@@ -374,6 +381,27 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
 
         accuracy_rate = ( total_correct / total_scored ) if total_scored > 0 else None
 
+        comment_match = None
+        if ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( COMMENT_MATCH_REPORT_KEY, default="false", return_type="boolean" ):
+            # qualifier_match lives in the accuracy_detail JSONB; ->> reads it as text, so "true" is a match
+            # ( "1" is how the SQLite the unit tests run on renders a JSON true; Postgres never yields it )
+            qualifier_match = PredictionLog.accuracy_detail.op( "->>" )( "qualifier_match" )
+            yes_no_filter   = and_( combined_filter, PredictionLog.accuracy_match.isnot( None ), qualifier_match.isnot( None ) )
+            yes_no_scored   = self.session.query( func.count( PredictionLog.id ) ).filter( yes_no_filter ).scalar() or 0
+            stance_right    = self.session.query( func.count( PredictionLog.id ) ).filter(
+                yes_no_filter, PredictionLog.accuracy_match == True
+            ).scalar() or 0
+            both_right      = self.session.query( func.count( PredictionLog.id ) ).filter(
+                yes_no_filter, PredictionLog.accuracy_match == True, sa.cast( qualifier_match, sa.String ).in_( ( "true", "1" ) )
+            ).scalar() or 0
+            comment_match   = {
+                "yes_no_scored"             : yes_no_scored,
+                "stance_right"              : stance_right,
+                "stance_and_comment_right"  : both_right,
+                "stance_rate"               : round( stance_right / yes_no_scored, 4 ) if yes_no_scored > 0 else None,
+                "stance_and_comment_rate"   : round( both_right / yes_no_scored, 4 ) if yes_no_scored > 0 else None,
+            }
+
         # Average confidence
         avg_confidence = self.session.query( func.avg( PredictionLog.prediction_confidence ) ).filter(
             combined_filter
@@ -387,7 +415,7 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
 
         abstention_counts = self._get_abstention_counts( combined_filter )
 
-        return {
+        summary = {
             "window_days"       : window_days,
             "total_predictions" : total_predictions,
             "total_responded"   : total_responded,
@@ -402,6 +430,8 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             "by_response_type"  : type_breakdown,
             "by_abstention_reason" : abstention_counts,
         }
+        if comment_match is not None: summary[ "comment_match" ] = comment_match
+        return summary
 
     def _get_abstention_counts( self, base_filter ) -> Dict[str, int]:
         """
