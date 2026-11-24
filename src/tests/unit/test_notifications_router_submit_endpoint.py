@@ -171,41 +171,22 @@ class TestTheHappyPath:
         assert wired[ "submit_calls" ][ 0 ][ 1 ] is False
 
 
-class TestTheSanitiser:
+class TestTheAnswerIsStoredAsTyped:
+    """The door keeps what was typed; every render path escapes it on display."""
 
-    def test_html_tags_are_stripped_from_a_string_answer( self, harness, wired ):
-        harness.client.post( _URL, json={ "notification_id": _NID,
-                                          "response_value" : "<b>bold</b> answer" } )
-        assert wired[ "submit_calls" ][ 0 ][ 1 ] == "bold answer"
+    @pytest.mark.parametrize( "typed", [ "<b>bold</b> answer", "<script>steal()</script>ok", "use <T> generics", "a<b and c>d" ] )
+    def test_text_inside_angle_brackets_is_persisted_unchanged( self, harness, wired, typed ):
+        harness.client.post( _URL, json={ "notification_id": _NID, "response_value": typed } )
+        assert wired[ "submit_calls" ][ 0 ][ 1 ] == typed
 
-    def test_a_script_tag_is_stripped_before_it_is_PERSISTED( self, harness, wired ):
-        """
-        🔴 THE ASSERTION IS AT THE PERSISTENCE BOUNDARY, NOT ON THE RESPONSE. A handler
-        that sanitised only what it echoed back would look correct from outside and
-        would still store the script for every later reader of the conversation.
-        """
-        harness.client.post( _URL, json={ "notification_id": _NID,
-                                          "response_value" : "<script>steal()</script>ok" } )
-        persisted = wired[ "submit_calls" ][ 0 ][ 1 ]
-        assert "<" not in persisted and "script" not in persisted
-        assert persisted == "steal()ok"
+    def test_the_response_echoes_what_was_typed( self, harness, wired ):
+        body = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "<i>x</i>" } ).json()
+        assert body[ "response_value" ] == "<i>x</i>"
 
-    def test_the_sanitised_value_is_what_the_response_echoes( self, harness, wired ):
-        body = harness.client.post( _URL, json={ "notification_id": _NID,
-                                                 "response_value" : "<i>x</i>" } ).json()
-        assert body[ "response_value" ] == "x"
-
-    def test_an_answer_that_is_ONLY_tags_becomes_empty_and_is_a_400( self, harness, wired ):
-        """
-        The two guards are ordered: sanitise, then check empty. An answer that arrives
-        non-empty and is emptied BY the stripping must still be refused — checking
-        emptiness first would let a bare `<b></b>` through as a real answer.
-        """
-        r = harness.client.post( _URL, json={ "notification_id": _NID,
-                                              "response_value" : "<b></b>" } )
-        assert r.status_code == 400
-        assert "empty" in r.json()[ "detail" ].lower()
-        assert wired[ "submit_calls" ] == []
+    def test_an_answer_that_is_only_tags_is_a_real_answer( self, harness, wired ):
+        r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "<b></b>" } )
+        assert r.status_code == 200
+        assert wired[ "submit_calls" ][ 0 ][ 1 ] == "<b></b>"
 
     def test_a_whitespace_only_answer_is_a_400( self, harness, wired ):
         r = harness.client.post( _URL, json={ "notification_id": _NID,
