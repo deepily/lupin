@@ -224,7 +224,7 @@ def observation_view( response_type, response_options: Optional[dict], response_
         - keys: response_type, card ( the options as shown ), option_ids ( see option_ids_of ), raw_response ( response_value's
           "value" ), source, actor ( response_value's "answered_by" ), answered_at, fold_opened_at, draft_at_reveal, and INPUT_ROUTE_KEY
         - a key whose source is missing reads None; nothing is guessed or defaulted
-        - INPUT_ROUTE_KEY reads None until the capture-fields slice stores it
+        - INPUT_ROUTE_KEY is the route stored beside the answer ( a string, or { header: route } ), the same value episode_view reads; None when none was stored
         - nothing is written to the database and the arguments are not changed
     """
     answer = response_value if isinstance( response_value, dict ) else {}
@@ -238,5 +238,5 @@ def observation_view( response_type, response_options: Optional[dict], response_
         "answered_at"    : responded_at,
         "fold_opened_at" : fold_opened_at,
         "draft_at_reveal": draft_at_reveal,
-        INPUT_ROUTE_KEY  : None,
+        INPUT_ROUTE_KEY  : answer.get( INPUT_ROUTE_KEY ),
     } )

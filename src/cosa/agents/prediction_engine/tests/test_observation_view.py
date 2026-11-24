@@ -4,6 +4,7 @@ The observation view of one answer, read-only.
 import datetime as dt
 import unittest
 
+from cosa.agents.prediction_engine import episode_view as ev
 from cosa.agents.prediction_engine import exposure as ex
 
 _CARD   = { "questions": [ { "header": "Code review", "options": [ { "label": "Yes (Recommended)" }, { "label": "No" } ] }, { "header": "Scope", "options": [ { "label": "All" } ] } ] }
@@ -63,10 +64,16 @@ class TestObservationView( unittest.TestCase ):
             self.assertIsNone( view[ key ], key )
         self.assertEqual( dict( view[ "option_ids" ] ), {} )
 
-    def test_the_input_route_has_a_named_place_that_reads_none_until_the_capture_slice_lands( self ):
+    def test_the_input_route_has_a_named_place_that_reads_none_when_none_was_stored( self ):
         self.assertEqual( ex.INPUT_ROUTE_KEY, "input_route" )
         self.assertIn( ex.INPUT_ROUTE_KEY, _view() )
         self.assertIsNone( _view()[ ex.INPUT_ROUTE_KEY ] )
+
+    def test_the_input_route_reads_the_stored_value_the_same_way_episode_view_does( self ):
+        for route in ( "typed", { "Code review": "click", "Scope": "typed" } ):
+            value = dict( _VALUE, input_route=route )
+            self.assertEqual( _view( response_value=value )[ ex.INPUT_ROUTE_KEY ], route )
+            self.assertEqual( _view( response_value=value )[ ex.INPUT_ROUTE_KEY ], ev.capture_fields( value, _CARD )[ "input_route" ] )
 
     def test_a_response_value_that_is_not_a_mapping_reads_as_no_answer( self ):
         self.assertIsNone( _view( response_value="yes" )[ "raw_response" ] )

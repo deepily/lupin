@@ -328,9 +328,8 @@ class TestSSEBlockingFlow:
         Ensures:
             - free-form text is accepted and returned to the caller verbatim
             - it is persisted wrapped as {"value": ..., "source": "ui"}
-            - the router STRIPS HTML tags before storing (the Phase 2.4 XSS
-              guard), so a response typed into the browser cannot carry markup
-              into the record the CLI reads back
+            - the router stores what was typed, tags included; escaping is done
+              where the answer is shown, never in the stored record
         """
         response = notification_harness.respond( "The server is down" )
 
@@ -340,21 +339,16 @@ class TestSSEBlockingFlow:
             "value": "The server is down", "source": "ui", "answered_by": ITEST_ANSWERED_BY
         }
 
-    def test_open_ended_response_is_stripped_of_markup( self, notification_harness ):
+    def test_open_ended_response_keeps_the_markup_that_was_typed( self, notification_harness ):
         """
-        The XSS guard on the open-ended path, asserted separately so a
-        regression in it cannot hide behind the happy-path text case.
-
         Ensures:
-            - <script> and any other tag is removed, inner text preserved
-            - the stripped value is what gets persisted AND what is returned
+            - text inside angle brackets is stored and returned unchanged
         """
-        response = notification_harness.respond( "<script>alert(1)</script>down" )
+        response = notification_harness.respond( "use <T> generics" )
 
         assert response.status_code == 200
-        assert "<script>" not in response.json()[ "response_value" ]
-        assert response.json()[ "response_value" ] == "alert(1)down"
-        assert notification_harness.persisted[ "value" ] == "alert(1)down"
+        assert response.json()[ "response_value" ] == "use <T> generics"
+        assert notification_harness.persisted[ "value" ] == "use <T> generics"
 
     def test_whitespace_only_response_is_refused( self, notification_harness ):
         """

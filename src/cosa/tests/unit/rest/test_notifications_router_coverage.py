@@ -921,7 +921,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
                 await submit_notification_response( authenticated_user_id=UID_STR,
-                    request_body={ "notification_id": UID_STR, "response_value": "  <b></b> " },
+                    request_body={ "notification_id": UID_STR, "response_value": "   " },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
 
