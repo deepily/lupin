@@ -22,9 +22,10 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from .config import SweTeamConfig
-from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement, REFRAME_WINDOW
-from cosa.agents.decision_proxy.config import shadow_forecast_recording_enabled, neither_is_no_ruling_enabled
+from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement, three_way_agreement, REFRAME_WINDOW
+from cosa.agents.decision_proxy.config import shadow_forecast_recording_enabled, neither_is_no_ruling_enabled, neither_forecast_shadow_enabled
 from cosa.agents.decision_proxy.decision_writer import write_proxy_decision
+from cosa.agents.decision_proxy import shadow_stances
 from .state import (
     OrchestratorState,
     SweTeamState,
@@ -342,6 +343,7 @@ class SweTeamOrchestrator:
 
         # Step 4: Record trust feedback (shadow observes, suggest tracks follow-through)
         if proxy_result and self.proxy:
+            agreement = None
             try:
                 proxy_would_approve = ( proxy_result.value == "approved" )
                 if neither_is_no_ruling_enabled() and by_human: self.proxy.note_stance( proxy_result.category, answer.stance )
@@ -370,8 +372,11 @@ class SweTeamOrchestrator:
                     # Persist trust state to DB (non-fatal)
                     self._persist_trust_feedback( proxy_result.category, agreement )
 
+                # Row 69f665ba: shadow only, the three-way forecast and its would-be agreement go on the row and nowhere else
+                three_way = self._three_way_shadow_fields( notification_id, answer, by_human, agreement ) if neither_forecast_shadow_enabled() else None
+
                 # Row 5ac3d5d7: the ratify page reads proxy_decisions, and this path wrote none
-                self._persist_proxy_decision( role, question, proxy_result, None if no_ruling else user_answer, notification_id, answer, outcome="qualified_yes" if qualified_yes else None )
+                self._persist_proxy_decision( role, question, proxy_result, None if no_ruling else user_answer, notification_id, answer, outcome="qualified_yes" if qualified_yes else None, three_way=three_way )
 
                 # Phase 7: Emit proxy summary notification for pending ratification decisions
                 # "suggest" and "defer" actions produce pending ratification decisions;
@@ -423,7 +428,54 @@ class SweTeamOrchestrator:
             logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
             return 0
 
-    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None, source=None, outcome=None ):
+    def _shadow_stance( self, notification_id, read ):
+        """
+        Run one shadow reader against the database for one ask, never raising.
+
+        Requires:
+            - notification_id is the asking notification's id, or None when it was not captured
+            - read is a shadow_stances reader taking ( session, notification_id )
+
+        Ensures:
+            - returns the reader's dict, { status: no_notification } for no id, or { status: error, error_class } when the read fails
+            - a failure is logged and never propagates
+        """
+        if notification_id is None: return { "status": "no_notification" }
+        try:
+            from cosa.rest.db.database import get_db
+            with get_db() as session:
+                return read( session, notification_id )
+        except Exception as e:
+            logger.warning( f"Shadow stance read failed (non-fatal): {e}" )
+            return { "status": "error", "error_class": e.__class__.__name__ }
+
+    def _three_way_shadow_fields( self, notification_id, answer, by_human, live_agreement ):
+        """
+        Build a decision row's shadow fields from the two stored forecasts.
+
+        Requires:
+            - notification_id is the asking notification's id, or None when it was not captured
+            - answer is the ConfirmationAnswer; by_human is True when a person gave it
+            - live_agreement is what the live counters scored for this answer, or None when no counter moved
+
+        Ensures:
+            - returns { three_way_forecast, three_way_agreement, full_answer_forecast, full_answer_agreement, live_agreement }
+            - each forecast is a stance dict or a { status } naming why there is none; a malformed stored value gives a status, never an exception
+            - each agreement is three_way_agreement of that forecast's value and the answer's stance, None for a non-human answer or a forecast with no value
+            - never raises, and changes no counter
+        """
+        three_way = self._shadow_stance( notification_id, shadow_stances.stored_three_way_stance )
+        full      = self._shadow_stance( notification_id, shadow_stances.full_answer_stance )
+        stance    = answer.stance if by_human else None
+        return {
+            "three_way_forecast"    : three_way,
+            "three_way_agreement"   : three_way_agreement( three_way.get( "value" ), stance ),
+            "full_answer_forecast"  : full,
+            "full_answer_agreement" : three_way_agreement( full.get( "value" ), stance ),
+            "live_agreement"        : live_agreement,
+        }
+
+    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None, source=None, outcome=None, three_way=None ):
         """
         Write one proxy_decisions row for a gated confirmation (non-fatal best-effort).
 
@@ -435,6 +487,7 @@ class SweTeamOrchestrator:
             - answer is the ConfirmationAnswer the ask returned, or None when the proxy auto-approved
             - source names who answered when there is no answer object: "proxy" for an auto-approval
             - outcome is "qualified_yes" for a yes that carries a comment, or None
+            - three_way is the shadow fields from _three_way_shadow_fields, or None with the shadow switch off
 
         Ensures:
             - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
@@ -444,11 +497,13 @@ class SweTeamOrchestrator:
             - with an answer, metadata_json carries answer_source (human, default or unattributed) whatever the neither switch says; answer_stance, answer_comment, answer_raw and the answerer's id and method are stored only when a person answered, and a default's or a test double's text goes under answer_unowned_raw, so "Rick deferred the decision" (a neither) stays distinct from "the model deferred to Rick" (action defer)
             - without an answer, the row has no answer fields, and an auto-approval carries answer_source "proxy"
             - a qualified yes also carries answer_outcome "qualified_yes" beside its stored comment
+            - with three_way given, metadata_json also carries its five shadow keys (the two forecasts, their two agreements and live_agreement); without it, none of them
             - failure is logged and never propagates
         """
         try:
             metadata = { "job_id": self.job_id, "user_answer": user_answer }
             if outcome is not None: metadata[ "answer_outcome" ] = outcome
+            if three_way is not None: metadata.update( three_way )
             if answer is None:
                 if source is not None: metadata[ "answer_source" ] = source
             elif answer_source_is_human( answer.source ):
