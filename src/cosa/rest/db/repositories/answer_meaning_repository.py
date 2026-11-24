@@ -29,6 +29,43 @@ MEANING_KINDS  = NATIVE_KINDS + UNKNOWN_KINDS
 ACT_KINDS      = ( "approve", "decline", "challenge_premise", "request_information", "defer", "propose_alternative" )
 ALIGNMENTS     = ( "aligned", "diverges", "partial", "no_recommendation", "unknown" )
 
+# Schema v2 sits beside v1: its rows add a "relation" to each native answer entry (plan sections 3, 3b and 3c).
+SCHEMA_VERSION_V2     = "answer-meaning-v2"
+RELATIONS_V2          = ( "support", "dissent", "re_frame", "no_comment",
+                          "agrees", "expands_recommendation", "expands_other_option", "chose_different_listed_option",
+                          "wrote_own_answer", "no_recommendation_on_card",
+                          "no_answer", "answers", "declines_or_defers" )
+STANCE_SOURCES_V2     = ( "inferred", )
+
+# Plain code derives the alignment of a v2 row from its relation, never the model.
+RELATION_ALIGNMENT    = { relation: "unknown" for relation in RELATIONS_V2 }
+RELATION_ALIGNMENT.update( { "agrees": "aligned", "expands_recommendation": "partial", "expands_other_option": "diverges",
+                             "chose_different_listed_option": "diverges", "no_recommendation_on_card": "no_recommendation" } )
+
+
+def _v2_alignment( native_answer: Dict[str, Any], alignment: Optional[str] ) -> str:
+    """
+    Check a v2 row's relations and stance sources, and derive its alignment.
+
+    Requires:
+        - native_answer maps a field key to an entry dict; an entry may carry "relation" and "stance_source"
+        - alignment is None or a name the caller wants checked
+
+    Ensures:
+        - returns the one alignment all the entries' relations map to; "unknown" when there are none or they differ
+        - a stated alignment equal to the derived one passes
+
+    Raises:
+        - ValueError for a relation or stance source off its list, or for a stated alignment that is not the derived one
+    """
+    entries = list( native_answer.values() )
+    _refuse_unknown( "v2 relation", [ e[ "relation" ] for e in entries if "relation" in e ], RELATIONS_V2 )
+    _refuse_unknown( "v2 stance_source", [ e[ "stance_source" ] for e in entries if "stance_source" in e ], STANCE_SOURCES_V2 )
+    found   = { RELATION_ALIGNMENT[ e[ "relation" ] ] for e in entries if "relation" in e }
+    derived = found.pop() if len( found ) == 1 else "unknown"
+    if alignment is not None and alignment != derived: raise ValueError( f"alignment {alignment!r} is not the {derived!r} that the relations give" )
+    return derived
+
 
 class MeaningAlreadyRecorded( ValueError ):
     """Raised when a meaning is added under a key that already has a row."""
@@ -97,20 +134,23 @@ class AnswerMeaningRepository:
             - native_answer maps a field key to an entry whose "kind" is one of NATIVE_KINDS
             - acts is a list of dicts whose "act" is one of ACT_KINDS
             - conditions is a list of dicts that each carry "modifies_option_id": an option id, or None for the whole answer
-            - alignment is a name from the alignments list; unknowns is a list of unknown kinds
+            - alignment is a name from the alignments list, or None on a v2 row, which takes it from its relations; unknowns is a list of unknown kinds
 
         Ensures:
             - writes one answer_meaning row and flushes it, without committing
             - a second schema version, or a second annotator, for the same notification is a new row and the first survives
             - annotated_at is the current time when not given
+            - a v2 row (schema_version SCHEMA_VERSION_V2) has its alignment filled from RELATION_ALIGNMENT
 
         Raises:
             - ValueError for a source, kind, act, alignment or unknown not on its list, or a condition with no modifies_option_id key
+            - ValueError for a v2 relation or stance_source off its list, or a v2 alignment that its relations do not give
             - MeaningAlreadyRecorded when the key already has a row; that row is left as it was
         """
         _refuse_unknown( "source", [ source ], SOURCES )
         _refuse_unknown( "native kind", [ entry[ "kind" ] for entry in native_answer.values() ], NATIVE_KINDS )
         _refuse_unknown( "act", [ act[ "act" ] for act in acts ], ACT_KINDS )
+        if schema_version == SCHEMA_VERSION_V2: alignment = _v2_alignment( native_answer, alignment )
         _refuse_unknown( "alignment", [ alignment ], ALIGNMENTS )
         _refuse_unknown( "unknown", unknowns, UNKNOWN_KINDS )
         for condition in conditions:
