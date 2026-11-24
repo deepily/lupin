@@ -411,7 +411,7 @@ def test_switch_off_the_version_the_prompt_the_reply_and_the_row_are_what_they_w
 
 
 def test_every_forecaster_arm_uses_parse_reply( factory, monkeypatch, tmp_path ):
-    assert list( FORECASTER_ARMS ) == [ "C0", "B1", "C0-opus", "B1-opus" ], "the registry is pinned to the four forecasters the plan names"
+    assert list( FORECASTER_ARMS ) == [ "C0", "B1", "C0-opus", "B1-opus", "answer_history" ], "the registry is pinned to the five forecasters the plan names"
     seen = []
     monkeypatch.setattr( cb, "parse_reply", lambda text, episode: seen.append( ( "old", text ) ) or { "routed": True } )
     monkeypatch.setattr( fa, "parse_full_reply", lambda text, episode: seen.append( ( "full", text ) ) or { "routed": True } )
