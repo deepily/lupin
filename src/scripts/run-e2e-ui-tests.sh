@@ -59,7 +59,7 @@ resolve_venv_python || exit $?
 
 # --- Background execution support ---
 LOG_DIR="/tmp"
-PID_FILE="/tmp/e2e-ui-tests.pid"
+PID_FILE="${LUPIN_E2E_PID_FILE:-/tmp/e2e-ui-tests.pid}"
 
 # Parse --background / --bg and --half (strip both from args passed to pytest).
 # --half is re-added to the args the background re-exec receives, below.
