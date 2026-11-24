@@ -1,0 +1,579 @@
+{
+ "captured": "2026-11-23, read-only, dev Postgres; answered_by removed, long text clipped to 160 characters, option descriptions dropped",
+ "fixtures": [
+  {
+   "kind": "yes_no_stance",
+   "archive_row": true,
+   "notification_id": "c6350fb4-e433-4e44-bfba-71494b3dfef3",
+   "response_type": "yes_no",
+   "response_options": null,
+   "response_value": {
+    "value": "no [comment: Yeah is currently running We are not ready to start the Cascaded Review I want you to hold your horses and stand down until I tell you I'm ready ...",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-23 16:51:06.157575+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {
+     "$answer": {
+      "kind": "yes_no_stance",
+      "selected_option_ids": [],
+      "empty_selection": false,
+      "write_in_text": null,
+      "referred_option_ids": [],
+      "text": "no"
+     }
+    },
+    "acts": [
+     {
+      "act": "decline",
+      "depends_on": []
+     },
+     {
+      "act": "defer",
+      "depends_on": [
+       0
+      ]
+     }
+    ],
+    "conditions": [
+     {
+      "text": "do not start the cascaded review until told",
+      "scope": "timing",
+      "polarity": "positive",
+      "time_or_order": null,
+      "modality": "must_not",
+      "affects_execution": true,
+      "modifies_option_id": null
+     }
+    ],
+    "alignment": "diverges",
+    "unknowns": [],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "selected_options",
+   "archive_row": true,
+   "notification_id": "9c51b9ec-3473-42b8-b581-9429740266b9",
+   "response_type": "multiple_choice",
+   "response_options": {
+    "questions": [
+     {
+      "header": "Code review",
+      "options": [
+       {
+        "label": "Yes, in the reviewer charter (Recommended)"
+       },
+       {
+        "label": "Only on answer-handling code"
+       },
+       {
+        "label": "No"
+       }
+      ]
+     }
+    ]
+   },
+   "response_value": {
+    "value": "{\"answers\":{\"Code review\":\"Yes, in the reviewer charter (Recommended)\"}}",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-23 23:44:07.809074+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {
+     "Code review": {
+      "kind": "selected_options",
+      "selected_option_ids": [
+       "Code review#0"
+      ],
+      "empty_selection": false,
+      "write_in_text": null,
+      "referred_option_ids": [],
+      "text": null
+     }
+    },
+    "acts": [
+     {
+      "act": "approve",
+      "depends_on": []
+     }
+    ],
+    "conditions": [],
+    "alignment": "aligned",
+    "unknowns": [],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "multi_selected_options",
+   "archive_row": true,
+   "notification_id": "77b8959b-3142-47f1-9ca1-4b2964627104",
+   "response_type": "multiple_choice",
+   "response_options": {
+    "questions": [
+     {
+      "header": "Graduate",
+      "options": [
+       {
+        "label": "All four (Recommended)"
+       },
+       {
+        "label": "Rulings travel word for word"
+       },
+       {
+        "label": "Re-checks read around every fix"
+       },
+       {
+        "label": "Reviewers chosen by seat, not name"
+       },
+       {
+        "label": "You rule each data type's scope first"
+       }
+      ]
+     }
+    ]
+   },
+   "response_value": {
+    "value": "{\"answers\":{\"Graduate\":[\"All four (Recommended)\"]}}",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-23 23:31:17.291415+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {
+     "Graduate": {
+      "kind": "multi_selected_options",
+      "selected_option_ids": [
+       "Graduate#0"
+      ],
+      "empty_selection": false,
+      "write_in_text": null,
+      "referred_option_ids": [],
+      "text": null
+     }
+    },
+    "acts": [
+     {
+      "act": "approve",
+      "depends_on": []
+     }
+    ],
+    "conditions": [],
+    "alignment": "aligned",
+    "unknowns": [],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "write_in_text",
+   "archive_row": true,
+   "notification_id": "491be55a-50ac-480d-a10d-f3f187809be1",
+   "response_type": "multiple_choice",
+   "response_options": {
+    "questions": [
+     {
+      "header": "Ruling 1",
+      "options": [
+       {
+        "label": "Yes, lift it (Recommended)"
+       },
+       {
+        "label": "No, keep it"
+       }
+      ]
+     }
+    ]
+   },
+   "response_value": {
+    "value": "{\"answers\":{\"Ruling 1\":\"As 1 of the downsides to this ruling according to your recommendation are you saying 1 of the downsides that you would potentially start building before Cheech ...\"}}",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-23 23:29:22.875980+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {
+     "Ruling 1": {
+      "kind": "write_in_text",
+      "selected_option_ids": [],
+      "empty_selection": false,
+      "write_in_text": "a question about the downside of the recommendation",
+      "referred_option_ids": [
+       "Ruling 1#0"
+      ],
+      "text": null
+     }
+    },
+    "acts": [
+     {
+      "act": "request_information",
+      "depends_on": []
+     },
+     {
+      "act": "challenge_premise",
+      "depends_on": [
+       0
+      ]
+     }
+    ],
+    "conditions": [
+     {
+      "text": "asks whether lifting the ruling means building before the cascade revision lands",
+      "scope": "option",
+      "polarity": "positive",
+      "time_or_order": null,
+      "modality": "should",
+      "affects_execution": false,
+      "modifies_option_id": "Ruling 1#0"
+     }
+    ],
+    "alignment": "partial",
+    "unknowns": [],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "open_ended_text",
+   "archive_row": true,
+   "notification_id": "4eff4287-eba9-4d26-805d-ad09f8713d56",
+   "response_type": "open_ended",
+   "response_options": null,
+   "response_value": {
+    "value": "housekeeping questions, no worries there!",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-19 19:28:41.645488+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {
+     "$answer": {
+      "kind": "open_ended_text",
+      "selected_option_ids": [],
+      "empty_selection": false,
+      "write_in_text": null,
+      "referred_option_ids": [],
+      "text": "housekeeping questions, no worries there!"
+     }
+    },
+    "acts": [
+     {
+      "act": "approve",
+      "depends_on": []
+     }
+    ],
+    "conditions": [],
+    "alignment": "no_recommendation",
+    "unknowns": [],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "batch_field_text",
+   "archive_row": true,
+   "notification_id": "80d93019-0571-40a0-8ce6-d76f922b19eb",
+   "response_type": "open_ended_batch",
+   "response_options": {
+    "questions": [
+     {
+      "header": "budget",
+      "options": []
+     },
+     {
+      "header": "timeout",
+      "options": []
+     },
+     {
+      "header": "dry_run",
+      "options": []
+     }
+    ]
+   },
+   "response_value": {
+    "value": "{\"answers\":{\"budget\":\"no limit\",\"timeout\":\"default\",\"dry_run\":\"yes\"}}",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-04 15:11:51.430343+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {
+     "budget": {
+      "kind": "batch_field_text",
+      "selected_option_ids": [],
+      "empty_selection": false,
+      "write_in_text": null,
+      "referred_option_ids": [],
+      "text": "no limit"
+     },
+     "timeout": {
+      "kind": "batch_field_text",
+      "selected_option_ids": [],
+      "empty_selection": false,
+      "write_in_text": null,
+      "referred_option_ids": [],
+      "text": "default"
+     },
+     "dry_run": {
+      "kind": "batch_field_text",
+      "selected_option_ids": [],
+      "empty_selection": false,
+      "write_in_text": null,
+      "referred_option_ids": [],
+      "text": "yes"
+     }
+    },
+    "acts": [
+     {
+      "act": "approve",
+      "depends_on": []
+     }
+    ],
+    "conditions": [],
+    "alignment": "no_recommendation",
+    "unknowns": [],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "no_explicit_stance",
+   "archive_row": true,
+   "notification_id": "a3509ab0-3d8a-4f8a-a352-6f0f45b8bab8",
+   "response_type": "yes_no",
+   "response_options": null,
+   "response_value": {
+    "value": "Let's see, does this append? It does when responding to the prompt, I'm sorry, the response or action required card you just sent me, but I haven't yet tested ...",
+    "source": "ui"
+   },
+   "responded_at": "2026-09-29 02:06:52.363075+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {},
+    "acts": [
+     {
+      "act": "defer",
+      "depends_on": []
+     }
+    ],
+    "conditions": [],
+    "alignment": "unknown",
+    "unknowns": [
+     "no_explicit_stance"
+    ],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "neither",
+   "archive_row": true,
+   "notification_id": "688b31cb-bb2f-4f7e-b3e3-11c87eb1aedb",
+   "response_type": "yes_no",
+   "response_options": null,
+   "response_value": {
+    "value": "neither",
+    "source": "ui"
+   },
+   "responded_at": "2026-10-31 22:15:28.453909+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {
+     "$answer": {
+      "kind": "yes_no_stance",
+      "selected_option_ids": [],
+      "empty_selection": false,
+      "write_in_text": null,
+      "referred_option_ids": [],
+      "text": "neither"
+     }
+    },
+    "acts": [],
+    "conditions": [],
+    "alignment": "unknown",
+    "unknowns": [
+     "neither"
+    ],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "cancellation",
+   "archive_row": true,
+   "notification_id": "9e537fa4-bfac-4379-8f77-850ee1174ecd",
+   "response_type": "multiple_choice",
+   "response_options": {
+    "questions": [
+     {
+      "header": "Trust success",
+      "options": [
+       {
+        "label": "Yes, count it (Recommended)"
+       },
+       {
+        "label": "No, keep it a rejection"
+       }
+      ]
+     },
+     {
+      "header": "Agreement",
+      "options": [
+       {
+        "label": "Confirm as built (Recommended)"
+       },
+       {
+        "label": "Count deferred as rejection"
+       }
+      ]
+     },
+     {
+      "header": "Shadow value",
+      "options": [
+       {
+        "label": "Record it, behind a switch (Recommended)"
+       },
+       {
+        "label": "Reword the plan instead"
+       },
+       {
+        "label": "Leave it"
+       }
+      ]
+     }
+    ]
+   },
+   "response_value": {
+    "value": "{\"cancelled\":true,\"answers\":{}}",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-20 22:31:23.744322+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {},
+    "acts": [],
+    "conditions": [],
+    "alignment": "unknown",
+    "unknowns": [
+     "cancellation"
+    ],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "unreadable_payload",
+   "archive_row": true,
+   "notification_id": "5790d56c-5ce0-4847-97f9-e6fc83103c26",
+   "response_type": "multiple_choice",
+   "response_options": {
+    "questions": [
+     {
+      "header": "Approach",
+      "options": [
+       {
+        "label": "Full hands-free (Recommended)"
+       },
+       {
+        "label": "Screen on first"
+       },
+       {
+        "label": "Hold for now"
+       }
+      ]
+     }
+    ]
+   },
+   "response_value": {
+    "value": "Let's go with screen on functionality first.",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-02 16:12:24.480608+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {},
+    "acts": [],
+    "conditions": [],
+    "alignment": "unknown",
+    "unknowns": [
+     "unreadable_payload"
+    ],
+    "uncertainty": null
+   }
+  },
+  {
+   "kind": "uncertain_annotator",
+   "archive_row": true,
+   "notification_id": "491be55a-50ac-480d-a10d-f3f187809be1",
+   "response_type": "multiple_choice",
+   "response_options": {
+    "questions": [
+     {
+      "header": "Ruling 1",
+      "options": [
+       {
+        "label": "Yes, lift it (Recommended)"
+       },
+       {
+        "label": "No, keep it"
+       }
+      ]
+     }
+    ]
+   },
+   "response_value": {
+    "value": "{\"answers\":{\"Ruling 1\":\"As 1 of the downsides to this ruling according to your recommendation are you saying 1 of the downsides that you would potentially start building before Cheech ...\"}}",
+    "source": "ui"
+   },
+   "responded_at": "2026-11-23 23:29:22.875980+00:00",
+   "annotation": "hand-written reading of the real row",
+   "meaning": {
+    "native_answer": {
+     "Ruling 1": {
+      "kind": "write_in_text",
+      "selected_option_ids": [],
+      "empty_selection": false,
+      "write_in_text": "a question about the downside of the recommendation",
+      "referred_option_ids": [
+       "Ruling 1#0"
+      ],
+      "text": null
+     }
+    },
+    "acts": [
+     {
+      "act": "request_information",
+      "depends_on": []
+     },
+     {
+      "act": "challenge_premise",
+      "depends_on": [
+       0
+      ]
+     }
+    ],
+    "conditions": [
+     {
+      "text": "asks whether lifting the ruling means building before the cascade revision lands",
+      "scope": "option",
+      "polarity": "positive",
+      "time_or_order": null,
+      "modality": "should",
+      "affects_execution": false,
+      "modifies_option_id": "Ruling 1#0"
+     }
+    ],
+    "alignment": "partial",
+    "unknowns": [
+     "uncertain_annotator"
+    ],
+    "uncertainty": 0.6
+   }
+  },
+  {
+   "kind": "empty_selection",
+   "archive_row": false,
+   "reason": "no row of this kind in the archive on 2026-11-23 (7044 answered notifications searched, read-only)"
+  },
+  {
+   "kind": "absent_field",
+   "archive_row": false,
+   "reason": "no row of this kind in the archive on 2026-11-23 (7044 answered notifications searched, read-only)"
+  }
+ ]
+}

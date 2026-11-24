@@ -4,6 +4,7 @@ The displayed arm's sibling row and the check that none is missing.
 prediction_log keeps one row per card. prediction_arm_forecast keeps one row per card and arm.
 The forecast a card showed is stored in both, in one commit.
 A standing check names any card that has the first without the second.
+A forecast row is frozen the moment it is written: update_arm_forecast refuses any change to it.
 """
 
 import uuid
@@ -19,6 +20,10 @@ from cosa.rest.postgres_models import PredictionArmForecast, PredictionLog
 # The arm a forecast source stands for, read from the row's own forecast_source and never assumed.
 # The abstention reason of a forecast row the concurrency cap turned away. Defined here once; the summary and the writers import it.
 CAPPED_ARM_REASON = "capacity"
+
+class ForecastAlreadyFrozen( ValueError ):
+    """Raised when an update is aimed at a forecast row, which is frozen once written."""
+
 
 DISPLAYED_ARM_BY_FORECAST_SOURCE = { FORECAST_SOURCE_FOUNDATION: "A1", FORECAST_SOURCE_TEST_OVERRIDE: "test_override" }
 
@@ -105,3 +110,28 @@ def notifications_missing_displayed_sibling( session: Session, since: datetime )
     ).exists()
     rows = session.execute( sa.select( PredictionLog.notification_id ).where( PredictionLog.predicted_at >= since, ~sibling ) ).scalars().all()
     return sorted( rows, key=str )
+
+
+def update_arm_forecast( session: Session, notification_id: uuid.UUID, arm: str, **changes: Any ) -> None:
+    """
+    Refuse any update to a forecast row.
+
+    This is the one door a change to a forecast row would have to pass through.
+
+    Requires:
+        - session is open on a database holding prediction_arm_forecast
+        - notification_id and arm name the row; changes are the columns the caller wants to change
+
+    Ensures:
+        - reads the row under a row lock, as prediction_log_repository.update_outcome does, so a simultaneous caller waits
+        - returns None, changing nothing, when the notification has no row for that arm
+        - never changes a row that exists
+
+    Raises:
+        - ForecastAlreadyFrozen when the row exists, whatever the changes; the stored row is left as it was
+    """
+    row = session.query( PredictionArmForecast ).filter(
+        PredictionArmForecast.notification_id == notification_id, PredictionArmForecast.arm == arm
+    ).with_for_update().first()
+    if row is None: return None
+    raise ForecastAlreadyFrozen( f"prediction_arm_forecast row for {notification_id}, arm {arm} is frozen; refused to change {sorted( changes )}" )

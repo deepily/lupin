@@ -17,7 +17,8 @@ An answer and a draft reach this module in four stored forms, all read by decode
 A draft at reveal is stored as { "value": <the wire string the submit button would send with the controls as they stand> }.
 """
 
-from typing import Optional, Iterable, Tuple
+from types import MappingProxyType
+from typing import Any, Optional, Iterable, Mapping, Tuple
 
 from cosa.utils.notification_utils import extract_qualifier_comment, parse_field_selections
 
@@ -32,6 +33,10 @@ UNAIDED    = "unaided"      # no reveal, or the final answer equals the draft ta
 SWITCHED   = "switched"     # the final answer differs from the draft taken at reveal
 EXPOSED    = "exposed"      # revealed, but no draft was sent: cannot tell, counts as exposed
 UNANSWERED = "unanswered"   # no final answer yet, so there is nothing to classify
+
+# The capture-fields slice adds the route an answer came in by ( typed, spoken, a button ). Its value is stored where this
+# view reads it from; until that slice is merged the view carries the key with None.
+INPUT_ROUTE_KEY = "input_route"
 
 
 def revealed_before_answer( fold_opened_at, answered_at ) -> bool:
@@ -169,3 +174,68 @@ def switch_rate( cards: Iterable[Tuple[str, bool]] ) -> Optional[float]:
     switched = sum( 1 for cls, _ in cards if cls == SWITCHED )
     measured = switched + sum( 1 for cls, revealed in cards if cls == UNAIDED and revealed )
     return round( switched / measured, 4 ) if measured else None
+
+
+def _freeze( value: Any ) -> Any:
+    """
+    Copy a JSON-shaped value into a form that cannot be written to.
+
+    Requires:
+        - value is built of dicts, lists, tuples and scalars
+
+    Ensures:
+        - a dict becomes a read-only mapping and a list or tuple becomes a tuple, all the way down
+        - the value passed in is left as it was
+    """
+    if isinstance( value, dict ): return MappingProxyType( { key: _freeze( item ) for key, item in value.items() } )
+    if isinstance( value, ( list, tuple ) ): return tuple( _freeze( item ) for item in value )
+    return value
+
+
+def option_ids_of( response_options: Optional[dict] ) -> Mapping[str, Tuple[str, ...]]:
+    """
+    Give each option of a card a stable id, in the order the card showed them.
+
+    Requires:
+        - response_options is None, or a notification's response_options: { "questions": [ { "header", "options": [ { "label" } ] } ] }
+
+    Ensures:
+        - returns { header: ( "<header>#0", "<header>#1", ... ) }, one id per option in displayed order
+        - the id depends on the header and the position only, so it does not change if a label is reworded later
+        - returns an empty mapping for None, and for a card with no questions
+    """
+    questions = ( response_options or {} ).get( "questions", [] )
+    return MappingProxyType( { question[ "header" ]: tuple( f"{question[ 'header' ]}#{index}" for index, _ in enumerate( question.get( "options", [] ) ) ) for question in questions } )
+
+
+def observation_view( response_type, response_options: Optional[dict], response_value: Optional[dict], responded_at, fold_opened_at, draft_at_reveal: Optional[dict] ) -> Mapping[str, Any]:
+    """
+    Show one answer's observation, as a read-only mapping.
+
+    It holds the card as shown, the answer as given, who gave it and when, and what the forecast exposed.
+
+    Requires:
+        - the arguments are the values of notifications.response_type, response_options, response_value and responded_at,
+          and prediction_log.fold_opened_at and draft_at_reveal, for one card; any may be None
+
+    Ensures:
+        - returns a read-only mapping, deep: assigning to it or to anything inside it raises TypeError, so an observation is never edited
+        - keys: response_type, card ( the options as shown ), option_ids ( see option_ids_of ), raw_response ( response_value's
+          "value" ), source, actor ( response_value's "answered_by" ), answered_at, fold_opened_at, draft_at_reveal, and INPUT_ROUTE_KEY
+        - a key whose source is missing reads None; nothing is guessed or defaulted
+        - INPUT_ROUTE_KEY reads None until the capture-fields slice stores it
+        - nothing is written to the database and the arguments are not changed
+    """
+    answer = response_value if isinstance( response_value, dict ) else {}
+    return _freeze( {
+        "response_type"  : response_type,
+        "card"           : response_options,
+        "option_ids"     : { header: list( ids ) for header, ids in option_ids_of( response_options ).items() },
+        "raw_response"   : answer.get( "value" ),
+        "source"         : answer.get( "source" ),
+        "actor"          : answer.get( "answered_by" ),
+        "answered_at"    : responded_at,
+        "fold_opened_at" : fold_opened_at,
+        "draft_at_reveal": draft_at_reveal,
+        INPUT_ROUTE_KEY  : None,
+    } )
