@@ -38,6 +38,14 @@ DEFAULT_RECENCY_HALF_LIFE_DAYS = 14
 # whole-card predictor and the whole-card scorer exactly as they were.
 DEFAULT_PER_FIELD_MC_ENABLED   = False
 
+# Whether the lookup engine forecasts neither for a yes/no ask when neither is the likeliest stance, through
+# the one three-way vote, instead of abstaining. False keeps today's vote and its abstention.
+DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED = False
+
+# Whether a forecast is scored by the complete-action measure (the whole action, not only its stance). False
+# keeps the stance-only comparators exactly as they were.
+DEFAULT_COMPLETE_ACTION_SCORING_ENABLED = False
+
 # The outcome of a field whose actual pick is not one of the labels the field offered (a typed "Other").
 # It is its own outcome, reported beside matches and misses and never counted as a miss.
 FIELD_OUTCOME_EXACT            = "exact"

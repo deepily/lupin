@@ -161,6 +161,8 @@ def test_init_with_config_mgr_reads_keys():
             "prediction engine three way enabled"             : True,
             "prediction engine recency half life days"        : 21.0,
                 "prediction engine per field multiple choice enabled" : True,
+            "prediction engine lookup neither forecast enabled" : True,
+            "prediction engine complete action scoring enabled" : True,
                 "prediction engine lancedb table"                 : "tbl_x",
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
@@ -195,6 +197,7 @@ def test_init_with_config_mgr_reads_keys():
     assert eng.three_way_enabled is True
     assert eng.recency_half_life_days == 21.0
     assert eng.calibration_enabled is True
+    assert eng.lookup_neither_forecast_enabled is True and eng.complete_action_scoring_enabled is True
     # debug = config(False) OR debug(True) = True
     assert eng.debug is True
     PredictionEngine.reset()

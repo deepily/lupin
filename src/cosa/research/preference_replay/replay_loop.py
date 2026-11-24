@@ -111,19 +111,45 @@ def _actual_dict( actual_value, response_type=None ):
     return actual
 
 
-def _score( response_type, predicted, actual_value, response_options ):
+def _score( response_type, predicted, actual_value, response_options, complete_action=False ):
     """
     Say whether a forecast matched the answer, scored as the engine scores it.
 
     Requires:
         - predicted is the dict predicted_value_for returns, or None
+        - complete_action is True only to score by the complete-action measure, with no judge
 
     Ensures:
         - returns True only when the comparator says match; no forecast and an unscored answer read False,
           so an abstention is charged as a miss
+        - with complete_action True, a result the plain code cannot decide without the judge also reads False here;
+          complete_action_summary reports those apart
     """
-    match, _ = get_comparator( response_type, response_options=response_options )( predicted, _actual_dict( actual_value, response_type ) )
+    match, _ = get_comparator( response_type, response_options=response_options, complete_action=complete_action )( predicted, _actual_dict( actual_value, response_type ) )
     return match is True
+
+
+def complete_action_summary( run, arm=ENGINE_ARM ):
+    """
+    Publish an arm's complete-action accuracy, with its coverage and pass rate.
+
+    Requires:
+        - run is the dict replay returns, called with complete_action True, so each record's meta holds "complete_action"
+          and "complete_action_decided"
+
+    Ensures:
+        - returns { cards, decided, coverage, passed, pass_rate, complete_action_accuracy }
+        - coverage is decided over cards, and pass_rate is passed over decided; a card with no judge verdict is not decided
+        - complete_action_accuracy is passed over cards, an abstention counting as no success; it is never called an
+          accuracy rate, which is accuracy_match's own name
+        - an empty run gives 0.0 for each ratio
+    """
+    records = run[ "records" ][ arm ]
+    cards   = len( records )
+    decided = sum( 1 for r in records if r[ "meta" ][ "complete_action_decided" ] )
+    passed  = sum( 1 for r in records if r[ "meta" ][ "complete_action" ] )
+    return { "cards": cards, "decided": decided, "coverage": decided / cards if cards else 0.0, "passed": passed,
+             "pass_rate": passed / decided if decided else 0.0, "complete_action_accuracy": passed / cards if cards else 0.0 }
 
 
 def always_yes_arm( row, visible_rows ):
@@ -165,7 +191,7 @@ BASELINE_ARMS = { "always_yes": always_yes_arm, "prior_majority": prior_majority
 
 
 def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSlicedDecisionStore, target_types=None,
-            context_arms=(), episode_view_provider=None, principles_provider=None, target_ids=None ):
+            context_arms=(), episode_view_provider=None, principles_provider=None, target_ids=None, complete_action=False ):
     """
     Predict every replayable ask in time order with the live engine, and with each baseline.
 
@@ -195,7 +221,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
         - not_replayable counts the asks with no vector and not_replayable_ids names them, in ask order;
           meta carries notification_id, the ask's id; unrebuildable_cases counts the distinct cases
           left out for want of a rebuildable value, however many asks they were left out of
-        - families is the number of distinct families among the replayed asks
+        - families counts the distinct families replayed; complete_action True (switch on) adds meta complete_action and complete_action_decided
         - the engine's embedding store is put back as it was
         - a context arm is called as arm( ask_at_ask, visible_rows, episode_view=..., principles=... ), where
           each value is the provider's answer for this ask, or None when that provider was not passed
@@ -259,6 +285,10 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
                         "forecast"      : predicted,
                     },
                 } )
+                if complete_action:
+                    verdict, _ = get_comparator( ask[ "response_type" ], response_options=ask[ "response_options" ], complete_action=True )( predicted, _actual_dict( ask[ "actual_value" ], ask[ "response_type" ] ) )
+                    records[ arm_name ][ -1 ][ "meta" ][ "complete_action" ]         = verdict is True
+                    records[ arm_name ][ -1 ][ "meta" ][ "complete_action_decided" ] = verdict is not None
             engine_meta = records[ ENGINE_ARM ][ -1 ][ "meta" ]
             engine_meta[ "neighbour_ids" ] = list( result.metadata.get( "evidence_ids", [] ) )
             engine_meta[ "confidence" ]    = result.confidence if isinstance( result, PredictionResult ) else None

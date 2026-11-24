@@ -59,6 +59,8 @@ from cosa.agents.prediction_engine.config import (
     STRATEGY_TEST_OVERRIDE,
     FORECAST_SOURCE_FOUNDATION,
     PREDICTOR_VERSION,
+    DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED,
+    DEFAULT_COMPLETE_ACTION_SCORING_ENABLED,
     RESPONSE_TYPE_YES_NO,
     RESPONSE_TYPE_MULTIPLE_CHOICE,
     RESPONSE_TYPE_OPEN_ENDED,
@@ -136,6 +138,8 @@ class PredictionEngine:
             self.three_way_enabled          = config_mgr.get( "prediction engine three way enabled", default=str( DEFAULT_THREE_WAY_ENABLED ), return_type="boolean" )
             self.recency_half_life_days     = config_mgr.get( "prediction engine recency half life days", default=str( DEFAULT_RECENCY_HALF_LIFE_DAYS ), return_type="float" )
             self.per_field_mc_enabled = config_mgr.get( "prediction engine per field multiple choice enabled", default=str( DEFAULT_PER_FIELD_MC_ENABLED ), return_type="boolean" )
+            self.lookup_neither_forecast_enabled = config_mgr.get( "prediction engine lookup neither forecast enabled", default=str( DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED ), return_type="boolean" )
+            self.complete_action_scoring_enabled = config_mgr.get( "prediction engine complete action scoring enabled", default=str( DEFAULT_COMPLETE_ACTION_SCORING_ENABLED ), return_type="boolean" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -162,6 +166,8 @@ class PredictionEngine:
             self.three_way_enabled          = DEFAULT_THREE_WAY_ENABLED
             self.recency_half_life_days     = DEFAULT_RECENCY_HALF_LIFE_DAYS
             self.per_field_mc_enabled = DEFAULT_PER_FIELD_MC_ENABLED
+            self.lookup_neither_forecast_enabled = DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED
+            self.complete_action_scoring_enabled = DEFAULT_COMPLETE_ACTION_SCORING_ENABLED
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -289,6 +295,8 @@ class PredictionEngine:
         # Dispatch by response type
         try:
             if response_type == RESPONSE_TYPE_YES_NO:
+                if self.lookup_neither_forecast_enabled:
+                    return self._predict_yes_no( message, category, embedding, owner_user_id=owner_user_id, ask_context=notification_dict )
                 return self._predict_yes_no( message, category, embedding, owner_user_id=owner_user_id )
 
             elif response_type == RESPONSE_TYPE_MULTIPLE_CHOICE:
@@ -463,7 +471,7 @@ class PredictionEngine:
         return " | ".join( parts )
 
     def _predict_yes_no( self, message: str, category: str, embedding: Optional[list],
-                         owner_user_id: Optional[str] = None ) -> PredictionResult:
+                         owner_user_id: Optional[str] = None, ask_context: Optional[Dict[str, Any]] = None ) -> PredictionResult:
         """
         Predict yes/no response using CBR majority vote with qualifier retrieval.
 
@@ -479,7 +487,12 @@ class PredictionEngine:
             - Confidence = max_similarity * consistency
             - Extracts qualifier from highest-similarity winning-side case
             - Returns cold_start if no similar cases found
+            - With the lookup neither switch on, the vote is _predict_yes_no_three_way's and may be a neither;
+              ask_context is then the notification dict, read for title and sender_id. With it off, ask_context is never read
         """
+        if self.lookup_neither_forecast_enabled:
+            return self._predict_yes_no_three_way( message, category, embedding, owner_user_id, {} if ask_context is None else ask_context )
+
         if embedding is None:
             return PredictionResult(
                 response_type = RESPONSE_TYPE_YES_NO,
@@ -616,6 +629,46 @@ class PredictionEngine:
                 "qualifier_similarity" : round( qualifier_similarity / 100.0, 3 ) if winning_qualifier else None,
                 "no_suppressed_by_prior" : no_suppressed,
             }
+        )
+
+    def _predict_yes_no_three_way( self, message: str, category: str, embedding: Optional[list],
+                                   owner_user_id: Optional[str], ask_context: Dict[str, Any] ) -> PredictionResult:
+        """
+        Forecast a yes/no ask through the one three-way vote, so a neither can be forecast.
+
+        Requires:
+            - ask_context is a dict that may carry title and sender_id
+            - the lookup neither switch is on; _predict_yes_no dispatches here
+
+        Ensures:
+            - the vote is three_way_stance.three_way_forecast over the owner's answered cases; this method adds none
+            - returns the likeliest of yes, no or neither as predicted_value, its probability as confidence, and the
+              three probabilities and neighbour ids in metadata
+            - no embedding, no owner, or no neighbour gives cold_start with a named reason
+        """
+        from cosa.agents.prediction_engine import three_way_shadow, three_way_stance
+        from cosa.rest.db.database import get_db
+        if embedding is None:
+            return PredictionResult( response_type=RESPONSE_TYPE_YES_NO, category=category, strategy=STRATEGY_COLD_START, metadata={ "reason": "no_embedding" } )
+        if owner_user_id is None:
+            return PredictionResult( response_type=RESPONSE_TYPE_YES_NO, category=category, strategy=STRATEGY_COLD_START, metadata={ "reason": "no_owner" } )
+        ask = { "question_embedding": embedding, "asked_at": datetime.now( timezone.utc ), "owner_user_id": owner_user_id,
+                "response_type": RESPONSE_TYPE_YES_NO, "category": category, "title": ask_context.get( "title", "" ),
+                "message": message, "sender_id": ask_context.get( "sender_id", "" ) }
+        with get_db() as session:
+            cases = three_way_shadow.live_cases( session, owner_user_id )
+        forecast = three_way_stance.three_way_forecast( ask, cases, self.recency_half_life_days )
+        if not forecast[ "neighbour_ids" ]:
+            return PredictionResult( response_type=RESPONSE_TYPE_YES_NO, category=category, strategy=STRATEGY_COLD_START, metadata={ "reason": "no_neighbours" } )
+        return PredictionResult(
+            response_type       = RESPONSE_TYPE_YES_NO,
+            category            = category,
+            strategy            = STRATEGY_CBR_MAJORITY,
+            predicted_value     = forecast[ "value" ],
+            confidence          = forecast[ "confidence" ],
+            similar_case_count  = len( forecast[ "neighbour_ids" ] ),
+            predicted_qualifier = forecast[ "qualifier" ],
+            metadata            = { "probabilities": forecast[ "probabilities" ], "neighbour_ids": forecast[ "neighbour_ids" ], "three_way": True },
         )
 
     @staticmethod
@@ -1640,7 +1693,7 @@ class PredictionEngine:
 
         Ensures:
             - returns the first 12 hex characters of a sha256 over the retrieval, display, retrieval-metric and calibration settings,
-              and over the per-field multiple-choice switch only when it is on
+              and over the per-field multiple-choice, lookup-neither and complete-action switches, each only when it is on
             - the same settings give the same string, and a changed setting gives a different one
         """
         settings = { "cbr_top_k": self.cbr_top_k, "similarity_threshold": self.similarity_threshold,
@@ -1649,6 +1702,8 @@ class PredictionEngine:
                      "open_ended_cbr_threshold": self.open_ended_cbr_threshold,
                      "retrieval_metric": self.retrieval_metric, "calibration_enabled": self.calibration_enabled }
         if self.per_field_mc_enabled: settings[ "per_field_mc_enabled" ] = True   # absent when off, so every earlier version string is unchanged
+        if self.lookup_neither_forecast_enabled: settings[ "lookup_neither_forecast_enabled" ] = True
+        if self.complete_action_scoring_enabled: settings[ "complete_action_scoring_enabled" ] = True
         return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
 
     def three_way_forecast( self, ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> Optional[Dict[str, Any]]:
@@ -2027,7 +2082,8 @@ class PredictionEngine:
                 self._enrich_with_embedding_similarity( actual_dict, prediction_result, response_type )
 
             # Compare prediction against actual (a multiple-choice card is scored by its stored schema)
-            comparator = get_comparator( response_type, open_ended_threshold=self.open_ended_match_threshold, response_options=response_options, per_field=self.per_field_mc_enabled )
+            scoring    = { "complete_action": True } if self.complete_action_scoring_enabled else {}   # passed only when on, so the switch-off call is exactly as before
+            comparator = get_comparator( response_type, open_ended_threshold=self.open_ended_match_threshold, response_options=response_options, per_field=self.per_field_mc_enabled, **scoring )
             predicted_dict = prediction_result._wrap_predicted_value()
             accuracy_match, accuracy_detail = comparator( predicted_dict, actual_dict )
 
