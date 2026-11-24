@@ -83,6 +83,17 @@ class TimeSlicedDecisionStore:
         """
         return [ self._cases[ row ][ "id" ] for row in self._visible_rows() ]
 
+    def visible_cases( self ) -> List[Dict[str, Any]]:
+        """
+        Give the visible cases whole, each with its ``responded_at``.
+
+        Ensures:
+            - returns copies of the cases answered at or before the moment advanced to, in load order; empty before advance_to
+            - a copy carries every field of RECORD_FIELDS and ``responded_at``; changing it never changes the store
+        """
+        return [ { **self._cases[ row ], "question_embedding": None if self._cases[ row ][ "question_embedding" ] is None else list( self._cases[ row ][ "question_embedding" ] ) }
+                 for row in self._visible_rows() ]
+
     def add_decision( self, *args: Any, **kwargs: Any ) -> None:
         """
         Refuse a write: in replay a case enters by its stored answer time, never by the engine.

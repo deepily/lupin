@@ -216,10 +216,10 @@ def with_principles( system_prompt, user_prompt, block ):
     Ensures:
         - returns ( system_prompt, user prompt ); the system prompt is returned as given
         - with no principles the user prompt is returned as given, so the call then equals the baseline's
-        - otherwise the user prompt is followed by a blank line, BLOCK_HEADING and the block text
+        - otherwise the user prompt is followed by a blank line, the block's own "heading" when it carries one (else BLOCK_HEADING) and the block text
     """
     if not block[ "text" ]: return system_prompt, user_prompt
-    return system_prompt, f"{user_prompt}\n\n{BLOCK_HEADING}\n{block[ 'text' ]}"
+    return system_prompt, f"{user_prompt}\n\n{block.get( 'heading', BLOCK_HEADING )}\n{block[ 'text' ]}"
 
 
 def _row_present( session, key, arm=ARM ):
@@ -275,7 +275,7 @@ def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, 
     return written
 
 
-def _prepare( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k, use_principles=True, limits=None ):
+def _prepare( session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k, use_principles=True, limits=None, block_provider=None ):
     """
     Gather the inputs as of the ask: the episode, the principles and the two prompts.
 
@@ -287,6 +287,7 @@ def _prepare( session_factory, notification_id, c0, embedder, encoder_version, e
         - returns ( episode, selected, block, system prompt, user prompt ), everything as of the ask and nothing later
         - without principles the selection is empty, the block is principle_block of none, and the prompts are the baseline's own
         - with principles, the limit and fetch multiplier are the `limits` given ({ bound, multiplier }); with None they are read from the INI file for this ask (retrieval_limits)
+        - with a block_provider, the block is block_provider( session, episode ), read in the same session and as of the same ask, instead of principle_block of the selection
     """
     with session_factory() as session:
         episode  = episode_view( session, notification_id )
@@ -296,13 +297,14 @@ def _prepare( session_factory, notification_id, c0, embedder, encoder_version, e
             vector   = embedder.encode( card_text( episode ) )
             selected = retrieve_principles( session, episode[ "owner_id" ], episode[ "project" ], vector, aware_moment( episode[ "asked_at" ] ),
                                             encoder_version, extractor_version, k=k, bound=limits[ "bound" ], multiplier=limits[ "multiplier" ] )[ "principles" ]
-    block            = principle_block( selected )
+        provided = None if block_provider is None else block_provider( session, episode )
+    block            = principle_block( selected ) if provided is None else provided
     system, user     = with_principles( *c0.build_prompts( episode ), block )
     return episode, selected, block, system, user
 
 
 async def run_arm( arm, switch_key, version_suffix, use_principles, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, gate,
-                   enabled=None, k=DEFAULT_K, clock=None, limits=None ):
+                   enabled=None, k=DEFAULT_K, clock=None, limits=None, block_provider=None ):
     """
     Make one arm's forecast for one ask, and store its row.
 
@@ -317,6 +319,7 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
         - embedder has encode( text ) returning a vector from the encoder named encoder_version
         - gate is a CapGate; enabled is None (read the INI switch named by switch_key) or a bool; clock is None or a function returning an aware datetime
         - limits is None (read the principle limit and fetch multiplier from the INI file for this ask) or { bound, multiplier }, which a replay passes so a frozen run never rereads the file
+        - block_provider is None or a function ( session, episode ) returning { text, principle_ids, heading }, the block an arm other than the principles arm adds to the prompt; its ids are stored as the row's evidence ids
 
     Ensures:
         - returns { status, reason }; status is ran, not_run, capacity or failed
@@ -346,7 +349,7 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
     try:
         version = c0.predictor_version + version_suffix
         try:
-            episode, selected, block, system, user = await asyncio.to_thread( _prepare, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k, use_principles, limits )
+            episode, selected, block, system, user = await asyncio.to_thread( _prepare, session_factory, notification_id, c0, embedder, encoder_version, extractor_version, k, use_principles, limits, block_provider )
         except Exception as input_error:  # any failure gathering inputs (database, embedder, bound) must still leave a row
             reason = f"{REASON_INPUT}: {type( input_error ).__name__}"
             try:
