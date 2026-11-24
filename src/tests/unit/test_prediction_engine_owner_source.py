@@ -65,9 +65,19 @@ def test_the_personal_vote_filter_is_the_one_both_retrievals_use():
 
 
 def test_a_stored_answer_carries_the_account_that_answered( engine ):
-    engine._store_decision( "n-1", _result(), "yes", "yes_no", { "user_id": RECIPIENT, "method": "jwt" } )
+    engine._store_decision( "n-1", _result(), "yes", "yes_no", { "user_id": RECIPIENT, "method": "jwt" }, "human" )
     stored = engine._embedding_store.add_decision.call_args.kwargs
     assert ( stored[ "owner_user_id" ], stored[ "answer_source" ] ) == ( RECIPIENT, "human" )
+
+
+@pytest.mark.parametrize( "label, stored_as", [
+    ( "human", "human" ), ( "default", "timeout_default" ), ( "not_operator", "unknown" ), ( "unattributed", "unknown" ), ( None, "unknown" ),
+] )
+def test_the_stored_source_follows_the_answer_source_label_not_the_presence_of_a_user_id( engine, label, stored_as ):
+    # Row 1b3202de (F7): an API-key stamp carries a user_id, and used to be filed as human
+    engine._store_decision( "n-1", _result(), "yes", "yes_no", { "user_id": RECIPIENT, "method": "api_key" }, label )
+    stored = engine._embedding_store.add_decision.call_args.kwargs
+    assert ( stored[ "owner_user_id" ], stored[ "answer_source" ] ) == ( RECIPIENT, stored_as )
 
 
 def test_a_stored_answer_with_no_account_is_unknown_and_casts_no_personal_vote( engine ):
@@ -91,3 +101,22 @@ def test_record_outcome_hands_the_answering_account_to_the_store( engine ):
          patch.object( engine, "_store_decision" ) as store_decision:
         engine.record_outcome( "n-4", _result(), "yes", "yes_no", answered_by=answered_by )
     assert store_decision.call_args.args[ 4 ] == answered_by
+
+
+def test_record_outcome_hands_the_answer_source_to_the_store( engine ):
+    with patch( "cosa.rest.db.database.get_db" ), \
+         patch( "cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository" ), \
+         patch.object( engine, "_store_decision" ) as store_decision:
+        engine.record_outcome( "n-5", _result(), "yes", "yes_no", answered_by={ "user_id": RECIPIENT, "method": "api_key" }, answer_source="not_operator" )
+    assert store_decision.call_args.args[ 5 ] == "not_operator"
+
+
+def test_the_ledger_route_hands_the_answer_source_on_to_record_outcome( engine ):
+    row = MagicMock()
+    with patch( "cosa.rest.db.database.get_db" ), \
+         patch( "cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository" ) as repo, \
+         patch.object( engine, "_result_from_row", return_value=_result() ), \
+         patch.object( engine, "record_outcome" ) as record:
+        repo.return_value.get_by_notification_id.return_value = row
+        assert engine.record_outcome_from_ledger( "n-6", "yes", { "user_id": RECIPIENT, "method": "api_key" }, None, "not_operator" ) is True
+    assert record.call_args.args[ 6 ] == "not_operator"

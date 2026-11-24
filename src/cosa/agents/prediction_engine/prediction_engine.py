@@ -79,6 +79,9 @@ from cosa.utils.notification_utils import extract_qualifier_comment
 
 REASON_NEITHER_MAJORITY = "neither_majority_abstains_until_phase_8"
 
+# The case store's own source words for the endpoint's answer_source_of labels; anything not listed is stored "unknown"
+CASE_STORE_SOURCE_OF = { "human": "human", "default": "timeout_default" }
+
 
 class PredictionEngine:
     """
@@ -1997,13 +2000,14 @@ class PredictionEngine:
 
     def record_outcome_from_ledger( self, notification_id: str, actual_value: Any,
                                     answered_by: Optional[Dict[str, Any]] = None,
-                                    response_options: Optional[Dict[str, Any]] = None ) -> bool:
+                                    response_options: Optional[Dict[str, Any]] = None,
+                                    answer_source: Optional[str] = None ) -> bool:
         """
         Attach an answer to the forecast row stored at ask time, with no help from memory.
 
         Requires:
             - notification_id: UUID string of the notification
-            - actual_value, answered_by, response_options: as record_outcome takes them
+            - actual_value, answered_by, response_options, answer_source: as record_outcome takes them
 
         Ensures:
             - looks the forecast up with PredictionLogRepository.get_by_notification_id and rebuilds
@@ -2035,7 +2039,7 @@ class PredictionEngine:
 
             if result is None: return False
             if not override:
-                self.record_outcome( notification_id, result, actual_value, result.response_type, answered_by, response_options )
+                self.record_outcome( notification_id, result, actual_value, result.response_type, answered_by, response_options, answer_source )
             return True
 
         except Exception as e:
@@ -2044,7 +2048,8 @@ class PredictionEngine:
 
     def record_outcome( self, notification_id: str, prediction_result: PredictionResult,
                         actual_value: Any, response_type: str, answered_by: Optional[Dict[str, Any]] = None,
-                        response_options: Optional[Dict[str, Any]] = None ) -> None:
+                        response_options: Optional[Dict[str, Any]] = None,
+                        answer_source: Optional[str] = None ) -> None:
         """
         Record the prediction outcome on the notification's prediction_log row.
 
@@ -2055,6 +2060,7 @@ class PredictionEngine:
             - response_type: The response type string
             - answered_by: the server's { user_id, account_email, method } for the answer, or None
             - response_options: the notification's stored schema, or None for a card that has none
+            - answer_source: the endpoint's answer_source_of label ("human", "default", "not_operator" or "unattributed"), or None when the caller cannot say
 
         Ensures:
             - A multiple-choice answer is scored field by field by that schema
@@ -2134,7 +2140,7 @@ class PredictionEngine:
                 session.commit()
 
             # Store in LanceDB for future CBR retrieval
-            self._store_decision( notification_id, prediction_result, actual_value, response_type, answered_by )
+            self._store_decision( notification_id, prediction_result, actual_value, response_type, answered_by, answer_source )
 
             if self.debug:
                 print( f"[PredictionEngine] Recorded outcome: id={notification_id}, match={accuracy_match}" )
@@ -2144,16 +2150,20 @@ class PredictionEngine:
 
     def _store_decision( self, notification_id: str, prediction_result: PredictionResult,
                          actual_value: Any, response_type: str,
-                         answered_by: Optional[Dict[str, Any]] = None ) -> None:
+                         answered_by: Optional[Dict[str, Any]] = None,
+                         answer_source: Optional[str] = None ) -> None:
         """
         Store the actual response in LanceDB for future CBR retrieval.
 
         Requires:
             - answered_by is the response route's { user_id, ... } dict, or None
+            - answer_source is the endpoint's answer_source_of label, or None when the caller cannot say
 
         Ensures:
-            - owner is answered_by["user_id"]; the source is "human" when an owner is named and
-              "unknown" otherwise, so a caller that cannot say who answered casts no personal vote
+            - owner is answered_by["user_id"]
+            - the stored source follows answer_source, not the presence of an owner: "human" stays "human", "default" is stored
+              as "timeout_default", and "not_operator", "unattributed" and None are stored as "unknown",
+              so an API-key answer, a default or a caller that cannot say who answered casts no personal vote
             - Generates embedding for the original question
             - Stores decision_value as the actual response
             - Uses response_type-specific formatting
@@ -2216,7 +2226,7 @@ class PredictionEngine:
                 data_origin        = "organic",
                 response_type      = response_type,
                 owner_user_id      = owner,
-                answer_source      = "human" if owner is not None else "unknown"
+                answer_source      = CASE_STORE_SOURCE_OF.get( answer_source, "unknown" )
             )
 
         except Exception as e:
