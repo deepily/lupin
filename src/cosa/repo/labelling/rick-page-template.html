@@ -7,6 +7,7 @@
 <style>
   body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #1d1d1b; }
   header { position: sticky; top: 0; background: #1d1d1b; color: #fff; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
+  #section { background: #e8e8e2; padding: 6px 14px; font-size: 14px; font-weight: 600; }
   main { max-width: 760px; margin: 0 auto; padding: 12px 14px 80px; }
   .card { background: #fff; border: 1px solid #d8d8d2; border-radius: 8px; padding: 12px; margin-bottom: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #66665f; margin-bottom: 4px; }
@@ -26,6 +27,7 @@
 </head>
 <body>
 <header><span id="pos"></span><span id="done"></span></header>
+<div id="section"></div>
 <main>
   <div class="label">Card</div>
   <div class="card" id="cardtext"></div>
@@ -76,6 +78,8 @@ function bank() {
   if ( entry ) entry.seconds = Math.round( ( entry.seconds + spent() ) * 10 ) / 10;
   shownAt = Date.now();
 }
+function sectionSize( name ) { return ITEMS.filter( function ( i ) { return i.section === name; } ).length; }
+function sectionDone( name ) { return ITEMS.filter( function ( i ) { return i.section === name && store.answers[ i.item_id ]; } ).length; }
 function doneCount() { return Object.keys( store.answers ).length; }
 function setText( id, text ) { document.getElementById( id ).textContent = text; }
 
@@ -83,6 +87,7 @@ function show() {
   var item = ITEMS[ position ], entry = store.answers[ item.item_id ];
   setText( "pos", "Item " + ( position + 1 ) + " of " + ITEMS.length );
   setText( "done", doneCount() + " of " + ITEMS.length + " done" );
+  setText( "section", item.section + " (" + sectionDone( item.section ) + " of " + sectionSize( item.section ) + " done)" );
   setText( "cardtext", item.card_text );
   document.getElementById( "optionsbox" ).style.display = item.options.length ? "block" : "none";
   setText( "options", item.options.join( "\n" ) );

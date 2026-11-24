@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import sys
 
 from cosa.repo.labelling import errors as er
@@ -55,33 +56,41 @@ def read_export( text ):
     return lines
 
 
-def gold_lines( lines, packet, allowed_ids, batch_id ):
+def batch_id_of( page, section ):
+    """Ensures: returns rick-<page id>-<section slug>, the batch id of one section's lines."""
+    return f"rick-{page}-" + re.sub( r"[^a-z0-9]+", "-", section.lower() ).strip( "-" )
+
+
+def gold_lines( lines, packet, sections ):
     """
     Turn exported lines into gold-store lines.
 
     Requires:
-        - lines is read_export's result; packet is { blind, disputes, refs }; allowed_ids are the ids the page held
-        - batch_id is non-empty text
+        - lines is read_export's result; packet is { blind, disputes, refs }
+        - sections maps each section name of the page to its item ids, as the generator wrote them
 
     Ensures:
         - returns one gold line per exported line, in order: source "human", reader "rick", the card's stance class, notification id and field key from the packet, the line's time as ts
+        - the batch id names the page and the section the item was in
         - a relation counts only when it is valid for that item's kind (rick_page.relations_for)
         - the note and the seconds are not part of a gold line and are left out
 
     Raises:
-        - LabellingError BAD_LABEL for an id that is not in allowed_ids or has no ref, or a relation that does not suit the item
+        - LabellingError BAD_LABEL for an id that is in no section or has no ref, or a relation that does not suit the item
         - LabellingError BAD_ITEM from the packet's item check
     """
-    known = { i[ "item_id" ]: i for i in packet[ "blind" ] + packet[ "disputes" ] }
-    out   = []
+    known   = { i[ "item_id" ]: i for i in packet[ "blind" ] + packet[ "disputes" ] }
+    section = { i: name for name, ids in sections.items() for i in ids }
+    page    = rp.page_id( list( section ) )
+    out     = []
     for line in lines:
         item_id = line[ "item_id" ]
         ref     = packet[ "refs" ].get( item_id )
-        if item_id not in allowed_ids or item_id not in known or ref is None: _bad( f"{item_id}: not an item of this page" )
+        if item_id not in section or item_id not in known or ref is None: _bad( f"{item_id}: not an item of this page" )
         item = pk.blind_form( known[ item_id ] )
         if line[ "relation" ] not in rp.relations_for( item ): _bad( f"{item_id}: {line[ 'relation' ]} is not a relation this card allows" )
         out.append( { "item_id": item_id, "notification_id": ref[ "notification_id" ], "field_key": ref[ "field_key" ], "relation": line[ "relation" ],
-                      "card_stance": item[ "payload" ][ "stance_class" ], "source": gs.SOURCE_HUMAN, "reader": READER, "batch_id": batch_id, "ts": line[ "ts" ] } )
+                      "card_stance": item[ "payload" ][ "stance_class" ], "source": gs.SOURCE_HUMAN, "reader": READER, "batch_id": batch_id_of( page, section[ item_id ] ), "ts": line[ "ts" ] } )
     return out
 
 
@@ -96,7 +105,7 @@ def main( argv=None ):
     Record an exported answer file in the gold store.
 
     Requires:
-        - argv is --export FILE --packet FILE --ids FILE (the page's .ids.txt), with optional --store and --archive-dir
+        - argv is --export FILE --packet FILE --sections FILE (the page's .sections.json), with optional --store and --archive-dir
 
     Ensures:
         - writes the lines to the store, copies the export file to the archive directory under its content hash (never overwritten) and prints a JSON summary:
@@ -108,15 +117,16 @@ def main( argv=None ):
     ap = argparse.ArgumentParser( description="Record Rick's exported answers as gold labels." )
     ap.add_argument( "--export", required=True )
     ap.add_argument( "--packet", required=True )
-    ap.add_argument( "--ids", required=True )
+    ap.add_argument( "--sections", required=True )
     ap.add_argument( "--store", default=None )
     ap.add_argument( "--archive-dir", default=cu.get_project_root() + ARCHIVE_DIR )
     args = ap.parse_args( argv )
     try:
         text    = pathlib.Path( args.export ).read_text( encoding="utf-8" )
         packet  = json.loads( pathlib.Path( args.packet ).read_text( encoding="utf-8" ) )
-        allowed = set( pathlib.Path( args.ids ).read_text( encoding="utf-8" ).split() )
-        lines   = gold_lines( read_export( text ), packet, allowed, f"rick-{rp.page_id( allowed )}" )
+        secs    = json.loads( pathlib.Path( args.sections ).read_text( encoding="utf-8" ) )
+        allowed = { i for ids in secs.values() for i in ids }
+        lines   = gold_lines( read_export( text ), packet, secs )
     except ( OSError, ValueError, KeyError, TypeError, er.LabellingError ) as e:
         return _fail( f"cannot read the export: {e!r}", 2 )
     path = pathlib.Path( args.store ) if args.store else gs.default_path()

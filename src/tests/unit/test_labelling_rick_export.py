@@ -51,36 +51,43 @@ def test_a_malformed_export_is_refused_by_name( bad ):
     assert code_of( rx.read_export, bad ) == er.BAD_LABEL
 
 
+SECTIONS = { "blind share": [ "n1:0", "n2:1" ], "reader disagreements": [ "n3:0" ] }
+PAGE     = rp.page_id( [ "n1:0", "n2:1", "n3:0" ] )
+
+
+def test_a_batch_id_names_the_page_and_the_section_slug():
+    assert rx.batch_id_of( "abc", "Reader disagreements!" ) == "rick-abc-reader-disagreements"
+
+
 def test_each_line_becomes_one_gold_line_from_rick_with_the_cards_own_ids_and_stance():
-    ids   = { "n1:0", "n2:1", "n3:0" }
     lines = [ exported(), exported( item_id="n2:1", relation="agrees", ts="2026-11-24T23:01:00.000Z", note="n", seconds=9 ) ]
-    assert rx.gold_lines( lines, packet(), ids, "rick-abc" ) == [
-        { "item_id": "n1:0", "notification_id": "n1", "field_key": "answer", "relation": "support", "card_stance": "yes", "source": "human", "reader": "rick", "batch_id": "rick-abc", "ts": "2026-11-24T23:00:00.000Z" },
-        { "item_id": "n2:1", "notification_id": "n2", "field_key": "Gate", "relation": "agrees", "card_stance": "none", "source": "human", "reader": "rick", "batch_id": "rick-abc", "ts": "2026-11-24T23:01:00.000Z" } ]
+    assert rx.gold_lines( lines, packet(), SECTIONS ) == [
+        { "item_id": "n1:0", "notification_id": "n1", "field_key": "answer", "relation": "support", "card_stance": "yes", "source": "human", "reader": "rick", "batch_id": f"rick-{PAGE}-blind-share", "ts": "2026-11-24T23:00:00.000Z" },
+        { "item_id": "n2:1", "notification_id": "n2", "field_key": "Gate", "relation": "agrees", "card_stance": "none", "source": "human", "reader": "rick", "batch_id": f"rick-{PAGE}-blind-share", "ts": "2026-11-24T23:01:00.000Z" } ]
 
 
 def test_a_gold_line_has_exactly_the_store_fields_and_the_store_accepts_it( tmp_path ):
-    out = rx.gold_lines( [ exported() ], packet(), { "n1:0" }, "rick-abc" )
+    out = rx.gold_lines( [ exported() ], packet(), { "s": [ "n1:0" ] } )
     assert set( out[ 0 ] ) == set( gs.LINE_KEYS )
     assert gs.append_gold( tmp_path / "g.jsonl", out ) == 1
 
 
 def test_an_item_outside_the_page_or_a_relation_the_card_does_not_allow_is_refused():
-    assert code_of( rx.gold_lines, [ exported( item_id="n3:0", relation="answers" ) ], packet(), { "n1:0" }, "b" ) == er.BAD_LABEL
-    assert code_of( rx.gold_lines, [ exported( item_id="zz:0" ) ], packet(), { "zz:0" }, "b" ) == er.BAD_LABEL
+    assert code_of( rx.gold_lines, [ exported( item_id="n3:0", relation="answers" ) ], packet(), { "s": [ "n1:0" ] } ) == er.BAD_LABEL
+    assert code_of( rx.gold_lines, [ exported( item_id="zz:0" ) ], packet(), { "s": [ "zz:0" ] } ) == er.BAD_LABEL
     broken = packet()
     del broken[ "refs" ][ "n1:0" ]
-    assert code_of( rx.gold_lines, [ exported() ], broken, { "n1:0" }, "b" ) == er.BAD_LABEL
+    assert code_of( rx.gold_lines, [ exported() ], broken, { "s": [ "n1:0" ] } ) == er.BAD_LABEL
     for line in ( exported( relation="agrees" ), exported( item_id="n2:1", relation="no_recommendation_on_card" ), exported( item_id="n3:0", relation="support" ) ):
-        assert code_of( rx.gold_lines, [ line ], packet(), { "n1:0", "n2:1", "n3:0" }, "b" ) == er.BAD_LABEL
+        assert code_of( rx.gold_lines, [ line ], packet(), SECTIONS ) == er.BAD_LABEL
 
 
-def files( tmp_path, lines, ids=( "n1:0", "n2:1", "n3:0" ) ):
-    """Write the export, packet and ids files; return the argv beginning."""
+def files( tmp_path, lines, sections=SECTIONS ):
+    """Write the export, packet and sections files; return the argv beginning."""
     ( tmp_path / "export.json" ).write_text( json.dumps( lines ), encoding="utf-8" )
     ( tmp_path / "packet.json" ).write_text( json.dumps( packet() ), encoding="utf-8" )
-    ( tmp_path / "ids.txt" ).write_text( "".join( f"{i}\n" for i in ids ), encoding="utf-8" )
-    return [ "--export", str( tmp_path / "export.json" ), "--packet", str( tmp_path / "packet.json" ), "--ids", str( tmp_path / "ids.txt" ),
+    ( tmp_path / "sections.json" ).write_text( json.dumps( sections ), encoding="utf-8" )
+    return [ "--export", str( tmp_path / "export.json" ), "--packet", str( tmp_path / "packet.json" ), "--sections", str( tmp_path / "sections.json" ),
              "--store", str( tmp_path / "gold.jsonl" ), "--archive-dir", str( tmp_path / "archive" ) ]
 
 
@@ -89,7 +96,7 @@ def test_main_stores_the_lines_archives_the_export_once_and_reports_what_is_left
     assert rx.main( argv ) == 0
     summary = json.loads( capsys.readouterr().out )
     stored  = gs.read_gold( tmp_path / "gold.jsonl" )
-    assert [ l[ "relation" ] for l in stored ] == [ "support", "expands_recommendation" ] and { l[ "batch_id" ] for l in stored } == { f"rick-{rp.page_id( [ 'n1:0', 'n2:1', 'n3:0' ] )}" }
+    assert [ l[ "relation" ] for l in stored ] == [ "support", "expands_recommendation" ] and { l[ "batch_id" ] for l in stored } == { f"rick-{PAGE}-blind-share" }
     assert summary[ "written" ] == 2 and summary[ "items_on_page" ] == 3 and summary[ "unanswered" ] == 1
     assert summary[ "human_labelled_by_stance" ] == { "yes": 1, "no": 0, "neither": 0, "none": 1 }
     saved = tmp_path / "archive" / summary[ "archived_as" ].split( "/" )[ -1 ]
