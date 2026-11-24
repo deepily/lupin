@@ -20,6 +20,7 @@ A draft at reveal is stored as { "value": <the wire string the submit button wou
 from types import MappingProxyType
 from typing import Any, Optional, Iterable, Mapping, Tuple
 
+from cosa.agents.prediction_engine.episode_view import fields_of
 from cosa.utils.notification_utils import extract_qualifier_comment, parse_field_selections
 
 WHOLE_ANSWER_KEY = "$answer"   # the field key of a yes/no or open-ended answer; a card field uses its header
@@ -200,12 +201,12 @@ def option_ids_of( response_options: Optional[dict] ) -> Mapping[str, Tuple[str,
         - response_options is None, or a notification's response_options: { "questions": [ { "header", "options": [ { "label" } ] } ] }
 
     Ensures:
-        - returns { header: ( "<header>#0", "<header>#1", ... ) }, one id per option in displayed order
+        - returns { header: ( "<header>#o1", "<header>#o2", ... ) }, one id per option in displayed order
+        - each id is the field header, then the option id episode_view.fields_of gives that option
         - the id depends on the header and the position only, so it does not change if a label is reworded later
         - returns an empty mapping for None, and for a card with no questions
     """
-    questions = ( response_options or {} ).get( "questions", [] )
-    return MappingProxyType( { question[ "header" ]: tuple( f"{question[ 'header' ]}#{index}" for index, _ in enumerate( question.get( "options", [] ) ) ) for question in questions } )
+    return MappingProxyType( { field[ "key" ]: tuple( f"{field[ 'key' ]}#{option[ 'id' ]}" for option in field[ "options" ] ) for field in fields_of( response_options, None ) } )
 
 
 def observation_view( response_type, response_options: Optional[dict], response_value: Optional[dict], responded_at, fold_opened_at, draft_at_reveal: Optional[dict] ) -> Mapping[str, Any]:

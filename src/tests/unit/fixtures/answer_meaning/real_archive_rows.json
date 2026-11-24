@@ -86,7 +86,7 @@
      "Code review": {
       "kind": "selected_options",
       "selected_option_ids": [
-       "Code review#0"
+       "Code review#o1"
       ],
       "empty_selection": false,
       "write_in_text": null,
@@ -146,7 +146,7 @@
      "Graduate": {
       "kind": "multi_selected_options",
       "selected_option_ids": [
-       "Graduate#0"
+       "Graduate#o1"
       ],
       "empty_selection": false,
       "write_in_text": null,
@@ -200,7 +200,7 @@
       "empty_selection": false,
       "write_in_text": "a question about the downside of the recommendation",
       "referred_option_ids": [
-       "Ruling 1#0"
+       "Ruling 1#o1"
       ],
       "text": null
      }
@@ -225,7 +225,7 @@
       "time_or_order": null,
       "modality": "should",
       "affects_execution": false,
-      "modifies_option_id": "Ruling 1#0"
+      "modifies_option_id": "Ruling 1#o1"
      }
     ],
     "alignment": "partial",
@@ -530,7 +530,7 @@
       "empty_selection": false,
       "write_in_text": "a question about the downside of the recommendation",
       "referred_option_ids": [
-       "Ruling 1#0"
+       "Ruling 1#o1"
       ],
       "text": null
      }
@@ -555,7 +555,7 @@
       "time_or_order": null,
       "modality": "should",
       "affects_execution": false,
-      "modifies_option_id": "Ruling 1#0"
+      "modifies_option_id": "Ruling 1#o1"
      }
     ],
     "alignment": "partial",

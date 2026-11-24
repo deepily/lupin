@@ -23,7 +23,7 @@ from cosa.rest.postgres_models import AnswerMeaning
 _NID     = str( uuid.uuid4() )
 _FIXTURE = os.path.join( os.path.dirname( __file__ ), "..", "..", "..", "..", "tests", "unit", "fixtures", "answer_meaning", "real_archive_rows.json" )
 
-_NATIVE  = { "Field": { "kind": "selected_options", "selected_option_ids": [ "Field#0" ], "empty_selection": False, "write_in_text": None, "referred_option_ids": [], "text": None } }
+_NATIVE  = { "Field": { "kind": "selected_options", "selected_option_ids": [ "Field#o1" ], "empty_selection": False, "write_in_text": None, "referred_option_ids": [], "text": None } }
 
 
 @pytest.fixture
@@ -95,7 +95,7 @@ def test_a_condition_without_modifies_option_id_is_refused( repo ):
 
 
 def test_modifies_option_id_round_trips_for_a_whole_answer_and_for_an_option( repo ):
-    conditions = [ { "text": "whole", "modifies_option_id": None }, { "text": "one option", "modifies_option_id": "Field#0" } ]
+    conditions = [ { "text": "whole", "modifies_option_id": None }, { "text": "one option", "modifies_option_id": "Field#o1" } ]
     _add( repo, conditions=conditions )
     repo.session.commit()
     assert repo.get( _NID, SCHEMA_VERSION, "a" ).conditions == conditions
@@ -106,7 +106,7 @@ def test_a_comment_on_a_multiple_choice_card_keeps_its_link_to_the_option_it_cha
     assert fixture[ "response_type" ] == "multiple_choice"
     meaning = fixture[ "meaning" ]
     option  = meaning[ "conditions" ][ 0 ][ "modifies_option_id" ]
-    assert option in { f"Ruling 1#{i}" for i, _ in enumerate( fixture[ "response_options" ][ "questions" ][ 0 ][ "options" ] ) }, "the id names an option the card showed"
+    assert option in { f"Ruling 1#o{i + 1}" for i, _ in enumerate( fixture[ "response_options" ][ "questions" ][ 0 ][ "options" ] ) }, "the id names an option the card showed"
     _add( repo, notification_id=fixture[ "notification_id" ], native_answer=meaning[ "native_answer" ], acts=meaning[ "acts" ],
           conditions=meaning[ "conditions" ], alignment=meaning[ "alignment" ], unknowns=meaning[ "unknowns" ] )
     repo.session.commit()

@@ -32,9 +32,9 @@ class TestObservationView( unittest.TestCase ):
         self.assertEqual( view[ "draft_at_reveal" ][ "value" ], _DRAFT[ "value" ] )
 
     def test_option_ids_follow_the_displayed_order_and_depend_only_on_header_and_position( self ):
-        self.assertEqual( _view()[ "option_ids" ], { "Code review": ( "Code review#0", "Code review#1" ), "Scope": ( "Scope#0", ) } )
+        self.assertEqual( _view()[ "option_ids" ], { "Code review": ( "Code review#o1", "Code review#o2" ), "Scope": ( "Scope#o1", ) } )
         reworded = { "questions": [ { "header": "Code review", "options": [ { "label": "Sure" }, { "label": "Nope" } ] } ] }
-        self.assertEqual( _view( response_options=reworded )[ "option_ids" ][ "Code review" ], ( "Code review#0", "Code review#1" ) )
+        self.assertEqual( _view( response_options=reworded )[ "option_ids" ][ "Code review" ], ( "Code review#o1", "Code review#o2" ) )
 
     def test_a_card_without_options_gives_no_option_ids( self ):
         self.assertEqual( dict( ex.option_ids_of( None ) ), {} )
