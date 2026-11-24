@@ -556,7 +556,7 @@ class TestExecuteLive( unittest.TestCase ):
         from cosa.agents.test_fix_expediter.state import VoiceGateUnreachableError
         o = _mk_orch()
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( side_effect=VoiceGateUnreachableError( "confirmation", RuntimeError( "x" ) ) )
+        team_io.ask_confirmation_answer = AsyncMock( side_effect=VoiceGateUnreachableError( "confirmation", RuntimeError( "x" ) ) )
         with self.assertRaises( VoiceGateUnreachableError ):
             _run( o._gated_confirmation( "Proceed?", "lead", "yes", 60, None, team_io ) )
 

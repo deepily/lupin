@@ -92,11 +92,14 @@ def _orch( action="shadow", value="approved", category="testing" ):
     return orch, proxy
 
 
+STAMP = { "user_id": "u-1", "account_email": "rick@example.com", "method": "jwt" }
+
+
 def _io( raw ):
     from cosa.utils.notification_utils import extract_qualifier_comment
     stance, comment = extract_qualifier_comment( raw )
     io = MagicMock()
-    io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( stance, comment, raw ) )
+    io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( stance, comment, raw, source="human", answered_by=STAMP ) )
     io.ask_confirmation        = AsyncMock( return_value=raw.lower().strip().startswith( "yes" ) )
     return io
 
@@ -139,7 +142,7 @@ def test_a_neither_is_no_ruling_leaves_the_counters_alone_and_logs_a_re_frame_re
     orch._persist_trust_feedback.assert_not_called()
     assert "[PROXY-REFRAME]" in caplog.text and "ask it another way" in caplog.text and "deployment" in caplog.text
     meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
-    assert meta == { "job_id": "swe-1", "user_answer": None, "answer_stance": "neither", "answer_comment": "ask it another way" }
+    assert meta == { "job_id": "swe-1", "user_answer": None, "answer_stance": "neither", "answer_comment": "ask it another way", "answer_raw": "neither [comment: ask it another way]", "answer_source": "human", "answered_by_user_id": "u-1", "answered_by_method": "jwt" }
     assert write.call_args.kwargs[ "extra" ][ "rule_agreement" ] is None
 
 
@@ -175,11 +178,40 @@ def test_with_the_switch_off_every_shape_is_scored_exactly_as_today( raw ):
     answer      = raw.lower().strip().startswith( "yes" )
     result, write = _ask( orch, io, False )
     assert result is answer
-    io.ask_confirmation.assert_awaited_once()
-    io.ask_confirmation_answer.assert_not_called()
+    io.ask_confirmation_answer.assert_awaited_once()
+    io.ask_confirmation.assert_not_called()
     proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=answer )
     orch._persist_trust_feedback.assert_called_once_with( "testing", answer )
-    assert write.call_args.kwargs[ "extra" ][ "metadata_json" ] == { "job_id": "swe-1", "user_answer": answer }
+    proxy.note_stance.assert_not_called()
+    proxy.reframe_blocked.assert_not_called()
+    assert write.call_args.kwargs[ "extra" ][ "metadata_json" ][ "user_answer" ] is answer
+
+
+@pytest.mark.parametrize( "switch", [ False, True ] )
+@pytest.mark.parametrize( "raw, stance, comment", [
+    ( "yes", "yes", None ), ( "no", "no", None ), ( "neither", "neither", None ),
+    ( "yes [comment: leave config alone]", "yes", "leave config alone" ),
+    ( "neither [comment: ask it another way]", "neither", "ask it another way" ),
+] )
+def test_the_row_carries_the_stance_the_comment_and_the_raw_text_whatever_the_switch_says( raw, stance, comment, switch ):
+    _, write = _ask( _orch()[ 0 ], _io( raw ), switch )
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert ( meta[ "answer_stance" ], meta[ "answer_comment" ], meta[ "answer_raw" ], meta[ "answer_source" ] ) == ( stance, comment, raw, "human" )
+
+
+def test_a_neither_with_the_switch_off_is_still_scored_a_no_while_its_stance_is_stored():
+    orch, proxy = _orch( value="approved" )
+    result, write = _ask( orch, _io( "neither" ), False )
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert ( result, meta[ "user_answer" ], meta[ "answer_stance" ] ) == ( False, False, "neither" )
+    proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=False )
+
+
+def test_the_row_carries_the_id_of_the_card_that_asked_when_there_is_one():
+    orch, _ = _orch()
+    with patch( "cosa.agents.swe_team.orchestrator.take_last_ask_notification_id", side_effect=[ None, "card-123" ] ):
+        _, write = _ask( orch, _io( "neither" ), False )
+    assert write.call_args.kwargs[ "notification_id" ] == "card-123"
 
 
 def _real_strategy( category="general" ):
@@ -341,3 +373,40 @@ def test_the_capture_script_main_prints_the_rows_as_json( capsys ):
     with patch.object( script, "capture", return_value=[ { "a": 1 } ] ):
         assert script.main( [ "--day", "2026-11-05" ] ) == 0
     assert json.loads( capsys.readouterr().out ) == [ { "a": 1 } ]
+
+
+def _io_from( source, raw="neither", stamp=None ):
+    io = MagicMock()
+    io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "neither" if raw == "neither" else raw, None, raw, source=source, answered_by=stamp ) )
+    return io
+
+
+@pytest.mark.parametrize( "source", [ "default", "unattributed" ] )
+@pytest.mark.parametrize( "switch", [ False, True ] )
+def test_an_answer_nobody_gave_is_never_stored_as_a_stance_and_never_counts_as_a_neither( source, switch ):
+    orch, proxy = _orch()
+    result, write = _ask( orch, _io_from( source ), switch )
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert meta[ "answer_source" ] == source and meta[ "answer_unowned_raw" ] == "neither"
+    for key in ( "answer_stance", "answer_comment", "answer_raw", "answered_by_user_id", "answered_by_method" ): assert key not in meta
+    assert meta[ "user_answer" ] is False and result is False      # scored as a no, as before
+    proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=False )
+    proxy.note_stance.assert_not_called()
+
+
+def test_a_human_stamp_without_a_user_id_stores_none_for_it():
+    _, write = _ask( _orch()[ 0 ], _io_from( "human", raw="yes", stamp={ "method": "api_key" } ), True )
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert ( meta[ "answered_by_user_id" ], meta[ "answered_by_method" ] ) == ( None, "api_key" )
+
+
+def test_an_auto_approval_row_says_the_proxy_answered():
+    orch, proxy = _orch( action="act", value="approved" )
+    proxy.trust_mode     = "active"
+    orch._ask_before_act = False
+    orch._notify = AsyncMock()
+    io = _io( "yes" )
+    result, write = _ask( orch, io, False )
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert meta == { "job_id": "swe-1", "user_answer": None, "answer_source": "proxy" }
+    io.ask_confirmation_answer.assert_not_called()

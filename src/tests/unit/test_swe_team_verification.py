@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cosa.agents.swe_team.config import SweTeamConfig
+from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
 from cosa.agents.swe_team.safety_limits import SafetyGuard, SafetyLimitError
 from cosa.agents.swe_team.state import (
     OrchestratorState,
@@ -576,6 +577,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
@@ -629,6 +631,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
@@ -679,6 +682,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
@@ -721,6 +725,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
@@ -766,6 +771,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             asyncio.run( orch._execute_live( team_io ) )
@@ -812,6 +818,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             asyncio.run( orch._execute_live( team_io ) )

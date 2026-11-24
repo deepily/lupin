@@ -5,6 +5,7 @@ The insert sits in SweTeamOrchestrator._gated_confirmation: once on the auto-app
 and once after the trust feedback is saved.
 """
 
+from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
 import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,7 +35,7 @@ def _orch_with_proxy( action, value="approved" ):
 
 def _team_io( answer=True ):
     t = MagicMock()
-    t.ask_confirmation = AsyncMock( return_value=answer )
+    t.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if answer else "no", None, "yes" if answer else "no", source="human", answered_by={ "user_id": "u-1", "method": "jwt" } ) )
     t.notify_progress  = AsyncMock()
     return t
 
@@ -76,7 +77,7 @@ class TestOrganicProxyDecisionRow( unittest.TestCase ):
         self.assertEqual( kwargs[ "domain" ], "swe" )
         self.assertEqual( kwargs[ "category" ], "testing" )
         self.assertEqual( kwargs[ "decision_value" ], "approved" )
-        self.assertEqual( kwargs[ "metadata_json" ], { "job_id": "swe-1", "user_answer": False } )
+        self.assertEqual( kwargs[ "metadata_json" ], { "job_id": "swe-1", "user_answer": False, "answer_stance": "no", "answer_comment": None, "answer_raw": "no", "answer_source": "human", "answered_by_user_id": "u-1", "answered_by_method": "jwt" } )
 
     def test_db_failure_is_swallowed_and_answer_still_returned( self ):
         o = _orch_with_proxy( "suggest" )
@@ -94,7 +95,7 @@ class TestOrganicProxyDecisionRow( unittest.TestCase ):
              patch.object( o, "_notify", AsyncMock() ):
             out = _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, team_io ) )
         self.assertTrue( out )
-        team_io.ask_confirmation.assert_not_awaited()
+        team_io.ask_confirmation_answer.assert_not_awaited()
 
 
 if __name__ == "__main__":
