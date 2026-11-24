@@ -645,6 +645,8 @@ class PredictionEngine:
             - returns the likeliest of yes, no or neither as predicted_value, its probability as confidence, and the
               three probabilities and neighbour ids in metadata
             - no embedding, no owner, or no neighbour gives cold_start with a named reason
+            - the cases are read live from the database as of now, not from a replay's time-sliced store, so a replay
+              with the switch on is not bounded to what was known at each ask
         """
         from cosa.agents.prediction_engine import three_way_shadow, three_way_stance
         from cosa.rest.db.database import get_db
