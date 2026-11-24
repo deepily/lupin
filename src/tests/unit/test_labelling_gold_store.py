@@ -146,3 +146,13 @@ def test_a_lock_held_on_another_file_description_refuses_the_write_in_this_proce
         fcntl.flock( holder, fcntl.LOCK_EX )
         assert code_of( gs.append_gold, path, [ line( "c2" ) ] ) == "STORE_LOCKED"
     assert [ l[ "item_id" ] for l in gs.read_gold( path ) ] == [ "c1" ]
+
+
+def test_a_complete_last_line_missing_only_its_newline_is_refused_by_read_and_append_and_left_alone( tmp_path ):
+    path = tmp_path / "gold.jsonl"
+    gs.append_gold( path, [ line( "c1" ) ] )
+    whole = path.read_text( encoding="utf-8" ) + json.dumps( line( "c2" ), sort_keys=True )
+    path.write_text( whole, encoding="utf-8" )
+    assert json.loads( whole.splitlines()[ -1 ] )[ "item_id" ] == "c2"
+    assert code_of( gs.read_gold, path ) == "BAD_LABEL" and code_of( gs.append_gold, path, [ line( "c3" ) ] ) == "BAD_LABEL"
+    assert path.read_text( encoding="utf-8" ) == whole
