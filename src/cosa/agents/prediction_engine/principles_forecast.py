@@ -250,7 +250,7 @@ def _has_row( session_factory, notification_id, arm=ARM ):
     return found
 
 
-def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, version, principle_ids, reason, arm=ARM ):
+def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, version, principle_ids, reason, arm=ARM, applicability=None ):
     """
     Store the one principles row for a card, unless it already has one.
 
@@ -259,6 +259,7 @@ def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, 
 
     Ensures:
         - adds one prediction_arm_forecast row, for the arm given, displayed false, and commits
+        - applicability is stored as given: None (the checks did not run) or the list of dropped principles
         - writes nothing when the card already has its principles row
         - a row that arrives between the check and the insert breaks the unique key; that is read as already stored,
           the session is closed with its failed commit rolled back, and nothing is raised
@@ -269,7 +270,8 @@ def _write_row( session_factory, notification_id, asked_at, ready_at, forecast, 
         written = not _row_present( session, key, arm )
         if written:
             session.add( PredictionArmForecast( notification_id=key, arm=arm, predictor_version=version, forecast=forecast, input_cutoff=asked_at,
-                                                evidence_ids=principle_ids, forecast_ready_at=ready_at, abstention_reason=reason, displayed=False ) )
+                                                evidence_ids=principle_ids, forecast_ready_at=ready_at, abstention_reason=reason, displayed=False,
+                                                applicability=applicability ) )
             try: session.commit()
             except IntegrityError: written = False
     return written
@@ -285,6 +287,7 @@ def _prepare( session_factory, notification_id, c0, embedder, encoder_version, e
 
     Ensures:
         - returns ( episode, selected, block, system prompt, user prompt ), everything as of the ask and nothing later
+        - block is principle_block's result plus applicability: None when the applicability switch is off or no principles are used, else the list of { principle_id (text), rule } dropped, [] when none
         - without principles the selection is empty, the block is principle_block of none, and the prompts are the baseline's own
         - with principles and the applicability switch (APPLICABILITY_KEY) on, retrieval also drops each principle failing the antecedent rule and prints the dropped ones; the card's stage is not known here yet, so the stage rule waits for it
         - with principles, the block carries each stored caveat only when the caveats switch (CAVEATS_KEY) is on
@@ -294,6 +297,7 @@ def _prepare( session_factory, notification_id, c0, embedder, encoder_version, e
         episode  = episode_view( session, notification_id )
         selected = []
         caveats  = False
+        dropped  = None
         if use_principles:
             limits   = retrieval_limits() if limits is None else limits
             vector   = embedder.encode( card_text( episode ) )
@@ -302,8 +306,10 @@ def _prepare( session_factory, notification_id, c0, embedder, encoder_version, e
             found    = retrieve_principles( session, episode[ "owner_id" ], episode[ "project" ], vector, aware_moment( episode[ "asked_at" ] ),
                                             encoder_version, extractor_version, k=k, bound=limits[ "bound" ], multiplier=limits[ "multiplier" ], applicability=check, caveats=caveats )
             selected = found[ "principles" ]
-            if check is not None and found[ "applicability" ]: print( f"[PRINCIPLES] applicability dropped: {found[ 'applicability' ]}" )
-    block            = principle_block( selected, caveats=caveats )
+            if check is not None:
+                dropped = [ { "principle_id": str( d[ "principle_id" ] ), "rule": d[ "rule" ] } for d in found[ "applicability" ] ]
+                if dropped: print( f"[PRINCIPLES] applicability dropped: {dropped}" )
+    block            = { **principle_block( selected, caveats=caveats ), "applicability": dropped }
     system, user     = with_principles( *c0.build_prompts( episode ), block )
     return episode, selected, block, system, user
 
@@ -336,6 +342,7 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
           forecast, and returns failed with stored True; only a card that does not exist raises, since it has no cutoff to store
         - when the database is down, so the row cannot be stored either, it still returns failed, with stored False
         - otherwise the baseline's prompts plus the principle block go to the baseline's model, once, with no retry
+        - a row written after the inputs were gathered also stores applicability: the dropped-principle list with the applicability switch on, else NULL
         - a ready forecast is stored with the principle ids it was given and its ready time; an unreadable reply or a
           failed call stores one row with the reason and no forecast
         - a full-answer reply the parser refuses stores that refusal's own reason (full_answer.REFUSAL_REASONS) and no forecast value
@@ -373,9 +380,9 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
         except ValueError:
             reason = REASON_UNREADABLE
         else:
-            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, now(), forecast, version, [ str( i ) for i in ids ], None, arm )
+            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, now(), forecast, version, [ str( i ) for i in ids ], None, arm, block[ "applicability" ] )
             return { "status": STATUS_RAN, "reason": None }
-        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [ str( i ) for i in ids ], reason, arm )
+        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [ str( i ) for i in ids ], reason, arm, block[ "applicability" ] )
         return { "status": STATUS_FAILED, "reason": reason }
     finally:
         gate.leave()

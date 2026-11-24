@@ -618,3 +618,65 @@ def test_a_reply_the_full_answer_parser_refuses_stores_that_refusals_own_reason(
     nid = ask( factory )
     assert run( factory, nid, Refusing() ) == { "status": "failed", "reason": reason }
     assert [ ( r.abstention_reason, r.forecast ) for r in rows( factory ) ] == [ ( reason, None ) ]
+
+
+def antecedent_principle( factory, antecedent ):
+    """Insert one principle with one supporting row quoting the antecedent, and return its id."""
+    pid = principle( factory )
+    with factory() as db:
+        row = db.query( PreferenceEvidence ).filter( PreferenceEvidence.principle_id == pid ).one()
+        row.antecedent = antecedent
+        db.commit()
+    return pid
+
+
+def test_the_dropped_principles_are_stored_on_the_row_only_with_the_applicability_switch_on( factory, monkeypatch ):
+    """
+    The row names each dropped principle with its rule, and the evidence ids omit it.
+
+    With the switch off the column is NULL, so NULL means the checks did not run.
+    """
+    dropped = antecedent_principle( factory, "never on this card" )
+    kept    = antecedent_principle( factory, "the plan" )
+    on      = set()
+    monkeypatch.setattr( pf, "switch_enabled", lambda key: key in on )
+    off_nid = ask( factory )
+    run( factory, off_nid, Baseline() )
+    on.add( pf.APPLICABILITY_KEY )
+    on_nid  = ask( factory, minutes=1 )
+    run( factory, on_nid, Baseline() )
+    by_card = { str( r.notification_id ): r for r in rows( factory ) }
+    assert by_card[ off_nid ].applicability is None and sorted( by_card[ off_nid ].evidence_ids ) == sorted( [ str( dropped ), str( kept ) ] )
+    assert by_card[ on_nid ].applicability == [ { "principle_id": str( dropped ), "rule": "antecedent" } ]
+    assert by_card[ on_nid ].evidence_ids == [ str( kept ) ]
+
+
+def test_a_failed_call_and_a_check_that_dropped_nothing_still_store_their_applicability( factory, monkeypatch ):
+    """An unreadable reply keeps the dropped list; a check that dropped none stores []."""
+    dropped = antecedent_principle( factory, "never on this card" )
+    monkeypatch.setattr( pf, "switch_enabled", lambda key: key == pf.APPLICABILITY_KEY )
+    failed  = ask( factory )
+    run( factory, failed, Baseline( bad_reply=True ) )
+    with factory() as db:
+        db.query( PreferenceEvidence ).filter( PreferenceEvidence.principle_id == dropped ).one().antecedent = None
+        db.commit()
+    clean   = ask( factory, minutes=1 )
+    run( factory, clean, Baseline() )
+    by_card = { str( r.notification_id ): r for r in rows( factory ) }
+    assert by_card[ failed ].abstention_reason == "unreadable_forecast" and by_card[ failed ].applicability == [ { "principle_id": str( dropped ), "rule": "antecedent" } ]
+    assert by_card[ clean ].applicability == []
+
+
+def test_a_capped_card_and_an_input_error_store_no_applicability( factory, monkeypatch ):
+    """Rows written before any retrieval happened carry NULL."""
+    antecedent_principle( factory, "never on this card" )
+    monkeypatch.setattr( pf, "switch_enabled", lambda key: key == pf.APPLICABILITY_KEY )
+    gate = pf.CapGate( 1 )
+    gate.try_enter()
+    capped = ask( factory )
+    run( factory, capped, Baseline(), gate=gate )
+    monkeypatch.setattr( pf, "retrieval_limits", lambda: { "bound": 0, "multiplier": 0 } )
+    broken = ask( factory, minutes=1 )
+    assert run( factory, broken, Baseline() )[ "status" ] == "failed"
+    by_card = { str( r.notification_id ): r for r in rows( factory ) }
+    assert by_card[ capped ].applicability is None and by_card[ broken ].applicability is None

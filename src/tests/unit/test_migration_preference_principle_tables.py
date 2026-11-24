@@ -250,6 +250,9 @@ _ADDED_LATER = { ( "preference_principles", "continues_principle_id" ), ( "prefe
 _PAIRS = ( ( PreferencePrinciple, "PRINCIPLES_TABLE" ), ( PreferenceEvidence, "EVIDENCE_TABLE" ),
            ( PredictionArmForecast, "ARM_TABLE" ) )
 
+# b3f7d1a94e62 adds applicability to the arm table, and has its own migration test.
+_ADDED_LATER.add( ( "prediction_arm_forecast", "applicability" ) )
+
 
 def test_the_migration_and_the_models_name_the_same_tables_and_columns( monkeypatch ):
     module  = _load_module()
