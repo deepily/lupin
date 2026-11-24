@@ -48,6 +48,21 @@ TRUST_MODE_CHOICES = [ "shadow", "suggest", "active" ]
 DEFAULT_TRUST_MODE = "shadow"
 
 
+def _configuration_manager( env_var_name ):
+    """
+    Build the configuration manager the INI switch readers below hand to read_switch.
+
+    Requires:
+        - env_var_name is the name of the environment variable that holds the config arguments
+
+    Ensures:
+        - returns a new ConfigurationManager for that variable
+        - imports ConfigurationManager only when called, so a test that patches it is honoured
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    return ConfigurationManager( env_var_name=env_var_name )
+
+
 SHADOW_FORECAST_RECORDING_KEY     = "decision proxy shadow forecast recording enabled"
 DEFAULT_SHADOW_FORECAST_RECORDING = False
 
@@ -63,11 +78,7 @@ def shadow_forecast_recording_enabled():
         - returns the INI switch's value as a bool, False when the key is absent
         - returns False and prints one line when the config cannot be read, so the caller's row is still written
     """
-    def manager( env_var_name ):
-        from cosa.config.configuration_manager import ConfigurationManager
-        return ConfigurationManager( env_var_name=env_var_name )
-
-    return read_switch( manager, SHADOW_FORECAST_RECORDING_KEY, str( DEFAULT_SHADOW_FORECAST_RECORDING ),
+    return read_switch( _configuration_manager, SHADOW_FORECAST_RECORDING_KEY, str( DEFAULT_SHADOW_FORECAST_RECORDING ),
                         lambda e: f"[DECISION-PROXY] shadow forecast switch unreadable, recording no forecast: {e.__class__.__name__}: {e}" )
 
 
@@ -86,11 +97,7 @@ def neither_is_no_ruling_enabled():
         - returns the INI switch's value as a bool, False when the key is absent
         - returns False and prints one line when the config cannot be read, so today's scoring holds
     """
-    def manager( env_var_name ):
-        from cosa.config.configuration_manager import ConfigurationManager
-        return ConfigurationManager( env_var_name=env_var_name )
-
-    return read_switch( manager, NEITHER_IS_NO_RULING_KEY, str( DEFAULT_NEITHER_IS_NO_RULING ),
+    return read_switch( _configuration_manager, NEITHER_IS_NO_RULING_KEY, str( DEFAULT_NEITHER_IS_NO_RULING ),
                         lambda e: f"[DECISION-PROXY] neither-is-no-ruling switch unreadable, scoring a neither as a no: {e.__class__.__name__}: {e}" )
 
 
