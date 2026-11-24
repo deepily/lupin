@@ -8,10 +8,12 @@ from cosa.repo.labelling import errors as er
 ITEM_FORMAT    = "labelling-item-1"
 NEED_KEY       = "need_key"
 DUPLICATE_PAIR = "semdup_pair"   # the value stays: packets already written carry it
-TYPES          = ( NEED_KEY, DUPLICATE_PAIR )
+ANSWER_CARD    = "answer_meaning_card"
+TYPES          = ( NEED_KEY, DUPLICATE_PAIR, ANSWER_CARD )
+STANCE_CLASSES = ( "yes", "no", "neither", "none" )   # none: a card with no stance, such as multiple choice or open-ended
 TOP_KEYS       = ( "item_id", "type", "payload" )
 MAX_CALL_SITES = 5
-ALLOWED     = { NEED_KEY: frozenset( { "need", "key_sources", "nothing_exists", "hits", "call_sites" } ), DUPLICATE_PAIR: frozenset( { "a", "b" } ) }
+ALLOWED     = { NEED_KEY: frozenset( { "need", "key_sources", "nothing_exists", "hits", "call_sites" } ), DUPLICATE_PAIR: frozenset( { "a", "b" } ), ANSWER_CARD: frozenset( { "card_text", "options", "recommendation", "answer", "stance_class" } ) }
 
 
 def _fail( item, why ):
@@ -23,6 +25,27 @@ def _fail( item, why ):
 def _text( value ):
     """Ensures: returns True for a non-empty string."""
     return isinstance( value, str ) and value.strip() != ""
+
+
+def _check_answer_card( item, p ):
+    """
+    Check the payload of an answer_meaning_card item.
+
+    Ensures:
+        - returns None when the payload holds card_text and answer as non-empty text, options as a list of non-empty text,
+          recommendation as None or non-empty text, and stance_class as one of STANCE_CLASSES
+        - fields beyond these are left for blind_form to refuse as PACKET_LEAK, so a forecast or a label never rides along
+
+    Raises:
+        - LabellingError BAD_ITEM naming the first violation
+    """
+    for k in ( "card_text", "answer" ):
+        if not _text( p.get( k ) ): _fail( item, f"an answer_meaning_card needs {k} as non-empty text" )
+    options = p.get( "options" )
+    if not isinstance( options, list ) or not all( _text( o ) for o in options ): _fail( item, "options must be a list of non-empty lines, empty when the card has none" )
+    rec = p.get( "recommendation" )
+    if "recommendation" not in p or ( rec is not None and not _text( rec ) ): _fail( item, "recommendation must be present, as None or non-empty text" )
+    if p.get( "stance_class" ) not in STANCE_CLASSES: _fail( item, f"stance_class must be one of {STANCE_CLASSES}" )
 
 
 def validate_item( item ):
@@ -37,6 +60,7 @@ def validate_item( item ):
         - a need_key item holds a need and either a non-empty list of key sources or nothing_exists true with up to ten hits
         - a matched need_key item may also hold call_sites, a list of up to five non-empty lines; a nothing-exists item may not
         - a semdup_pair item holds two definitions, a and b
+        - an answer_meaning_card item holds the card text, options, recommendation, answer and stance class (see _check_answer_card)
         - extra payload fields are left for export_packets to refuse
 
     Raises:
@@ -49,6 +73,9 @@ def validate_item( item ):
     if item[ "type" ] not in TYPES: _fail( item, f"unknown type {item[ 'type' ]!r}" )
     p = item[ "payload" ]
     if not isinstance( p, dict ): _fail( item, "payload must be a dict" )
+    if item[ "type" ] == ANSWER_CARD:
+        _check_answer_card( item, p )
+        return
     if item[ "type" ] == DUPLICATE_PAIR:
         if not ( _text( p.get( "a" ) ) and _text( p.get( "b" ) ) ): _fail( item, "a semdup_pair needs two definitions, a and b" )
         return
@@ -71,7 +98,7 @@ def make_item( kind, id, payload ):
     Build and validate an item.
 
     Requires:
-        - kind is need_key or semdup_pair; payload is the dict that kind needs
+        - kind is one of the item types; payload is the dict that kind needs
 
     Ensures:
         - returns { item_id, type, payload }
