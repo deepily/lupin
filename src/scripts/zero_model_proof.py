@@ -19,8 +19,6 @@ import collections
 import socket
 import sys
 
-LOOPBACK = ( "127.0.0.1", "localhost", "::1" )
-
 
 def install_guards( calls ):
     """
@@ -39,6 +37,7 @@ def install_guards( calls ):
     import cosa.agents.llm_client_factory as factory
     import cosa.memory.embedding_provider as provider
     import cosa.research.preference_replay.service_embeddings as service
+    from cosa.utils.unit_network_guard import is_loopback
 
     def boom( name ):
         def _raise( *args, **kwargs ):
@@ -57,7 +56,7 @@ def install_guards( calls ):
     real_connect = socket.socket.connect
 
     def no_outside_net( sock, address ):
-        if isinstance( address, tuple ) and address[ 0 ] not in LOOPBACK:
+        if not is_loopback( address ):
             calls[ "socket.connect_external" ] += 1
             raise AssertionError( f"EXTERNAL CONNECT {address}" )
         return real_connect( sock, address )
