@@ -36,7 +36,7 @@ from .orchestrator import ResearchOrchestratorAgent, OrchestratorState  # noqa: 
 from . import cosa_interface
 from . import voice_io
 from . import search_cache
-from cosa.agents.shared.sdk_error_result import LOGIN_MARKER
+from cosa.agents.shared.sdk_error_result import LOGIN_MARKERS
 
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -699,7 +699,7 @@ async def run_research(
                             call_type      = "research",
                         )
                     except RuntimeError as e:
-                        if LOGIN_MARKER in str( e ): raise
+                        if any( m in str( e ) for m in LOGIN_MARKERS ): raise
                         skipped.append( { "topic": topic, "reason": str( e )[ :200 ] } )
                         await voice_io.notify(
                             f"Skipping topic {i + 1} of {len( subqueries )} ({topic}): {str( e )[ :120 ]}",

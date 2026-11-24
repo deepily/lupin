@@ -65,8 +65,10 @@ def test_error_result_text_with_no_result_and_an_errors_list_keeps_its_form():
     assert ser.error_result_text( message ) == "Claude Code returned an error result: error_max_turns: no text (errors: ran out; disk full)"
 
 
-def test_login_hint_matches_only_the_401_marker():
+def test_login_hint_matches_the_401_marker_and_the_failed_to_authenticate_marker():
     assert ser.login_hint( "x API Error: 401 y" ) == "x API Error: 401 y" + ser.LOGIN_HINT
+    refresh_dead = "success: Failed to authenticate: OAuth session expired and could not be refreshed"
+    assert ser.login_hint( refresh_dead ) == refresh_dead + ser.LOGIN_HINT
     assert ser.login_hint( "API Error: 500 overloaded" ) == "API Error: 500 overloaded"
 
 

@@ -8,7 +8,7 @@ text and errors list are still available.
 """
 
 
-LOGIN_MARKER = "API Error: 401"
+LOGIN_MARKERS = ( "API Error: 401", "Failed to authenticate" )
 LOGIN_HINT   = ( " The Claude login in this server's container has expired or was rejected; renew it with: "
                  "docker exec -it lupin-rest-dev claude /login (dev, :7999) or "
                  "docker exec -it lupin-rest-test claude /login (test, :8000)." )
@@ -22,8 +22,8 @@ def error_result_text( message ) -> str:
 
 
 def login_hint( text: str ) -> str:
-    """Ensures: returns text, with the renew sentence appended on a 401 marker."""
-    return text + LOGIN_HINT if LOGIN_MARKER in text else text
+    """Ensures: returns text, plus the renew sentence when it holds a LOGIN_MARKERS entry."""
+    return text + LOGIN_HINT if any( m in text for m in LOGIN_MARKERS ) else text
 
 
 def raise_error_result( message, label: str, log ):
