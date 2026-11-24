@@ -41,15 +41,18 @@ SELECTION_KEYS                = ( "option_ids", "write_in", "reframe" )
 _COMMON_FORMAT = ( '"acts": {"approve": p, "decline": p, "challenge_premise": p, "request_information": p, "defer": p, "propose_alternative": p}, '
                    '"qualification": {"probability": p, "conditions": [{"text": "<the condition>", "modifies_option_id": "<an option id> or null"}]}, '
                    '"gist": "<the answer you expect, in a sentence>", "whole_card_probability": p' )
+# A card with no option ids (yes/no, open-ended, batch) has nothing for a condition to change, so its format says null, not an id.
+_NO_ID_FORMAT  = _COMMON_FORMAT.replace( '"<an option id> or null"', "null" )
+_NO_ID_NOTE    = " This card has no option ids, so modifies_option_id is always null."
 _SCALE         = "Every p is a number from 0 to 1. "
 _ABSTAIN       = ' If you cannot forecast this card, reply {"abstain": true, "reason": "<why>"} instead.'
-YES_NO_FULL_FORMAT = ( 'Reply: {"probabilities": {"yes": p, "no": p, "neither": p}, ' + _COMMON_FORMAT + "}. " + _SCALE +
-                       "The three probabilities add up to 1; the acts are separate chances and need not." + _ABSTAIN )
+YES_NO_FULL_FORMAT = ( 'Reply: {"probabilities": {"yes": p, "no": p, "neither": p}, ' + _NO_ID_FORMAT + "}. " + _SCALE +
+                       "The three probabilities add up to 1; the acts are separate chances and need not." + _NO_ID_NOTE + _ABSTAIN )
 CHOICE_FULL_FORMAT = ( 'Reply: {"fields": {"<field name>": {"option_ids": ["<option id>"]} or {"write_in": "<text>"} or {"reframe": "<text>"}}, ' +
                        _COMMON_FORMAT + "}. " + _SCALE + "Give option ids exactly as listed in brackets, never labels. "
                        "A field that allows several options takes a list of ids; any other takes one." + _ABSTAIN )
-OPEN_FULL_FORMAT   = ( 'Reply: {' + _COMMON_FORMAT + "}. " + _SCALE + "The gist is the text you expect them to write." + _ABSTAIN )
-BATCH_FULL_FORMAT  = ( 'Reply: {"fields": {"<field name>": {"gist": "<the text you expect for that field>"}}, ' + _COMMON_FORMAT + "}. " + _SCALE + _ABSTAIN )
+OPEN_FULL_FORMAT   = ( 'Reply: {' + _NO_ID_FORMAT + "}. " + _SCALE + "The gist is the text you expect them to write." + _NO_ID_NOTE + _ABSTAIN )
+BATCH_FULL_FORMAT  = ( 'Reply: {"fields": {"<field name>": {"gist": "<the text you expect for that field>"}}, ' + _NO_ID_FORMAT + "}. " + _SCALE + _NO_ID_NOTE.lstrip() + _ABSTAIN )
 FULL_FORMATS       = { "yes_no": YES_NO_FULL_FORMAT, "multiple_choice": CHOICE_FULL_FORMAT, "open_ended": OPEN_FULL_FORMAT, "open_ended_batch": BATCH_FULL_FORMAT }
 
 
@@ -215,10 +218,11 @@ def _qualification( value, known_ids ):
     Read the chance of a material condition and the conditions asserted.
 
     Requires:
-        - value is the parsed reply; known_ids holds every stable option id on the card
+        - value is the parsed reply; known_ids holds every stable option id on the card, empty for a card with none (yes/no, open-ended, batch)
 
     Ensures:
         - returns { probability, conditions }, each condition { text, modifies_option_id }, the id None for a condition on the whole answer
+          and for every condition on a card with no option ids, whatever id the model wrote
 
     Raises:
         - ReplyRefused( field_missing ) if qualification, its probability, its conditions list or a condition's text is absent
@@ -233,7 +237,7 @@ def _qualification( value, known_ids ):
     conditions  = []
     for condition in listed:
         if not isinstance( condition, dict ): raise ReplyRefused( REASON_FIELD_MISSING, "a condition must be an object" )
-        target = condition.get( "modifies_option_id" )
+        target = condition.get( "modifies_option_id" ) if known_ids else None
         if target is not None and target not in known_ids: raise ReplyRefused( REASON_UNKNOWN_OPTION_ID, f"a condition changes {target!r}, which is not an option of the card" )
         conditions.append( { "text": _text( condition, "text", "a condition's text" ), "modifies_option_id": target } )
     return { "probability": probability, "conditions": conditions }
