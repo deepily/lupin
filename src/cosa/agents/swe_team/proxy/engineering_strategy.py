@@ -12,6 +12,7 @@ Dependency Rule:
 """
 
 import random
+from contextlib import closing
 
 from scipy.stats import beta as beta_dist
 
@@ -19,7 +20,7 @@ from cosa.agents.decision_proxy.base_decision_strategy import BaseDecisionStrate
 from cosa.agents.decision_proxy.trust_tracker import TrustTracker
 from cosa.agents.decision_proxy.circuit_breaker import CircuitBreaker
 from cosa.agents.decision_proxy.conformal_wrapper import ConformalDecisionWrapper
-from cosa.agents.decision_proxy.config import DEFAULT_CBR_CONFIDENCE_THRESHOLD
+from cosa.agents.decision_proxy.config import DEFAULT_CBR_CONFIDENCE_THRESHOLD, neither_is_no_ruling_enabled
 from cosa.agents.decision_proxy.agreement import reframe_blocks_promotion, REFRAME_WINDOW
 
 from cosa.agents.swe_team.proxy.engineering_classifier import EngineeringClassifier
@@ -29,6 +30,7 @@ from cosa.agents.swe_team.proxy.engineering_categories import (
     get_category_cap_level,
 )
 from cosa.agents.swe_team.proxy.config import DEFAULT_ACCEPTED_SENDERS
+from cosa.agents.utils.agent_notification_dispatcher import answer_source_is_human
 
 
 class EngineeringStrategy( BaseDecisionStrategy ):
@@ -81,6 +83,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         l4_audit_rate              = 0.10,
         audit_random               = None,
         cap_levels                 = None,
+        stored_answers             = None,
         debug                      = False
     ):
         """
@@ -111,7 +114,12 @@ class EngineeringStrategy( BaseDecisionStrategy ):
             l4_audit_rate: Share of level 4 "act" outcomes sent to the human anyway as an audit sample (default 0.10)
             audit_random: Zero-argument callable returning a float in [0, 1); random.random when None
             cap_levels: Optional dict of category name to cap level (1-5) that overrides the built-in cap for those categories
+            stored_answers: Optional callable( category ) returning the category's stored decision rows' metadata dicts, newest first; used to rebuild the re-frame history after a restart
             debug: Enable debug output
+
+        Ensures:
+            - with stored_answers given and the neither switch on, each category's re-frame window holds its last REFRAME_WINDOW human stances from the stored rows, and a category over the bar is blocked from promotion
+            - with the switch off, or stored_answers None, the windows start empty as before
 
         Raises:
             - ValueError if cap_levels names an unknown category or a cap outside 1-5
@@ -141,6 +149,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         # Re-frame gate: the last answer stances per category, and the level a category may not rise above while its re-frame rate is over the bar
         self._stance_history  = {}
         self._reframe_ceiling = {}
+        self._restored_blocked = set()     # categories whose rebuilt window is over the bar; the ceiling is set at the first read, once the trust level has been restored
 
         # Create trust tracker if not provided
         self.trust_tracker = trust_tracker or TrustTracker( debug=debug )
@@ -162,6 +171,45 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
         # Classifier
         self.classifier = EngineeringClassifier( debug=debug )
+
+        # A restart empties the in-memory windows, so rebuild them from the stances the decision rows already hold
+        if stored_answers is not None and neither_is_no_ruling_enabled(): self._rebuild_stance_history( stored_answers )
+
+    def _rebuild_stance_history( self, stored_answers ):
+        """
+        Refill each category's re-frame window from its stored decision rows.
+
+        Requires:
+            - stored_answers is a callable( category ) returning an iterable of row metadata dicts, newest first, closable if it is a generator
+
+        Ensures:
+            - each window holds the stances of the newest REFRAME_WINDOW rows whose answer source counts as human, oldest first, as note_stance would have left it
+            - the loop stops pulling rows once the window is full
+            - a category whose window is over the bar is queued for its ceiling, set at the first read
+            - the trust counters are never touched
+        """
+        for category in get_category_names():
+            newest_first = []
+            with closing( stored_answers( category ) ) as rows:
+                for meta in rows:
+                    if not answer_source_is_human( meta.get( "answer_source" ) ): continue
+                    newest_first.append( meta.get( "answer_stance" ) )
+                    if len( newest_first ) == REFRAME_WINDOW: break
+            if not newest_first: continue
+            self._stance_history[ category ] = newest_first[ ::-1 ]
+            if reframe_blocks_promotion( self._stance_history[ category ] ): self._restored_blocked.add( category )
+
+    def _settle_restored( self, category ):
+        """
+        Set the ceiling of a rebuilt category at the level it holds now.
+
+        Ensures:
+            - a category queued by the rebuild gets its ceiling at the current trust level, once
+            - any other category is untouched
+        """
+        if category in self._restored_blocked:
+            self._restored_blocked.discard( category )
+            self._reframe_ceiling.setdefault( category, self.trust_tracker.get_level( category ) )
 
     @property
     def name( self ):
@@ -235,6 +283,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
             - A category with no recorded stance gets the tracker's level unchanged
         """
         level   = self.trust_tracker.get_level( category )
+        self._settle_restored( category )
         ceiling = self._reframe_ceiling.get( category )
         return level if ceiling is None else min( level, ceiling )
 
@@ -251,6 +300,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
             - when the rate is at or below the bar, the ceiling is cleared
             - the trust counters are never touched
         """
+        self._settle_restored( category )
         history = self._stance_history.setdefault( category, [] )
         history.append( stance )
         del history[ :-REFRAME_WINDOW ]
@@ -269,6 +319,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         Ensures:
             - returns True exactly when a ceiling is set for the category
         """
+        self._settle_restored( category )
         return category in self._reframe_ceiling
 
     def gate( self, category, trust_level, confidence ):

@@ -292,6 +292,28 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             desc( ProxyDecision.created_at )
         ).limit( limit ).all()
 
+    def iter_answered_newest_first( self, domain, category ):
+        """
+        Stream the answered decisions of a domain and category, newest first.
+
+        Requires:
+            - domain: Domain identifier
+            - category: Decision category
+
+        Ensures:
+            - yields each ProxyDecision whose metadata records an answer source, ordered by created_at descending with the row id breaking a tie
+            - rows are fetched in small batches as the caller pulls them, so a caller that stops early does not read the rest
+
+        Returns:
+            Generator of ProxyDecision instances
+        """
+        query = self.session.query( ProxyDecision ).filter(
+            ProxyDecision.domain == domain,
+            ProxyDecision.category == category,
+            ProxyDecision.metadata_json[ "answer_source" ].as_string().isnot( None ),
+        ).order_by( desc( ProxyDecision.created_at ), desc( ProxyDecision.id ) )
+        yield from query.yield_per( 20 )
+
     def find_similar( self, question, domain, category, limit=5 ):
         """
         Find similar past decisions for a given question.

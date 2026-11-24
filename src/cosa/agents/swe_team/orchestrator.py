@@ -49,7 +49,7 @@ from .hooks import build_can_use_tool, post_tool_hook, notification_hook, wrap_p
 from .state_files import FeatureList, ProgressLog
 from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.utils.voice_io import read_gate_answer
-from cosa.agents.utils.agent_notification_dispatcher import take_last_ask_notification_id
+from cosa.agents.utils.agent_notification_dispatcher import take_last_ask_notification_id, answer_source_is_human
 
 # Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
 # ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
@@ -335,7 +335,7 @@ class SweTeamOrchestrator:
         answer          = await team_io.ask_confirmation_answer( question, role, default, timeout, abstract )
         user_answer     = answer.approved
         notification_id = take_last_ask_notification_id()
-        by_human        = answer.source == "human"
+        by_human        = answer_source_is_human( answer.source )
         no_ruling       = neither_is_no_ruling_enabled() and by_human and answer.stance == "neither"
 
         # Step 4: Record trust feedback (shadow observes, suggest tracks follow-through)
@@ -441,7 +441,7 @@ class SweTeamOrchestrator:
             metadata = { "job_id": self.job_id, "user_answer": user_answer }
             if answer is None:
                 if source is not None: metadata[ "answer_source" ] = source
-            elif answer.source == "human":
+            elif answer_source_is_human( answer.source ):
                 stamp = answer.answered_by
                 metadata.update( {
                     "answer_source" : "human", "answer_stance" : answer.stance, "answer_comment" : answer.comment, "answer_raw" : answer.raw,
