@@ -287,7 +287,8 @@ class SweTeamOrchestrator:
             - An "act" answer auto-approves only when the ask-before-act switch is off
             - Trust feedback recorded after every human decision; a default, API-key or unattributed answer leaves the trust counters unchanged (its decision row is still written, under its answer source)
             - With the neither switch on, a neither answer is no ruling: the trust counters are unchanged, record_decision is skipped, a re-frame line is logged, and the decision row is written with no user answer and the stance "neither"
-            - With the neither switch on, a qualified yes is logged with its comment and scored as a yes
+            - With the neither switch on, a qualified yes is its own outcome: the trust counters are unchanged, record_decision is skipped, the comment is logged, and the decision row carries answer_outcome "qualified_yes" with the comment and the user answer True
+            - With the neither switch off, a qualified yes is scored as a yes, as before
             - With the neither switch off, a neither is scored exactly as before (as a no), yet the decision row still carries the stance, the comment and the raw text
             - Falls through to ask_confirmation when proxy is None
 
@@ -337,6 +338,7 @@ class SweTeamOrchestrator:
         notification_id = take_last_ask_notification_id()
         by_human        = answer_source_is_human( answer.source )
         no_ruling       = neither_is_no_ruling_enabled() and by_human and answer.stance == "neither"
+        qualified_yes   = neither_is_no_ruling_enabled() and by_human and answer.stance == "yes" and bool( answer.comment )
 
         # Step 4: Record trust feedback (shadow observes, suggest tracks follow-through)
         if proxy_result and self.proxy:
@@ -352,10 +354,11 @@ class SweTeamOrchestrator:
                 elif not by_human:
                     # Row 1b3202de (F2): a default, API-key or unattributed answer is not Rick's; the counters stay as they are
                     logger.info( f"[PROXY-NOT-HUMAN] answer source {answer.source!r} is not a human answer, trust counters unchanged: cat={proxy_result.category}, question={question[ :80 ]!r}" )
+                elif qualified_yes:
+                    # Row 1b3202de (F4): "yes, but ..." is not a clean yes; its comment is kept and the counters stay as they are
+                    logger.info( f"[PROXY-QUALIFIED-YES] cat={proxy_result.category}, comment={answer.comment!r}, trust counters unchanged, question={question[ :80 ]!r}" )
                 else:
                     agreement = forecast_agreement( proxy_result.value, user_answer )
-                    if neither_is_no_ruling_enabled() and by_human and answer.stance == "yes" and answer.comment:
-                        logger.info( f"[PROXY-QUALIFIED-YES] cat={proxy_result.category}, comment={answer.comment!r}, question={question[ :80 ]!r}" )
                     if self.proxy.trust_tracker.trust_model == "blr":
                         # Row cfc7dd01: the BLR model learns only from decisions that carry features
                         self.proxy.trust_tracker.record_decision_with_features( proxy_result.category, agreement, question )
@@ -368,7 +371,7 @@ class SweTeamOrchestrator:
                     self._persist_trust_feedback( proxy_result.category, agreement )
 
                 # Row 5ac3d5d7: the ratify page reads proxy_decisions, and this path wrote none
-                self._persist_proxy_decision( role, question, proxy_result, None if no_ruling else user_answer, notification_id, answer )
+                self._persist_proxy_decision( role, question, proxy_result, None if no_ruling else user_answer, notification_id, answer, outcome="qualified_yes" if qualified_yes else None )
 
                 # Phase 7: Emit proxy summary notification for pending ratification decisions
                 # "suggest" and "defer" actions produce pending ratification decisions;
@@ -420,7 +423,7 @@ class SweTeamOrchestrator:
             logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
             return 0
 
-    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None, source=None ):
+    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None, source=None, outcome=None ):
         """
         Write one organic proxy_decisions row for a gated confirmation (non-fatal best-effort).
 
@@ -431,6 +434,7 @@ class SweTeamOrchestrator:
             - notification_id is the id of the notification that carried the question, or None when none was asked
             - answer is the ConfirmationAnswer the ask returned, or None when the proxy auto-approved
             - source names who answered when there is no answer object: "proxy" for an auto-approval
+            - outcome is "qualified_yes" for a yes that carries a comment, or None
 
         Ensures:
             - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
@@ -438,10 +442,12 @@ class SweTeamOrchestrator:
             - the row carries data_origin "organic" and its rule_agreement, which is separate from the trust success
             - with an answer, metadata_json carries answer_source (human, default or unattributed) whatever the neither switch says; answer_stance, answer_comment, answer_raw and the answerer's id and method are stored only when a person answered, and a default's or a test double's text goes under answer_unowned_raw, so "Rick deferred the decision" (a neither) stays distinct from "the model deferred to Rick" (action defer)
             - without an answer, the row has no answer fields, and an auto-approval carries answer_source "proxy"
+            - a qualified yes also carries answer_outcome "qualified_yes" beside its stored comment
             - failure is logged and never propagates
         """
         try:
             metadata = { "job_id": self.job_id, "user_answer": user_answer }
+            if outcome is not None: metadata[ "answer_outcome" ] = outcome
             if answer is None:
                 if source is not None: metadata[ "answer_source" ] = source
             elif answer_source_is_human( answer.source ):
