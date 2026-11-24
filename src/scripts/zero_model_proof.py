@@ -74,11 +74,12 @@ def pick_slice( asks, per_type ):
     Ensures:
         - returns ( ids, counts ) with ids in cohort order and counts the number taken per response type
     """
+    from cosa.research.preference_replay.retune import eligible_asks
     ids    = []
     counts = collections.Counter()
-    for ask in asks:
+    for ask in eligible_asks( asks ):
         kind = ask[ "response_type" ]
-        if ask[ "question_embedding" ] is None or kind not in ( "yes_no", "multiple_choice" ) or counts[ kind ] >= per_type: continue
+        if counts[ kind ] >= per_type: continue
         ids.append( ask[ "id" ] )
         counts[ kind ] += 1
     return ids, counts
