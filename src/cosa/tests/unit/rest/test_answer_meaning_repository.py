@@ -17,7 +17,8 @@ import uuid
 import pytest
 
 from cosa.research.preference_replay.scratch_db import scratch_session
-from cosa.rest.db.repositories.answer_meaning_repository import SCHEMA_VERSION, AnswerMeaningRepository, MeaningAlreadyRecorded, kinds_in
+from cosa.rest.db.repositories.answer_meaning_repository import ( ALIGNMENTS, RELATION_ALIGNMENT, RELATIONS_V2, SCHEMA_VERSION, SCHEMA_VERSION_V2, AnswerMeaningRepository,
+                                                                     MeaningAlreadyRecorded, kinds_in )
 from cosa.rest.postgres_models import AnswerMeaning
 
 _NID     = str( uuid.uuid4() )
@@ -121,3 +122,79 @@ def test_kinds_in_joins_the_field_kinds_and_the_unknowns():
 def test_a_meaning_row_describes_itself_by_notification_version_and_annotator( repo ):
     text = repr( _add( repo, schema_version="v7", annotator="reader-b" ) )
     assert _NID in text and "v7" in text and "reader-b" in text
+
+
+# Schema v2: the relations of the meaning labeller plan, sections 3, 3b and 3c.
+
+def _v2_native( relation, **extra ):
+    entry = dict( _NATIVE[ "Field" ], relation=relation )
+    entry.update( extra )
+    return { "Field": entry }
+
+
+def _add_v2( repo, relation="agrees", **changes ):
+    args = dict( schema_version=SCHEMA_VERSION_V2, native_answer=_v2_native( relation ), alignment=None )
+    args.update( changes )
+    return _add( repo, **args )
+
+
+def test_the_v2_relations_are_the_thirteen_of_the_plan_and_match_the_labelling_vocabulary():
+    from cosa.repo.labelling.packets import ANSWER_LABELS
+    assert SCHEMA_VERSION_V2 == "answer-meaning-v2" and SCHEMA_VERSION_V2 != SCHEMA_VERSION
+    assert len( RELATIONS_V2 ) == 13 and len( set( RELATIONS_V2 ) ) == 13
+    assert set( RELATIONS_V2 ) == set( ANSWER_LABELS )
+
+
+def test_every_relation_maps_to_one_alignment_and_every_alignment_is_a_known_one():
+    assert set( RELATION_ALIGNMENT ) == set( RELATIONS_V2 )
+    assert set( RELATION_ALIGNMENT.values() ) <= set( ALIGNMENTS )
+    assert RELATION_ALIGNMENT[ "agrees" ] == "aligned"
+    assert RELATION_ALIGNMENT[ "expands_recommendation" ] == "partial"
+    assert RELATION_ALIGNMENT[ "expands_other_option" ] == RELATION_ALIGNMENT[ "chose_different_listed_option" ] == "diverges"
+    assert RELATION_ALIGNMENT[ "no_recommendation_on_card" ] == "no_recommendation"
+    assert [ r for r, a in RELATION_ALIGNMENT.items() if a == "unknown" ] == [ r for r in RELATIONS_V2 if r not in (
+        "agrees", "expands_recommendation", "expands_other_option", "chose_different_listed_option", "no_recommendation_on_card" ) ]
+
+
+@pytest.mark.parametrize( "relation", RELATIONS_V2 )
+def test_a_v2_row_gets_its_alignment_from_the_relation( repo, relation ):
+    row = _add_v2( repo, relation )
+    assert row.alignment == RELATION_ALIGNMENT[ relation ]
+
+
+def test_a_v1_row_and_a_v2_row_for_one_notification_coexist( repo ):
+    _add( repo, alignment="aligned" )
+    _add_v2( repo, "dissent" )
+    repo.session.commit()
+    assert [ row.schema_version for row in repo.versions( _NID ) ] == [ SCHEMA_VERSION, SCHEMA_VERSION_V2 ]
+
+
+@pytest.mark.parametrize( "native", [
+    _v2_native( "selects_other" ),
+    _v2_native( "agrees", stance_source="guessed" ),
+] )
+def test_a_v2_relation_or_stance_source_off_its_list_is_refused_and_nothing_is_written( repo, native ):
+    with pytest.raises( ValueError ): _add_v2( repo, native_answer=native )
+    assert repo.versions( _NID ) == []
+
+
+def test_a_v2_inferred_stance_source_is_kept( repo ):
+    row = _add_v2( repo, native_answer=_v2_native( "support", stance_source="inferred" ) )
+    assert row.native_answer[ "Field" ][ "stance_source" ] == "inferred"
+
+
+def test_a_v2_row_may_carry_the_alignment_its_relation_gives_and_no_other( repo ):
+    assert _add_v2( repo, "agrees", alignment="aligned" ).alignment == "aligned"
+    with pytest.raises( ValueError, match="alignment" ): _add_v2( repo, "agrees", annotator="b", alignment="diverges" )
+
+
+def test_a_v2_row_with_several_fields_takes_one_alignment_only_when_they_agree( repo ):
+    entry  = lambda relation: dict( _NATIVE[ "Field" ], relation=relation )
+    same   = _add_v2( repo, native_answer={ "A": entry( "agrees" ), "B": entry( "agrees" ) } )
+    mixed  = _add_v2( repo, annotator="b", native_answer={ "A": entry( "agrees" ), "B": entry( "answers" ) } )
+    empty  = _add_v2( repo, annotator="c", native_answer={}, unknowns=[ "unreadable_payload" ] )
+    assert ( same.alignment, mixed.alignment, empty.alignment ) == ( "aligned", "unknown", "unknown" )
+
+
+def test_a_v1_row_with_no_alignment_is_still_refused( repo ):
+    with pytest.raises( ValueError ): _add( repo, alignment=None )
