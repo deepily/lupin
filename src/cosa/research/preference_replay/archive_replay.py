@@ -34,8 +34,10 @@ from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.principle_learner import extractor_job, opus_call, principles_call
 from cosa.agents.principle_learner.extractor_store import NEIGHBOURS
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
+import cosa.utils.util as cu
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
+from cosa.research.preference_replay.checkpoint_report import FIRST_NAME, checkpoint_name
 from cosa.research.preference_replay.extractor_replay import ExtractorReplay, asks_from_session, check_no_leakage, make_recorder
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM, _score, replay, summarize
 from cosa.research.preference_replay.scratch_db import load_export, scratch_session
@@ -60,8 +62,9 @@ RECORDER_ARM    = "recorder"
 STAND_IN_PRIORITY = "medium"
 WARN_FRACTION   = 0.8
 BOUND_REASON    = f"{principles_forecast.REASON_INPUT}: {principle_retrieval.PrincipleBoundExceeded.__name__}"
-LEGACY_FREEZE   = { "fetch_multiplier": 0 }
+LEGACY_FREEZE   = { "fetch_multiplier": 0, "scored_against": FIRST_NAME }
 STOP_EXIT       = 3
+CHECKPOINT_PATH = "/src/conf/prediction-checkpoint.json"
 CODE_KEYS       = ( "code_sha", "code_dirty" )
 FLUSH_EVERY     = 500
 LABELS          = { ENGINE_ARM: "A1", ARM_FIXED: "A0" }
@@ -119,14 +122,16 @@ def tree_state( folder ):
     return { "sha": sha, "dirty": bool( state ) }
 
 
-def current_freeze( models, code ):
+def current_freeze( models, code, scored_against=FIRST_NAME ):
     """
     List every setting that must not change inside one evaluation window.
 
     Requires:
         - models is a ModelArms; code is tree_state's result
+        - scored_against is the name of the checkpoint the run is scored against, as checkpoint_report.checkpoint_name gives it
 
     Ensures:
+        - the dict names scored_against, so a work folder started against one checkpoint is refused by check_freeze under the other; a freeze written before the key existed reads FIRST_NAME
         - returns a dict of the code commit, the vocabulary and extractor versions, the extractor timeout, the encoder, neighbours, k,
           the principle limit and fetch multiplier as read from the INI file, lag seconds, window start, floor and the baseline and Opus model ids
     """
@@ -134,7 +139,7 @@ def current_freeze( models, code ):
     return { "code_sha": code[ "sha" ], "code_dirty": code[ "dirty" ], "vocabulary_version": PROMPT_VERSION, "extractor_version": models.extractor,
              "extractor_timeout_seconds": extractor_settings()[ 1 ], "encoder": models.encoder, "neighbours": NEIGHBOURS, "k": principle_retrieval.DEFAULT_K,
              "bound": limits[ "bound" ], "fetch_multiplier": limits[ "multiplier" ], "lag_seconds": REPLAY_LAG.total_seconds(), "window_start": WINDOW_START.isoformat(), "floor": OPERATIONAL_FLOOR,
-             "baseline_model": models.c0.model, "twin_model": opus_twins.opus_model() }
+             "baseline_model": models.c0.model, "twin_model": opus_twins.opus_model(), "scored_against": scored_against }
 
 
 def check_freeze( state, current, accept_code_change=None, now=None ):
@@ -668,7 +673,7 @@ def rerun_bound_failures( session, asks, models, work, arm, path, bound, out=pri
     return len( todo )
 
 
-def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=None, chunk=CHUNK_SIZE, out=print, code=None, accept_code_change=None ):
+def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=None, chunk=CHUNK_SIZE, out=print, code=None, accept_code_change=None, scored_against=FIRST_NAME ):
     """
     Predict the evaluation asks in time order with every arm but the twins.
 
@@ -683,6 +688,7 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
         - the extractor's model and timeout come from the INI file, as the live job reads them
         - an ask with no vector is counted once, kept in the checkpoint as skipped, and left out of every later chunk
         - a line already in records.jsonl is not written again, so a stop between the write and the checkpoint never doubles an ask
+        - check_freeze refuses a work folder frozen against the checkpoint other than scored_against
         - the first start stores the freeze in the checkpoint, and a later start under other settings is refused, except a higher principle limit
           (old multiplier 0) and a code change named by accept_code_change; both are recorded in the freeze history
         - before the first chunk, limit failures stored for asks with no record (a stopped chunk's) are deleted, then every recorded ask whose principles forecast failed on the limit is forecast again under the frozen limit
@@ -696,7 +702,7 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
         - BoundStop when the principle limit stops a forecast
     """
     state     = load_state( work.state )
-    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ), accept_code_change ): save_state( work.state, state )
+    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code, scored_against ), accept_code_change ): save_state( work.state, state )
     frozen_bound = freeze_limits( models, state )
     models.discard_unrecorded_limit_failures( HAIKU_ARMS, { line[ "id" ] for line in read_jsonl( work.records ) } if os.path.exists( work.records ) else set() )
     rerun_bound_failures( session, asks, models, work, ARM_PRINCIPLES, work.records, frozen_bound, out=out, chunk=chunk )
@@ -785,7 +791,7 @@ def _record_lines( run, models ):
     return lines
 
 
-def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds=60, sleep=time.sleep, chunk=CHUNK_SIZE, out=print, code=None, accept_code_change=None ):
+def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds=60, sleep=time.sleep, chunk=CHUNK_SIZE, out=print, code=None, accept_code_change=None, scored_against=FIRST_NAME ):
     """
     Run the Opus twins over the evaluation asks, trailing the first stage.
 
@@ -799,6 +805,7 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
         - an ask already in twin-records.jsonl is skipped
         - with follow True the stage waits for the first stage to record more asks; otherwise it stops when none is ready
         - returns the number of asks the twins ran in this call
+        - check_freeze refuses a work folder frozen against the checkpoint other than scored_against
         - a work folder started under other settings is refused, as in the first stage, with the same two allowed changes; this stage saves the state only
           when it wrote the first freeze, so it never overwrites the first stage's progress
         - before it runs a new ask, every twin line whose principles twin failed on the limit is forecast again under the limit now read
@@ -810,7 +817,7 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
     """
     state = load_state( work.state )
     fresh = "freeze" not in state
-    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code ), accept_code_change ) and fresh: save_state( work.state, state )
+    if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code, scored_against ), accept_code_change ) and fresh: save_state( work.state, state )
     frozen_bound = freeze_limits( models, state )
     models.discard_unrecorded_limit_failures( TWIN_ARMS, { line[ "id" ] for line in read_jsonl( work.twins ) } if os.path.exists( work.twins ) else set() )
     rerun_bound_failures( session, asks, models, work, TWIN_ARMS[ 1 ], work.twins, frozen_bound, out=out, chunk=chunk )
@@ -979,6 +986,7 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
         - a stop on the principle limit prints its named message and returns STOP_EXIT (3) with the work saved; any other return is 0
         - --accept-code-change <old sha>:<new sha> names the one code change a resume may carry
         - --limit N cuts the evaluation asks to the first N, so a trial never reaches a real run's work folder
+        - --checkpoint names the freeze file the run is scored against; every run of every stage first prints which one, through out
         - returns 0
     """
     parser = argparse.ArgumentParser( description="Replay the archive of asks through the forecasting arms" )
@@ -991,9 +999,12 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
     parser.add_argument( "--poll-seconds", type=int, default=60 )
     parser.add_argument( "--chunk", type=int, default=CHUNK_SIZE )
     parser.add_argument( "--accept-code-change", default=None, help="<old sha>:<new sha>, the caller's word that the code change does not alter what the run measures; recorded in the freeze history" )
+    parser.add_argument( "--checkpoint", default=None, help="the freeze file the run is scored against; default is the 18 Nov checkpoint, src/conf/prediction-checkpoint.json" )
     parser.add_argument( "--limit", type=int, default=None, help="predict only the first N evaluation asks, for a short trial in its own work folder" )
     args = parser.parse_args( argv )
     work = WorkFolder( args.work )
+    scored_against = checkpoint_name( cu.get_project_root() + CHECKPOINT_PATH if args.checkpoint is None else args.checkpoint )
+    out( f"[checkpoint] scored against: {scored_against}" )
     if args.stage == "report":
         records = read_jsonl( work.records )
         twins   = read_jsonl( work.twins ) if os.path.exists( work.twins ) else []
@@ -1011,8 +1022,8 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
         ids    = evaluation_ids( asks, fixture_ids( args.fixture ) )[ :args.limit ]
         models = default_models( session, embed, embed.encoder, f"{extractor_settings()[ 0 ]}:{PROMPT_VERSION}", work ) if make_models is None else make_models( session, embed )
         try:
-            if args.stage == "first": run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=query_fn, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change )
-            else: run_twin_stage( session, asks, ids, models, work, follow=args.follow, poll_seconds=args.poll_seconds, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change )
+            if args.stage == "first": run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=query_fn, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change, scored_against=scored_against )
+            else: run_twin_stage( session, asks, ids, models, work, follow=args.follow, poll_seconds=args.poll_seconds, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change, scored_against=scored_against )
         except BoundStop as stop:
             embed.flush()
             out( str( stop ) )

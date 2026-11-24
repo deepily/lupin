@@ -11,18 +11,29 @@ type with fewer than 20 eligible asks in the final window is deferred until the 
 The freeze file, ``checkpoint.json``, names the report's sha256, the cohort's ``sha256_of_rows`` and the
 commit that froze the settings. A later report is refused, with the mismatch named, when the baseline arm's
 ``snapshot_sha256`` is not the one in that file.
+
+The answer-handling plan keeps a second freeze file beside that one. Its document also carries ``bindings``:
+the gold labels' sha256, the judge's version and the scorer's version. A freeze document without ``bindings``
+is the 18 Nov checkpoint, and its cohort-only check is unchanged. An unset binding is stored as JSON null.
+It can never match anything, so a second checkpoint with an unset binding refuses every report until it is set.
 """
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sklearn.metrics import confusion_matrix, jaccard_score, precision_recall_fscore_support
 
+import cosa.utils.util as cu
+from cosa.repo.duplicate_check.config import is_empty
 from cosa.research.phi4_flash_lite_study.freeze_corpus import sha256_of_rows, verify_snapshot, write_snapshot
 
 DEFERRAL_FLOOR = 20
+BOUND_KEYS     = ( "gold_sha256", "judge_version", "scorer_version" )
+FIRST_NAME     = "18 Nov checkpoint (cohort sha only)"
+SECOND_NAME    = "answer-handling checkpoint (cohort sha, gold labels sha, judge version, scorer version)"
 
 
 class CheckpointMismatch( RuntimeError ):
@@ -151,23 +162,32 @@ def render_report( summaries: Dict[str, Dict[str, Dict]], final_window_asks: Dic
 
 
 def write_checkpoint( report_text: str, cohort_rows: List[Dict], snapshot_path: str, manifest_path: str,
-                      checkpoint_path: str, settings_commit: str, frozen_at: Optional[str] = None ) -> Dict[str, Any]:
+                      checkpoint_path: str, settings_commit: str, frozen_at: Optional[str] = None,
+                      bindings: Optional[Dict[str, Optional[str]]] = None ) -> Dict[str, Any]:
     """
     Freeze the cohort and write the freeze file.
 
     Requires:
         - report_text is the rendered report; cohort_rows is the list of cohort row dicts
         - the three paths are writable; settings_commit names the commit that froze the settings
+        - bindings is None for the 18 Nov kind of checkpoint, else a dict whose keys are the BOUND_KEYS; a value that is None or "" is unset
 
     Ensures:
         - writes the cohort with write_snapshot and a manifest verify_snapshot reads
         - re-derives the cohort sha from the file on disk and refuses when it disagrees
         - writes checkpoint.json with the report sha256, the cohort sha256 and row count, and the settings commit
+        - with bindings, the document also holds them, an unset one stored as null
         - returns the freeze document
 
     Raises:
         - CheckpointMismatch if verify_snapshot does not re-derive the cohort sha
+        - CheckpointMismatch if bindings are given and checkpoint_path already holds a document without bindings, so the 18 Nov file is never overwritten
+        - ValueError if the keys of bindings are not the BOUND_KEYS
     """
+    if bindings is not None:
+        if sorted( bindings ) != sorted( BOUND_KEYS ): raise ValueError( f"bindings must hold exactly {BOUND_KEYS}, got {sorted( bindings )}" )
+        if os.path.exists( checkpoint_path ) and "bindings" not in cu.get_file_as_json( checkpoint_path ):
+            raise CheckpointMismatch( f"{checkpoint_path} is a checkpoint without bindings; the answer-handling checkpoint is written beside it, never over it" )
     cohort_sha = sha256_of_rows( cohort_rows )
     write_snapshot( cohort_rows, snapshot_path )
     with open( manifest_path, "w", encoding="utf-8" ) as handle:
@@ -181,33 +201,73 @@ def write_checkpoint( report_text: str, cohort_rows: List[Dict], snapshot_path: 
         "settings_commit" : settings_commit,
         "frozen_at"       : frozen_at if frozen_at is not None else datetime.now( timezone.utc ).isoformat(),
     }
+    if bindings is not None: document[ "bindings" ] = { key: ( bindings[ key ] or None ) for key in BOUND_KEYS }
     with open( checkpoint_path, "w", encoding="utf-8" ) as handle:
         json.dump( document, handle, indent=2, sort_keys=True )
         handle.write( "\n" )
     return document
 
 
-def refuse_post_checkpoint_report( records: List[Dict], checkpoint_path: str, printer=print ) -> int:
+def checkpoint_name( checkpoint_path: str ) -> str:
     """
-    Refuse a report whose baseline arm is not on the frozen cohort.
+    Name the checkpoint a freeze file is.
+
+    Requires:
+        - checkpoint_path names a freeze file written by write_checkpoint
+
+    Ensures:
+        - returns SECOND_NAME when the document holds bindings, else FIRST_NAME
+
+    Raises:
+        - OSError if the file cannot be read
+    """
+    return SECOND_NAME if "bindings" in cu.get_file_as_json( checkpoint_path ) else FIRST_NAME
+
+
+def _matches( frozen: Optional[str], current: Optional[str] ) -> bool:
+    """
+    Compare one bound value.
+
+    Requires:
+        - frozen and current are a string, None or ""
+
+    Ensures:
+        - returns True only when both are set and equal; None, "" and white space are unset (config.is_empty), and an unset value equals nothing, itself included
+    """
+    return not is_empty( frozen ) and not is_empty( current ) and frozen == current
+
+
+def refuse_post_checkpoint_report( records: List[Dict], checkpoint_path: str, printer=print,
+                                   current: Optional[Dict[str, Optional[str]]] = None ) -> int:
+    """
+    Refuse a report that is off the frozen cohort or off a bound value.
+
+    A freeze file with bindings is the answer-handling checkpoint; one without is the 18 Nov checkpoint, checked on the cohort alone.
 
     Requires:
         - records are the baseline arm's replay records, each with snapshot_sha256
         - checkpoint_path names a checkpoint.json written by write_checkpoint
+        - current is None, or the report's own gold_sha256, judge_version and scorer_version; the 18 Nov kind of file ignores it
 
     Ensures:
-        - returns 0 when every record's snapshot_sha256 equals the freeze file's cohort sha256
-        - otherwise prints the mismatch, naming both shas, and returns 3
+        - returns 0 when every record's snapshot_sha256 equals the freeze file's cohort sha256 and, for a file with bindings, each of the three bound values is set and equals the current one
+        - otherwise prints one line naming every mismatch, both values each, and returns 3
         - an empty record list is refused, because it matches nothing
+        - for a file with bindings, a missing current is refused, and so is any bound value unset on either side
 
     Raises:
         - OSError if the freeze file cannot be read
     """
-    with open( checkpoint_path, "r", encoding="utf-8" ) as handle:
-        frozen = json.load( handle )[ "cohort_sha256" ]
-    seen = sorted( { record[ "snapshot_sha256" ] for record in records } )
-    if seen == [ frozen ]: return 0
-    printer( f"REFUSED: the baseline arm's snapshot_sha256 {seen or 'none (no records)'} is not the frozen cohort sha256 {frozen}" )
+    document = cu.get_file_as_json( checkpoint_path )
+    frozen   = document[ "cohort_sha256" ]
+    seen     = sorted( { record[ "snapshot_sha256" ] for record in records } )
+    problems = [] if seen == [ frozen ] else [ f"the baseline arm's snapshot_sha256 {seen or 'none (no records)'} is not the frozen cohort sha256 {frozen}" ]
+    if "bindings" in document:
+        now = {} if current is None else current
+        problems += [ f"{key} {now.get( key )!r} does not match the frozen {document[ 'bindings' ][ key ]!r}"
+                      for key in BOUND_KEYS if not _matches( document[ "bindings" ][ key ], now.get( key ) ) ]
+    if not problems: return 0
+    printer( "REFUSED: " + "; ".join( problems ) )
     return 3
 
 
@@ -217,6 +277,7 @@ def main( argv: Optional[Sequence[str]] = None, printer=print ) -> int:
 
     Requires:
         - argv holds --records, a JSON file of baseline-arm records, and --checkpoint, the freeze file
+        - --current, optional, is a JSON file holding the report's own gold_sha256, judge_version and scorer_version
 
     Ensures:
         - returns refuse_post_checkpoint_report's code, so a mismatch is a non-zero exit
@@ -225,10 +286,14 @@ def main( argv: Optional[Sequence[str]] = None, printer=print ) -> int:
     parser = argparse.ArgumentParser( description="Refuse a report that is not on the frozen cohort." )
     parser.add_argument( "--records", required=True )
     parser.add_argument( "--checkpoint", required=True )
+    parser.add_argument( "--current", default=None )
     args = parser.parse_args( argv )
     with open( args.records, "r", encoding="utf-8" ) as handle:
         records = json.load( handle )
-    return refuse_post_checkpoint_report( records, args.checkpoint, printer )
+    current = None
+    if args.current is not None:
+        with open( args.current, "r", encoding="utf-8" ) as handle: current = json.load( handle )
+    return refuse_post_checkpoint_report( records, args.checkpoint, printer, current )
 
 
 if __name__ == "__main__":  # pragma: no cover - thin process entry, main() is what the tests drive
