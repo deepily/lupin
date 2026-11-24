@@ -9,7 +9,7 @@ pins:
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker@ed1b3c7973
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker.check@37ecd22e31
   - cosa.agents.decision_proxy.smart_router.SmartRouter@6734207a13
-  - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy@0b7f9fefbf
+  - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy@700dfe050f
   - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy.gate@0ee4450d30
 ---
 # Decision proxy
@@ -25,6 +25,7 @@ The decision proxy answers questions that ask for a response, on the user's beha
 ## The gate
 - `EngineeringStrategy.gate` first asks the circuit breaker: a tripped category gives `defer`.
 - The conformal and Thompson options exist in `EngineeringStrategy`, but its three callers never turn them on. So trust mode `shadow` (the default) always gives `shadow`. In `suggest` mode, level 2 and above give `suggest` and level 1 gives `shadow`. In `active` mode, level 1 gives `shadow` and level 2 gives `suggest`. Level 3 gives `act` at classification confidence 0.80 or more, else `suggest`.  Level 4 gives `act`, except `suggest` for the destructive category, below confidence 0.50, and for a 10% audit sample. Level 5 always gives `act`. A Thompson draw can only lower the result.
+- With `decision proxy neither is no ruling enabled` on, `note_stance` keeps each category's last 20 answer stances. While more than 1 in 10 is a neither, `get_trust_level` holds the category at the level it had when the block began ([[decision-proxy-agreement]]). Given a `stored_answers` callable, a fresh strategy rebuilds each window from the newest 20 stored human stances per category, so restarts keep it. With the switch off the windows start empty.
 - The strategy's heuristic answer is `approved`, except for deployment, destructive and architecture questions, which get `requires_review`. `EngineeringStrategy` has an optional model fallback, but no caller supplies the client and case store it needs, so it never runs.
 
 ## Trust
@@ -33,8 +34,7 @@ The decision proxy answers questions that ask for a response, on the user's beha
 - The SWE orchestrator feeds the tracker: a success when the proxy acts alone. Otherwise `forecast_agreement` scores the user's answer against the forecast, and a human approval of a `requires_review` forecast counts as success ([[decision-proxy-agreement]]). The ratify route updates stored counters, not the tracker.
 
 ## Circuit breaker
-- `check` trips a category when at least 10 decisions exist and the error rate is above its threshold. It also trips when 5 or more confidence samples average below the collapse threshold.
-- A trip starts a cooldown. It also demotes the category by the configured number of levels under every model: `beta` and `blr` have their counters lowered too. After the cooldown, `check` reads the same lifetime counters, so a category still over the threshold trips again.
+- `check` trips a category when at least 10 decisions exist and the error rate is above its threshold. It also trips when 5 or more confidence samples average below the collapse threshold. A trip starts a cooldown. It also demotes the category by the configured number of levels under every model: `beta` and `blr` have their counters lowered too. After the cooldown, `check` reads the same lifetime counters, so a category still over the threshold trips again.
 
 ## Smart router
 - `DecisionResponder` asks `SmartRouter` before posting an automatic answer. In active hours, with the named human connected, it posts nothing and records a defer. The feed is `user_presence.sessions_feed`; a failing feed reads as not connected. The SWE orchestrator does not consult the router. Router and responder take the zone for the active hours from `decision proxy timezone` when none is passed. An absent key raises.

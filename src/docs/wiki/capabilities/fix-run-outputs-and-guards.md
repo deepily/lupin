@@ -6,7 +6,7 @@ pins:
   - cosa.agents.shared.report_writer.ReportWriter@e6ec009b2c
   - cosa.agents.shared.resume_guard.resume_covers@54f618ac21
   - cosa.agents.shared.sdk_error_result.error_result_text@670be3458c
-  - cosa.agents.shared.sdk_error_result.login_hint@ae2c20cf15
+  - cosa.agents.shared.sdk_error_result.login_hint@9b0b5bae52
   - cosa.agents.shared.sdk_error_result.raise_error_result@de5e8eacd5
   - cosa.agents.shared.fix_executor.BFETimeoutError@0414fa1b5b
   - cosa.agents.shared.diagnosis_json.parse_diagnosis_json@42f2080b38
@@ -25,7 +25,7 @@ Small helpers shared by both fix expediters. They write the plan and the final r
 - The report slug is cut to six lowercase words, with underscores turned into hyphens. An empty slug becomes `unknown`.
 - `resume_covers` returns true when a saved checkpoint ordinal is at or past a phase's ordinal. It returns false when the run is not a resume.
 - `error_result_text` names the result subtype, the text from the command line tool and any errors, each cut to 500 characters.
-- `login_hint` appends the renew-your-login sentence when the text holds `API Error: 401`.
+- `login_hint` appends the renew-your-login sentence when the text holds `API Error: 401` or `Failed to authenticate` (the `LOGIN_MARKERS`).
 - `raise_error_result` logs the failure and raises `RuntimeError` with the hint included.
 - `BFETimeoutError` is raised when one agent call outlives the wall-clock budget.
 - `fallback_diagnosis_fields( reason )` builds the fields both expediters give a fallback diagnosis: confidence 0.1, category `unknown`, one evidence line.

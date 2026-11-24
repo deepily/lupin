@@ -5,10 +5,11 @@ pins:
   - cosa.research.preference_replay.checkpoint_report.CheckpointMismatch@2811151b0e
   - cosa.research.preference_replay.checkpoint_report.deferral@8affdd7a51
   - cosa.research.preference_replay.checkpoint_report.label_metrics@dc0a564c68
-  - cosa.research.preference_replay.checkpoint_report.main@32e6db34e1
-  - cosa.research.preference_replay.checkpoint_report.refuse_post_checkpoint_report@3d9878f863
+  - cosa.research.preference_replay.checkpoint_report.main@64be14c6b1
+  - cosa.research.preference_replay.checkpoint_report.refuse_post_checkpoint_report@fe85b788a9
   - cosa.research.preference_replay.checkpoint_report.render_report@0842772750
-  - cosa.research.preference_replay.checkpoint_report.write_checkpoint@acd93325c8
+  - cosa.research.preference_replay.checkpoint_report.checkpoint_name@5da7dbc2bf
+  - cosa.research.preference_replay.checkpoint_report.write_checkpoint@3e88c9ec9a
   - cosa.research.preference_replay.before_after_report.ReportMismatch@96b9138bd0
   - cosa.research.preference_replay.before_after_report.check_columns@062cea1ade
   - cosa.research.preference_replay.before_after_report.check_control@9edaad5a86
@@ -25,8 +26,9 @@ pins:
 The Markdown reports of the replay, and the text each context arm embeds ([[preference-replay-core]]). Intervals and McNemar results come from the replay summaries and Brier scores from the calibration fit; nothing is hand-computed here.
 
 ## Checkpoint
-- `render_report` renders the summaries, calibration, findings and cohort facts. `write_checkpoint` freezes the cohort and writes the freeze file. `deferral( final_window_asks )` applies the deferral rule to each interaction type.
-- `refuse_post_checkpoint_report` refuses a report whose baseline arm is not on the frozen cohort, raising `CheckpointMismatch`. `main` checks baseline records against the freeze file.
+- `render_report` renders the summaries, calibration, findings and cohort facts. `write_checkpoint` freezes the cohort and writes the freeze file. With `bindings` (gold sha, judge version, scorer version) it also stores them. It refuses to overwrite a file that has none. `deferral( final_window_asks )` applies the deferral rule to each interaction type.
+- `refuse_post_checkpoint_report` refuses a report whose baseline arm is not on the frozen cohort. For a freeze file with bindings it also refuses any bound value that is unset or differs from the report's own, and returns 3. `main` checks baseline records against the freeze file, with an optional `--current` file holding the report's own bound values.
+- `checkpoint_name( checkpoint_path )` names a freeze file's checkpoint: the second when it holds bindings, else the first.
 - `label_metrics` is a scikit-learn per-label scorer that nothing calls yet.
 
 ## Before and after

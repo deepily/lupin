@@ -2,16 +2,16 @@
 capability: prediction-engine
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@8ba8f79827
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@a87c4f3690
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.predict@d8d8445bfa
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_outcome@fd02419869
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_outcome@13f97dac54
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_hint_vote@6eea5b4fb5
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.get_accuracy_summary@6b034cadf8
   - cosa.agents.prediction_engine.prediction_engine.get_prediction_engine@17a1a42f8d
   - cosa.agents.prediction_engine.prediction_result.PredictionResult@a451dc67b0
   - cosa.agents.prediction_engine.prediction_result.PredictionResult.to_hint_dict@258569218c
   - cosa.agents.prediction_engine.notification_category_classifier.NotificationCategoryClassifier@c07615726c
-  - cosa.agents.prediction_engine.accuracy_comparators.get_comparator@c59bd8b6a2
+  - cosa.agents.prediction_engine.accuracy_comparators.get_comparator@a124c310bf
   - cosa.agents.prediction_engine.xml_models.OpenEndedSynthesisResponse@b42b81a7b6
 ---
 # Prediction engine
@@ -25,7 +25,8 @@ A process-wide singleton that guesses how the user will answer a notification be
 - A multiple-choice case's answers are re-keyed onto the new question's own headers before the vote, because a neighbour's headers seldom match. A header with no usable answer is dropped.
 - `record_outcome` decodes a multiple-choice or batch answer sent as a JSON string. It compares the prediction with the real answer and writes the `prediction_log` row. The engine reads `prediction engine open ended match threshold` when it is built. `record_outcome` hands that and the stored `response_options` to `get_comparator` (see [[prediction-accuracy-comparators]]). It also stores the answer as a new case.
 - `record_forecast` writes the ask-time `prediction_log` row. It takes an optional `pre_commit_hook( session, forecast )`, run before the commit, so what it writes commits with the row. A hook that raises stores neither row. `record_hint_vote` stores a thumbs up or down as a case keyed `hintvote-<notification id>`, so a second vote flips the state in place.
-- Three switches add per-field multiple-choice forecasts ([[prediction-per-field-multiple-choice]]), named failure reasons ([[prediction-failure-visibility]]) and a shadow yes, no or neither stance ([[prediction-three-way-stance]]). Their code defaults are off; the shipped INI sets per-field and three-way true, failure visibility false.
+- `record_outcome` and `record_hint_vote` take an optional `answer_source`, the endpoint's label (`human`, `default`, `not_operator`, `unattributed`). The stored case source follows it: `human` stays `human`, `default` becomes `timeout_default`, and anything else (or none) becomes `unknown`. Only a human answer casts a personal vote.
+- Two more switches, both off in code, are read when the engine is built. `prediction engine lookup neither forecast enabled` makes a `yes_no` forecast a three-way vote (yes, no or neither) over the owner's live cases. They are read as of now, so a replay is not time-bounded. `prediction engine complete action scoring enabled` makes `record_outcome` score with the complete-action comparators. Three switches add per-field multiple-choice forecasts ([[prediction-per-field-multiple-choice]]), named failure reasons ([[prediction-failure-visibility]]) and a shadow yes, no or neither stance ([[prediction-three-way-stance]]). Their code defaults are off; the shipped INI sets per-field and three-way true, failure visibility false.
 
 ## Invariants
 - Cold start is a result, not an error. It covers a disabled engine, no embedding, no store, no similar case and an unsupported type.
@@ -35,6 +36,5 @@ A process-wide singleton that guesses how the user will answer a notification be
 
 ## How it is used
 - `lupin_app.main` builds the singleton with the config at startup. The notify route calls `predict` off the event loop. Confidence under `prediction engine confidence threshold` gives the below-threshold state.
-- The same route stamps the vote gate and the auto-submit keys into the hint, so the client reads them from the server. Auto-submit and batch prefill are **Dormant**: `expeditor prediction auto submit enabled` is false and a unit test pins it. The keys and the client code stay.
-- The response route calls `record_outcome`. The vote route calls `record_hint_vote`.
+- The same route stamps the vote gate and the auto-submit keys into the hint, so the client reads them from the server. Auto-submit and batch prefill are **Dormant**: `expeditor prediction auto submit enabled` is false and a unit test pins it. The keys and the client code stay. The response route calls `record_outcome`. The vote route calls `record_hint_vote`.
 - Thresholds, `top k`, the LanceDB table and the open-ended LLM key are `prediction engine ...` INI keys, with code defaults in `config.py`. A hot reload drops the singleton through `PredictionEngine.reset`.

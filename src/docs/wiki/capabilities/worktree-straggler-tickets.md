@@ -2,7 +2,7 @@
 capability: worktree-straggler-tickets
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.shared.worktree_straggler_tickets.RepositoryStragglerStore@96ef0a9d0e
+  - cosa.agents.shared.worktree_straggler_tickets.RepositoryStragglerStore@adbd026326
   - cosa.agents.shared.worktree_straggler_tickets.compose_archive_row@0fafdae820
   - cosa.agents.shared.worktree_straggler_tickets.compose_row@d79e065756
   - cosa.agents.shared.worktree_straggler_tickets.load_state@53db943f3b
@@ -32,7 +32,7 @@ A tree refused for more than a day, or an archived branch whose work never lande
 - `compose_archive_row` builds the row for an archived branch, keyed `archive:` plus the archive ref. The body gives the count of commits held on no remote, the files they touch (first `MAX_ROW_FILES`), the restore command and the 14-day deadline.
 - `open_archive_tickets` opens one row per archived branch whose commits did not land. An open row with the key is adopted.
 - `load_state` and `write_state` read and atomically replace the sidecar holding `first_refused_at`, `estimated` and `ticket_id` per tree.
-- `RepositoryStragglerStore` is the real store. It has `find_open`, `create` and `drop`. `create` stamps the filer as a persona with the arbiter in brackets.
+- `RepositoryStragglerStore` is the real store. It has `find_open`, `create` and `drop`. `create` stamps the filer as a persona with the arbiter in brackets, at priority P3 unless the caller names another. `amend( ticket_id, note, reason )` appends a note to a live row and leaves a missing or closed one alone.
 
 ## Invariants
 - The store writes to the task repository directly, and not through `/api/tasks`, so the arbiter can close its own rows.

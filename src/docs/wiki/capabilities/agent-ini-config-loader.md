@@ -6,6 +6,7 @@ pins:
   - cosa.agents.shared.config_loader.load_dataclass_from_ini@d57cdf477c
   - cosa.agents.shared.config_loader.model_field@73be90fe01
   - cosa.agents.shared.config_loader.required_model_id@f03443d618
+  - cosa.agents.shared.config_loader.required_positive_int@9d680bd9bb
 ---
 # Agent INI config loader
 
@@ -19,6 +20,7 @@ The one loop the expediter, swe-team and deep research config dataclasses share 
 - `load_dataclass_from_ini` calls the same loop and returns `cls( **kwargs )`.
 - `model_field( key )` declares a config field with no code default. A constructor call that omits it reads `key` through `required_model_id`.
 - `required_model_id( key, config_mgr=None )` reads one Claude model id from the INI with `get_required`, at call time. With no manager it builds its own and sends the banner to stderr.
+- `required_positive_int( key, config_mgr=None )` reads one INI count with `get_required`, at call time. A missing key raises `MissingConfigKeyError`, and a value under 1 raises `ValueError`.
 
 ## Don't
 - Don't map a name that is not a field of the class. It raises `KeyError`.

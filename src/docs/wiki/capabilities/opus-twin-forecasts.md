@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.prediction_engine.opus_twins.OpusBaseline@1ee1c5605d
   - cosa.agents.prediction_engine.opus_twins.baseline_gate@67d55d146e
-  - cosa.agents.prediction_engine.opus_twins.opus_model@adc7ec1c23
+  - cosa.agents.prediction_engine.opus_twins.opus_model@1d0b3d8c22
   - cosa.agents.prediction_engine.opus_twins.principles_gate@5132136808
   - cosa.agents.prediction_engine.opus_twins.run_baseline_opus@556e55fb3e
   - cosa.agents.prediction_engine.opus_twins.run_principles_opus@6820c1850d

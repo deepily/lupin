@@ -18,7 +18,8 @@ pins:
   - lupin_mcp.daily_test_promotion.decide@cba445859e
   - lupin_mcp.daily_test_promotion.conclude@08bf058178
   - lupin_mcp.daily_test_promotion.run@7963fc3ba4
-  - lupin_mcp.daily_test_promotion.main@8466f88d47
+  - lupin_mcp.daily_test_promotion.main@f23110400d
+  - lupin_mcp.daily_test_promotion.registry_owner@47fddd468a
 ---
 # Daily test promotion
 
@@ -35,4 +36,5 @@ pins:
 - A failed deploy or smoke redeploys the sha the VM ran before the deploy, then smokes again. A previous sha this checkout lacks makes the rollback fail, and the row says so.
 
 ## Rows
+- `main` gets the failure-row owner from `registry_owner`, the registry's `test-promotion` owner as a store persona key, unless `--owner` is given. A registry with no such entry raises `ValueError`. A `--check` run files no row and needs no owner.
 - `conclude` writes the job summary and the state, and files at most one row through `row_payload`, at priority P5. The store lets a worker file only at P5, and a manager raises it. The key names the kind and the sha, so a repeat is one row. Kinds are failed, rollback-failed, vm-unreachable and stale. `behind_state` and `stale_due` file stale once per stretch, after 3 days behind, counting deferrals.

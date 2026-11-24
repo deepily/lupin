@@ -5,7 +5,7 @@ pins:
   - cosa.agents.swe_team.cosa_interface.get_sender_id@63b6e070e0
   - cosa.agents.swe_team.voice_io.reconfigure@8265f4719a
   - cosa.agents.swe_team.notification_client.OrchestratorNotificationClient@38473751dd
-  - cosa.agents.utils.agent_notification_dispatcher.make_role_interface_functions@13bd859c83
+  - cosa.agents.utils.agent_notification_dispatcher.make_role_interface_functions@31ef8f7cd2
 ---
 # SWE team notifications
 
@@ -22,7 +22,7 @@ The orchestrator talks to the user and the proxy through `cosa_interface`, and l
 - It keeps only `user_initiated_message` notifications for its own job id. Each goes on a shared queue with message, priority, timestamp and sender.
 - An `urgent` message also sets a shared event, so the orchestrator checks in at once.
 - `start` runs it in a daemon thread with its own event loop. `stop_sync` closes the socket and waits up to 5 seconds for the thread.
-- `notify_progress`, `ask_confirmation`, `request_decision` and `get_feedback` are built by `make_role_interface_functions( globals() )`, the role-aware sibling of `make_interface_functions`. Role is the second parameter of each, so a positional call such as `ask_confirmation( question, role, default, timeout, abstract )` works. It reads `SESSION_ID`, `SESSION_NAME` and `TARGET_USER` from the module on every call and needs no `SENDER_ID`.
+- `notify_progress`, `ask_confirmation`, `request_decision`, `get_feedback` and `ask_confirmation_answer` are built by `make_role_interface_functions( globals() )`, the role-aware sibling of `make_interface_functions`. `ask_confirmation_answer` takes `ask_confirmation`'s arguments and returns the whole `ConfirmationAnswer` (stance, comment, raw text, source). Role is the second parameter of each, so a positional call such as `ask_confirmation( question, role, default, timeout, abstract )` works. It reads `SESSION_ID`, `SESSION_NAME` and `TARGET_USER` from the module on every call and needs no `SENDER_ID`.
 
 ## Invariants
 - The client makes its login token in-process from the user's email. If the user is not found, login returns `None`.

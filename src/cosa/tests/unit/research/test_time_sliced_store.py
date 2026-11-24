@@ -144,3 +144,14 @@ def test_an_unknown_metric_raises_value_error():
     """Only dot and cosine are scores."""
     with pytest.raises( ValueError ):
         TimeSlicedDecisionStore( [] ).find_similar( _vector( 1.0 ), metric="euclid" )
+
+
+def test_visible_cases_gives_whole_copies_of_only_the_visible_cases():
+    """Visible cases come back whole, and editing a copy never edits the store."""
+    store = TimeSlicedDecisionStore( [ _case( "early", _vector( 1.0 ), BEFORE ), _case( "late", _vector( 1.0 ), AFTER ), _case( "novec", None, BEFORE ) ] )
+    assert store.visible_cases() == [], "nothing is visible before advance_to"
+    store.advance_to( ASK )
+    seen = store.visible_cases()
+    assert [ case[ "id" ] for case in seen ] == [ "early", "novec" ] and seen[ 0 ][ "responded_at" ] == BEFORE and seen[ 1 ][ "question_embedding" ] is None
+    seen[ 0 ][ "question_embedding" ][ 0 ] = -1.0
+    assert store.visible_cases()[ 0 ][ "question_embedding" ][ 0 ] == 20.0

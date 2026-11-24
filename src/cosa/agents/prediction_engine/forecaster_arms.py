@@ -7,7 +7,7 @@ A guard can then check that every one reads its reply through ``context_baseline
 A forecaster added to the fleet is added here.
 """
 
-from cosa.agents.prediction_engine import context_baseline, opus_twins, principles_forecast
+from cosa.agents.prediction_engine import answer_history_forecast, context_baseline, opus_twins, principles_forecast
 
 
 def own_parse( baseline ):
@@ -41,4 +41,5 @@ FORECASTER_ARMS = {
     principles_forecast.ARM        : own_parse,
     opus_twins.ARM_BASELINE_OPUS   : opus_parse,
     opus_twins.ARM_PRINCIPLES_OPUS : opus_parse,
+    answer_history_forecast.ARM    : own_parse,
 }

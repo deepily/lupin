@@ -3,7 +3,7 @@ capability: deep-research
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.deep_research.job.DeepResearchJob@e9e3a5b8b5
-  - cosa.agents.deep_research.cli.run_research@15318a5392
+  - cosa.agents.deep_research.cli.run_research@c963505d66
   - cosa.agents.deep_research.cli.generate_abstract_for_cli@802bfc04b2
   - cosa.agents.deep_research.cli.save_report_with_frontmatter@3805e7087f
   - cosa.agents.deep_research.cli.skipped_topics_section@e4502c2378
@@ -22,7 +22,7 @@ pins:
 - `run_research` runs four steps inline: clarify the query, plan sub-topics, research each topic, synthesize one report. The job then makes an abstract (`generate_abstract_for_cli`) and saves the report (`save_report_with_frontmatter`, local or GCS).
 - Topics are researched one after another, not in parallel. Each result is cached for the day under `io/deep-research/{user_email}/cache/{date}`; the key is the topic's six alphabetically-first words (`normalize_query`).
 - `ResearchConfig` has no model default in code: a missing `deep research lead model` or `deep research subagent model` key raises `MissingConfigKeyError`. The shipped INI (`[Lupin: Baseline]`, every section inherits it) sets the lead to `claude-opus-5` and subagents to `claude-sonnet-4-6`, at most 20 turns per call. The job's `lead_model`, `audience` and `audience_context` override.
-- A topic whose research call returns an error result (for example a turn limit) costs that topic only. `run_research` records it as `{ topic, reason }`, tells the user, and goes on. An expired Claude login aborts the run instead, because every later call would fail too. `skipped_topics_section( skipped )` renders the "Skipped topics" section appended to the report. The job passes in an empty `skipped_topics` list and adds a "Skipped topics" line to its completion abstract. When every topic failed, `run_research` raises `RuntimeError`.
+- A topic whose research call returns an error result (for example a turn limit) costs that topic only. `run_research` records it as `{ topic, reason }`, tells the user, and goes on. An expired Claude login (an error naming `API Error: 401` or `Failed to authenticate`) aborts the run instead, because every later call would fail too. `skipped_topics_section( skipped )` renders the "Skipped topics" section appended to the report. The job passes in an empty `skipped_topics` list and adds a "Skipped topics" line to its completion abstract. When every topic failed, `run_research` raises `RuntimeError`.
 - `source_document` paths are already validated by the v2 door; `query_with_seed_context` puts them in front of the question for this job and for the chained ones.
 
 ## Invariants
