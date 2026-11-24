@@ -26,7 +26,7 @@ def _calls():
 
 def test_every_score_caller_passes_per_field():
     found = _calls()
-    assert len( found ) == 5, f"the five known call sites moved or grew: {found}"   # replay_loop 1, archive_replay 2, answer_attrition_table 2
+    assert len( found ) == 6, f"the six known call sites moved or grew: {found}"   # replay_loop 1, archive_replay 2, answer_attrition_table 2, full_answer_arm 1
     assert [ site for site in found if not site[ 2 ] ] == []
 
 
