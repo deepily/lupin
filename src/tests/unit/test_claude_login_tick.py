@@ -52,9 +52,21 @@ def test_print_install_prints_one_crontab_line_and_touches_nothing_else():
     assert out.returncode == 0 and out.stdout.count( "\n" ) == 1 and out.stdout.rstrip().endswith( "# claude-login-tick" )
 
 
-def test_a_missing_container_is_exit_one_not_a_false_all_clear(tmp_path):
+def _tick_with_fake_docker( tmp_path, script ):
+    """Ensures: runs the tick with a fake docker (the given shell script) found first."""
     fake = tmp_path / "docker"
-    fake.write_text( "#!/bin/sh\nexit 1\n" ); fake.chmod( 0o755 )
-    env = dict( os.environ, PATH=f"{tmp_path}:{os.environ[ 'PATH' ]}" )
-    out = subprocess.run( [ "bash", TICK, "nope" ], capture_output=True, text=True, env=env )
-    assert out.returncode == 1 and "cannot read the login" in out.stderr
+    fake.write_text( "#!/bin/sh\n" + script + "\n" ); fake.chmod( 0o755 )
+    env = dict( os.environ, CLAUDE_LOGIN_PATH=f"{tmp_path}:/usr/bin:/bin" )
+    return subprocess.run( [ "bash", TICK, "nope" ], capture_output=True, text=True, env=env )
+
+
+def test_a_container_that_cannot_be_read_is_exit_one_not_a_false_all_clear(tmp_path):
+    out = _tick_with_fake_docker( tmp_path, "exit 1" )
+    assert out.returncode == 1 and "cannot read the login in nope" in out.stderr and out.stdout == ""
+
+
+def test_the_tick_reads_the_two_numbers_from_the_container_and_reports_through_the_fake(tmp_path):
+    blank = _tick_with_fake_docker( tmp_path, "echo 0 1795463156832" )
+    assert blank.returncode == 2 and "claude login in nope is blank" in blank.stdout
+    fine = _tick_with_fake_docker( tmp_path, "echo 100 10000000000000" )
+    assert ( fine.returncode, fine.stdout, fine.stderr ) == ( 0, "", "" )
