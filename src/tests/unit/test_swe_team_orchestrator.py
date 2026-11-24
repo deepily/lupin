@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 import pytest
 
 from cosa.agents.swe_team.config import SweTeamConfig
+from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
 from cosa.agents.swe_team.safety_limits import SafetyGuard
 from cosa.agents.swe_team.state import (
     OrchestratorState,
@@ -58,7 +59,7 @@ def mock_team_io():
     """Mock cosa_interface module with all 4 functions."""
     team_io = MagicMock()
     team_io.notify_progress = AsyncMock()
-    team_io.ask_confirmation = AsyncMock( return_value=True )
+    team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
     team_io.request_decision = AsyncMock( return_value={ "answers": { "Escalation": "Continue to next task" } } )
     team_io.get_feedback = AsyncMock( return_value=None )
     team_io.SESSION_ID = None
@@ -371,6 +372,7 @@ class TestStateChangeCallback:
 
         monkeypatch.setattr( cosa_interface, "notify_progress",  AsyncMock() )
         monkeypatch.setattr( cosa_interface, "ask_confirmation", AsyncMock( return_value=True ) )
+        monkeypatch.setattr( cosa_interface, "ask_confirmation_answer", AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) ) )
         monkeypatch.setattr( cosa_interface, "request_decision", AsyncMock( return_value={ "answers": { "Escalation": "Continue to next task" } } ) )
         monkeypatch.setattr( cosa_interface, "get_feedback",     AsyncMock( return_value=None ) )
         monkeypatch.setattr( MockAgentSDKSession, "DELAY_MULTIPLIER", 0.0 )
@@ -406,7 +408,7 @@ class TestGatedConfirmation:
         assert orch.proxy is None
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
         team_io.notify_progress = AsyncMock()
 
         result = asyncio.run( orch._gated_confirmation(
@@ -419,7 +421,7 @@ class TestGatedConfirmation:
         ) )
 
         assert result is True
-        team_io.ask_confirmation.assert_called_once()
+        team_io.ask_confirmation_answer.assert_called_once()
 
     def test_proxy_act_mode_auto_approves( self ):
         """When proxy returns action='act' and value='approved', should auto-approve."""
@@ -443,7 +445,7 @@ class TestGatedConfirmation:
 
         team_io = MagicMock()
         team_io.notify_progress = AsyncMock()
-        team_io.ask_confirmation = AsyncMock( return_value=False )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if False else "no", None, "yes" if False else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question = "Proceed with deployment?",
@@ -456,7 +458,7 @@ class TestGatedConfirmation:
 
         assert result is True
         # ask_confirmation should NOT be called (auto-approved)
-        team_io.ask_confirmation.assert_not_called()
+        team_io.ask_confirmation_answer.assert_not_called()
         # Auto-approval notification should fire
         team_io.notify_progress.assert_called_once()
         msg = team_io.notify_progress.call_args[ 1 ][ "message" ]
@@ -484,7 +486,7 @@ class TestGatedConfirmation:
         orch.proxy = mock_proxy
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question = "Proceed?",
@@ -496,7 +498,7 @@ class TestGatedConfirmation:
         ) )
 
         assert result is True
-        team_io.ask_confirmation.assert_called_once()
+        team_io.ask_confirmation_answer.assert_called_once()
         # Shadow mode now DOES evaluate (for trust feedback recording)
         mock_proxy.evaluate.assert_called_once()
         # Trust feedback should be recorded
@@ -522,7 +524,7 @@ class TestGatedConfirmation:
         orch.proxy = mock_proxy
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question = "Proceed?",
@@ -535,7 +537,7 @@ class TestGatedConfirmation:
 
         assert result is True
         # The abstract passed to ask_confirmation should include suggestion
-        call_args = team_io.ask_confirmation.call_args
+        call_args = team_io.ask_confirmation_answer.call_args
         abstract_arg = call_args[ 0 ][ 4 ] if len( call_args[ 0 ] ) > 4 else call_args[ 1 ].get( "abstract", "" )
         assert "Proxy suggestion" in abstract_arg
         # Trust feedback should be recorded
@@ -555,7 +557,7 @@ class TestGatedConfirmation:
         orch.proxy = mock_proxy
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question = "Proceed?",
@@ -567,7 +569,7 @@ class TestGatedConfirmation:
         ) )
 
         assert result is True
-        team_io.ask_confirmation.assert_called_once()
+        team_io.ask_confirmation_answer.assert_called_once()
 
 
 # =============================================================================
@@ -711,6 +713,7 @@ class TestDryRunRegression:
 
         monkeypatch.setattr( cosa_interface, "notify_progress",  notify_mock )
         monkeypatch.setattr( cosa_interface, "ask_confirmation", ask_mock )
+        monkeypatch.setattr( cosa_interface, "ask_confirmation_answer", AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) ) )
         monkeypatch.setattr( cosa_interface, "request_decision", decide_mock )
         monkeypatch.setattr( cosa_interface, "get_feedback",     feed_mock )
         monkeypatch.setattr( MockAgentSDKSession, "DELAY_MULTIPLIER", 0.0 )
@@ -880,7 +883,7 @@ class TestTrustFeedbackLoop:
         )
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question="Proceed?", role="lead", default="yes",
@@ -898,7 +901,7 @@ class TestTrustFeedbackLoop:
         )
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=False )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if False else "no", None, "yes" if False else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question="Deploy now?", role="lead", default="no",
@@ -916,7 +919,7 @@ class TestTrustFeedbackLoop:
 
         team_io = MagicMock()
         team_io.notify_progress = AsyncMock()
-        team_io.ask_confirmation = AsyncMock( return_value=False )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if False else "no", None, "yes" if False else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question="Run tests?", role="lead", default="yes",
@@ -924,7 +927,7 @@ class TestTrustFeedbackLoop:
         ) )
 
         assert result is True
-        team_io.ask_confirmation.assert_not_called()
+        team_io.ask_confirmation_answer.assert_not_called()
         mock_proxy.trust_tracker.record_decision.assert_not_called()
 
     def test_suggest_mode_records_agreement( self ):
@@ -934,7 +937,7 @@ class TestTrustFeedbackLoop:
         )
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question="Continue?", role="lead", default="yes",
@@ -951,7 +954,7 @@ class TestTrustFeedbackLoop:
         )
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=False )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if False else "no", None, "yes" if False else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question="Refactor module?", role="lead", default="no",
@@ -969,7 +972,7 @@ class TestTrustFeedbackLoop:
         mock_proxy.trust_tracker.record_decision.side_effect = RuntimeError( "tracker broke" )
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
 
         result = asyncio.run( orch._gated_confirmation(
             question="Proceed?", role="lead", default="yes",
@@ -1053,7 +1056,7 @@ class TestUserMessageQueue:
 
         team_io = MagicMock()
         team_io.notify_progress  = AsyncMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
         team_io.get_feedback     = AsyncMock( return_value=None )
         team_io.is_approval      = MagicMock( return_value=False )
 
@@ -1078,7 +1081,7 @@ class TestUserMessageQueue:
 
         team_io = MagicMock()
         team_io.notify_progress  = AsyncMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
         team_io.get_feedback     = AsyncMock( return_value=None )
 
         feedback = asyncio.run( orch._check_in_with_user(
@@ -1117,7 +1120,7 @@ class TestUserMessageQueue:
 
         team_io = MagicMock()
         team_io.notify_progress  = AsyncMock()
-        team_io.ask_confirmation = AsyncMock( return_value=False )  # User declines
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if False else "no", None, "yes" if False else "no" ) )  # User declines
         team_io.get_feedback     = AsyncMock( return_value=None )
 
         with patch.object( orch, '_analyze_user_messages', new_callable=AsyncMock ) as mock_analyze:
@@ -1243,7 +1246,7 @@ class TestProxyNotificationEmission:
         orch, _ = self._make_orchestrator_with_suggest_proxy()
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
         team_io.notify_progress = AsyncMock()
 
         with patch.object( orch, "_emit_proxy_summary_notification" ) as mock_emit, \
@@ -1284,7 +1287,7 @@ class TestProxyNotificationEmission:
         orch.proxy = mock_proxy
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
 
         with patch.object( orch, "_emit_proxy_summary_notification" ) as mock_emit, \
              patch.object( orch, "_persist_trust_feedback" ):
@@ -1341,7 +1344,7 @@ class TestProxyNotificationEmission:
         orch, _ = self._make_orchestrator_with_suggest_proxy()
 
         team_io = MagicMock()
-        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) )
 
         assert orch._proxy_pending_count == 0
 

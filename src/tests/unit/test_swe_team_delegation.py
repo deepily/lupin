@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cosa.agents.swe_team.config import SweTeamConfig
+from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
 from cosa.agents.swe_team.hooks import (
     notification_hook,
     pre_tool_hook,
@@ -87,6 +88,7 @@ class TestHooks:
         """pre_tool_hook allows dangerous command when user approves."""
         team_io = MagicMock()
         team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
         guard = SafetyGuard( max_iterations=10 )
 
         result = asyncio.run( pre_tool_hook(
@@ -464,6 +466,7 @@ class TestDelegation:
         team_io = MagicMock()
         team_io.notify_progress = AsyncMock()
         team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
 
         # Call the full _execute_live flow via delegation
         result = asyncio.run( orch._delegate_task( spec, 0, team_io ) )
@@ -560,6 +563,7 @@ class TestOrchestratorLiveFlow:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
@@ -585,10 +589,11 @@ class TestOrchestratorLiveFlow:
         team_io = MagicMock()
         team_io.notify_progress  = AsyncMock()
         team_io.ask_confirmation = AsyncMock( return_value=False )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "no", None, "no" ) )
 
         result = asyncio.run( orch._execute_live( team_io ) )
 
-        team_io.ask_confirmation.assert_called_once()
+        team_io.ask_confirmation_answer.assert_called_once()
         assert "cancelled" in result.lower()
 
     @patch( "cosa.agents.swe_team.orchestrator.sdk_query" )
@@ -609,6 +614,7 @@ class TestOrchestratorLiveFlow:
         team_io = MagicMock()
         team_io.notify_progress  = AsyncMock()
         team_io.ask_confirmation = AsyncMock( return_value=False )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "no", None, "no" ) )
 
         result = asyncio.run( orch._execute_live( team_io ) )
 
@@ -648,6 +654,7 @@ class TestOrchestratorLiveFlow:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
@@ -676,6 +683,7 @@ class TestOrchestratorLiveFlow:
         team_io = MagicMock()
         team_io.notify_progress  = AsyncMock()
         team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
 
         with patch( "cosa.agents.swe_team.orchestrator.ProgressLog" ) as MockPL, \
              patch( "cosa.agents.swe_team.orchestrator.FeatureList" ) as MockFL:
@@ -719,6 +727,7 @@ class TestOrchestratorLiveFlow:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes", None, "yes" ) )
             team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )

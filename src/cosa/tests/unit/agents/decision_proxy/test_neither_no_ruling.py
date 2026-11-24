@@ -139,7 +139,7 @@ def test_a_neither_is_no_ruling_leaves_the_counters_alone_and_logs_a_re_frame_re
     orch._persist_trust_feedback.assert_not_called()
     assert "[PROXY-REFRAME]" in caplog.text and "ask it another way" in caplog.text and "deployment" in caplog.text
     meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
-    assert meta == { "job_id": "swe-1", "user_answer": None, "answer_stance": "neither", "answer_comment": "ask it another way" }
+    assert meta == { "job_id": "swe-1", "user_answer": None, "answer_stance": "neither", "answer_comment": "ask it another way", "answer_raw": "neither [comment: ask it another way]" }
     assert write.call_args.kwargs[ "extra" ][ "rule_agreement" ] is None
 
 
@@ -175,11 +175,40 @@ def test_with_the_switch_off_every_shape_is_scored_exactly_as_today( raw ):
     answer      = raw.lower().strip().startswith( "yes" )
     result, write = _ask( orch, io, False )
     assert result is answer
-    io.ask_confirmation.assert_awaited_once()
-    io.ask_confirmation_answer.assert_not_called()
+    io.ask_confirmation_answer.assert_awaited_once()
+    io.ask_confirmation.assert_not_called()
     proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=answer )
     orch._persist_trust_feedback.assert_called_once_with( "testing", answer )
-    assert write.call_args.kwargs[ "extra" ][ "metadata_json" ] == { "job_id": "swe-1", "user_answer": answer }
+    proxy.note_stance.assert_not_called()
+    proxy.reframe_blocked.assert_not_called()
+    assert write.call_args.kwargs[ "extra" ][ "metadata_json" ][ "user_answer" ] is answer
+
+
+@pytest.mark.parametrize( "switch", [ False, True ] )
+@pytest.mark.parametrize( "raw, stance, comment", [
+    ( "yes", "yes", None ), ( "no", "no", None ), ( "neither", "neither", None ),
+    ( "yes [comment: leave config alone]", "yes", "leave config alone" ),
+    ( "neither [comment: ask it another way]", "neither", "ask it another way" ),
+] )
+def test_the_row_carries_the_stance_the_comment_and_the_raw_text_whatever_the_switch_says( raw, stance, comment, switch ):
+    _, write = _ask( _orch()[ 0 ], _io( raw ), switch )
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert ( meta[ "answer_stance" ], meta[ "answer_comment" ], meta[ "answer_raw" ] ) == ( stance, comment, raw )
+
+
+def test_a_neither_with_the_switch_off_is_still_scored_a_no_while_its_stance_is_stored():
+    orch, proxy = _orch( value="approved" )
+    result, write = _ask( orch, _io( "neither" ), False )
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert ( result, meta[ "user_answer" ], meta[ "answer_stance" ] ) == ( False, False, "neither" )
+    proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=False )
+
+
+def test_the_row_carries_the_id_of_the_card_that_asked_when_there_is_one():
+    orch, _ = _orch()
+    with patch( "cosa.agents.swe_team.orchestrator.take_last_ask_notification_id", side_effect=[ None, "card-123" ] ):
+        _, write = _ask( orch, _io( "neither" ), False )
+    assert write.call_args.kwargs[ "notification_id" ] == "card-123"
 
 
 def _real_strategy( category="general" ):

@@ -6,6 +6,7 @@ The first test drives the whole chain with only the HTTP post faked. That is the
 the real dispatcher, the real orchestrator gate and the real repository, into in-memory SQLite.
 It reads the row back in a fresh session. The rest hold each hop on its own.
 """
+from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -78,12 +79,12 @@ def _rows( factory ):
 
 
 class _RealDispatcherIO:
-    """team_io whose ask_confirmation is the real dispatcher's, over a faked HTTP post."""
+    """team_io whose ask_confirmation_answer is the real dispatcher's, over a faked HTTP post."""
     def __init__( self ):
         self.dispatcher = AgentNotificationDispatcher( agent_type="swe.team", supports_role=True )
 
-    async def ask_confirmation( self, question, role, default, timeout, abstract ):
-        return await self.dispatcher.ask_confirmation( question, default=default, timeout=timeout, abstract=abstract, role=role )
+    async def ask_confirmation_answer( self, question, role, default, timeout, abstract ):
+        return await self.dispatcher.ask_confirmation_answer( question, default=default, timeout=timeout, abstract=abstract, role=role )
 
     async def notify_progress( self, *a, **k ): pass
 
@@ -112,16 +113,16 @@ def test_the_shadow_row_carries_the_id_too( factory, monkeypatch ):
 
 
 def test_an_auto_approval_has_no_carrying_notification_so_it_keeps_a_fresh_id( factory ):
-    team_io = MagicMock( ask_confirmation=AsyncMock(), notify_progress=AsyncMock() )
+    team_io = MagicMock( ask_confirmation_answer=AsyncMock(), notify_progress=AsyncMock() )
     _gate( _orchestrator( action="act" ), team_io, factory )
     row = _rows( factory )[ 0 ]
     assert row.notification_id and row.notification_id != NID
-    team_io.ask_confirmation.assert_not_called()
+    team_io.ask_confirmation_answer.assert_not_called()
 
 
 def test_an_ask_that_reported_no_id_falls_back_to_a_fresh_one_rather_than_a_stale_one( factory ):
     dispatcher_module._last_ask_notification_id.set( NID )     # left behind by an earlier ask in this task
-    team_io = MagicMock( ask_confirmation=AsyncMock( return_value=True ), notify_progress=AsyncMock() )
+    team_io = MagicMock( ask_confirmation_answer=AsyncMock( return_value=ConfirmationAnswer( "yes" if True else "no", None, "yes" if True else "no" ) ), notify_progress=AsyncMock() )
     _gate( _orchestrator(), team_io, factory )
     assert _rows( factory )[ 0 ].notification_id != NID
 

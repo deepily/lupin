@@ -14,6 +14,7 @@ Created 2026-05-31 by Extra 1 🪨 (CoSA coverage campaign, swe_team lane, orche
 """
 
 from datetime import datetime, timezone
+from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
 import asyncio
 import io
 import sys
@@ -306,7 +307,7 @@ class TestGatedConfirmation( unittest.TestCase ):
 
     def _team_io( self, confirm=True ):
         t = MagicMock()
-        t.ask_confirmation = AsyncMock( return_value=confirm )
+        t.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if confirm else "no", None, "yes" if confirm else "no" ) )
         return t
 
     def test_no_proxy_falls_through_to_user( self ):
@@ -314,7 +315,7 @@ class TestGatedConfirmation( unittest.TestCase ):
         t = self._team_io( confirm=True )
         out = _run( o._gated_confirmation( "ok?", "lead", "no", 60, None, t ) )
         self.assertTrue( out )
-        t.ask_confirmation.assert_awaited_once()
+        t.ask_confirmation_answer.assert_awaited_once()
 
     def _proxy( self, action, value="approved", trust_mode="active" ):
         p = MagicMock()
@@ -689,11 +690,11 @@ class TestGatedConfirmation( unittest.TestCase ):
     def test_active_act_auto_approves( self ):
         o = _mk_orch()
         o.proxy, _ = self._proxy( "act", value="approved" )
-        t = MagicMock(); t.notify_progress = AsyncMock(); t.ask_confirmation = AsyncMock()
+        t = MagicMock(); t.notify_progress = AsyncMock(); t.ask_confirmation_answer = AsyncMock()
         with patch.object( o, "_notify", AsyncMock() ):
             out = _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, t ) )
         self.assertTrue( out )
-        t.ask_confirmation.assert_not_awaited()   # auto-approved, never asked user
+        t.ask_confirmation_answer.assert_not_awaited()   # auto-approved, never asked user
         o.proxy.trust_tracker.record_decision.assert_not_called()   # no human verdict, so no trust credit
 
     def test_an_auto_approval_leaves_the_real_tracker_and_the_db_untouched( self ):
@@ -703,12 +704,12 @@ class TestGatedConfirmation( unittest.TestCase ):
         o       = _mk_orch()
         tracker = TrustTracker()
         o.proxy = EngineeringStrategy( trust_tracker=tracker, trust_mode="active" )
-        t       = MagicMock(); t.ask_confirmation = AsyncMock()
+        t       = MagicMock(); t.ask_confirmation_answer = AsyncMock()
         o.proxy.gate = MagicMock( return_value="act" )
         with patch.object( o, "_notify", AsyncMock() ), patch.object( o, "_persist_trust_feedback" ) as persist:
             out = _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
         self.assertTrue( out )
-        t.ask_confirmation.assert_not_awaited()
+        t.ask_confirmation_answer.assert_not_awaited()
         self.assertEqual( sum( c[ "total_decisions" ] for c in tracker.get_stats().values() ), 0 )
         persist.assert_not_called()
 
@@ -724,7 +725,7 @@ class TestGatedConfirmation( unittest.TestCase ):
              patch.object( o, "_emit_proxy_summary_notification" ):
             out = _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, t ) )
         self.assertFalse( out )   # the user's answer, not the proxy's "approved"
-        t.ask_confirmation.assert_awaited_once()
+        t.ask_confirmation_answer.assert_awaited_once()
         notify.assert_not_awaited()   # no "[Auto-approved by proxy]" message sent
         persist.assert_called_once()  # trust feedback recorded after the asked answer
 
@@ -737,7 +738,7 @@ class TestGatedConfirmation( unittest.TestCase ):
         with patch.object( o, "_notify", AsyncMock() ) as notify:
             out = _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, t ) )
         self.assertTrue( out )
-        t.ask_confirmation.assert_not_awaited()
+        t.ask_confirmation_answer.assert_not_awaited()
         self.assertIn( "[Auto-approved by proxy]", notify.await_args.kwargs[ "message" ] )
 
     def test_ask_switch_on_with_suggest_behaves_as_today( self ):
@@ -750,8 +751,8 @@ class TestGatedConfirmation( unittest.TestCase ):
              patch.object( o, "_emit_proxy_summary_notification" ):
             out = _run( o._gated_confirmation( "q?", "lead", "no", 60, "base", t ) )
         self.assertTrue( out )
-        t.ask_confirmation.assert_awaited_once()
-        self.assertIn( "Proxy suggestion", t.ask_confirmation.await_args.args[ 4 ] )
+        t.ask_confirmation_answer.assert_awaited_once()
+        self.assertIn( "Proxy suggestion", t.ask_confirmation_answer.await_args.args[ 4 ] )
 
     def test_ask_switch_on_with_defer_behaves_as_today( self ):
         # Switch ON + action "defer": path = step-3 ask, step-4 summary (unchanged).
@@ -763,7 +764,7 @@ class TestGatedConfirmation( unittest.TestCase ):
              patch.object( o, "_emit_proxy_summary_notification" ) as summary:
             out = _run( o._gated_confirmation( "q?", "lead", "no", 60, None, t ) )
         self.assertFalse( out )
-        t.ask_confirmation.assert_awaited_once()
+        t.ask_confirmation_answer.assert_awaited_once()
         summary.assert_called_once()
 
     def test_active_suggest_appends_note_then_asks( self ):
@@ -777,7 +778,7 @@ class TestGatedConfirmation( unittest.TestCase ):
                 out = _run( o._gated_confirmation( "q?", "lead", "no", 60, "base", t ) )
         self.assertTrue( out )
         # suggestion appended to abstract passed to ask_confirmation
-        self.assertIn( "Proxy suggestion", t.ask_confirmation.await_args.args[ 4 ] )
+        self.assertIn( "Proxy suggestion", t.ask_confirmation_answer.await_args.args[ 4 ] )
         self.assertIn( "Proxy Feedback", buf.getvalue() )
 
     def test_active_defer_falls_through_and_summarizes( self ):
@@ -790,7 +791,7 @@ class TestGatedConfirmation( unittest.TestCase ):
              patch.object( o, "_emit_proxy_summary_notification" ) as summary:
             out = _run( o._gated_confirmation( "q?", "lead", "no", 60, None, t ) )
         self.assertFalse( out )
-        t.ask_confirmation.assert_awaited_once()
+        t.ask_confirmation_answer.assert_awaited_once()
         summary.assert_called_once()   # defer → pending ratification
 
     def test_blr_model_records_the_ratified_decision_with_features_and_others_do_not( self ):

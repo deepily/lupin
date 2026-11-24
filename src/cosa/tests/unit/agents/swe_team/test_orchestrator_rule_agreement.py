@@ -5,6 +5,7 @@ The row it persists carries its own rule_agreement, which is NULL for a shadow r
 One test pins the open conflict: a human approval of a deployment scores as a rejection today.
 Only the human and the database are faked.
 """
+from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
 import asyncio
 import contextlib
 import unittest
@@ -22,7 +23,7 @@ def _orch( trust_mode="disabled" ):
 
 def _team_io( confirm ):
     team_io = MagicMock()
-    team_io.ask_confirmation = AsyncMock( return_value=confirm )
+    team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if confirm else "no", None, "yes" if confirm else "no" ) )
     return team_io
 
 
