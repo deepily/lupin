@@ -16,7 +16,8 @@ import pytest
 from cosa.agents.principle_learner import extractor_store
 from cosa.agents.principle_learner.extractor_store import evidence_keys, source_key_for
 from cosa.rest.postgres_models import PreferenceEvidence
-from tests.unit.test_principle_extractor_job import Model, _ask, _hyp, _reply, _result, _run, db  # noqa: F401  (db is a fixture)
+from tests.unit.test_principle_extractor_job import NOW, OWNER, Model, _ask, _hyp, _principle, _reply, _result, _run, db  # noqa: F401  (db is a fixture)
+import uuid
 
 FIXTURE = json.loads( ( Path( __file__ ).resolve().parents[ 1 ] / "fixtures" / "principle_status" / "condition_key_writer_replies.json" ).read_text() )
 
@@ -98,3 +99,24 @@ def test_a_written_row_carries_the_source_key_the_job_computed( db, switches ):
     _run( db, _ask( db, answer="no" ), model )
     row = _rows( db )[ 0 ]
     assert row.source_key is not None and len( row.source_key ) == 32 and row.standing_quote is None
+
+
+def test_a_key_already_stored_for_the_principle_is_offered_and_reused( db, switches ):
+    """
+    Two stored rows, one keyed and one not; the model names the stored key as the same.
+
+    Only a query that returns the keyed row offers it, so the reply's same_as resolves to it and not to the new key.
+    """
+    switches[ "principle learner condition keys enabled" ] = True
+    principle = _principle( db )
+    for note, key in ( ( "n1", "stored key" ), ( "n2", None ) ):
+        db.add( PreferenceEvidence( id=uuid.uuid4(), principle_id=principle.id, notification_id=uuid.uuid4(), field_key=note, relation="supports", condition="x",
+                                    answered_at=NOW, extracted_at=NOW, extractor_version="v", source="extractor", condition_key=key ) )
+    db.commit()
+    offered = []
+    def complete( system, user ):
+        offered.append( json.loads( user ) )
+        return json.dumps( { "same_as": "stored key", "key": "a brand new key" } )
+    keys = evidence_keys( db, principle, "worded some other way", None, "s", complete )
+    assert offered[ 0 ][ "existing_keys" ] == [ "stored key" ]
+    assert keys == { "condition_key": "stored key" }
