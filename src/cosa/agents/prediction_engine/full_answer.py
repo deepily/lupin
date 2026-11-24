@@ -162,6 +162,30 @@ def _text( member, key, where ):
     return text.strip()
 
 
+def _named_probabilities( value, key, vocabulary, label ):
+    """
+    Read one object of probabilities, one for every name in a vocabulary.
+
+    Requires:
+        - value is the parsed reply; key is the member's name; vocabulary is the tuple of names it may hold
+        - label is the words that precede a name in a message, such as "act"
+
+    Ensures:
+        - returns { name: probability } in the vocabulary's order, each a float from 0 to 1; the values need not add up to anything
+
+    Raises:
+        - ReplyRefused( field_missing ) if the member is absent or not an object, or leaves a name out
+        - ReplyRefused( stance_not_in_vocabulary ) if it holds a name outside the vocabulary
+        - ReplyRefused( probabilities_not_normalised ) if a value is not a number from 0 to 1
+    """
+    given   = _object( value, key, key )
+    unknown = [ name for name in given if name not in vocabulary ]
+    if unknown: raise ReplyRefused( REASON_STANCE_NOT_IN_VOCAB, f"{unknown} are not among {vocabulary}" )
+    absent  = [ name for name in vocabulary if name not in given ]
+    if absent: raise ReplyRefused( REASON_FIELD_MISSING, f"{key} leaves out {absent}" )
+    return { name: _probability( given[ name ], f"{label} {name}" ) for name in vocabulary }
+
+
 def _stance_probabilities( value ):
     """
     Read the yes, no and neither probabilities.
@@ -177,12 +201,7 @@ def _stance_probabilities( value ):
         - ReplyRefused( stance_not_in_vocabulary ) if it names a stance other than the three
         - ReplyRefused( probabilities_not_normalised ) if one is not from 0 to 1 or they do not add up to 1
     """
-    given   = _object( value, "probabilities", "probabilities" )
-    unknown = [ name for name in given if name not in STANCES ]
-    if unknown: raise ReplyRefused( REASON_STANCE_NOT_IN_VOCAB, f"{unknown} are not among {STANCES}" )
-    absent  = [ name for name in STANCES if name not in given ]
-    if absent: raise ReplyRefused( REASON_FIELD_MISSING, f"probabilities leaves out {absent}" )
-    read    = { name: _probability( given[ name ], f"probability of {name}" ) for name in STANCES }
+    read    = _named_probabilities( value, "probabilities", STANCES, "probability of" )
     if abs( sum( read.values() ) - 1 ) > NORMALISED_TOLERANCE: raise ReplyRefused( REASON_NOT_NORMALISED, f"the stances add up to {sum( read.values() )}, not 1" )
     return read
 
@@ -202,12 +221,7 @@ def _acts( value ):
         - ReplyRefused( stance_not_in_vocabulary ) if it names an act outside the act vocabulary
         - ReplyRefused( probabilities_not_normalised ) if one is not from 0 to 1
     """
-    given   = _object( value, "acts", "acts" )
-    unknown = [ name for name in given if name not in ACTS ]
-    if unknown: raise ReplyRefused( REASON_STANCE_NOT_IN_VOCAB, f"{unknown} are not among {ACTS}" )
-    absent  = [ name for name in ACTS if name not in given ]
-    if absent: raise ReplyRefused( REASON_FIELD_MISSING, f"acts leaves out {absent}" )
-    return { name: _probability( given[ name ], f"act {name}" ) for name in ACTS }
+    return _named_probabilities( value, "acts", ACTS, "act" )
 
 
 def _qualification( value, known_ids ):

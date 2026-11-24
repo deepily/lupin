@@ -431,3 +431,16 @@ def test_each_switch_ships_as_ruled_in_the_ini_and_has_an_explainer( key, shippe
     line = [ l for l in open( f"{root}/src/conf/lupin-app.ini", encoding="utf-8" ).read().splitlines() if l.startswith( key + " " ) ]
     assert len( line ) == 1 and line[ 0 ].split( "=", 1 )[ 1 ].strip() == shipped
     assert sum( 1 for l in open( f"{root}/src/conf/lupin-app-splainer.ini", encoding="utf-8" ) if l.startswith( key + " " ) ) == 1
+
+
+@pytest.mark.parametrize( "reply, got", [ ( {}, "None" ), ( { "confidence": True }, "True" ), ( { "confidence": 1.5 }, "1.5" ),
+                                           ( { "confidence": -0.1 }, "-0.1" ), ( { "confidence": "high" }, "'high'" ) ] )
+def test_the_confidence_message_is_the_shared_probability_message_with_its_reason_in_front_and_stays_a_plain_error( reply, got ):
+    with pytest.raises( ValueError ) as refused: cb._confidence_of( reply )
+    assert str( refused.value ) == f"{fa.REASON_NOT_NORMALISED}: confidence must be a number from 0 to 1, got {got}"
+    assert not isinstance( refused.value, fa.ReplyRefused ) and isinstance( refused.value.__cause__, fa.ReplyRefused )
+
+
+def test_the_confidence_read_accepts_both_ends_and_returns_a_float():
+    assert cb._confidence_of( { "confidence": 0 } ) == 0.0 and cb._confidence_of( { "confidence": 1 } ) == 1.0
+    assert isinstance( cb._confidence_of( { "confidence": 1 } ), float ) and cb._confidence_of( { "confidence": 0.25 } ) == 0.25
