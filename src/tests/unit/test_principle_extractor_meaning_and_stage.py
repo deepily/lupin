@@ -22,7 +22,7 @@ from cosa.agents.principle_learner.extractor_job import DECISION_STAGE_KEY, MEAN
 from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION, STAGE_SYSTEM_PROMPT, SYSTEM_PROMPT, VERSION_TAGS, active_prompt_version, active_tags, build_user_prompt, current_extractor_version, extractor_version_of, parse_reply, switch_on
 from cosa.rest.db.repositories.answer_meaning_repository import AnswerMeaningRepository
 from cosa.rest.postgres_models import AnswerMeaning, PredictionLog, PreferenceEvidence
-from tests.unit.test_principle_extractor_job import MODEL, NOW, OWNER, T0, Model, _ask, _counts, _hyp, _reply, _result, _run, db  # noqa: F401  (db is a fixture)
+from tests.unit.test_principle_extractor_job import MODEL, NOW, OWNER, T0, Model, _ask, _counts, _hyp, _principle, _reply, _result, _run, db  # noqa: F401  (db is a fixture)
 
 FIXTURE = os.path.join( os.path.dirname( __file__ ), "fixtures", "principle_stage", "real_stage_replies.json" )
 
@@ -343,3 +343,19 @@ def test_complete_sync_returns_the_models_reply_from_inside_a_running_loop_and_s
     async def inside_a_loop(): return job._complete_sync( MODEL, "the system text", "the user text", 30 )
     assert asyncio.run( inside_a_loop() ) == "the reply"
     assert len( model.sent ) == 1 and "the user text" in model.sent[ 0 ]
+
+
+def test_a_row_that_only_names_a_principle_carries_the_stage_the_reply_gave_under_the_stage_switch( db, monkeypatch ):
+    """A bare yes writes a relation and no hypothesis, and that row still stores the stage."""
+    _switches( monkeypatch, DECISION_STAGE_KEY )
+    known = _principle( db )
+    _run( db, _ask( db, answer="yes" ), Model( _reply( { **_result( relations={ str( known.id ): "supports" } ), "decision_stage": "what_to_do_once_asked" } ) ) )
+    row = db.query( PreferenceEvidence ).one()
+    assert row.relation == "supports" and row.condition is None and row.decision_stage == "what_to_do_once_asked"
+
+
+def test_a_row_that_only_names_a_principle_stores_no_stage_with_the_stage_switch_off( db, monkeypatch ):
+    _switches( monkeypatch )
+    known = _principle( db )
+    _run( db, _ask( db, answer="yes" ), Model( _reply( { **_result( relations={ str( known.id ): "supports" } ), "decision_stage": "what_to_do_once_asked" } ) ) )
+    assert db.query( PreferenceEvidence ).one().decision_stage is None
