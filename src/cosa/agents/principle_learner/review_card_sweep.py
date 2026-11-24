@@ -22,7 +22,7 @@ from cosa.agents.prediction_engine.principle_retrieval import load_owner_ledger,
 from cosa.agents.prediction_engine.principle_status import CONTESTED, CONTRADICTING, SOURCE_EXTRACT, SOURCE_SPLIT, SUPPORTING, derive_statuses, usable_at
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_job
-from cosa.agents.principle_learner.extractor_prompt import extractor_version_of
+from cosa.agents.principle_learner.extractor_prompt import current_extractor_version
 from cosa.agents.principle_learner.review_cards import PRINCIPLES_KEY, WINDOW, resolve_conflict, review_card_cap, review_card_times, send_review_card
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.postgres_models import Notification, PreferenceEvidence
@@ -361,7 +361,7 @@ class ReviewCardSweepJob( AgenticJobBase ):
             - a dispatcher is built for the owner's address when none was given
         """
         config     = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        version    = extractor_version_of( config.get_required( extractor_job.MODEL_KEY ) )
+        version    = current_extractor_version( config.get_required( extractor_job.MODEL_KEY ) )
         wait       = config.get_required( WAIT_KEY, return_type="int" )
         cap        = self.cap if self.cap is not None else review_card_cap()
         now        = self.clock() if self.clock is not None else aware_moment( cu.get_current_datetime_iso() )

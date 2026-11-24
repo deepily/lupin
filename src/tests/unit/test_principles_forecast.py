@@ -584,7 +584,7 @@ def test_prepare_passes_the_applicability_check_and_the_caveat_flag_only_when_th
     assert seen == [ ( None, False ) ] and blocks == [ False ] and "applicability dropped" not in capsys.readouterr().out
     on.update( { pf.APPLICABILITY_KEY, pf.CAVEATS_KEY } )
     pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )
-    assert seen[ 1 ][ 0 ][ "card_stage" ] is None and "the plan" in seen[ 1 ][ 0 ][ "card" ] and seen[ 1 ][ 1 ] is True and blocks[ 1 ] is True
+    assert seen[ 1 ][ 0 ][ "card_stage" ] == "what_to_do_once_asked" and "the plan" in seen[ 1 ][ 0 ][ "card" ] and seen[ 1 ][ 1 ] is True and blocks[ 1 ] is True
     assert "applicability dropped: [{'principle_id': 'p1', 'rule': 'antecedent'}]" in capsys.readouterr().out
     on.discard( pf.APPLICABILITY_KEY )
     seen.clear()

@@ -16,9 +16,10 @@ from types import SimpleNamespace
 import pytest
 
 import cosa.agents.principle_learner.extractor_job as job_module
+import cosa.agents.principle_learner.extractor_prompt as prompt_module
 from cosa.agents.prediction_engine.history_derive import meaning_structure
 from cosa.agents.principle_learner.extractor_job import DECISION_STAGE_KEY, MEANING_INPUT_KEY, PrincipleExtractorJob
-from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION, STAGE_PROMPT_VERSION, STAGE_SYSTEM_PROMPT, SYSTEM_PROMPT, build_user_prompt, extractor_version_of, parse_reply
+from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION, STAGE_SYSTEM_PROMPT, SYSTEM_PROMPT, VERSION_TAGS, active_prompt_version, active_tags, build_user_prompt, current_extractor_version, extractor_version_of, parse_reply, switch_on
 from cosa.rest.db.repositories.answer_meaning_repository import AnswerMeaningRepository
 from cosa.rest.postgres_models import AnswerMeaning, PredictionLog, PreferenceEvidence
 from tests.unit.test_principle_extractor_job import MODEL, NOW, OWNER, T0, Model, _ask, _counts, _hyp, _reply, _result, _run, db  # noqa: F401  (db is a fixture)
@@ -141,7 +142,7 @@ def test_with_the_stage_switch_off_a_stage_in_the_reply_is_not_stored_and_the_ol
 
 def test_the_flag_reads_the_ini_file_and_is_false_for_both_new_keys_as_shipped():
     job = PrincipleExtractorJob( str( uuid.uuid4() ), str( OWNER ), "o@example.com" )
-    assert job._flag( MEANING_INPUT_KEY ) is False and job._flag( DECISION_STAGE_KEY ) is False
+    assert job._flag( MEANING_INPUT_KEY ) is False and job._flag( DECISION_STAGE_KEY ) is False and switch_on( DECISION_STAGE_KEY ) is False
 
 
 def test_the_flag_is_true_when_the_ini_value_is_true( monkeypatch ):
@@ -150,14 +151,14 @@ def test_the_flag_is_true_when_the_ini_value_is_true( monkeypatch ):
         def get( self, key, default, return_type ):
             assert ( default, return_type ) == ( "false", "boolean" )
             return key == MEANING_INPUT_KEY
-    monkeypatch.setattr( job_module, "ConfigurationManager", Config )
+    monkeypatch.setattr( prompt_module, "ConfigurationManager", Config )
     job = PrincipleExtractorJob( str( uuid.uuid4() ), str( OWNER ), "o@example.com" )
     assert job._flag( MEANING_INPUT_KEY ) is True and job._flag( DECISION_STAGE_KEY ) is False
 
 
 def test_an_unreadable_settings_file_turns_the_switch_off_and_says_so( monkeypatch, capsys ):
     def broken( env_var_name ): raise OSError( "no ini" )
-    monkeypatch.setattr( job_module, "ConfigurationManager", broken )
+    monkeypatch.setattr( prompt_module, "ConfigurationManager", broken )
     job = PrincipleExtractorJob( str( uuid.uuid4() ), str( OWNER ), "o@example.com" )
     assert job._flag( MEANING_INPUT_KEY ) is False
     assert MEANING_INPUT_KEY in capsys.readouterr().out
@@ -252,11 +253,28 @@ def test_meaning_structure_keeps_a_condition_only_for_the_whole_answer_or_this_f
 
 # ---- row 6: the decision stage ----
 
-def test_the_stage_prompt_extends_the_old_one_and_the_versions_differ_only_when_asked():
+def test_the_stage_prompt_extends_the_old_one():
     assert STAGE_SYSTEM_PROMPT.startswith( SYSTEM_PROMPT ) and STAGE_SYSTEM_PROMPT != SYSTEM_PROMPT
     assert "who_decides" in STAGE_SYSTEM_PROMPT and "what_to_do_once_asked" in STAGE_SYSTEM_PROMPT and "who_decides" not in SYSTEM_PROMPT
-    assert extractor_version_of( "m" ) == f"m:{PROMPT_VERSION}" and extractor_version_of( "m", True ) == f"m:{STAGE_PROMPT_VERSION}"
-    assert STAGE_PROMPT_VERSION != PROMPT_VERSION
+
+
+def test_a_version_has_no_tag_with_every_switch_off_and_one_plus_tag_per_switch_that_is_on_in_registry_order():
+    assert extractor_version_of( "m" ) == f"m:{PROMPT_VERSION}" and extractor_version_of( "m", ( "stage", ) ) == f"m:{PROMPT_VERSION}+stage"
+    assert extractor_version_of( "m", ( "a", "b" ) ) == f"m:{PROMPT_VERSION}+a+b"
+    assert VERSION_TAGS == ( ( DECISION_STAGE_KEY, "stage" ), )
+    assert active_tags( lambda key: False ) == () and active_tags( lambda key: True ) == ( "stage", )
+    assert current_extractor_version( "m", lambda key: True ) == f"m:{PROMPT_VERSION}+stage" and current_extractor_version( "m", lambda key: False ) == f"m:{PROMPT_VERSION}"
+    assert active_prompt_version( lambda key: True ) == f"{PROMPT_VERSION}+stage" and active_prompt_version( lambda key: False ) == PROMPT_VERSION
+
+
+def test_the_live_version_reads_the_ini_file_and_is_untagged_as_shipped():
+    assert active_tags() == () and current_extractor_version( "m" ) == f"m:{PROMPT_VERSION}" and active_prompt_version() == PROMPT_VERSION
+
+
+def test_the_job_writes_under_the_version_every_reader_asks_for( db, monkeypatch ):
+    _switches( monkeypatch, DECISION_STAGE_KEY )
+    _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ) )
+    assert { row.extractor_version for row in db.query( PreferenceEvidence ) } == { current_extractor_version( MODEL, lambda key: True ) }
 
 
 def test_the_committed_prompts_are_what_build_user_prompt_writes_today():
@@ -277,7 +295,7 @@ def test_a_real_model_reply_is_read_by_the_real_reader_and_its_stage_is_stored_o
     out, _ = _run( db, ask, Model( reply ) )
     rows   = db.query( PreferenceEvidence ).all()
     assert out[ "status" ] == "extracted" and rows and { row.decision_stage for row in rows } == { stage }
-    assert { row.extractor_version for row in rows } == { f"{MODEL}:{STAGE_PROMPT_VERSION}" }
+    assert { row.extractor_version for row in rows } == { f"{MODEL}:{PROMPT_VERSION}+stage" }
 
 
 @pytest.mark.parametrize( "given", [ "third_value", None, 7 ] )

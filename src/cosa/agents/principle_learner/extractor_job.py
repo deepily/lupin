@@ -22,11 +22,10 @@ from cosa.agents.prediction_engine.history_derive import derive_answer, meaning_
 from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
-from cosa.agents.principle_learner.extractor_prompt import DECISION_STAGES, STAGE_SYSTEM_PROMPT, SYSTEM_PROMPT, extractor_version_of, build_user_prompt, parse_reply
+from cosa.agents.principle_learner.extractor_prompt import DECISION_STAGE_KEY, DECISION_STAGES, STAGE_SYSTEM_PROMPT, SYSTEM_PROMPT, current_extractor_version, build_user_prompt, parse_reply, switch_on
 from cosa.agents.principle_learner.extractor_rules import card_text, check_field, drafted_text, owners_own_answer, field_answers, project_names, unaided_answer
 from cosa.agents.principle_learner.vocabulary import is_heading
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.config.switch_reader import read_switch
 from cosa.repo.doc_lint import model_transport
 from cosa.rest.db.repositories.answer_meaning_repository import SCHEMA_VERSION as MEANING_SCHEMA_VERSION, AnswerMeaningRepository
 from cosa.rest.postgres_models import Notification
@@ -39,7 +38,6 @@ MODEL_KEY          = "prediction learner extractor model"
 TIMEOUT_KEY        = "prediction learner extractor timeout seconds"
 ENCODER_MODEL_KEY  = "local embedding prose model name"
 MEANING_INPUT_KEY  = "principle learner meaning record input enabled"
-DECISION_STAGE_KEY = "principle learner decision stage enabled"
 PROBE_SYSTEM       = "Answer with the single word ok."
 PROBE_QUESTION     = "Are you there?"
 
@@ -176,9 +174,9 @@ class PrincipleExtractorJob( AgenticJobBase ):
 
         Ensures:
             - returns True only when the key is set true; an absent key is False
-            - an unreadable settings file answers False and prints one line naming the key, through switch_reader.read_switch
+            - an unreadable settings file answers False and prints one line naming the key, through extractor_prompt.switch_on
         """
-        return read_switch( ConfigurationManager, key, "false", lambda error: f"[principle extractor] switch {key!r} unreadable, treated as off: {error}" )
+        return switch_on( key )
 
     def _attach_meaning( self, session, notification_id, entries, draft ):
         """
@@ -280,7 +278,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
             - writes through the session only; the caller commits
         """
         staged    = self._flag( DECISION_STAGE_KEY )
-        extractor = extractor_version_of( model, staged )
+        extractor = current_extractor_version( model, self._flag )
         row = session.get( Notification, uuid.UUID( self.notification_id ) )
         if row is None: raise LookupError( f"notification {self.notification_id} does not exist" )
         if is_review_card( row.response_options ): return self._summary( "skipped_review_card" )

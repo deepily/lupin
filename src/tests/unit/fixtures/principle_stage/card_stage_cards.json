@@ -1,0 +1,30 @@
+{
+  "note": "Episode-shaped cards for card_stage_of, one per case the rule names. The expected stage is the rule's documented answer.",
+  "cards": {
+    "delegation_question": {
+      "expected": "who_decides",
+      "episode": { "title": "Idle agent policy", "message": "Should I ask you before re-spinning an idle agent, or re-spin it on my own?", "abstract": "Agents idle for 40 minutes cost a seat.",
+                   "response_type": "multiple_choice",
+                   "fields": [ { "key": "policy", "prompt": "Who decides when an idle agent is re-spun?", "mode": "single",
+                                 "options": [ { "id": "o1", "label": "Ask me before re-spinning" }, { "id": "o2", "label": "Re-spin without asking" } ] } ] }
+    },
+    "act_now_yes_no": {
+      "expected": "what_to_do_once_asked",
+      "episode": { "title": "Agent idle", "message": "Maya has been idle for 40 minutes. Re-spin this agent now?", "abstract": "", "response_type": "yes_no", "fields": [] }
+    },
+    "act_now_offering_delegation_as_an_option": {
+      "expected": "what_to_do_once_asked",
+      "episode": { "title": "Agent idle", "message": "Maya has been idle for 40 minutes.", "abstract": "", "response_type": "multiple_choice",
+                   "fields": [ { "key": "respin", "prompt": "Re-spin the idle agent?", "mode": "single",
+                                 "options": [ { "id": "o1", "label": "Yes, re-spin this agent now" }, { "id": "o2", "label": "Ask me before re-spinning" } ] } ] }
+    },
+    "delegation_words_only_in_the_abstract": {
+      "expected": "what_to_do_once_asked",
+      "episode": { "title": "Held bugs", "message": "Approve the held bugs?", "abstract": "Earlier you said to handle these without asking you.", "response_type": "yes_no", "fields": [] }
+    },
+    "open_ended_card": {
+      "expected": null,
+      "episode": { "title": "Release notes", "message": "What should the release notes say?", "abstract": "", "response_type": "open_ended", "fields": [] }
+    }
+  }
+}
