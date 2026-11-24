@@ -290,3 +290,107 @@ def test_the_score_table_is_set_off_from_the_mix_table_by_a_blank_line():
     lines = _report( coverage=dict( COVERAGE, scores=SCORES ) ).splitlines()
     index = lines.index( "Predictor score by answer type, in each window:" )
     assert lines[ index - 1 ] == "" and lines[ index + 1 ] == ""
+
+
+# ---- the answer-handling (second) checkpoint: four bound shas -------------------------------------------------
+
+BOUND = { "gold_sha256": "a1" * 32, "judge_version": "judge-v1", "scorer_version": "scorer-v1" }
+
+
+def _second( tmp_path, bindings=None, name="second.json" ):
+    """Write a second checkpoint over the three-row cohort; returns its path."""
+    path = str( tmp_path / name )
+    cr.write_checkpoint( "report", ROWS, str( tmp_path / "c.jsonl" ), str( tmp_path / "m.json" ), path, "abc1234", frozen_at="2026-11-24T00:00:00+00:00",
+                         bindings=BOUND if bindings is None else bindings )
+    return path
+
+
+def _records():
+    return [ { "snapshot_sha256": sha256_of_rows( ROWS ) } ]
+
+
+def test_the_second_checkpoint_holds_the_three_bound_values_beside_the_cohort_sha_and_the_first_kind_holds_none( tmp_path ):
+    document = json.load( open( _second( tmp_path ) ) )
+    assert document[ "bindings" ] == BOUND and document[ "cohort_sha256" ] == sha256_of_rows( ROWS )
+    assert "bindings" not in json.load( open( _frozen( tmp_path ) ) )
+    assert cr.checkpoint_name( _second( tmp_path, name="again.json" ) ) == cr.SECOND_NAME
+    assert cr.checkpoint_name( _frozen( tmp_path ) ) == cr.FIRST_NAME != cr.SECOND_NAME
+
+
+def test_all_four_shas_unchanged_is_allowed( tmp_path ):
+    said = []
+    assert cr.refuse_post_checkpoint_report( _records(), _second( tmp_path ), said.append, dict( BOUND ) ) == 0 and said == []
+
+
+@pytest.mark.parametrize( "key", [ "gold_sha256", "judge_version", "scorer_version" ] )
+def test_a_change_to_any_one_bound_value_is_refused_and_names_that_value_only( tmp_path, key ):
+    said = []
+    assert cr.refuse_post_checkpoint_report( _records(), _second( tmp_path ), said.append, { **BOUND, key: "changed" } ) == 3
+    assert key in said[ 0 ] and "changed" in said[ 0 ] and sum( name in said[ 0 ] for name in cr.BOUND_KEYS ) == 1
+
+
+def test_a_change_to_the_cohort_sha_is_refused_and_the_bound_values_are_not_blamed( tmp_path ):
+    said = []
+    assert cr.refuse_post_checkpoint_report( [ { "snapshot_sha256": "f" * 64 } ], _second( tmp_path ), said.append, dict( BOUND ) ) == 3
+    assert "snapshot_sha256" in said[ 0 ] and not any( name in said[ 0 ] for name in cr.BOUND_KEYS )
+
+
+def test_two_changes_are_both_named_in_the_one_refusal( tmp_path ):
+    said = []
+    assert cr.refuse_post_checkpoint_report( [ { "snapshot_sha256": "f" * 64 } ], _second( tmp_path ), said.append, { **BOUND, "judge_version": "x" } ) == 3
+    assert "snapshot_sha256" in said[ 0 ] and "judge_version" in said[ 0 ] and len( said ) == 1
+
+
+def test_a_second_checkpoint_refuses_a_report_that_brings_no_current_bound_values( tmp_path ):
+    said = []
+    assert cr.refuse_post_checkpoint_report( _records(), _second( tmp_path ), said.append ) == 3
+    assert all( name in said[ 0 ] for name in cr.BOUND_KEYS )
+
+
+@pytest.mark.parametrize( "unset", [ None, "" ] )
+def test_an_unset_value_is_stored_as_null_and_matches_nothing_not_even_an_unset_one( tmp_path, unset ):
+    path = _second( tmp_path, { **BOUND, "gold_sha256": unset } )
+    assert json.load( open( path ) )[ "bindings" ][ "gold_sha256" ] is None
+    for current in ( { **BOUND, "gold_sha256": unset }, BOUND, { **BOUND, "gold_sha256": "b" * 64 } ):
+        said = []
+        assert cr.refuse_post_checkpoint_report( _records(), path, said.append, current ) == 3 and "gold_sha256" in said[ 0 ]
+
+
+def test_a_set_frozen_value_is_not_matched_by_an_unset_current_one( tmp_path ):
+    said = []
+    assert cr.refuse_post_checkpoint_report( _records(), _second( tmp_path ), said.append, { **BOUND, "scorer_version": None } ) == 3 and "scorer_version" in said[ 0 ]
+
+
+def test_the_18_nov_kind_of_checkpoint_ignores_current_values_and_keeps_its_cohort_only_check( tmp_path ):
+    path = _frozen( tmp_path )
+    assert cr.refuse_post_checkpoint_report( _records(), path, lambda line: None ) == 0
+    assert cr.refuse_post_checkpoint_report( _records(), path, lambda line: None, { "gold_sha256": "whatever" } ) == 0
+    said = []
+    assert cr.refuse_post_checkpoint_report( [ { "snapshot_sha256": "0" * 64 } ], path, said.append, dict( BOUND ) ) == 3
+    assert said == [ f"REFUSED: the baseline arm's snapshot_sha256 ['{'0' * 64}'] is not the frozen cohort sha256 {sha256_of_rows( ROWS )}" ]
+
+
+def test_writing_a_second_checkpoint_over_the_18_nov_file_is_refused_and_leaves_it_untouched( tmp_path ):
+    path   = _frozen( tmp_path )
+    before = open( path ).read()
+    with pytest.raises( cr.CheckpointMismatch, match="never over it" ): _second( tmp_path, name="k.json" )
+    assert open( path ).read() == before
+
+
+def test_a_second_checkpoint_may_be_written_again_beside_itself_and_must_hold_exactly_the_bound_keys( tmp_path ):
+    path = _second( tmp_path )
+    assert _second( tmp_path, { **BOUND, "judge_version": "v2" } ) == path
+    with pytest.raises( ValueError, match="exactly" ): _second( tmp_path, { "gold_sha256": "a" }, name="bad.json" )
+
+
+def test_the_command_reads_the_current_values_from_a_file( tmp_path ):
+    path    = _second( tmp_path )
+    records = tmp_path / "r.json"
+    records.write_text( json.dumps( _records() ) )
+    current = tmp_path / "cur.json"
+    current.write_text( json.dumps( BOUND ) )
+    base = [ "--records", str( records ), "--checkpoint", path ]
+    assert cr.main( base + [ "--current", str( current ) ], lambda line: None ) == 0
+    current.write_text( json.dumps( { **BOUND, "judge_version": "x" } ) )
+    assert cr.main( base + [ "--current", str( current ) ], lambda line: None ) == 3
+    assert cr.main( base, lambda line: None ) == 3

@@ -21,6 +21,7 @@ from unittest import mock
 from cosa.agents.prediction_engine import opus_twins, principles_forecast
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.research.preference_replay import archive_replay as ar
+from cosa.research.preference_replay import checkpoint_report as cr
 from cosa.research.preference_replay import extractor_replay as er
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM
 from cosa.research.preference_replay.scratch_db import scratch_session
@@ -518,7 +519,8 @@ def test_main_runs_each_stage_from_the_command_line_and_the_report_stage_writes_
     assert ar.main( [ "report", "--work", str( tmp_path ) ], out=out_lines.append ) == 0
     report = json.load( open( work.report ) )
     assert report[ "asks" ] == len( records ) and report[ "twin_stretch" ] == len( records ) and len( report[ "pairings" ] ) == 6
-    assert out_lines[ 0 ].startswith( f"Evaluation asks: {len( records )};" )
+    assert out_lines[ 0 ] == f"[checkpoint] scored against: {ar.FIRST_NAME}"
+    assert out_lines[ 1 ].startswith( f"Evaluation asks: {len( records )};" )
     PredictionEngine.reset()
 
 
@@ -876,7 +878,7 @@ def test_the_twin_stage_saves_the_state_only_when_it_wrote_the_first_freeze( loa
 
 def _freeze( **changes ):
     """A freeze as run 2 stored it, with the changes applied."""
-    base = { "code_sha": "a" * 40, "code_dirty": False, "vocabulary_version": "v", "bound": 500, "fetch_multiplier": 0, "k": 5 }
+    base = { "code_sha": "a" * 40, "code_dirty": False, "vocabulary_version": "v", "bound": 500, "fetch_multiplier": 0, "k": 5, "scored_against": ar.FIRST_NAME }
     return { **base, **changes }
 
 
@@ -1111,3 +1113,29 @@ def test_a_twin_stage_start_deletes_limit_failures_stored_for_asks_with_no_twin_
     assert [ t[ "id" ] for t in lines ] == ids[ :10 ] and _bound_rows( session ) == 0
     assert all( t[ "arms" ][ ar.TWIN_ARMS[ 1 ] ][ "reason" ] is None for t in lines[ 5: ] ), "an unrecorded limit failure was recorded as a miss"
     assert len( c0.calls ) - before == 3 + 2 * 2, "the three orphans got one fresh principles twin call each (their baseline twin rows were kept); the two new asks got both twins"
+
+
+def test_every_stage_names_the_checkpoint_it_is_scored_against_the_18_nov_one_by_default_and_the_named_file_otherwise( tmp_path, archive ):
+    asks_path, non_path, fixture_path, _ = archive
+    second = tmp_path / "second.json"
+    second.write_text( json.dumps( { "cohort_sha256": "c" * 64, "bindings": { "gold_sha256": None, "judge_version": None, "scorer_version": None } } ) )
+    def run( stage, folder, *extra ):
+        folder.mkdir()
+        lines = []
+        PredictionEngine.reset()
+        argv = [ stage, "--work", str( folder ), "--asks", asks_path, "--non-asks", non_path, "--fixture", fixture_path, "--chunk", "4", "--limit", "6", *extra ]
+        assert ar.main( argv, query_fn=er.canned_model, embed=_open_embedder( folder ), make_models=lambda session, e: _models( session, e )[ 0 ], out=lines.append ) == 0
+        return lines
+    assert run( "first", tmp_path / "a" )[ 0 ] == f"[checkpoint] scored against: {ar.FIRST_NAME}"
+    assert run( "first", tmp_path / "b", "--checkpoint", str( second ) )[ 0 ] == f"[checkpoint] scored against: {cr.SECOND_NAME}"
+    assert cr.SECOND_NAME != ar.FIRST_NAME
+    assert ar.load_state( ar.WorkFolder( str( tmp_path / "b" ) ).state )[ "freeze" ][ "scored_against" ] == cr.SECOND_NAME
+    assert ar.load_state( ar.WorkFolder( str( tmp_path / "a" ) ).state )[ "freeze" ][ "scored_against" ] == ar.FIRST_NAME
+    PredictionEngine.reset()
+
+
+def test_a_work_folder_frozen_against_one_checkpoint_is_refused_under_the_other_and_an_old_freeze_reads_as_the_18_nov_one( ):
+    old = { key: value for key, value in _freeze().items() if key != "scored_against" }
+    assert ar.check_freeze( { "freeze": dict( old ) }, _freeze() ) is False
+    with pytest.raises( ar.FreezeMismatch, match="scored_against" ): ar.check_freeze( { "freeze": dict( old ) }, _freeze( scored_against=cr.SECOND_NAME ) )
+    with pytest.raises( ar.FreezeMismatch, match="scored_against" ): ar.check_freeze( { "freeze": _freeze( scored_against=cr.SECOND_NAME ) }, _freeze() )
