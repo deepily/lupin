@@ -196,7 +196,8 @@ def answer_source_is_human( source ):
 
     Ensures:
         - returns True exactly when the source is "human"
-        - this is the one place the rule lives: the live scoring, the stored row and the restart rebuild all ask it
+        - the rule itself lives in answer_source_of, which decides the label once, at the moment of the answer
+        - this function only reads that label back, for the live scoring, the stored row and the restart rebuild
     """
     return source == "human"
 
