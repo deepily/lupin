@@ -77,14 +77,17 @@ def _card_ask( db ):
                  response_value={ "value": json.dumps( { "answers": { "held_bugs": "Hold", "budget": "no limit" } } ), "source": "ui", "answered_by": { "user_id": str( OWNER ) } } )
 
 
-def _meaning( db, notification_id, schema_version="answer-meaning-v1", annotator="a", native=NATIVE, conditions=CONDITIONS ):
+def _meaning( db, notification_id, schema_version="answer-meaning-v1", annotator="a", native=None, conditions=None ):
     """
     Store one meaning record for a notification.
 
     Ensures:
         - the table exists and one row is added through the repository
+        - native and conditions, when None, default to the module's sample card record
     """
     AnswerMeaning.__table__.create( db.get_bind(), checkfirst=True )
+    native     = NATIVE if native is None else native
+    conditions = CONDITIONS if conditions is None else conditions
     AnswerMeaningRepository( db ).add( notification_id, annotator, "human", native, [ { "act": "approve", "depends_on": [] } ], conditions, "aligned", [], schema_version=schema_version )
     db.commit()
 
