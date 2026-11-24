@@ -179,7 +179,7 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None, *, v
             "created_at"         : decision.created_at if decision is not None else row.predicted_at.isoformat(),
             "owner_user_id"      : decision.owner_user_id if decision is not None else str( notification.recipient_id ),
             "answer_source"      : decision.answer_source if decision is not None else answer_source_of( notification.response_value, notification.response_options ),
-            "timeout_default"    : attribution_tier( { "response_value": notification.response_value } ) == "timeout_default",
+            "timeout_default"    : attribution_tier( { "recipient_id": str( notification.recipient_id ), "response_value": notification.response_value } ) == "timeout_default",
             "responded_at"       : row.responded_at,
             "title"              : notification.title,
             "message"            : notification.message,

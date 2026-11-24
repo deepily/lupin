@@ -102,3 +102,15 @@ def test_an_ask_carries_the_timeout_default_flag_from_the_stored_source_whatever
         return ask[ "timeout_default" ], ask[ "answer_source" ]
     assert flagged( { "value": "yes", "source": "timeout_default" } ) == ( True, "unknown" )
     assert flagged( { "value": "yes", "source": "ui" } ) == ( False, "human" )
+
+
+def test_a_human_answer_that_carries_answered_by_is_built_and_not_flagged():
+    stamp = { "value": "yes", "source": "ui", "answered_by": { "user_id": "r", "method": "jwt" } }
+    class Session( _Session ):
+        def get( self, model, key ):
+            note = super().get( model, key )
+            if model.__name__ == "Notification": note.response_value = stamp
+            return note
+    with patch( "cosa.research.preference_replay.cohorts.scored_rows", return_value=[ _row( "yes_no", YES_NO_STORED ) ] ):
+        ask = cohort_asks( Session(), "yes_no", vectors={} )[ 0 ]
+    assert ( ask[ "timeout_default" ], ask[ "answer_source" ] ) == ( False, "human" )
