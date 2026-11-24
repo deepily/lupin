@@ -17,6 +17,7 @@ abstention row and writes no forecast value, so a refused reply never becomes a 
 The switch is ``prediction engine full answer reply enabled``, default off. With it off nothing here is called.
 """
 
+import collections
 import hashlib
 
 from cosa.agents.io_models.utils.json_object_recovery import recover_json_object
@@ -241,6 +242,7 @@ def _qualification( value, known_ids ):
     Raises:
         - ReplyRefused( field_missing ) if qualification, its probability, its conditions list or a condition's text is absent
         - ReplyRefused( probabilities_not_normalised ) if the probability is not from 0 to 1
+        - ReplyRefused( field_missing ) if a condition's modifies_option_id is neither text nor null, on a card that has option ids
         - ReplyRefused( unknown_option_id ) if a condition changes an option the card does not have
     """
     given = _object( value, "qualification", "qualification" )
@@ -252,6 +254,7 @@ def _qualification( value, known_ids ):
     for condition in listed:
         if not isinstance( condition, dict ): raise ReplyRefused( REASON_FIELD_MISSING, "a condition must be an object" )
         target = condition.get( "modifies_option_id" ) if known_ids else None
+        if target is not None and not isinstance( target, str ): raise ReplyRefused( REASON_FIELD_MISSING, f"a condition's modifies_option_id must be text or null, not {target!r}" )
         if target is not None and target not in known_ids: raise ReplyRefused( REASON_UNKNOWN_OPTION_ID, f"a condition changes {target!r}, which is not an option of the card" )
         conditions.append( { "text": _text( condition, "text", "a condition's text" ), "modifies_option_id": target } )
     return { "probability": probability, "conditions": conditions }
@@ -286,6 +289,45 @@ def _selection( field, given ):
     return { "option_ids": ids }
 
 
+def _names_of( field ):
+    """
+    List the keys a reply may use for one field.
+
+    Requires:
+        - field is one of episode_view's fields
+
+    Ensures:
+        - the keys are its header, its question, and the line the prompt prints for it
+        - returns the header first, then, when the question is not blank, the question, "header: question", and for a field with options
+          "header: question (one may be chosen)" or "(several may be chosen)", the prompt's own line before its option list
+    """
+    key    = field[ "key" ] or "field"
+    prompt = ( field[ "prompt" ] or "" ).strip()
+    names  = [ field[ "key" ] ]
+    if prompt:
+        names += [ prompt, f"{key}: {prompt}" ]
+        if field[ "mode" ] != "text": names.append( f"{key}: {prompt} ({'several' if field[ 'mode' ] == 'multi' else 'one'} may be chosen)" )
+    return names
+
+
+def _reply_key( field, given, owners ):
+    """
+    Find the key the reply used for one field.
+
+    Requires:
+        - field is one of episode_view's fields; given is the reply's fields object
+        - owners counts, over every field of the card, how many fields each name from _names_of belongs to
+
+    Ensures:
+        - returns the header when the reply has it
+        - otherwise returns the question or the "header: question" form only when the reply has exactly one of those names and no other field of the card has that name
+        - returns None when the reply has none of them, or the answer is ambiguous
+    """
+    if field[ "key" ] in given: return field[ "key" ]
+    found = [ name for name in _names_of( field )[ 1: ] if name in given ]
+    return found[ 0 ] if len( found ) == 1 and owners[ found[ 0 ] ] == 1 else None
+
+
 def _fields( value, episode ):
     """
     Read the per-field part of a multiple-choice or batch reply.
@@ -304,10 +346,12 @@ def _fields( value, episode ):
     given  = _object( value, "fields", "fields" )
     batch  = episode[ "response_type" ] == "open_ended_batch"
     chosen = {}
+    owners = collections.Counter( name for field in episode[ "fields" ] for name in _names_of( field ) )
     for field in episode[ "fields" ]:
         if field[ "mode" ] == "text" and not batch: continue
-        if field[ "key" ] not in given: raise ReplyRefused( REASON_FIELD_MISSING, f"the reply leaves out field {field[ 'key' ]!r}" )
-        entry = given[ field[ "key" ] ]
+        name = _reply_key( field, given, owners )
+        if name is None: raise ReplyRefused( REASON_FIELD_MISSING, f"the reply leaves out field {field[ 'key' ]!r}" )
+        entry = given[ name ]
         if batch:
             if not isinstance( entry, dict ): raise ReplyRefused( REASON_FIELD_MISSING, f"field {field[ 'key' ]!r} must be an object holding a gist" )
             chosen[ field[ "key" ] ] = { "gist": _text( entry, "gist", f"field {field[ 'key' ]!r} gist" ) }

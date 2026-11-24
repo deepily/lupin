@@ -489,3 +489,77 @@ def test_an_object_with_one_unknown_name_and_names_left_out_is_refused_for_the_u
     """The unknown-name check runs before the missing-name check, so that reason wins."""
     with pytest.raises( fa.ReplyRefused ) as refused: fa._named_probabilities( { "acts": { "approve": 0.1, "shrug": 0.3 } }, "acts", fa.ACTS, "act" )
     assert refused.value.reason == fa.REASON_STANCE_NOT_IN_VOCAB and str( refused.value ) == f"{fa.REASON_STANCE_NOT_IN_VOCAB}: ['shrug'] are not among {fa.ACTS}"
+
+
+# Keys Haiku wrote on 24 Nov 2026 where the parser looked for the short header, taken verbatim from the raw refused replies (row 76e96ecd). Each is one real card's field.
+def one_field_card( key, prompt, mode ):
+    """Return an episode holding one option field of the given header, question and mode."""
+    option = { "id": "o1", "label": "Land it", "description": None, "recommended": False }
+    other  = { "id": "o2", "label": "Drop it", "description": None, "recommended": False }
+    return { "response_type": "multiple_choice", "fields": [ { "key": key, "prompt": prompt, "mode": mode, "options": [ option, other ] } ] }
+
+
+REAL_KEYS = [ ( "Admit rows", "Which of these three rows should I approve so idle workers can take them?", "multi" ),
+              ( "Jev go", "Do I start the live Jev stage one?", "single" ),
+              ( "Rachel", "Rachel's gitignore branch: land it or drop it?", "single" ) ]
+
+
+def with_fields( reply_fields ):
+    """Return the good yes/no tail with a fields object, for a multiple-choice card of one field."""
+    return { **{ k: v for k, v in good( "yes_no" ).items() if k != "probabilities" }, "fields": reply_fields }
+
+
+@pytest.mark.parametrize( "key, prompt, mode", REAL_KEYS )
+@pytest.mark.parametrize( "form", [ "header", "question", "header: question", "header: question (note)" ] )
+def test_a_field_keyed_by_its_header_its_question_or_the_prompts_line_is_read_as_that_field( key, prompt, mode, form ):
+    note   = "several" if mode == "multi" else "one"
+    name   = { "header": key, "question": prompt, "header: question": f"{key}: {prompt}", "header: question (note)": f"{key}: {prompt} ({note} may be chosen)" }[ form ]
+    card   = one_field_card( key, prompt, mode )
+    chosen = fa.option_ids_of( card[ "fields" ][ 0 ] )[ :1 ]
+    record = fa.parse_full_reply( json.dumps( with_fields( { name: { "option_ids": chosen } } ) ), card )
+    assert record[ "fields" ] == { key: { "option_ids": chosen } }, "the selection is stored under the header, as for a reply keyed by it"
+    assert record[ "answers" ] == { key: [ "Land it" ] if mode == "multi" else "Land it" }
+
+
+def test_the_raw_refused_reply_with_a_header_and_question_key_now_parses():
+    # The reply the 26th refusal gave, verbatim but for its two long values: one fenced reply, three fields, each keyed by header plus question.
+    card = { "response_type": "multiple_choice", "fields": [
+        { "key": "W-A run", "prompt": "W-A's option A confirmation run: hold it and fold the money into Phase 5?", "mode": "single", "options": [ { "id": "o1", "label": "Hold it", "description": None, "recommended": True } ] },
+        { "key": "Embedder", "prompt": "Embedding model: local or vendor?", "mode": "single", "options": [ { "id": "o1", "label": "Local", "description": None, "recommended": True } ] } ] }
+    ids  = { name: fa.option_ids_of( field )[ 0 ] for name, field in zip( ( "W-A run", "Embedder" ), card[ "fields" ] ) }
+    text = "```json\n" + json.dumps( with_fields( { "W-A run: W-A's option A confirmation run: hold it and fold the money into Phase 5?": { "option_ids": [ ids[ "W-A run" ] ] },
+                                                   "Embedder: Embedding model: local or vendor?": { "option_ids": [ ids[ "Embedder" ] ] } } ) ) + "\n```"
+    assert fa.parse_full_reply( text, card )[ "answers" ] == { "W-A run": "Hold it", "Embedder": "Local" }
+
+
+def test_a_long_key_shared_by_two_fields_or_next_to_a_second_spelling_is_still_refused():
+    twin = { "response_type": "multiple_choice", "fields": [ one_field_card( "A", "Land it?", "single" )[ "fields" ][ 0 ], one_field_card( "B", "Land it?", "single" )[ "fields" ][ 0 ] ] }
+    pick = { "option_ids": fa.option_ids_of( twin[ "fields" ][ 0 ] )[ :1 ] }
+    with pytest.raises( fa.ReplyRefused ) as same: fa.parse_full_reply( json.dumps( with_fields( { "Land it?": pick, "B": pick } ) ), twin )
+    assert same.value.reason == fa.REASON_FIELD_MISSING and "'A'" in str( same.value ), "two fields share the question, so it names neither"
+    card = one_field_card( "A", "Land it?", "single" )
+    with pytest.raises( fa.ReplyRefused ) as both: fa.parse_full_reply( json.dumps( with_fields( { "Land it?": pick, "A: Land it?": pick } ) ), card )
+    assert both.value.reason == fa.REASON_FIELD_MISSING, "two spellings of one field cannot say which was meant"
+    with pytest.raises( fa.ReplyRefused ) as none: fa.parse_full_reply( json.dumps( with_fields( { "Something else": pick } ) ), card )
+    assert none.value.reason == fa.REASON_FIELD_MISSING and "'A'" in str( none.value )
+
+
+def test_a_field_with_no_question_is_found_by_its_header_alone():
+    card = one_field_card( "A", None, "single" )
+    pick = { "option_ids": fa.option_ids_of( card[ "fields" ][ 0 ] )[:1] }
+    assert fa.parse_full_reply( json.dumps( with_fields( { "A": pick } ) ), card )[ "answers" ] == { "A": "Land it" }
+    with pytest.raises( fa.ReplyRefused ): fa.parse_full_reply( json.dumps( with_fields( { "A: ": pick } ) ), card )
+
+
+@pytest.mark.parametrize( "written", [ [ PLAN_B ], [], { "id": PLAN_B }, 7, True ] )
+def test_a_multiple_choice_condition_naming_a_list_or_a_number_is_a_field_refusal_not_a_type_error( factory, written ):
+    # Rachel's fuzz on 29ea03af2: a list here reached `target not in known_ids` and raised a plain TypeError, which run_arm does not catch.
+    reply = changed( "multiple_choice", lambda r: r[ "qualification" ][ "conditions" ][ 0 ].update( { "modifies_option_id": written } ) )
+    with pytest.raises( fa.ReplyRefused ) as caught: fa.parse_full_reply( json.dumps( reply ), episode( factory, "multiple_choice" ) )
+    assert caught.value.reason == fa.REASON_FIELD_MISSING and "modifies_option_id" in str( caught.value )
+
+
+def test_the_same_list_on_a_card_with_no_option_ids_is_ignored_like_any_written_id( factory ):
+    reply  = changed( "yes_no", lambda r: r[ "qualification" ][ "conditions" ][ 0 ].update( { "modifies_option_id": [ "yes" ] } ) )
+    record = fa.parse_full_reply( json.dumps( reply ), episode( factory, "yes_no" ) )
+    assert record[ "qualification" ][ "conditions" ][ 0 ][ "modifies_option_id" ] is None
