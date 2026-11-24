@@ -183,6 +183,41 @@ def test_parse_ties_a_condition_to_the_option_it_changes( factory ):
     assert record[ "qualifier" ] == "leave the configuration alone; only with the docs"
 
 
+# A reply Haiku (the context model) gave on 24 Nov 2026 to the yes/no prompt this file's cards build, taken verbatim from a bounded Claude Code call.
+REAL_HAIKU_YES_NO = ( '{"probabilities": {"yes": 0.5, "no": 0.2, "neither": 0.3}, "acts": {"approve": 0.5, "decline": 0.15, "challenge_premise": 0.03, '
+                      '"request_information": 0.15, "defer": 0.1, "propose_alternative": 0.05}, "qualification": {"probability": 0.4, "conditions": '
+                      '[{"text": "The plan in the linked task is acceptable to them after they review it", "modifies_option_id": null}]}, '
+                      '"gist": "Likely a yes to shipping, but only after they check the plan in the linked task; the card gives too little detail to be confident.", '
+                      '"whole_card_probability": 0.45}' )
+
+
+def test_a_real_haiku_yes_no_reply_parses_under_the_yes_no_format( factory ):
+    record = fa.parse_full_reply( REAL_HAIKU_YES_NO, episode( factory, "yes_no" ) )
+    assert record[ "value" ] == "yes" and record[ "confidence" ] == 0.5
+    assert record[ "qualification" ][ "conditions" ] == [ { "text": "The plan in the linked task is acceptable to them after they review it", "modifies_option_id": None } ]
+
+
+@pytest.mark.parametrize( "kind, written", [ ( "yes_no", "yes" ), ( "yes_no", "approve" ), ( "open_ended", "approve" ), ( "open_ended_batch", "o1-000000" ) ] )
+def test_an_option_id_a_model_writes_on_a_card_with_no_option_ids_is_read_as_no_option( factory, kind, written ):
+    # The probe's failure: 9 of 10 Haiku yes/no replies wrote yes or approve here and were refused as unknown_option_id.
+    reply  = changed( kind, lambda r: r[ "qualification" ][ "conditions" ][ 0 ].update( { "modifies_option_id": written } ) )
+    record = fa.parse_full_reply( json.dumps( reply ), episode( factory, kind ) )
+    assert record[ "qualification" ][ "conditions" ] == [ { "text": "leave the configuration alone", "modifies_option_id": None } ]
+
+
+def test_a_multiple_choice_card_still_refuses_a_condition_on_an_option_it_lacks( factory ):
+    reply = changed( "multiple_choice", lambda r: r[ "qualification" ][ "conditions" ][ 0 ].update( { "modifies_option_id": "yes" } ) )
+    with pytest.raises( fa.ReplyRefused ) as caught: fa.parse_full_reply( json.dumps( reply ), episode( factory, "multiple_choice" ) )
+    assert caught.value.reason == fa.REASON_UNKNOWN_OPTION_ID
+
+
+def test_the_formats_of_the_cards_with_no_option_ids_say_null_and_the_choice_format_asks_for_an_id():
+    for kind in ( "yes_no", "open_ended", "open_ended_batch" ):
+        assert '"modifies_option_id": null' in fa.FULL_FORMATS[ kind ] and "<an option id>" not in fa.FULL_FORMATS[ kind ]
+        assert "no option ids, so modifies_option_id is always null" in fa.FULL_FORMATS[ kind ]
+    assert '"modifies_option_id": "<an option id> or null"' in fa.CHOICE_FULL_FORMAT and "always null" not in fa.CHOICE_FULL_FORMAT
+
+
 def test_parse_reads_an_open_ended_and_a_batch_reply_as_a_gist_with_acts_and_conditions( factory ):
     opened = fa.parse_full_reply( json.dumps( good( "open_ended" ) ), episode( factory, "open_ended" ) )
     assert opened[ "gist" ] == "yes, but leave the configuration alone" and opened[ "confidence" ] == 0.6 and "fields" not in opened and "value" not in opened
