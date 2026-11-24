@@ -140,6 +140,24 @@ def test_write_summary_writes_whole_by_rename_and_read_summary_round_trips(tmp_p
     assert [ p[ "count" ] for p in again[ "scan_debt" ][ "points" ] ] == [ 3, 2 ]
 
 
+def test_keep_failed_leaves_a_failed_last_attempt_in_place_and_still_records_the_new_one(tmp_path):
+    path = tmp_path / "s.json"
+    js.write_summary( path, "j", attempt( "failed", at=T0 ) )
+    doc = js.write_summary( path, "j", attempt( "skipped", at=T1 ), keep_failed=True )
+    assert doc[ "last_attempt" ][ "outcome" ] == "failed" and doc[ "last_attempt" ][ "started_at" ] == T0
+    assert [ r[ "outcome" ] for r in doc[ "recent" ] ] == [ "failed", "skipped" ] and doc[ "consecutive_failures" ] == 1
+
+
+def test_keep_failed_changes_nothing_after_a_clean_run_or_with_no_stored_record_or_when_off(tmp_path):
+    path = tmp_path / "s.json"
+    first = js.write_summary( path, "j", attempt( "skipped", at=T0 ), keep_failed=True )
+    assert first[ "last_attempt" ][ "outcome" ] == "skipped"
+    js.write_summary( path, "j", attempt( "clean", at=T0 ) )
+    assert js.write_summary( path, "j", attempt( "skipped", at=T1 ), keep_failed=True )[ "last_attempt" ][ "started_at" ] == T1
+    js.write_summary( path, "j", attempt( "failed", at=T0 ) )
+    assert js.write_summary( path, "j", attempt( "skipped", at=T1 ) )[ "last_attempt" ][ "outcome" ] == "skipped"
+
+
 def test_read_summary_refuses_missing_garbage_and_foreign_schema(tmp_path):
     assert js.read_summary( tmp_path / "nope.json" ) is None
     ( tmp_path / "a.json" ).write_text( "{not json" ); assert js.read_summary( tmp_path / "a.json" ) is None

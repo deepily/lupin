@@ -26,7 +26,7 @@ pins:
 `lupin_mcp.daily_test_promotion` moves the newest merged build to the cloud test VM once a day and smokes it. It is the registry job `test-promotion`, run through `cron-job.sh` and `job_run`, and its switch `cron job test-promotion enabled` ships false.
 
 ## One run
-- `run` takes a lock, then asks `due`. A cron or hand entry is always due. A boot entry runs only when no attempt follows the latest 18:00 slot. `job_cron.cron_last` finds it in the zone `app_zone` reads from the `app timezone` key.
+- `run` takes a lock, then asks `due`. A cron or hand entry is always due. A boot entry runs only when no attempt follows the latest 18:00 slot. A boot that finds the slot served writes a skipped attempt, mode `caught-up`, to the job summary. It leaves `state.json` alone, so the silence rule sees the boot ran. `job_cron.cron_last` finds it in the zone `app_zone` reads from the `app timezone` key.
 - `pick_sha` takes the tip of the working branch. A stored `last_promoted_sha` equal to it ends the run with no VM call.
 - Otherwise `decide` starts the VM if it is not running and reads the sha it runs. That is the first field of the first output line that starts with a 40-digit sha. The wrapper's own `[lupin-vm] + ...` echo line is skipped. An equal sha ends the run. A busy or unknown test server defers it. The VM goes back to its earlier power state.
 

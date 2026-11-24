@@ -418,17 +418,34 @@ def test_a_promotion_after_a_stretch_behind_clears_the_stretch( repo ):
     assert "behind_since" not in load_json_dict( _folder( repo ) / "state.json" )
 
 
-def test_a_boot_after_the_slot_was_served_writes_nothing_and_a_boot_after_a_missed_slot_runs( repo ):
+def test_a_boot_after_the_slot_was_served_records_a_skip_and_a_boot_after_a_missed_slot_runs( repo ):
     first = Runner( **{ "vm-status": ( 0, "RUNNING" ), "run": ( 0, repo.old ) } )
     _run( repo, first, Store(), now=NOW + datetime.timedelta( seconds=5 ) )
-    before = ( _folder( repo ) / "job-summary.json" ).read_text()
+    state_before = ( _folder( repo ) / "state.json" ).read_text()
     runner = Runner()
-    assert _run( repo, runner, Store(), now=NOW + datetime.timedelta( hours=3 ), trigger="boot" ) == 0
-    assert runner.calls == [] and ( _folder( repo ) / "job-summary.json" ).read_text() == before
+    late = NOW + datetime.timedelta( hours=3 )
+    assert _run( repo, runner, Store(), now=late, trigger="boot" ) == 0
+    summary = js.read_summary( _folder( repo ) / "job-summary.json" )
+    attempt = summary[ "last_attempt" ]
+    assert runner.calls == [] and ( _folder( repo ) / "state.json" ).read_text() == state_before
+    assert ( attempt[ "outcome" ], attempt[ "mode" ], attempt[ "trigger" ], attempt[ "started_at" ] ) == ( "skipped", "caught-up", "boot", js.iso_now( late ) )
+    assert attempt[ "evidence" ] == "an attempt is already recorded since the 18:00 slot"
+    assert summary[ "recent" ][ -1 ][ "outcome" ] == "skipped" and len( summary[ "recent" ] ) == 2
     next_morning = NOW + datetime.timedelta( hours=15 )
     ran = Runner( **{ "vm-status": ( 0, "RUNNING" ), "run": ( 0, repo.new ) } )
     assert _run( repo, ran, Store(), now=next_morning + datetime.timedelta( days=1 ), trigger="boot" ) == 0
     assert js.read_summary( _folder( repo ) / "job-summary.json" )[ "last_attempt" ][ "trigger" ] == "boot"
+
+
+def test_a_boot_after_a_failed_run_in_the_same_slot_keeps_the_failed_last_attempt_and_adds_the_skip( repo ):
+    down = Runner( **{ "vm-status": ( 1, "" ) } )
+    assert _run( repo, down, Store(), now=NOW + datetime.timedelta( seconds=5 ) ) == 1
+    state_before = ( _folder( repo ) / "state.json" ).read_text()
+    assert _run( repo, Runner(), Store(), now=NOW + datetime.timedelta( hours=3 ), trigger="boot" ) == 0
+    summary = js.read_summary( _folder( repo ) / "job-summary.json" )
+    assert summary[ "last_attempt" ][ "outcome" ] == "failed" and summary[ "last_attempt" ][ "trigger" ] == "cron"
+    assert [ r[ "outcome" ] for r in summary[ "recent" ] ] == [ "failed", "skipped" ] and summary[ "consecutive_failures" ] == 1
+    assert ( _folder( repo ) / "state.json" ).read_text() == state_before
 
 
 def test_a_second_run_that_finds_the_lock_held_exits_without_touching_the_vm( repo ):
