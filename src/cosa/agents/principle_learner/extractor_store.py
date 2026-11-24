@@ -77,15 +77,17 @@ def _find_or_create_principle( session, owner_id, kind, dimension, hypothesis, e
     return principle
 
 
-def _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report ):
+def _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report, decision_stage=None ):
     """
     Add one evidence row unless its unique key already exists.
 
     Requires:
         - principle is a flushed principle row
         - session_key is the session of the answered notification, or None
+        - decision_stage is None, who_decides or what_to_do_once_asked
 
     Ensures:
+        - a new row carries decision_stage as given, so a run without the stage prompt leaves the column empty
         - a row with the same principle, notification, field, extractor version and source "extractor" is never added twice
         - a new row carries session_key, so status can count sessions after the notification is pruned
         - report counts the row as written or already present
@@ -95,6 +97,7 @@ def _write_evidence( session, principle, notification_id, field_key, relation, c
         report[ "evidence_existing" ] += 1
         return
     fields = { "id": uuid.uuid4(), "relation": relation, "condition": condition, "answered_at": answered_at, "extracted_at": extracted_at,
+               "decision_stage": decision_stage,
                "session_key": session_key }
     session.add( PreferenceEvidence( **fields, **key ) )
     session.flush()
@@ -121,6 +124,7 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
         - a principle created here carries continues_principle_id: the lowest id among the named principles of another extractor
           version, or None when none is named; a relation within one version never sets it, whatever the relation word
         - every evidence row written carries session_key
+        - every evidence row written carries checked[ "decision_stage" ] when the check result has one, else none
         - with no hypothesis, each named principle gets one evidence row with the relation given and no condition
         - the same input written twice adds nothing the second time
     """
@@ -130,7 +134,7 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
     named = { pid: relation for pid, relation in checked[ "relations" ].items() if pid in by_id }
     def record( principle, relation, condition ):
         if not same_heading( principle.dimension, checked[ "dimension" ] ): report[ "dimension_mismatches" ].append( { "principle_id": str( principle.id ), "field_key": field_key } )
-        _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report )
+        _write_evidence( session, principle, notification_id, field_key, relation, condition, answered_at, extracted_at, extractor_version, session_key, report, checked.get( "decision_stage" ) )
     if not checked[ "hypotheses" ]:
         for pid, relation in sorted( named.items() ): record( by_id[ pid ], relation, None )
         return
@@ -141,4 +145,4 @@ def apply_field( session, owner_id, notification_id, field_key, checked, neighbo
             earlier   = sorted( pid for pid in named if by_id[ pid ].extractor_version != extractor_version )
             continues = by_id[ earlier[ 0 ] ].id if earlier else None
             principle = _find_or_create_principle( session, owner_id, checked[ "kind" ], checked[ "dimension" ], hypothesis, extractor_version, encoder_version, embed_fn, continues, extracted_at, report )
-            _write_evidence( session, principle, notification_id, field_key, "supports", hypothesis[ "condition" ], answered_at, extracted_at, extractor_version, session_key, report )
+            _write_evidence( session, principle, notification_id, field_key, "supports", hypothesis[ "condition" ], answered_at, extracted_at, extractor_version, session_key, report, checked.get( "decision_stage" ) )

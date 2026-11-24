@@ -15,17 +15,25 @@ from cosa.agents.principle_learner.vocabulary import VOCABULARY_VERSION, heading
 PROMPT_VERSION = f"extractor-v2-vocab-{VOCABULARY_VERSION}"
 
 
-def extractor_version_of( model ):
+# The decision-stage prompt is a new prompt, so its rows carry a new version and sit beside the old rows;
+# derive_statuses counts current-version evidence only. The old version stays while the switch is off.
+STAGE_PROMPT_VERSION = f"extractor-v3-stage-vocab-{VOCABULARY_VERSION}"
+DECISION_STAGES      = ( "who_decides", "what_to_do_once_asked" )
+
+
+def extractor_version_of( model, decision_stage=False ):
     """
     Name the extractor version a model and the current prompt make.
 
     Requires:
         - model is the extractor model id
+        - decision_stage is True when the decision-stage prompt is in use
 
     Ensures:
         - returns "<model>:<prompt version>", the string the extractor stores on its rows
+        - with decision_stage False the version is PROMPT_VERSION, unchanged from before the stage prompt existed
     """
-    return f"{model}:{PROMPT_VERSION}"
+    return f"{model}:{STAGE_PROMPT_VERSION if decision_stage else PROMPT_VERSION}"
 
 
 SYSTEM_PROMPT = """You extract short conditional preference principles from one answered question.
@@ -50,6 +58,17 @@ Reply with JSON only, in this shape:
 The owner's headings:
 """ + headings_block()
 
+# Added to the system prompt only under the decision-stage switch. The stage is a condition on the answer, never a vocabulary heading.
+STAGE_RULE = """
+
+Decision stage: when the card is a question about whether to act, say which stage this answer is at, per field, as "decision_stage".
+- "who_decides": the owner is answering who decides, for example "Ask me before re-spinning".
+- "what_to_do_once_asked": the owner is answering what to do once asked, for example "Yes, re-spin this agent now".
+- Use null when the field is not a decision about acting. Never invent a third value.
+Add "decision_stage": "who_decides" or "what_to_do_once_asked" or null to each field result."""
+
+STAGE_SYSTEM_PROMPT = SYSTEM_PROMPT + STAGE_RULE
+
 
 def build_user_prompt( episode, entries, neighbours ):
     """
@@ -65,12 +84,14 @@ def build_user_prompt( episode, entries, neighbours ):
         - no notification id, owner id or sender id is written into the prompt
         - history entries carry tier, confidence, status, inferred and the answer value, and no ids
         - a principle's dimension is shown as its approved heading when it has one, so an old name never contradicts the heading rule
+        - an entry carrying a "structure" (option ids and linked conditions from the meaning record) shows it under that key; an entry without one is written exactly as before
     """
     card    = { "title": episode[ "title" ], "abstract": episode[ "abstract" ], "fields": episode[ "fields" ] }
     history = [ { key: entry.get( key ) for key in ( "tier", "confidence", "status", "inferred", "answer" ) } for entry in episode[ "history" ] ]
     known   = [ { "id": str( row.id ), "dimension": shown_dimension( row.dimension ), "statement": row.statement, "scope": row.scope } for row in neighbours ]
     answers = [ { "field_key": entry[ "field_key" ], "answer": entry[ "text" ], "bare_yes": entry[ "bare_yes" ],
-                  "possibly_influenced": entry[ "possibly_influenced" ] } for entry in entries ]
+                  "possibly_influenced": entry[ "possibly_influenced" ], **( { "structure": entry[ "structure" ] } if entry.get( "structure" ) is not None else {} ) }
+                for entry in entries ]
     return "\n\n".join( [ "CARD\n" + json.dumps( card, indent=1, sort_keys=True ), "EARLIER QUESTIONS\n" + json.dumps( history, indent=1, sort_keys=True ),
                           "ANSWERS\n" + json.dumps( answers, indent=1, sort_keys=True ), "EXISTING PRINCIPLES\n" + json.dumps( known, indent=1, sort_keys=True ) ] )
 

@@ -1,0 +1,38 @@
+{
+ "cases": {
+  "what_to_do_once_asked": {
+   "answer_text": "Yes, re-spin this agent now",
+   "parsed_ok": true,
+   "prompt": "CARD\n{\n \"abstract\": \"The worker agent Maya has been idle for 40 minutes. Re-spin it?\",\n \"fields\": [\n  {\n   \"header\": \"respin\",\n   \"key\": \"respin\",\n   \"options\": [\n    {\n     \"id\": \"1\",\n     \"label\": \"Yes, re-spin this agent now\"\n    },\n    {\n     \"id\": \"2\",\n     \"label\": \"Ask me before re-spinning\"\n    }\n   ],\n   \"question\": \"Re-spin the idle agent?\"\n  }\n ],\n \"title\": \"Agent idle\"\n}\n\nEARLIER QUESTIONS\n[]\n\nANSWERS\n[\n {\n  \"answer\": \"Yes, re-spin this agent now\",\n  \"bare_yes\": false,\n  \"field_key\": \"respin\",\n  \"possibly_influenced\": false,\n  \"structure\": {\n   \"conditions\": [],\n   \"option_ids\": [\n    \"respin#o1\"\n   ],\n   \"referred_option_ids\": [],\n   \"write_in_text\": null\n  }\n }\n]\n\nEXISTING PRINCIPLES\n[]",
+   "reply": "{\"fields\": [{\"field_key\": \"respin\", \"kind\": \"decision\", \"dimension\": \"Save my attention\", \"hypotheses\": [{\"statement\": \"When a worker agent has been idle for a long stretch, re-spin it right away without asking me first.\", \"rationale\": \"The owner chose 'Yes, re-spin this agent now' over asking first, for an agent idle 40 minutes. This shows a preference to delegate routine recovery of idle agents instead of being interrupted.\", \"scope\": \"global\", \"condition\": \"worker agent has been idle for 40 minutes\", \"grounded_in\": \"card\"}, {\"statement\": \"Do not interrupt me to approve re-spinning an idle agent; handle it and carry on.\", \"rationale\": \"Choosing immediate re-spin over 'Ask me before re-spinning' suggests the owner wants fewer approval prompts for low-risk fleet maintenance.\", \"scope\": \"global\", \"condition\": \"agent idle\", \"grounded_in\": \"answer\"}], \"relations\": {}, \"decision_stage\": \"what_to_do_once_asked\"}]}"
+  },
+  "who_decides": {
+   "answer_text": "Ask me before re-spinning",
+   "parsed_ok": true,
+   "prompt": "CARD\n{\n \"abstract\": \"The worker agent Maya has been idle for 40 minutes. Re-spin it?\",\n \"fields\": [\n  {\n   \"header\": \"respin\",\n   \"key\": \"respin\",\n   \"options\": [\n    {\n     \"id\": \"1\",\n     \"label\": \"Yes, re-spin this agent now\"\n    },\n    {\n     \"id\": \"2\",\n     \"label\": \"Ask me before re-spinning\"\n    }\n   ],\n   \"question\": \"Re-spin the idle agent?\"\n  }\n ],\n \"title\": \"Agent idle\"\n}\n\nEARLIER QUESTIONS\n[]\n\nANSWERS\n[\n {\n  \"answer\": \"Ask me before re-spinning\",\n  \"bare_yes\": false,\n  \"field_key\": \"respin\",\n  \"possibly_influenced\": false,\n  \"structure\": {\n   \"conditions\": [],\n   \"option_ids\": [\n    \"respin#o1\"\n   ],\n   \"referred_option_ids\": [],\n   \"write_in_text\": null\n  }\n }\n]\n\nEXISTING PRINCIPLES\n[]",
+   "reply": "{\"fields\": [{\"field_key\": \"respin\", \"kind\": \"decision\", \"dimension\": \"Spend, limits and fleet capacity\", \"hypotheses\": [{\"statement\": \"Ask the owner before re-spinning an idle worker agent rather than re-spinning it automatically.\", \"rationale\": \"The owner chose 'Ask me before re-spinning' for the idle agent Maya, which shows they want to decide on re-spins themselves.\", \"scope\": \"global\", \"condition\": \"when a worker agent has been idle for 40 minutes\", \"grounded_in\": \"card\"}], \"relations\": {}, \"decision_stage\": \"who_decides\"}]}"
+  }
+ },
+ "episode": {
+  "abstract": "The worker agent Maya has been idle for 40 minutes. Re-spin it?",
+  "fields": [
+   {
+    "header": "respin",
+    "key": "respin",
+    "options": [
+     {
+      "id": "1",
+      "label": "Yes, re-spin this agent now"
+     },
+     {
+      "id": "2",
+      "label": "Ask me before re-spinning"
+     }
+    ],
+    "question": "Re-spin the idle agent?"
+   }
+  ],
+  "history": [],
+  "title": "Agent idle"
+ }
+}
