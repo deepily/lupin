@@ -448,3 +448,9 @@ def test_named_probabilities_reads_every_name_in_vocabulary_order_and_keeps_the_
     assert list( fa._named_probabilities( { "k": { "b": 0.9, "a": 0.9 } }, "k", ( "a", "b" ), "p" ) ) == [ "a", "b" ]
     assert fa._stance_probabilities( { "probabilities": STANCE_OK } ) == STANCE_OK
     with pytest.raises( fa.ReplyRefused, match="stances add up to" ): fa._stance_probabilities( { "probabilities": { "yes": 0.5, "no": 0.3, "neither": 0.1 } } )
+
+
+def test_an_object_with_one_unknown_name_and_names_left_out_is_refused_for_the_unknown_name_first():
+    """The unknown-name check runs before the missing-name check, so that reason wins."""
+    with pytest.raises( fa.ReplyRefused ) as refused: fa._named_probabilities( { "acts": { "approve": 0.1, "shrug": 0.3 } }, "acts", fa.ACTS, "act" )
+    assert refused.value.reason == fa.REASON_STANCE_NOT_IN_VOCAB and str( refused.value ) == f"{fa.REASON_STANCE_NOT_IN_VOCAB}: ['shrug'] are not among {fa.ACTS}"
