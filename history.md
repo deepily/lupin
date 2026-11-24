@@ -8,6 +8,19 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.23 - Session 32f46545 (Mr. Radio 🦉, build manager; crew Rio, Sam, Pocholo, Tiberius, Tiffany, Krishna, John, Maya, Rachel, Chloé, Clayton) | Answer-signal pipeline built behind switches, end-to-end answer audit, audit fixes
+
+**Resume here**: memento `.claude-memento-mr-radio-32f46545.md`. Every new switch is off.
+1. **Rick's rulings**: the pipeline build may proceed. Job alert rows land queued (`f3111d4cd`), and alerts are live.
+   - The 43 "organic" proxy rows from 5 Nov were test output. The neither switch stays off until 20 real answers per category.
+   - Labeller row `7b86d55a`: all five questions are ruled. The pass is yes-only for now.
+   - Gold labels row `0f5bbbb5`: two AI readers, plus a blind 20% sample that Rick labels.
+   - The re-run of the later phases is approved but waits on the audit (row `1153d97b`).
+2. **Pipeline merged** (row `5eca85f8`): `b4296b9c6`, `9a21ee5a4`, `a472c7bef`, `88ce93a7d`, `c1db41a84`, `0e39cbc02`, `30d43d020`, `9d09b0b97`, `1219cf4f1`, `57705a085`, `adfea7d44` and `d046c4a5d`.
+3. **End-to-end answer audit** (row `c7b573e3`): 271 cells, of which 109 kept and 85 lost. The write-ups are in `io/write-ups/online-preference-learning/`. Audit fixes merged at `4456ac7b1`, `08fe45961` and `167cce452`.
+4. **Login fix** (bug `807ffebc`): `caf7383aa` adds a read-only login tick. A failed login no longer reads as a plan limit.
+5. **Also**: the bundle gate `1bd924b5e` (bug `416c967b`). Four endpoint tests have been red since `08fe45961`; the fix `b8edaee79` is in review.
+
 ## 2026.11.22 - Session dbff9ee1 (Mr. Radio 🦉, build manager; skeleton crew, subagents only) | Jev key on the VM, sessions folder cutover, Jev-down reuse re-check
 
 **Resume here**: memento `.claude-memento-mr-radio-dbff9ee1.md`. No live seats.
