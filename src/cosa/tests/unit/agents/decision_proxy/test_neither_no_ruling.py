@@ -381,7 +381,7 @@ def _io_from( source, raw="neither", stamp=None ):
     return io
 
 
-@pytest.mark.parametrize( "source", [ "default", "unattributed" ] )
+@pytest.mark.parametrize( "source", [ "default", "unattributed", "not_operator" ] )
 @pytest.mark.parametrize( "switch", [ False, True ] )
 def test_an_answer_nobody_gave_is_never_stored_as_a_stance_and_never_counts_as_a_neither( source, switch ):
     orch, proxy = _orch()

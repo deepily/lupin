@@ -9,11 +9,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import cosa.agents.utils.agent_notification_dispatcher as mod
+import cosa.rest.task_promotion_gate as gate
 from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher, ConfirmationAnswer
 from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
 
 
 STAMP = { "user_id": "u-1", "account_email": "rick@example.com", "method": "jwt" }
+
+
+@pytest.fixture( autouse=True )
+def _the_operators_login_maps_to_rick():
+    """Map the stamp's account to the persona the gate treats as the operator."""
+    real = gate.approver_persona_for_account
+    with patch.object( gate, "approver_persona_for_account", side_effect=lambda email: "rick" if email == "rick@example.com" else real( email ) ):
+        yield
 
 
 NOBODY = object()
@@ -121,3 +130,29 @@ def test_a_default_stays_a_default_even_if_a_stamp_is_present():
 def test_an_answer_nobody_stamped_is_unattributed_not_human():
     # A test double, or a server that predates the stamp, looks like this.
     assert _answer_to( _resp( 0, "yes", answered_by=None ) ).source == "unattributed"
+
+
+STAMPS = [
+    ( STAMP,                                                                  "human" ),
+    ( { "user_id": "u-2", "account_email": "rick@example.com", "method": "api_key" }, "not_operator" ),
+    ( { "user_id": "u-2", "method": "api_key" },                               "not_operator" ),
+    ( { "user_id": "u-3", "account_email": "someone@example.com", "method": "jwt" },  "not_operator" ),
+    ( { "user_id": "u-3", "method": "jwt" },                                   "not_operator" ),
+    ( { "user_id": "u-3", "account_email": "rick@example.com" },               "not_operator" ),
+]
+
+
+@pytest.mark.parametrize( "stamp, source", STAMPS )
+def test_the_source_of_a_stamped_answer_is_decided_by_the_promotion_gates_own_predicate( stamp, source ):
+    answer = _answer_to( _resp( 0, "yes", answered_by=stamp ) )
+    assert answer.source == source
+    assert ( answer.source == "human" ) is gate.answer_posted_by_the_operator( stamp )
+
+
+def test_the_answer_source_follows_the_gate_if_the_gate_changes_its_mind():
+    # If the source restated the rule instead of asking the gate, this would stay "human".
+    with patch.object( mod, "answer_posted_by_the_operator", return_value=False ) as asked:
+        assert _answer_to( _resp( 0, "yes" ) ).source == "not_operator"
+    asked.assert_called_once_with( STAMP )
+    with patch.object( mod, "answer_posted_by_the_operator", return_value=True ):
+        assert _answer_to( _resp( 0, "yes", answered_by={ "method": "api_key" } ) ).source == "human"

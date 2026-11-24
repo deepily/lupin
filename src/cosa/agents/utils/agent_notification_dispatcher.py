@@ -36,6 +36,7 @@ from lupin_cli.notifications.notify_user_sync import notify_user_sync as _notify
 from lupin_cli.notifications.notify_user_async import notify_user_async as _notify_user_async
 from cosa.utils.notification_utils import format_questions_for_tts, convert_questions_for_api, extract_qualifier_comment
 from cosa.agents.utils.sender_id import build_sender_id
+from cosa.rest.task_promotion_gate import answer_posted_by_the_operator
 
 logger = logging.getLogger( __name__ )
 
@@ -137,6 +138,28 @@ def reset_dispatch_context( tokens: dict ) -> None:
         ctx_session_id.reset( tokens[ "session_id" ] )
 
 
+def answer_source_of( response ):
+    """
+    Say who gave the answer a response carries.
+
+    The operator test is the promotion gate's own, `answer_posted_by_the_operator`.
+    So a stored answer counts as a person's only when the gate would count it as the operator's.
+    The result is "default", "human", "not_operator" or "unattributed".
+
+    Requires:
+        - response has default_used and answered_by, as a NotificationResponse does
+
+    Ensures:
+        - "default" when the server applied the question's default, whatever else the response carries
+        - "human" iff the promotion gate's predicate accepts the response's stamp
+        - "not_operator" when a stamp is present and the gate's predicate refuses it, such as an API-key answer
+        - "unattributed" when there is no stamp
+    """
+    if response.default_used: return "default"
+    if not response.answered_by: return "unattributed"
+    return "human" if answer_posted_by_the_operator( response.answered_by ) else "not_operator"
+
+
 class ConfirmationAnswer( NamedTuple ):
     """
     One answer to a yes/no card, kept whole.
@@ -147,6 +170,7 @@ class ConfirmationAnswer( NamedTuple ):
     The source says who gave it.
     It is "human" when the server stamped a person who posted the answer.
     It is "default" when the server applied the question's default, as it does for an offline user.
+    It is "not_operator" when a stamp is present but the promotion gate would not count it as the operator's, such as an API-key answer.
     It is "unattributed" when nobody was stamped, as with a test double or a server that predates the stamp.
     The answered_by dict is the server's stamp, or None.
     """
@@ -496,7 +520,7 @@ class AgentNotificationDispatcher:
 
             if response.exit_code == 0 and response.response_value:
                 stance, comment = extract_qualifier_comment( response.response_value )
-                source          = "default" if response.default_used else ( "human" if response.answered_by else "unattributed" )
+                source          = answer_source_of( response )
                 return ConfirmationAnswer( stance=stance, comment=comment, raw=response.response_value, source=source, answered_by=response.answered_by )
 
             # exit_code == 2 is the MCP server's explicit "user-unavailable timeout"
