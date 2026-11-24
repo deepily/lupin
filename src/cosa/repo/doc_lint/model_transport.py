@@ -35,6 +35,7 @@ import uuid
 from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage, ResultMessage, TextBlock, query as sdk_query
 
 import cosa.utils.util as cu
+from cosa.agents.shared.sdk_error_result import LOGIN_MARKERS, login_hint
 from cosa.orchestration.agy import runtime as agy_runtime
 
 # With tools=[] there is nothing to permit. "plan" would put the model in plan mode and change
@@ -155,7 +156,7 @@ CLAUDE_USAGE_FIELDS = ( "input_tokens", "output_tokens", "cache_creation_input_t
 CLAUDE_USAGE        = dict( { field: 0 for field in CLAUDE_USAGE_FIELDS }, calls=0, cost_usd=0.0 )      # what finished Claude Code calls reported, since the process began
 _CLAUDE_USAGE_LOCK  = threading.Lock()
 RESET_SHAPE         = re.compile( r"\bresets?\s+(?:at\s+|on\s+|in\s+)?(?:\d|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|tomorrow|today|midnight|noon)\b)", re.IGNORECASE )     # a plan-limit reply names when it lifts ("resets Nov 16, 10am"); "Connection reset by peer" and "resets monitoring state" do not match
-FAILURE_MARKERS     = ( "api error", "invalid api key", "/login", "unauthorized", "authentication" )     # a reply the CLI sends when the call failed (a 401, a broken login); a plan limit carries none of them, so a failure is never backed off as a limit
+FAILURE_MARKERS     = ( "api error", "invalid api key", "/login", "unauthorized", "authentication", "authenticate" )     # a reply the CLI sends when the call failed (a 401, a broken login); a plan limit carries none of them, so a failure is never backed off as a limit
 RATE_LIMIT_MARKERS  = ( "rate limit", "rate_limit", "usage limit", "429", "too many requests", "overloaded", "reached your" )     # "reached your" is the plan limit: "You've reached your Fable limit."
 _AGY_USAGE_LOCK   = threading.Lock()
 _AGY_SCRATCH_LOCK = threading.Lock()
@@ -220,6 +221,10 @@ class ModelRateLimited( ModelCallError ):
 
     A caller that sees it should stop calling for a while.
     """
+
+
+class ModelLoginExpired( ModelCallError ):
+    """The Claude login behind the call has expired; only a person's /login fixes it."""
 
 
 class ModelUnavailableError( ModelCallError ):
@@ -495,6 +500,11 @@ def claude_usage_summary():
         - the result is a copy, so a caller cannot change the tally
     """
     with _CLAUDE_USAGE_LOCK: return dict( CLAUDE_USAGE )
+
+
+def login_reply( detail ):
+    """Ensures: true when the error text carries a LOGIN_MARKERS entry."""
+    return any( marker in detail for marker in LOGIN_MARKERS )
 
 
 def limit_reply( message, detail ):
@@ -889,6 +899,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
                 _note_claude_usage( message )
                 if message.is_error:
                     detail = f"{message.subtype}: {str( message.result )[ :300 ]}"
+                    if login_reply( detail ): raise ModelLoginExpired( login_hint( f"model call to {model} ended in an error result: {detail}" ) )
                     limited = limit_reply( message, detail )
                     raise ( ModelRateLimited if limited else ModelCallError )( f"model call to {model} ended in an error result: {detail}" )
 
