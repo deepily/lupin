@@ -111,6 +111,21 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    One ruling line per symbol, and the symbol id has no spaces or commas. The gate's pattern
    reads `\S+` for the id and `[0-9A-Za-z_-]+` for the receipt. The gate refuses a line that
    opens with `RULING` and does not match, and it names the line.
+   **The pairing rule (Rick adopted P4, 24 Nov 2026, about 5:36 pm Eastern).** The ruling, as written in
+   `src/docs/post-games/v0.2.4/2026.11.24-cheech-principle-learner-crew-post-game.md` section 4: "the reuse pairing rule goes into the reuse-reviewer skill and the common brief."
+   The gate pairs a line to its definition by the **full symbol id**, as `diff.json` or the index lists it
+   (`cosa.agents.prediction_engine.full_answer._named_probabilities`, not `_named_probabilities` and not the helper's prose name).
+   The receipt rule depends on the line type, because the two gates read different calls.
+   A `RULING` line needs a receipt from a successful `fetch_similar` call for that same symbol.
+   `src/lupin_mcp/reuse_exit_gate.py` keeps only `fetch_similar` calls that carry a receipt id and no error.
+   A `check_exists` receipt on a `RULING` line finds no receipt for its symbol and is `NO_CALL`.
+   Another symbol's receipt is `WRONG_RECEIPT`.
+   A `REUSE-OUTCOME` line takes a receipt from either `fetch_similar` or `check_exists`, and the receipt must be in the call log.
+   `src/lupin_mcp/reuse_outcome.py` does not check that it is about this definition, so the writer does.
+   Successful means the tool answered with a `receipt_id` and no error. A failed call has no receipt to cite.
+   Three seats met this separately and repaired it in eight commits:
+   10e15367f, 0b09b8ce6, 8b7482cce, 90b1cb4f1, 80444badd, 481f88f23, 78aa1ca9c and ea8e9e183.
+
    For a file outside the index write `<file>#<name>` as the id and `unindexed` as the receipt
    token. The gate only checks ids that are `added`, so it neither accepts nor rejects such a line.
    The reader has to challenge it. Never put free text in the receipt position.
