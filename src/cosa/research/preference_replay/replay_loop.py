@@ -225,7 +225,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
           meta carries notification_id, the ask's id; unrebuildable_cases counts the distinct cases
           left out for want of a rebuildable value, however many asks they were left out of
         - families counts the distinct families replayed; complete_action True (switch on) adds meta complete_action and complete_action_decided
-        - the engine's embedding store is put back as it was
+        - the engine's embedding store and three-way case provider are put back; the lookup vote reads each ask's own cases
         - a context arm is called as arm( ask_at_ask, visible_rows, episode_view=..., principles=... ), where
           each value is the provider's answer for this ask, or None when that provider was not passed
         - ask_at_ask is the ask cut to its ASK_KNOWN_FIELDS, so a provider and a context arm are
@@ -249,6 +249,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
     unrebuildable  = set()
     families       = set()
     saved_store    = engine._embedding_store
+    saved_provider = engine.three_way_case_provider
     try:
         for index in order:
             ask = asks[ index ]
@@ -263,9 +264,10 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             store        = store_factory( rows )
             store.advance_to( asked_at )
             engine._embedding_store = store
+            visible = [ row for row in rows if row[ "responded_at" ] is not None and aware_moment( row[ "responded_at" ] ) <= asked_at ]
+            engine.three_way_case_provider = lambda owner_user_id, asked_at=asked_at, visible=visible: ( asked_at, visible )
             result = engine.predict( _notification_dict( ask ), query_vector=ask[ "question_embedding" ] )
             families.add( classes[ index ][ "family" ] )
-            visible = [ row for row in rows if row[ "responded_at" ] is not None and aware_moment( row[ "responded_at" ] ) <= asked_at ]
             forecasts = { ENGINE_ARM: _forecast_of( result ) }
             if context_arms:
                 view       = None if episode_view_provider is None else episode_view_provider( _ask_at_ask( ask ), copy.deepcopy( visible ) )
@@ -297,7 +299,8 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
             engine_meta[ "confidence" ]    = result.confidence if isinstance( result, PredictionResult ) else None
             engine_meta[ "strategy" ]      = result.strategy if isinstance( result, PredictionResult ) else None
     finally:
-        engine._embedding_store = saved_store
+        engine._embedding_store        = saved_store
+        engine.three_way_case_provider = saved_provider
     return {
         "records"             : records,
         "not_replayable"      : len( not_replayable ),
