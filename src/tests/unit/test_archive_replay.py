@@ -1161,3 +1161,46 @@ def test_the_twin_stage_and_the_rerun_score_with_the_switch_they_are_given( load
     seen.clear()
     assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, switch ) == 2
     assert seen == [ switch, switch ]
+
+
+def _spy_on_archive_score( monkeypatch ):
+    """Record the per_field value every archive_replay scoring site hands to _score."""
+    seen = []
+    real = ar._score
+    def spy( *args, **kwargs ):
+        seen.append( args[ 4 ] if len( args ) > 4 else kwargs[ "per_field" ] )
+        return real( *args, **kwargs )
+    monkeypatch.setattr( ar, "_score", spy )
+    return seen
+
+
+def test_the_first_stage_rerun_scores_with_the_engines_own_switch( loaded, monkeypatch ):
+    session, asks, ids, embed, work, _ = loaded
+    _limits( monkeypatch, 5000 )
+    models, _ = _models( session, embed )
+    _stage_first( loaded, ids[ :20 ], models=models )
+    _plant_failures( work, session, ids[ 3:5 ], ar.ARM_PRINCIPLES, work.records )
+    seen   = _spy_on_archive_score( monkeypatch )
+    engine = PredictionEngine( debug=False )
+    engine.per_field_mc_enabled = True
+    ar.run_first_stage( session, asks, ids[ :20 ], engine, embed, models, work, query_fn=er.canned_model, chunk=10, out=lambda line: None, code=CODE )
+    assert seen == [ True, True ], "the two rerun entries must be scored on the engine's switch, which is True here"
+
+
+def test_main_hands_the_engines_switch_to_the_twin_stage_scoring( tmp_path, archive, monkeypatch ):
+    asks_path, non_path, fixture_path, fixture = archive
+    class SwitchedOnEngine:
+        reset = staticmethod( PredictionEngine.reset )
+        def __new__( cls, *args, **kwargs ):
+            engine = PredictionEngine( *args, **kwargs )
+            engine.per_field_mc_enabled = True
+            return engine
+    monkeypatch.setattr( ar, "PredictionEngine", SwitchedOnEngine )
+    base  = [ "--work", str( tmp_path ), "--asks", asks_path, "--non-asks", non_path, "--fixture", fixture_path, "--chunk", "50", "--limit", "10" ]
+    embed = _open_embedder( tmp_path )
+    make  = lambda session, e: _models( session, e )[ 0 ]
+    PredictionEngine.reset()
+    assert ar.main( [ "first" ] + base, query_fn=er.canned_model, embed=embed, make_models=make, out=lambda line: None ) == 0
+    seen = _spy_on_archive_score( monkeypatch )
+    assert ar.main( [ "twins", "--poll-seconds", "1" ] + base, embed=embed, make_models=make, out=lambda line: None ) == 0
+    assert seen and set( seen ) == { True }, "the twin arms must be scored on the engine's switch, which is True here"
