@@ -42,6 +42,7 @@ STOP_HOOK_TITLE = "Stop hook"
 OUT_NAME        = "full-answer-arm-per-ask.jsonl"
 COPY_NAME       = "archive-copy.sqlite"
 LEDGER_NAME     = "ledger.jsonl"
+REFUSALS_NAME   = "refusals.jsonl"
 
 
 def add_missing_columns( engine ):
@@ -100,6 +101,46 @@ def prepare_copy( archive, work_dir, ids ):
             connection.exec_driver_sql( f"DELETE FROM prediction_arm_forecast WHERE arm = ? AND replace( notification_id, '-', '' ) IN ( {holds} )", ( context_baseline.ARM, *part ) )
     engine.dispose()
     return target
+
+
+class RefusalKeeper( context_baseline.ContextBaseline ):
+    """The full-answer baseline that keeps the raw reply of every reply the parser refuses."""
+
+    def __init__( self, *args, **kwargs ):
+        """
+        Build the baseline as ContextBaseline does, with an empty list of refusals.
+
+        Ensures:
+            - self.kept is an empty list
+        """
+        super().__init__( *args, **kwargs )
+        self.kept = []
+
+    def parse( self, text, episode ):
+        """
+        Parse a reply as ContextBaseline does, keeping the raw reply when the parser refuses it.
+
+        Ensures:
+            - a refused reply adds { title, reason, detail, reply } to self.kept and the refusal is raised again unchanged
+        """
+        try:
+            return super().parse( text, episode )
+        except full_answer.ReplyRefused as refusal:
+            self.kept.append( { "title": episode[ "title" ], "reason": refusal.reason, "detail": str( refusal ), "reply": text } )
+            raise
+
+
+def refused_ids( per_ask_path ):
+    """
+    List the card ids a finished run left without an answer.
+
+    Requires:
+        - per_ask_path is a per-ask file this driver wrote
+
+    Ensures:
+        - returns the ids whose reason is not None, in file order
+    """
+    return [ row[ "id" ] for row in read_jsonl( per_ask_path ) if row[ "reason" ] is not None ]
 
 
 async def forecast_all( factory, c0, ids, workers=WORKERS, progress=None ):
@@ -229,7 +270,8 @@ def main( argv=None, query_fn=None, out=print ):
     Ensures:
         - the archive is only read; every file is written in the new work folder
         - --limit N cuts the cards to the first N, for a probe in its own work folder
-        - writes the per-ask file and prints the table; returns 0
+        - writes the per-ask file and the raw replies the parser refused (refusals.jsonl), prints the table; returns 0
+        - --only-refused FILE runs only the cards that file left unanswered
         - the baseline is built with the full-answer reply forced on, so no INI switch changes
 
     Raises:
@@ -242,9 +284,13 @@ def main( argv=None, query_fn=None, out=print ):
     parser.add_argument( "--work-dir", required=True )
     parser.add_argument( "--workers", type=int, default=WORKERS )
     parser.add_argument( "--limit", type=int, default=None )
+    parser.add_argument( "--only-refused", default=None, help="a per-ask file; re-run only its cards that got no answer" )
     args    = parser.parse_args( argv )
     if not full_answer.full_answer_enabled(): raise RuntimeError( f"{full_answer.SWITCH_KEY} reads off in this tree; the arm needs it on" )
     records = read_jsonl( args.records )[ :args.limit ]
+    if args.only_refused is not None:
+        wanted  = set( refused_ids( args.only_refused ) )
+        records = [ record for record in records if record[ "id" ] in wanted ]
     ids     = [ record[ "id" ] for record in records ]
     target  = os.path.join( args.work_dir, OUT_NAME )
     if os.path.exists( target ): raise FileExistsError( f"{target} exists; use a new work folder" )
@@ -253,11 +299,14 @@ def main( argv=None, query_fn=None, out=print ):
     engine  = create_engine( f"sqlite:///{copy}", connect_args={ "check_same_thread": False }, poolclass=StaticPool )
     factory = locked_sessions( engine )
     ledger  = context_baseline.open_ledger( base_path=os.path.join( args.work_dir, LEDGER_NAME ), cli_path=model_transport.CLI_PATH )
-    c0      = context_baseline.ContextBaseline( context_baseline.context_model(), context_baseline.context_timeout(), context_baseline.context_layers(), ledger, query_fn=query_fn, full=True )
+    c0      = RefusalKeeper( context_baseline.context_model(), context_baseline.context_timeout(), context_baseline.context_layers(), ledger, query_fn=query_fn, full=True )
     counts  = asyncio.run( forecast_all( factory, c0, ids, args.workers, progress=lambda done, total: out( f"[full-answer-arm] {done}/{total}" ) if progress_due( done, total ) else None ) )
     rows    = score_rows( factory, records )
     with open( target, "w", encoding="utf-8" ) as handle:
         for row in rows: handle.write( json.dumps( row, default=str ) + "\n" )
+    with open( os.path.join( args.work_dir, REFUSALS_NAME ), "w", encoding="utf-8" ) as handle:
+        for kept in c0.kept: handle.write( json.dumps( kept ) + "\n" )
+    out( f"refused replies kept: {len( c0.kept )}" )
     out( f"model {c0.model}, full answer {c0.full}, per-field scoring on, jobs {dict( counts )}" )
     out( render( summarize( rows ) ) )
     engine.dispose()

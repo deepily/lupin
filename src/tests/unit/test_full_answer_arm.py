@@ -206,3 +206,26 @@ def test_the_workers_flag_sets_how_many_calls_run_at_once( world, monkeypatch ):
     monkeypatch.setattr( arm, "forecast_all", spy )
     run( world, "--workers", "1" )
     assert seen == [ 1 ] and arm.WORKERS == 2
+
+
+def test_a_refused_reply_is_kept_whole_with_its_reason_and_an_answered_one_is_not( world ):
+    lines = run( world )
+    kept  = [ json.loads( one ) for one in open( os.path.join( world[ "work" ], arm.REFUSALS_NAME ) ) ]
+    assert len( kept ) == 1 and "refused replies kept: 1" in lines
+    assert kept[ 0 ][ "title" ] == "Break it?" and kept[ 0 ][ "reply" ] == "I cannot say."
+    assert kept[ 0 ][ "reason" ] == fa.REASON_REPLY_NOT_JSON and kept[ 0 ][ "detail" ].startswith( f"{fa.REASON_REPLY_NOT_JSON}: " )
+
+
+def test_the_refused_ids_are_the_cards_a_run_left_without_an_answer( world ):
+    run( world )
+    assert arm.refused_ids( os.path.join( world[ "work" ], arm.OUT_NAME ) ) == [ str( world[ "cards" ][ 3 ][ "id" ] ) ]
+
+
+def test_only_refused_runs_just_those_cards_in_a_new_folder( world ):
+    run( world )
+    first = os.path.join( world[ "work" ], arm.OUT_NAME )
+    again = { **world, "work": world[ "work" ] + "-again" }
+    lines = run( again, "--only-refused", first )
+    rows  = [ json.loads( one ) for one in open( os.path.join( again[ "work" ], arm.OUT_NAME ) ) ]
+    assert [ row[ "id" ] for row in rows ] == [ str( world[ "cards" ][ 3 ][ "id" ] ) ], "the three answered cards are not asked again"
+    assert lines[ 0 ] == "[full-answer-arm] 1/1" and any( "refused replies kept: 1" in one for one in lines )
