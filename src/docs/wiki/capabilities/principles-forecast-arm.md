@@ -2,9 +2,9 @@
 capability: principles-forecast-arm
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
+  - cosa.agents.prediction_engine.episode_view.card_text@26b6fee76f
   - cosa.agents.prediction_engine.principles_forecast.CapGate@82e86aad1b
   - cosa.agents.prediction_engine.principles_forecast.check_baseline@d869a4ef78
-  - cosa.agents.prediction_engine.principles_forecast.card_text@5be118980c
   - cosa.agents.prediction_engine.principles_forecast.concurrency_cap@d37390c64c
   - cosa.agents.prediction_engine.principles_forecast.principles_forecast_enabled@6af619ae07
   - cosa.agents.prediction_engine.principles_forecast.read_cap@e6185c263b
@@ -22,7 +22,7 @@ The baseline forecast job plus a block of applicable principles. The model and p
 - `switch_enabled( key )` is True only when the INI key is true, and never raises. It reads through the shared `read_switch`. An unreadable setting prints one line and counts as off. `principles_forecast_enabled` reads the arm's own switch, off by default.
 - `read_cap( key )` returns a positive int. A missing, blank or non-positive value raises. `concurrency_cap` reads this arm's own cap, so it cannot take a slot from the baseline.
 - `CapGate` counts calls in flight. `try_enter` refuses at once past the limit and never queues. `leave` gives the place back.
-- `card_text( episode )` is `episode_view.card_text`: the title, the abstract and each field prompt, one per line. It is what principles are searched by.
+- `episode_view.card_text( episode )` gives the title, the abstract and each field prompt, one per line. It is what principles are searched by.
 - `with_principles( system, user, block )` adds the block to the user prompt after the block's own `heading` (else the default heading) and changes nothing else. With no principles the prompt equals the baseline's.
 - `run_arm` makes one arm's forecast for one ask and stores one row. Its status is ran, not_run, capacity or failed.
 - With the switch off, or `c0` None, nothing is read, called or written. A card that already has its row is left alone.

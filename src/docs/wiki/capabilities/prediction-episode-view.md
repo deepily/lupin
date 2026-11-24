@@ -2,6 +2,7 @@
 capability: prediction-episode-view
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
+  - cosa.agents.prediction_engine.episode_view.capture_fields@76e835b244
   - cosa.agents.prediction_engine.episode_view.episode_view@17e927ce2c
   - cosa.agents.prediction_engine.episode_view.fields_of@d7c3d7eb59
   - cosa.agents.prediction_engine.episode_view.history_of@4282b44471
@@ -27,4 +28,5 @@ The ask-time record the principle learner reads: what was knowable about one ask
 - `fields_of` reads the card's fields: prompt, mode (single, multi or text), options with ids, and the default. With the full-answer switch on (`episode_view` reads it) each option also carries a `stable_id`, the position id plus a label hash, which survives a reordering. `links_of` lists the abstract's markdown links, and `link_kind` names each one.
 - `revealed_at` reads when the reader first opened the forecast fold, as known at a moment. A reveal after the cutoff reads None.
 - The exposure block holds `revealed_at` and `draft_at_reveal`. `draft_at_reveal` comes from `revealed_draft`: the draft stored with the reveal, None when there is none or the reveal came after the cutoff. With no cutoff it is the raw stored draft, never prompt input.
+- `capture_fields( response_value, response_options )` returns the stored input route and the recommended option labels per question. Both read `unknown` when never recorded, and nothing is written.
 - `notification_dict( row )` turns a notification row into the dict `rebuild_context` reads. `answer_known_at_ask( answered_at, asked_at )` applies the one as-of rule: an answer at or before the ask is known.

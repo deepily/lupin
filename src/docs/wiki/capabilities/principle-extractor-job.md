@@ -9,6 +9,7 @@ pins:
   - cosa.agents.principle_learner.extractor_job.default_embed@e98982141d
   - cosa.agents.principle_learner.extractor_job.default_session@42b97853f4
   - cosa.agents.principle_learner.extractor_job.encoder_version@226928f982
+  - cosa.agents.principle_learner.extractor_rules.owners_own_answer@2634f92fac
 ---
 # Principle extractor job
 
@@ -25,3 +26,5 @@ A queued job that turns one human answer into evidence. It sends the owner nothi
 - `encoder_version()` names the embedding model and the text recipe, as `<model name>:<recipe>`, built by `principle_retrieval.encoder_version_of`. The extractor reads the draft with `revealed_draft`. `default_embed` embeds a text with the configured provider.
 - The provider must make 768-dimension vectors. Another width fails loudly when a principle is stored.
 - `default_session` opens a database session that commits on success and rolls back on error.
+- `extractor_rules.owners_own_answer( row )` is True only when the answering user is the recipient and the source is the screen. The extractor and the review cards both gate on it.
+- A timeout default, a proxy answer, an answer with no user and another account's answer are all False.

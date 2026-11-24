@@ -14,6 +14,7 @@ pins:
   - cosa.agents.prediction_engine.principle_retrieval.session_lookup@1cd4e9b9ac
   - cosa.agents.prediction_engine.principle_features.card_features@db9c0264e8
   - cosa.agents.prediction_engine.principle_features.feature_lookup@502707cd9c
+  - cosa.agents.prediction_engine.principle_features.notification_lookup@a32f564e64
 ---
 # Principle retrieval and card features
 
@@ -27,7 +28,7 @@ Fetches the principles that apply to one ask and shapes them as a prompt block. 
 - `principle_block( selected, suffix )` writes the lines the prompt carries: id, status, scope, dimension, statement and conditions. The lines sit between tags with a random suffix, so a statement cannot close the block.
 - No raw answer, rationale or evidence row enters the block.
 - `embedding_text( statement, rationale )` is the statement, then the rationale on a new line (none when the rationale is empty). `encoder_version_of( model )` names an encoder as `<model>:<recipe>`. The extractor job stores rows through it, so storing and filtering agree.
-- `session_lookup` and `feature_lookup` are both built by `principle_features.notification_lookup`: one query for all ids, a value per notification, `None` when it is not found.
+- `notification_lookup( session, ids, columns, value_of )` builds both `session_lookup` and `feature_lookup`. It runs one query for all ids and gives `None` for a missing notification.
 - `reembed_principles` re-embeds an owner's principles that another encoder made. It flushes without committing, and a wrong vector count raises with nothing changed.
 - `load_owner_ledger` reads an owner's principles and evidence of every extractor version, because a ruling may name an older principle.
 - `session_lookup` names the session of an evidence row's notification, in one query.

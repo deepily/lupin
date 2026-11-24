@@ -10,7 +10,7 @@ pins:
   - cosa.research.preference_replay.archive_replay.BoundStop@bcb4cf5768
   - cosa.research.preference_replay.archive_replay.bound_failed@b679a235dc
   - cosa.research.preference_replay.archive_replay.replace_arms@3f732dd1e6
-  - cosa.research.preference_replay.archive_replay.rerun_bound_failures@1c94798f88
+  - cosa.research.preference_replay.archive_replay.rerun_bound_failures@58fefd7e03
 ---
 # Preference replay: the freeze and the principle limit
 
