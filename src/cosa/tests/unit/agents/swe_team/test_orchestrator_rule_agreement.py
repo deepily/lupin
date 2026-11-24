@@ -23,7 +23,7 @@ def _orch( trust_mode="disabled" ):
 
 def _team_io( confirm ):
     team_io = MagicMock()
-    team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if confirm else "no", None, "yes" if confirm else "no" ) )
+    team_io.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if confirm else "no", None, "yes" if confirm else "no", source="human" ) )
     return team_io
 
 

@@ -285,7 +285,7 @@ class SweTeamOrchestrator:
             - Returns bool (True if approved, False otherwise)
             - Proxy evaluate() called for all non-disabled modes
             - An "act" answer auto-approves only when the ask-before-act switch is off
-            - Trust feedback recorded after every user decision
+            - Trust feedback recorded after every human decision; a default, API-key or unattributed answer leaves the trust counters unchanged (its decision row is still written, under its answer source)
             - With the neither switch on, a neither answer is no ruling: the trust counters are unchanged, record_decision is skipped, a re-frame line is logged, and the decision row is written with no user answer and the stance "neither"
             - With the neither switch on, a qualified yes is logged with its comment and scored as a yes
             - With the neither switch off, a neither is scored exactly as before (as a no), yet the decision row still carries the stance, the comment and the raw text
@@ -349,6 +349,9 @@ class SweTeamOrchestrator:
                     logger.info( f"[PROXY-REFRAME] neither answer, no ruling recorded: cat={proxy_result.category}, comment={answer.comment!r}, question={question[ :80 ]!r}" )
                     if self.proxy.reframe_blocked( proxy_result.category ):
                         logger.info( f"[PROXY-REFRAME] re-frame rate is above the bar over the last {REFRAME_WINDOW} asks: cat={proxy_result.category} promotion blocked" )
+                elif not by_human:
+                    # Row 1b3202de (F2): a default, API-key or unattributed answer is not Rick's; the counters stay as they are
+                    logger.info( f"[PROXY-NOT-HUMAN] answer source {answer.source!r} is not a human answer, trust counters unchanged: cat={proxy_result.category}, question={question[ :80 ]!r}" )
                 else:
                     agreement = forecast_agreement( proxy_result.value, user_answer )
                     if neither_is_no_ruling_enabled() and by_human and answer.stance == "yes" and answer.comment:

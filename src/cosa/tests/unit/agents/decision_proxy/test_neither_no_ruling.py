@@ -390,8 +390,29 @@ def test_an_answer_nobody_gave_is_never_stored_as_a_stance_and_never_counts_as_a
     assert meta[ "answer_source" ] == source and meta[ "answer_unowned_raw" ] == "neither"
     for key in ( "answer_stance", "answer_comment", "answer_raw", "answered_by_user_id", "answered_by_method" ): assert key not in meta
     assert meta[ "user_answer" ] is False and result is False      # scored as a no, as before
-    proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=False )
+    proxy.trust_tracker.record_decision.assert_not_called()      # row 1b3202de: not Rick's answer, so no trust update
+    orch._persist_trust_feedback.assert_not_called()
     proxy.note_stance.assert_not_called()
+
+
+@pytest.mark.parametrize( "source", [ "default", "unattributed", "not_operator" ] )
+@pytest.mark.parametrize( "raw, forecast", [ ( "no", "approved" ), ( "yes", "approved" ), ( "yes", "review" ) ] )
+@pytest.mark.parametrize( "model", [ "count", "blr" ] )
+def test_a_non_human_answer_leaves_every_trust_counter_alone( source, raw, forecast, model, caplog ):
+    orch, proxy = _orch( value=forecast )
+    proxy.trust_tracker.trust_model = model
+    with caplog.at_level( "INFO" ):
+        _ask( orch, _io_from( source, raw=raw ), True )
+    proxy.trust_tracker.record_decision.assert_not_called()
+    proxy.trust_tracker.record_decision_with_features.assert_not_called()
+    orch._persist_trust_feedback.assert_not_called()
+    assert "[PROXY-NOT-HUMAN]" in caplog.text
+
+
+def test_a_human_default_no_is_still_scored():
+    orch, proxy = _orch( value="approved" )
+    _ask( orch, _io( "no" ), False )
+    proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=False )
 
 
 def test_a_human_stamp_without_a_user_id_stores_none_for_it():
