@@ -156,3 +156,45 @@ def test_the_answer_source_follows_the_gate_if_the_gate_changes_its_mind():
     asked.assert_called_once_with( STAMP )
     with patch.object( mod, "answer_posted_by_the_operator", return_value=True ):
         assert _answer_to( _resp( 0, "yes", answered_by={ "method": "api_key" } ) ).source == "human"
+
+
+# Row 1b3202de (F9): the open-ended and multiple-choice asks carry who answered, beside their return values.
+# The slot is per task, so each test asks and reads inside one coroutine, as the orchestrator does.
+MC_ANSWER = '{"answers": {"Plan": "Keep"}}'
+MC_QUESTIONS = [ { "question": "Plan?", "header": "Plan", "options": [ { "label": "Keep" }, { "label": "Drop" } ] } ]
+
+
+async def _ask_then_take( d, ask ):
+    args = ( "Why?", ) if ask == "get_feedback" else ( MC_QUESTIONS, )
+    before = mod.take_last_ask_answer_source()
+    await getattr( d, ask )( *args )
+    return before, mod.take_last_ask_answer_source(), mod.take_last_ask_answer_source()
+
+
+@pytest.mark.parametrize( "kwargs, label", [
+    ( { },                                                  "human" ),
+    ( { "answered_by": { "method": "api_key", "user_id": "u-2" } }, "not_operator" ),
+    ( { "answered_by": None },                              "unattributed" ),
+    ( { "default_used": True },                             "default" ),
+] )
+@pytest.mark.parametrize( "ask", [ "get_feedback", "present_choices" ] )
+def test_an_open_ended_or_multiple_choice_answer_carries_who_gave_it( ask, kwargs, label ):
+    d    = AgentNotificationDispatcher( agent_type="test.agent" )
+    text = "free text" if ask == "get_feedback" else MC_ANSWER
+    with patch.object( mod, "_notify_user_sync", return_value=_resp( 0, text, **kwargs ) ):
+        before, taken, again = _run( _ask_then_take( d, ask ) )
+    assert ( before, taken, again ) == ( None, label, None )          # nothing before, the label once, then forgotten
+
+
+@pytest.mark.parametrize( "ask", [ "get_feedback", "present_choices" ] )
+def test_an_ask_that_raises_before_an_answer_leaves_no_source_behind( ask ):
+    d = AgentNotificationDispatcher( agent_type="test.agent" )
+
+    async def scenario():
+        mod._last_ask_answer_source.set( "human" )                # a stale value from an earlier ask in this task
+        with pytest.raises( VoiceGateTimeoutError ):
+            await getattr( d, ask )( *( ( "Why?", ) if ask == "get_feedback" else ( MC_QUESTIONS, ) ) )
+        return mod.take_last_ask_answer_source()
+
+    with patch.object( mod, "_notify_user_sync", side_effect=ConnectionError( "down" ) ):
+        assert _run( scenario() ) is None
