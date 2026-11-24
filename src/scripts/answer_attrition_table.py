@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from cosa.agents.prediction_engine import accuracy_comparators as ac
 from cosa.agents.prediction_engine import context_baseline
 from cosa.agents.prediction_engine.exposure import compare_draft_to_answer, decode_answer_fields, revealed_before_answer
-from cosa.agents.prediction_engine.history_derive import derive_answer
+from cosa.agents.prediction_engine.history_derive import attribution_tier, derive_answer
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.prediction_engine.three_way_stance import neighbours_of
@@ -252,9 +252,9 @@ def is_timeout( row ):
         - row is a clean_row dict
 
     Ensures:
-        - returns True only for a dict answer whose source is timeout_default
+        - returns True only when history_derive.attribution_tier names the answer a timeout default
     """
-    return isinstance( row[ "response_value" ], dict ) and row[ "response_value" ].get( "source" ) == "timeout_default"
+    return attribution_tier( row ) == "timeout_default"
 
 
 def timeout_units( row ):
