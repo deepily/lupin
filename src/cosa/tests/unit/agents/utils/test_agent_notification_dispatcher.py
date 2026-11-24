@@ -430,11 +430,11 @@ def _role_namespace():
     return { "__name__": "fake.role_module", "_dispatcher": d, "SESSION_ID": "sess-1", "SESSION_NAME": "name-1", "TARGET_USER": "u@x" }, d
 
 
-def test_role_wrappers_have_the_four_names_the_module_exposes():
+def test_role_wrappers_have_the_five_names_the_module_exposes():
     ns, _ = _role_namespace()
-    notify_progress, ask_confirmation, request_decision, get_feedback = mod.make_role_interface_functions( ns )
-    assert [ f.__name__ for f in ( notify_progress, ask_confirmation, request_decision, get_feedback ) ] == [ "notify_progress", "ask_confirmation", "request_decision", "get_feedback" ]
-    assert all( f.__module__ == "fake.role_module" for f in ( notify_progress, ask_confirmation, request_decision, get_feedback ) )
+    wrappers = mod.make_role_interface_functions( ns )
+    assert [ f.__name__ for f in wrappers ] == [ "notify_progress", "ask_confirmation", "request_decision", "get_feedback", "ask_confirmation_answer" ]
+    assert all( f.__module__ == "fake.role_module" for f in wrappers )
 
 
 def test_role_notify_progress_pushes_session_identity_and_forwards_the_role():

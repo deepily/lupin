@@ -22,8 +22,8 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from .config import SweTeamConfig
-from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement
-from cosa.agents.decision_proxy.config import shadow_forecast_recording_enabled
+from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement, REFRAME_WINDOW
+from cosa.agents.decision_proxy.config import shadow_forecast_recording_enabled, neither_is_no_ruling_enabled
 from cosa.agents.decision_proxy.decision_writer import write_proxy_decision
 from .state import (
     OrchestratorState,
@@ -286,6 +286,9 @@ class SweTeamOrchestrator:
             - Proxy evaluate() called for all non-disabled modes
             - An "act" answer auto-approves only when the ask-before-act switch is off
             - Trust feedback recorded after every user decision
+            - With the neither switch on, a neither answer is no ruling: the trust counters are unchanged, record_decision is skipped, a re-frame line is logged, and the decision row is written with no user answer and the stance "neither"
+            - With the neither switch on, a qualified yes is logged with its comment and scored as a yes
+            - With the neither switch off, the confirmation is asked and scored exactly as before
             - Falls through to ask_confirmation when proxy is None
 
         Args:
@@ -328,27 +331,43 @@ class SweTeamOrchestrator:
 
         # Step 3: Fall through to user confirmation
         take_last_ask_notification_id()  # forget any id left by an earlier ask in this task
-        user_answer     = await team_io.ask_confirmation( question, role, default, timeout, abstract )
+        answer = None
+        if neither_is_no_ruling_enabled():
+            answer      = await team_io.ask_confirmation_answer( question, role, default, timeout, abstract )
+            user_answer = answer.approved
+        else:
+            user_answer = await team_io.ask_confirmation( question, role, default, timeout, abstract )
         notification_id = take_last_ask_notification_id()
+        no_ruling       = answer is not None and answer.stance == "neither"
 
         # Step 4: Record trust feedback (shadow observes, suggest tracks follow-through)
         if proxy_result and self.proxy:
             try:
                 proxy_would_approve = ( proxy_result.value == "approved" )
-                agreement           = forecast_agreement( proxy_result.value, user_answer )
-                if self.proxy.trust_tracker.trust_model == "blr":
-                    # Row cfc7dd01: the BLR model learns only from decisions that carry features
-                    self.proxy.trust_tracker.record_decision_with_features( proxy_result.category, agreement, question )
-                else:
-                    self.proxy.trust_tracker.record_decision( proxy_result.category, success=agreement )
-                if self.debug:
-                    print( f"[Proxy Feedback] mode={self.proxy.trust_mode}, cat={proxy_result.category}, proxy={'approve' if proxy_would_approve else 'review'}, user={'yes' if user_answer else 'no'}, agree={agreement}" )
+                if answer is not None: self.proxy.note_stance( proxy_result.category, answer.stance )
 
-                # Persist trust state to DB (non-fatal)
-                self._persist_trust_feedback( proxy_result.category, agreement )
+                if no_ruling:
+                    # Rick's ruling V14: a neither is no ruling, a request to re-frame the question. The counters stay as they are.
+                    logger.info( f"[PROXY-REFRAME] neither answer, no ruling recorded: cat={proxy_result.category}, comment={answer.comment!r}, question={question[ :80 ]!r}" )
+                    if self.proxy.reframe_blocked( proxy_result.category ):
+                        logger.info( f"[PROXY-REFRAME] re-frame rate is above the bar over the last {REFRAME_WINDOW} asks: cat={proxy_result.category} promotion blocked" )
+                else:
+                    agreement = forecast_agreement( proxy_result.value, user_answer )
+                    if answer is not None and answer.stance == "yes" and answer.comment:
+                        logger.info( f"[PROXY-QUALIFIED-YES] cat={proxy_result.category}, comment={answer.comment!r}, question={question[ :80 ]!r}" )
+                    if self.proxy.trust_tracker.trust_model == "blr":
+                        # Row cfc7dd01: the BLR model learns only from decisions that carry features
+                        self.proxy.trust_tracker.record_decision_with_features( proxy_result.category, agreement, question )
+                    else:
+                        self.proxy.trust_tracker.record_decision( proxy_result.category, success=agreement )
+                    if self.debug:
+                        print( f"[Proxy Feedback] mode={self.proxy.trust_mode}, cat={proxy_result.category}, proxy={'approve' if proxy_would_approve else 'review'}, user={'yes' if user_answer else 'no'}, agree={agreement}" )
+
+                    # Persist trust state to DB (non-fatal)
+                    self._persist_trust_feedback( proxy_result.category, agreement )
 
                 # Row 5ac3d5d7: the ratify page reads proxy_decisions, and this path wrote none
-                self._persist_proxy_decision( role, question, proxy_result, user_answer, notification_id )
+                self._persist_proxy_decision( role, question, proxy_result, None if no_ruling else user_answer, notification_id, answer )
 
                 # Phase 7: Emit proxy summary notification for pending ratification decisions
                 # "suggest" and "defer" actions produce pending ratification decisions;
@@ -400,7 +419,7 @@ class SweTeamOrchestrator:
             logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
             return 0
 
-    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None ):
+    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None ):
         """
         Write one organic proxy_decisions row for a gated confirmation (non-fatal best-effort).
 
@@ -409,14 +428,19 @@ class SweTeamOrchestrator:
             - proxy_result has action, value, category, confidence, trust_level, reason
             - user_answer is the user's bool answer, or None when the proxy auto-approved
             - notification_id is the id of the notification that carried the question, or None when none was asked
+            - answer is the ConfirmationAnswer when the neither switch is on, else None
 
         Ensures:
             - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
             - the row's notification_id is the carrying notification's id; a fresh uuid only when no notification carried the question (auto-approval, or the id was not captured)
             - the row carries data_origin "organic" and its rule_agreement, which is separate from the trust success
+            - with an answer, metadata_json also carries answer_stance and answer_comment, so "Rick deferred the decision" (a neither) stays distinct from "the model deferred to Rick" (action defer)
+            - without an answer, the row is exactly as it has always been
             - failure is logged and never propagates
         """
         try:
+            metadata = { "job_id": self.job_id, "user_answer": user_answer }
+            if answer is not None: metadata.update( { "answer_stance": answer.stance, "answer_comment": answer.comment } )
             write_proxy_decision(
                 result                = proxy_result,
                 notification_id       = notification_id or str( uuid.uuid4() ),
@@ -427,7 +451,7 @@ class SweTeamOrchestrator:
                 shadow_reason_default = "",
                 shadow_decision_value = proxy_result.value if shadow_forecast_recording_enabled() else None,
                 extra                 = {
-                    "metadata_json"  : { "job_id": self.job_id, "user_answer": user_answer },
+                    "metadata_json"  : metadata,
                     "data_origin"    : "organic",
                     "rule_agreement" : rule_agreement( proxy_result.action, user_answer ),
                 },
