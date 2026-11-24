@@ -11,6 +11,7 @@ import asyncio
 import concurrent.futures
 import inspect
 import json
+import os
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -673,3 +674,18 @@ def test_a_supporting_row_leaves_the_antecedent_column_empty( db ):
     known = _principle( db )
     _run( db, _ask( db, answer="yes" ), Model( _reply( _result( relations={ str( known.id ): "supports" } ) ) ) )
     assert db.query( PreferenceEvidence ).one().antecedent is None
+
+
+@pytest.mark.skipif( not os.environ.get( "LUPIN_LIVE_UNREAD_TEXTS" ), reason="live check: set LUPIN_LIVE_UNREAD_TEXTS to a JSON list of { title, message, abstract, text } for the unread yes/no texts" )
+def test_live_the_unread_yes_no_texts_each_produce_a_stored_row_through_the_real_model( db, monkeypatch ):
+    """Live check (plan row 3): the real model reads each unread text; none is skipped."""
+    _switches( monkeypatch, job_module.UNREAD_KEY )
+    texts = json.load( open( os.environ[ "LUPIN_LIVE_UNREAD_TEXTS" ] ) )
+    assert len( texts ) == 4
+    for item in texts:
+        ask = _ask( db, answer=item[ "text" ], title=item[ "title" ], message=item[ "message" ], abstract=item[ "abstract" ] )
+        job = PrincipleExtractorJob( ask, str( OWNER ), "owner@example.com", embed_fn=embed, session_factory=_factory( db ), model="claude-sonnet-5-5",
+                                     timeout_seconds=180, encoder=ENCODER, clock=lambda: NOW )
+        before = db.query( PreferenceEvidence ).count()
+        assert json.loads( asyncio.run( job._execute() ) )[ "status" ] == "extracted"
+        assert db.query( PreferenceEvidence ).count() > before
