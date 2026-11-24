@@ -94,6 +94,30 @@ def neither_is_no_ruling_enabled():
                         lambda e: f"[DECISION-PROXY] neither-is-no-ruling switch unreadable, scoring a neither as a no: {e.__class__.__name__}: {e}" )
 
 
+NEITHER_FORECAST_SHADOW_KEY     = "decision proxy neither forecast shadow enabled"
+DEFAULT_NEITHER_FORECAST_SHADOW = False
+
+
+def neither_forecast_shadow_enabled():
+    """
+    Say whether a decision row records the three-way forecast and its would-be agreement.
+
+    Requires:
+        - LUPIN_CONFIG_MGR_CLI_ARGS names the config file the way every other reader does
+
+    Ensures:
+        - returns the INI switch's value as a bool, False when the key is absent
+        - returns False and prints one line when the config cannot be read, so no shadow field is written
+        - the switch is shadow only: it never changes a trust counter
+    """
+    def manager( env_var_name ):
+        from cosa.config.configuration_manager import ConfigurationManager
+        return ConfigurationManager( env_var_name=env_var_name )
+
+    return read_switch( manager, NEITHER_FORECAST_SHADOW_KEY, str( DEFAULT_NEITHER_FORECAST_SHADOW ),
+                        lambda e: f"[DECISION-PROXY] neither-forecast shadow switch unreadable, recording no three-way forecast: {e.__class__.__name__}: {e}" )
+
+
 # ============================================================================
 # Trust Model
 # ============================================================================

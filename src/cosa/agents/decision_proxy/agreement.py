@@ -18,6 +18,7 @@ Dependency Rule:
 FORECAST_APPROVED        = "approved"
 FORECAST_REQUIRES_REVIEW = "requires_review"
 IMPLIES_APPROVAL  = ( "act", "suggest" )
+THREE_WAY_STANCES = ( "yes", "no", "neither" )
 
 REFRAME_WINDOW    = 20
 REFRAME_BAR       = 0.1
@@ -41,6 +42,25 @@ def forecast_agreement( forecast_value, user_answer ):
     if user_answer is None: return None
     if forecast_value == FORECAST_REQUIRES_REVIEW: return True
     return ( forecast_value == FORECAST_APPROVED ) == user_answer
+
+
+def three_way_agreement( forecast_value, answer_stance ):
+    """
+    Say whether the human's answer stance matched the three-way forecast's stance, in shadow.
+
+    Requires:
+        - forecast_value is the stored three-way stance's value ("yes", "no" or "neither"), or None when no forecast was stored
+        - answer_stance is the human's answer stance ("yes", "no" or "neither"), or None when nobody human answered
+
+    Ensures:
+        - returns None when either side is missing or is not one of the three stances: nothing to compare
+        - returns True when the two stances are the same, False when they differ (the stance comparison is accuracy_comparators.compare_yes_no's)
+        - a comment on the answer does not change the stance scored
+        - never feeds a trust counter: the caller records the result on the decision row only
+    """
+    if forecast_value not in THREE_WAY_STANCES or answer_stance not in THREE_WAY_STANCES: return None
+    from cosa.agents.prediction_engine.accuracy_comparators import compare_yes_no
+    return compare_yes_no( { "value": forecast_value }, { "value": answer_stance } )[ 0 ]
 
 
 def rule_agreement( action, user_answer ):
