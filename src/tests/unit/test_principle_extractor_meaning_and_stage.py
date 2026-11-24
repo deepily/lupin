@@ -321,3 +321,23 @@ def test_a_reply_with_no_stage_key_stores_none_under_the_stage_switch( db, monke
     _switches( monkeypatch, DECISION_STAGE_KEY )
     _run( db, _ask( db, answer="no" ), Model( _reply( _result( hypotheses=[ _hyp() ] ) ) ) )
     assert db.query( PreferenceEvidence ).one().decision_stage is None and _counts( db ) == ( 1, 1 )
+
+
+# ---- the review-card skip ----
+
+def test_a_review_card_answer_is_skipped_with_no_model_call_and_nothing_written( db ):
+    ask   = _ask( db, response_type="multiple_choice", response_options={ "review_card": True, "questions": [] },
+                  response_value={ "value": json.dumps( { "answers": {} } ), "source": "ui", "answered_by": { "user_id": str( OWNER ) } } )
+    model = Model( _reply() )
+    out, _ = _run( db, ask, model )
+    assert out[ "status" ] == "skipped_review_card" and model.sent == [] and _counts( db ) == ( 0, 0 )
+
+
+# ---- the synchronous completion wrapper ----
+
+def test_complete_sync_returns_the_models_reply_from_inside_a_running_loop_and_sends_the_system_and_user_text():
+    model = Model( "the reply" )
+    job   = PrincipleExtractorJob( str( uuid.uuid4() ), str( OWNER ), "o@example.com", query_fn=model )
+    async def inside_a_loop(): return job._complete_sync( MODEL, "the system text", "the user text", 30 )
+    assert asyncio.run( inside_a_loop() ) == "the reply"
+    assert len( model.sent ) == 1 and "the user text" in model.sent[ 0 ]
