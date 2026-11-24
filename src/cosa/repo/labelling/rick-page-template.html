@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #1d1d1b; }
+  header { position: sticky; top: 0; background: #1d1d1b; color: #fff; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 14px 80px; }
+  .card { background: #fff; border: 1px solid #d8d8d2; border-radius: 8px; padding: 12px; margin-bottom: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #66665f; margin-bottom: 4px; }
+  .answer { background: #fff7d6; border-color: #e3c85c; font-size: 17px; }
+  .rec { color: #0a6b2f; font-weight: 600; }
+  button { font-size: 16px; padding: 12px 14px; border-radius: 8px; border: 1px solid #9a9a92; background: #fff; }
+  .rel { display: block; width: 100%; text-align: left; margin-bottom: 8px; }
+  .rel small { display: block; color: #55554f; font-size: 13px; }
+  .rel.chosen { background: #1d6fd1; color: #fff; border-color: #1d6fd1; }
+  .rel.chosen small { color: #e6efff; }
+  .nav { display: flex; gap: 8px; margin: 12px 0; }
+  .nav button { flex: 1; }
+  textarea { width: 100%; box-sizing: border-box; font-size: 15px; padding: 8px; min-height: 70px; }
+  #export { margin-top: 28px; border-top: 2px solid #1d1d1b; padding-top: 12px; }
+  #exporttext { min-height: 140px; font-family: monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<header><span id="pos"></span><span id="done"></span></header>
+<main>
+  <div class="label">Card</div>
+  <div class="card" id="cardtext"></div>
+  <div id="optionsbox"><div class="label">Options</div><div class="card" id="options"></div></div>
+  <div class="label">Recommended</div>
+  <div class="card" id="recommendation"></div>
+  <div class="label">Rick's answer</div>
+  <div class="card answer" id="answer"></div>
+  <div class="label">How does the answer relate to the card?</div>
+  <div id="relations"></div>
+  <div class="label">Note (optional)</div>
+  <textarea id="note"></textarea>
+  <div class="nav">
+    <button id="prev">Back</button>
+    <button id="nextopen">Next unlabelled</button>
+    <button id="next">Next</button>
+  </div>
+  <div id="export">
+    <div class="label">Export</div>
+    <button id="download">Download answers (JSON)</button>
+    <button id="copy">Select text to copy</button>
+    <p id="exportstatus"></p>
+    <textarea id="exporttext" readonly></textarea>
+  </div>
+</main>
+<script type="application/json" id="data">__ITEMS_JSON__</script>
+<script>
+"use strict";
+var PAGE_ID  = "__PAGE_ID__";
+var ITEMS    = JSON.parse( document.getElementById( "data" ).textContent );
+var KEY      = "rick-gold:" + PAGE_ID;
+var MAX_IDLE = 300;   // seconds counted for one stretch on one item; a longer stretch is a walk away from the page
+var store    = { answers: {}, position: 0 };
+var shownAt  = Date.now();
+var position = 0;
+
+function load() {
+  try { var raw = window.localStorage.getItem( KEY ); if ( raw ) store = JSON.parse( raw ); } catch ( e ) { /* private mode: answers live until the page closes */ }
+  position = Math.min( store.position || 0, ITEMS.length - 1 );
+}
+function save() {
+  store.position = position;
+  try { window.localStorage.setItem( KEY, JSON.stringify( store ) ); } catch ( e ) { /* see load() */ }
+}
+function spent() { return Math.min( ( Date.now() - shownAt ) / 1000, MAX_IDLE ); }
+function bank() {
+  var item = ITEMS[ position ], entry = store.answers[ item.item_id ];
+  if ( entry ) entry.seconds = Math.round( ( entry.seconds + spent() ) * 10 ) / 10;
+  shownAt = Date.now();
+}
+function doneCount() { return Object.keys( store.answers ).length; }
+function setText( id, text ) { document.getElementById( id ).textContent = text; }
+
+function show() {
+  var item = ITEMS[ position ], entry = store.answers[ item.item_id ];
+  setText( "pos", "Item " + ( position + 1 ) + " of " + ITEMS.length );
+  setText( "done", doneCount() + " of " + ITEMS.length + " done" );
+  setText( "cardtext", item.card_text );
+  document.getElementById( "optionsbox" ).style.display = item.options.length ? "block" : "none";
+  setText( "options", item.options.join( "\n" ) );
+  var rec = document.getElementById( "recommendation" );
+  rec.textContent = item.recommendation === null ? "none on this card" : item.recommendation;
+  rec.className = item.recommendation === null ? "card" : "card rec";
+  setText( "answer", item.answer );
+  var box = document.getElementById( "relations" );
+  box.textContent = "";
+  item.relations.forEach( function ( r ) {
+    var b = document.createElement( "button" ), s = document.createElement( "small" );
+    b.className = "rel" + ( entry && entry.relation === r.label ? " chosen" : "" );
+    b.appendChild( document.createTextNode( r.label ) );
+    s.textContent = r.meaning;
+    b.appendChild( s );
+    b.onclick = function () { choose( r.label ); };
+    box.appendChild( b );
+  } );
+  document.getElementById( "note" ).value = entry ? entry.note : "";
+  shownAt = Date.now();
+  refreshExport();
+  save();
+}
+function choose( label ) {
+  var item = ITEMS[ position ], entry = store.answers[ item.item_id ];
+  var seconds = entry ? entry.seconds : 0;
+  store.answers[ item.item_id ] = { relation: label, note: document.getElementById( "note" ).value, seconds: Math.round( ( seconds + spent() ) * 10 ) / 10, ts: new Date().toISOString() };
+  shownAt = Date.now();
+  show();
+}
+function saveNote() {
+  var entry = store.answers[ ITEMS[ position ].item_id ];
+  if ( entry ) { entry.note = document.getElementById( "note" ).value; save(); refreshExport(); }
+}
+function go( to ) {
+  if ( to < 0 || to >= ITEMS.length ) return;
+  bank();
+  position = to;
+  show();
+  window.scrollTo( 0, 0 );
+}
+function nextOpen() {
+  for ( var n = 1; n <= ITEMS.length; n++ ) {
+    var at = ( position + n ) % ITEMS.length;
+    if ( !store.answers[ ITEMS[ at ].item_id ] ) { go( at ); return; }
+  }
+  setText( "exportstatus", "Every item has an answer. Export below." );
+}
+function exportLines() {
+  return ITEMS.filter( function ( i ) { return store.answers[ i.item_id ]; } ).map( function ( i ) {
+    var e = store.answers[ i.item_id ];
+    return { item_id: i.item_id, relation: e.relation, note: e.note, seconds: e.seconds, ts: e.ts };
+  } );
+}
+function refreshExport() { document.getElementById( "exporttext" ).value = JSON.stringify( exportLines(), null, 1 ); }
+function download() {
+  bank();
+  refreshExport();
+  var blob = new Blob( [ document.getElementById( "exporttext" ).value ], { type: "application/json" } );
+  var a = document.createElement( "a" );
+  a.href = URL.createObjectURL( blob );
+  a.download = "rick-gold-" + PAGE_ID + "-" + new Date().toISOString().slice( 0, 10 ) + ".json";
+  document.body.appendChild( a );
+  a.click();
+  document.body.removeChild( a );
+  setText( "exportstatus", "Downloaded " + exportLines().length + " answers. If nothing arrived, copy the text below." );
+}
+function copyText() {
+  var t = document.getElementById( "exporttext" );
+  refreshExport();
+  t.focus();
+  t.select();
+  t.setSelectionRange( 0, t.value.length );
+  setText( "exportstatus", "Text selected. Use Copy in your browser's menu." );
+}
+
+document.getElementById( "prev" ).onclick     = function () { go( position - 1 ); };
+document.getElementById( "next" ).onclick     = function () { go( position + 1 ); };
+document.getElementById( "nextopen" ).onclick = nextOpen;
+document.getElementById( "download" ).onclick = download;
+document.getElementById( "copy" ).onclick     = copyText;
+document.getElementById( "note" ).oninput     = saveNote;
+load();
+show();
+</script>
+</body>
+</html>
