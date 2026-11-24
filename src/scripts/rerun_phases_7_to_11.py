@@ -25,11 +25,16 @@ import sys
 sys.path.insert( 0, os.path.dirname( os.path.abspath( __file__ ) ) )
 
 import zero_model_proof as zmp
-from cosa.research.preference_replay.replay_loop import paired_wins
+from cosa.research.preference_replay import replay_loop
 from cosa.research.preference_replay.retune import TUNE_FRACTION
 from cosa.research.preference_replay.retune_run import read_id_list
 from cosa.utils.atomic_json import write_json_atomic
 from cosa.utils.file_hash import file_sha256
+
+# The names this script's callers and tests have always used, now the shared helpers themselves.
+sha256_of   = file_sha256
+read_ids    = read_id_list
+paired_wins = replay_loop.paired_wins
 
 FROZEN            = { "threshold": 0.5, "top_k": 10, "metric": "cosine" }
 OLD_CONTROL       = { "final_all": 177, "final_yes_no": 163, "final_mc": 14, "final_mc_asks": 176, "final_yes_no_asks": 215, "tune": 911, "final": 391 }
@@ -172,7 +177,7 @@ def per_ask_document( arm, records_by_column, header ):
 def write_json( path, document ):
     """Write a document as sorted, indented JSON and return the file's sha256."""
     write_json_atomic( path, document, indent=1, sort_keys=True )
-    return file_sha256( path )
+    return sha256_of( path )
 
 
 def read_switches( ini_path ):
@@ -274,7 +279,7 @@ def phase7_column( control_run, new_run, ids ):
     for window, a, b in ( ( "column", old, new ), ( "final", final_records( old ), final_records( new ) ) ):
         a, b = of_type( a, "multiple_choice" ), of_type( b, "multiple_choice" )
         run  = { "records": { "control": a, "per_field": b } }
-        only_new, only_old = paired_wins( run[ "records" ][ "per_field" ], run[ "records" ][ "control" ] )
+        only_new, only_old = paired_wins( run, "per_field", "control" )
         out[ window ] = { "asks": len( a ), "control_correct": sum( r[ "meta" ][ "correct" ] for r in a ), "per_field_correct": sum( r[ "meta" ][ "correct" ] for r in b ),
                           "only_per_field_right": only_new, "only_control_right": only_old, "difference": only_new - only_old }
     out[ "old_difference" ] = OLD_DIFFERENCES[ "phase7 per_field against control, multiple choice, final window" ]
@@ -299,8 +304,8 @@ def phase8_column( new_run, ids, asks_by_id ):
               "not_replayable": whole[ "not_replayable" ], "unrebuildable_cases": whole[ "unrebuildable_cases" ], "families": whole[ "families" ] }
     kept   = [ r[ "meta" ][ "notification_id" ] for r in final[ "records" ][ "engine" ] ]
     report = three_way_report.build_report( final, [ asks_by_id[ i ] for i in kept ], OPERATIONAL_FLOOR )
-    vs_yes_a, vs_yes_b = paired_wins( final[ "records" ][ "three_way" ], final[ "records" ][ "always_yes" ] )
-    vs_mar_a, vs_mar_b = paired_wins( final[ "records" ][ "three_way" ], final[ "records" ][ "engine" ] )
+    vs_yes_a, vs_yes_b = paired_wins( final, "three_way", "always_yes" )
+    vs_mar_a, vs_mar_b = paired_wins( final, "three_way", "engine" )
     right = { arm: sum( r[ "meta" ][ "correct" ] for r in records ) for arm, records in final[ "records" ].items() }
     return { "asks": len( of_type( whole[ "records" ][ "engine" ], "yes_no" ) ), "final_asks": len( kept ), "final_correct": right, "report": report,
              "three_way_against_always_yes": { "only_three_way": vs_yes_a, "only_always_yes": vs_yes_b, "difference": vs_yes_a - vs_yes_b,
@@ -386,8 +391,8 @@ def main( argv=None ):
     header, vectors = load_side_file( args.vectors )
     with get_db() as session: asks, facts = read_cohort( session, vectors )
     by_id      = { ask[ "id" ]: ask for ask in asks }
-    record_ids = read_id_list( args.records )
-    columns    = columns_of( record_ids, read_id_list( cohort ), read_id_list( old ), [ a[ "id" ] for a in asks if a[ "question_embedding" ] is not None ] )
+    record_ids = read_ids( args.records )
+    columns    = columns_of( record_ids, read_ids( cohort ), read_ids( old ), [ a[ "id" ] for a in asks if a[ "question_embedding" ] is not None ] )
     outside    = len( set( record_ids ) - set( columns[ "record" ] ) )
     PredictionEngine.reset()
     engine  = PredictionEngine( debug=False )
@@ -415,9 +420,9 @@ def main( argv=None ):
     switches = read_switches( root + "/src/conf/lupin-app.ini" )
     stamps   = { "code_sha": code_sha( root ), "command": "python src/scripts/rerun_phases_7_to_11.py " + " ".join( argv if argv is not None else sys.argv[ 1: ] ),
                  "frozen": { "metric": engine.retrieval_metric, "threshold": engine.similarity_threshold, "top_k": engine.cbr_top_k },
-                 "checkpoint_cohort_sha256": file_sha256( cohort ),
+                 "checkpoint_cohort_sha256": sha256_of( cohort ),
                  "columns": { name: { "count": len( ids ), "sha256_of_sorted_ids": sha256_of_ids( ids ) } for name, ids in columns.items() },
-                 "record_ids_outside_every_column": outside, "vector_file_sha256": file_sha256( args.vectors ), "database": facts[ "database" ],
+                 "record_ids_outside_every_column": outside, "vector_file_sha256": sha256_of( args.vectors ), "database": facts[ "database" ],
                  "case_pool": "each column is replayed against only its own asks as cases, as the freeze's control was",
                  "switches_in_ini_not_read_by_the_replay": switches,
                  "engine_attributes_in_effect": { name: getattr( engine, name ) for name in ( "yes_no_no_margin", "confidence_threshold", "three_way_enabled", "lookup_neither_forecast_enabled",

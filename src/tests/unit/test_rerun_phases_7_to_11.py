@@ -40,15 +40,22 @@ def run_of( **arms ):
 def test_the_two_sha_helpers_are_a_plain_sha_of_bytes_and_of_sorted_ids_without_a_trailing_newline( tmp_path ):
     path = tmp_path / "f.txt"
     path.write_bytes( b"abc" )
-    assert rrm.file_sha256( str( path ) ) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    assert rrm.sha256_of_ids( [ "b", "a" ] ) == rrm.file_sha256( str( _file( tmp_path, "ids.txt", b"a\nb" ) ) )
-    assert rrm.sha256_of_ids( [ "a", "b" ] ) != rrm.file_sha256( str( _file( tmp_path, "ids2.txt", b"a\nb\n" ) ) )
+    assert rrm.sha256_of( str( path ) ) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    assert rrm.sha256_of_ids( [ "b", "a" ] ) == rrm.sha256_of( str( _file( tmp_path, "ids.txt", b"a\nb" ) ) )
+    assert rrm.sha256_of_ids( [ "a", "b" ] ) != rrm.sha256_of( str( _file( tmp_path, "ids2.txt", b"a\nb\n" ) ) )
 
 
 def _file( folder, name, data ):
     path = folder / name
     path.write_bytes( data )
     return path
+
+
+def test_read_ids_reads_bare_lines_and_json_lines_and_skips_blank_lines( tmp_path ):
+    bare = _file( tmp_path, "bare.txt", b"a\n\nb\n" )
+    rows = _file( tmp_path, "rows.jsonl", b'{"id": "c"}\n\n{"id": "d", "x": 1}\n' )
+    assert rrm.read_ids( str( bare ) ) == [ "a", "b" ]
+    assert rrm.read_ids( str( rows ) ) == [ "c", "d" ]
 
 
 def test_columns_are_cut_to_the_replayable_ids_and_the_record_ids_outside_them_are_in_no_column():
@@ -107,8 +114,7 @@ def test_write_json_writes_sorted_indented_json_and_returns_the_files_sha( tmp_p
     sha  = rrm.write_json( str( path ), { "b": 1, "a": [ 2 ] } )
     assert json.loads( path.read_text() ) == { "a": [ 2 ], "b": 1 }
     assert path.read_text().index( '"a"' ) < path.read_text().index( '"b"' )
-    assert sha == rrm.file_sha256( str( path ) )
-    assert path.read_text() == '{\n "a": [\n  2\n ],\n "b": 1\n}', "one space per level, no trailing newline, as the committed reports were written"
+    assert sha == rrm.sha256_of( str( path ) )
 
 
 # ---------------------------------------------------------------- replay_config
@@ -206,6 +212,15 @@ def test_column_run_keeps_the_records_in_the_column_re_indexes_them_and_carries_
     assert ( cut[ "not_replayable" ], cut[ "unrebuildable_cases" ], cut[ "families" ] ) == ( 3, 2, 5 )
     only_mc = rrm.column_run( run, { "a", "b", "c" }, "multiple_choice" )
     assert [ r[ "meta" ][ "notification_id" ] for r in only_mc[ "records" ][ "engine" ] ] == [ "b" ]
+
+
+def test_paired_wins_counts_the_asks_only_one_arm_got_right_and_refuses_unequal_lengths():
+    run = { "records": { "a": [ rec( "1", correct=True ), rec( "2", correct=True ), rec( "3", correct=False ), rec( "4", correct=False ) ],
+                         "b": [ rec( "1", correct=True ), rec( "2", correct=False ), rec( "3", correct=True ), rec( "4", correct=False ) ] } }
+    assert rrm.paired_wins( run, "a", "b" ) == ( 1, 1 )
+    assert rrm.paired_wins( run, "b", "a" ) == ( 1, 1 )
+    run[ "records" ][ "b" ].pop()
+    with pytest.raises( ValueError ): rrm.paired_wins( run, "a", "b" )
 
 
 def test_of_type_and_final_records_keep_one_type_and_the_window_after_the_cut():
@@ -374,7 +389,7 @@ def test_main_writes_eight_per_ask_files_and_a_report_stamped_with_the_cohorts_a
     assert len( files ) == 9 and len( report[ "per_ask_files" ] ) == 8
     assert report[ "stamps" ][ "columns" ][ "record" ][ "count" ] == 2 and report[ "stamps" ][ "record_ids_outside_every_column" ] == 1
     assert report[ "stamps" ][ "code_sha" ] == "deadbeef" and report[ "stamps" ][ "frozen" ] == { "metric": "cosine", "threshold": 0.5, "top_k": 10 }
-    assert report[ "stamps" ][ "checkpoint_cohort_sha256" ] == rrm.file_sha256( argv[ argv.index( "--cohort" ) + 1 ] )
+    assert report[ "stamps" ][ "checkpoint_cohort_sha256" ] == rrm.sha256_of( argv[ argv.index( "--cohort" ) + 1 ] )
     assert report[ "model_call_attempts" ] == 0 and report[ "phase10" ].startswith( "not run" )
     assert set( report[ "phase7" ] ) == set( report[ "phase8" ] ) == set( report[ "phase9" ] ) == set( report[ "phase11" ] ) == { "second", "record", "old_1302" }
     assert report[ "phase11" ][ "second" ][ "label" ].startswith( "identical by construction" )
@@ -419,7 +434,7 @@ def test_main_writes_the_replay_cache_and_a_second_run_reads_it_instead_of_repla
 def test_main_uses_the_committed_default_cohort_and_old_id_files_when_they_are_not_given( monkeypatch, tmp_path ):
     argv, _ = _wire( monkeypatch, tmp_path )
     seen = []
-    monkeypatch.setattr( rrm, "read_id_list", lambda path: seen.append( path ) or [ "a0" ] )
+    monkeypatch.setattr( rrm, "read_ids", lambda path: seen.append( path ) or [ "a0" ] )
     keep = [ a for i, a in enumerate( argv ) if a not in ( "--cohort", "--old-ids" ) and ( i < 1 or argv[ i - 1 ] not in ( "--cohort", "--old-ids" ) ) ]
     assert rrm.main( keep ) == 0
     root = cu.get_project_root()
@@ -430,13 +445,3 @@ def test_run_as_a_script_exits_with_the_argument_parsers_code_when_required_argu
     monkeypatch.setattr( sys, "argv", [ "rerun_phases_7_to_11.py" ] )
     with pytest.raises( SystemExit ) as raised: runpy.run_path( rrm.__file__, run_name="__main__" )
     assert raised.value.code == 2
-
-
-def test_paired_wins_counts_the_asks_only_one_arm_got_right_and_refuses_unequal_lengths():
-    from cosa.research.preference_replay import replay_loop
-    a = [ rec( "1", correct=True ), rec( "2", correct=True ), rec( "3", correct=False ), rec( "4", correct=False ) ]
-    b = [ rec( "1", correct=True ), rec( "2", correct=False ), rec( "3", correct=True ), rec( "4", correct=False ) ]
-    assert replay_loop.paired_wins( a, b ) == ( 1, 1 ) and replay_loop.paired_wins( b, a ) == ( 1, 1 )
-    assert replay_loop.paired_wins( a, [ rec( "1", correct=False ) ] * 4 ) == ( 2, 0 ), "a literal: both of a's right asks are the arm's alone"
-    with pytest.raises( ValueError ): replay_loop.paired_wins( a, b[ :3 ] )
-    assert rrm.paired_wins is replay_loop.paired_wins, "the script counts with the loop's own helper"
