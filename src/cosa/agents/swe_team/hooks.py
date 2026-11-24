@@ -287,7 +287,7 @@ def quick_smoke_test():
         class MockTeamIO:
             async def notify_progress( self, **kwargs ): pass
             async def ask_confirmation( self, **kwargs ): return False
-            async def ask_confirmation_answer( self, **kwargs ): return ConfirmationAnswer( stance="no", comment=None, raw="no" )
+            async def ask_confirmation_answer( self, **kwargs ): return ConfirmationAnswer( stance="no", comment=None, raw="no", source="unattributed" )
 
         callback = build_can_use_tool( MockTeamIO(), guard )
         assert callable( callback )

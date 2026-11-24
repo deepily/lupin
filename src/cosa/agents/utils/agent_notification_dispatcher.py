@@ -144,11 +144,18 @@ class ConfirmationAnswer( NamedTuple ):
     The stance is "yes", "no" or "neither". It is None when the text is not one of those shapes.
     The comment is the qualifier typed with the answer, or None.
     The raw text is the response value exactly as the card returned it.
+    The source says who gave it.
+    It is "human" when the server stamped a person who posted the answer.
+    It is "default" when the server applied the question's default, as it does for an offline user.
+    It is "unattributed" when nobody was stamped, as with a test double or a server that predates the stamp.
+    The answered_by dict is the server's stamp, or None.
     """
 
-    stance  : Optional[ str ]
-    comment : Optional[ str ]
-    raw     : str
+    stance      : Optional[ str ]
+    comment     : Optional[ str ]
+    raw         : str
+    source      : str = "unattributed"
+    answered_by : Optional[ dict ] = None
 
     @property
     def approved( self ):
@@ -460,7 +467,7 @@ class AgentNotificationDispatcher:
             priority: "low"/"medium"/"high"/"urgent" (default: "high" for blocking calls)
 
         Returns:
-            ConfirmationAnswer: stance and comment parsed by extract_qualifier_comment, and the raw text
+            ConfirmationAnswer: stance and comment parsed by extract_qualifier_comment, the raw text, and who gave it (source, answered_by)
 
         Raises:
             VoiceGateTimeoutError: when the question was asked and no answer was received
@@ -489,7 +496,8 @@ class AgentNotificationDispatcher:
 
             if response.exit_code == 0 and response.response_value:
                 stance, comment = extract_qualifier_comment( response.response_value )
-                return ConfirmationAnswer( stance=stance, comment=comment, raw=response.response_value )
+                source          = "default" if response.default_used else ( "human" if response.answered_by else "unattributed" )
+                return ConfirmationAnswer( stance=stance, comment=comment, raw=response.response_value, source=source, answered_by=response.answered_by )
 
             # exit_code == 2 is the MCP server's explicit "user-unavailable timeout"
             # signal. Raise VoiceGateTimeoutError so checkpoint-resume can trigger

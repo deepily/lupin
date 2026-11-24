@@ -13,12 +13,20 @@ from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDis
 from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
 
 
-def _resp( exit_code=0, response_value=None ):
+STAMP = { "user_id": "u-1", "account_email": "rick@example.com", "method": "jwt" }
+
+
+NOBODY = object()
+
+
+def _resp( exit_code=0, response_value=None, default_used=False, answered_by=NOBODY ):
     r = MagicMock()
     r.exit_code      = exit_code
     r.response_value = response_value
     r.status         = "ok"
     r.notification_id = "n-1"
+    r.default_used   = default_used
+    r.answered_by    = STAMP if answered_by is NOBODY else answered_by
     return r
 
 
@@ -47,7 +55,7 @@ def test_answer_carries_stance_comment_and_raw_text( raw, stance, comment, appro
     d = AgentNotificationDispatcher( agent_type="test.agent" )
     with patch.object( mod, "_notify_user_sync", return_value=_resp( 0, raw ) ):
         answer = _run( d.ask_confirmation_answer( "Proceed?" ) )
-    assert answer == ConfirmationAnswer( stance=stance, comment=comment, raw=raw )
+    assert answer == ConfirmationAnswer( stance=stance, comment=comment, raw=raw, source="human", answered_by=STAMP )
     assert answer.approved is approved
 
 
@@ -88,3 +96,28 @@ def test_role_wrapper_forwards_to_the_dispatcher_sibling_with_the_role():
     args, kwargs = d.ask_confirmation_answer.await_args
     assert args == ( "ok?", ) and kwargs == { "default": "yes", "timeout": 30, "abstract": "abs", "role": "tester" }
     assert ( d.session_id, d.target_user ) == ( "s", "u@x" )
+
+
+def _answer_to( response ):
+    d = AgentNotificationDispatcher( agent_type="test.agent" )
+    with patch.object( mod, "_notify_user_sync", return_value=response ):
+        return _run( d.ask_confirmation_answer( "Proceed?" ) )
+
+
+def test_an_answer_stamped_by_the_server_is_a_human_one():
+    assert _answer_to( _resp( 0, "no" ) ).source == "human"
+
+
+def test_a_default_the_server_applied_is_a_default_even_though_the_exit_code_is_zero():
+    # The offline path: exit 0, status "offline", default_used True, nobody stamped.
+    answer = _answer_to( _resp( 0, "no", default_used=True, answered_by=None ) )
+    assert ( answer.source, answer.answered_by, answer.raw ) == ( "default", None, "no" )
+
+
+def test_a_default_stays_a_default_even_if_a_stamp_is_present():
+    assert _answer_to( _resp( 0, "no", default_used=True ) ).source == "default"
+
+
+def test_an_answer_nobody_stamped_is_unattributed_not_human():
+    # A test double, or a server that predates the stamp, looks like this.
+    assert _answer_to( _resp( 0, "yes", answered_by=None ) ).source == "unattributed"

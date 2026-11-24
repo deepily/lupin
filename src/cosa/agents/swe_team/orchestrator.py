@@ -322,7 +322,7 @@ class SweTeamOrchestrator:
                 )
                 # No trust feedback here: no human has answered, and an auto-approval that scored
                 # itself a success would let the proxy grade its own work (row 0bba595e).
-                self._persist_proxy_decision( role, question, proxy_result, None )
+                self._persist_proxy_decision( role, question, proxy_result, None, source="proxy" )
                 return proxy_result.value == "approved"
 
             if proxy_result.action == "suggest" and proxy_result.value:
@@ -335,13 +335,14 @@ class SweTeamOrchestrator:
         answer          = await team_io.ask_confirmation_answer( question, role, default, timeout, abstract )
         user_answer     = answer.approved
         notification_id = take_last_ask_notification_id()
-        no_ruling       = neither_is_no_ruling_enabled() and answer.stance == "neither"
+        by_human        = answer.source == "human"
+        no_ruling       = neither_is_no_ruling_enabled() and by_human and answer.stance == "neither"
 
         # Step 4: Record trust feedback (shadow observes, suggest tracks follow-through)
         if proxy_result and self.proxy:
             try:
                 proxy_would_approve = ( proxy_result.value == "approved" )
-                if neither_is_no_ruling_enabled(): self.proxy.note_stance( proxy_result.category, answer.stance )
+                if neither_is_no_ruling_enabled() and by_human: self.proxy.note_stance( proxy_result.category, answer.stance )
 
                 if no_ruling:
                     # Rick's ruling V14: a neither is no ruling, a request to re-frame the question. The counters stay as they are.
@@ -350,7 +351,7 @@ class SweTeamOrchestrator:
                         logger.info( f"[PROXY-REFRAME] re-frame rate is above the bar over the last {REFRAME_WINDOW} asks: cat={proxy_result.category} promotion blocked" )
                 else:
                     agreement = forecast_agreement( proxy_result.value, user_answer )
-                    if neither_is_no_ruling_enabled() and answer.stance == "yes" and answer.comment:
+                    if neither_is_no_ruling_enabled() and by_human and answer.stance == "yes" and answer.comment:
                         logger.info( f"[PROXY-QUALIFIED-YES] cat={proxy_result.category}, comment={answer.comment!r}, question={question[ :80 ]!r}" )
                     if self.proxy.trust_tracker.trust_model == "blr":
                         # Row cfc7dd01: the BLR model learns only from decisions that carry features
@@ -416,7 +417,7 @@ class SweTeamOrchestrator:
             logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
             return 0
 
-    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None ):
+    def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None, source=None ):
         """
         Write one organic proxy_decisions row for a gated confirmation (non-fatal best-effort).
 
@@ -425,19 +426,29 @@ class SweTeamOrchestrator:
             - proxy_result has action, value, category, confidence, trust_level, reason
             - user_answer is the user's bool answer, or None when the proxy auto-approved
             - notification_id is the id of the notification that carried the question, or None when none was asked
-            - answer is the ConfirmationAnswer of a human answer, or None when the proxy auto-approved
+            - answer is the ConfirmationAnswer the ask returned, or None when the proxy auto-approved
+            - source names who answered when there is no answer object: "proxy" for an auto-approval
 
         Ensures:
             - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
             - the row's notification_id is the carrying notification's id; a fresh uuid only when no notification carried the question (auto-approval, or the id was not captured)
             - the row carries data_origin "organic" and its rule_agreement, which is separate from the trust success
-            - with an answer, metadata_json also carries answer_stance, answer_comment and answer_raw whatever the neither switch says, so "Rick deferred the decision" (a neither) stays distinct from "the model deferred to Rick" (action defer)
-            - without an answer, the row is exactly as it has always been
+            - with an answer, metadata_json carries answer_source (human, default or unattributed) whatever the neither switch says; answer_stance, answer_comment, answer_raw and the answerer's id and method are stored only when a person answered, and a default's or a test double's text goes under answer_unowned_raw, so "Rick deferred the decision" (a neither) stays distinct from "the model deferred to Rick" (action defer)
+            - without an answer, the row has no answer fields, and an auto-approval carries answer_source "proxy"
             - failure is logged and never propagates
         """
         try:
             metadata = { "job_id": self.job_id, "user_answer": user_answer }
-            if answer is not None: metadata.update( { "answer_stance": answer.stance, "answer_comment": answer.comment, "answer_raw": answer.raw } )
+            if answer is None:
+                if source is not None: metadata[ "answer_source" ] = source
+            elif answer.source == "human":
+                stamp = answer.answered_by
+                metadata.update( {
+                    "answer_source" : "human", "answer_stance" : answer.stance, "answer_comment" : answer.comment, "answer_raw" : answer.raw,
+                    "answered_by_user_id" : stamp.get( "user_id" ), "answered_by_method" : stamp.get( "method" ),
+                } )
+            else:
+                metadata.update( { "answer_source" : answer.source, "answer_unowned_raw" : answer.raw } )
             write_proxy_decision(
                 result                = proxy_result,
                 notification_id       = notification_id or str( uuid.uuid4() ),
