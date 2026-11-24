@@ -202,6 +202,16 @@ def test_render_says_none_when_no_sign_reverses( tmp_path, monkeypatch ):
     assert report[ "reversals" ] == [] and "- none" in ots.render_markdown( report )
 
 
+def test_a_flagged_reversal_carries_the_old_figure_from_the_asks_decided_in_both_arms():
+    files   = { arm: { "ids_count": 4, "ids_sha256": "s", "code_sha": "c" * 40, "sha256": "f" } for arm in ( "Q", "X" ) }
+    per_ask = { "records": { "Q": Q_RECORDS, "X": X_RECORDS }, "files": files }
+    report  = ots.build_report( per_ask, ANSWERS, { "code_sha": "x", "started": "t", "command": "c" }, {} )
+    entry   = report[ "result" ][ "arms" ][ "X" ][ "vs_q" ]
+    assert entry[ "old" ][ "difference" ] == -2 and entry[ "old_same" ][ "difference" ] == -1
+    assert { "arm": "X", "against": "vs_q", "old": -1, "new": 1 } in report[ "reversals" ]
+    assert "- X vs_q: old -1, new 1" in ots.render_markdown( report )
+
+
 def test_main_refuses_an_output_folder_under_src_rnd( tmp_path ):
     with pytest.raises( ValueError, match = "src/rnd" ): ots.main( [ "--per-ask-dir", str( tmp_path ), "--out-dir", "/x/src/rnd/y" ] )
 
