@@ -307,7 +307,7 @@ class TestGatedConfirmation( unittest.TestCase ):
 
     def _team_io( self, confirm=True ):
         t = MagicMock()
-        t.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if confirm else "no", None, "yes" if confirm else "no" ) )
+        t.ask_confirmation_answer = AsyncMock( return_value=ConfirmationAnswer( "yes" if confirm else "no", None, "yes" if confirm else "no", source="human" ) )
         return t
 
     def test_no_proxy_falls_through_to_user( self ):
