@@ -31,7 +31,7 @@ A decline still scores True, and an approval against any other non-"approved" fo
 
 ### What the 5 Nov rows show
 
-The audit of the 43 organic rows of 5 Nov is in `src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.20-trust-gate-5-nov-audit.md`.
+The 43 rows of 5 Nov were tagged organic but came from a mocked orchestrator run, not from Rick's answers. Their audit is in `src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.20-trust-gate-5-nov-audit.md`.
 Forty-two rows are shadow rows with no stored forecast, because `log_shadow` writes NULL there. The row cannot show what the proxy forecast.
 One row is an act row that auto-approved with no human answer.
 None of the 43 notification ids joins to a row of `notifications`, because the orchestrator mints a fresh id for each decision.
