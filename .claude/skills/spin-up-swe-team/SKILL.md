@@ -24,7 +24,7 @@ Instantiate the **spin-up crew** (Implementer · Reviewer · Tester) against a t
    - **⚠️ SCOPED BY CONSTRUCTION**: a crew spawned against `lupin` reads `lupin/MANDATE.md`, finds nothing, and is *structurally incapable* of inheriting another project's deadline. **Never carry a mandate from this repo into a target crew** — that pushes one project's directive onto the whole fleet. Mechanism: `workflow/provisional-mandates.md`.
    - **Why not "tell the Manager to tell them"**: 2026-07-16 — a supersession notice reached **2 of 4** workers; a send bounced off a nonexistent persona, **the bounce reported itself with the roster attached, and was read and moved past**; 3 of 4 briefs carried a defect. **Two hops, both lossy. Here the brief IS the delivery.**
 
-4b. **Append the four post-game rulings to every brief.** Rick adopted P1, P2, P5 and P6 on 24 Nov 2026. He answered `ask_multiple_choice` at about 5:36 pm Eastern. The source is section 4 of `src/docs/post-games/v0.2.4/2026.11.24-cheech-principle-learner-crew-post-game.md`. Paste the block below into each member's done-section, as 4a does. Never use the preamble. The first line of each ruling is Rick's adopted wording. The second is the post-game's.
+4b. **Append the four post-game rulings to every brief.** Rick adopted P1, P2, P5 and P6 on 24 Nov 2026. He answered `ask_multiple_choice` at about 5:36 pm Eastern. The source is section 4 of `src/docs/post-games/v0.2.4/2026.11.24-cheech-principle-learner-crew-post-game.md`. Paste the block below into each member's done-section, as 4a does. The first line of each ruling is Rick's adopted wording. The second is the post-game's.
 
 ```text
 P1  Base on the tip; a shared file has one owning seat.

@@ -115,9 +115,15 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    `src/docs/post-games/v0.2.4/2026.11.24-cheech-principle-learner-crew-post-game.md` section 4: "the reuse pairing rule goes into the reuse-reviewer skill and the common brief."
    The gate pairs a line to its definition by the **full symbol id**, as `diff.json` or the index lists it
    (`cosa.agents.prediction_engine.full_answer._named_probabilities`, not `_named_probabilities` and not the helper's prose name).
-   The receipt in the line must come from a **successful `check_exists` call** for that same symbol. A `fetch_similar` call also counts; the gate reads both.
-   Successful means the tool answered with a `receipt_id`. A receipt copied from another symbol's call, or invented, is `WRONG_RECEIPT`.
-   A definition with none is `no_receipt`. Three seats met this separately and repaired it in eight commits:
+   The receipt rule depends on the line type, because the two gates read different calls.
+   A `RULING` line needs a receipt from a successful `fetch_similar` call for that same symbol.
+   `src/lupin_mcp/reuse_exit_gate.py` keeps only `fetch_similar` calls that carry a receipt id and no error.
+   A `check_exists` receipt on a `RULING` line finds no receipt for its symbol and is `NO_CALL`.
+   Another symbol's receipt is `WRONG_RECEIPT`.
+   A `REUSE-OUTCOME` line takes a receipt from either `fetch_similar` or `check_exists`, and the receipt must be in the call log.
+   `src/lupin_mcp/reuse_outcome.py` does not check that it is about this definition, so the writer does.
+   Successful means the tool answered with a `receipt_id` and no error. A failed call has no receipt to cite.
+   Three seats met this separately and repaired it in eight commits:
    10e15367f, 0b09b8ce6, 8b7482cce, 90b1cb4f1, 80444badd, 481f88f23, 78aa1ca9c and ea8e9e183.
 
    For a file outside the index write `<file>#<name>` as the id and `unindexed` as the receipt
