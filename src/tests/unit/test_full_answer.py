@@ -563,3 +563,14 @@ def test_the_same_list_on_a_card_with_no_option_ids_is_ignored_like_any_written_
     reply  = changed( "yes_no", lambda r: r[ "qualification" ][ "conditions" ][ 0 ].update( { "modifies_option_id": [ "yes" ] } ) )
     record = fa.parse_full_reply( json.dumps( reply ), episode( factory, "yes_no" ) )
     assert record[ "qualification" ][ "conditions" ][ 0 ][ "modifies_option_id" ] is None
+
+
+def test_a_question_that_equals_another_fields_header_is_not_read_as_a_key_for_the_first_field():
+    # Rachel's unwatched case on b8e0b151e: field A asks "B", and field B has the header "B". The reply's one "B" entry belongs to field B only.
+    first  = one_field_card( "A", "B", "single" )[ "fields" ][ 0 ]
+    second = one_field_card( "B", "Which?", "single" )[ "fields" ][ 0 ]
+    card   = { "response_type": "multiple_choice", "fields": [ first, second ] }
+    pick   = { "option_ids": fa.option_ids_of( first )[ :1 ] }
+    with pytest.raises( fa.ReplyRefused ) as caught: fa.parse_full_reply( json.dumps( with_fields( { "B": pick } ) ), card )
+    assert caught.value.reason == fa.REASON_FIELD_MISSING and "'A'" in str( caught.value ), "field A is refused as missing, not given field B's answer"
+    assert fa.parse_full_reply( json.dumps( with_fields( { "A": pick, "B": pick } ) ), card )[ "answers" ] == { "A": "Land it", "B": "Land it" }
