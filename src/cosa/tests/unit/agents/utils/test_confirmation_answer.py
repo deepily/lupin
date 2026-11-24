@@ -198,3 +198,21 @@ def test_an_ask_that_raises_before_an_answer_leaves_no_source_behind( ask ):
 
     with patch.object( mod, "_notify_user_sync", side_effect=ConnectionError( "down" ) ):
         assert _run( scenario() ) is None
+
+
+@pytest.mark.parametrize( "ask, response", [
+    ( "get_feedback",    dict( exit_code=2, response_value=None ) ),
+    ( "get_feedback",    dict( exit_code=1, response_value=None ) ),
+    ( "present_choices", dict( exit_code=2, response_value=None ) ),
+    ( "present_choices", dict( exit_code=0, response_value='{"answers": {}}' ) ),
+] )
+def test_a_timeout_or_empty_answer_raises_and_leaves_no_label( ask, response ):
+    d = AgentNotificationDispatcher( agent_type="test.agent" )
+
+    async def scenario():
+        with pytest.raises( VoiceGateTimeoutError ):
+            await getattr( d, ask )( *( ( "Why?", ) if ask == "get_feedback" else ( MC_QUESTIONS, ) ) )
+        return mod.take_last_ask_answer_source()
+
+    with patch.object( mod, "_notify_user_sync", return_value=_resp( **response ) ):
+        assert _run( scenario() ) is None

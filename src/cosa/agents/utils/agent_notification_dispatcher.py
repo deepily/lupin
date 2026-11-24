@@ -238,7 +238,7 @@ def take_last_ask_answer_source():
 
     Ensures:
         - returns "human", "default", "not_operator" or "unattributed", as answer_source_of decided it for that answer
-        - returns None when no such ask has answered in this task, or when the ask raised before an answer came back
+        - returns None when no such ask has answered in this task, or when the ask raised: a timeout, an empty selection or an unreachable gate leaves no label
         - a second call returns None
     """
     source = _last_ask_answer_source.get()
@@ -653,9 +653,9 @@ class AgentNotificationDispatcher:
 
             _last_ask_answer_source.set( None )
             response: NotificationResponse = await asyncio.to_thread( _notify_user_sync, request )
-            _last_ask_answer_source.set( answer_source_of( response ) )
 
             if response.exit_code == 0:
+                _last_ask_answer_source.set( answer_source_of( response ) )
                 return response.response_value
 
             # exit_code == 2 is the MCP server's explicit "user-unavailable
@@ -757,12 +757,12 @@ class AgentNotificationDispatcher:
 
             _last_ask_answer_source.set( None )
             response: NotificationResponse = await asyncio.to_thread( _notify_user_sync, request )
-            _last_ask_answer_source.set( answer_source_of( response ) )
 
             if response.exit_code == 0 and response.response_value:
                 try:
                     parsed = json.loads( response.response_value )
                 except json.JSONDecodeError:
+                    _last_ask_answer_source.set( answer_source_of( response ) )
                     return { "answers": { "response": response.response_value } }
 
                 # Defensive normalization (Session 2026-04-15): treat an empty
@@ -783,6 +783,7 @@ class AgentNotificationDispatcher:
                         ),
                         delivered = True,   # exit_code 0 came back → the ask reached a human, who did not answer (row 38a0b373)
                     )
+                _last_ask_answer_source.set( answer_source_of( response ) )
                 return parsed
 
             # exit_code == 2 is the MCP server's explicit timeout signal.
