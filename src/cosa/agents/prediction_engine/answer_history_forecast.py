@@ -139,10 +139,11 @@ def history_code_hash():
         - nothing
 
     Ensures:
-        - returns model_transport.prompt_version's hex digits, HASH_LENGTH of them, over the heading and the source of render_answer, render_history, eligible_cases and the provider
+        - returns model_transport.prompt_version's hex digits, HASH_LENGTH of them, over the heading and the source of render_answer, render_history, eligible_cases, the provider, observation_view and fields_of
         - a change to any of them changes the value, so a new way of showing the history starts a new ledger
     """
-    parts = ( BLOCK_HEADING, inspect.getsource( render_answer ), inspect.getsource( render_history ), inspect.getsource( eligible_cases ), inspect.getsource( history_provider ) )
+    parts = ( BLOCK_HEADING, inspect.getsource( render_answer ), inspect.getsource( render_history ), inspect.getsource( eligible_cases ), inspect.getsource( history_provider ),
+              inspect.getsource( observation_view ), inspect.getsource( fields_of ) )
     return model_transport.prompt_version( "answer-history", *parts ).rsplit( "-", 1 )[ 1 ]
 
 
@@ -197,7 +198,7 @@ def history_provider( store, embedder, budget, half_life_days, count_tokens=appr
         - the store is advanced to the ask, so an answer given after the ask is never retrieved
         - the neighbours are neighbours_of the eligible cases, strongest first, each shown whole by render_answer from its notification's observation view
         - a neighbour whose notification no longer exists is skipped
-        - the text, without its heading, never takes more than budget by count_tokens
+        - the heading line and the text together, as run_arm's prompt carries them, never take more than budget by count_tokens
         - principle_ids holds the shown notification ids, in order, as the row's evidence ids; with nothing shown text is ""
     """
     def provider( session, episode ):
@@ -211,7 +212,7 @@ def history_provider( store, embedder, budget, half_life_days, count_tokens=appr
             row = session.get( Notification, uuid.UUID( neighbour[ "case" ][ "id" ] ) )
             if row is None: continue
             entries.append( ( neighbour[ "case" ][ "id" ], render_answer( row.message, observation_view( row.response_type, row.response_options, row.response_value, row.responded_at, None, None ) ) ) )
-        laid = render_history( entries, budget, count_tokens )
+        laid = render_history( entries, max( budget - count_tokens( f"\n\n{BLOCK_HEADING}\n" ), 0 ), count_tokens )
         return { "text": laid[ "text" ], "principle_ids": laid[ "ids" ], "heading": BLOCK_HEADING }
     return provider
 

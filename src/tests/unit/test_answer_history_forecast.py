@@ -270,7 +270,8 @@ def test_budget_the_rendered_history_never_exceeds_it( factory, budget ):
     cases = [ answered( factory, -60 + n, answer=f"yes [comment: reason number {n} " + "x" * 30 + "]", vector=vec( 1, 0.1 * n ) )[ 1 ] for n in range( 6 ) ]
     with factory() as db:
         block = ah.history_provider( TimeSlicedDecisionStore( cases ), Embedder(), budget, 30.0 )( db, ev.episode_view( db, ask( factory ), limit=50 ) )
-    assert ah.approx_tokens( block[ "text" ] ) <= budget
+    appended = f"\n\n{block[ 'heading' ]}\n{block[ 'text' ]}" if block[ "text" ] else ""
+    assert ah.approx_tokens( appended ) <= budget, "the heading line counts inside the budget"
     assert block[ "text" ].count( "Earlier answer" ) == len( block[ "principle_ids" ] )
     assert budget < 120 or len( block[ "principle_ids" ] ) > 1, "a generous budget shows more than one answer, so the test can see a budget biting"
 
@@ -328,7 +329,7 @@ def test_the_version_suffix_hashes_the_history_rendering_code( monkeypatch ):
     """Changing how the history is shown must start a new ledger."""
     before = ah.version_suffix()
     assert before.startswith( "+answer-history-" ) and len( before ) == len( "+answer-history-" ) + ah.HASH_LENGTH
-    for name in ( "render_answer", "render_history", "eligible_cases", "history_provider" ):
+    for name in ( "render_answer", "render_history", "eligible_cases", "history_provider", "observation_view", "fields_of" ):
         original = getattr( ah, name )
         def changed( *args, **kwargs ): return original( *args, **kwargs )
         monkeypatch.setattr( ah, name, changed )
