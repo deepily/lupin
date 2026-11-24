@@ -25,8 +25,8 @@ def _p( yes, no, neither ): return { "yes": yes, "no": no, "neither": neither }
 def test_b3_score_reads_a_typed_other_per_field_only_when_told_the_switch_is_on():
     predicted = { "answers": { "Mode": "Fast", "DB": "Postgres" } }
     actual    = { "answers": { "Mode": "Fast", "DB": "Use DuckDB" } }
-    assert replay_loop._score( "multiple_choice", predicted, actual, CARD ) is False
-    assert replay_loop._score( "multiple_choice", predicted, actual, CARD, per_field=True ) is True
+    assert replay_loop._score( "multiple_choice", predicted, actual, CARD, False ) is False
+    assert replay_loop._score( "multiple_choice", predicted, actual, CARD, True ) is True
 
 
 @pytest.fixture

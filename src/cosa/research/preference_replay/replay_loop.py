@@ -111,14 +111,15 @@ def _actual_dict( actual_value, response_type=None ):
     return actual
 
 
-def _score( response_type, predicted, actual_value, response_options, complete_action=False, per_field=False ):
+def _score( response_type, predicted, actual_value, response_options, per_field, complete_action=False ):
     """
     Say whether a forecast matched the answer, scored as the engine scores it.
 
     Requires:
         - predicted is the dict predicted_value_for returns, or None
         - complete_action is True only to score by the complete-action measure, with no judge
-        - per_field is the engine's per-field multiple-choice switch, the one live scoring reads
+        - per_field is the engine's per-field multiple-choice switch, the one live scoring reads; every caller passes it,
+          so no scoring site can use a different basis from the engine arms
 
     Ensures:
         - a typed Other field is scored as live scores it: left out with the switch on, a miss with it off

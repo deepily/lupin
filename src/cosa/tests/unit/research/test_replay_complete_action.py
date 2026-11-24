@@ -50,8 +50,8 @@ def test_switch_off_pin_a_record_holds_no_complete_action_key( engine ):
 
 def test_switch_off_pin_score_with_the_default_is_the_stance_score():
     answer = "yes [comment: only the old files]"
-    assert replay_loop._score( "yes_no", { "value": "yes" }, answer, None ) is True
-    assert replay_loop._score( "yes_no", { "value": "yes" }, answer, None, complete_action=True ) is False
+    assert replay_loop._score( "yes_no", { "value": "yes" }, answer, None, False ) is True
+    assert replay_loop._score( "yes_no", { "value": "yes" }, answer, None, False, complete_action=True ) is False
 
 
 def test_on_each_record_carries_the_stance_score_and_the_whole_action_score_apart( engine ):

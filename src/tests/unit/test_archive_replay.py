@@ -301,7 +301,7 @@ def _twin_stage( loaded, ids, models, **kwargs ):
     """Run the twin stage over the given ids."""
     session, asks, _, _, work, _ = loaded
     lines = kwargs.pop( "lines", [] )
-    return ar.run_twin_stage( session, asks, ids, models, work, out=lines.append, **kwargs )
+    return ar.run_twin_stage( session, asks, ids, models, work, kwargs.pop( "per_field", False ), out=lines.append, **kwargs )
 
 
 def test_the_twins_run_only_asks_the_first_stage_recorded_and_score_each_row_like_the_harness( loaded ):
@@ -318,7 +318,7 @@ def test_the_twins_run_only_asks_the_first_stage_recorded_and_score_each_row_lik
     for line in twin_lines:
         ask = by_id[ line[ "id" ] ]
         for arm in ar.TWIN_ARMS:
-            assert line[ "arms" ][ arm ][ "correct" ] == ar._score( ask[ "response_type" ], line[ "arms" ][ arm ][ "forecast" ], ask[ "actual_value" ], ask[ "response_options" ] )
+            assert line[ "arms" ][ arm ][ "correct" ] == ar._score( ask[ "response_type" ], line[ "arms" ][ arm ][ "forecast" ], ask[ "actual_value" ], ask[ "response_options" ], False )
     rows = session.query( PredictionArmForecast ).filter( PredictionArmForecast.arm.in_( ar.TWIN_ARMS ) ).all()
     assert len( rows ) == 20, "one row per twin per ask"
     assert _twin_stage( loaded, ids[ :20 ], models ) == 0, "an ask the twins already ran was run again"
@@ -663,8 +663,8 @@ def test_the_twin_stage_refuses_settings_the_first_stage_did_not_freeze_and_the_
     models, _ = _models( session, embed )
     ar.run_first_stage( session, asks, ids[ :5 ], PredictionEngine( debug=False ), embed, models, work, query_fn=er.canned_model, chunk=5, out=lambda line: None, code=CODE )
     with pytest.raises( ar.FreezeMismatch, match="code_sha" ):
-        ar.run_twin_stage( session, asks, ids[ :5 ], models, work, out=lambda line: None, code={ "sha": "c" * 40, "dirty": False } )
-    assert ar.run_twin_stage( session, asks, ids[ :5 ], models, work, out=lambda line: None, code=CODE ) == 5
+        ar.run_twin_stage( session, asks, ids[ :5 ], models, work, False, out=lambda line: None, code={ "sha": "c" * 40, "dirty": False } )
+    assert ar.run_twin_stage( session, asks, ids[ :5 ], models, work, False, out=lambda line: None, code=CODE ) == 5
     report = ar.build_report( ar.read_jsonl( work.records ), ar.read_jsonl( work.twins ), ar.load_state( work.state ) )
     assert report[ "freeze" ] == ar.load_state( work.state )[ "freeze" ] and report[ "freeze" ][ "code_sha" ] == CODE[ "sha" ]
 
@@ -672,7 +672,7 @@ def test_the_twin_stage_refuses_settings_the_first_stage_did_not_freeze_and_the_
 def test_a_twin_stage_on_a_fresh_folder_stores_the_freeze_it_starts_under( loaded ):
     session, asks, ids, embed, work, _ = loaded
     models, _ = _models( session, embed )
-    assert ar.run_twin_stage( session, asks, ids[ :3 ], models, work, out=lambda line: None, code=CODE ) == 0
+    assert ar.run_twin_stage( session, asks, ids[ :3 ], models, work, False, out=lambda line: None, code=CODE ) == 0
     assert ar.load_state( work.state )[ "freeze" ][ "code_sha" ] == CODE[ "sha" ]
 
 
@@ -804,14 +804,14 @@ def test_a_resume_forecasts_again_only_the_asks_that_failed_on_the_limit_and_rep
     original = _plant_failures( work, session, hit, ar.ARM_PRINCIPLES, work.records )
     before   = len( c0.calls )
     lines    = []
-    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, out=lines.append, chunk=3 ) == 4
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, False, out=lines.append, chunk=3 ) == 4
     after = ar.read_jsonl( work.records )
     assert [ r[ "id" ] for r in after ] == ids[ :20 ], "an ask was doubled, lost or moved"
     assert after == list( original.values() ), "a rerun entry must equal the forecast the arm makes under the same inputs, and no other entry may change"
     assert len( c0.calls ) - before == 4, "only the four failed principles forecasts called a model"
     assert not any( r[ "arms" ][ ar.ARM_PRINCIPLES ][ "reason" ] == ar.BOUND_REASON for r in after )
     assert len( lines ) == 2 and lines[ 0 ].startswith( f"[rerun {ar.ARM_PRINCIPLES}] 3/4" ) and lines[ 1 ].startswith( f"[rerun {ar.ARM_PRINCIPLES}] 4/4" )
-    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000 ) == 0, "nothing is left to run again"
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, False ) == 0, "nothing is left to run again"
     assert ar.load_state( work.state )[ "done_ids" ] == ids[ :20 ], "the denominators must not move"
 
 
@@ -827,7 +827,7 @@ def test_a_failure_on_the_limit_that_remains_stops_the_rerun_and_keeps_what_fini
         if ask_id == hit[ 1 ]: return ar.Counter( { ( arms[ 0 ], "failed", ar.BOUND_REASON ): 1 } )
         return real( self, ask_id, arms )
     monkeypatch.setattr( ar.ModelArms, "run", second_fails )
-    with pytest.raises( ar.BoundStop ) as stop: ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, chunk=10 )
+    with pytest.raises( ar.BoundStop ) as stop: ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, False, chunk=10 )
     assert stop.value.ask_id == hit[ 1 ]
     after = { r[ "id" ]: r for r in ar.read_jsonl( work.records ) }
     assert after[ hit[ 0 ] ] == original[ hit[ 0 ] ], "the finished rerun was lost"
@@ -941,7 +941,7 @@ def test_replace_arms_changes_only_the_named_arm_of_the_named_line( tmp_path ):
 def test_a_rerun_of_an_empty_or_missing_file_runs_nothing( loaded, tmp_path ):
     session, asks, ids, embed, work, _ = loaded
     models = _models( session, embed )[ 0 ]
-    assert ar.rerun_bound_failures( session, asks, models, work, ar.TWIN_ARMS[ 1 ], str( tmp_path / "absent.jsonl" ), 5000 ) == 0
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.TWIN_ARMS[ 1 ], str( tmp_path / "absent.jsonl" ), 5000, False ) == 0
 
 
 def test_discarding_deletes_only_limit_failures_of_the_named_arms_and_ask( loaded, monkeypatch ):
@@ -1027,7 +1027,7 @@ def test_a_rerun_picks_only_limit_failures_and_leaves_unreadable_and_model_failu
     session.commit()
     before  = len( c0.calls )
     planted = { line[ "id" ]: line for line in ar.read_jsonl( work.records ) }
-    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000 ) == 1
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, False ) == 1
     after = { line[ "id" ]: line for line in ar.read_jsonl( work.records ) }
     assert len( c0.calls ) - before == 1, "only the limit failure called a model"
     assert after[ limit_id ] == original[ limit_id ], "the limit failure was not forecast again"
@@ -1139,3 +1139,25 @@ def test_a_work_folder_frozen_against_one_checkpoint_is_refused_under_the_other_
     assert ar.check_freeze( { "freeze": dict( old ) }, _freeze() ) is False
     with pytest.raises( ar.FreezeMismatch, match="scored_against" ): ar.check_freeze( { "freeze": dict( old ) }, _freeze( scored_against=cr.SECOND_NAME ) )
     with pytest.raises( ar.FreezeMismatch, match="scored_against" ): ar.check_freeze( { "freeze": _freeze( scored_against=cr.SECOND_NAME ) }, _freeze() )
+
+
+@pytest.mark.parametrize( "switch", [ True, False ] )
+def test_the_twin_stage_and_the_rerun_score_with_the_switch_they_are_given( loaded, monkeypatch, switch ):
+    session, asks, ids, embed, work, _ = loaded
+    seen = []
+    real = ar._score
+    def spy( *args, **kwargs ):
+        seen.append( args[ 4 ] if len( args ) > 4 else kwargs[ "per_field" ] )
+        return real( *args, **kwargs )
+    monkeypatch.setattr( ar, "_score", spy )
+    models, _ = _models( session, embed )
+    _first_stage_counted( loaded, chunk=10, ids=ids[ :10 ] )
+    models, _ = _models( session, embed )
+    assert _twin_stage( loaded, ids[ :10 ], models, per_field=switch ) == 10
+    assert seen and set( seen ) == { switch }, "the twin arms must be scored on the basis the engine arms were"
+    _limits( monkeypatch, 5000 )
+    hit = ids[ 2:4 ]
+    _plant_failures( work, session, hit, ar.ARM_PRINCIPLES, work.records )
+    seen.clear()
+    assert ar.rerun_bound_failures( session, asks, models, work, ar.ARM_PRINCIPLES, work.records, 5000, switch ) == 2
+    assert seen == [ switch, switch ]
