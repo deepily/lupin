@@ -563,3 +563,58 @@ def test_the_real_context_baseline_prompt_never_renders_the_owners_draft_even_wh
     baseline = cb.ContextBaseline( "haiku-x", 30, cb.ALL_LAYERS, cb.open_ledger( str( tmp_path / "ledger.jsonl" ) ) )
     system, user = baseline.build_prompts( episode )
     assert "Which plan?" in user and draft_marker not in system and draft_marker not in user
+
+
+def test_prepare_passes_the_applicability_check_and_the_caveat_flag_only_when_their_switches_are_on( factory, monkeypatch, capsys ):
+    """
+    Each switch gates its own repair, and the dropped principles are printed.
+
+    Both off: no check goes to retrieval and the block takes no caveats. Both on: the card text goes as the check and the dropped ones are printed.
+    """
+    nid, seen, blocks = ask( factory ), [], []
+    def fake_retrieve( session, owner, project, vector, asked, enc, ext, k, bound, multiplier, applicability, caveats ):
+        seen.append( ( applicability, caveats ) )
+        return { "principles": [], "applicability": [ { "principle_id": "p1", "rule": "antecedent" } ] }
+    monkeypatch.setattr( pf, "retrieve_principles", fake_retrieve )
+    monkeypatch.setattr( pf, "principle_block", lambda selected, caveats: blocks.append( caveats ) or { "text": "", "principle_ids": [], "suffix": None } )
+    monkeypatch.setattr( pf, "retrieval_limits", lambda: { "bound": 5, "multiplier": 0 } )
+    on = set()
+    monkeypatch.setattr( pf, "switch_enabled", lambda key: key in on )
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )
+    assert seen == [ ( None, False ) ] and blocks == [ False ] and "applicability dropped" not in capsys.readouterr().out
+    on.update( { pf.APPLICABILITY_KEY, pf.CAVEATS_KEY } )
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )
+    assert seen[ 1 ][ 0 ][ "card_stage" ] is None and "the plan" in seen[ 1 ][ 0 ][ "card" ] and seen[ 1 ][ 1 ] is True and blocks[ 1 ] is True
+    assert "applicability dropped: [{'principle_id': 'p1', 'rule': 'antecedent'}]" in capsys.readouterr().out
+    on.discard( pf.APPLICABILITY_KEY )
+    seen.clear()
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5 )
+    assert seen == [ ( None, True ) ] and "applicability dropped" not in capsys.readouterr().out
+    pf._prepare( factory, nid, Baseline(), Embedder(), ENCODER, EXTRACT, 5, use_principles=False )
+    assert len( seen ) == 1 and blocks[ -1 ] is False
+
+
+def test_the_two_new_switches_ship_off_with_an_explainer():
+    """The keys are in the shipped INI as false and in the explainer file."""
+    import os
+    root = os.environ[ "LUPIN_ROOT" ] + "/src/conf/"
+    for name, expect in ( ( "lupin-app.ini", True ), ( "lupin-app-splainer.ini", False ) ):
+        text = open( root + name ).read()
+        for key in ( "principle learner applicability checks enabled", "principle learner caveats enabled" ):
+            line = [ l for l in text.splitlines() if l.startswith( key ) ]
+            assert len( line ) == 1 and ( line[ 0 ].split( "=" )[ 1 ].strip() == "false" ) is expect
+
+
+def test_a_reply_the_full_answer_parser_refuses_stores_that_refusals_own_reason( factory ):
+    """
+    A reply the parser refuses stores that refusal's own reason.
+
+    The reason is stored alone, not the generic unreadable one, and no forecast.
+    """
+    from cosa.agents.prediction_engine.full_answer import REFUSAL_REASONS, ReplyRefused
+    reason = sorted( REFUSAL_REASONS )[ 0 ]
+    class Refusing( Baseline ):
+        def parse( self, text, episode ): raise ReplyRefused( reason, "planted" )
+    nid = ask( factory )
+    assert run( factory, nid, Refusing() ) == { "status": "failed", "reason": reason }
+    assert [ ( r.abstention_reason, r.forecast ) for r in rows( factory ) ] == [ ( reason, None ) ]
