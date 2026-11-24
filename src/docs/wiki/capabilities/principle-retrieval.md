@@ -26,6 +26,13 @@ Fetches the principles that apply to one ask and shapes them as a prompt block. 
 - `select_principles( scored, statuses, k )` drops principles with no usable evidence, contested ones and retracted ones. Then it keeps the first `k`, so a dropped principle never takes a slot.
 - `principle_block( selected, suffix )` writes the lines the prompt carries: id, status, scope, dimension, statement and conditions. The lines sit between tags with a random suffix, so a statement cannot close the block.
 - No raw answer, rationale or evidence row enters the block.
+- One exception: a stored caveat, behind the switch `principle learner caveats enabled` (off).
+- With it on, `retrieve_principles( caveats=True )` adds the latest supporting row's caveat to each entry.
+- `principle_block( caveats=True )` then ends that principle's line with `caveat:` and the text. The text is one line, cut at 200 characters, inside the same tags.
+- The switch `principle learner applicability checks enabled` (off) adds two drops to `retrieve_principles( applicability={ card, card_stage } )`.
+- Rule `antecedent`: the rows quote an antecedent the card lacks. Rule `stage`: the rows name a stage and none is the card's.
+- Neither rule calls a model. The result gains `applicability`, a list of `{ principle_id, rule }`.
+- `principles_forecast` does not yet know the card's stage, so it passes none.
 - `embedding_text` is the statement, then the rationale on a new line. `encoder_version_of( model )` names an encoder as `<model>:<recipe>`. The extractor job stores rows through it, so storing and filtering agree.
 - `reembed_principles` re-embeds an owner's principles that another encoder made. It flushes without committing, and a wrong vector count raises with nothing changed.
 - `load_owner_ledger` reads an owner's principles and evidence of every extractor version, because a ruling may name an older principle.
