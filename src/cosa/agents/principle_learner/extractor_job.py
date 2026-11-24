@@ -22,7 +22,7 @@ from cosa.agents.prediction_engine.history_derive import derive_answer, meaning_
 from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
-from cosa.agents.principle_learner.extractor_prompt import BARE_YES_TAG, DECISION_STAGE_KEY, DECISION_STAGES, UNINFORMATIVE_TAG, UNREAD_TAG, active_tags, build_user_prompt, current_extractor_version, parse_reply, switch_on, system_prompt_for
+from cosa.agents.principle_learner.extractor_prompt import BARE_YES_TAG, DEDUP_TAG, DECISION_STAGE_KEY, DECISION_STAGES, UNINFORMATIVE_TAG, UNREAD_TAG, active_tags, build_user_prompt, current_extractor_version, parse_reply, switch_on, system_prompt_for
 from cosa.agents.principle_learner.extractor_rules import card_text, check_field, drafted_text, owners_own_answer, field_answers, project_names, unaided_answer, unread_entries
 from cosa.agents.principle_learner.vocabulary import is_heading
 from cosa.config.configuration_manager import ConfigurationManager
@@ -318,7 +318,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
                 continue
             grounding = card_text( episode ) + "\n" + entry[ "text" ]
             checked   = check_field( by_key[ entry[ "field_key" ] ], grounding, projects, entry[ "bare_yes" ], ids,
-                                     bare_yes_relations=BARE_YES_TAG in tags, uninformative=UNINFORMATIVE_TAG in tags )
+                                     bare_yes_relations=BARE_YES_TAG in tags, uninformative=UNINFORMATIVE_TAG in tags, source_dedup=DEDUP_TAG in tags )
             if staged: checked[ "decision_stage" ] = by_key[ entry[ "field_key" ] ].get( "decision_stage" ) if by_key[ entry[ "field_key" ] ].get( "decision_stage" ) in DECISION_STAGES else None
             report[ "rejected" ].extend( { "field_key": entry[ "field_key" ], **item } for item in checked[ "rejected" ] )
             # field_kept is redundant today, because a wholly rejected field keeps no hypotheses; it stays so the rule reads as stated

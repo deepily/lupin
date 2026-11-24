@@ -298,8 +298,8 @@ def test_unread_entries_gives_nothing_for_any_other_answer( answer, response_typ
 def test_the_prompt_addenda_names_tags_and_version_follow_the_switches():
     from cosa.agents.principle_learner import extractor_prompt as ep
     assert ep.system_prompt_for() == SYSTEM_PROMPT and ep.system_prompt_for( () ) == SYSTEM_PROMPT
-    full = ep.system_prompt_for( ( ep.BARE_YES_TAG, ep.UNINFORMATIVE_TAG, ep.UNREAD_TAG ) )
-    assert full.startswith( SYSTEM_PROMPT ) and "contradicts" in full and "card_lacks_it" in full and "unread_stance" in full
+    full = ep.system_prompt_for( ( ep.BARE_YES_TAG, ep.UNINFORMATIVE_TAG, ep.UNREAD_TAG, ep.DEDUP_TAG ) )
+    assert full.startswith( SYSTEM_PROMPT ) and "contradicts" in full and "card_lacks_it" in full and "unread_stance" in full and "standing_quote" in full
     assert ep.extractor_version_of( "m" ) == f"m:{ep.PROMPT_VERSION}"
     assert ep.extractor_version_of( "m", ( "bareyes", "unread" ) ) == f"m:{ep.PROMPT_VERSION}+bareyes+unread"
 
@@ -348,3 +348,31 @@ def test_a_real_reply_to_an_unread_text_proposes_a_grounded_hypothesis_through_c
     assert rules.unread_entries( { "kind": "unread", "text": entries[ 0 ][ "text" ] }, "yes_no" ) == [ { **entries[ 0 ] } ]
     got = rules.check_field( field, rules.card_text( EPISODE ) + "\n" + entries[ 0 ][ "text" ], [], False, set() )
     assert len( got[ "hypotheses" ] ) == 1 and got[ "hypotheses" ][ 0 ][ "condition" ] == "unknown"  # the real condition words are not in this card or answer
+
+
+def test_a_real_standing_instruction_reply_keeps_its_quote_only_with_the_source_dedup_switch_on():
+    fixture, field = _real( "standing-instruction" )
+    text           = rules.card_text( EPISODE ) + "\n" + fixture[ "entries" ][ 0 ][ "text" ]
+    on             = rules.check_field( field, text, [], False, set(), source_dedup=True )
+    assert on[ "rejected" ] == [] and on[ "hypotheses" ][ 0 ][ "standing_quote" ] == "From now on, never approve held bugs without showing me the diff first."
+    off = rules.check_field( field, text, [], False, set() )
+    assert off[ "rejected" ] == [] and "standing_quote" not in off[ "hypotheses" ][ 0 ]
+
+
+def test_a_real_inferred_refusal_reply_carries_no_standing_quote():
+    fixture, field = _real( "inferred-refusal" )
+    assert field[ "hypotheses" ] == [] and rules.check_field( field, "x", [], False, set(), source_dedup=True )[ "hypotheses" ] == []
+
+
+@pytest.mark.parametrize( "quote", [ None, "", "   ", 5, "words that are nowhere in the card or the answer" ] )
+def test_a_hypothesis_marked_standing_without_a_grounded_quote_is_refused_with_the_switch_on( quote ):
+    marked = _hyp( standing_instruction=True, standing_quote=quote )
+    got    = rules.check_field( _field( hypotheses=[ marked ] ), "card text and answer text", [], False, set(), source_dedup=True )
+    assert got[ "hypotheses" ] == [] and got[ "rejected" ] == [ { "what": "hypothesis 0", "reason": "standing_instruction_without_quote" } ]
+    assert len( rules.check_field( _field( hypotheses=[ marked ] ), "card text and answer text", [], False, set() )[ "hypotheses" ] ) == 1
+
+
+def test_a_hypothesis_not_marked_standing_stores_no_quote_even_if_the_reply_gave_one():
+    got = rules.check_field( _field( hypotheses=[ _hyp( standing_instruction=False, standing_quote="answer text" ), _hyp( "Another.", standing_quote="answer text" ) ] ),
+                             "card text and answer text", [], False, set(), source_dedup=True )
+    assert len( got[ "hypotheses" ] ) == 2 and all( "standing_quote" not in h for h in got[ "hypotheses" ] )

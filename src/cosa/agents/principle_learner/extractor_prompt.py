@@ -22,14 +22,16 @@ DECISION_STAGE_KEY = "principle learner decision stage enabled"
 BARE_YES_KEY      = "principle learner bare yes relations enabled"
 UNINFORMATIVE_KEY = "principle learner uninformative relation enabled"
 UNREAD_KEY        = "principle learner unread answers enabled"
+DEDUP_KEY         = "principle learner source dedup enabled"
 BARE_YES_TAG      = "bareyes"
 UNINFORMATIVE_TAG = "uninformative"
 UNREAD_TAG        = "unread"
+DEDUP_TAG         = "dedup"
 
 # Every switch that changes what the extractor writes tags the version it writes under, so its rows sit beside the old ones
 # and derive_statuses, which counts current-version evidence only, never mixes them. One entry per switch: ( INI key, tag ).
 # The order here is the order of the tags in the version string. A new switch of this kind adds its entry here and nowhere else.
-VERSION_TAGS       = ( ( BARE_YES_KEY, BARE_YES_TAG ), ( UNINFORMATIVE_KEY, UNINFORMATIVE_TAG ), ( UNREAD_KEY, UNREAD_TAG ), ( DECISION_STAGE_KEY, "stage" ) )
+VERSION_TAGS       = ( ( BARE_YES_KEY, BARE_YES_TAG ), ( UNINFORMATIVE_KEY, UNINFORMATIVE_TAG ), ( UNREAD_KEY, UNREAD_TAG ), ( DEDUP_KEY, DEDUP_TAG ), ( DECISION_STAGE_KEY, "stage" ) )
 
 
 def switch_on( key ):
@@ -65,6 +67,11 @@ UNINFORMATIVE_ADDENDUM = """
 - A bare yes says nothing about a listed principle whose antecedent (the situation it applies when) is not in the card.
   Name it in "relations" as "uninformative" and add it to "antecedents": {"<principle id>": {"quote": "<the principle's antecedent, quoted>", "card_lacks_it": true}}.
   Without the quote and card_lacks_it true, the relation is refused."""
+
+DEDUP_ADDENDUM = """
+- When the answer states a rule beyond this card ("always", "never", "from now on" or the same sense), add to that hypothesis
+  "standing_instruction": true and "standing_quote": "<the words, quoted from the answer>". Without the quote the hypothesis is refused.
+  An answer that only refuses this card is not a standing instruction: leave both fields out."""
 
 UNREAD_ADDENDUM = """
 - An answer marked unread_stance is the raw text of a yes or no answer the system could not classify. Read it as written;
@@ -123,7 +130,7 @@ def system_prompt_for( tags=() ):
         - the base is STAGE_SYSTEM_PROMPT when the stage tag is on, else SYSTEM_PROMPT; no other tag changes the base
         - returns the base unchanged for no tags, else it with one addendum per tag that has one, appended after the headings block
     """
-    extra = { BARE_YES_TAG: BARE_YES_ADDENDUM, UNINFORMATIVE_TAG: UNINFORMATIVE_ADDENDUM, UNREAD_TAG: UNREAD_ADDENDUM }
+    extra = { BARE_YES_TAG: BARE_YES_ADDENDUM, UNINFORMATIVE_TAG: UNINFORMATIVE_ADDENDUM, UNREAD_TAG: UNREAD_ADDENDUM, DEDUP_TAG: DEDUP_ADDENDUM }
     return ( STAGE_SYSTEM_PROMPT if "stage" in tags else SYSTEM_PROMPT ) + "".join( extra[ tag ] for tag in tags if tag in extra )
 
 

@@ -689,3 +689,21 @@ def test_live_the_unread_yes_no_texts_each_produce_a_stored_row_through_the_real
         before = db.query( PreferenceEvidence ).count()
         assert json.loads( asyncio.run( job._execute() ) )[ "status" ] == "extracted"
         assert db.query( PreferenceEvidence ).count() > before
+
+
+def test_a_standing_instruction_reply_without_its_quote_is_refused_only_with_the_source_dedup_switch_on( db, monkeypatch ):
+    reply = _reply( _result( hypotheses=[ _hyp( "Never approve without the diff.", standing_instruction=True ) ] ) )
+    out, _ = _run( db, _ask( db, answer="no" ), Model( reply ) )
+    assert out[ "rejected" ] == [] and _counts( db ) == ( 1, 1 )
+    _switches( monkeypatch, prompt_module.DEDUP_KEY )
+    out, _ = _run( db, _ask( db, minutes=10, answer="no" ), Model( reply ) )
+    assert out[ "rejected" ] == [ { "field_key": "$answer", "what": "hypothesis 0", "reason": "standing_instruction_without_quote" } ] and _counts( db ) == ( 1, 1 )
+    assert prompt_module.current_extractor_version( MODEL, lambda key: key == prompt_module.DEDUP_KEY ).endswith( "+dedup" )
+    assert '"standing_quote"' in prompt_module.system_prompt_for( ( prompt_module.DEDUP_TAG, ) )
+
+
+def test_the_stage_prompt_is_the_base_when_the_stage_tag_is_on_and_the_other_addenda_follow_it():
+    base = prompt_module.STAGE_SYSTEM_PROMPT
+    assert prompt_module.system_prompt_for( ( "stage", ) ) == base and prompt_module.system_prompt_for( () ) == prompt_module.SYSTEM_PROMPT
+    both = prompt_module.system_prompt_for( ( prompt_module.BARE_YES_TAG, "stage" ) )
+    assert both == base + prompt_module.BARE_YES_ADDENDUM

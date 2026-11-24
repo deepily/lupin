@@ -262,10 +262,10 @@ def test_a_version_has_no_tag_with_every_switch_off_and_one_plus_tag_per_switch_
     assert extractor_version_of( "m" ) == f"m:{PROMPT_VERSION}" and extractor_version_of( "m", ( "stage", ) ) == f"m:{PROMPT_VERSION}+stage"
     assert extractor_version_of( "m", ( "a", "b" ) ) == f"m:{PROMPT_VERSION}+a+b"
     only_stage = lambda key: key == DECISION_STAGE_KEY
-    assert [ tag for _, tag in VERSION_TAGS ] == [ "bareyes", "uninformative", "unread", "stage" ] and VERSION_TAGS[ -1 ] == ( DECISION_STAGE_KEY, "stage" )
-    assert active_tags( lambda key: False ) == () and active_tags( only_stage ) == ( "stage", ) and active_tags( lambda key: True ) == ( "bareyes", "uninformative", "unread", "stage" )
+    assert [ tag for _, tag in VERSION_TAGS ] == [ "bareyes", "uninformative", "unread", "dedup", "stage" ] and VERSION_TAGS[ -1 ] == ( DECISION_STAGE_KEY, "stage" )
+    assert active_tags( lambda key: False ) == () and active_tags( only_stage ) == ( "stage", ) and active_tags( lambda key: True ) == ( "bareyes", "uninformative", "unread", "dedup", "stage" )
     assert current_extractor_version( "m", only_stage ) == f"m:{PROMPT_VERSION}+stage" and current_extractor_version( "m", lambda key: False ) == f"m:{PROMPT_VERSION}"
-    assert current_extractor_version( "m", lambda key: True ) == f"m:{PROMPT_VERSION}+bareyes+uninformative+unread+stage"
+    assert current_extractor_version( "m", lambda key: True ) == f"m:{PROMPT_VERSION}+bareyes+uninformative+unread+dedup+stage"
     assert active_prompt_version( only_stage ) == f"{PROMPT_VERSION}+stage" and active_prompt_version( lambda key: False ) == PROMPT_VERSION
 
 

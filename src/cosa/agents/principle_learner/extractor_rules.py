@@ -218,13 +218,14 @@ def _names_project( statement, projects ):
     return any( re.search( rf"(?<![\w-]){re.escape( name )}(?![\w-])", statement, re.IGNORECASE ) for name in projects )
 
 
-def check_hypothesis( hypothesis, grounding_text, projects ):
+def check_hypothesis( hypothesis, grounding_text, projects, source_dedup=False ):
     """
     Check one hypothesis and return it cleaned, or the reason it is rejected.
 
     Requires:
         - hypothesis is a dict from the model's output
         - projects is the list project_names returns for the owner's asks
+        - source_dedup is the source dedup switch's state; off is the behaviour before it existed
 
     Ensures:
         - returns ( cleaned, None ) or ( None, reason )
@@ -233,6 +234,10 @@ def check_hypothesis( hypothesis, grounding_text, projects ):
         - a global statement that names a listed project is rejected; a statement scoped to that project may name it
         - cleaned holds statement, rationale (string or None), scope, condition grounded as ground_condition does,
           and grounded_in as given or None
+        - with source_dedup on, a hypothesis the model marks standing_instruction true must carry a standing_quote: a non-blank string whose case-folded
+          text occurs in the grounding text; otherwise it is rejected (standing_instruction_without_quote)
+        - with source_dedup on, a marked hypothesis's cleaned form also holds standing_quote, stripped; an unmarked one holds none, so an inferred refusal stores no quote
+        - with source_dedup off, standing_instruction and standing_quote are ignored and cleaned has no standing_quote
     """
     statement = hypothesis.get( "statement" )
     if not isinstance( statement, str ) or not statement.strip(): return None, "statement_missing"
@@ -243,8 +248,13 @@ def check_hypothesis( hypothesis, grounding_text, projects ):
         return None, "scope_unknown"
     if scope == GLOBAL_SCOPE and _names_project( statement, projects ): return None, "global_statement_names_project"
     rationale = hypothesis.get( "rationale" )
-    return { "statement": statement, "rationale": rationale if isinstance( rationale, str ) else None, "scope": scope,
-             "condition": ground_condition( hypothesis.get( "condition" ), grounding_text ), "grounded_in": hypothesis.get( "grounded_in" ) }, None
+    cleaned   = { "statement": statement, "rationale": rationale if isinstance( rationale, str ) else None, "scope": scope,
+                  "condition": ground_condition( hypothesis.get( "condition" ), grounding_text ), "grounded_in": hypothesis.get( "grounded_in" ) }
+    if source_dedup and hypothesis.get( "standing_instruction" ) is True:
+        quote = hypothesis.get( "standing_quote" )
+        if not isinstance( quote, str ) or not quote.strip() or quote.strip().casefold() not in grounding_text.casefold(): return None, "standing_instruction_without_quote"
+        cleaned[ "standing_quote" ] = quote.strip()
+    return cleaned, None
 
 
 def _check_relation( relation, principle_id, field_result, bare_yes, bare_yes_relations, uninformative ):
@@ -274,7 +284,7 @@ def _check_relation( relation, principle_id, field_result, bare_yes, bare_yes_re
     return relation, None, None
 
 
-def check_field( field_result, grounding_text, projects, bare_yes, neighbour_ids, bare_yes_relations=False, uninformative=False ):
+def check_field( field_result, grounding_text, projects, bare_yes, neighbour_ids, bare_yes_relations=False, uninformative=False, source_dedup=False ):
     """
     Check the model's result for one field.
 
@@ -282,7 +292,7 @@ def check_field( field_result, grounding_text, projects, bare_yes, neighbour_ids
         - field_result is a dict with optional kind, dimension, hypotheses (a list), relations (a dict of principle id to relation)
           and antecedents (a dict of principle id to { "quote", "card_lacks_it" })
         - neighbour_ids is the set of principle ids the model was shown
-        - bare_yes_relations and uninformative are the two switches' states; both off is the behaviour before they existed
+        - bare_yes_relations, uninformative and source_dedup are the three switches' states; all off is the behaviour before they existed
 
     Ensures:
         - returns { "kind", "dimension", "hypotheses", "relations", "antecedents", "rejected" }
@@ -291,6 +301,7 @@ def check_field( field_result, grounding_text, projects, bare_yes, neighbour_ids
           or also contradicts and refines when bare_yes_relations is on
         - with uninformative on, a bare yes may name a principle uninformative; the relation is kept only with the antecedent quote,
           and antecedents maps that principle id to the quote
+        - with source_dedup on, a hypothesis marked a standing instruction keeps its quote (check_hypothesis); one marked without a quote is rejected
         - a relation to a principle the model was not shown, or with an unknown relation word, is dropped and listed in rejected
         - a kind outside the two allowed, or a blank dimension, rejects the whole field: no hypothesis and no relation is kept
         - rejected is a list of { "what", "reason" }; nothing is dropped without an entry
@@ -309,7 +320,7 @@ def check_field( field_result, grounding_text, projects, bare_yes, neighbour_ids
         if raw: rejected.append( { "what": "hypotheses", "reason": "bare_yes_creates_none" } )
     else:
         for index, hypothesis in enumerate( raw ):
-            cleaned, reason = check_hypothesis( hypothesis, grounding_text, projects ) if isinstance( hypothesis, dict ) else ( None, "hypothesis_not_an_object" )
+            cleaned, reason = check_hypothesis( hypothesis, grounding_text, projects, source_dedup ) if isinstance( hypothesis, dict ) else ( None, "hypothesis_not_an_object" )
             if cleaned is None: rejected.append( { "what": f"hypothesis {index}", "reason": reason } )
             else: hypotheses.append( cleaned )
     relations   = {}
