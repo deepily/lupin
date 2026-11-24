@@ -11,7 +11,6 @@ The old column is the stored flag. The new column is the complete-action measure
 
 import argparse
 import json
-import re
 import sys
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -28,7 +27,6 @@ from cosa.utils.file_hash import file_sha256
 
 ARM_FILE_STEMS = { "Q": "q", "Q+A": "q-a", "Q+O": "q-o", "Q+P": "q-p", "Q+H": "q-h" }
 PAIRED_ARM     = "Q"
-SWITCH_PATTERN = re.compile( r"^(prediction [^=#]*?(?:enabled|switch))\s*=\s*(\S+)", re.MULTILINE )
 NOT_STORED     = "no stored per-ask forecasts"
 PHASES_NOT_STORED = {
     "phase 7":  "only prediction-phase7-paired-report.json, aggregate counts; no per-ask forecast",
@@ -50,8 +48,7 @@ def read_switches( ini_path: str ) -> Dict[str, str]:
         - returns each key that begins "prediction" and ends "enabled" or "switch", with its value text
         - a commented line is not read
     """
-    with open( ini_path, encoding="utf-8" ) as handle: text = handle.read()
-    return { key.strip(): value for key, value in SWITCH_PATTERN.findall( text ) }
+    return { key: value for key, value in cu.get_file_as_dictionary( ini_path ).items() if key.startswith( "prediction " ) and key.endswith( ( "enabled", "switch" ) ) }
 
 
 def read_answers( session ) -> Dict[str, Dict[str, Any]]:
@@ -122,14 +119,16 @@ def paired( arm: Dict[str, Dict[str, Any]], base: Dict[str, Dict[str, Any]], col
     Pair an arm with a baseline on one column, the way the report's old rows were paired.
 
     Requires:
-        - arm and base score the same ids; column is "old" or "new"
+        - arm and base score the same ids; column is "old", "new" or "old_on_decided_both"
 
     Ensures:
         - the new column pairs only the asks decided in both; the old column pairs every ask
+        - old_on_decided_both reads the stored old flags on the same asks the new column pairs
         - returns n, arm_only, base_only, difference (arm_only minus base_only), sign (-1, 0 or 1) and the exact McNemar p
     """
     ids = [ i for i in arm if column == "old" or ( arm[ i ][ "decided" ] and base[ i ][ "decided" ] ) ]
-    ok  = lambda s: s[ column ] is True
+    key = "new" if column == "new" else "old"
+    ok  = lambda s: s[ key ] is True
     a   = sum( 1 for i in ids if ok( arm[ i ] ) and not ok( base[ i ] ) )
     b   = sum( 1 for i in ids if ok( base[ i ] ) and not ok( arm[ i ] ) )
     return { "n": len( ids ), "arm_only": a, "base_only": b, "difference": a - b, "sign": ( a > b ) - ( a < b ), "p_value": mcnemar_exact( a, b ) }
@@ -145,7 +144,9 @@ def rescore( per_arm: Dict[str, List[Dict[str, Any]]], answers: Dict[str, Dict[s
 
     Ensures:
         - returns { arms: { arm: { all, by_type, vs_q, vs_always_yes } } }
-        - each vs_ entry holds old, new and sign_reversed: both signs nonzero and unequal; a sign that moves to or from zero is shown, not flagged
+        - each vs_ entry holds old, old_same (the old flags on the asks decided in both arms), new, sign_reversed and population_effect
+        - sign_reversed compares old_same with new, both signs nonzero and unequal; a sign that moves to or from zero is shown, not flagged
+        - population_effect is True when old over every ask reverses against new but old_same does not: asks dropping out, not the new scoring
         - the always-yes forecast is the stored always_yes_correct flag for the old column and the constant yes forecast for the new
     """
     scored = { arm: score_arm( records, answers ) for arm, records in per_arm.items() }
@@ -157,8 +158,9 @@ def rescore( per_arm: Dict[str, List[Dict[str, Any]]], answers: Dict[str, Dict[s
         entry   = { "all": tally( scores ), "by_type": { kind: tally( scores, kind ) for kind in sorted( { s[ "response_type" ] for s in scores.values() } ) } }
         for name, base, mine in ( ( "vs_q", scored[ PAIRED_ARM ], scores ), ( "vs_always_yes", yes, yn ) ):
             if name == "vs_q" and arm == PAIRED_ARM: continue
-            old, new = paired( mine, base, "old" ), paired( mine, base, "new" )
-            entry[ name ] = { "old": old, "new": new, "sign_reversed": old[ "sign" ] * new[ "sign" ] == -1 }
+            old, same, new = paired( mine, base, "old" ), paired( mine, base, "old_on_decided_both" ), paired( mine, base, "new" )
+            entry[ name ] = { "old": old, "old_same": same, "new": new, "sign_reversed": same[ "sign" ] * new[ "sign" ] == -1,
+                              "population_effect": old[ "sign" ] * new[ "sign" ] == -1 and same[ "sign" ] * new[ "sign" ] != -1 }
         out[ arm ] = entry
     return { "arms": out, "always_yes": tally( yes ) }
 
@@ -197,10 +199,10 @@ def build_report( per_ask: Dict[str, Any], answers: Dict[str, Dict[str, Any]], r
 
     Ensures:
         - carries the scored sha, the per-ask files' shas, the cohort shas, the switch states, the denominators and PHASES_NOT_STORED
-        - any context arm whose paired sign reverses is listed under reversals, as a finding and not an action
+        - any context arm whose paired sign reverses on the asks decided in both arms is listed under reversals, as a finding and not an action
     """
     result    = rescore( per_ask[ "records" ], answers )
-    reversals = [ { "arm": arm, "against": name, "old": entry[ name ][ "old" ][ "difference" ], "new": entry[ name ][ "new" ][ "difference" ] }
+    reversals = [ { "arm": arm, "against": name, "old": entry[ name ][ "old_same" ][ "difference" ], "new": entry[ name ][ "new" ][ "difference" ] }
                   for arm, entry in result[ "arms" ].items() for name in ( "vs_q", "vs_always_yes" ) if name in entry and entry[ name ][ "sign_reversed" ] ]
     return { "title": "One-time re-score of phase 6 under the complete-action measure", "run": run_facts, "per_ask_files": per_ask[ "files" ],
              "switches": switches, "judge": "none; a free-text condition that needs the judge is undecided", "model_calls": 0,
@@ -226,13 +228,13 @@ def render_markdown( report: Dict[str, Any] ) -> str:
     for arm, entry in report[ "result" ][ "arms" ].items():
         for kind, cell in [ ( "all", entry[ "all" ] ) ] + list( entry[ "by_type" ].items() ):
             lines.append( f"| {arm} | {kind} | {cell[ 'asks' ]} | {cell[ 'old_correct' ]} | {cell[ 'new_passed' ]} | {cell[ 'decided' ]} | {cell[ 'undecided' ]} | {cell[ 'coverage' ]:.3f} |" )
-    lines += [ "", "## Paired differences (arm only minus other only)", "", "| arm | against | old n | old diff | old p | new n (decided in both) | new diff | new p | sign reversed |", "|---|---|---|---|---|---|---|---|---|" ]
+    lines += [ "", "## Paired differences (arm only minus other only)", "", "| arm | against | old n | old diff | old p | new n (decided in both) | old diff on those asks | new diff | new p | sign reversed | population effect |", "|---|---|---|---|---|---|---|---|---|---|---|" ]
     for arm, entry in report[ "result" ][ "arms" ].items():
         for name in ( "vs_q", "vs_always_yes" ):
             if name in entry:
                 o, n = entry[ name ][ "old" ], entry[ name ][ "new" ]
-                lines.append( f"| {arm} | {name} | {o[ 'n' ]} | {o[ 'difference' ]} | {o[ 'p_value' ]:.4f} | {n[ 'n' ]} | {n[ 'difference' ]} | {n[ 'p_value' ]:.4f} | {entry[ name ][ 'sign_reversed' ]} |" )
-    lines += [ "", "## Sign reversals (a finding, not acted on)", "", *( [ f"- {r[ 'arm' ]} {r[ 'against' ]}: old {r[ 'old' ]}, new {r[ 'new' ]}" for r in report[ "reversals" ] ] or [ "- none" ] ) ]
+                lines.append( f"| {arm} | {name} | {o[ 'n' ]} | {o[ 'difference' ]} | {o[ 'p_value' ]:.4f} | {n[ 'n' ]} | {entry[ name ][ 'old_same' ][ 'difference' ]} | {n[ 'difference' ]} | {n[ 'p_value' ]:.4f} | {entry[ name ][ 'sign_reversed' ]} | {entry[ name ][ 'population_effect' ]} |" )
+    lines += [ "", "## Sign reversals on the same asks (a finding, not acted on)", "", *( [ f"- {r[ 'arm' ]} {r[ 'against' ]}: old {r[ 'old' ]}, new {r[ 'new' ]}" for r in report[ "reversals" ] ] or [ "- none" ] ) ]
     lines += [ "", "## Phases with nothing to re-score", "" ] + [ f"- {phase}: {why}" for phase, why in report[ "phases_without_stored_forecasts" ].items() ]
     return "\n".join( lines ) + "\n"
 

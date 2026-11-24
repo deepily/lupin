@@ -41,6 +41,16 @@ X_RECORDS = [
 ]
 
 
+# Z ties Q on the stored flags over the asks decided in both arms (a1, a3, a4) and wins one of them on the new measure;
+# its a2 flag is wrong, so over every ask the old column reads Z behind Q
+Z_RECORDS = [
+    _rec( "a1", "yes_no", { "value": "yes" }, False, True ),
+    _rec( "a2", "yes_no", { "value": "no" }, False, True ),
+    _rec( "a3", "yes_no", { "value": "no" }, True, False ),
+    _rec( "a4", "multiple_choice", { "answers": { "H": "A" } }, True ),
+]
+
+
 def test_score_ask_gives_each_planted_forecast_its_literal_old_and_new():
     got = ots.score_arm( Q_RECORDS, ANSWERS )
     assert { i: ( s[ "old" ], s[ "new" ], s[ "decided" ] ) for i, s in got.items() } == {
@@ -71,10 +81,18 @@ def test_paired_old_counts_every_ask_and_new_counts_only_asks_decided_in_both():
     assert new[ "p_value" ] == 1.0
 
 
+def test_a_sign_that_moves_to_zero_is_shown_not_flagged_and_a_population_effect_is_named():
+    entry = ots.rescore( { "Q": Q_RECORDS, "Z": Z_RECORDS }, ANSWERS )[ "arms" ][ "Z" ][ "vs_q" ]
+    assert ( entry[ "old" ][ "difference" ], entry[ "old_same" ][ "difference" ], entry[ "new" ][ "difference" ] ) == ( -1, 0, 1 )
+    assert ( entry[ "old_same" ][ "sign" ], entry[ "new" ][ "sign" ] ) == ( 0, 1 )
+    assert entry[ "sign_reversed" ] is False and entry[ "population_effect" ] is True
+
+
 def test_rescore_flags_a_sign_reversal_and_leaves_q_unpaired_with_itself():
     result = ots.rescore( { "Q": Q_RECORDS, "X": X_RECORDS }, ANSWERS )
     assert "vs_q" not in result[ "arms" ][ "Q" ]
-    assert result[ "arms" ][ "X" ][ "vs_q" ][ "sign_reversed" ] is True
+    assert result[ "arms" ][ "X" ][ "vs_q" ][ "sign_reversed" ] is True and result[ "arms" ][ "X" ][ "vs_q" ][ "population_effect" ] is False
+    assert result[ "arms" ][ "X" ][ "vs_q" ][ "old_same" ][ "difference" ] == -1
     assert result[ "arms" ][ "Q" ][ "vs_always_yes" ][ "sign_reversed" ] is False
     assert result[ "always_yes" ] == { "asks": 3, "old_correct": 2, "new_passed": 1, "decided": 2, "undecided": 1, "coverage": 2 / 3 }
     assert result[ "arms" ][ "X" ][ "all" ][ "new_passed" ] == 3 and result[ "arms" ][ "X" ][ "all" ][ "old_correct" ] == 1
@@ -107,6 +125,16 @@ def test_read_switches_reads_values_and_skips_commented_lines( tmp_path ):
     ini = tmp_path / "x.ini"
     ini.write_text( "prediction engine enabled = true\n# prediction engine old enabled = true\nother enabled = true\nprediction hint voting enabled   = false\n" )
     assert ots.read_switches( str( ini ) ) == { "prediction engine enabled": "true", "prediction hint voting enabled": "false" }
+
+
+def test_read_switches_on_the_committed_ini_gives_what_the_retired_pattern_gave():
+    """The retired pattern, kept as a second derivation, read on the committed INI."""
+    import re
+    import cosa.utils.util as cu
+    path    = cu.get_project_root() + "/src/conf/" + "lupin-app" + ".ini"
+    pattern = r"^(prediction [^=#]*?(?:enabled|switch))\s*=\s*(\S+)"
+    with open( path, encoding="utf-8" ) as handle: retired = { key.strip(): value for key, value in re.findall( pattern, handle.read(), re.MULTILINE ) }
+    assert len( retired ) >= 16 and ots.read_switches( path ) == retired
 
 
 class _Session:
