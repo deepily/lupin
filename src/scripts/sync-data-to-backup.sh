@@ -34,7 +34,7 @@
 # === CONFIG START ===
 # CUSTOMIZE these paths for your project
 SOURCE_DIR="${DEEPILY_DATA_DIR:-/mnt/DATA01/include/www.deepily.ai/projects-data}/"
-DEST_DIR="/mnt/DATA02/include/www.deepily.ai/projects-data/"
+DEST_DIR="${DEEPILY_BACKUP_DEST_DIR:-/mnt/DATA02/include/www.deepily.ai/projects-data}/"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 EXCLUDE_FILE="$SCRIPT_DIR/conf/rsync-exclude-data.txt"
 PROJECT_NAME="Deepily FLEET DATA (projects-data)"
@@ -79,10 +79,15 @@ check_for_updates() {
         echo -e "Or run: ${BLUE}./backup.sh --check-for-update${NC}"
         echo -e "${YELLOW}========================================${NC}\n"
 
-        # Pause for user to notice
-        echo -n "Press Enter to continue with current version, or Ctrl+C to cancel..."
-        read
-        echo ""
+        # Pause for user to notice, but only when a person can answer: with no terminal on stdin
+        # (a seat's Bash call, cron) read would wait forever (bug 4353ee94)
+        if [[ -t 0 ]]; then
+            echo -n "Press Enter to continue with current version, or Ctrl+C to cancel..."
+            read
+            echo ""
+        else
+            echo -e "${YELLOW}No terminal on stdin: continuing with the current version.${NC}\n"
+        fi
     fi
 }
 
