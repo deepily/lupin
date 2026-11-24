@@ -902,7 +902,7 @@ class ProxyDecision( Base ):
         nullable=True
     )
 
-    # Data provenance (organic, synthetic_seed, synthetic_generated)
+    # Data provenance (organic, proxy, uncarded, synthetic_seed, synthetic_generated)
     data_origin: Mapped[str] = mapped_column(
         String( 50 ),
         nullable=False,

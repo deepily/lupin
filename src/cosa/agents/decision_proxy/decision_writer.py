@@ -5,7 +5,33 @@ The one writer for a proxy_decisions row, shared by the responder and the SWE te
 
 Both callers choose between a shadow row and a decision row on the result's action. Only the
 fields around that choice differ, so the choice lives here and the differences are arguments.
+A test run may not write to the dev database; the guard below refuses that write.
 """
+
+from lupin_cli.notifications.human_ask_containment import test_node_id
+
+DEV_DATABASE_NAME = "lupin_db_dev"
+
+
+def refuse_dev_database_under_pytest( session ):
+    """
+    Refuse a proxy_decisions write that a test is about to make to the dev database.
+
+    Requires:
+        - session is the database session the write will use
+
+    Ensures:
+        - returns None outside pytest, and under pytest when the session is bound to any other database
+        - raises under pytest when the session's bind names the dev database, naming the test that tried (human_ask_containment.test_node_id)
+        - the check reads the session's own bind, so a test that fakes the session or binds a scratch database is not refused
+
+    Raises:
+        - RuntimeError when pytest is running and the session is bound to the dev database
+    """
+    node = test_node_id()
+    if node is None: return
+    if session.get_bind().url.database != DEV_DATABASE_NAME: return
+    raise RuntimeError( f"test {node} tried to write a proxy_decisions row to {DEV_DATABASE_NAME}; bind a scratch database or fake the session" )
 
 
 def write_proxy_decision( result, notification_id, domain, question, sender_id, requires_ratification,
@@ -31,6 +57,7 @@ def write_proxy_decision( result, notification_id, domain, question, sender_id, 
         - extra reaches the repository call unchanged
 
     Raises:
+        - RuntimeError from refuse_dev_database_under_pytest when a test is bound to the dev database
         - whatever the database session or the repository raises; the callers treat the write as
           non-fatal and catch it
     """
@@ -40,6 +67,7 @@ def write_proxy_decision( result, notification_id, domain, question, sender_id, 
     extra = extra if extra is not None else {}
 
     with get_db() as session:
+        refuse_dev_database_under_pytest( session )
         repo = ProxyDecisionRepository( session )
 
         if result.action == "shadow":
