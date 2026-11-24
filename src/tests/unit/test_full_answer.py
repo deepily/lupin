@@ -337,19 +337,21 @@ def test_a_full_reply_for_an_open_ended_card_is_stored_where_the_old_reply_was_r
 
 
 def test_the_full_prompt_names_each_option_by_its_stable_id_and_asks_for_the_full_reply( factory, on ):
-    text = cb.build_user_prompt( episode( factory, "multiple_choice" ), cb.ALL_LAYERS, full=True )
-    assert f'[{PLAN_A}] "Plan A" - the safe one' in text and f'[{DOCS}] "Docs"' in text and text.endswith( fa.CHOICE_FULL_FORMAT )
-    assert cb.build_user_prompt( episode( factory, "yes_no" ), cb.ALL_LAYERS, full=True ).endswith( fa.YES_NO_FULL_FORMAT )
-    assert cb.build_user_prompt( episode( factory, "open_ended" ), cb.ALL_LAYERS, full=True ).endswith( fa.OPEN_FULL_FORMAT )
-    assert cb.build_user_prompt( episode( factory, "open_ended_batch" ), cb.ALL_LAYERS, full=True ).endswith( fa.BATCH_FULL_FORMAT )
+    text = cb.build_full_user_prompt( episode( factory, "multiple_choice" ) )
+    assert f'[{PLAN_A}] "Plan A"; [{PLAN_B}] "Plan B (Recommended)"' in text and f'[{DOCS}] "Docs"' in text and text.endswith( fa.CHOICE_FULL_FORMAT )
+    assert cb.YES_NO_FORMAT not in text and cb.CHOICE_FORMAT not in text and '"Plan A" - the safe one' in text, "the old format is replaced and the card text is the old builder's"
+    assert "Option ids" not in cb.build_full_user_prompt( episode( factory, "multiple_choice" ), ( "prompt", ) ), "no ids without the options layer"
+    assert cb.build_full_user_prompt( episode( factory, "yes_no" ) ).endswith( fa.YES_NO_FULL_FORMAT ) and "Option ids" not in cb.build_full_user_prompt( episode( factory, "yes_no" ) )
+    assert cb.build_full_user_prompt( episode( factory, "open_ended" ) ).endswith( fa.OPEN_FULL_FORMAT )
+    assert cb.build_full_user_prompt( episode( factory, "open_ended_batch" ) ).endswith( fa.BATCH_FULL_FORMAT )
     assert set( fa.FULL_FORMATS ) == set( fa.FULL_ANSWER_TYPES )
 
 
 def test_the_full_reply_refuses_a_card_type_it_does_not_read( factory ):
     ep = episode( factory, "yes_no" )
     ep[ "response_type" ] = "review"
-    with pytest.raises( cb.UnsupportedAsk ): cb.build_user_prompt( ep, full=True )
-    with pytest.raises( cb.UnsupportedAsk ): cb.parse_reply( "{}", ep, full=True )
+    with pytest.raises( cb.UnsupportedAsk ): cb.build_full_user_prompt( ep )
+    with pytest.raises( cb.UnsupportedAsk ): cb.parse_full( "{}", ep )
 
 
 def test_the_baseline_reads_the_switch_once_and_uses_it_for_prompt_parser_and_version( factory, monkeypatch, tmp_path ):
@@ -370,16 +372,16 @@ def test_a_change_to_the_full_answer_module_is_a_new_predictor_version( monkeypa
     assert cb.predictor_version( cb.ALL_LAYERS, True ) != full and cb.predictor_version() == plain, "the helper source joins the hash only while the switch is on"
 
 
-# The switch-off pins. Editing parse_reply and build_user_prompt changes the source the version hashes, so the version string
-# itself moves once when this slice merges (at a472c7bef it was context-baseline-5352236008). What the switch-off pin holds is
-# that the version is built from exactly the parts it was built from before, with none of full_answer's source added.
+# The switch-off pins. build_user_prompt, parse_reply and _choice_of are the hashed source, and this slice leaves them byte for byte
+# as they were at a472c7bef, so a switch-off baseline keeps its version, its ledger and its stored rows' version string.
+OLD_VERSION = "context-baseline-5352236008"
 OLD_PROMPT_TAIL = 'Reply: {"answer": "yes" or "no", "confidence": a number from 0 to 1}.'
 
 
 def test_switch_off_the_version_the_prompt_the_reply_and_the_row_are_what_they_were( factory, tmp_path ):
     from cosa.repo.doc_lint import model_transport
     old_parts = [ "context-baseline", cb.SYSTEM_PROMPT, ",".join( cb.ALL_LAYERS ), cb.inspect.getsource( cb.build_user_prompt ), cb.inspect.getsource( cb.parse_reply ), cb.inspect.getsource( cb._choice_of ) ]
-    assert cb.predictor_version() == model_transport.prompt_version( *old_parts ), "a switch-off version hashes the same six parts as before and none of full_answer"
+    assert cb.predictor_version() == model_transport.prompt_version( *old_parts ) == OLD_VERSION, "a switch-off version is the one a472c7bef gave, and hashes none of full_answer"
     ep = episode( factory, "yes_no" )
     assert cb.build_user_prompt( ep ).endswith( OLD_PROMPT_TAIL ) and cb.YES_NO_FORMAT == OLD_PROMPT_TAIL and cb.YES_NO_ANSWERS == ( "yes", "no" )
     assert cb.parse_reply( '{"answer": "yes", "confidence": 0.9}', ep ) == { "value": "yes", "confidence": 0.9 }
@@ -395,8 +397,12 @@ def test_switch_off_the_version_the_prompt_the_reply_and_the_row_are_what_they_w
 def test_every_forecaster_arm_uses_parse_reply( factory, monkeypatch, tmp_path ):
     assert list( FORECASTER_ARMS ) == [ "C0", "B1", "C0-opus", "B1-opus" ], "the registry is pinned to the four forecasters the plan names"
     seen = []
-    monkeypatch.setattr( cb, "parse_reply", lambda text, episode, full=False: seen.append( text ) or { "routed": True } )
-    c0 = cb.ContextBaseline( "haiku-x", 5, cb.ALL_LAYERS, cb.open_ledger( str( tmp_path / "ledger.jsonl" ) ), full=False )
-    for arm, parse_of in FORECASTER_ARMS.items():
-        assert parse_of( c0 )( arm, None ) == { "routed": True }
-    assert seen == list( FORECASTER_ARMS ), "each arm's reply reached context_baseline.parse_reply, in registry order"
+    monkeypatch.setattr( cb, "parse_reply", lambda text, episode: seen.append( ( "old", text ) ) or { "routed": True } )
+    monkeypatch.setattr( fa, "parse_full_reply", lambda text, episode: seen.append( ( "full", text ) ) or { "routed": True } )
+    ep = episode( factory, "yes_no" )
+    for full, route in ( ( False, "old" ), ( True, "full" ) ):
+        c0 = cb.ContextBaseline( "haiku-x", 5, cb.ALL_LAYERS, cb.open_ledger( str( tmp_path / f"ledger-{route}.jsonl" ) ), full=full )
+        for arm, parse_of in FORECASTER_ARMS.items():
+            assert parse_of( c0 )( arm, ep ) == { "routed": True }
+        assert seen == [ ( route, arm ) for arm in FORECASTER_ARMS ], f"each arm's reply reached the {route} parser, in registry order"
+        seen.clear()
