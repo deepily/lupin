@@ -13,6 +13,28 @@ import logging
 logger = logging.getLogger( __name__ )
 
 
+def stored_answers_for( category ):
+    """
+    Stream a category's stored swe decision metadata, newest first.
+
+    Requires:
+        - the database is reachable, or the failure is tolerated below
+
+    Ensures:
+        - yields each answered row's metadata_json dict, ordered by the row's stored time, and reads no more rows than the caller pulls
+        - a database failure is logged and the stream ends empty; it never propagates
+    """
+    try:
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
+
+        with get_db() as session:
+            for row in ProxyDecisionRepository( session ).iter_answered_newest_first( "swe", category ):
+                yield row.metadata_json
+    except Exception as e:
+        logger.warning( f"Re-frame history rebuild skipped for {category} (non-fatal): {e}" )
+
+
 def build_ini_engineering_strategy( trust_mode, debug=False, on_trip_callback=None ):
     """
     Build an EngineeringStrategy with every setting read from the INI.
@@ -24,6 +46,7 @@ def build_ini_engineering_strategy( trust_mode, debug=False, on_trip_callback=No
     Ensures:
         - Returns ( strategy, swe_cfg ) where swe_cfg is the SWE proxy config dict, empty if the INI read failed
         - A key absent because the INI read failed keeps the built-in value
+        - The strategy rebuilds its re-frame history from the stored decision rows when the neither switch is on
         - Only an unknown trust model is refused; any other INI read failure is logged and the defaults are used
 
     Raises:
@@ -97,6 +120,7 @@ def build_ini_engineering_strategy( trust_mode, debug=False, on_trip_callback=No
         trust_tracker    = trust_tracker,
         circuit_breaker  = circuit_breaker,
         accepted_senders = swe_cfg.get( "accepted_senders" ),
+        stored_answers   = stored_answers_for,
         trust_mode       = trust_mode,
         debug            = debug,
     )

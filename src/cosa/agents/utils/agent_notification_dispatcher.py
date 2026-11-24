@@ -187,6 +187,21 @@ class ConfirmationAnswer( NamedTuple ):
         return self.raw.lower().strip().startswith( "yes" )
 
 
+def answer_source_is_human( source ):
+    """
+    Say whether an answer's source counts as a person's answer.
+
+    Requires:
+        - source is the string a ConfirmationAnswer carries, or the answer_source a decision row stores
+
+    Ensures:
+        - returns True exactly when the source is "human"
+        - the rule itself lives in answer_source_of, which decides the label once, at the moment of the answer
+        - this function only reads that label back, for the live scoring, the stored row and the restart rebuild
+    """
+    return source == "human"
+
+
 # Row 663f08d4: ask_confirmation returns a bool, so the id of the notification that carried the
 # question travels beside it. A ContextVar is per task, so concurrent jobs sharing one dispatcher
 # never read each other's id.
