@@ -5,12 +5,12 @@ pins:
   - cosa.agents.principle_learner.review_cards.review_card_cap@8f614eef47
   - cosa.agents.principle_learner.review_cards.split_step@93263afe0c
   - cosa.agents.principle_learner.review_cards.resolve_conflict@78402458d5
-  - cosa.agents.principle_learner.review_cards.cards_in_window@2b2872cb18
+  - cosa.agents.principle_learner.review_cards.cards_in_window@49bb266a24
   - cosa.agents.principle_learner.review_cards.plan_card@f73a22a780
   - cosa.agents.principle_learner.review_cards.build_card@e8e6489d60
   - cosa.agents.principle_learner.review_cards.send_review_card@afca357cc1
   - cosa.agents.principle_learner.review_cards.review_card_times@6a555e44e1
-  - cosa.agents.principle_learner.review_cards.record_card_answer@abc6290677
+  - cosa.agents.principle_learner.review_cards.record_card_answer@8ad921c8d8
 ---
 # Principle review cards
 

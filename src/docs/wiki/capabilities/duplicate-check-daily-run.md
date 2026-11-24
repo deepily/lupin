@@ -2,7 +2,7 @@
 capability: duplicate-check-daily-run
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.duplicate_check_daily.Counting@f2ca3e39f1
+  - lupin_mcp.duplicate_check_daily.Counting@2862e10027
   - lupin_mcp.duplicate_check_daily.findings_of@cfdb1b0bd4
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@63584b8a94
   - lupin_mcp.duplicate_check_daily.run@bba5df5315
@@ -24,7 +24,7 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 
 ## What it does
 - `failed_prerequisite` checks, in order, that the embedding endpoint answers, the Claude binary reports a version and the frozen configuration matches the live one. A judge model with no frozen file fails the third. It returns None or `{ prerequisite, detail }` for the first that fails.
-- `Counting` wraps the judge backend and counts the calls. After a rate or usage limit refusal it counts that in `limited` and refuses every later call of the run at once. Any failed call, a limited one included, is counted in `failed`.
+- `Counting` wraps the judge backend and counts the calls. After a rate or usage limit refusal it counts that in `limited` and refuses every later call of the run at once. A call that fails on an expired Claude login sets `login_dead`, counts in `failed` but not `limited`, and also refuses every later call at once. Any failed call, a limited one included, is counted in `failed`.
 - `findings_of` makes one finding per cluster that holds a new definition: the new definition with the lowest id, with `others` the rest. A cluster is left out when any of its new definitions already has a verdict line, so a verdict on either side settles the pair. Without `session_of` the session is None. `finding_judges` names the models behind a finding from its verdict rows, and marks a reused ruling with `reused_from_model`.
 - `run( root, now, trigger, cap, cli_path, parts, ... )` first runs the guards of [[duplicate-check-branch-guard]]. It then writes `<date>-<time>-<trigger>.json` under `duplicate-check-daily`. A trigger other than `cron`, `reboot` or `hand` raises `ValueError`.
 - A run whose every new call failed, with no limit to explain it, is recorded `failed`. Rulings replayed from the ledger do not hide it. A limited run stays `carried`. A complete baseline judges nothing. A run inside a rate-limit back-off is recorded `skipped` and judges nothing. A failed prerequisite writes status `failed` and changes nothing else.

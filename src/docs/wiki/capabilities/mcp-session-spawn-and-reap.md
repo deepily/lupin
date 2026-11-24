@@ -2,7 +2,7 @@
 capability: mcp-session-spawn-and-reap
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - lupin_mcp.session_spawner.spawn_sessions@eb7d475f75
+  - lupin_mcp.session_spawner.spawn_sessions@410e6337dc
   - lupin_mcp.session_spawner.default_fleet_gate@2ee57b8598
   - lupin_mcp.session_spawner.dismiss_sessions@40ab1f24d0
   - lupin_mcp.session_spawner.list_spawned_sessions@47ba7c5ac6
@@ -16,7 +16,7 @@ A manager seat starts, lists and ends Claude Code seats through four MCP tools s
 ## Spawn
 - `spawn_sessions` refuses a count below 1, a count over the spawn cap (code default 8), a fleet-cap breach, or any spawn under skeleton crew. The tool returns `status: "error"`. A one-for-one re-spin that holds a credit is not refused for skeleton crew.
 - `default_fleet_gate` answers the skeleton crew switch first. With it on, it refuses every spawn except a re-spin that holds a fresh credit, which goes on to the cap check. Otherwise it allows a spawn when current total plus requested fits the fleet cap. If its census raises, the spawn is allowed.
-- On a real spawn each child gets its own seat worktree. A falsy `project` puts the seat in the caller's cwd. Otherwise `project` resolves to a root: the caller's own tree for its own project, a sibling of the main checkout for any other. A missing provisioning script, a refused root or a provisioning failure leaves it in that resolved project root. An occupied slot skips to the next index. A dry run provisions nothing. An unresolvable `project` is refused, dry runs included.
+- On a real spawn each child gets its own seat worktree. A falsy `project` puts the seat in the caller's cwd. Otherwise `project` resolves to a root: the caller's own tree for its own project, a sibling of the main checkout for any other. A missing provisioning script, a refused root or a provisioning failure leaves it in that resolved project root. An occupied slot skips to the next index. The brief template gets `{role}`, `{manager_session_id}`, `{index}` and `{batch_index}`. `{index}` is the session-name slot, the lowest free number, so it can start above 1. `{batch_index}` is the seat's 1-based position in this call, for picking one brief per seat. A dry run provisions nothing. An unresolvable `project` is refused, dry runs included.
 - Each child's environment carries `COSA_VOICE_WORKER_VOICE_MODE`: the INI key `cc session worker default voice mode`, or `inherit` for a role equal to `manager`. A bad key value refuses the whole spawn, naming the key, after the project check. See [[quiet-workers-by-default]]. A child whose launch script exits non-zero is reported `failed`; the rest still launch, and only successes enter the manifest.
 - Model is the `model` argument, else the INI per-role key, else the INI default key, else no `--model` flag.
 - `seed_memento` is appended to the brief as text; the spawner never opens it. A truthy seed on a real spawn also arms a wake watch.

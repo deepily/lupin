@@ -9,7 +9,7 @@ pins:
   - lupin_arbiter_app.job_alert_watcher.decide@495d06cf93
   - lupin_arbiter_app.job_alert_watcher.delivered@35e5670140
   - lupin_arbiter_app.job_alert_watcher.make_live_summary_fn@ba181b86a9
-  - lupin_arbiter_app.job_alert_watcher.JobAlertLoop@53e6ae71f5
+  - lupin_arbiter_app.job_alert_watcher.JobAlertLoop@14520cc074
 ---
 # Job alert watcher
 
@@ -28,6 +28,11 @@ Tells Rick when a background job goes bad. It runs inside the :8001 arbiter ([[a
 - An alert that reached no channel is logged `job_alert_undelivered` and keeps its old state, so the next poll retries. It logs `job_alert` per message and returns the number delivered.
 - The loop reads its state with `load_json_dict` and writes it with `write_json_atomic` ([[utils-atomic-json]]), both injected. A missing, unreadable or non-dict file reads as empty; the write replaces `io/jobs/alert-state.json` by rename and makes the folder. It writes only when the state changed.
 - `start` and `stop` come from `StoppableDaemonMixin` ([[utils-stoppable-daemon]]) and run the loop on a daemon thread, every 300 seconds by default.
+
+## Job-health rows
+- With a `row_sync_fn`, each poll also keeps one store row per failing or silent job, key `job-health:<job>`, filed at P5 for the registry owner. Behind jobs are alerted but never get a row.
+- A row is amended only when its fingerprint (state, reasons, last attempt start) changes, and dropped when the job is healthy again. Fingerprints live in `io/jobs/job-row-state.json`.
+- A row failure is logged `job_row_failed` and sent as an urgent alert, at most once an hour after one was delivered.
 
 ## Wiring
 - `make_live_summary_fn` builds the list `GET /api/jobs/summary` answers with, in this process. It imports the job service on first call.

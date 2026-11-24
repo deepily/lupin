@@ -2,7 +2,7 @@
 capability: decision-proxy-agreement
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.agreement.forecast_agreement@2c4f0e7d87
+  - cosa.agents.decision_proxy.agreement.forecast_agreement@cccd2465f2
   - cosa.agents.decision_proxy.agreement.rule_agreement@983b5eae1a
   - cosa.agents.decision_proxy.config.shadow_forecast_recording_enabled@bbd09ea2ae
 ---

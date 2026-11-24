@@ -5,7 +5,7 @@ pins:
   - cosa.agents.principle_learner.enqueue_after_answer.enqueue_after_answer@ab3b706698
   - cosa.agents.principle_learner.enqueue_after_answer.is_enabled@b49876fbb2
   - cosa.agents.principle_learner.enqueue_after_answer.register_job@09d7d1cfa0
-  - cosa.agents.principle_learner.extractor_job.PrincipleExtractorJob@0dd1b4ded7
+  - cosa.agents.principle_learner.extractor_job.PrincipleExtractorJob@4cc1e0e7f0
   - cosa.agents.principle_learner.extractor_job.default_embed@e98982141d
   - cosa.agents.principle_learner.extractor_job.default_session@42b97853f4
   - cosa.agents.principle_learner.extractor_job.encoder_version@226928f982

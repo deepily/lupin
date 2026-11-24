@@ -6,8 +6,8 @@ pins:
   - cosa.agents.prediction_engine.prediction_result.PredictionResult.to_hint_dict@258569218c
   - cosa.agents.prediction_engine.accuracy_comparators.offered_labels@d54e9908aa
   - cosa.agents.prediction_engine.accuracy_comparators.score_field@646437df13
-  - cosa.agents.prediction_engine.accuracy_comparators.compare_multiple_choice@8c053be4a2
-  - cosa.agents.prediction_engine.accuracy_comparators.get_comparator@c59bd8b6a2
+  - cosa.agents.prediction_engine.accuracy_comparators.compare_multiple_choice@851632a17b
+  - cosa.agents.prediction_engine.accuracy_comparators.get_comparator@a124c310bf
 ---
 # Prediction per-field multiple choice
 
@@ -25,4 +25,5 @@ With `prediction engine per field multiple choice enabled` on, a multiple-choice
 - `get_comparator` binds `per_field` to the multiple-choice comparator only when it is true. `offered_labels` returns the stripped labels one stored field offered.
 - With `per_field` true, `score_field` adds an `outcome`: exact, miss, or `other_write_in` when the pick is not an offered label.
 - `compare_multiple_choice` then leaves abstained fields and typed Others out of `total`. It adds `other_write_in`, `abstained` and `field_coverage` to the detail.
+- The forecast's typed fields (write-in or re-frame text) are read through `predicted_answers_of` before scoring, so a typed pick is compared as the answer.
 - A card with nothing left to score returns `None`, so it is not scored at all.

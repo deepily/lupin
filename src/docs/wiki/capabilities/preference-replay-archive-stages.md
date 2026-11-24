@@ -12,9 +12,9 @@ pins:
   - cosa.research.preference_replay.archive_replay.checkpoint_line@2724b71a61
   - cosa.research.preference_replay.archive_replay.principle_progress@bf3abb5db9
   - cosa.research.preference_replay.archive_replay.warning_text@e9a80093eb
-  - cosa.research.preference_replay.archive_replay.run_first_stage@fd5da2d7bb
-  - cosa.research.preference_replay.archive_replay.run_twin_stage@9d046b3243
-  - cosa.research.preference_replay.archive_replay.main@4f9c5f720d
+  - cosa.research.preference_replay.archive_replay.run_first_stage@c1a79fba47
+  - cosa.research.preference_replay.archive_replay.run_twin_stage@91f0716db0
+  - cosa.research.preference_replay.archive_replay.main@347f00d711
 ---
 # Preference replay: archive stages and checkpoints
 
@@ -35,6 +35,6 @@ Runs the archive of asks through every arm in stages, each able to stop and resu
 - Both stages raise `FreezeMismatch` and `BoundStop` as described on the freeze page. On a stop the work is saved and a named line is logged.
 
 ## Command line
-- `main( argv )` takes the stage `first`, `twins` or `report`, with `--work`, `--asks`, `--non-asks` and `--fixture`. It also takes `--follow`, `--chunk`, `--accept-code-change` and `--limit N`, which cuts the evaluation to N asks for a short trial.
+- `main( argv )` takes the stage `first`, `twins` or `report`, with `--work`, `--asks`, `--non-asks` and `--fixture`. It also takes `--follow`, `--chunk`, `--accept-code-change`, `--checkpoint` and `--limit N`, which cuts the evaluation to N asks for a short trial. `--checkpoint` names the freeze file the run is scored against (default: the 18 Nov checkpoint). Every run prints which one first.
 - A stop on the limit returns exit 3 with the work saved. Any other return is 0.
 - The report stage is on [[preference-replay-archive-report]].
