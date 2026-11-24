@@ -19,11 +19,11 @@ Run it pinned to the tree. The live database needs the usual config environment:
 import argparse
 import json
 import re
-import subprocess
 import types
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -38,7 +38,9 @@ from cosa.agents.prediction_engine.three_way_stance import neighbours_of
 from cosa.agents.principle_learner.extractor_rules import field_answers, owners_own_answer
 from cosa.research.preference_replay import replay_loop
 from cosa.utils.iso_timestamp import aware_moment
-from cosa.utils.notification_utils import extract_qualifier_comment
+import cosa.utils.util as cu
+from cosa.utils.notification_utils import _decode_json_text, extract_qualifier_comment
+from scripts.check_bundle_freshness import current_sha
 
 WINDOW_START = "2026-09-10"
 STANCES      = ( "yes", "no", "neither" )
@@ -93,10 +95,10 @@ def as_json( value ):
     Ensures:
         - returns the decoded value for a str or bytes that holds JSON, None for one that does not, and any other value unchanged
     """
-    if isinstance( value, ( str, bytes ) ):
-        try: return json.loads( value )
-        except ValueError: return None
-    return value
+    if isinstance( value, bytes ):
+        try: value = value.decode( "utf-8" )
+        except UnicodeDecodeError: return None
+    return _decode_json_text( value )
 
 
 # ---------------------------------------------------------------- read only loaders
@@ -178,9 +180,8 @@ def provenance():
     Ensures:
         - returns { "run_time_utc", "git_sha" }; the sha is "unknown" when git cannot say
     """
-    done = subprocess.run( [ "git", "rev-parse", "HEAD" ], capture_output=True, text=True )
     return { "run_time_utc": datetime.now( timezone.utc ).isoformat( timespec="seconds" ),
-             "git_sha"     : done.stdout.strip() if done.returncode == 0 else "unknown" }
+             "git_sha"     : current_sha( Path( cu.get_project_root() ) ) }
 
 
 # ---------------------------------------------------------------- units

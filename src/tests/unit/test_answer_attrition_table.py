@@ -15,6 +15,7 @@ import sys
 import types
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -162,7 +163,8 @@ def test_the_prompt_probe_finds_an_answer_when_the_builder_carries_it( fixture_p
 def test_a_write_inside_the_scripts_transaction_fails_and_the_fixture_is_unchanged( fixture_path, monkeypatch ):
     """A write made inside read_tables fails, and the fixture file is the same afterwards."""
     before = file_digest( fixture_path )
-    with aat.open_archive_session( fixture_path ) as session:
+    # a connection with no mode=ro: only the script's own READ ONLY statement can stop the write
+    with Session( create_engine( f"sqlite:///{fixture_path}" ) ) as session:
         def write_inside( raw ):
             session.execute( text( "INSERT INTO preference_evidence VALUES ( 'zz', 'zz', NULL )" ) )
         monkeypatch.setattr( aat, "clean_row", write_inside )
@@ -259,10 +261,10 @@ def test_main_writes_the_json_and_the_markdown( fixture_path, tmp_path, monkeypa
 
 
 def test_provenance_names_the_sha_and_falls_back_when_git_cannot_say( monkeypatch ):
-    """A real sha is 40 hex characters; a git failure reads unknown."""
+    """The sha comes from check_bundle_freshness.current_sha; a git failure reads unknown."""
     real = aat.provenance()
-    assert len( real[ "git_sha" ] ) == 40 and real[ "run_time_utc" ].endswith( "+00:00" )
-    monkeypatch.setattr( aat.subprocess, "run", lambda *a, **k: types.SimpleNamespace( returncode=128, stdout="" ) )
+    assert real[ "git_sha" ] == aat.current_sha( Path( cu.get_project_root() ) ) != "unknown" and real[ "run_time_utc" ].endswith( "+00:00" )
+    monkeypatch.setattr( aat, "current_sha", lambda root: "unknown" )
     assert aat.provenance()[ "git_sha" ] == "unknown"
 
 
@@ -273,11 +275,17 @@ def clean( kind, value, options=None, rid="r1" ):
     return aat.clean_row( { "id": rid, "recipient_id": ME, "response_type": kind, "response_value": value, "response_options": options } )
 
 
+def test_as_json_reads_bytes_as_utf8():
+    """Non-ASCII JSON bytes come back as the same characters, not as latin-1 mojibake."""
+    assert aat.as_json( '{"a": "é"}'.encode( "utf-8" ) ) == { "a": "é" }
+
+
 def test_as_json_decodes_text_and_passes_other_values_through():
     """JSON text decodes, bad text is None, a decoded value passes through."""
     assert aat.as_json( '{"a": 1}' ) == { "a": 1 }
     assert aat.as_json( "not json" ) is None
     assert aat.as_json( { "a": 1 } ) == { "a": 1 }
+    assert aat.as_json( b'{"a": 1}' ) == { "a": 1 } and aat.as_json( b"\xff\xfe" ) is None and aat.as_json( "  " ) is None
     assert aat.norm_id( "AB-cd" ) == "abcd"
 
 
