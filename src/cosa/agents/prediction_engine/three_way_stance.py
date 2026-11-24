@@ -32,6 +32,21 @@ LAPLACE_PSEUDO_COUNT  = 1.0
 LEVEL_FIELDS          = ( "response_type", "category", "title", "message", "sender_id", "asked_at" )
 
 
+def is_owners_human_answer( case: Dict[str, Any], owner_id: str ) -> bool:
+    """
+    Say whether a case is a human's answer, owned by this owner and not thumbed down.
+
+    Requires:
+        - case has answer_source, owner_user_id and ratification_state
+        - owner_id is the ask's owner as text
+
+    Ensures:
+        - returns True only when answer_source is "human", owner_user_id equals owner_id and ratification_state is not "rejected" in any letter case
+        - an absent ratification state counts as not rejected
+    """
+    return case[ "answer_source" ] == "human" and case[ "owner_user_id" ] == owner_id and ( case[ "ratification_state" ] or "" ).lower() != "rejected"
+
+
 def usable_cases( ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> List[Dict[str, Any]]:
     """
     Keep the cases that may cast a personal stance vote on this ask.
@@ -53,8 +68,7 @@ def usable_cases( ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> List[Dic
     kept  = []
     for case in cases:
         if case[ "response_type" ] != "yes_no": continue
-        if case[ "answer_source" ] != "human" or case[ "owner_user_id" ] != str( owner ): continue
-        if ( case[ "ratification_state" ] or "" ).lower() == "rejected": continue
+        if not is_owners_human_answer( case, str( owner ) ): continue
         if extract_qualifier_comment( case[ "decision_value" ] )[ 0 ] is None: continue
         if asked is not None and ( case[ "responded_at" ] is None or aware_moment( case[ "responded_at" ] ) > asked ): continue
         kept.append( case )
