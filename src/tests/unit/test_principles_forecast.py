@@ -680,3 +680,23 @@ def test_a_capped_card_and_an_input_error_store_no_applicability( factory, monke
     assert run( factory, broken, Baseline() )[ "status" ] == "failed"
     by_card = { str( r.notification_id ): r for r in rows( factory ) }
     assert by_card[ capped ].applicability is None and by_card[ broken ].applicability is None
+
+
+def test_a_block_with_no_applicability_key_stores_null_and_raises_nothing( factory, monkeypatch ):
+    """
+    run_arm accepts a block with no applicability key, as the answer history arm gives.
+
+    The row stores NULL, for a ready forecast and for a failed call alike.
+    """
+    real = pf._prepare
+    def without_key( *args, **kwargs ):
+        episode, selected, block, system, user = real( *args, **kwargs )
+        return episode, selected, { k: v for k, v in block.items() if k != "applicability" }, system, user
+    monkeypatch.setattr( pf, "_prepare", without_key )
+    principle( factory )
+    ready, failed = ask( factory ), ask( factory, minutes=1 )
+    assert run( factory, ready, Baseline() )[ "status" ] == "ran"
+    assert run( factory, failed, Baseline( bad_reply=True ) )[ "reason" ] == "unreadable_forecast"
+    by_card = { str( r.notification_id ): r for r in rows( factory ) }
+    assert by_card[ ready ].applicability is None and by_card[ ready ].forecast is not None
+    assert by_card[ failed ].applicability is None and by_card[ failed ].abstention_reason == "unreadable_forecast"

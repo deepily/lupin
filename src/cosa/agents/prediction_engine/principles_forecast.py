@@ -343,6 +343,7 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
         - when the database is down, so the row cannot be stored either, it still returns failed, with stored False
         - otherwise the baseline's prompts plus the principle block go to the baseline's model, once, with no retry
         - a row written after the inputs were gathered also stores applicability: the dropped-principle list with the applicability switch on, else NULL
+        - a block with no applicability key, as another provider's block may be, stores NULL and raises nothing
         - a ready forecast is stored with the principle ids it was given and its ready time; an unreadable reply or a
           failed call stores one row with the reason and no forecast
         - a full-answer reply the parser refuses stores that refusal's own reason (full_answer.REFUSAL_REASONS) and no forecast value
@@ -370,6 +371,8 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
             return { "status": STATUS_FAILED, "reason": reason, "stored": True }
         asked   = aware_moment( episode[ "asked_at" ] )
         ids     = block[ "principle_ids" ]
+        # a block from another provider (the answer history arm) may carry no applicability key: that means no check ran, so NULL
+        checked = block[ "applicability" ] if "applicability" in block else None
         try:
             text     = await c0.complete( c0.model, system, user, timeout_seconds=c0.timeout_seconds )
             forecast = c0.parse( text, episode )
@@ -380,9 +383,9 @@ async def run_arm( arm, switch_key, version_suffix, use_principles, session_fact
         except ValueError:
             reason = REASON_UNREADABLE
         else:
-            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, now(), forecast, version, [ str( i ) for i in ids ], None, arm, block[ "applicability" ] )
+            await asyncio.to_thread( _write_row, session_factory, notification_id, asked, now(), forecast, version, [ str( i ) for i in ids ], None, arm, checked )
             return { "status": STATUS_RAN, "reason": None }
-        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [ str( i ) for i in ids ], reason, arm, block[ "applicability" ] )
+        await asyncio.to_thread( _write_row, session_factory, notification_id, asked, None, None, version, [ str( i ) for i in ids ], reason, arm, checked )
         return { "status": STATUS_FAILED, "reason": reason }
     finally:
         gate.leave()
