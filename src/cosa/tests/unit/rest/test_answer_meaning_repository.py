@@ -116,3 +116,8 @@ def test_a_comment_on_a_multiple_choice_card_keeps_its_link_to_the_option_it_cha
 def test_kinds_in_joins_the_field_kinds_and_the_unknowns():
     assert kinds_in( { "native_answer": _NATIVE, "unknowns": [ "cancellation" ] } ) == { "selected_options", "cancellation" }
     assert kinds_in( { "native_answer": {}, "unknowns": [] } ) == set()
+
+
+def test_a_meaning_row_describes_itself_by_notification_version_and_annotator( repo ):
+    text = repr( _add( repo, schema_version="v7", annotator="reader-b" ) )
+    assert _NID in text and "v7" in text and "reader-b" in text
