@@ -224,6 +224,28 @@ def take_last_ask_notification_id():
     return notification_id
 
 
+# Row 1b3202de (F9): get_feedback returns a string and present_choices a dict, so who gave the answer
+# travels beside them the same way, per task.
+_last_ask_answer_source = ContextVar( "last_ask_answer_source", default=None )
+
+
+def take_last_ask_answer_source():
+    """
+    Return and forget who gave the latest open-ended or multiple-choice answer.
+
+    Requires:
+        - called from the task that awaited get_feedback or present_choices
+
+    Ensures:
+        - returns "human", "default", "not_operator" or "unattributed", as answer_source_of decided it for that answer
+        - returns None when no such ask has answered in this task, or when the ask raised: a timeout, an empty selection or an unreachable gate leaves no label
+        - a second call returns None
+    """
+    source = _last_ask_answer_source.get()
+    _last_ask_answer_source.set( None )
+    return source
+
+
 def _prepend_operator_routing( abstract: Optional[ str ], original_target: str ) -> str:
     """
     Prefix an abstract with an operator-routing context line.
@@ -629,9 +651,11 @@ class AgentNotificationDispatcher:
                 job_id            = job_id,
             )
 
+            _last_ask_answer_source.set( None )
             response: NotificationResponse = await asyncio.to_thread( _notify_user_sync, request )
 
             if response.exit_code == 0:
+                _last_ask_answer_source.set( answer_source_of( response ) )
                 return response.response_value
 
             # exit_code == 2 is the MCP server's explicit "user-unavailable
@@ -731,12 +755,14 @@ class AgentNotificationDispatcher:
                 job_id            = job_id,
             )
 
+            _last_ask_answer_source.set( None )
             response: NotificationResponse = await asyncio.to_thread( _notify_user_sync, request )
 
             if response.exit_code == 0 and response.response_value:
                 try:
                     parsed = json.loads( response.response_value )
                 except json.JSONDecodeError:
+                    _last_ask_answer_source.set( answer_source_of( response ) )
                     return { "answers": { "response": response.response_value } }
 
                 # Defensive normalization (Session 2026-04-15): treat an empty
@@ -757,6 +783,7 @@ class AgentNotificationDispatcher:
                         ),
                         delivered = True,   # exit_code 0 came back → the ask reached a human, who did not answer (row 38a0b373)
                     )
+                _last_ask_answer_source.set( answer_source_of( response ) )
                 return parsed
 
             # exit_code == 2 is the MCP server's explicit timeout signal.

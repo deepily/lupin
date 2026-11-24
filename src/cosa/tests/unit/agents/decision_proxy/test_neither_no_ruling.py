@@ -111,9 +111,9 @@ def _ask( orch, io, switch ):
 
 
 @pytest.mark.parametrize( "raw, expected_answer, expected_success", [
-    ( "yes", True, True ), ( "no", False, False ), ( "yes [comment: leave config alone]", True, True ),
+    ( "yes", True, True ), ( "no", False, False ),
 ] )
-def test_a_plain_or_qualified_answer_is_scored_as_before_with_the_switch_on( raw, expected_answer, expected_success ):
+def test_a_plain_answer_is_scored_as_before_with_the_switch_on( raw, expected_answer, expected_success ):
     orch, proxy = _orch( value="approved" )
     result, write = _ask( orch, _io( raw ), True )
     assert result is expected_answer
@@ -122,13 +122,32 @@ def test_a_plain_or_qualified_answer_is_scored_as_before_with_the_switch_on( raw
     assert write.call_args.kwargs[ "extra" ][ "metadata_json" ][ "user_answer" ] is expected_answer
 
 
-def test_a_qualified_yes_is_logged_with_its_comment( caplog ):
-    orch, _ = _orch()
+def test_a_qualified_yes_is_its_own_outcome_with_the_switch_on( caplog ):
+    orch, proxy = _orch()
     with caplog.at_level( "INFO" ):
-        _ask( orch, _io( "yes [comment: leave config alone]" ), True )
+        result, write = _ask( orch, _io( "yes [comment: leave config alone]" ), True )
+    assert result is True
     assert "[PROXY-QUALIFIED-YES]" in caplog.text and "leave config alone" in caplog.text
-    meta = _ask( _orch()[ 0 ], _io( "yes [comment: leave config alone]" ), True )[ 1 ].call_args.kwargs[ "extra" ][ "metadata_json" ]
+    proxy.trust_tracker.record_decision.assert_not_called()          # row 1b3202de (F4): not a clean yes
+    proxy.trust_tracker.record_decision_with_features.assert_not_called()
+    orch._persist_trust_feedback.assert_not_called()
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert meta[ "answer_outcome" ] == "qualified_yes" and meta[ "user_answer" ] is True
     assert meta[ "answer_stance" ] == "yes" and meta[ "answer_comment" ] == "leave config alone"
+
+
+def test_a_qualified_yes_is_scored_a_yes_with_the_switch_off_and_carries_no_outcome_label():
+    orch, proxy = _orch()
+    result, write = _ask( orch, _io( "yes [comment: leave config alone]" ), False )
+    assert result is True
+    proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=True )
+    meta = write.call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert "answer_outcome" not in meta and meta[ "answer_comment" ] == "leave config alone"
+
+
+def test_a_plain_yes_carries_no_outcome_label_with_the_switch_on():
+    meta = _ask( _orch()[ 0 ], _io( "yes" ), True )[ 1 ].call_args.kwargs[ "extra" ][ "metadata_json" ]
+    assert "answer_outcome" not in meta
 
 
 def test_a_neither_is_no_ruling_leaves_the_counters_alone_and_logs_a_re_frame_request( caplog ):

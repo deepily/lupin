@@ -18,6 +18,7 @@ import json
 import math
 import uuid
 import re
+from types import SimpleNamespace
 
 # Import dependencies and services
 from cosa.config.app_timezone import get_app_timezone, process_config_mgr
@@ -2081,13 +2082,16 @@ async def submit_notification_response(
                 print( f"[PREDICTION] Review card {notification_id}: {ruling_report[ 'rulings_written' ]} ruling(s) recorded, rejected: {ruling_report[ 'rejected' ]}" )
             else:
                 from cosa.agents.prediction_engine import get_prediction_engine
+                from cosa.agents.utils.agent_notification_dispatcher import answer_source_of
                 prediction_engine = get_prediction_engine()
+                # Row 1b3202de (F7): the label is the promotion gate's operator test, the same one the proxy reads; a posted answer is never a default
+                answer_source     = answer_source_of( SimpleNamespace( default_used=False, answered_by=answered_by ) )
 
                 # FM-7 event-loop offload: record_outcome() does 3-5 GPU
                 # embeddings + a LanceDB write; run it away from the event loop so the
                 # response path (and /health) can't stall under embedding latency.
                 from_ledger = await asyncio.to_thread(
-                    prediction_engine.record_outcome_from_ledger, notification_id, response_value, answered_by, submit_result[ "response_options" ]
+                    prediction_engine.record_outcome_from_ledger, notification_id, response_value, answered_by, submit_result[ "response_options" ], answer_source
                 )
                 if not from_ledger and notification_id in pending_responses and "prediction_result" in pending_responses[notification_id]:
                     prediction_result = pending_responses[notification_id]["prediction_result"]
@@ -2098,7 +2102,8 @@ async def submit_notification_response(
                         actual_value      = response_value,
                         response_type     = prediction_result.response_type,
                         answered_by       = answered_by,
-                        response_options  = submit_result[ "response_options" ]
+                        response_options  = submit_result[ "response_options" ],
+                        answer_source     = answer_source
                     )
                 if from_ledger or notification_id in pending_responses: print( f"[PREDICTION] ✓ Recorded outcome for {notification_id}" )
         except Exception as pred_error:

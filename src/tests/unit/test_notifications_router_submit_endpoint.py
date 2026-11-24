@@ -332,6 +332,26 @@ class TestThePredictionHookIsNonFatal:
         assert seen[ 0 ][ "response_type" ] == "RESPONSE-TYPE-VALUE"
         assert seen[ 0 ][ "response_options" ] == _CARD_SCHEMA
 
+    def test_the_answer_source_label_reaches_the_engine_on_both_routes( self, harness, wired, monkeypatch ):
+        """The door labels a posted answer with the promotion gate's own test."""
+        import cosa.agents.prediction_engine as pe
+        seen = []
+
+        class _Engine:
+            def record_outcome_from_ledger( self, *a ):
+                seen.append( ( "ledger", a[ -1 ] ) )
+                return len( seen ) > 1
+            def record_outcome( self, **kwargs ):
+                seen.append( ( "memory", kwargs[ "answer_source" ] ) )
+
+        monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
+        _add_waiter( wired, prediction_result=self._Prediction() )
+        headers = { "X-API-Key": "KEY-VALUE" }
+        harness.client.post( _URL, headers=headers, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        _add_waiter( wired, prediction_result=self._Prediction() )
+        harness.client.post( _URL, headers=headers, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
+        assert seen == [ ( "ledger", "not_operator" ), ( "memory", "not_operator" ), ( "ledger", "not_operator" ) ]
+
     def test_the_stored_forecast_row_is_used_first_and_memory_is_not_read( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine as pe
         ledger_calls, memory_calls = [], []
@@ -346,7 +366,7 @@ class TestThePredictionHookIsNonFatal:
         monkeypatch.setattr( pe, "get_prediction_engine", lambda: _Engine() )
         _add_waiter( wired, prediction_result=self._Prediction() )
         harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
-        assert ledger_calls == [ ( _NID, "ANSWER-VALUE", ledger_calls[ 0 ][ 2 ], _CARD_SCHEMA ) ]
+        assert ledger_calls == [ ( _NID, "ANSWER-VALUE", ledger_calls[ 0 ][ 2 ], _CARD_SCHEMA, ledger_calls[ 0 ][ 4 ] ) ]
         assert memory_calls == []
 
     def test_a_restart_that_emptied_memory_still_reaches_the_ledger( self, harness, wired, monkeypatch ):
