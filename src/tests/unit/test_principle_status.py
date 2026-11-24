@@ -504,3 +504,17 @@ def test_the_tallies_say_which_sources_are_standing_and_which_are_inferred():
         return result[ "standing" ], result[ "inferred" ]
     assert tally( "always ask first", "never skip the link", None ) == ( 2, 1 )
     assert tally( "always ask first", None, "" ) == ( 1, 2 )
+
+
+def test_after_a_ruling_a_later_contradiction_contests_by_stored_key():
+    """
+    A later contradiction worded differently carries the support's stored key.
+
+    With keys on the principle is contested; with keys off it is not.
+    """
+    rows = [ keyed( note="n1", condition="needs the link", condition_key="link", answered=-3 * HOUR ),
+             keyed( note="card", source="review_card", relation="supports", answered=-2 * HOUR ),
+             keyed( note="n2", relation="contradicts", condition="the link is missing", condition_key="link", answered=-HOUR ) ]
+    on  = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=True, source_dedup=False )[ "p1" ]
+    off = derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=False, source_dedup=False )[ "p1" ]
+    assert on[ "status" ] == CONTESTED and off[ "status" ] != CONTESTED and on[ "ruled" ] is True
