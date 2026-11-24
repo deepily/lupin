@@ -24,6 +24,7 @@ import re
 import threading
 
 import cosa.utils.util as cu
+from cosa.agents.prediction_engine import full_answer
 from cosa.agents.io_models.utils.json_object_recovery import recover_json_object
 from cosa.agents.prediction_engine.principles_forecast import CapGate, REASON_SWITCH, STATUS_NOT_RUN, read_cap, run_arm, switch_enabled
 from cosa.config.configuration_manager import ConfigurationManager
@@ -303,18 +304,65 @@ def parse_reply( text, episode ):
     return { "answers": answers, "confidence": confidence }
 
 
-def predictor_version( layers=ALL_LAYERS ):
+def build_full_user_prompt( episode, layers=ALL_LAYERS ):
+    """
+    Build the user prompt that asks for the full-answer reply.
+
+    Requires:
+        - episode is episode_view's result for a card whose type is in full_answer.FULL_ANSWER_TYPES
+        - layers is a subset of ALL_LAYERS
+
+    Ensures:
+        - returns build_user_prompt's text for the card with its old reply format swapped for full_answer's format for the card's type
+        - when the card has option fields and the options layer is on, a block lists each option's stable id before the format
+
+    Raises:
+        - UnsupportedAsk if the card's response type is not in full_answer.FULL_ANSWER_TYPES
+    """
+    kind = episode[ "response_type" ]
+    if kind not in full_answer.FULL_ANSWER_TYPES: raise UnsupportedAsk( f"the baseline forecasts {full_answer.FULL_ANSWER_TYPES}, not {kind!r}" )
+    old    = YES_NO_FORMAT if kind in ( "yes_no", "open_ended" ) else CHOICE_FORMAT
+    body   = build_user_prompt( { **episode, "response_type": "yes_no" if old == YES_NO_FORMAT else "multiple_choice" }, layers ).removesuffix( old )
+    ids    = [ f"- {field[ 'key' ] or 'field'}: " + "; ".join( f"[{one}] \"{option[ 'label' ]}\"" for one, option in zip( full_answer.option_ids_of( field ), field[ "options" ] ) )
+               for field in episode[ "fields" ] if field[ "options" ] ]
+    block  = "Option ids, to be given exactly as written:\n" + "\n".join( ids ) + "\n\n" if ids and "options" in layers else ""
+    return body + block + full_answer.FULL_FORMATS[ kind ]
+
+
+def parse_full( text, episode ):
+    """
+    Turn a full-answer reply into the forecast record.
+
+    Requires:
+        - text is the model's reply; episode is episode_view's result for the same card
+
+    Ensures:
+        - returns full_answer.parse_full_reply's forecast record
+
+    Raises:
+        - UnsupportedAsk if the card's response type is not in full_answer.FULL_ANSWER_TYPES
+        - full_answer.ReplyRefused, a ValueError that names its reason, for a reply it cannot read
+    """
+    kind = episode[ "response_type" ]
+    if kind not in full_answer.FULL_ANSWER_TYPES: raise UnsupportedAsk( f"the baseline forecasts {full_answer.FULL_ANSWER_TYPES}, not {kind!r}" )
+    return full_answer.parse_full_reply( text, episode )
+
+
+def predictor_version( layers=ALL_LAYERS, full=False ):
     """
     Name the prompt and parser the baseline runs, so a change to either is a new version.
 
     Requires:
-        - layers is a subset of ALL_LAYERS
+        - layers is a subset of ALL_LAYERS; full is True when the full-answer reply is on
 
     Ensures:
         - returns model_transport.prompt_version over the system prompt, the layers, and the source of the prompt builder and the parser
+        - with full, the source of the whole full_answer module and of the two full-answer entry points is added, so a change to its formats or to any helper the parser calls is a new version
+        - without full the value is the one this function gave before the full-answer reply existed
     """
-    return model_transport.prompt_version( "context-baseline", SYSTEM_PROMPT, ",".join( layers ), inspect.getsource( build_user_prompt ),
-                                           inspect.getsource( parse_reply ), inspect.getsource( _choice_of ) )
+    parts = [ "context-baseline", SYSTEM_PROMPT, ",".join( layers ), inspect.getsource( build_user_prompt ), inspect.getsource( parse_reply ), inspect.getsource( _choice_of ) ]
+    if full: parts += [ "full-answer", inspect.getsource( full_answer ), inspect.getsource( build_full_user_prompt ), inspect.getsource( parse_full ) ]
+    return model_transport.prompt_version( *parts )
 
 
 def open_ledger( base_path=None, cli_path=None ):
@@ -344,7 +392,7 @@ class ContextBaseline:
     It holds the model, the timeout, the error classes, the prompts, the parser, the version and a cached call.
     """
 
-    def __init__( self, model, timeout_seconds, layers, ledger, query_fn=None ):
+    def __init__( self, model, timeout_seconds, layers, ledger, query_fn=None, full=None ):
         """
         Build the baseline.
 
@@ -352,8 +400,10 @@ class ContextBaseline:
             - model is a non-empty model id; timeout_seconds is above zero; layers is a subset of ALL_LAYERS
             - ledger has get( key ) and put( key, value )
             - query_fn is None, or a stand-in for the SDK with sdk_query's signature, for tests
+            - full is None (read the full-answer switch once, now) or a bool
 
         Ensures:
+            - the switch is read once here, so the prompt, the parser and the version of this baseline always agree
             - the members principles_forecast.check_baseline reads are all present
             - errors holds the model errors and the call-budget refusal, so a refused or failed call stores a not-ready row
         """
@@ -363,7 +413,8 @@ class ContextBaseline:
         self.ledger            = ledger
         self.query_fn          = query_fn
         self.errors            = ( model_transport.ModelCallError, model_transport.CallBudgetExceeded )
-        self.predictor_version = predictor_version( self.layers )
+        self.full              = full_answer.full_answer_enabled() if full is None else full
+        self.predictor_version = predictor_version( self.layers, self.full )
 
     def build_prompts( self, episode ):
         """
@@ -375,7 +426,7 @@ class ContextBaseline:
         Raises:
             - UnsupportedAsk as build_user_prompt does
         """
-        return SYSTEM_PROMPT, build_user_prompt( episode, self.layers )
+        return SYSTEM_PROMPT, build_full_user_prompt( episode, self.layers ) if self.full else build_user_prompt( episode, self.layers )
 
     def parse( self, text, episode ):
         """
@@ -384,7 +435,7 @@ class ContextBaseline:
         Requires:
             - text is the reply; episode is episode_view's result
         """
-        return parse_reply( text, episode )
+        return parse_full( text, episode ) if self.full else parse_reply( text, episode )
 
     async def complete( self, model, system, user, timeout_seconds=None ):
         """
