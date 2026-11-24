@@ -82,11 +82,11 @@ def test_an_item_outside_the_page_or_a_relation_the_card_does_not_allow_is_refus
         assert code_of( rx.gold_lines, [ line ], packet(), SECTIONS ) == er.BAD_LABEL
 
 
-def files( tmp_path, lines, sections=SECTIONS ):
+def files( tmp_path, lines, sections=None ):
     """Write the export, packet and sections files; return the argv beginning."""
     ( tmp_path / "export.json" ).write_text( json.dumps( lines ), encoding="utf-8" )
     ( tmp_path / "packet.json" ).write_text( json.dumps( packet() ), encoding="utf-8" )
-    ( tmp_path / "sections.json" ).write_text( json.dumps( sections ), encoding="utf-8" )
+    ( tmp_path / "sections.json" ).write_text( json.dumps( SECTIONS if sections is None else sections ), encoding="utf-8" )
     return [ "--export", str( tmp_path / "export.json" ), "--packet", str( tmp_path / "packet.json" ), "--sections", str( tmp_path / "sections.json" ),
              "--store", str( tmp_path / "gold.jsonl" ), "--archive-dir", str( tmp_path / "archive" ) ]
 
