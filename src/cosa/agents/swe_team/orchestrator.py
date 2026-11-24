@@ -425,7 +425,7 @@ class SweTeamOrchestrator:
 
     def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None, source=None, outcome=None ):
         """
-        Write one organic proxy_decisions row for a gated confirmation (non-fatal best-effort).
+        Write one proxy_decisions row for a gated confirmation (non-fatal best-effort).
 
         Requires:
             - role is a string; question is a string
@@ -439,7 +439,8 @@ class SweTeamOrchestrator:
         Ensures:
             - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
             - the row's notification_id is the carrying notification's id; a fresh uuid only when no notification carried the question (auto-approval, or the id was not captured)
-            - the row carries data_origin "organic" and its rule_agreement, which is separate from the trust success
+            - the row carries data_origin "organic" only when a notification id says a real card was asked; an auto-approval is tagged "proxy" and an answer with no card id "uncarded", so a mocked run is never counted as the operator's
+            - the row carries its rule_agreement, which is separate from the trust success
             - with an answer, metadata_json carries answer_source (human, default or unattributed) whatever the neither switch says; answer_stance, answer_comment, answer_raw and the answerer's id and method are stored only when a person answered, and a default's or a test double's text goes under answer_unowned_raw, so "Rick deferred the decision" (a neither) stays distinct from "the model deferred to Rick" (action defer)
             - without an answer, the row has no answer fields, and an auto-approval carries answer_source "proxy"
             - a qualified yes also carries answer_outcome "qualified_yes" beside its stored comment
@@ -458,6 +459,7 @@ class SweTeamOrchestrator:
                 } )
             else:
                 metadata.update( { "answer_source" : answer.source, "answer_unowned_raw" : answer.raw } )
+            data_origin = "organic" if notification_id else ( "proxy" if source == "proxy" else "uncarded" )
             write_proxy_decision(
                 result                = proxy_result,
                 notification_id       = notification_id or str( uuid.uuid4() ),
@@ -469,7 +471,7 @@ class SweTeamOrchestrator:
                 shadow_decision_value = proxy_result.value if shadow_forecast_recording_enabled() else None,
                 extra                 = {
                     "metadata_json"  : metadata,
-                    "data_origin"    : "organic",
+                    "data_origin"    : data_origin,
                     "rule_agreement" : rule_agreement( proxy_result.action, user_answer ),
                 },
                 commit                = True,

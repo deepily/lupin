@@ -17,6 +17,7 @@ from datetime import timedelta
 import pytest
 
 import cosa.agents.prediction_engine.context_baseline as cb
+import cosa.agents.prediction_engine.full_answer as fa
 import cosa.agents.prediction_engine.opus_twins as ot
 import cosa.agents.principle_learner.opus_call as oc
 import cosa.agents.principle_learner.principles_call as pc
@@ -37,6 +38,7 @@ OPUS = "opus-x"
 def _fresh_state( monkeypatch ):
     """Start every test with no process gates and the settings answered by stand-ins."""
     oc.reset_gates()
+    monkeypatch.setattr( fa, "full_answer_enabled", lambda: False )   # the canned replies are the old reply format; the INI ships the switch on
     monkeypatch.setattr( ot, "opus_model", lambda: OPUS )
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
     monkeypatch.setattr( pc, "current_extractor_version", lambda model: EXTRACT )

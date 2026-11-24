@@ -558,12 +558,13 @@ def test_only_current_supporting_usable_extractor_rows_are_read():
     """
     Only current supporting rows usable at the ask feed the checks.
 
-    A contradicting row, an old version, a ruling and a later answer carry no antecedent or stage.
+    An old version, a ruling and a later answer carry no antecedent; only support rows carry a stage.
     """
-    ignored = [ support( uid( 1 ), antecedent="absent", relation="contradicts" ), support( uid( 1 ), antecedent="absent", version="old" ),
-                support( uid( 1 ), antecedent="absent", source="ruling" ), support( uid( 1 ), antecedent="absent", answered=HOUR ) ]
-    assert rules_for( ignored ) == {}
+    ignored = [ support( uid( 1 ), antecedent="absent", version="old" ), support( uid( 1 ), antecedent="absent", source="ruling" ),
+                support( uid( 1 ), antecedent="absent", answered=HOUR ), support( uid( 1 ), antecedent="absent", stage="who_decides", relation="contradicts" ) ]
+    assert rules_for( ignored[ :3 ] ) == {}
     assert rules_for( [ support( uid( 1 ), antecedent="absent", relation="refines" ) ] ) == { uid( 1 ): "antecedent" }
+    assert rules_for( [ support( uid( 1 ), stage="who_decides", relation="contradicts" ) ], card_stage="what_to_do_once_asked" ) == {}
 
 
 def test_select_principles_names_each_dropped_principle_with_its_rule_and_the_drop_frees_the_slot():
@@ -628,3 +629,16 @@ def test_a_caveat_on_a_contradicting_old_or_ruling_row_never_reaches_the_prompt(
                 support( uid( 1 ), caveat="c", answered=HOUR ) ]
     assert pr.latest_caveat( uid( 1 ), skipped, ASK, EXT ) is None
     assert pr.latest_caveat( uid( 1 ), skipped + [ support( uid( 1 ), caveat="kept", relation="refines" ) ], ASK, EXT ) == "kept"
+
+
+def test_an_antecedent_quote_on_an_uninformative_or_contradicting_row_drops_the_principle():
+    """
+    A quote on an uninformative or contradicting row still drops the principle.
+
+    The antecedent belongs to the principle. The extractor writes it on rows whose relation is uninformative.
+    """
+    rows = [ support( uid( 1 ) ), support( uid( 1 ), antecedent="deploy to production", relation="uninformative" ) ]
+    assert rules_for( rows ) == { uid( 1 ): "antecedent" }
+    assert rules_for( [ support( uid( 1 ) ), support( uid( 1 ), antecedent="re-spin", relation="uninformative" ) ] ) == {}
+    assert rules_for( [ support( uid( 1 ), antecedent="deploy", relation="contradicts" ) ] ) == { uid( 1 ): "antecedent" }
+    assert pr.supporting_rows( uid( 1 ), rows, ASK, EXT ) == rows[ :1 ] and pr.supporting_rows( uid( 1 ), rows, ASK, EXT, relations=None ) == rows

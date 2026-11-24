@@ -159,19 +159,20 @@ def session_lookup( session, notification_ids ):
     return notification_lookup( session, notification_ids, ( Notification.sender_id, ), lambda row: sender_session_suffix( row.sender_id ) )
 
 
-def supporting_rows( principle_id, evidence, asked_at, extractor_version ):
+def supporting_rows( principle_id, evidence, asked_at, extractor_version, relations=SUPPORTING ):
     """
-    List one principle's evidence rows that count as support at the ask.
+    List one principle's evidence rows that count at the ask, support by default.
 
     Requires:
         - evidence comes from load_owner_ledger; asked_at is an aware datetime
+        - relations is a tuple of relation words, or None for every relation
 
     Ensures:
-        - returns the rows of this principle that are from the extractor, of the current extractor version, supporting or refining, and usable at the ask
-        - the same rows derive_statuses counts as support; nothing is written
+        - returns the rows of this principle that are from the extractor, of the current extractor version, of one of the relations, and usable at the ask
+        - by default the relations are the ones derive_statuses counts as support; nothing is written
     """
     return [ e for e in evidence if e.principle_id == principle_id and e.source == SOURCE_EXTRACT and e.extractor_version == extractor_version
-             and e.relation in SUPPORTING and usable_at( e, asked_at ) ]
+             and ( relations is None or e.relation in relations ) and usable_at( e, asked_at ) ]
 
 
 def applicability_rules( principles, evidence, asked_at, extractor_version, card, card_stage ):
@@ -185,15 +186,15 @@ def applicability_rules( principles, evidence, asked_at, extractor_version, card
 
     Ensures:
         - returns { principle id: rule } for the failing principles only; no model is called and nothing is written
-        - only the rows supporting_rows returns are read
-        - RULE_ANTECEDENT: some of those rows quote an antecedent and none of the quotes appears in the card, compared case-folded
-        - RULE_STAGE: card_stage is given, some of those rows name a stage and none names the card's
+        - the antecedent belongs to the principle, so it is read from any usable extractor row of the current version that carries one, whatever its relation
+        - RULE_ANTECEDENT: some such row quotes an antecedent and none of the quotes appears in the card, compared case-folded
+        - RULE_STAGE: card_stage is given, some supporting row names a stage and none names the card's
         - a principle whose rows quote no antecedent, or name no stage, passes that rule; the antecedent rule is tried first
     """
     rules = {}
     for principle in principles:
         rows   = supporting_rows( principle.id, evidence, asked_at, extractor_version )
-        quotes = [ e.antecedent for e in rows if e.antecedent ]
+        quotes = [ e.antecedent for e in supporting_rows( principle.id, evidence, asked_at, extractor_version, relations=None ) if e.antecedent ]
         stages = { e.decision_stage for e in rows if e.decision_stage }
         if quotes and not any( q.casefold() in card.casefold() for q in quotes ): rules[ principle.id ] = RULE_ANTECEDENT
         elif card_stage is not None and stages and card_stage not in stages: rules[ principle.id ] = RULE_STAGE

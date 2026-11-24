@@ -902,7 +902,7 @@ class ProxyDecision( Base ):
         nullable=True
     )
 
-    # Data provenance (organic, synthetic_seed, synthetic_generated)
+    # Data provenance (organic, proxy, uncarded, synthetic_seed, synthetic_generated)
     data_origin: Mapped[str] = mapped_column(
         String( 50 ),
         nullable=False,
@@ -1425,6 +1425,8 @@ class PredictionArmForecast( Base ):
         - a late forecast is derived from forecast_ready_at, never stored
         - evidence_ids holds different ids by arm: the principle ids the forecast was given for the principles forecast,
           and the neighbour case ids for the case-based arm that showed the card, so a report never mixes the two
+        - applicability, when set, lists { principle_id, rule } for each principle the applicability checks dropped for this card;
+          it is written only with that switch on, so NULL means the checks did not run and [] means they ran and dropped none
     """
 
     __tablename__ = "prediction_arm_forecast"
@@ -1442,6 +1444,7 @@ class PredictionArmForecast( Base ):
     evidence_ids: Mapped[Optional[list]]       = mapped_column( JSONB, nullable=True )
     forecast_ready_at: Mapped[Optional[datetime]] = mapped_column( DateTime( timezone=True ), nullable=True )
     abstention_reason: Mapped[Optional[str]]   = mapped_column( Text, nullable=True )
+    applicability: Mapped[Optional[list]]      = mapped_column( JSONB, nullable=True )
     displayed: Mapped[bool]                    = mapped_column( nullable=False, default=False, server_default=text( "false" ) )
 
     __table_args__ = (

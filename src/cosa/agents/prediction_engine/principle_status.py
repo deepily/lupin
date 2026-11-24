@@ -30,13 +30,22 @@ A contradiction answered after the split belongs to the other side if its ask ha
 It then does not contest the principle.
 One with a value on neither side still contests it.
 
+Two switches, both off by default, change how rows compare; derive_statuses says how.
+- ``principle learner condition keys enabled``: conditions compare by the stored ``condition_key``.
+- ``principle learner source dedup enabled``: supporting rows with one ``source_key`` count once.
+
 A ruling covers the contradicting rows answered up to its own answer time. A later contradiction counts again.
 A ruling applies across extractor versions, the one exception to "the current version only".
 A principle re-extracted under a new version names the one it continues (``continues_principle_id``), and inherits that one's rulings.
 Retraction of an evidence row (``retracted_at``) takes it out from that moment on.
 """
 
+import json
+
 from cosa.agents.prediction_engine.history_context_rebuild import answer_known_at_ask
+from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+from cosa.config.configuration_manager import ConfigurationManager
+from cosa.config.switch_reader import read_switch
 from cosa.utils.iso_timestamp import aware_moment
 
 HYPOTHESIS  = "hypothesis"
@@ -52,6 +61,68 @@ SOURCE_EXTRACT  = "extractor"
 SUPPORTING      = ( "supports", "refines" )
 CONTRADICTING   = "contradicts"
 MIN_SESSIONS    = 2
+
+CONDITION_KEYS_SWITCH = "principle learner condition keys enabled"
+SOURCE_DEDUP_SWITCH   = "principle learner source dedup enabled"
+CONDITION_KEY_SYSTEM  = ( "You give conditions on a principle a short canonical key. Two conditions that mean the same thing must get the same key. "
+                          "Reply with one JSON object and nothing else: {\"same_as\": <one of the existing keys, or null>, \"key\": <a new lowercase key of at most eight words>}. "
+                          "Use same_as when an existing key means the same condition; otherwise set it to null." )
+
+
+def switch_on( key ):
+    """
+    Read one of this module's INI switches.
+
+    Requires:
+        - key names an INI setting
+
+    Ensures:
+        - returns True only when the setting is true; an unreadable setting reads as off and never raises
+    """
+    return read_switch( lambda env_var_name: ConfigurationManager( env_var_name=env_var_name ), key, False,
+                        lambda settings_error: f"[PRINCIPLE-STATUS] ⚠️ Switch '{key}' unreadable, treated as off: {settings_error}" )
+
+
+def normalise_key( text ):
+    """
+    Reduce a condition or a key to a form that ignores case, spacing and end punctuation.
+
+    Requires:
+        - text is a string or None
+
+    Ensures:
+        - returns PredictionEngine._normalise_text of the text: case-folded, one space per run, end spaces and . : ; ! ? removed
+        - returns None for None and for a text with nothing left
+    """
+    if text is None: return None
+    return PredictionEngine._normalise_text( text ) or None
+
+
+def compute_condition_key( condition, existing_keys, complete ):
+    """
+    Give one condition its canonical key, at the moment its evidence row is written.
+
+    Requires:
+        - condition is a string or None; existing_keys are the keys already stored for the same principle
+        - complete maps ( system, user ) to the model's reply text; it is called only when no existing key matches the wording
+
+    Ensures:
+        - returns None for a blank condition, without a call
+        - returns the existing key whose normalised form equals the condition's, without a call
+        - otherwise returns the existing key the reply names in same_as, or the reply's own new key, normalised
+        - a reply that is not a JSON object with a usable key falls back to the normalised condition, so a bad reply never loses the row's key
+    """
+    wording = normalise_key( condition )
+    if wording is None: return None
+    known = [ normalise_key( key ) for key in existing_keys if normalise_key( key ) is not None ]
+    if wording in known: return wording
+    reply = complete( CONDITION_KEY_SYSTEM, json.dumps( { "condition": condition, "existing_keys": known } ) )
+    try: parsed = json.loads( reply )
+    except ( TypeError, ValueError ): return wording
+    if not isinstance( parsed, dict ): return wording
+    same = normalise_key( parsed.get( "same_as" ) if isinstance( parsed.get( "same_as" ), str ) else None )
+    if same in known: return same
+    return normalise_key( parsed.get( "key" ) if isinstance( parsed.get( "key" ), str ) else None ) or wording
 
 
 def usable_at( row, asked_at ):
@@ -106,34 +177,89 @@ def _sessions( rows, session_of ):
     return { key for key in ( row.session_key if row.session_key is not None else session_of( row.notification_id ) for row in rows ) if key is not None }
 
 
-def _conditions( rows ):
+def _conditions( rows, by_key=False ):
     """
     List the conditions of some rows once each, in the order first met.
 
     Requires:
-        - rows have condition, a string or None
+        - rows have condition, a string or None; with by_key, also condition_key, a string or None
 
     Ensures:
         - returns the non-blank conditions without repeats
+        - with by_key, two rows sharing a stored condition_key give only the first one's condition
     """
-    seen = []
+    seen, keys = [], []
     for row in rows:
-        if row.condition and row.condition not in seen: seen.append( row.condition )
+        if not row.condition or row.condition in seen: continue
+        if by_key and row.condition_key is not None:
+            if row.condition_key in keys: continue
+            keys.append( row.condition_key )
+        seen.append( row.condition )
     return seen
 
 
-def _contested( supporting, contradicting ):
+def _condition_group( row, by_key ):
+    """
+    Name the group a row's condition belongs to.
+
+    Requires:
+        - row has condition and, with by_key, condition_key
+
+    Ensures:
+        - returns the stored condition_key when by_key is set and the row has one
+        - otherwise returns the case-folded, stripped condition, or the empty string when there is none
+    """
+    if by_key and row.condition_key is not None: return row.condition_key
+    return ( row.condition or "" ).strip().casefold()
+
+
+def _once_per_source( rows ):
+    """
+    Keep one row for each source, so copies of one source cast a single vote.
+
+    Requires:
+        - rows have source_key, a string or None, and notification_id
+
+    Ensures:
+        - returns the rows in their order, dropping a row whose source_key an earlier row already has
+        - a row with no source_key is its own source, so it is never dropped
+    """
+    seen, kept = set(), []
+    for row in rows:
+        if row.source_key is not None:
+            if row.source_key in seen: continue
+            seen.add( row.source_key )
+        kept.append( row )
+    return kept
+
+
+def _tallies( rows ):
+    """
+    Count the sources behind some supporting rows by kind.
+
+    Requires:
+        - rows are the supporting rows after _once_per_source; each has standing_quote, a string or None
+
+    Ensures:
+        - returns { standing, inferred }; a row with a non-blank standing_quote is standing, any other is inferred
+        - the two add up to len( rows )
+    """
+    standing = sum( 1 for row in rows if ( row.standing_quote or "" ).strip() )
+    return { "standing": standing, "inferred": len( rows ) - standing }
+
+
+def _contested( supporting, contradicting, by_key=False ):
     """
     Say whether some condition holds both supporting and contradicting evidence.
 
     Requires:
-        - supporting and contradicting are lists of evidence rows with condition
+        - supporting and contradicting are lists of evidence rows with condition; with by_key, also condition_key
 
     Ensures:
-        - conditions are compared case-folded; no condition is its own group
+        - conditions are compared case-folded, or by stored condition_key with by_key; no condition is its own group
         - returns True when one group holds a row of each side
     """
-    key = lambda row: ( row.condition or "" ).strip().casefold()
+    key = lambda row: _condition_group( row, by_key )
     return bool( { key( row ) for row in supporting } & { key( row ) for row in contradicting } )
 
 
@@ -173,7 +299,7 @@ def _ruled( principle, rulings, principles_by_id, asked_at ):
     return max( found, key=lambda r: ( aware_moment( r.answered_at ), aware_moment( r.extracted_at ) ), default=None )
 
 
-def derive_statuses( principles, evidence, asked_at, current_version, session_of, features_of=None ):
+def derive_statuses( principles, evidence, asked_at, current_version, session_of, features_of=None, condition_keys=None, source_dedup=None ):
     """
     Derive the status of every principle as of one ask.
 
@@ -183,6 +309,7 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
         - asked_at is an aware datetime; current_version is the extractor version the config names
         - session_of maps a notification id to a session key, or None when it has none
         - features_of is None, or maps a notification id to its card features, or None when unknown
+        - condition_keys and source_dedup are None, to read the INI switch, or a boolean that overrides it
 
     Ensures:
         - returns { principle.id: result }; result is None when no evidence was usable at the ask
@@ -196,8 +323,12 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
         - after a split, a contradiction answered later whose ask has a feature value on the split's other side does not count against the principle;
           with features_of None, or a value on neither side, it counts as before
         - a retracting ruling is final
+        - with condition_keys on, conditions group by stored condition_key and no model is called; with source_dedup on,
+          supporting rows with one source_key count once and the result adds standing and inferred; with both off, nothing changes
         - no row is read or written outside the arguments, and none is changed
     """
+    by_key   = switch_on( CONDITION_KEYS_SWITCH ) if condition_keys is None else condition_keys
+    dedup    = switch_on( SOURCE_DEDUP_SWITCH ) if source_dedup is None else source_dedup
     by_id    = { p.id: p for p in principles }
     rulings  = [ e for e in evidence if e.source in RULING_SOURCES ]
     own      = [ e for e in evidence if e.source == SOURCE_EXTRACT and e.extractor_version == current_version and usable_at( e, asked_at ) ]
@@ -205,25 +336,27 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
     for principle in principles:
         rows        = [ e for e in own if e.principle_id == principle.id ]
         supporting  = [ e for e in rows if e.relation in SUPPORTING ]
+        if dedup: supporting = _once_per_source( supporting )
         contra      = [ e for e in rows if e.relation == CONTRADICTING ]
         if not rows:
             statuses[ principle.id ] = None
             continue
         ruling      = _ruled( principle, rulings, by_id, asked_at )
         sessions    = _sessions( supporting, session_of )
-        conditions  = _conditions( supporting )
+        conditions  = _conditions( supporting, by_key )
         if ruling is not None and ruling.relation == CONTRADICTING: status = RETRACTED
         elif ruling is not None:
             later = [ e for e in contra if aware_moment( e.answered_at ) > aware_moment( ruling.answered_at ) ]
             if ruling.source == SOURCE_SPLIT and features_of is not None:
                 other = _other_side_values( ruling, rulings )
                 later = [ e for e in later if str( ( features_of( e.notification_id ) or {} ).get( ruling.field_key ) ) not in other ]
-            if _contested( supporting, later ): status = CONTESTED
+            if _contested( supporting, later, by_key ): status = CONTESTED
             else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
         elif not supporting: status = RETRACTED
-        elif _contested( supporting, contra ): status = CONTESTED
+        elif _contested( supporting, contra, by_key ): status = CONTESTED
         else: status = ESTABLISHED if len( sessions ) >= MIN_SESSIONS else HYPOTHESIS
         if ruling is not None and ruling.condition and ruling.condition not in conditions: conditions.append( ruling.condition )
         statuses[ principle.id ] = { "status": status, "conditions": conditions, "episodes": len( { e.notification_id for e in supporting } ),
                                      "sessions": len( sessions ), "ruled": ruling is not None }
+        if dedup: statuses[ principle.id ].update( _tallies( supporting ) )
     return statuses
