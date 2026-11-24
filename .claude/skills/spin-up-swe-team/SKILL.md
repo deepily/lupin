@@ -24,6 +24,21 @@ Instantiate the **spin-up crew** (Implementer · Reviewer · Tester) against a t
    - **⚠️ SCOPED BY CONSTRUCTION**: a crew spawned against `lupin` reads `lupin/MANDATE.md`, finds nothing, and is *structurally incapable* of inheriting another project's deadline. **Never carry a mandate from this repo into a target crew** — that pushes one project's directive onto the whole fleet. Mechanism: `workflow/provisional-mandates.md`.
    - **Why not "tell the Manager to tell them"**: 2026-07-16 — a supersession notice reached **2 of 4** workers; a send bounced off a nonexistent persona, **the bounce reported itself with the roster attached, and was read and moved past**; 3 of 4 briefs carried a defect. **Two hops, both lossy. Here the brief IS the delivery.**
 
+4b. **Append the four post-game rulings to every brief.** Rick adopted P1, P2, P5 and P6 on 24 Nov 2026. He answered `ask_multiple_choice` at about 5:36 pm Eastern. The source is section 4 of `src/docs/post-games/v0.2.4/2026.11.24-cheech-principle-learner-crew-post-game.md`. Paste the block below into each member's done-section, as 4a does. Never use the preamble. The first line of each ruling is Rick's adopted wording. The second is the post-game's.
+
+```text
+P1  Base on the tip; a shared file has one owning seat.
+    A seat bases on the tip. Where slices share a file, one seat owns it and the others send hunks.
+P2  One merge path: the manager merges in the main tree from the seat's index tree and records the tree id.
+    One sanctioned path for seat merges.
+P5  One mutant per new guard before a merge verdict, named in the ready file.
+    Before a merge verdict, the reviewer runs one mutant on each new guard, and the author's ready file names the one it ran.
+P6  Seats deposit every self-correction and surprise, with provenance.
+    The crew brief tells each seat to deposit at every self-correction and surprise, with provenance.
+```
+
+Give each seat the tip's sha at spawn, for P1. A seat never copies bytes into the main tree, for P2. Run the mutant arm in a detached worktree of its own, for P5. The charters in `workflow/swe-team-roles.md` carry the implementer and reviewer halves of P5. That repo is not edited from here, so the change travels as a patch: `io/tmp/principle-learner-briefs/2026.11.24-swe-team-roles-postgame-rulings.patch`. Until it lands, this step is how the rulings reach a seat.
+
 5. **Notify + hand to Steward.** `notify()` the user who came online and the collection topic; `commons_send_to` the Steward your spin-up plan so they observe live.
 
 6. **Run the gate.** Implement, then adversarial review, then unit and census green for the files changed. Verify both green and reviewed. The Manager then commits and merges to the working branch. Re-loop on fail. Integration/e2e belongs to the PR to main (CLAUDE.md "Two kinds of merge"). The Steward runs the scaled post-game every cycle. Teardown on *"stand down the SWE team"* reaps the crew with mementos. The standing pair persists.
