@@ -25,6 +25,7 @@ from .config import SweTeamConfig
 from cosa.agents.decision_proxy.agreement import forecast_agreement, rule_agreement, three_way_agreement, REFRAME_WINDOW
 from cosa.agents.decision_proxy.config import shadow_forecast_recording_enabled, neither_is_no_ruling_enabled, neither_forecast_shadow_enabled
 from cosa.agents.decision_proxy.decision_writer import write_proxy_decision
+from cosa.agents.decision_proxy import shadow_stances
 from .state import (
     OrchestratorState,
     SweTeamState,
@@ -427,9 +428,30 @@ class SweTeamOrchestrator:
             logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
             return 0
 
+    def _shadow_stance( self, notification_id, read ):
+        """
+        Run one shadow reader against the database for one ask, never raising.
+
+        Requires:
+            - notification_id is the asking notification's id, or None when it was not captured
+            - read is a shadow_stances reader taking ( session, notification_id )
+
+        Ensures:
+            - returns the reader's dict, { status: no_notification } for no id, or { status: error, error_class } when the read fails
+            - a failure is logged and never propagates
+        """
+        if notification_id is None: return { "status": "no_notification" }
+        try:
+            from cosa.rest.db.database import get_db
+            with get_db() as session:
+                return read( session, notification_id )
+        except Exception as e:
+            logger.warning( f"Shadow stance read failed (non-fatal): {e}" )
+            return { "status": "error", "error_class": e.__class__.__name__ }
+
     def _three_way_shadow_fields( self, notification_id, answer, by_human, live_agreement ):
         """
-        Build a decision row's shadow fields from the stored three-way forecast.
+        Build a decision row's shadow fields from the two stored forecasts.
 
         Requires:
             - notification_id is the asking notification's id, or None when it was not captured
@@ -437,25 +459,20 @@ class SweTeamOrchestrator:
             - live_agreement is what the live counters scored for this answer, or None when no counter moved
 
         Ensures:
-            - returns { three_way_forecast, three_way_agreement, live_agreement }; the forecast is the stance stored on the ask's prediction_log row, or { status } when none was stored or it could not be read
-            - three_way_agreement is three_way_agreement of the forecast's value and the answer's stance, None for a non-human answer or an unavailable forecast
-            - reads the row once and changes nothing; a read failure is logged and gives { status: error }, never raises
+            - returns { three_way_forecast, three_way_agreement, full_answer_forecast, full_answer_agreement, live_agreement }
+            - each forecast is a stance dict or a { status } naming why there is none; a malformed stored value gives a status, never an exception
+            - each agreement is three_way_agreement of that forecast's value and the answer's stance, None for a non-human answer or a forecast with no value
+            - never raises, and changes no counter
         """
-        forecast = { "status": "no_notification" }
-        if notification_id is not None:
-            try:
-                from cosa.rest.db.database import get_db
-                from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
-                with get_db() as session:
-                    row      = PredictionLogRepository( session ).get_by_notification_id( notification_id )
-                    forecast = { "status": "no_forecast_row" } if row is None else ( row.three_way_shadow or { "status": "not_recorded" } )
-            except Exception as e:
-                logger.warning( f"Three-way shadow read failed (non-fatal): {e}" )
-                forecast = { "status": "error", "error_class": e.__class__.__name__ }
+        three_way = self._shadow_stance( notification_id, shadow_stances.stored_three_way_stance )
+        full      = self._shadow_stance( notification_id, shadow_stances.full_answer_stance )
+        stance    = answer.stance if by_human else None
         return {
-            "three_way_forecast"  : forecast,
-            "three_way_agreement" : three_way_agreement( forecast.get( "value" ), answer.stance if by_human else None ),
-            "live_agreement"      : live_agreement,
+            "three_way_forecast"    : three_way,
+            "three_way_agreement"   : three_way_agreement( three_way.get( "value" ), stance ),
+            "full_answer_forecast"  : full,
+            "full_answer_agreement" : three_way_agreement( full.get( "value" ), stance ),
+            "live_agreement"        : live_agreement,
         }
 
     def _persist_proxy_decision( self, role, question, proxy_result, user_answer, notification_id=None, answer=None, source=None, outcome=None, three_way=None ):
@@ -479,7 +496,7 @@ class SweTeamOrchestrator:
             - with an answer, metadata_json carries answer_source (human, default or unattributed) whatever the neither switch says; answer_stance, answer_comment, answer_raw and the answerer's id and method are stored only when a person answered, and a default's or a test double's text goes under answer_unowned_raw, so "Rick deferred the decision" (a neither) stays distinct from "the model deferred to Rick" (action defer)
             - without an answer, the row has no answer fields, and an auto-approval carries answer_source "proxy"
             - a qualified yes also carries answer_outcome "qualified_yes" beside its stored comment
-            - with three_way given, metadata_json also carries three_way_forecast, three_way_agreement and live_agreement; without it, none of the three
+            - with three_way given, metadata_json also carries its five shadow keys (the two forecasts, their two agreements and live_agreement); without it, none of them
             - failure is logged and never propagates
         """
         try:

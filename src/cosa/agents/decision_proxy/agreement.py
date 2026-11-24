@@ -46,10 +46,10 @@ def forecast_agreement( forecast_value, user_answer ):
 
 def three_way_agreement( forecast_value, answer_stance ):
     """
-    Say whether the human's answer stance matched the three-way forecast's stance, in shadow.
+    Say whether the human's answer stance matched a stored forecast's stance, in shadow.
 
     Requires:
-        - forecast_value is the stored three-way stance's value ("yes", "no" or "neither"), or None when no forecast was stored
+        - forecast_value is a stored stance's value ("yes", "no" or "neither"), from either shadow source, or None when no forecast was stored
         - answer_stance is the human's answer stance ("yes", "no" or "neither"), or None when nobody human answered
 
     Ensures:

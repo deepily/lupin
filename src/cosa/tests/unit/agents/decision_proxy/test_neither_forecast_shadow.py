@@ -23,7 +23,9 @@ ROOT          = os.environ[ "LUPIN_ROOT" ]
 SHADOW_SWITCH = "cosa.agents.swe_team.orchestrator.neither_forecast_shadow_enabled"
 NEITHER_SWITCH= "cosa.agents.swe_team.orchestrator.neither_is_no_ruling_enabled"
 STAMP         = { "user_id": "u-1", "account_email": "rick@example.com", "method": "jwt" }
-SHADOW_KEYS   = ( "three_way_forecast", "three_way_agreement", "live_agreement" )
+SHADOW_KEYS   = ( "three_way_forecast", "three_way_agreement", "full_answer_forecast", "full_answer_agreement", "live_agreement" )
+FULL_READER   = "cosa.agents.decision_proxy.shadow_stances.full_answer_stance"
+NO_BASELINE   = { "status": "no_baseline_row" }
 
 
 # --------------------------------------------------------------------------- the pure function
@@ -96,10 +98,11 @@ def _repo( row ):
     return patch( "cosa.rest.db.database.get_db" ), patch( "cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository", repo ), repo
 
 
-def _ask( orch, io, shadow, neither=False, row=None, notification_id="n-1" ):
+def _ask( orch, io, shadow, neither=False, row=None, notification_id="n-1", full=NO_BASELINE ):
     db, repo_patch, repo = _repo( row )
     with patch( SHADOW_SWITCH, return_value=shadow ), patch( NEITHER_SWITCH, return_value=neither ), \
          patch( "cosa.agents.swe_team.orchestrator.take_last_ask_notification_id", side_effect=[ None, notification_id ] ), \
+         patch( FULL_READER, return_value=full ), \
          patch( "cosa.agents.swe_team.orchestrator.write_proxy_decision" ) as write, db, repo_patch:
         result = asyncio.run( orch._gated_confirmation( "Proceed?", "lead", "no", 60, None, io ) )
     return result, write, repo
@@ -174,6 +177,7 @@ def test_a_failed_read_is_named_and_never_stops_the_row_or_the_counters():
     repo.return_value.get_by_notification_id.side_effect = RuntimeError( "db down" )
     with patch( SHADOW_SWITCH, return_value=True ), patch( NEITHER_SWITCH, return_value=False ), \
          patch( "cosa.agents.swe_team.orchestrator.take_last_ask_notification_id", side_effect=[ None, "n-1" ] ), \
+         patch( FULL_READER, return_value=NO_BASELINE ), \
          patch( "cosa.agents.swe_team.orchestrator.write_proxy_decision" ) as write, \
          patch( "cosa.rest.db.database.get_db" ), \
          patch( "cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository", repo ):
@@ -201,3 +205,71 @@ def test_with_the_switch_off_the_row_and_the_counters_are_as_before( raw, neithe
     assert on_result == off_result
     assert on_proxy.trust_tracker.record_decision.call_args_list == off_proxy.trust_tracker.record_decision.call_args_list
     assert on_orch._persist_trust_feedback.call_args_list == off_orch._persist_trust_feedback.call_args_list
+
+
+# --------------------------------------------------------------------------- a stored value that is not a dict never stops the row
+@pytest.mark.parametrize( "stored, type_name", [ ( [ "neither" ], "list" ), ( "oops", "str" ), ( 5, "int" ) ] )
+def test_a_malformed_stored_forecast_still_writes_the_row_and_moves_the_counters_as_before( stored, type_name ):
+    orch, proxy = _orch()
+    result, write, _ = _ask( orch, _io( "yes" ), shadow=True, row=SimpleNamespace( three_way_shadow=stored ) )
+    meta = _metadata( write )
+    assert result is True
+    assert meta[ "three_way_forecast" ] == { "status": "malformed", "stored_type": type_name } and meta[ "three_way_agreement" ] is None
+    assert meta[ "live_agreement" ] is True
+    proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=True )
+
+
+# --------------------------------------------------------------------------- the full-answer arm is a second source on the same row
+FULL_NEITHER = { "value": "neither", "confidence": 0.6, "probabilities": { "yes": 0.2, "no": 0.2, "neither": 0.6 } }
+FULL_YES     = { "value": "yes", "confidence": 0.7, "probabilities": { "yes": 0.7, "no": 0.2, "neither": 0.1 } }
+
+
+def test_the_two_sources_are_scored_apart_on_one_row():
+    orch, proxy = _orch()
+    _, write, _ = _ask( orch, _io( "neither" ), shadow=True, neither=True, row=STANCE_YES, full=FULL_NEITHER )
+    meta = _metadata( write )
+    assert meta[ "three_way_forecast" ][ "value" ] == "yes" and meta[ "three_way_agreement" ] is False
+    assert meta[ "full_answer_forecast" ] == FULL_NEITHER and meta[ "full_answer_agreement" ] is True
+    proxy.trust_tracker.record_decision.assert_not_called()
+
+
+def test_a_yes_answer_against_a_full_answer_yes_and_a_lookup_neither():
+    orch, _ = _orch()
+    _, write, _ = _ask( orch, _io( "yes" ), shadow=True, row=STANCE_NEITHER, full=FULL_YES )
+    meta = _metadata( write )
+    assert meta[ "three_way_agreement" ] is False and meta[ "full_answer_agreement" ] is True
+
+
+def test_an_unavailable_full_answer_forecast_is_named_and_scores_none():
+    orch, _ = _orch()
+    _, write, _ = _ask( orch, _io( "yes" ), shadow=True, row=STANCE_YES, full={ "status": "unavailable", "reason": "forecast_timed_out" } )
+    meta = _metadata( write )
+    assert meta[ "full_answer_forecast" ][ "reason" ] == "forecast_timed_out" and meta[ "full_answer_agreement" ] is None and meta[ "three_way_agreement" ] is True
+
+
+def test_a_default_answer_scores_neither_source():
+    orch, _ = _orch()
+    _, write, _ = _ask( orch, _io( "no", source="default" ), shadow=True, row=STANCE_YES, full=FULL_YES )
+    meta = _metadata( write )
+    assert meta[ "three_way_agreement" ] is None and meta[ "full_answer_agreement" ] is None
+
+
+def test_a_card_with_no_notification_id_reads_neither_source():
+    orch, _ = _orch()
+    _, write, repo = _ask( orch, _io( "yes" ), shadow=True, row=STANCE_YES, notification_id=None, full=FULL_YES )
+    meta = _metadata( write )
+    assert meta[ "three_way_forecast" ] == meta[ "full_answer_forecast" ] == { "status": "no_notification" }
+    repo.return_value.get_by_notification_id.assert_not_called()
+
+
+def test_a_full_answer_read_that_fails_is_named_and_leaves_the_lookup_source_alone():
+    orch, proxy = _orch()
+    db, repo_patch, _ = _repo( STANCE_YES )
+    with patch( SHADOW_SWITCH, return_value=True ), patch( NEITHER_SWITCH, return_value=False ), \
+         patch( "cosa.agents.swe_team.orchestrator.take_last_ask_notification_id", side_effect=[ None, "n-1" ] ), \
+         patch( "cosa.agents.swe_team.orchestrator.write_proxy_decision" ) as write, db, repo_patch:
+        asyncio.run( orch._gated_confirmation( "Proceed?", "lead", "no", 60, None, _io( "yes" ) ) )
+    meta = _metadata( write )
+    assert meta[ "full_answer_forecast" ] == { "status": "error", "error_class": "ValueError" }, "the id n-1 is not a UUID, and the real reader says so"
+    assert meta[ "three_way_agreement" ] is True
+    proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=True )
