@@ -265,8 +265,8 @@ def test_a_baseline_can_be_supplied_and_replaces_the_defaults( engine ):
 
 def test_an_answer_that_is_not_text_or_a_dict_is_scored_by_its_string_form( engine ):
     """A bare value is wrapped the way the engine wraps it."""
-    assert replay_loop._score( "yes_no", { "value": "yes" }, { "value": "yes" }, None ) is True
-    assert replay_loop._score( "yes_no", { "value": "yes" }, 5, None ) is False
+    assert replay_loop._score( "yes_no", { "value": "yes" }, { "value": "yes" }, None, False ) is True
+    assert replay_loop._score( "yes_no", { "value": "yes" }, 5, None, False ) is False
 
 
 def test_a_json_answer_under_value_is_decoded_for_multiple_choice_and_batch_asks_only():

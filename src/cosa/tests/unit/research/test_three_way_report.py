@@ -123,8 +123,10 @@ class TestMakeArm:
                                    "ratification_state": "not_required", "data_origin": "organic", "response_type": "yes_no",
                                    "question_embedding": [ 1.0, 0.0 ], "created_at": "x", "owner_user_id": OWNER,
                                    "answer_source": "human", "responded_at": NOON - timedelta( days=1 ) }
-        assert arm( self._ask(), [] ) == { "value": "yes" }
-        assert arm( self._ask(), [ case( 0, "no [comment: not today]" ) ] ) == { "value": "no", "qualifier": "not today" }
+        bare, qualified = arm( self._ask(), [] ), arm( self._ask(), [ case( 0, "no [comment: not today]" ) ] )
+        assert { k: v for k, v in bare.items() if k != "probabilities" } == { "value": "yes" }
+        assert { k: v for k, v in qualified.items() if k != "probabilities" } == { "value": "no", "qualifier": "not today" }
+        assert set( bare[ "probabilities" ] ) == set( qualified[ "probabilities" ] ) == { "yes", "no", "neither" }
 
 
 @pytest.fixture

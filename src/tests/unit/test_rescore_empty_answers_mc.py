@@ -34,9 +34,10 @@ class FakeQuery:
 
 
 class FakeSession:
-    def __init__( self, rows ): self.rows, self.query_obj, self.commits = rows, None, 0
+    def __init__( self, rows, notifications=None ): self.rows, self.query_obj, self.commits, self.notifications = rows, None, 0, notifications or {}
     def query( self, model ): self.query_obj = FakeQuery( self.rows ); return self.query_obj
     def commit( self ): self.commits += 1
+    def get( self, model, key ): return self.notifications.get( key )
     def __enter__( self ): return self
     def __exit__( self, *exc ): return False
 
@@ -185,3 +186,55 @@ def test_a_write_run_without_a_dump_path_uses_the_default( monkeypatch, tmp_path
     monkeypatch.setattr( rm, "default_dump_path", lambda: str( tmp_path / "default.jsonl" ) )
     rm.rescore( FakeSession( [ row( stored( { "Commit": "x" } ), PRED_COMMIT ) ] ), write=True )
     assert ( tmp_path / "default.jsonl" ).exists()
+
+
+TYPED_CARD  = { "questions": [ { "header": "Mode", "options": [ { "label": "Fast" }, { "label": "Safe" } ] },
+                               { "header": "DB", "options": [ { "label": "Postgres" }, { "label": "SQLite" } ] } ] }
+TYPED_PRED  = { "answers": { "Mode": "Fast", "DB": "Postgres" } }
+TYPED_REAL  = stored( { "Mode": "Fast", "DB": "Use DuckDB" } )
+
+
+def test_b3_the_per_field_switch_scores_a_typed_other_as_live_does_and_off_scores_a_miss():
+    off = rm.classify( TYPED_REAL, TYPED_PRED, response_options=TYPED_CARD )
+    on  = rm.classify( TYPED_REAL, TYPED_PRED, response_options=TYPED_CARD, per_field=True )
+    assert ( off[ 2 ], off[ 3 ][ "matches" ], off[ 3 ][ "total" ] ) == ( False, 1, 2 )
+    assert ( on[ 2 ], on[ 3 ][ "matches" ], on[ 3 ][ "total" ], on[ 3 ][ "other_write_in" ] ) == ( True, 1, 1, 1 )
+
+
+def test_b9_the_stored_schema_makes_a_multi_select_field_score_as_multi():
+    card   = { "questions": [ { "header": "Tools", "multi_select": True, "options": [ { "label": "a" }, { "label": "b" }, { "label": "c" } ] } ] }
+    actual = stored( { "Tools": [ "a", "b" ] } )
+    bare   = rm.classify( actual, { "answers": { "Tools": [ "a", "c" ] } } )
+    typed  = rm.classify( actual, { "answers": { "Tools": [ "a", "c" ] } }, response_options=card )
+    assert bare[ 3 ][ "fields" ][ 0 ][ "mode" ] == "single"
+    assert ( typed[ 3 ][ "fields" ][ 0 ][ "mode" ], typed[ 3 ][ "fields" ][ 0 ][ "jaccard" ] ) == ( "multi", 0.333 )
+
+
+def test_b3_b9_a_run_reads_each_rows_stored_options_and_the_switch_it_is_given():
+    typed = row( TYPED_REAL, TYPED_PRED, n=7 )
+    bare  = row( TYPED_REAL, TYPED_PRED, n=8 )
+    session = FakeSession( [ typed, bare ], notifications={ typed.notification_id: SimpleNamespace( response_options=TYPED_CARD ) } )
+    counts  = rm.rescore( session, per_field=True )
+    assert counts[ "match" ] == 1 and counts[ "miss" ] == 1          # the row with options is scored per field; the row with no notification as a single select
+    assert dict( rm.rescore( session ) )[ "miss" ] == 2             # the switch off: both are misses
+
+
+def test_b3_main_reads_the_switch_from_the_same_ini_key_the_engine_reads( monkeypatch, capsys ):
+    asked = []
+    class Stub:
+        def __init__( self, env_var_name ): pass
+        def get( self, key, default=None, return_type=None ):
+            asked.append( ( key, return_type ) )
+            return True
+    monkeypatch.setattr( rm, "ConfigurationManager", Stub )
+    session = FakeSession( [ row( TYPED_REAL, TYPED_PRED ) ], notifications={ "note-0": SimpleNamespace( response_options=TYPED_CARD ) } )
+    rm.main( [], session_factory=lambda: session )
+    assert asked == [ ( "prediction engine per field multiple choice enabled", "boolean" ) ]
+    out = capsys.readouterr().out
+    assert "match" in out and "miss" not in out
+
+
+def test_b3_main_forced_off_scores_the_typed_other_as_a_miss( capsys ):
+    session = FakeSession( [ row( TYPED_REAL, TYPED_PRED ) ], notifications={ "note-0": SimpleNamespace( response_options=TYPED_CARD ) } )
+    rm.main( [], session_factory=lambda: session, per_field=False )
+    assert "miss" in capsys.readouterr().out

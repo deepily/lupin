@@ -111,21 +111,24 @@ def _actual_dict( actual_value, response_type=None ):
     return actual
 
 
-def _score( response_type, predicted, actual_value, response_options, complete_action=False ):
+def _score( response_type, predicted, actual_value, response_options, per_field, complete_action=False ):
     """
     Say whether a forecast matched the answer, scored as the engine scores it.
 
     Requires:
         - predicted is the dict predicted_value_for returns, or None
         - complete_action is True only to score by the complete-action measure, with no judge
+        - per_field is the engine's per-field multiple-choice switch, the one live scoring reads; every caller passes it,
+          so no scoring site can use a different basis from the engine arms
 
     Ensures:
+        - a typed Other field is scored as live scores it: left out with the switch on, a miss with it off
         - returns True only when the comparator says match; no forecast and an unscored answer read False,
           so an abstention is charged as a miss
         - with complete_action True, a result the plain code cannot decide without the judge also reads False here;
           complete_action_summary reports those apart
     """
-    match, _ = get_comparator( response_type, response_options=response_options, complete_action=complete_action )( predicted, _actual_dict( actual_value, response_type ) )
+    match, _ = get_comparator( response_type, response_options=response_options, per_field=per_field, complete_action=complete_action )( predicted, _actual_dict( actual_value, response_type ) )
     return match is True
 
 
@@ -279,7 +282,7 @@ def replay( asks, engine, snapshot_sha256, baselines=None, store_factory=TimeSli
                     "snapshot_sha256" : snapshot_sha256,
                     "meta"            : {
                         "notification_id" : ask[ "id" ],
-                        "correct"       : _score( ask[ "response_type" ], predicted, ask[ "actual_value" ], ask[ "response_options" ] ),
+                        "correct"       : _score( ask[ "response_type" ], predicted, ask[ "actual_value" ], ask[ "response_options" ], per_field=engine.per_field_mc_enabled ),
                         "response_type" : ask[ "response_type" ],
                         "family"        : classes[ index ][ "family" ],
                         "forecast"      : predicted,

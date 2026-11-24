@@ -632,12 +632,13 @@ def replace_arms( path, replacements ):
     os.replace( temporary, path )
 
 
-def rerun_bound_failures( session, asks, models, work, arm, path, bound, out=print, chunk=CHUNK_SIZE ):
+def rerun_bound_failures( session, asks, models, work, arm, path, bound, per_field, out=print, chunk=CHUNK_SIZE ):
     """
     Forecast again every ask whose arm failed on the limit, and replace its entry.
 
     Requires:
         - arm is ARM_PRINCIPLES with path work.records, or TWIN_ARMS[ 1 ] with path work.twins; bound is the frozen limit, which models hands to the forecast
+        - per_field is the engine's per-field multiple-choice switch, so the new entry is scored on the engine arms' basis
         - the scratch database holds the principles and evidence extracted so far, which are kept and never extracted again
 
     Ensures:
@@ -662,7 +663,7 @@ def rerun_bound_failures( session, asks, models, work, arm, path, bound, out=pri
             raise BoundStop( ask_id, session.query( PreferencePrinciple ).count(), bound )
         forecast, reason = models.rows[ ( ask_id, arm ) ]
         ask              = by_id[ ask_id ]
-        replaced[ ask_id ] = { arm: { "correct": _score( ask[ "response_type" ], forecast, ask[ "actual_value" ], ask[ "response_options" ] ), "forecast": forecast, "reason": reason } }
+        replaced[ ask_id ] = { arm: { "correct": _score( ask[ "response_type" ], forecast, ask[ "actual_value" ], ask[ "response_options" ], per_field ), "forecast": forecast, "reason": reason } }
         models.rows.clear()
         if position % chunk == 0 or position == len( todo ):
             replace_arms( path, replaced )
@@ -705,7 +706,7 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
     if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code, scored_against ), accept_code_change ): save_state( work.state, state )
     frozen_bound = freeze_limits( models, state )
     models.discard_unrecorded_limit_failures( HAIKU_ARMS, { line[ "id" ] for line in read_jsonl( work.records ) } if os.path.exists( work.records ) else set() )
-    rerun_bound_failures( session, asks, models, work, ARM_PRINCIPLES, work.records, frozen_bound, out=out, chunk=chunk )
+    rerun_bound_failures( session, asks, models, work, ARM_PRINCIPLES, work.records, frozen_bound, engine.per_field_mc_enabled, out=out, chunk=chunk )
     model, timeout_seconds = extractor_settings()
     version   = f"{model}:{PROMPT_VERSION}"
     extracted = set( state[ "extracted_ids" ] ) | extracted_in_db( session, version )
@@ -791,12 +792,13 @@ def _record_lines( run, models ):
     return lines
 
 
-def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds=60, sleep=time.sleep, chunk=CHUNK_SIZE, out=print, code=None, accept_code_change=None, scored_against=FIRST_NAME ):
+def run_twin_stage( session, asks, ids, models, work, per_field, follow=False, poll_seconds=60, sleep=time.sleep, chunk=CHUNK_SIZE, out=print, code=None, accept_code_change=None, scored_against=FIRST_NAME ):
     """
     Run the Opus twins over the evaluation asks, trailing the first stage.
 
     Requires:
         - asks are the replay's ask dicts; ids the evaluation ids in replay order
+        - per_field is the engine's per-field multiple-choice switch, the basis the first stage scored the engine arms on
         - the first stage writes records.jsonl in the same work folder
 
     Ensures:
@@ -820,7 +822,7 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
     if check_freeze( state, current_freeze( models, tree_state( os.path.dirname( __file__ ) ) if code is None else code, scored_against ), accept_code_change ) and fresh: save_state( work.state, state )
     frozen_bound = freeze_limits( models, state )
     models.discard_unrecorded_limit_failures( TWIN_ARMS, { line[ "id" ] for line in read_jsonl( work.twins ) } if os.path.exists( work.twins ) else set() )
-    rerun_bound_failures( session, asks, models, work, TWIN_ARMS[ 1 ], work.twins, frozen_bound, out=out, chunk=chunk )
+    rerun_bound_failures( session, asks, models, work, TWIN_ARMS[ 1 ], work.twins, frozen_bound, per_field, out=out, chunk=chunk )
     by_id = { ask[ "id" ]: ask for ask in asks }
     ran   = 0
     while True:
@@ -844,7 +846,7 @@ def run_twin_stage( session, asks, ids, models, work, follow=False, poll_seconds
                 raise stop
             counts.update( outcome )
             ask = by_id[ ask_id ]
-            arms = { arm: { "correct": _score( ask[ "response_type" ], models.rows[ ( ask_id, arm ) ][ 0 ], ask[ "actual_value" ], ask[ "response_options" ] ),
+            arms = { arm: { "correct": _score( ask[ "response_type" ], models.rows[ ( ask_id, arm ) ][ 0 ], ask[ "actual_value" ], ask[ "response_options" ], per_field ),
                             "forecast": models.rows[ ( ask_id, arm ) ][ 0 ], "reason": models.rows[ ( ask_id, arm ) ][ 1 ] } for arm in TWIN_ARMS }
             append_lines( work.twins, [ { "id": ask_id, "arms": arms } ] )
             ran += 1
@@ -1023,7 +1025,7 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
         models = default_models( session, embed, embed.encoder, f"{extractor_settings()[ 0 ]}:{PROMPT_VERSION}", work ) if make_models is None else make_models( session, embed )
         try:
             if args.stage == "first": run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=query_fn, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change, scored_against=scored_against )
-            else: run_twin_stage( session, asks, ids, models, work, follow=args.follow, poll_seconds=args.poll_seconds, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change, scored_against=scored_against )
+            else: run_twin_stage( session, asks, ids, models, work, engine.per_field_mc_enabled, follow=args.follow, poll_seconds=args.poll_seconds, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change, scored_against=scored_against )
         except BoundStop as stop:
             embed.flush()
             out( str( stop ) )

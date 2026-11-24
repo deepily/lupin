@@ -555,14 +555,14 @@ def score_units( row, raw ):
     v, kind, opts = row[ "response_value" ], row[ "response_type" ], row[ "response_options" ]
     perfect = perfect_forecast( row )
     if perfect is None: return out
-    perfect_scores = replay_loop._score( kind, perfect, v, opts )
+    perfect_scores = replay_loop._score( kind, perfect, v, opts, False )   # the switch-off basis; the on case is computed beside it below
     if kind == "yes_no":
         text_ = v.get( "value" )
         for unit in raw:
             tag = unit[ 0 ]
             if tag.startswith( "stance:" ) and tag[ 7: ] == perfect[ "value" ]:
                 other = next( s for s in STANCES if s != perfect[ "value" ] )
-                if perfect_scores and not replay_loop._score( kind, { "value": other }, v, opts ): out[ "match" ].append( unit )
+                if perfect_scores and not replay_loop._score( kind, { "value": other }, v, opts, False ): out[ "match" ].append( unit )
             if tag == "comment":
                 same, _ = ac.compare_yes_no( perfect, { "value": text_ } )
                 diff, d2 = ac.compare_yes_no( { "value": f"{perfect[ 'value' ]} [comment: zz different zz]" }, { "value": text_ } )

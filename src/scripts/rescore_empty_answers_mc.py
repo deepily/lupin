@@ -48,7 +48,10 @@ from datetime import datetime, timezone
 try:
     from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
     from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
-    from cosa.rest.postgres_models import PredictionLog
+    from cosa.agents.prediction_engine.config import DEFAULT_PER_FIELD_MC_ENABLED
+    from cosa.rest.postgres_models import Notification, PredictionLog
+    from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.config.switch_reader import read_switch
     import cosa.utils.util as cu
 except ImportError as err:
     print( f"FATAL: import failed ({err!r}). Run with the repo's interpreter and PYTHONPATH=<tree>/src.", file=sys.stderr )
@@ -59,12 +62,18 @@ UNSCORED_REASON = "empty_answers"
 COMMIT_EVERY    = 200
 
 
-def classify( actual_value, predicted_value ):
+PER_FIELD_KEY = "prediction engine per field multiple choice enabled"
+
+
+def classify( actual_value, predicted_value, response_options=None, per_field=False ):
     """
     Decide what rescoring one row would do.
 
     Requires:
         - actual_value and predicted_value are the row's stored JSONB values, any type
+        - response_options is the notification's stored schema, or None for a card that has none; with it a multi-select
+          field scores as multi
+        - per_field is the per-field switch the live engine reads, so a typed Other is scored as live scores it
 
     Ensures:
         - returns ( "would_score", decoded_actual, match, detail ) when the comparator scores the decoded answer
@@ -76,7 +85,7 @@ def classify( actual_value, predicted_value ):
     decoded = PredictionEngine._parse_mc_decision_value( value ) if isinstance( value, str ) else None
     if decoded is None: return "skipped", "not_json_answers", None, None
     if not isinstance( predicted_value, dict ) or not predicted_value: return "skipped", "no_prediction", None, None
-    match, detail = get_comparator( RESPONSE_TYPE )( predicted_value, decoded )
+    match, detail = get_comparator( RESPONSE_TYPE, response_options=response_options, per_field=per_field )( predicted_value, decoded )
     if match is None: return "skipped", "comparator_unscored", None, None
     return "would_score", decoded, match, detail
 
@@ -130,13 +139,14 @@ def dump_old_values( planned, dump_path ):
     return len( planned )
 
 
-def rescore( session, write=False, dump_path=None ):
+def rescore( session, write=False, dump_path=None, per_field=False ):
     """
     Classify every selected row; with write, dump the old values, then store the scores.
 
     Requires:
         - session is an open SQLAlchemy session
         - dump_path is the dump file for a write run, or None for the default path
+        - per_field is the per-field switch, passed to every row's score
 
     Ensures:
         - returns a Counter with selected, would_score, match, miss and skipped:<reason> keys, plus dumped on a write run
@@ -147,7 +157,9 @@ def rescore( session, write=False, dump_path=None ):
     rows, counts, planned = select_rows( session ), Counter(), []
     counts[ "selected" ] = len( rows )
     for row in rows:
-        outcome, decoded_or_reason, match, detail = classify( row.actual_value, row.predicted_value )
+        notification = session.get( Notification, row.notification_id )   # the stored schema, so a multi-select field scores as multi
+        outcome, decoded_or_reason, match, detail = classify( row.actual_value, row.predicted_value,
+                                                              response_options=None if notification is None else notification.response_options, per_field=per_field )
         if outcome == "skipped":
             counts[ f"skipped:{decoded_or_reason}" ] += 1
             continue
@@ -165,12 +177,16 @@ def rescore( session, write=False, dump_path=None ):
     return counts
 
 
-def main( argv=None, session_factory=None ):
+def main( argv=None, session_factory=None, per_field=None ):
     """
     Run the rescore from the command line and print the counts.
 
+    Requires:
+        - per_field is None, to read the live switch, or True or False to force it
+
     Ensures:
         - report only unless --write is given
+        - scores with the per-field switch the live engine reads
         - returns 0
     """
     parser = argparse.ArgumentParser( description="Rescore old multiple-choice rows left unscored as empty_answers." )
@@ -179,9 +195,11 @@ def main( argv=None, session_factory=None ):
     args = parser.parse_args( argv )
     if session_factory is None:
         from cosa.rest.db.database import get_db as session_factory
+    if per_field is None:
+        per_field = read_switch( ConfigurationManager, PER_FIELD_KEY, str( DEFAULT_PER_FIELD_MC_ENABLED ), lambda error: f"per-field switch unreadable, scoring with it off: {error!r}" )
     dump_path = ( args.dump_path if args.dump_path is not None else default_dump_path() ) if args.write else None
     with session_factory() as session:
-        counts = rescore( session, write=args.write, dump_path=dump_path )
+        counts = rescore( session, write=args.write, dump_path=dump_path, per_field=per_field )
     print( f"mode: {'WRITE' if args.write else 'report only'}" )
     for key in sorted( counts ): print( f"{key:32} {counts[ key ]}" )
     if args.write: print( f"dump file: {dump_path}" )
