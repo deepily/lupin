@@ -74,7 +74,7 @@ def wired( harness, monkeypatch ):
 
     # `answered_by` joined the worker's signature in row e20e249a (the door now stamps who
     # answered). Recorded apart from `submit_calls` so the id/value assertions stay exact.
-    def _submit( notification_id, response_value, answered_by=None ):
+    def _submit( notification_id, response_value, answered_by=None, input_route=None ):
         state[ "submit_calls" ].append( ( notification_id, response_value ) )
         state[ "answered_by_calls" ].append( answered_by )
         if state[ "submit_raises" ] is not None:

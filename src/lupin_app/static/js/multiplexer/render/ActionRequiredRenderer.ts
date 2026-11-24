@@ -46,6 +46,7 @@ import type { EventBus } from "../shared/EventBus";
 import type {
   ActionRequiredItem,
   ActionRequiredResponse,
+  ActionRequiredRoute,
   LupinEvent,
   StoreActionRequiredChangedPayload,
 } from "../shared/types";
@@ -87,7 +88,7 @@ export interface ActionRequiredStoreLike {
   /** Arrival order: the first item is the active card, the rest are queued. */
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
-  respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void>;
+  respondAndAwait(idHash: string, response: ActionRequiredResponse, route?: ActionRequiredRoute): Promise<void>;
   /** A-2 #2f — the ⏸️; returns true when the card is now paused. */
   togglePause(idHash: string): boolean;
   /** A-1c2 — the stepper position lives on the store's item, so a repaint and a reload keep it. */
@@ -511,7 +512,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
 
   private buildInteractiveWidget(item: ActionRequiredItem): HTMLElement {
     const widget = renderActionRequiredInteractive(item, {
-      onSubmit : (response) => { void this.handleSubmit(item.id_hash, response); },
+      onSubmit : (response, route) => { void this.handleSubmit(item.id_hash, response, route); },
       onStep   : (step) => { this.stores.actionRequired.recordStep(item.id_hash, step); },
       onMic    : this.onMic,
     }, item.step);
@@ -644,9 +645,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // Submit handler — Pass 2 A1: respondAndAwait, NOT optimistic respond
   // -------------------------------------------------------------------------
 
-  private async handleSubmit(idHash: string, response: ActionRequiredResponse): Promise<void> {
+  private async handleSubmit(idHash: string, response: ActionRequiredResponse, route?: ActionRequiredRoute): Promise<void> {
     try {
-      await this.stores.actionRequired.respondAndAwait(idHash, response);
+      await this.stores.actionRequired.respondAndAwait(idHash, response, route);
       // Success: store fires "responded" event → onChange() rebuilds the widget.
     } catch {
       // Failure: store fires "failed" event → onChange() rebuilds with the

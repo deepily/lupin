@@ -183,6 +183,33 @@ def _is_recommended( option ):
     return option.get( "recommended" ) is True or RECOMMENDED_TAG in str( option.get( "label", "" ) ).lower()
 
 
+UNKNOWN_FIELD = "unknown"
+
+
+def capture_fields( response_value, response_options ):
+    """
+    Read an answered card's capture fields: its input route and what was recommended.
+
+    Requires:
+        - response_value is the notification's stored response_value (dict or None)
+        - response_options is the notification's stored response_options (dict or None)
+
+    Ensures:
+        - input_route is the stored route (a string, or { header: route }), else "unknown"; nothing is inferred for an old row
+        - recommendation is { header: [ labels of the options _is_recommended flags ] } for each question that has any, derived
+          on read from the stored options; "unknown" when no question has one. It is never written
+        - a card with no stored options or no flagged option reads "unknown", the same as one that never recorded it
+
+    Raises:
+        - nothing
+    """
+    route = response_value.get( "input_route" ) if isinstance( response_value, dict ) else None
+    flags = { question.get( "header" ): [ option.get( "label" ) for option in question.get( "options" ) or [] if _is_recommended( option ) ]
+              for question in ( response_options or {} ).get( "questions" ) or [] }
+    flags = { header: labels for header, labels in flags.items() if labels }
+    return { "input_route": UNKNOWN_FIELD if route is None else route, "recommendation": flags if flags else UNKNOWN_FIELD }
+
+
 def fields_of( response_options, response_default ):
     """
     Read the card's fields: prompt, mode, options with descriptions and flags, and default.

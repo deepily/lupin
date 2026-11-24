@@ -86,7 +86,7 @@ def test_a_card_filed_before_the_page_opened_is_drawn_at_load( logged_in_page, t
     with page.expect_response( lambda r: r.url.endswith( _RESPONSE_ROUTE ) and r.request.method == "POST", timeout=10000 ) as sent:
         widget.locator( f".action-required-btn-{answer}" ).click()
 
-    assert json.loads( sent.value.request.post_data ) == { "notification_id": card_id, "response_value": answer }, \
+    assert json.loads( sent.value.request.post_data ) == { "notification_id": card_id, "response_value": answer, "input_route": "click" }, \
         "the tap must post exactly the card id and the word tapped"
     assert sent.value.ok, f"the server refused the answer: {sent.value.status}"
 

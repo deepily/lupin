@@ -1204,3 +1204,15 @@ test("A-2 #2m: neither key is planted when the server omits it", () => {
   assert.ok(!("abstract" in item), "no abstract key on an item the server sent none for");
   assert.ok(!("prediction_hint" in item), "no prediction_hint key either");
 });
+
+test("respondAndAwait sends the input route beside the answer, and nothing when there is none", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
+  emitArPrompt(ctx.bus, { id_hash: "ar2", message: "y", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respondAndAwait("ar1", "yes", "click");
+  await ctx.store.respondAndAwait("ar2", "no");
+  assert.deepEqual(ctx.postCalls.map((c) => c.body), [
+    { notification_id: "ar1", response_value: "yes", input_route: "click" },
+    { notification_id: "ar2", response_value: "no" },
+  ]);
+});

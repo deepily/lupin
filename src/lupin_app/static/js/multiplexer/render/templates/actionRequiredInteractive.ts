@@ -39,14 +39,15 @@
 
 import { html } from "../html";
 import type { ActionRequiredMicHandler } from "../actionRequiredMic";
-import type { ActionRequiredItem, ActionRequiredResponse, ActionRequiredStep } from "../../shared/types";
+import type { ActionRequiredInputRoute, ActionRequiredItem, ActionRequiredResponse, ActionRequiredRoute, ActionRequiredStep } from "../../shared/types";
 
 /** multiple_choice stepper position — the store keeps it on the item (parity A-1c2). */
 export type MultipleChoiceStep = ActionRequiredStep;
 
 /** The callbacks an interactive card calls: submit, step position and the microphone. */
 export interface ActionRequiredInteractiveHandlers {
-  onSubmit(response: ActionRequiredResponse): void;
+  /** `route` says how the answer was given; the store sends it beside the answer. */
+  onSubmit(response: ActionRequiredResponse, route?: ActionRequiredRoute): void;
   /** multiple_choice only: called after every Back, Next and Submit with the new position. */
   onStep?(step: MultipleChoiceStep): void;
   /** A-2 #2j/#2k/#2l — a card 🎤 was clicked; absent, the mic renders and does nothing. */
@@ -131,7 +132,7 @@ function buildYesNo(
   for (const answer of YES_NO_ANSWERS) {
     const button = root.querySelector<HTMLButtonElement>(`.action-required-btn-${answer}`)!;
     if (answer !== "neither" && item.default === answer) button.classList.add("default-value");
-    button.addEventListener("click", () => handlers.onSubmit(withComment(answer, comment.value)));
+    button.addEventListener("click", () => handlers.onSubmit(withComment(answer, comment.value), comment.value.trim() === "" ? "click" : commentRoute(comment)));
   }
 }
 
@@ -179,9 +180,9 @@ function appendYesNoComment(
   hint.addEventListener("click", () => {
     if (container.classList.toggle("expanded")) input.focus();
   });
-  mic.addEventListener("click", () => handlers.onMic?.(`yn-comment-${item.id_hash}`, mic, input));
+  mic.addEventListener("click", () => { markVoice(input); handlers.onMic?.(`yn-comment-${item.id_hash}`, mic, input); });
   input.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
+    if (e.key !== "Enter") { clearVoice(input); return; }
     e.preventDefault();
     input.blur();
   });
@@ -205,6 +206,8 @@ function buildMultipleChoice(
   let index     = step?.index ?? 0;
   // legacy state.collectedAnswers — insertion order is the order answers were first saved.
   const answers : Record<string, string | ReadonlyArray<string>> = { ...step?.answers };
+  const otherUsed  = new Set<string>();   // headers answered through Other's text box, even when the text equals a label
+  const voiceOther = new Set<string>();   // headers whose Other text came from the mic
 
   const prompt  = html`<div class="action-required-prompt">${item.prompt}</div>` as DocumentFragment;
   const stepper = document.createElement("div");
@@ -222,6 +225,9 @@ function buildMultipleChoice(
     if (values.length === 0) return false;
     // legacy getCurrentQuestionAnswer: `question.multi_select ? answers : answers[ 0 ]`
     answers[question.header] = question.multiSelect ? values : values[0]!;
+    const other = block.querySelector<HTMLInputElement>(".mc-other-radio")!;
+    if (other.checked && block.querySelector<HTMLInputElement>(".mc-other-input")!.value.trim() !== "") otherUsed.add(question.header);
+    else otherUsed.delete(question.header);
     return true;
   };
 
@@ -307,12 +313,14 @@ function buildMultipleChoice(
     // The mic fires `input` once the words are in (actionRequiredMic); legacy's
     // onTranscriptionComplete clears the invalid mark then (:26058-26062).
     otherInput.addEventListener("input", () => { block.classList.remove("invalid"); });
+    otherInput.addEventListener("keydown", () => { voiceOther.delete(q.header); });
     // legacy startMultipleChoiceVoiceInput (:26039-26064): context `mc-<id>`, and Other is ticked
     // as the recording starts (recordingManager autoSelectElement, :3791-3793).
     const record = (e: Event): void => {
       e.preventDefault();
       e.stopPropagation();
       otherRadio.checked = true;
+      voiceOther.add(q.header);
       handlers.onMic?.(`mc-${item.id_hash}`, otherMic, otherInput);
     };
     otherMic.addEventListener("click", record);
@@ -346,7 +354,9 @@ function buildMultipleChoice(
           return;
         }
         report();
-        handlers.onSubmit({ answers: { ...answers } });
+        const routes: Record<string, ActionRequiredInputRoute> = {};
+        for (const question of item.questions) routes[question.header] = !otherUsed.has(question.header) ? "click" : (voiceOther.has(question.header) ? "voice" : "typed");
+        handlers.onSubmit({ answers: { ...answers } }, routes);
       });
     }
   };
@@ -384,6 +394,33 @@ export function checkedChoices(block: HTMLElement): string[] {
   return values;
 }
 
+/** Marks a text field whose words came from the microphone, until the person types in it. */
+const VOICE_ATTRIBUTE = "data-voice";
+
+/** Notes that the mic is filling this field. */
+function markVoice(input: HTMLInputElement): void {
+  input.setAttribute(VOICE_ATTRIBUTE, "true");
+}
+
+/** Notes that a person typed in this field after the mic filled it. */
+function clearVoice(input: HTMLInputElement): void {
+  input.removeAttribute(VOICE_ATTRIBUTE);
+}
+
+/**
+ * The route of a text field's words.
+ *
+ * Requires:
+ *   - input is a text field of the card
+ *
+ * Ensures:
+ *   - returns "voice" while the mic filled the field and nobody has typed in it since
+ *   - otherwise returns the given route, "comment" by default
+ */
+function commentRoute(input: HTMLInputElement, typedRoute: ActionRequiredInputRoute = "comment"): ActionRequiredInputRoute {
+  return input.hasAttribute(VOICE_ATTRIBUTE) ? "voice" : typedRoute;
+}
+
 /** Legacy's placeholder for the "Other" text (notifications.js:23979). */
 export const MC_OTHER_PLACEHOLDER = "Type or speak custom answer...";
 
@@ -418,7 +455,7 @@ function buildOpenEnded(
     return valid;
   };
   const submitNow = (): void => {
-    if (validate()) handlers.onSubmit(input.value.trim());
+    if (validate()) handlers.onSubmit(input.value.trim(), commentRoute(input, "typed"));
   };
   validate();
   input.addEventListener("input", validate);
@@ -429,7 +466,8 @@ function buildOpenEnded(
       submitNow();
     }
   });
-  const record = (): void => handlers.onMic?.(`response-input-${item.id_hash}`, mic, input);
+  input.addEventListener("keydown", () => { clearVoice(input); });
+  const record = (): void => { markVoice(input); handlers.onMic?.(`response-input-${item.id_hash}`, mic, input); };
   mic.addEventListener("click", record);
   mic.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key !== "Enter" && e.key !== " ") return;
@@ -484,7 +522,9 @@ function buildOpenEndedBatch(
       input.classList.remove("invalid");
     });
     if (!complete) return;
-    handlers.onSubmit({ answers });
+    const routes: Record<string, ActionRequiredInputRoute> = {};
+    for (const q of item.questions) routes[q.header] = "typed";
+    handlers.onSubmit({ answers }, routes);
   });
 }
 

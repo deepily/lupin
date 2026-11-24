@@ -21,7 +21,7 @@ import re
 
 # Import dependencies and services
 from cosa.config.app_timezone import get_app_timezone, process_config_mgr
-from cosa.utils.notification_utils import sender_session_suffix
+from cosa.utils.notification_utils import normalize_input_route, sender_session_suffix
 from ..notification_fifo_queue import NotificationFifoQueue, NOTIFICATION_PRIORITIES
 from ..websocket_manager import WebSocketManager
 from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt, authenticated_account_email
@@ -293,18 +293,21 @@ def _stored_answered_by( stored_response_value ):
     return stored_response_value.get( ANSWERED_BY_KEY )
 
 
-def _stored_response_dict( response_value, answered_by=None ):
+def _stored_response_dict( response_value, answered_by=None, input_route=None ):
     """
     Build what `/api/notify/response` stores as a request's response_value.
 
     Requires:
         - response_value is a non-empty str, a dict, or another JSON value
         - answered_by is the server's `_answered_by(...)` dict, or None
+        - input_route is a checked route (`normalize_input_route`) or None
 
     Ensures:
         - with answered_by None: a str becomes { "value": response_value, "source": "ui" }
           and anything else is returned unchanged (the same object), with nothing stamped on it before storage
         - with answered_by given: the shapes below, and the caller's dict is never mutated
+        - with input_route given: the stored dict also carries it under "input_route", beside "value";
+          with None the stored dict is exactly what it was before this key existed
 
     Every reader takes the answer out with `.get( "value" )` (`_extract_response_value`,
     `notify_user_sync`), so a plain string answer is wrapped under "value". A dict is stored
@@ -326,6 +329,9 @@ def _stored_response_dict( response_value, answered_by=None ):
         stored = { "value": response_value, "source": "ui" }
     else:
         stored = response_value
+
+    if input_route is not None:
+        stored = { **stored, "input_route": input_route } if isinstance( stored, dict ) else { "value": stored, "source": "ui", "input_route": input_route }
 
     if answered_by is None: return stored
 
@@ -622,6 +628,25 @@ def _update_notification_state_sync( notification_id, state ):
 _shadow_tasks = set()   # holds each running three-way shadow task, so the loop does not drop it
 
 
+def _capture_fields_enabled() -> bool:
+    """
+    Say whether an answer's input route is stored beside its value.
+
+    Requires:
+        - nothing; an unreadable setting reads as off
+
+    Ensures:
+        - returns True only when "notification capture fields enabled" is true in the INI file
+        - never raises, so a settings failure cannot stop an answer being stored
+    """
+    try:
+        import lupin_app.main as main_module
+        return main_module.config_mgr.get( "notification capture fields enabled", default=False, return_type="boolean" )
+    except Exception as config_error:
+        print( f"[NOTIFY] ⚠️ Capture fields switch unreadable, treated as off: {config_error}" )
+        return False
+
+
 def _arm_forecast_ledger_enabled() -> bool:
     """
     Say whether the displayed arm's sibling row is written with each ask-time forecast row.
@@ -788,7 +813,7 @@ def _enqueue_extractor_sync( notification_id, submit_result ):
     return enqueue_after_answer( main_module.jobs_todo_queue, notification_id, str( recipient ), email, submit_result[ "response_options" ] )
 
 
-def _submit_response_sync( notification_id, response_value, answered_by=None ):
+def _submit_response_sync( notification_id, response_value, answered_by=None, input_route=None ):
     """
     Read, validate and update a notification response synchronously, off the event loop.
 
@@ -798,6 +823,7 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
         - answered_by is the server-built dict from `_answered_by`, or None. Its
           "user_id" is the authenticated caller: the login's user, or the user that owns
           the API key. None is treated as "no caller" and refused with 403
+        - input_route is a checked route (`normalize_input_route`) or None
 
     Ensures:
         - validates notification exists, is unanswered, and is within the grace
@@ -910,7 +936,7 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
         response_options    = notification.response_options
 
         # Update database with response (pass dict, not JSON string); a plain string is wrapped under "value"
-        response_dict = _stored_response_dict( response_value, answered_by )
+        response_dict = _stored_response_dict( response_value, answered_by, input_route )
 
         updated = repo.update_response( uuid.UUID( notification_id ), response_dict )
 
@@ -2032,8 +2058,9 @@ async def submit_notification_response(
         # Get notification from PostgreSQL + persist the response. Lever B
         # (surgical pass 2): blocking DB read/validate/update off the event loop.
         answered_by         = _answered_by( authenticated_user_id, account_email, x_api_key )
+        input_route         = normalize_input_route( request_body.get( "input_route" ) ) if _capture_fields_enabled() else None
         submit_result       = await asyncio.to_thread(
-            _submit_response_sync, notification_id, response_value, answered_by
+            _submit_response_sync, notification_id, response_value, answered_by, input_route
         )
         recipient_id        = submit_result[ "recipient_id" ]
         notification_job_id = submit_result[ "job_id" ]
