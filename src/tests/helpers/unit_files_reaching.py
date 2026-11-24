@@ -45,6 +45,8 @@ def unit_files_reaching( terms, root, pathspecs=DEFAULT_PATHSPECS, include_stage
         - returns a sorted list of repo-relative paths, each ending in .py, each once
         - a file of any other kind that the pathspecs reach, such as a .ts test, is left out
         - with include_staged, the .py files staged under the pathspecs join the list even when they hold no term
+        - a file staged for deletion is never listed, because pytest exits 4 on a path that is gone
+        - every .py file under the pathspecs counts, a conftest.py included, not only test_*.py
         - searches tracked files only; an untracked file is not listed
 
     Raises:
@@ -54,7 +56,7 @@ def unit_files_reaching( terms, root, pathspecs=DEFAULT_PATHSPECS, include_stage
     if not terms: raise ValueError( "unit_files_reaching needs at least one term" )
     needles = [ arg for term in terms for arg in ( "-e", term ) ]
     found   = _git_lines( root, "grep", "-l", "-F", *needles, "--", *pathspecs )
-    if include_staged: found += _git_lines( root, "diff", "--cached", "--name-only", "--", *pathspecs )
+    if include_staged: found += _git_lines( root, "diff", "--cached", "--name-only", "--diff-filter=d", "--", *pathspecs )
     return sorted( { path for path in found if path.endswith( ".py" ) } )
 
 

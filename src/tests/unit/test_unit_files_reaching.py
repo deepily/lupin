@@ -65,6 +65,22 @@ def test_a_staged_py_file_joins_the_list_and_a_staged_ts_file_does_not( repo ):
     assert ufr.unit_files_reaching( [ "context_baseline" ], repo, include_staged=False ) == [ "src/cosa/tests/unit/test_c.py" ]
 
 
+def test_a_py_file_staged_for_deletion_is_left_out_even_when_it_held_the_term( repo ):
+    _git( repo, "rm", "-q", "src/tests/unit/test_a.py" )
+    assert not ( repo / "src/tests/unit/test_a.py" ).exists()
+    assert ufr.unit_files_reaching( [ "full_answer" ], repo ) == [ "src/tests/unit/test_b.py" ]
+    assert ufr.unit_files_reaching( [ "no_such_module" ], repo ) == []
+
+
+def test_a_term_with_a_dot_is_a_fixed_string_not_a_pattern( repo ):
+    ( repo / "src/tests/unit/test_dot.py" ).write_text( "import coXsa\n" )
+    _git( repo, "add", "src/tests/unit/test_dot.py" )
+    _git( repo, "commit", "-qm", "dot" )
+    assert ufr.unit_files_reaching( [ "co.sa" ], repo ) == []
+    ( repo / "src/tests/unit/test_dot.py" ).write_text( "import co.sa\n" )
+    assert ufr.unit_files_reaching( [ "co.sa" ], repo ) == [ "src/tests/unit/test_dot.py" ]
+
+
 def test_the_pathspecs_decide_where_to_search( repo ):
     assert ufr.unit_files_reaching( [ "context_baseline", "full_answer" ], repo, pathspecs=( "src/cosa/tests/unit", ) ) == [ "src/cosa/tests/unit/test_c.py" ]
 
