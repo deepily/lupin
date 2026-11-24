@@ -6,9 +6,6 @@ The candidate stage searches each of them too and fuses every list into the same
 The model sees the need sentence and nothing else: tools are off and no repository file is read.
 The prompt and the reader are expansion_replay's, so a live lookup asks what the measured replay asked.
 """
-import asyncio
-import concurrent.futures
-
 from cosa.repo.doc_lint import model_transport
 from cosa.repo import code_health_settings as chs
 from lupin_mcp.reuse_needset import expansion_replay as ex
@@ -29,8 +26,7 @@ def ask_model( model, system, user ):
         - model_transport.ModelCallError when the call fails, times out or returns no text
         - model_transport.CallBudgetExceeded when a cap on the model is spent
     """
-    with concurrent.futures.ThreadPoolExecutor( max_workers=1 ) as pool:
-        return pool.submit( lambda: asyncio.run( model_transport.complete( model, system, user ) ) ).result()
+    return model_transport.complete_sync( model, system, user )
 
 
 def make_expander( ask=None, model=None, out=print ):
