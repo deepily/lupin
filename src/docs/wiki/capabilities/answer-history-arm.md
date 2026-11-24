@@ -23,7 +23,7 @@ The baseline forecast plus the owner's earlier answers to similar questions, sho
 - The labeller's reading, the forecast and the meaning record are never shown. The asker's recommended option is marked.
 - `render_history( entries, budget )` lays out whole answers, strongest first, and stops at the first one that does not fit. None is cut short.
 - It returns `{ text, ids }`. With nothing that fits, text is empty and ids is empty.
-- `eligible_cases` keeps a case answered by a human, owned by the ask's owner and not rejected. The answer and its meaning record must predate the ask.
+- `eligible_cases` keeps a case answered by a human, owned by the ask's owner and not rejected. The answer and its meaning record must be at or before the ask.
 - `history_provider` builds the `block_provider` for `run_arm`. It advances the store to the ask, ranks neighbours by `neighbours_of` and skips a notification that no longer exists.
 - Its `principle_ids` are the shown notification ids, stored as the row's evidence ids.
 - `history_code_hash` hashes the heading and the source of the render, eligibility and provider functions. `version_suffix` adds it to the baseline's version after `+answer-history-`.

@@ -23,7 +23,7 @@ The row half of [[job-alert-watcher]]: one store row for each failing or silent 
 - `sync_job_rows` opens a row for a failing or silent job with none, and amends one only when the fingerprint changed.
 - It drops the open row of a healthy job. Behind and unknown jobs are left alone.
 - A fault on one job goes into `errors`, its fingerprint is not recorded, and the other jobs still run.
-- `make_row_sync` returns the function the poll calls with the jobs and the time. It returns failure lines and never raises.
+- `make_row_sync` returns the function the poll calls with the jobs and the time. It returns one failure line when the registry is unreadable. An error reading or writing the state file is not caught.
 - An unreadable registry is one failure line. The fingerprint file is written only when it changed.
 
 ## Owners
