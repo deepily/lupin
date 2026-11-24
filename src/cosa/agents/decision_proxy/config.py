@@ -117,11 +117,7 @@ def neither_forecast_shadow_enabled():
         - returns False and prints one line when the config cannot be read, so no shadow field is written
         - the switch is shadow only: it never changes a trust counter
     """
-    def manager( env_var_name ):
-        from cosa.config.configuration_manager import ConfigurationManager
-        return ConfigurationManager( env_var_name=env_var_name )
-
-    return read_switch( manager, NEITHER_FORECAST_SHADOW_KEY, str( DEFAULT_NEITHER_FORECAST_SHADOW ),
+    return read_switch( _configuration_manager, NEITHER_FORECAST_SHADOW_KEY, str( DEFAULT_NEITHER_FORECAST_SHADOW ),
                         lambda e: f"[DECISION-PROXY] neither-forecast shadow switch unreadable, recording no three-way forecast: {e.__class__.__name__}: {e}" )
 
 

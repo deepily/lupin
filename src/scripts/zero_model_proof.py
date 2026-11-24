@@ -19,8 +19,6 @@ import collections
 import socket
 import sys
 
-LOOPBACK = ( "127.0.0.1", "localhost", "::1" )
-
 
 def install_guards( calls ):
     """
@@ -39,6 +37,7 @@ def install_guards( calls ):
     import cosa.agents.llm_client_factory as factory
     import cosa.memory.embedding_provider as provider
     import cosa.research.preference_replay.service_embeddings as service
+    from cosa.utils.unit_network_guard import is_loopback
 
     def boom( name ):
         def _raise( *args, **kwargs ):
@@ -57,7 +56,7 @@ def install_guards( calls ):
     real_connect = socket.socket.connect
 
     def no_outside_net( sock, address ):
-        if isinstance( address, tuple ) and address[ 0 ] not in LOOPBACK:
+        if not is_loopback( address ):
             calls[ "socket.connect_external" ] += 1
             raise AssertionError( f"EXTERNAL CONNECT {address}" )
         return real_connect( sock, address )
@@ -75,11 +74,12 @@ def pick_slice( asks, per_type ):
     Ensures:
         - returns ( ids, counts ) with ids in cohort order and counts the number taken per response type
     """
+    from cosa.research.preference_replay.retune import eligible_asks
     ids    = []
     counts = collections.Counter()
-    for ask in asks:
+    for ask in eligible_asks( asks ):
         kind = ask[ "response_type" ]
-        if ask[ "question_embedding" ] is None or kind not in ( "yes_no", "multiple_choice" ) or counts[ kind ] >= per_type: continue
+        if counts[ kind ] >= per_type: continue
         ids.append( ask[ "id" ] )
         counts[ kind ] += 1
     return ids, counts

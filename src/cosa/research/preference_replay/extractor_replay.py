@@ -27,6 +27,7 @@ from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
 from cosa.agents.principle_learner.extractor_prompt import current_extractor_version
 from cosa.agents.principle_learner.vocabulary import heading_for
 from cosa.repo.doc_lint import model_transport
+from cosa.research.preference_replay.cohorts import notification_ask_fields
 from cosa.research.preference_replay.replay_loop import always_yes_arm, replay
 from cosa.research.preference_replay.scratch_db import load_export, scratch_session, session_scope
 from cosa.research.preference_replay.service_embeddings import CachedServiceEmbedder, record_neighbour_cosines
@@ -108,14 +109,12 @@ def asks_from_session( session, engine, embed_fn=stand_in_vector ):
     for row in session.query( Notification ).filter( Notification.responded_at.isnot( None ) ).order_by( Notification.created_at, Notification.id ):
         value = row.response_value
         if not isinstance( value, dict ): continue
-        raw   = { "recipient_id": str( row.recipient_id ), "response_type": row.response_type, "response_value": value }
+        tier  = attribution_tier( { "recipient_id": str( row.recipient_id ), "response_value": value } )
         asks.append( { "id": str( row.id ), "question": row.message, "category": engine.classifier.classify( row.message, sender_id=row.sender_id )[ 0 ],
                        "decision_value": value.get( "value" ), "ratification_state": "not_required", "data_origin": "organic", "response_type": row.response_type,
                        "question_embedding": embed_fn( row.message ), "created_at": aware_moment( row.created_at ).isoformat(), "owner_user_id": str( row.recipient_id ),
-                       "answer_source": "human" if attribution_tier( raw ) == "recipient" else "unknown", "responded_at": aware_moment( row.responded_at ),
-                       "timeout_default": attribution_tier( raw ) == "timeout_default",
-                       "title": row.title, "message": row.message, "sender_id": row.sender_id, "asked_at": aware_moment( row.created_at ),
-                       "recipient_id": str( row.recipient_id ), "response_options": row.response_options, "actual_value": value.get( "value" ) } )
+                       "answer_source": "human" if tier == "recipient" else "unknown", "responded_at": aware_moment( row.responded_at ),
+                       "asked_at": aware_moment( row.created_at ), "actual_value": value.get( "value" ), **notification_ask_fields( row ) } )
     return asks
 
 
