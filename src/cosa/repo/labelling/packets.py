@@ -15,7 +15,11 @@ from cosa.repo.labelling import items as it
 AS_PROPOSED = "AS_PROPOSED"
 OTHER       = "OTHER"
 NONE        = "NONE"
-CHOICES     = ( AS_PROPOSED, OTHER, NONE )
+CHOICES     = ( AS_PROPOSED, OTHER, NONE )   # the kappa category set of confirm and adjudicate; never widened for answer cards
+ANSWER_LABELS = (   # the answer-meaning-v2 relations of plan sections 3 and 3b, the vocabulary of an answer_meaning_card item
+    "support", "dissent", "re_frame", "no_comment",
+    "agrees", "expands_recommendation", "expands_other_option", "chose_different_listed_option", "wrote_own_answer", "no_recommendation_on_card",
+    "no_answer", "answers", "declines_or_defers" )
 LABEL_KEYS  = ( "item_id", "reviewer", "choice", "symbols", "note", "ts" )
 NAME_RE     = re.compile( r"[A-Za-z0-9_-]+" )
 MAX_ORDER_TRIES = 50
@@ -224,16 +228,17 @@ def moment( ts ):
     return when if when.tzinfo is not None else when.replace( tzinfo=timezone.utc )
 
 
-def read_history( path ):
+def read_history( path, vocabulary=CHOICES ):
     """
     Read every line of one reviewer's labels file, the earlier answers included.
 
     Requires:
         - path holds one JSON object per line with item_id, reviewer, choice, symbols, note and ts
+        - vocabulary is the tuple of choices the file's items allow: the kappa choices, or ANSWER_LABELS for answer_meaning_card items
 
     Ensures:
         - returns the labels in file order; an item answered again appears once per answer, the latest last
-        - a choice is AS_PROPOSED, the other-choice or none; symbols is a non-empty list of ids exactly when the choice is the other-choice
+        - a choice is one of the vocabulary (for the kappa choices: AS_PROPOSED, the other-choice or none); symbols is a non-empty list of ids exactly when the choice is the other-choice
         - a file holds one reviewer's labels
         - an item answered again carries a time that can be read and is not earlier than the answer before it, as save_label always writes it; a repeat that breaks this is refused, but a hand edit with a later time still loads
 
@@ -249,7 +254,7 @@ def read_history( path ):
         if not isinstance( label, dict ) or set( label ) != set( LABEL_KEYS ): _bad( path, n, f"a label needs exactly the fields {LABEL_KEYS}" )
         if not all( isinstance( label[ k ], str ) and label[ k ].strip() for k in ( "item_id", "reviewer", "ts" ) ) or not isinstance( label[ "note" ], str ):
             _bad( path, n, "item_id, reviewer, ts and note must be strings, the first three not empty" )
-        if label[ "choice" ] not in CHOICES: _bad( path, n, f"choice must be one of {CHOICES}" )
+        if label[ "choice" ] not in vocabulary: _bad( path, n, f"choice must be one of {vocabulary}" )
         symbols = label[ "symbols" ]
         if not isinstance( symbols, list ) or not all( isinstance( s, str ) and s.strip() for s in symbols ) or bool( symbols ) != ( label[ "choice" ] == OTHER ):
             _bad( path, n, "symbols must be a non-empty list of ids when the choice is OTHER, and empty otherwise" )
@@ -278,17 +283,17 @@ def latest_labels( history ):
     return list( latest.values() )
 
 
-def read_labels( path ):
+def read_labels( path, vocabulary=CHOICES ):
     """
     Read one reviewer's labels as they stand: the latest answer of each item.
 
     Requires:
-        - path is as read_history needs
+        - path and vocabulary are as read_history needs
 
     Ensures:
-        - returns latest_labels( read_history( path ) ); an item answered again counts once, at its latest answer
+        - returns latest_labels( read_history( path, vocabulary ) ); an item answered again counts once, at its latest answer
 
     Raises:
         - LabellingError BAD_LABEL naming the line, from read_history
     """
-    return latest_labels( read_history( path ) )
+    return latest_labels( read_history( path, vocabulary ) )

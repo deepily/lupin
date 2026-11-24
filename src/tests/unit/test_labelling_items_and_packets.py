@@ -267,3 +267,36 @@ def test_a_subset_packet_is_refused_when_an_earlier_packet_has_no_provenance_or_
     pk._provenance_path( paths[ "sam" ] ).unlink()
     assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.PROVENANCE_MISSING
     assert not pk.packet_path( tmp_path, "third" ).exists()
+
+
+def card_payload( **over ):
+    """Return an answer_meaning_card payload, with any field replaced."""
+    return { "card_text": "Merge now?", "options": [ "A", "B" ], "recommendation": "A", "answer": "yes", "stance_class": "yes", **over }
+
+
+def test_an_answer_card_validates_and_each_bad_field_is_refused_by_name():
+    assert it.make_item( "answer_meaning_card", "c1", card_payload() )[ "payload" ][ "recommendation" ] == "A"
+    assert it.make_item( "answer_meaning_card", "c2", card_payload( options=[], recommendation=None, stance_class="none" ) )[ "payload" ][ "options" ] == []
+    for bad in ( card_payload( card_text=" " ), card_payload( answer=None ), card_payload( options="A" ), card_payload( options=[ "" ] ),
+                 card_payload( recommendation="" ), card_payload( stance_class="maybe" ) ):
+        assert code_of( it.make_item, "answer_meaning_card", "c3", bad ) == "BAD_ITEM"
+    missing = card_payload(); del missing[ "recommendation" ]
+    assert code_of( it.make_item, "answer_meaning_card", "c4", missing ) == "BAD_ITEM"
+
+
+def test_an_answer_card_with_a_forecast_or_a_label_is_a_packet_leak():
+    for extra in ( "forecast", "reader_label", "labeller_label" ):
+        item = it.make_item( "answer_meaning_card", "c1", card_payload() )
+        item[ "payload" ][ extra ] = "yes"
+        assert code_of( pk.blind_form, item ) == "PACKET_LEAK"
+
+
+def test_answer_labels_leave_the_kappa_choices_alone_and_read_in_their_own_vocabulary( tmp_path ):
+    assert pk.CHOICES == ( "AS_PROPOSED", "OTHER", "NONE" ) and len( pk.ANSWER_LABELS ) == 13 and len( set( pk.ANSWER_LABELS ) ) == 13
+    path = tmp_path / "labels.jsonl"
+    for label in pk.ANSWER_LABELS:
+        path.write_text( json.dumps( { "item_id": "c1", "reviewer": "rick", "choice": label, "symbols": [], "note": "", "ts": "2026-11-24T10:00:00+00:00" } ) + "\n", encoding="utf-8" )
+        assert pk.read_labels( path, pk.ANSWER_LABELS )[ 0 ][ "choice" ] == label
+        assert code_of( pk.read_labels, path ) == "BAD_LABEL"
+    path.write_text( json.dumps( { "item_id": "c1", "reviewer": "rick", "choice": "AS_PROPOSED", "symbols": [], "note": "", "ts": "2026-11-24T10:00:00+00:00" } ) + "\n", encoding="utf-8" )
+    assert code_of( pk.read_labels, path, pk.ANSWER_LABELS ) == "BAD_LABEL" and pk.read_labels( path )[ 0 ][ "choice" ] == "AS_PROPOSED"
