@@ -29,6 +29,7 @@ STATE_READY           = "ready"
 STATE_UNAVAILABLE     = "unavailable"
 STATE_TIMED_OUT       = "forecast_timed_out"
 REASON_TIMED_OUT      = "forecast_timed_out"
+REASON_NOT_STARTED    = "forecast_not_started"
 GIVE_UP_SECONDS       = 30
 STRATEGY              = "context_baseline"
 
@@ -120,7 +121,7 @@ def settle_unfinished( session_factory, notification_id ):
 
     Ensures:
         - with the forecast switch off, a row already stored, a card type the job does not read, a review card or an injected hint, nothing is written
-        - otherwise one baseline row is written with no forecast and the reason forecast_timed_out
+        - otherwise one baseline row is written with no forecast: the reason is forecast_not_started for a card with no prediction_log row, which never entered the notify forecast path (podcast and un-park asks), and forecast_timed_out for a card that has one
         - returns True when it wrote a row
 
     Raises:
@@ -128,7 +129,7 @@ def settle_unfinished( session_factory, notification_id ):
     """
     if not context_baseline.context_forecast_enabled(): return False
     key = uuid.UUID( str( notification_id ) )
-    skip, asked = True, None
+    skip, asked, started = True, None, False
     with session_factory() as session:
         card = session.get( Notification, key )
         if card is not None:
@@ -137,9 +138,10 @@ def settle_unfinished( session_factory, notification_id ):
                          or ( injected is not None and injected[ 0 ] == TEST_OVERRIDE_SOURCE )
                          or _row_present( session, key, context_baseline.ARM ) )
             asked    = aware_moment( card.created_at )
+            started  = injected is not None
     if card is None: raise LookupError( f"notification {notification_id} does not exist" )
     if skip: return False
-    return _write_row( session_factory, key, asked, None, None, context_baseline.predictor_version(), [], REASON_TIMED_OUT, context_baseline.ARM )
+    return _write_row( session_factory, key, asked, None, None, context_baseline.predictor_version(), [], REASON_TIMED_OUT if started else REASON_NOT_STARTED, context_baseline.ARM )
 
 
 async def run_and_publish( notification_id, emit, retrieval_metric, session_factory=None, run=None, clock=None ):

@@ -129,13 +129,32 @@ def switches( monkeypatch ):
     return state
 
 
-def test_settle_stores_the_terminal_state_for_an_answered_card_with_no_row( factory, switches ):
+def log_row( factory, nid ):
+    """Give a card the engine's prediction_log row."""
+    with factory() as db:
+        db.add( PredictionLog( notification_id=uuid.UUID( nid ), response_type="yes_no", category="c", prediction_confidence=0.5, prediction_strategy="cbr",
+                               similar_case_count=1, forecast_source="engine", predicted_at=T0 ) )
+        db.commit()
+
+
+def test_settle_stores_timed_out_for_an_answered_card_that_entered_the_forecast_path_and_has_no_row( factory, switches ):
     nid = ask( factory )
+    log_row( factory, nid )
     assert ch.settle_unfinished( factory, nid ) is True
     row = arm_rows( factory )[ 0 ]
     assert ( row.arm, row.forecast, row.forecast_ready_at, row.abstention_reason ) == ( "C0", None, None, "forecast_timed_out" )
     assert ch.read_payload( factory, nid, T0, "cosine" ) == { "state": "forecast_timed_out" }, "the card reads the stored state, not the clock"
     assert ch.settle_unfinished( factory, nid ) is False and len( arm_rows( factory ) ) == 1, "a second settle changes nothing"
+
+
+def test_settle_stores_not_started_for_an_answered_card_with_no_prediction_log_row( factory, switches ):
+    # A podcast or un-park ask never starts a forecast, so calling its row a timeout is untrue.
+    nid = ask( factory )
+    assert ch.settle_unfinished( factory, nid ) is True
+    row = arm_rows( factory )[ 0 ]
+    assert ( row.arm, row.forecast, row.forecast_ready_at, row.abstention_reason ) == ( "C0", None, None, "forecast_not_started" )
+    assert ch.read_payload( factory, nid, T0, "cosine" ) == { "state": "unavailable", "reason": "forecast_not_started" }
+    assert ch.settle_unfinished( factory, nid ) is False and len( arm_rows( factory ) ) == 1
 
 
 def test_settle_leaves_alone_a_card_that_has_a_row_or_is_not_the_jobs_to_forecast( factory, switches, tmp_path ):
