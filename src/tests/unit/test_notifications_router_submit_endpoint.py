@@ -511,13 +511,13 @@ class TestTheContextForecastSettlesAtAnswerTime:
         monkeypatch.setattr( ch, "settle_unfinished", lambda factory, nid: seen.append( ( factory, nid ) ) or True )
         r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
         assert r.status_code == 200 and seen == [ ( notif.get_db, _NID ) ]
-        assert "stored forecast_timed_out" in capsys.readouterr().out
+        assert "stored a terminal forecast row" in capsys.readouterr().out
 
     def test_a_card_that_needed_no_settle_prints_nothing( self, harness, wired, monkeypatch, capsys ):
         import cosa.agents.prediction_engine.context_hint as ch
         monkeypatch.setattr( ch, "settle_unfinished", lambda factory, nid: False )
         harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
-        assert "stored forecast_timed_out" not in capsys.readouterr().out
+        assert "stored a terminal forecast row" not in capsys.readouterr().out
 
     def test_a_settle_failure_does_not_lose_the_answer( self, harness, wired, monkeypatch ):
         import cosa.agents.prediction_engine.context_hint as ch
