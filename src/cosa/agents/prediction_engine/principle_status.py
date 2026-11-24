@@ -69,7 +69,7 @@ CONDITION_KEY_SYSTEM  = ( "You give conditions on a principle a short canonical 
                           "Use same_as when an existing key means the same condition; otherwise set it to null." )
 
 
-def _switch_on( key ):
+def switch_on( key ):
     """
     Read one of this module's INI switches.
 
@@ -327,8 +327,8 @@ def derive_statuses( principles, evidence, asked_at, current_version, session_of
           supporting rows with one source_key count once and the result adds standing and inferred; with both off, nothing changes
         - no row is read or written outside the arguments, and none is changed
     """
-    by_key   = _switch_on( CONDITION_KEYS_SWITCH ) if condition_keys is None else condition_keys
-    dedup    = _switch_on( SOURCE_DEDUP_SWITCH ) if source_dedup is None else source_dedup
+    by_key   = switch_on( CONDITION_KEYS_SWITCH ) if condition_keys is None else condition_keys
+    dedup    = switch_on( SOURCE_DEDUP_SWITCH ) if source_dedup is None else source_dedup
     by_id    = { p.id: p for p in principles }
     rulings  = [ e for e in evidence if e.source in RULING_SOURCES ]
     own      = [ e for e in evidence if e.source == SOURCE_EXTRACT and e.extractor_version == current_version and usable_at( e, asked_at ) ]

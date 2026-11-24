@@ -404,7 +404,7 @@ def test_a_row_with_no_stored_key_is_compared_by_its_condition_as_before():
     assert derive_statuses( [ principle() ], rows, ASK, V1, session_of, condition_keys=True, source_dedup=False )[ "p1" ][ "status" ] == CONTESTED
 
 
-def test_conditions_are_listed_once_per_stored_key_with_the_switch_on():
+def test_conditions_are_listed_once_per_stored_key_with_theswitch_on():
     """Two supporting rows with one key list one condition; a key-less row still lists its own."""
     rows   = [ keyed( note="n1", condition="worded one way", condition_key="k" ), keyed( note="n2", condition="worded another way", condition_key="k" ),
                keyed( note="n3", condition="no key here" ), keyed( note="n4", condition="worded one way", condition_key="k2" ) ]
@@ -492,5 +492,5 @@ def test_the_switches_read_their_ini_keys_and_an_unreadable_setting_is_off( monk
     assert result[ "episodes" ] == 2 and "standing" not in result
     def broken( env_var_name ): raise RuntimeError( "no ini" )
     monkeypatch.setattr( principle_status, "ConfigurationManager", broken )
-    assert principle_status._switch_on( "any key" ) is False
+    assert principle_status.switch_on( "any key" ) is False
     assert "unreadable, treated as off" in capsys.readouterr().out
