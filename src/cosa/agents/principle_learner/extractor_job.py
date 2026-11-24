@@ -19,15 +19,16 @@ from contextlib import contextmanager
 
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.prediction_engine.episode_view import episode_view, revealed_at, revealed_draft
-from cosa.agents.prediction_engine.history_derive import derive_answer
+from cosa.agents.prediction_engine.history_derive import derive_answer, meaning_structure
 from cosa.agents.prediction_engine.principle_retrieval import encoder_version_of
 from cosa.agents.prediction_engine.review_card import is_review_card
 from cosa.agents.principle_learner import extractor_store
-from cosa.agents.principle_learner.extractor_prompt import SYSTEM_PROMPT, extractor_version_of, build_user_prompt, parse_reply
-from cosa.agents.principle_learner.extractor_rules import card_text, check_field, owners_own_answer, field_answers, project_names, unaided_answer
+from cosa.agents.principle_learner.extractor_prompt import DECISION_STAGE_KEY, DECISION_STAGES, STAGE_SYSTEM_PROMPT, SYSTEM_PROMPT, current_extractor_version, build_user_prompt, parse_reply, switch_on
+from cosa.agents.principle_learner.extractor_rules import card_text, check_field, drafted_text, owners_own_answer, field_answers, project_names, unaided_answer
 from cosa.agents.principle_learner.vocabulary import is_heading
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
+from cosa.rest.db.repositories.answer_meaning_repository import SCHEMA_VERSION as MEANING_SCHEMA_VERSION, AnswerMeaningRepository
 from cosa.rest.postgres_models import Notification
 from cosa.utils.iso_timestamp import aware_moment
 from cosa.utils.notification_utils import sender_session_suffix
@@ -37,6 +38,7 @@ SESSION_ID         = "principle-extractor"
 MODEL_KEY          = "prediction learner extractor model"
 TIMEOUT_KEY        = "prediction learner extractor timeout seconds"
 ENCODER_MODEL_KEY  = "local embedding prose model name"
+MEANING_INPUT_KEY  = "principle learner meaning record input enabled"
 PROBE_SYSTEM       = "Answer with the single word ok."
 PROBE_QUESTION     = "Are you there?"
 
@@ -164,6 +166,39 @@ class PrincipleExtractorJob( AgenticJobBase ):
         limit  = self.timeout_seconds if self.timeout_seconds is not None else config.get_required( TIMEOUT_KEY, return_type="int" )
         return model, limit, self.encoder if self.encoder is not None else encoder_version()
 
+    def _flag( self, key ):
+        """
+        Read one off-by-default switch from the INI file.
+
+        Requires:
+            - key is an INI key holding a boolean
+
+        Ensures:
+            - returns True only when the key is set true; an absent key is False
+            - an unreadable settings file answers False and prints one line naming the key, through extractor_prompt.switch_on
+        """
+        return switch_on( key )
+
+    def _attach_meaning( self, session, notification_id, entries, draft ):
+        """
+        Add each entry's draft-or-final reading and, from the meaning record, its structure.
+
+        Requires:
+            - entries are the extractor's field entries after unaided_answer has chosen their text
+            - draft is None or in the shape drafted_text reads
+
+        Ensures:
+            - every entry gets answer_read, "draft" when its text came from the revealed draft, else "final"
+            - an entry read from the final answer gets structure from the newest meaning record of the current schema version, when that record has the field
+            - an entry read from a draft gets no structure, because the record describes the final answer and not the draft
+            - with no record, or no entry for a field, the entry gets no structure and is otherwise unchanged
+        """
+        records = [ record for record in AnswerMeaningRepository( session ).versions( notification_id ) if record.schema_version == MEANING_SCHEMA_VERSION ]
+        for entry in entries:
+            entry[ "answer_read" ] = "draft" if drafted_text( draft, entry[ "field_key" ] ) else "final"
+            if entry[ "answer_read" ] == "final" and records:
+                entry[ "structure" ] = meaning_structure( records[ -1 ].native_answer, records[ -1 ].conditions, entry[ "field_key" ] )
+
     async def _execute( self ):
         """
         Read the answer, ask the model once, and write the checked result.
@@ -243,7 +278,8 @@ class PrincipleExtractorJob( AgenticJobBase ):
             - returns the JSON summary _execute documents
             - writes through the session only; the caller commits
         """
-        extractor = extractor_version_of( model )
+        staged    = self._flag( DECISION_STAGE_KEY )
+        extractor = current_extractor_version( model, self._flag )
         row = session.get( Notification, uuid.UUID( self.notification_id ) )
         if row is None: raise LookupError( f"notification {self.notification_id} does not exist" )
         if is_review_card( row.response_options ): return self._summary( "skipped_review_card" )
@@ -259,14 +295,16 @@ class PrincipleExtractorJob( AgenticJobBase ):
         for entry in entries:
             entry[ "text" ], entry[ "possibly_influenced" ] = unaided_answer( entry[ "text" ], draft, entry[ "field_key" ], reveal, row.responded_at )
             if entry[ "possibly_influenced" ]: influenced.append( entry[ "field_key" ] )
+        if self._flag( MEANING_INPUT_KEY ): self._attach_meaning( session, row.id, entries, draft )
         vectors    = [ embed( card_text( episode ) ) ] + [ embed( entry[ "text" ] ) for entry in entries if entry[ "text" ] ]
         now        = self.clock() if self.clock is not None else aware_moment( cu.get_current_datetime_iso() )
         neighbours = extractor_store.fetch_neighbours( session, str( row.recipient_id ), encoder, vectors, now )
         if all( entry[ "bare_yes" ] for entry in entries ) and not neighbours: return self._summary( "skipped_no_input" )
-        reply      = await model_transport.complete( model, SYSTEM_PROMPT, build_user_prompt( episode, entries, neighbours ),
+        reply      = await model_transport.complete( model, STAGE_SYSTEM_PROMPT if staged else SYSTEM_PROMPT, build_user_prompt( episode, entries, neighbours ),
                                                      query_fn=self.query_fn, timeout_seconds=timeout )
         fields     = parse_reply( reply )
-        if fields is None: return self._summary( "unparseable", influenced=influenced )
+        read       = { entry[ "field_key" ]: entry[ "answer_read" ] for entry in entries if "answer_read" in entry } or None
+        if fields is None: return self._summary( "unparseable", influenced=influenced, answer_read=read )
         senders  = [ sender for ( sender, ) in session.query( Notification.sender_id ).filter( Notification.recipient_id == row.recipient_id ).distinct() ]
         projects = project_names( senders )
         report   = { "principles_created": 0, "principles_reused": 0, "evidence_written": 0, "evidence_existing": 0, "dimension_mismatches": [], "off_vocabulary": [], "rejected": [] }
@@ -278,6 +316,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
                 continue
             grounding = card_text( episode ) + "\n" + entry[ "text" ]
             checked   = check_field( by_key[ entry[ "field_key" ] ], grounding, projects, entry[ "bare_yes" ], ids )
+            if staged: checked[ "decision_stage" ] = by_key[ entry[ "field_key" ] ].get( "decision_stage" ) if by_key[ entry[ "field_key" ] ].get( "decision_stage" ) in DECISION_STAGES else None
             report[ "rejected" ].extend( { "field_key": entry[ "field_key" ], **item } for item in checked[ "rejected" ] )
             # field_kept is redundant today, because a wholly rejected field keeps no hypotheses; it stays so the rule reads as stated
             field_kept = not any( item[ "what" ] == "field" for item in checked[ "rejected" ] )
@@ -287,7 +326,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
                                          ( aware_moment( row.responded_at ), now ), ( extractor, encoder ), embed,
                                          sender_session_suffix( row.sender_id ), report, key_complete=lambda system, user: self._complete_sync( model, system, user, timeout ),
                                          source_key=extractor_store.source_key_for( card_text( episode ), entry[ "text" ] ) )
-        return self._summary( "extracted", report=report, influenced=influenced )
+        return self._summary( "extracted", report=report, influenced=influenced, answer_read=read )
 
     def _complete_sync( self, model, system, user, timeout ):
         """
@@ -303,7 +342,7 @@ class PrincipleExtractorJob( AgenticJobBase ):
         with ThreadPoolExecutor( max_workers=1 ) as pool:
             return pool.submit( asyncio.run, model_transport.complete( model, system, user, query_fn=self.query_fn, timeout_seconds=timeout ) ).result()
 
-    def _summary( self, status, report=None, influenced=None ):
+    def _summary( self, status, report=None, influenced=None, answer_read=None ):
         """
         Write the job's result as a JSON string.
 
@@ -312,6 +351,8 @@ class PrincipleExtractorJob( AgenticJobBase ):
 
         Ensures:
             - returns JSON with status, the report counters (zeros when none), and the possibly-influenced field keys
+            - carries answer_read, a map of field key to final or draft, only when the caller passes one, so the summary is unchanged with the meaning-record switch off
         """
         base = { "principles_created": 0, "principles_reused": 0, "evidence_written": 0, "evidence_existing": 0, "dimension_mismatches": [], "off_vocabulary": [], "rejected": [] }
-        return json.dumps( { "status": status, **( report or base ), "possibly_influenced": influenced or [] }, sort_keys=True )
+        return json.dumps( { "status": status, **( report or base ), "possibly_influenced": influenced or [],
+                             **( { "answer_read": answer_read } if answer_read is not None else {} ) }, sort_keys=True )

@@ -33,7 +33,7 @@ from cosa.agents.prediction_engine.episode_view import fields_of
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.principle_learner import extractor_job, opus_call, principles_call
 from cosa.agents.principle_learner.extractor_store import NEIGHBOURS
-from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
+from cosa.agents.principle_learner.extractor_prompt import active_prompt_version, current_extractor_version
 import cosa.utils.util as cu
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
@@ -136,7 +136,7 @@ def current_freeze( models, code, scored_against=FIRST_NAME ):
           the principle limit and fetch multiplier as read from the INI file, lag seconds, window start, floor and the baseline and Opus model ids
     """
     limits = principle_retrieval.retrieval_limits()
-    return { "code_sha": code[ "sha" ], "code_dirty": code[ "dirty" ], "vocabulary_version": PROMPT_VERSION, "extractor_version": models.extractor,
+    return { "code_sha": code[ "sha" ], "code_dirty": code[ "dirty" ], "vocabulary_version": active_prompt_version(), "extractor_version": models.extractor,
              "extractor_timeout_seconds": extractor_settings()[ 1 ], "encoder": models.encoder, "neighbours": NEIGHBOURS, "k": principle_retrieval.DEFAULT_K,
              "bound": limits[ "bound" ], "fetch_multiplier": limits[ "multiplier" ], "lag_seconds": REPLAY_LAG.total_seconds(), "window_start": WINDOW_START.isoformat(), "floor": OPERATIONAL_FLOOR,
              "baseline_model": models.c0.model, "twin_model": opus_twins.opus_model(), "scored_against": scored_against }
@@ -708,7 +708,7 @@ def run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=N
     models.discard_unrecorded_limit_failures( HAIKU_ARMS, { line[ "id" ] for line in read_jsonl( work.records ) } if os.path.exists( work.records ) else set() )
     rerun_bound_failures( session, asks, models, work, ARM_PRINCIPLES, work.records, frozen_bound, engine.per_field_mc_enabled, out=out, chunk=chunk )
     model, timeout_seconds = extractor_settings()
-    version   = f"{model}:{PROMPT_VERSION}"
+    version   = current_extractor_version( model )
     extracted = set( state[ "extracted_ids" ] ) | extracted_in_db( session, version )
     runner    = ExtractorReplay( session, asks, REPLAY_LAG, query_fn=query_fn, embed_fn=embed, model=model, encoder=embed.encoder, timeout_seconds=timeout_seconds )
     runner.pending = [ ask for ask in runner.pending if ask[ "id" ] not in extracted ]
@@ -1022,7 +1022,7 @@ def main( argv=None, query_fn=None, embed=None, make_models=None, out=print ):
         asks   = asks_from_session( session, engine, embed )
         embed.flush()
         ids    = evaluation_ids( asks, fixture_ids( args.fixture ) )[ :args.limit ]
-        models = default_models( session, embed, embed.encoder, f"{extractor_settings()[ 0 ]}:{PROMPT_VERSION}", work ) if make_models is None else make_models( session, embed )
+        models = default_models( session, embed, embed.encoder, current_extractor_version( extractor_settings()[ 0 ] ), work ) if make_models is None else make_models( session, embed )
         try:
             if args.stage == "first": run_first_stage( session, asks, ids, engine, embed, models, work, query_fn=query_fn, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change, scored_against=scored_against )
             else: run_twin_stage( session, asks, ids, models, work, engine.per_field_mc_enabled, follow=args.follow, poll_seconds=args.poll_seconds, chunk=args.chunk, out=out, accept_code_change=args.accept_code_change, scored_against=scored_against )

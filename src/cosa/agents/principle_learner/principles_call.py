@@ -19,7 +19,7 @@ from cosa.agents.prediction_engine.context_baseline import get_baseline
 from cosa.agents.prediction_engine.principles_forecast import (
     REASON_SWITCH, STATUS_NOT_RUN, CapGate, concurrency_cap, principles_forecast_enabled, run_b1 )
 from cosa.agents.principle_learner import extractor_job
-from cosa.agents.principle_learner.extractor_prompt import extractor_version_of
+from cosa.agents.principle_learner.extractor_prompt import current_extractor_version
 from cosa.config.configuration_manager import ConfigurationManager
 
 _GATE = None
@@ -66,13 +66,13 @@ def retrieval_versions():
     Name the encoder and extractor versions the principles are read under.
 
     Ensures:
-        - returns ( encoder version, extractor version ): the extractor's own stored encoder string, and the settings' extractor model with the prompt version
+        - returns ( encoder version, extractor version ): the extractor's own stored encoder string, and the settings' extractor model with the prompt version the stage switch selects
 
     Raises:
         - MissingConfigKeyError if a needed INI key is absent
     """
     config = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    return extractor_job.encoder_version(), extractor_version_of( config.get_required( extractor_job.MODEL_KEY ) )
+    return extractor_job.encoder_version(), current_extractor_version( config.get_required( extractor_job.MODEL_KEY ) )
 
 
 async def run_quietly( notification_id, run=None ):

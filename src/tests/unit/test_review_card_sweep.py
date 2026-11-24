@@ -232,7 +232,7 @@ def _ini_version():
     """The extractor version the real INI file names, as the job computes it."""
     from cosa.agents.principle_learner.extractor_job import MODEL_KEY
     from cosa.config.configuration_manager import ConfigurationManager
-    return sweep.extractor_version_of( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( MODEL_KEY ) )
+    return sweep.current_extractor_version( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get_required( MODEL_KEY ) )
 
 
 def _job( db, dispatcher, cap=3, clock=lambda: NOW ):

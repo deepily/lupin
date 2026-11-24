@@ -41,7 +41,7 @@ def _fresh_state( monkeypatch ):
     monkeypatch.setattr( fa, "full_answer_enabled", lambda: False )   # the canned replies are the old reply format; the INI ships the switch on
     monkeypatch.setattr( ot, "opus_model", lambda: OPUS )
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
-    monkeypatch.setattr( pc, "extractor_version_of", lambda model: EXTRACT )
+    monkeypatch.setattr( pc, "current_extractor_version", lambda model: EXTRACT )
     monkeypatch.setattr( pc, "ConfigurationManager", lambda env_var_name=None: type( "C", (), { "get_required": lambda self, key: "model-x" } )() )
     yield
     oc.reset_gates()

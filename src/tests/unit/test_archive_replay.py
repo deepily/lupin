@@ -76,7 +76,7 @@ def _models( session, embed, c0=None, caps=( 2, 2, 1, 1 ) ):
     c0    = Haiku() if c0 is None else c0
     gates = { ar.ARM_BASELINE: principles_forecast.CapGate( caps[ 0 ] ), ar.ARM_PRINCIPLES: principles_forecast.CapGate( caps[ 1 ] ),
               ar.TWIN_ARMS[ 0 ]: principles_forecast.CapGate( caps[ 2 ] ), ar.TWIN_ARMS[ 1 ]: principles_forecast.CapGate( caps[ 3 ] ) }
-    return ar.ModelArms( ar.locked_sessions( session.get_bind() ), c0, embed, embed.encoder, f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}", gates ), c0
+    return ar.ModelArms( ar.locked_sessions( session.get_bind() ), c0, embed, embed.encoder, ar.current_extractor_version( ar.extractor_settings()[ 0 ] ), gates ), c0
 
 
 @pytest.fixture
@@ -218,7 +218,7 @@ def test_a_stopped_run_resumes_from_its_checkpoint_without_repeating_an_ask_or_a
 def test_an_answer_whose_evidence_is_in_the_database_is_not_extracted_again_even_without_a_checkpoint( loaded ):
     session, asks, ids, embed, work, _ = loaded
     _, c0, _ = _first_stage_counted( loaded, chunk=40, ids=ids[ :30 ] )
-    version  = f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}"
+    version  = ar.current_extractor_version( ar.extractor_settings()[ 0 ] )
     held     = ar.extracted_in_db( session, version )
     assert held, "the first run left no evidence to resume from"
     os.remove( work.state )
@@ -629,9 +629,9 @@ def test_the_freeze_is_stored_on_the_first_start_and_a_start_under_other_setting
     run( CODE )
     freeze = ar.load_state( work.state )[ "freeze" ]
     assert freeze[ "code_sha" ] == CODE[ "sha" ] and freeze[ "floor" ] == 10 and freeze[ "lag_seconds" ] == 0.0
-    assert ( freeze[ "neighbours" ], freeze[ "k" ], freeze[ "bound" ], freeze[ "fetch_multiplier" ] ) == ( 5, 5, 5000, 0 ) and freeze[ "vocabulary_version" ] == ar.PROMPT_VERSION
+    assert ( freeze[ "neighbours" ], freeze[ "k" ], freeze[ "bound" ], freeze[ "fetch_multiplier" ] ) == ( 5, 5, 5000, 0 ) and freeze[ "vocabulary_version" ] == ar.active_prompt_version()
     assert freeze[ "encoder" ] == "test-encoder:v1" and freeze[ "baseline_model" ] == "haiku-x" and freeze[ "twin_model" ] == opus_twins.opus_model()
-    assert freeze[ "extractor_version" ] == f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}" and freeze[ "extractor_timeout_seconds" ] == ar.extractor_settings()[ 1 ]
+    assert freeze[ "extractor_version" ] == ar.current_extractor_version( ar.extractor_settings()[ 0 ] ) and freeze[ "extractor_timeout_seconds" ] == ar.extractor_settings()[ 1 ]
     run( CODE, upto=20 )
     with pytest.raises( ar.FreezeMismatch, match="code_sha" ):
         run( { "sha": "b" * 40, "dirty": False }, upto=30 )
@@ -987,7 +987,7 @@ def test_a_limit_raised_above_the_old_one_fetches_the_same_principles_below_the_
     vector = asks[ 0 ][ "question_embedding" ]
     asked  = ar.aware_moment( asks[ -1 ][ "asked_at" ] )
     version = embed.encoder
-    pick = lambda bound: ar.principle_retrieval.retrieve_principles( session, owner, None, vector, asked, version, f"{ar.extractor_settings()[ 0 ]}:{ar.PROMPT_VERSION}", bound=bound, multiplier=0 )
+    pick = lambda bound: ar.principle_retrieval.retrieve_principles( session, owner, None, vector, asked, version, ar.current_extractor_version( ar.extractor_settings()[ 0 ] ), bound=bound, multiplier=0 )
     with mock.patch.object( ar.principle_retrieval, "dot_topk", ar.scratch_topk ): old, new = pick( 500 ), pick( 5000 )
     assert [ p[ "principle" ].id for p in old[ "principles" ] ] == [ p[ "principle" ].id for p in new[ "principles" ] ] and old[ "available" ] == new[ "available" ]
 

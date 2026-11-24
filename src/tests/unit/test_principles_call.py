@@ -78,7 +78,7 @@ def test_the_call_is_the_baselines_prompt_plus_the_block_and_stores_a_principles
     The user prompt carries the block. One row for the principles arm is stored, not displayed, with the principle id.
     """
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
-    monkeypatch.setattr( pc, "extractor_version_of", lambda model: EXTRACT )
+    monkeypatch.setattr( pc, "current_extractor_version", lambda model: EXTRACT )
     settings( monkeypatch )
     nid, pid = ask( factory ), principle( factory )
     c0       = Baseline()
@@ -94,7 +94,7 @@ def test_the_call_is_the_baselines_prompt_plus_the_block_and_stores_a_principles
 def test_the_baseline_gate_and_embedder_default_to_this_processs_own( factory, monkeypatch ):
     """With none given, the call uses the process's own baseline, gate and embedder."""
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
-    monkeypatch.setattr( pc, "extractor_version_of", lambda model: EXTRACT )
+    monkeypatch.setattr( pc, "current_extractor_version", lambda model: EXTRACT )
     settings( monkeypatch )
     c0 = Baseline()
     monkeypatch.setattr( pc, "get_baseline", lambda: ( c0, None ) )
@@ -110,7 +110,7 @@ def test_the_session_factory_defaults_to_the_apps_get_db( factory, monkeypatch )
     """With no factory given, the app's get_db is the one used."""
     monkeypatch.setattr( database, "get_db", factory )
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
-    monkeypatch.setattr( pc, "extractor_version_of", lambda model: EXTRACT )
+    monkeypatch.setattr( pc, "current_extractor_version", lambda model: EXTRACT )
     settings( monkeypatch )
     nid = ask( factory )
     result = asyncio.run( pc.run_principles_forecast( nid, c0=Baseline(), gate=CapGate( 2 ), embedder=Embedder(), enabled=True, clock=lambda: NOW ) )
@@ -148,7 +148,7 @@ def test_one_gate_is_made_per_process_and_reset_makes_a_new_one( monkeypatch ):
 def test_a_card_past_the_process_cap_gets_the_capped_row_and_no_call( factory, monkeypatch ):
     """With the one place taken, the next ask is capped at once through the process gate."""
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
-    monkeypatch.setattr( pc, "extractor_version_of", lambda model: EXTRACT )
+    monkeypatch.setattr( pc, "current_extractor_version", lambda model: EXTRACT )
     settings( monkeypatch )
     monkeypatch.setattr( pc, "concurrency_cap", lambda: 1 )
     assert pc.get_gate().try_enter() is True
@@ -161,7 +161,7 @@ def test_a_card_past_the_process_cap_gets_the_capped_row_and_no_call( factory, m
 def test_the_cap_is_not_the_baselines( factory, monkeypatch ):
     """A full baseline gate does not stop the principles call, because the two caps are separate."""
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
-    monkeypatch.setattr( pc, "extractor_version_of", lambda model: EXTRACT )
+    monkeypatch.setattr( pc, "current_extractor_version", lambda model: EXTRACT )
     settings( monkeypatch )
     monkeypatch.setattr( pc, "concurrency_cap", lambda: 1 )
     full = CapGate( 1 )
@@ -218,7 +218,7 @@ def test_the_arm_summary_reports_the_learners_own_rows_with_timeliness_and_the_c
     or wrote it under another arm name, would leave the arm out and fail here.
     """
     monkeypatch.setattr( extractor_job, "encoder_version", lambda: ENCODER )
-    monkeypatch.setattr( pc, "extractor_version_of", lambda model: EXTRACT )
+    monkeypatch.setattr( pc, "current_extractor_version", lambda model: EXTRACT )
     settings( monkeypatch )
     answered_at = T0 + timedelta( minutes=30 )
     cards       = [ ask( factory, minutes=n ) for n in range( 4 ) ]

@@ -35,6 +35,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from cosa.agents.prediction_engine.full_answer import ReplyRefused
 from cosa.agents.prediction_engine.episode_view import card_text, episode_view
+from cosa.agents.prediction_engine.card_stage import card_stage_of
 from cosa.agents.prediction_engine.principle_retrieval import APPLICABILITY_KEY, CAVEATS_KEY, DEFAULT_K, principle_block, retrieval_limits, retrieve_principles
 from cosa.agents.shared.config_loader import required_positive_int
 from cosa.config.configuration_manager import ConfigurationManager
@@ -289,7 +290,7 @@ def _prepare( session_factory, notification_id, c0, embedder, encoder_version, e
         - returns ( episode, selected, block, system prompt, user prompt ), everything as of the ask and nothing later
         - block is principle_block's result plus applicability: None when the applicability switch is off or no principles are used, else the list of { principle_id (text), rule } dropped, [] when none
         - without principles the selection is empty, the block is principle_block of none, and the prompts are the baseline's own
-        - with principles and the applicability switch (APPLICABILITY_KEY) on, retrieval also drops each principle failing the antecedent rule and prints the dropped ones; the card's stage is not known here yet, so the stage rule waits for it
+        - with principles and the applicability switch (APPLICABILITY_KEY) on, retrieval also drops each principle failing the antecedent rule and prints the dropped ones; the card's stage is read from its own question by card_stage_of, so the stage rule runs for a card whose stage that names
         - with principles, the block carries each stored caveat only when the caveats switch (CAVEATS_KEY) is on
         - with principles, the limit and fetch multiplier are the `limits` given ({ bound, multiplier }); with None they are read from the INI file for this ask (retrieval_limits)
         - with a block_provider, the block is block_provider( session, episode ), read in the same session and as of the same ask, instead of principle_block of the selection; it then carries no applicability key unless the provider adds one
@@ -303,7 +304,7 @@ def _prepare( session_factory, notification_id, c0, embedder, encoder_version, e
             limits   = retrieval_limits() if limits is None else limits
             vector   = embedder.encode( card_text( episode ) )
             caveats  = switch_enabled( CAVEATS_KEY )
-            check    = { "card": card_text( episode ), "card_stage": None } if switch_enabled( APPLICABILITY_KEY ) else None
+            check    = { "card": card_text( episode ), "card_stage": card_stage_of( episode ) } if switch_enabled( APPLICABILITY_KEY ) else None
             found    = retrieve_principles( session, episode[ "owner_id" ], episode[ "project" ], vector, aware_moment( episode[ "asked_at" ] ),
                                             encoder_version, extractor_version, k=k, bound=limits[ "bound" ], multiplier=limits[ "multiplier" ], applicability=check, caveats=caveats )
             selected = found[ "principles" ]

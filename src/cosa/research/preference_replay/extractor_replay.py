@@ -24,7 +24,7 @@ from cosa.agents.prediction_engine.principle_retrieval import load_owner_ledger,
 from cosa.agents.prediction_engine.principle_status import SOURCE_EXTRACT, derive_statuses, usable_at
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
 from cosa.agents.principle_learner.extractor_job import PrincipleExtractorJob
-from cosa.agents.principle_learner.extractor_prompt import PROMPT_VERSION
+from cosa.agents.principle_learner.extractor_prompt import current_extractor_version
 from cosa.agents.principle_learner.vocabulary import heading_for
 from cosa.repo.doc_lint import model_transport
 from cosa.research.preference_replay.replay_loop import always_yes_arm, replay
@@ -174,7 +174,7 @@ class ExtractorReplay:
         self.embed_fn  = embed_fn
         self.model     = model
         self.timeout   = timeout_seconds
-        self.version   = f"{model}:{PROMPT_VERSION}"
+        self.version   = current_extractor_version( model )
         self.encoder   = encoder
         self.summaries = []
 

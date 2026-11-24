@@ -88,6 +88,29 @@ def asks_of( raws ):
                "sender_id": r[ "sender_id" ], "asked_at": r[ "created_at" ] } for r in raws ]
 
 
+def meaning_structure( native_answer, conditions, field_key ):
+    """
+    Read one field's option ids and linked conditions from a stored meaning record.
+
+    Requires:
+        - native_answer is the meaning record's map of field key to entry, each entry holding selected_option_ids,
+          write_in_text and referred_option_ids
+        - conditions is the record's list of { "text", "modifies_option_id" }, the id None for the whole answer
+
+    Ensures:
+        - returns None when the record has no entry for field_key
+        - otherwise returns { "option_ids", "write_in_text", "referred_option_ids", "conditions" }
+        - a condition belongs to the field when it changes none of the card (id None) or one of this field's selected or referred ids;
+          each is returned as { "text", "modifies_option_id" }, so the link to its option reaches the writer as a field, never as joined text
+    """
+    entry = native_answer.get( field_key )
+    if entry is None: return None
+    own = set( entry[ "selected_option_ids" ] ) | set( entry[ "referred_option_ids" ] )
+    return { "option_ids": list( entry[ "selected_option_ids" ] ), "write_in_text": entry[ "write_in_text" ], "referred_option_ids": list( entry[ "referred_option_ids" ] ),
+             "conditions": [ { "text": c[ "text" ], "modifies_option_id": c[ "modifies_option_id" ] } for c in conditions
+                             if c[ "modifies_option_id" ] is None or c[ "modifies_option_id" ] in own ] }
+
+
 def derive_dataset( raws ):
     """
     Derive one example per original row, and count what could not be read.
