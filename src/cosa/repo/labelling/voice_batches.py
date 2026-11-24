@@ -4,12 +4,17 @@ The voice-card bridge: batches out to Rick, spoken answers back as labels.
 Code cannot call the voice tools. This module builds what a seat passes to ask_open_ended_batch and to task_create, and reads
 back what ask_open_ended_batch returns. The plan is 2026.11.24-meaning-labeller-plan.md.
 """
+import argparse
 import hashlib
+import json
+import pathlib
 import random
 import re
-from datetime import timedelta
+import sys
+from datetime import datetime, timedelta, timezone
 
 from cosa.repo.labelling import errors as er
+from cosa.repo.labelling import gold_store as gs
 from cosa.repo.labelling import items as it
 from cosa.repo.labelling import packets as pk
 from cosa.utils.notification_utils import format_open_ended_batch_for_tts
@@ -190,3 +195,67 @@ def read_answers( batch, answers ):
         if relation is None: unlabelled.append( { "item_id": item_id, "header": header, "text": text } )
         else: labels.append( { "item_id": item_id, "header": header, "relation": relation } )
     return { "labels": labels, "unlabelled": unlabelled, "unmatched": sorted( set( answers ) - set( batch[ "headers" ] ) ) }
+
+
+def _fail( message, code ):
+    """Ensures: prints the message to stderr and returns the exit code."""
+    print( message, file=sys.stderr )
+    return code
+
+
+def main( argv=None, clock=lambda: datetime.now( timezone.utc ) ):
+    """
+    Read a returned batch answer into the gold store.
+
+    Requires:
+        - argv is [ "read", "--batch", id, "--packet", file, "--seed", seed, "--answers", file ], with optional --store, --source and --reader
+        - the packet file holds { name, blind, disputes, refs }, refs mapping each item id to { notification_id, field_key }
+        - the answers file holds the dict ask_open_ended_batch returned, or just its "answers" dict
+
+    Ensures:
+        - returns 0 after writing one gold line per labelled card and printing a JSON summary of the labelled, unlabelled and unmatched cards and Rick's labelled cards by stance class
+        - returns 2, writing nothing, for an unknown batch id, a missing ref, or a file that cannot be read
+        - returns 3, writing nothing, when the store is locked or damaged
+    """
+    ap = argparse.ArgumentParser( prog="voice_batches" )
+    sub = ap.add_subparsers( dest="verb", required=True )
+    rd = sub.add_parser( "read" )
+    rd.add_argument( "--batch", required=True )
+    rd.add_argument( "--packet", required=True )
+    rd.add_argument( "--seed", required=True )
+    rd.add_argument( "--answers", required=True )
+    rd.add_argument( "--store", default=None )
+    rd.add_argument( "--source", choices=gs.SOURCES, default=gs.SOURCE_HUMAN )
+    rd.add_argument( "--reader", default="rick" )
+    args = ap.parse_args( argv )
+    try:
+        packet  = json.loads( pathlib.Path( args.packet ).read_text( encoding="utf-8" ) )
+        answers = json.loads( pathlib.Path( args.answers ).read_text( encoding="utf-8" ) )
+        batches = voice_batches( packet, args.seed, "2026-01-01T00:00:00+00:00" )
+    except ( OSError, ValueError, KeyError, TypeError, er.LabellingError ) as e:
+        return _fail( f"cannot read the packet or the answers: {e!r}", 2 )
+    batch = next( ( b for b in batches if b[ "batch_id" ] == args.batch ), None )
+    if batch is None: return _fail( f"unknown batch id {args.batch}", 2 )
+    if isinstance( answers, dict ) and isinstance( answers.get( "answers" ), dict ): answers = answers[ "answers" ]
+    if not isinstance( answers, dict ): return _fail( "the answers file holds no dict of answers", 2 )
+    refs = packet.get( "refs", {} )
+    absent = [ i for i in batch[ "item_ids" ] if not isinstance( refs.get( i ), dict ) or set( refs[ i ] ) != { "notification_id", "field_key" } ]
+    if absent: return _fail( f"the packet's refs lack notification_id and field_key for: {absent[ :5 ]}", 2 )
+    result = read_answers( batch, answers )
+    cards  = { i[ "item_id" ]: i for i in packet[ "blind" ] + packet[ "disputes" ] }
+    ts     = clock().isoformat()
+    lines  = [ { "item_id": x[ "item_id" ], "notification_id": refs[ x[ "item_id" ] ][ "notification_id" ], "field_key": refs[ x[ "item_id" ] ][ "field_key" ],
+                 "relation": x[ "relation" ], "card_stance": cards[ x[ "item_id" ] ][ "payload" ][ "stance_class" ], "source": args.source,
+                 "reader": args.reader, "batch_id": batch[ "batch_id" ], "ts": ts } for x in result[ "labels" ] ]
+    path = pathlib.Path( args.store ) if args.store else gs.default_path()
+    try:
+        gs.append_gold( path, lines )
+        counts = gs.human_card_counts( gs.read_gold( path ) )
+    except er.LabellingError as e:
+        return _fail( f"the gold store refused the write: {e}", 3 )
+    print( json.dumps( { "batch_id": batch[ "batch_id" ], "written": len( lines ), "unlabelled": result[ "unlabelled" ], "unmatched": result[ "unmatched" ], "human_labelled_by_stance": counts }, sort_keys=True ) )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit( main() )
