@@ -228,7 +228,7 @@ def test_boundary_an_answer_at_the_exact_ask_instant_counts( factory ):
 
 def test_boundary_the_provider_checks_the_time_itself_when_the_store_would_let_one_through( factory ):
     """eligible_cases refuses an answer later than the ask even if the store handed it over."""
-    _, case = answered( factory, 1 )
+    _, case = answered( factory, 1, annotated=T0 - timedelta( minutes=5 ) )
     with factory() as db:
         assert ah.eligible_cases( db, [ case ], str( RECIPIENT ), T0 ) == []
         assert ah.eligible_cases( db, [ { **case, "responded_at": None } ], str( RECIPIENT ), T0 ) == []
