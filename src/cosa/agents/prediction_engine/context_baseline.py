@@ -235,15 +235,16 @@ def _confidence_of( value ):
         - value is the parsed reply object
 
     Ensures:
-        - returns a float from 0 to 1
+        - returns a float from 0 to 1, read by full_answer._probability
 
     Raises:
-        - ValueError if confidence is missing, not a number or outside 0 to 1
+        - a plain ValueError, never a ReplyRefused, if confidence is missing, not a number or outside 0 to 1; its message begins with the reason
+          full_answer gave, because run_arm stores a ReplyRefused as a refusal and a plain error as unreadable_forecast
     """
-    confidence = value.get( "confidence" )
-    if isinstance( confidence, bool ) or not isinstance( confidence, ( int, float ) ) or not 0 <= confidence <= 1:
-        raise ValueError( f"confidence must be a number from 0 to 1, got {confidence!r}" )
-    return float( confidence )
+    try:
+        return full_answer._probability( value.get( "confidence" ), "confidence" )
+    except full_answer.ReplyRefused as refused:
+        raise ValueError( str( refused ) ) from refused
 
 
 def _choice_of( field, given ):

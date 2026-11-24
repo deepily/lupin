@@ -457,3 +457,35 @@ def test_every_forecaster_arm_uses_parse_reply( factory, monkeypatch, tmp_path )
             assert parse_of( c0 )( arm, ep ) == { "routed": True }
         assert seen == [ ( route, arm ) for arm in FORECASTER_ARMS ], f"each arm's reply reached the {route} parser, in registry order"
         seen.clear()
+
+
+STANCE_OK = { "yes": 0.5, "no": 0.3, "neither": 0.2 }
+ACTS_OK   = { act: 0.1 for act in fa.ACTS }
+
+
+@pytest.mark.parametrize( "call, parsed, reason, message", [
+    ( fa._stance_probabilities, { "probabilities": { **STANCE_OK, "maybe": 0.1 } }, fa.REASON_STANCE_NOT_IN_VOCAB, f"{fa.REASON_STANCE_NOT_IN_VOCAB}: ['maybe'] are not among {fa.STANCES}" ),
+    ( fa._stance_probabilities, { "probabilities": { "yes": 0.5, "no": 0.5 } },     fa.REASON_FIELD_MISSING,       f"{fa.REASON_FIELD_MISSING}: probabilities leaves out ['neither']" ),
+    ( fa._stance_probabilities, { "probabilities": { **STANCE_OK, "no": "most" } }, fa.REASON_NOT_NORMALISED,      f"{fa.REASON_NOT_NORMALISED}: probability of no must be a number from 0 to 1, got 'most'" ),
+    ( fa._stance_probabilities, { "probabilities": "x" },                           fa.REASON_FIELD_MISSING,       f"{fa.REASON_FIELD_MISSING}: probabilities must be an object" ),
+    ( fa._acts,                 { "acts": { **ACTS_OK, "shrug": 0.3 } },            fa.REASON_STANCE_NOT_IN_VOCAB, f"{fa.REASON_STANCE_NOT_IN_VOCAB}: ['shrug'] are not among {fa.ACTS}" ),
+    ( fa._acts,                 { "acts": { "approve": 0.1 } },                     fa.REASON_FIELD_MISSING,       f"{fa.REASON_FIELD_MISSING}: acts leaves out {[ act for act in fa.ACTS if act != 'approve' ]}" ),
+    ( fa._acts,                 { "acts": { **ACTS_OK, "defer": 2 } },              fa.REASON_NOT_NORMALISED,      f"{fa.REASON_NOT_NORMALISED}: act defer must be a number from 0 to 1, got 2" ),
+    ( fa._acts,                 {},                                                 fa.REASON_FIELD_MISSING,       f"{fa.REASON_FIELD_MISSING}: acts must be an object" ),
+] )
+def test_the_stance_and_act_refusal_messages_are_the_words_they_were_before_the_shared_helper( call, parsed, reason, message ):
+    with pytest.raises( fa.ReplyRefused ) as refused: call( parsed )
+    assert refused.value.reason == reason and str( refused.value ) == message
+
+
+def test_named_probabilities_reads_every_name_in_vocabulary_order_and_keeps_the_values_unsummed():
+    assert fa._named_probabilities( { "acts": ACTS_OK }, "acts", fa.ACTS, "act" ) == ACTS_OK
+    assert list( fa._named_probabilities( { "k": { "b": 0.9, "a": 0.9 } }, "k", ( "a", "b" ), "p" ) ) == [ "a", "b" ]
+    assert fa._stance_probabilities( { "probabilities": STANCE_OK } ) == STANCE_OK
+    with pytest.raises( fa.ReplyRefused, match="stances add up to" ): fa._stance_probabilities( { "probabilities": { "yes": 0.5, "no": 0.3, "neither": 0.1 } } )
+
+
+def test_an_object_with_one_unknown_name_and_names_left_out_is_refused_for_the_unknown_name_first():
+    """The unknown-name check runs before the missing-name check, so that reason wins."""
+    with pytest.raises( fa.ReplyRefused ) as refused: fa._named_probabilities( { "acts": { "approve": 0.1, "shrug": 0.3 } }, "acts", fa.ACTS, "act" )
+    assert refused.value.reason == fa.REASON_STANCE_NOT_IN_VOCAB and str( refused.value ) == f"{fa.REASON_STANCE_NOT_IN_VOCAB}: ['shrug'] are not among {fa.ACTS}"
