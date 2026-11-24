@@ -303,6 +303,27 @@ def score_field( field_schema, predicted, actual, per_field=False ):
     return record
 
 
+def predicted_answers_of( predicted ):
+    """
+    Read every field a multiple-choice forecast answered, typed fields included.
+
+    Requires:
+        - predicted is a forecast dict, with an "answers" map and optionally the full-answer "fields" map
+
+    Ensures:
+        - returns { header: pick } holding the forecast's "answers", plus the write-in or re-frame text of each
+          field in "fields" that "answers" lacks, because parse_full_reply leaves a typed field out of "answers"
+        - an entry in "answers" is never replaced by one in "fields"
+        - a field of "fields" holding option ids or a batch gist adds nothing
+    """
+    answers = dict( predicted.get( "answers" ) or {} )
+    for header, selection in ( predicted.get( "fields" ) or {} ).items():
+        if header in answers or not isinstance( selection, dict ): continue
+        typed = selection.get( "write_in", selection.get( "reframe" ) )
+        if typed is not None: answers[ header ] = typed
+    return answers
+
+
 def compare_multiple_choice( predicted, actual, response_options, per_field=False ):
     """
     Score a multiple-choice card field by field, by the schema stored with the notification.
@@ -336,7 +357,7 @@ def compare_multiple_choice( predicted, actual, response_options, per_field=Fals
     if predicted is None or actual is None:
         return ( None, { "reason": "missing_data" } )
 
-    predicted_answers = predicted.get( "answers", {} )
+    predicted_answers = predicted_answers_of( predicted )
     actual_answers    = actual.get( "answers", {} )
     if not predicted_answers or not actual_answers:
         return ( None, { "reason": "empty_answers" } )
@@ -506,7 +527,7 @@ def compare_complete_action_multiple_choice( predicted, actual, response_options
           plain_code_match
     """
     if actual is None or not actual.get( "answers" ): return ( None, { "reason": "missing_data" if actual is None else "empty_answers" } )
-    if predicted is None or not predicted.get( "answers" ): return ( False, _abstained_detail() )
+    if predicted is None or not predicted_answers_of( predicted ): return ( False, _abstained_detail() )
     _, base      = compare_multiple_choice( predicted, actual, response_options, per_field=True )
     fields       = base[ "fields" ]
     single       = { f[ "header" ] for f in fields if f[ "mode" ] == "single" }
