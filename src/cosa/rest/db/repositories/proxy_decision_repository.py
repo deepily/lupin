@@ -78,7 +78,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             trust_level: Trust level at decision time
             reason: Human-readable reason
             metadata_json: Optional JSONB metadata
-            data_origin: Provenance tag (organic, synthetic_seed, synthetic_generated)
+            data_origin: Provenance tag (organic, proxy, uncarded, synthetic_seed, synthetic_generated)
             rule_agreement: True, False or None, as agreement.rule_agreement answers it
             decision_value: the proxy's forecast, or None to leave the column empty as before
 
@@ -134,7 +134,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
             reason: Human-readable reason
             requires_ratification: Whether decision needs human approval
             metadata_json: Optional JSONB metadata
-            data_origin: Provenance tag (organic, synthetic_seed, synthetic_generated)
+            data_origin: Provenance tag (organic, proxy, uncarded, synthetic_seed, synthetic_generated)
             rule_agreement: True, False or None, as agreement.rule_agreement answers it
 
         Returns:

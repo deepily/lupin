@@ -2,7 +2,8 @@
 The decision proxy's neither fix: a neither answer is no ruling.
 
 Covers the switch, the pure agreement and re-frame functions, and the gated confirmation with the switch on and off.
-It also covers the stored events and the replay of the 43 organic rows of 5 Nov 2026.
+It also covers the stored events and the replay of the 43 rows of 5 Nov 2026.
+Those rows are a mocked orchestrator run, not Rick's answers; the replay measures the code's handling of them.
 Nothing here reaches a database or a notification: the boundaries are patched.
 """
 import asyncio
@@ -21,7 +22,7 @@ from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
 from cosa.agents.utils.agent_notification_dispatcher import ConfirmationAnswer
 
 ROOT    = os.environ[ "LUPIN_ROOT" ]
-FIXTURE = f"{ROOT}/src/tests/unit/fixtures/proxy_decisions_2026_11_05_organic.json"
+FIXTURE = f"{ROOT}/src/tests/unit/fixtures/proxy_decisions_2026_11_05_mocked_orchestrator.json"
 SWITCH  = "cosa.agents.swe_team.orchestrator.neither_is_no_ruling_enabled"
 
 
@@ -318,10 +319,11 @@ def test_a_run_of_neithers_through_the_orchestrator_logs_the_block_once_the_rate
 # --------------------------------------------------------------------------- the replay
 def _replay():
     """
-    Replay the 43 organic rows.
+    Replay the 43 rows of 5 Nov 2026, the output of a mocked orchestrator run.
 
     The stored rows keep only a bool, so a stored False is either a no or a neither.
     The replay reports the lower bound (none is a neither) and the upper bound (all are).
+    The bools are a test double's answers, so no figure here is Rick's neither rate.
     """
     rows   = json.load( open( FIXTURE ) )
     asked  = [ r for r in rows if r[ "user_answer" ] is not None ]
@@ -340,7 +342,7 @@ def _replay():
     return rows, report
 
 
-def test_the_replay_fixture_is_the_43_organic_rows_of_5_nov():
+def test_the_replay_fixture_is_the_43_mocked_orchestrator_rows_of_5_nov():
     rows, _ = _replay()
     assert len( rows ) == 43
     assert { r[ "created_at" ][ :10 ] for r in rows } == { "2026-11-05" }
@@ -349,7 +351,7 @@ def test_the_replay_fixture_is_the_43_organic_rows_of_5_nov():
 
 def test_the_replay_reports_the_three_figures_per_category_and_pins_the_changed_agreements():
     _, report = _replay()
-    # Measured 23 Nov 2026. neither_recorded is 0 because the stored rows keep only a bool; the upper bound treats every stored False as a neither.
+    # Measured 23 Nov 2026 on a mocked orchestrator's rows, not on Rick's answers. neither_recorded is 0 because the stored rows keep only a bool; the upper bound treats every stored False as a neither.
     assert report == {
         "general" : { "asks": 40, "neither_recorded": 0, "neither_upper": 8, "changed_upper": 8, "reframe_rate_upper": 0.1 },
         "testing" : { "asks": 2,  "neither_recorded": 0, "neither_upper": 1, "changed_upper": 1, "reframe_rate_upper": 0.5 },

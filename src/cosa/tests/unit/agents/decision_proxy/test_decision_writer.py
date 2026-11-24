@@ -126,3 +126,28 @@ def test_commit_defaults_to_no_commit():
     with _database() as ( _, session ):
         _write( _result( action="act" ) )
     session.commit.assert_not_called()
+
+
+def test_a_write_to_the_dev_database_under_pytest_is_refused_and_no_repository_call_is_made():
+    import pytest
+    with _database() as ( repo, session ):
+        session.get_bind.return_value.url.database = "lupin_db_dev"
+        with pytest.raises( RuntimeError, match="lupin_db_dev" ):
+            _write( _result( action="suggest" ) )
+    repo.log_decision.assert_not_called()
+    repo.log_shadow.assert_not_called()
+
+
+def test_a_write_bound_to_a_scratch_database_under_pytest_goes_through():
+    with _database() as ( repo, session ):
+        session.get_bind.return_value.url.database = "scratch_db"
+        _write( _result( action="suggest" ) )
+    repo.log_decision.assert_called_once()
+
+
+def test_outside_pytest_a_dev_database_write_is_not_refused( monkeypatch ):
+    monkeypatch.delenv( "PYTEST_CURRENT_TEST" )
+    with _database() as ( repo, session ):
+        session.get_bind.return_value.url.database = "lupin_db_dev"
+        _write( _result( action="suggest" ) )
+    repo.log_decision.assert_called_once()

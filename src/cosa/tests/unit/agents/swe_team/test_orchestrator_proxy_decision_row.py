@@ -1,5 +1,8 @@
 """
-A live gated confirmation must leave an organic proxy_decisions row.
+A gated confirmation leaves a proxy_decisions row tagged by where its answer came from.
+
+The row is organic only when a notification id says a real card was asked.
+An auto-approval is tagged proxy, and an answer with no card id is tagged uncarded.
 
 The insert sits in SweTeamOrchestrator._gated_confirmation: once on the auto-approve return
 and once after the trust feedback is saved.
@@ -42,9 +45,10 @@ def _team_io( answer=True ):
 
 class TestOrganicProxyDecisionRow( unittest.TestCase ):
 
-    def _run_with_repo( self, o, t ):
+    def _run_with_repo( self, o, t, card_id="card-1" ):
         repo = MagicMock()
         with patch( "cosa.rest.db.database.get_db" ) as get_db, \
+             patch( "cosa.agents.swe_team.orchestrator.take_last_ask_notification_id", return_value=card_id ), \
              patch( "cosa.rest.db.repositories.proxy_decision_repository.ProxyDecisionRepository", return_value=repo ), \
              patch.object( o, "_persist_trust_feedback" ), \
              patch.object( o, "_emit_proxy_summary_notification" ), \
@@ -59,6 +63,16 @@ class TestOrganicProxyDecisionRow( unittest.TestCase ):
         self.assertEqual( kwargs[ "data_origin" ], "organic" )
         self.assertTrue( kwargs[ "requires_ratification" ] )
         self.assertEqual( kwargs[ "action" ], "suggest" )
+
+    def test_an_answered_row_with_no_card_id_is_uncarded_not_organic( self ):
+        repo = self._run_with_repo( _orch_with_proxy( "suggest" ), _team_io( True ), card_id=None )
+        self.assertEqual( repo.log_decision.call_args.kwargs[ "data_origin" ], "uncarded" )
+        repo = self._run_with_repo( _orch_with_proxy( "shadow", value=None ), _team_io( True ), card_id=None )
+        self.assertEqual( repo.log_shadow.call_args.kwargs[ "data_origin" ], "uncarded" )
+
+    def test_an_auto_approved_row_is_tagged_proxy_not_organic( self ):
+        repo = self._run_with_repo( _orch_with_proxy( "act" ), _team_io( True ), card_id=None )
+        self.assertEqual( repo.log_decision.call_args.kwargs[ "data_origin" ], "proxy" )
 
     def test_shadow_row_uses_log_shadow( self ):
         repo = self._run_with_repo( _orch_with_proxy( "shadow", value=None ), _team_io( True ) )
