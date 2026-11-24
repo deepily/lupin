@@ -2114,7 +2114,7 @@ async def submit_notification_response(
         try:
             from cosa.agents.prediction_engine import context_hint
             if await asyncio.to_thread( context_hint.settle_unfinished, get_db, notification_id ):
-                print( f"[CONTEXT-FORECAST] {notification_id}: answered with no baseline row, stored forecast_timed_out" )
+                print( f"[CONTEXT-FORECAST] {notification_id}: answered with no baseline row, stored a terminal forecast row (the reason is in its abstention_reason)" )
         except Exception as settle_error:
             print( f"[CONTEXT-FORECAST] ⚠️ Settle error (non-fatal): {settle_error}" )
 
