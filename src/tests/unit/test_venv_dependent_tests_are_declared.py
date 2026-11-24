@@ -136,6 +136,12 @@ BREAKS_WITHOUT_VENV = {
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next
 # reader can refute the classification instead of re-deriving it.
 DETECTED_BUT_DOES_NOT_BREAK = {
+    "test_preflight_bundle_probe.py":
+        "the `.venv/bin` path is BUILT inside a tmp_path tree the test plants itself (a "
+        "mkdir plus a symlink to the system python3), so the file never walks this tree's "
+        "own venv. Measured BOTH ways at 1dc52d187 in this worktree, the `.venv` symlink "
+        "moved aside and restored between the runs: 19 passed with, 19 passed without, "
+        "19 passed after the restore.",
     "test_purge_pycache_args.py":
         "the two `.venv/bin/python` strings are ASSERTION SUBJECTS, not paths this file "
         "walks. One is the literal the drift check greps for inside both shell scripts "
