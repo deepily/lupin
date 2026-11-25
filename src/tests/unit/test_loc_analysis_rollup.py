@@ -60,7 +60,6 @@ def test_importing_the_module_runs_no_analysis():
 # ── counted() ─────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize( "path", [
     "src/ephemera/x.ipynb",
-    "src/lupin_app/static/lupin-mobile-test/main.dart.js",
     "io/mementos/rio.md",
     "node_modules/left-pad/index.js",
     "package-lock.json",

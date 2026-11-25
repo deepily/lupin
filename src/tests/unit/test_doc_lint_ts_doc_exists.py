@@ -89,9 +89,9 @@ def test_counted_paths_are_the_scope_the_wording_linter_reads( repo ):
     assert ts_doc_exists.counted_paths( str( repo ) ) == tsdoc_lint.tracked_files( str( repo ) ) == [ "a.ts", "b.js" ]
 
 
-def test_counted_paths_leave_out_rnd_and_the_flutter_bundle_but_the_wording_linter_still_reads_them( repo ):
+def test_counted_paths_leave_out_rnd_but_the_wording_linter_still_reads_them( repo ):
     kept = [ "src/lupin_app/static/js/ok.js", "src/rndx/ok.js" ]
-    gone = [ "src/rnd/v1/probe.js", "src/cosa/rnd/note.ts", "src/lupin_app/static/lupin-mobile-test/flutter.js" ]
+    gone = [ "src/rnd/v1/probe.js", "src/cosa/rnd/note.ts" ]
     for rel in kept + gone:
         ( repo / rel ).parent.mkdir( parents=True, exist_ok=True )
         ( repo / rel ).write_text( "x\n", encoding="utf-8" )

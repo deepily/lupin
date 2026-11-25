@@ -86,7 +86,6 @@ def test_is_test_is_false_for_ordinary_code():
 # ── bucket_of: exclusions first, in order ─────────────────────────────────────
 @pytest.mark.parametrize( "path,bucket", [
     ( "io/mementos/rio.md",                                  "X1 Agent output (io/)" ),
-    ( "src/lupin_app/static/lupin-mobile-test/main.dart.js", "X2 Flutter web build output (vendored)" ),
     ( "src/lupin_app/static/js/vendor/jquery.js",            "X3 Vendored third-party JS" ),
     ( "src/a/thing.min.js",                                  "X3 Vendored third-party JS" ),
     ( "src/a/thing.min.css",                                 "X3 Vendored third-party JS" ),

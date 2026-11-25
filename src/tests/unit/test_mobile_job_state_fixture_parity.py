@@ -21,9 +21,9 @@ watching anything. Three separate ways that happens here, and the three defenses
 
   1. FIXTURE FILE ABSENT. A parity test that skips when its input is missing is a test that a
      one-character path typo disables forever, silently and green. So absence is split: the
-     nested repo is detected by a marker that is NOT the fixture (`pubspec.yaml`). Repo present
+     mobile repo is detected by a marker that is NOT the fixture (`pubspec.yaml`). Repo present
      but fixture missing -> HARD FAIL, because that is drift (moved/deleted/typo'd). Repo itself
-     absent -> skip, which is honest: a git worktree has no `src/lupin-mobile` at all, measured.
+     absent -> skip, which is honest: a git worktree has no sibling `lupin-mobile` folder, measured.
 
   2. EITHER SIDE EMPTY. An empty dict compares equal to nothing and every "for k in ..." loop
      over it passes vacuously. Both sides are asserted non-empty before they are compared.
@@ -53,11 +53,13 @@ import pytest
 
 REPO_ROOT = Path( __file__ ).resolve().parents[ 3 ]
 
-# The nested lupin-mobile repo. `MOBILE_MARKER` is deliberately a DIFFERENT file from the
-# fixture: it answers "is the nested repo checked out here at all", which is the only question
-# that may legitimately end in a skip. Using the fixture itself for both questions is what turns
-# a path typo into a permanent silent pass.
-MOBILE_ROOT   = REPO_ROOT / "src" / "lupin-mobile"
+# The lupin-mobile repo, which sits BESIDE the Lupin checkout (`<parent>/lupin-mobile`), the same
+# place `librarian_tick.read_mobile_corpus` looks. It used to be nested at `src/lupin-mobile`;
+# that path no longer exists, and pointing at it made every test here skip silently.
+# `MOBILE_MARKER` is deliberately a DIFFERENT file from the fixture: it answers "is the mobile
+# repo checked out here at all", which is the only question that may legitimately end in a skip.
+# Using the fixture itself for both questions is what turns a path typo into a permanent silent pass.
+MOBILE_ROOT   = REPO_ROOT.parent / "lupin-mobile"
 MOBILE_MARKER = MOBILE_ROOT / "pubspec.yaml"
 
 # The fixture, and the Dart test that consumes it. FIXTURE_REL is the exact string the Dart side
@@ -69,16 +71,17 @@ DART_CONSUMER = MOBILE_ROOT / "test" / "unit" / "queue" / "job_lifecycle_test.da
 
 def _require_mobile_checkout():
     """
-    Skip only when the nested repo is absent entirely; never when it is present but incomplete.
+    Skip only when the mobile repo is absent entirely; never when it is present but incomplete.
 
     Ensures:
-        - skips iff `src/lupin-mobile/pubspec.yaml` is missing (worktrees, VM checkouts)
+        - skips iff `<parent of the Lupin checkout>/lupin-mobile/pubspec.yaml` is missing
+          (a git worktree under `.claude/worktrees/`, a VM without the sibling folder)
         - returns None otherwise
     """
     if not MOBILE_MARKER.exists():
         pytest.skip(
-            f"nested repo lupin-mobile is not checked out here ({MOBILE_MARKER} missing) — "
-            f"no fixture exists to compare against. A git worktree has no src/lupin-mobile; "
+            f"lupin-mobile is not checked out beside this Lupin tree ({MOBILE_MARKER} missing) — "
+            f"no fixture exists to compare against. A git worktree has no sibling lupin-mobile; "
             f"run this from the main tree."
         )
 

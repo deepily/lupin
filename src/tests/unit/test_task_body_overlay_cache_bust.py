@@ -380,8 +380,10 @@ def _html_corpus():
 
     ⚠️ 42 AND 32 ARE BOTH CORRECT — reconciled, not adjudicated. 42 is every tracked
     `.html` under `src/`; 32 is the subset in `static/html/` plus `templates/`. The
-    ten between them are `static/lupin-mobile-test/`, four `src/rnd/` reports, two
-    `src/templates/` and four `src/tests/` fixtures. This guard takes the WIDER one:
+    ten between them were `static/lupin-mobile-test/`, four `src/rnd/` reports, two
+    `src/templates/` and four `src/tests/` fixtures. (`static/lupin-mobile-test/`, a
+    vendored Flutter build, was deleted on 24 Nov 2026, so a count taken after that
+    reads one lower than the 42 and 10 here.) This guard takes the WIDER one:
     a page that starts versioning assets is unwatched wherever it lives, and the
     narrower corpus is a place for it to hide. Same for JavaScript — 27 tracked
     under `static/` outside the excluded bundles, against the 16 a `static/js/`-only
@@ -533,7 +535,7 @@ UNFOLLOWABLE_REFERENCE_FORMS = (
 
 # Third-party bundles we neither author nor version. Same rule as the JS corpus above:
 # every name is a hole, so the list stays tiny and its effect is reported.
-_UNFOLLOWABLE_SCAN_EXCLUDED = ( "/vendor/", "/canvaskit/", "/lupin-mobile-test/" )
+_UNFOLLOWABLE_SCAN_EXCLUDED = ( "/vendor/", "/canvaskit/" )
 
 
 def _authored_client_files():

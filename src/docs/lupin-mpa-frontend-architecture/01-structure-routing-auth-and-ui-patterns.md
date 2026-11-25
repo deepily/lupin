@@ -117,13 +117,8 @@ src/lupin_app/static/
 │   ├── notification-*-priority-*.mp3       # Priority-level notification sounds
 │   └── ...
 │
-├── images/
-│   └── play-16.png
-│
-└── lupin-mobile-test/                      # Flutter web build (24 MB, separate from main app)
-    ├── index.html
-    ├── main.dart.js
-    └── ...
+└── images/
+    └── play-16.png
 ```
 
 ### Co-location Pattern

@@ -29,8 +29,8 @@ STAMP_FILES      = (
     "src/cosa/repo/symindex/ts_kind_names.cjs",
 )
 EXTRACTOR_REL    = "src/scripts/ts_export_extract.mjs"
-# Folders that tsdoc_lint reads and this check does not: R&D notes and probes, and the built Flutter web bundle.
-EXCLUDED_PREFIXES = ( "src/rnd/", "src/cosa/rnd/", "src/lupin_app/static/lupin-mobile-test/" )
+# Folders that tsdoc_lint reads and this check does not: R&D notes and probes.
+EXCLUDED_PREFIXES = ( "src/rnd/", "src/cosa/rnd/" )
 CHUNK_SIZE       = tsdoc_lint.CHUNK_SIZE
 EXIT_TIGHT       = counts.EXIT_TIGHT
 EXIT_MISMATCH    = counts.EXIT_MISMATCH

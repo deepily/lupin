@@ -33,7 +33,7 @@ ALGORITHM     = "sha256"
 TOKEN_HEX_LEN = 12
 
 # Third-party bundles this repo neither authors nor versions.
-EXCLUDED_DIRS = frozenset( { "vendor", "canvaskit", "lupin-mobile-test" } )
+EXCLUDED_DIRS = frozenset( { "vendor", "canvaskit" } )
 
 # Any quoted literal `/static/...?v=<value>` — an href/src attribute or a JS import(). The
 # value is deliberately NOT restricted to the token shape, so an old date token or a typo

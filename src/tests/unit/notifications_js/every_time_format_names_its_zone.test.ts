@@ -114,7 +114,7 @@ const STATIC = "src/lupin_app/static";
 /** Every tracked .js and .html file the web client serves, as repo-relative paths. */
 function trackedPageFiles(): string[] {
   const out = execFileSync( "git", [ "ls-files", "--", `${STATIC}/*.js`, `${STATIC}/*.html` ], { cwd: ROOT, encoding: "utf8" } );
-  return out.split( "\n" ).filter( f => f && !f.includes( "/lupin-mobile-test/" ) && !f.includes( "/dist/" ) && !f.endsWith( ".min.js" ) );
+  return out.split( "\n" ).filter( f => f && !f.includes( "/dist/" ) && !f.endsWith( ".min.js" ) );
 }
 
 test( "no tracked .js or .html page reads the browser zone", () => {
