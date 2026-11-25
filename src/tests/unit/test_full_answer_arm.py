@@ -282,3 +282,12 @@ def test_a_sample_and_a_seed_go_together( world, flags ):
 def test_the_model_flag_names_the_model_the_run_calls_in_place_of_the_ini_setting( world ):
     lines = run( world, "--model", "claude-sonnet-5-5" )
     assert any( one.startswith( "model claude-sonnet-5-5," ) for one in lines )
+
+
+def test_the_sample_file_is_on_disk_before_the_first_model_call_arrives( world ):
+    seen = []
+    def watching( prompt, options ):
+        seen.append( os.path.exists( os.path.join( world[ "work" ], arm.SAMPLE_NAME ) ) )
+        return model( prompt, options )
+    arm.main( [ "--archive", world[ "archive" ], "--records", world[ "records" ], "--work-dir", world[ "work" ], "--sample", "2", "--seed", "5" ], query_fn=watching, out=lambda line: None )
+    assert seen and all( seen ), "the ids and seed are written down before any call, so a crashed run still leaves them"
