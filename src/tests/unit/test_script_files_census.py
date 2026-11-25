@@ -17,7 +17,6 @@ NESTED            = ( "src/lupin-plugin-firefox/", )                    # a sepa
 UNINDEXED_REASONS = {
     "src/tests/"                                  : "test files: indexed on request by the tests spec, never in the main index",
     "src/rnd/"                                    : "R&D probes and assets: the rnd skip part",
-    "src/lupin_app/static/lupin-mobile-test/"     : "generated Flutter web build output, vendored",
     "src/lupin_mcp/reuse_needset/needset_strip.js": "a compiler script that strip.py runs as a program over stdin and stdout; nothing imports it, so it offers no function to reuse",
 }
 

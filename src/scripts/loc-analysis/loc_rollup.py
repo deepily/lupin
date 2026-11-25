@@ -24,7 +24,6 @@ OUT_DIR = os.path.join( REPO, "io", "git-delta-analysis" )
 # Paths that are generated, vendored, or data — never hand-authored.
 EXCLUDE_PREFIXES = (
     "src/ephemera/",
-    "src/lupin_app/static/lupin-mobile-test/",
     "io/",
     "node_modules/",
 )

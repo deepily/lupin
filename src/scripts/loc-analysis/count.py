@@ -62,7 +62,6 @@ def ext_of(path):
 # Exclusion buckets are checked in order; first match wins.
 EXCLUDE_RULES = [
     ("X1 Agent output (io/)",                    lambda p: p.startswith("io/")),
-    ("X2 Flutter web build output (vendored)",   lambda p: p.startswith("src/lupin_app/static/lupin-mobile-test/")),
     ("X3 Vendored third-party JS",               lambda p: "/static/js/vendor/" in p or p.endswith(".min.js") or p.endswith(".min.css")),
     ("X4 Lockfiles",                             lambda p: p in ("package-lock.json", "uv.lock")),
     ("X5 Generated API docs (OpenAPI spec + rendered md)", lambda p: p.startswith("src/docs/fastapi/api.")),

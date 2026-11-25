@@ -211,7 +211,6 @@
     "src/lupin_app/static/js/tts-audio-cache.js": 1,
     "src/lupin_app/static/js/websocket-diagnostic.js": 3,
     "src/lupin_app/static/js/ws-channel.js": 35,
-    "src/lupin_app/static/lupin-mobile-test/flutter_service_worker.js": 6,
     "src/rnd/v0.2.0/2026.08.24-epic-accordion-review-probes/probe-a.js": 8,
     "src/rnd/v0.2.0/2026.08.24-epic-accordion-review-probes/probe-degrade.js": 4,
     "src/rnd/v0.2.0/2026.08.24-epic-accordion-review-probes/probe-render.js": 6,
