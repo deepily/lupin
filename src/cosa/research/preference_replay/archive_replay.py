@@ -40,7 +40,7 @@ from cosa.repo.doc_lint import model_transport
 from cosa.utils.atomic_json import write_json_atomic
 from cosa.research.preference_replay.checkpoint_report import FIRST_NAME, checkpoint_name
 from cosa.research.preference_replay.extractor_replay import ExtractorReplay, asks_from_session, check_no_leakage, make_recorder
-from cosa.research.preference_replay.replay_loop import ENGINE_ARM, _score, replay, summarize
+from cosa.research.preference_replay.replay_loop import ENGINE_ARM, _score, always_yes_arm, replay, summarize
 from cosa.research.preference_replay.scratch_db import load_export, scratch_session
 from cosa.research.preference_replay.service_embeddings import CachedServiceEmbedder
 from cosa.rest.repair_attempt_tracker import cosine_similarity
@@ -295,7 +295,7 @@ def fixed_rules_arm( ask, visible_rows ):
         - returns { "answers": { header: pick } } for a multiple-choice ask, one entry per field that offers options
         - returns None for a card with no option to pick, and for any other type
     """
-    if ask[ "response_type" ] == "yes_no": return { "value": "yes" }
+    if ask[ "response_type" ] == "yes_no": return always_yes_arm( ask, visible_rows )
     if ask[ "response_type" ] != "multiple_choice": return None
     answers = { field[ "key" ]: _pick( field ) for field in fields_of( ask[ "response_options" ], None ) if field[ "options" ] }
     return { "answers": answers } if answers else None
