@@ -363,6 +363,25 @@ def _notification_dict( ask ):
     }
 
 
+def paired_wins( run, arm, baseline, strict=True ):
+    """
+    Count the asks only one arm got right, on the same asks.
+
+    Requires:
+        - run holds records for both arms, in the same ask order, each record holding meta.correct
+
+    Ensures:
+        - returns ( asks only arm got right, asks only baseline got right )
+        - with strict false a longer record list is cut to the shorter, as summarize has always done
+
+    Raises:
+        - ValueError if strict is true and the two record lists differ in length, because a pair would then be unmatched
+    """
+    pairs = list( zip( run[ "records" ][ arm ], run[ "records" ][ baseline ], strict=strict ) )
+    return ( sum( 1 for a, b in pairs if a[ "meta" ][ "correct" ] and not b[ "meta" ][ "correct" ] ),
+             sum( 1 for a, b in pairs if b[ "meta" ][ "correct" ] and not a[ "meta" ][ "correct" ] ) )
+
+
 def summarize( run, baseline_arm, operational_floor, arm=ENGINE_ARM ):
     """
     Compare the engine, or another arm, with one baseline, paired on the same asks.
@@ -385,8 +404,7 @@ def summarize( run, baseline_arm, operational_floor, arm=ENGINE_ARM ):
     engine   = run[ "records" ][ arm ]
     baseline = run[ "records" ][ baseline_arm ]
     n        = len( engine )
-    wins     = sum( 1 for e, b in zip( engine, baseline ) if e[ "meta" ][ "correct" ] and not b[ "meta" ][ "correct" ] )
-    losses   = sum( 1 for e, b in zip( engine, baseline ) if b[ "meta" ][ "correct" ] and not e[ "meta" ][ "correct" ] )
+    wins, losses = paired_wins( run, arm, baseline_arm, strict=False )
     engine_correct   = sum( 1 for r in engine if r[ "meta" ][ "correct" ] )
     baseline_correct = sum( 1 for r in baseline if r[ "meta" ][ "correct" ] )
     test     = mcnemar_exact( wins, losses )

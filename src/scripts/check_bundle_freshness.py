@@ -498,7 +498,7 @@ def check_harness_bundle( root, bundle, esbuild ):
     return result
 
 
-def current_sha( root ):
+def current_sha( root, short=True ):
     """
     The commit this tree is standing on, for the report header.
 
@@ -506,13 +506,14 @@ def current_sha( root ):
     it even when git is unavailable.
 
     Requires:
-        - root is the project root as a Path
+        - root is the project root as a Path or a path string; short is a bool
 
     Ensures:
-        - returns a short sha string, or "unknown" when git cannot answer
+        - returns the short sha, or the full 40-character sha when short is false
+        - returns "unknown" when git cannot answer
     """
     completed = subprocess.run(
-        [ "git", "rev-parse", "--short", "HEAD" ],
+        [ "git", "rev-parse" ] + ( [ "--short" ] if short else [] ) + [ "HEAD" ],
         cwd=root, capture_output=True, text=True, check=False
     )
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
