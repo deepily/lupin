@@ -5,6 +5,7 @@ A notify-route test built it and left it set, so test_context_baseline failed on
 run after that test. The src/conftest.py fixture is driven by hand.
 """
 import os
+import sys
 
 import cosa.agents.prediction_engine.context_baseline as cb
 
@@ -37,3 +38,16 @@ def test_a_baseline_left_set_by_a_test_is_cleared_before_the_next_one_and_after_
     except StopIteration:
         pass
     assert cb._BASELINE is None and cb._GATE is None
+
+
+def test_the_reset_never_imports_the_module_when_it_is_not_loaded( request, monkeypatch ):
+    name = "cosa.agents.prediction_engine.context_baseline"
+    monkeypatch.delitem( sys.modules, name )
+    body = _fixture_body( request )()
+    next( body )
+    assert name not in sys.modules
+    try:
+        next( body )
+    except StopIteration:
+        pass
+    assert name not in sys.modules
