@@ -52,7 +52,10 @@ class TestOrganicProxyDecisionRow( unittest.TestCase ):
              patch( "cosa.rest.db.repositories.proxy_decision_repository.ProxyDecisionRepository", return_value=repo ), \
              patch.object( o, "_persist_trust_feedback" ), \
              patch.object( o, "_emit_proxy_summary_notification" ), \
-             patch.object( o, "_notify", AsyncMock() ):
+             patch.object( o, "_notify", AsyncMock() ), \
+             patch( "cosa.agents.swe_team.orchestrator.neither_forecast_shadow_enabled", return_value=False ):
+            # The three-way shadow switch is pinned off: these rows assert metadata without its shadow
+            # fields, and must not follow whatever the live INI ships.
             get_db.return_value.__enter__.return_value = MagicMock()
             _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, t ) )
         return repo

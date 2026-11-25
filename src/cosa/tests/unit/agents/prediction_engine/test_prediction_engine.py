@@ -163,6 +163,7 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine per field multiple choice enabled" : True,
             "prediction engine lookup neither forecast enabled" : True,
             "prediction engine complete action scoring enabled" : True,
+            "prediction engine timeout defaults excluded enabled" : True,
                 "prediction engine lancedb table"                 : "tbl_x",
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
@@ -183,6 +184,7 @@ def test_init_with_config_mgr_reads_keys():
     assert eng.cbr_top_k == 9
     assert eng.similarity_threshold == 0.8
     assert eng.lancedb_table == "tbl_x"
+    assert eng.timeout_defaults_excluded_enabled is True
     assert eng._server_port == 1234
     assert eng.open_ended_cbr_threshold == 0.9
     assert eng.open_ended_match_threshold == 0.66

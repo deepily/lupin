@@ -157,7 +157,9 @@ def test_a_plain_yes_carries_no_outcome_label_with_the_switch_on():
 def test_a_neither_is_no_ruling_leaves_the_counters_alone_and_logs_a_re_frame_request( caplog ):
     orch, proxy = _orch( category="deployment" )
     proxy.reframe_blocked.return_value = False
-    with caplog.at_level( "INFO" ):
+    # Pin the three-way shadow switch off: this test asserts the metadata without its shadow fields,
+    # and must not follow whatever the live INI ships.
+    with caplog.at_level( "INFO" ), patch( "cosa.agents.swe_team.orchestrator.neither_forecast_shadow_enabled", return_value=False ):
         result, write = _ask( orch, _io( "neither [comment: ask it another way]" ), True )
     assert result is False
     proxy.trust_tracker.record_decision.assert_not_called()

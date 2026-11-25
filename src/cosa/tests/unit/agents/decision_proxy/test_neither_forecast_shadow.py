@@ -45,13 +45,14 @@ def test_three_way_agreement_leaves_forecast_agreement_alone():
 
 
 # --------------------------------------------------------------------------- the switch
-def test_the_switch_is_off_by_default_and_shipped_off_with_an_explainer():
+def test_the_switch_is_off_by_default_and_shipped_on_with_an_explainer():
+    # The code default stays off; the INI ships it on since Mr. Radio's go on 25 Nov 2026 (shadow only).
     assert proxy_config.DEFAULT_NEITHER_FORECAST_SHADOW is False
     key  = proxy_config.NEITHER_FORECAST_SHADOW_KEY
     assert key == "decision proxy neither forecast shadow enabled"
     ini  = [ l for l in open( f"{ROOT}/src/conf/lupin-app.ini" ) if l.startswith( key ) ]
     expl = [ l for l in open( f"{ROOT}/src/conf/lupin-app-splainer.ini" ) if l.startswith( key ) ]
-    assert len( ini ) == 1 and ini[ 0 ].split( "=" )[ 1 ].strip() == "false" and len( expl ) == 1
+    assert len( ini ) == 1 and ini[ 0 ].split( "=" )[ 1 ].strip() == "true" and len( expl ) == 1
 
 
 @pytest.mark.parametrize( "value", [ True, False ] )
