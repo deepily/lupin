@@ -17,7 +17,7 @@ pins:
   - lupin_mcp.daily_test_promotion.settle@6dba8aa66b
   - lupin_mcp.daily_test_promotion.decide@cba445859e
   - lupin_mcp.daily_test_promotion.conclude@08bf058178
-  - lupin_mcp.daily_test_promotion.run@7963fc3ba4
+  - lupin_mcp.daily_test_promotion.run@14967a3c2e
   - lupin_mcp.daily_test_promotion.main@f23110400d
   - lupin_mcp.daily_test_promotion.registry_owner@47fddd468a
 ---

@@ -3,6 +3,7 @@ capability: doc-lint-model-transport
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.repo.doc_lint.model_transport.record_calls@adaa91ee5d
+  - cosa.repo.doc_lint.model_transport.complete_sync@c14764cdab
   - cosa.repo.doc_lint.model_transport.ModelCallError@0f1f3577ec
   - cosa.repo.doc_lint.model_transport.ModelUnavailableError@1d6e243d03
   - cosa.repo.doc_lint.model_transport.ModelWaitCutShort@7161eda0f1
@@ -27,11 +28,10 @@ pins:
   - cosa.repo.doc_lint.model_transport.kill_tagged_processes@8bbd995ce6
 ---
 # Doc-lint model transport
-
 The one door the judge harness uses to reach a Claude model, through bounded Claude Code or through agy. It sits under [[doc-lint-claim-judge]] and the other judges.
 
 ## Calling
-- `complete` sends one prompt and returns the stripped text, never empty. Tools are disabled, so the model can only write text. An empty model id raises `ValueError`. `blocking_ask( model, call=None, **options )` builds `ask( system, user )`, which runs one `complete` call to the end. Call it only outside a running event loop. A Claude Code call carries a random tag in its environment. A call that times out, raises or ends in an error result has every process with that tag killed, so it leaves no child behind. `kill_tagged_processes( tag )` does the killing. It sends SIGKILL to each process of this user, other than the caller, that holds the tag. It skips any it cannot read and returns the sorted pids. `record_calls` collects the stage and seconds of each finished call in its block, and blocks nest. A failed call is not recorded. `new_suffix` returns a random tag suffix that occurs in none of the given texts, and `wrap` puts a body between tags named with it. `prompt_version` derives a name and ten hex digits from the prompt's text and code.
+- `complete` sends one prompt and returns the stripped text, never empty. Tools are disabled, so the model can only write text. An empty model id raises `ValueError`. `blocking_ask( model, call=None, **options )` builds `ask( system, user )`, which runs one `complete` call to the end. Call it only outside a running event loop. `complete_sync( model, system_prompt, user_prompt, **options )` is for synchronous code that may sit inside a running loop. It runs `complete` on a worker thread with a loop of its own and returns its text, raising whatever `complete` raises. A Claude Code call carries a random tag in its environment. A call that times out, raises or ends in an error result has every process with that tag killed, so it leaves no child behind. `kill_tagged_processes( tag )` does the killing. It sends SIGKILL to each process of this user, other than the caller, that holds the tag. It skips any it cannot read and returns the sorted pids. `record_calls` collects the stage and seconds of each finished call in its block, and blocks nest. A failed call is not recorded. `new_suffix` returns a random tag suffix that occurs in none of the given texts, and `wrap` puts a body between tags named with it. `prompt_version` derives a name and ten hex digits from the prompt's text and code.
 
 ## Choosing the path
 - `configure` picks the Claude Code binary and working directory for later calls. `cli_version` returns the first line of that binary's `--version`, or `None` for the SDK's own. `configure_agy` sends later calls through agy, pinned to the binary on disk, and returns the ledger binding. `configure_claude` returns to Claude Code and forgets the pin. `agy_usage_summary` returns a copy of the tokens agy reported, per model. `claude_usage_summary` does the same for Claude Code: calls, token counts and `cost_usd`, a notional list-price figure, not a charge.

@@ -2,7 +2,7 @@
 capability: rest-prediction-arm-forecast
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.rest.postgres_models.PredictionArmForecast@1e5007acc1
+  - cosa.rest.postgres_models.PredictionArmForecast@93545840d9
   - cosa.rest.db.repositories.arm_forecast_repository.displayed_arm_for@7f4ce09bae
   - cosa.rest.db.repositories.arm_forecast_repository.displayed_arm_hook@25f1481f23
   - cosa.rest.db.repositories.arm_forecast_repository.notifications_missing_displayed_sibling@d866f73abf
@@ -14,7 +14,7 @@ pins:
 One forecast per card and arm, kept beside the card's `prediction_log` row ([[rest-data-repos-proxy-predictions]]). The engine that makes the forecasts is in [[prediction-engine]].
 
 ## What it does
-- `PredictionArmForecast` is one row per `( notification_id, arm )`. `displayed` is true for the arm whose forecast the card showed.
+- `PredictionArmForecast` is one row per `( notification_id, arm )`. `displayed` is true for the arm whose forecast the card showed. `applicability` lists `{ principle_id, rule }` for each principle the applicability checks dropped for the card. It is written only with that switch on, so NULL means the checks did not run and an empty list means they dropped none.
 - `evidence_ids` means different things by arm. It holds principle ids for the principles forecast, and neighbour case ids for the case-based arm that showed the card.
 - A late forecast is derived from `forecast_ready_at`, never stored. Deleting the notification deletes its rows.
 - `displayed_arm_for( forecast_source )` names the arm a source stands for. It raises `KeyError` for an unregistered source, so a new source must be registered there.

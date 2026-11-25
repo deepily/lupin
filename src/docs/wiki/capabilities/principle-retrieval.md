@@ -32,7 +32,7 @@ Fetches the principles that apply to one ask and shapes them as a prompt block. 
 - The switch `principle learner applicability checks enabled` (off) adds two drops to `retrieve_principles( applicability={ card, card_stage } )`.
 - Rule `antecedent`: a row of the principle, of any relation, quotes an antecedent the card lacks. Rule `stage`: the rows name a stage and none is the card's.
 - Neither rule calls a model. The result gains `applicability`, a list of `{ principle_id, rule }`.
-- `principles_forecast` does not yet know the card's stage, so it passes none.
+- `principles_forecast` passes the card's text and the stage `card_stage_of( episode )` reads from the card ([[principle-applicability-and-caveats]]).
 - `embedding_text( statement, rationale )` is the statement, then the rationale on a new line (none when the rationale is empty). `encoder_version_of( model )` names an encoder as `<model>:<recipe>`. The extractor job stores rows through it, so storing and filtering agree. `notification_lookup( session, ids, columns, value_of )` builds both `session_lookup` and `feature_lookup`. It runs one query for all ids and gives `None` for a missing notification.
 - `reembed_principles` re-embeds an owner's principles that another encoder made. It flushes without committing, and a wrong vector count raises with nothing changed.
 - `load_owner_ledger` reads an owner's principles and evidence of every extractor version, because a ruling may name an older principle.

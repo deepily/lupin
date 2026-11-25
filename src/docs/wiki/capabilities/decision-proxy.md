@@ -2,7 +2,8 @@
 capability: decision-proxy
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.decision_writer.write_proxy_decision@db5c1f009f
+  - cosa.agents.decision_proxy.decision_writer.write_proxy_decision@a085b76711
+  - cosa.agents.decision_proxy.decision_writer.refuse_non_scratch_database_under_pytest@fbbb4d64ea
   - cosa.agents.decision_proxy.responder.DecisionResponder@2ea618d0c1
   - cosa.agents.decision_proxy.trust_tracker.TrustTracker@e6ea84b97f
   - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@03f04c7066
@@ -13,13 +14,12 @@ pins:
   - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy.gate@0ee4450d30
 ---
 # Decision proxy
-
 The decision proxy answers questions that ask for a response, on the user's behalf, once it has earned trust for that kind of question. This package holds the responder, the trust tracker and the circuit breaker. The classify, gate and decide logic comes from a domain profile; the shipped profile is `swe_team`, whose `EngineeringStrategy` also serves [[swe-team-orchestrator]]. The base classes are in [[proxy-agent-base]], and [[notification-proxy]] is the sibling that answers by script.
 
 ## What the responder does
 - `DecisionResponder` reacts to `notification_queue_update` events and ignores notifications that do not ask for a response. Its statistics print under the title `Decision Proxy Statistics`. It skips a review card, the principle learner's own question: no decision row, no answer, counted as `review_cards_skipped`.
 - Checks run in this order. A disabled proxy does nothing. A sender outside the allowlist is rejected, and an empty allowlist rejects everyone. A dry run sends a decline. With no strategy loaded it only counts the event.
-- Otherwise the strategy returns one of four actions. `shadow` logs. `suggest` stores the decision for ratification. `act` stores it and sends the answer when it has a value, unless the smart router defers it (see Smart router). `defer` stores it and sends nothing. A `defer` row keeps an empty decision value, so the proxy's own guess is never cited as precedent. A `shadow` row stores the forecast only when `decision proxy shadow forecast recording enabled` is true. The code default is false and the shipped INI is true. An unreadable config blanks only the forecast, never the row ([[decision-proxy-agreement]]). `write_proxy_decision` is the one writer of a `proxy_decisions` row, shared by `DecisionResponder` and the SWE orchestrator. A `shadow` result goes to `log_shadow`, with the caller's default reason and the decision value the caller chose, since the caller reads the forecast switch. Any other action goes to `log_decision` with the result's value and the caller's ratification flag. It cuts the question to 500 characters, passes `extra` (metadata, data origin, rule agreement) on unchanged, and commits only when `commit` is true. Database errors propagate; both callers catch them as non-fatal.
+- Otherwise the strategy returns one of four actions. `shadow` logs. `suggest` stores the decision for ratification. `act` stores it and sends the answer when it has a value, unless the smart router defers it (see Smart router). `defer` stores it and sends nothing. A `defer` row keeps an empty decision value, so the proxy's own guess is never cited as precedent. A `shadow` row stores the forecast only when `decision proxy shadow forecast recording enabled` is true. The code default is false and the shipped INI is true. An unreadable config blanks only the forecast, never the row ([[decision-proxy-agreement]]). `write_proxy_decision` is the one writer of a `proxy_decisions` row, shared by `DecisionResponder` and the SWE orchestrator. A `shadow` result goes to `log_shadow`, with the caller's default reason and the decision value the caller chose, since the caller reads the forecast switch. Any other action goes to `log_decision` with the result's value and the caller's ratification flag. It cuts the question to 500 characters, passes `extra` (metadata, data origin, rule agreement) on unchanged, and commits only when `commit` is true. Database errors propagate; both callers catch them as non-fatal. Before it writes, `refuse_non_scratch_database_under_pytest` checks the session. Under pytest it raises `RuntimeError`, naming the test, when the session's database name has no test word. The dev database is one such name. A faked session or an unnamed database passes, and outside pytest it does nothing.
 - `python -m cosa.agents.decision_proxy --profile swe_team` starts it only when `decision proxy enabled` is true. The shipped INI sets it false, so by default it prints that and exits. If the profile fails to load it also exits.
 
 ## The gate

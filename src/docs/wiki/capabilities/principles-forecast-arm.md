@@ -4,6 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.prediction_engine.episode_view.card_text@26b6fee76f
   - cosa.agents.prediction_engine.principles_forecast.CapGate@82e86aad1b
+  - cosa.agents.prediction_engine.principles_forecast.cap_gate@41fc33e91c
   - cosa.agents.prediction_engine.principles_forecast.check_baseline@d869a4ef78
   - cosa.agents.prediction_engine.principles_forecast.concurrency_cap@d37390c64c
   - cosa.agents.prediction_engine.principles_forecast.principles_forecast_enabled@6af619ae07
@@ -21,6 +22,7 @@ The baseline forecast job plus a block of applicable principles. The model and p
 - The baseline job, `ContextBaseline`, is passed in as `c0`. With `c0` None the arm reads blocked and writes nothing. `check_baseline` raises `TypeError` naming every missing or misshapen member of the contract.
 - `switch_enabled( key )` is True only when the INI key is true, and never raises. It reads through the shared `read_switch`. An unreadable setting prints one line and counts as off. `principles_forecast_enabled` reads the arm's own switch, off by default.
 - `read_cap( key )` returns a positive int. A missing, blank or non-positive value raises. `concurrency_cap` reads this arm's own cap, so it cannot take a slot from the baseline.
+- `cap_gate( key )` builds a `CapGate` from one INI setting. A missing or non-positive setting raises. The Opus twins and the context baseline build their gates through it.
 - `CapGate` counts calls in flight. `try_enter` refuses at once past the limit and never queues. `leave` gives the place back.
 - `episode_view.card_text( episode )` gives the title, the abstract and each field prompt, one per line. It is what principles are searched by.
 - `with_principles( system, user, block )` adds the block to the user prompt after the block's own `heading` (else the default heading) and changes nothing else. With no principles the prompt equals the baseline's.

@@ -6,7 +6,7 @@ pins:
   - cosa.research.preference_replay.archive_replay.fixture_ids@94a3549c48
   - cosa.research.preference_replay.archive_replay.evaluation_ids@de1a916142
   - cosa.research.preference_replay.archive_replay.extractor_settings@acf79b0826
-  - cosa.research.preference_replay.archive_replay.fixed_rules_arm@d04dfa7deb
+  - cosa.research.preference_replay.archive_replay.fixed_rules_arm@b0fcf681ab
   - cosa.research.preference_replay.archive_replay.scratch_topk@f0b62d5779
   - cosa.research.preference_replay.archive_replay.locked_sessions@a458fcfd00
   - cosa.research.preference_replay.archive_replay.ModelArms@c6a9cca37a
@@ -25,7 +25,7 @@ What the archive replay loads and which arms it runs ([[preference-replay-archiv
 - `fixture_ids( export_path )` names the development fixture's asks.
 - `evaluation_ids( asks, fixture, window_start )` lists yes/no and multiple-choice asks outside the fixture, asked at or after the window start, in replay order. Other asks still serve as cases and extractor inputs.
 - `extractor_settings()` reads the extractor's model id and timeout from the INI file, as the live job does. A missing key raises.
-- `fixed_rules_arm( ask, visible_rows )` forecasts yes for a yes/no ask. For a multiple-choice ask it picks, per field, the one recommended label, else the first. A multi-select field gets a one-item list.
+- `fixed_rules_arm( ask, visible_rows )` forecasts yes for a yes/no ask, through `always_yes_arm`. For a multiple-choice ask it picks, per field, the one recommended label, else the first. A multi-select field gets a one-item list.
 It returns None for a card with no option to pick, and for any other type.
 - `scratch_topk` is the live cosine search done in Python, because SQLite has no vector operator. It returns at most `limit` pairs of cosine times 100 and row, best first.
 - `locked_sessions( bind )` makes the session factory the arms' jobs use. It holds a lock for the whole block, so two threads never share the one connection.
