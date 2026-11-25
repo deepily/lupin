@@ -111,6 +111,22 @@ def read_cap( key ):
     return required_positive_int( key, ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
 
 
+def cap_gate( key ):
+    """
+    Make the cap gate of one arm from its INI setting.
+
+    Requires:
+        - the INI file carries the key
+
+    Ensures:
+        - returns a CapGate that lets in as many calls as the key says
+
+    Raises:
+        - the errors read_cap raises for a missing or non-positive setting
+    """
+    return CapGate( read_cap( key ) )
+
+
 def concurrency_cap():
     """
     Read how many principles forecasts may run at once.

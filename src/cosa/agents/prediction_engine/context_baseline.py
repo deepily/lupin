@@ -26,7 +26,7 @@ import threading
 import cosa.utils.util as cu
 from cosa.agents.prediction_engine import full_answer
 from cosa.agents.io_models.utils.json_object_recovery import recover_json_object
-from cosa.agents.prediction_engine.principles_forecast import CapGate, REASON_SWITCH, STATUS_NOT_RUN, read_cap, run_arm, switch_enabled
+from cosa.agents.prediction_engine.principles_forecast import REASON_SWITCH, STATUS_NOT_RUN, cap_gate, run_arm, switch_enabled
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
 from lupin_mcp.reuse_needset.draft import SharedLedger, ask_ledgered, make_ledger
@@ -163,7 +163,7 @@ def context_gate():
     Raises:
         - the errors read_cap raises for a missing or non-positive setting
     """
-    return CapGate( read_cap( CAP_KEY ) )
+    return cap_gate( CAP_KEY )
 
 
 def _field_lines( episode, with_options ):

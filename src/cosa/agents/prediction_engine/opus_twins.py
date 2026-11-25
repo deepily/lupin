@@ -12,7 +12,7 @@ Both twins wait on the baseline job, which has not landed. Without it they read 
 Each result goes to ``prediction_arm_forecast`` under its own arm name, never to ``prediction_log``.
 """
 
-from cosa.agents.prediction_engine.principles_forecast import CapGate, DEFAULT_K, VERSION_SUFFIX, read_cap, run_arm, switch_enabled
+from cosa.agents.prediction_engine.principles_forecast import DEFAULT_K, VERSION_SUFFIX, cap_gate, run_arm, switch_enabled
 from cosa.agents.shared.config_loader import required_model_id
 
 ARM_BASELINE_OPUS     = "C0-opus"
@@ -79,7 +79,7 @@ def baseline_gate():
     Raises:
         - the errors read_cap raises for a missing or non-positive setting
     """
-    return CapGate( read_cap( BASELINE_CAP_KEY ) )
+    return cap_gate( BASELINE_CAP_KEY )
 
 
 def principles_gate():
@@ -92,7 +92,7 @@ def principles_gate():
     Raises:
         - the errors read_cap raises for a missing or non-positive setting
     """
-    return CapGate( read_cap( PRINCIPLES_CAP_KEY ) )
+    return cap_gate( PRINCIPLES_CAP_KEY )
 
 
 async def _run_twin( arm, switch_key, version_suffix, use_principles, session_factory, notification_id, c0, embedder, encoder_version, extractor_version,

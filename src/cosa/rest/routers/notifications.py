@@ -22,6 +22,7 @@ from types import SimpleNamespace
 
 # Import dependencies and services
 from cosa.config.app_timezone import get_app_timezone, process_config_mgr
+from cosa.config.switch_reader import read_switch
 from cosa.utils.notification_utils import normalize_input_route, sender_session_suffix
 from ..notification_fifo_queue import NotificationFifoQueue, NOTIFICATION_PRIORITIES
 from ..websocket_manager import WebSocketManager
@@ -659,12 +660,11 @@ def _arm_forecast_ledger_enabled() -> bool:
         - returns True only when "prediction learner arm forecast ledger enabled" is true in the INI file
         - never raises, so a settings failure cannot stop the forecast row being written
     """
-    try:
+    def process_manager( env_var_name ):
         import lupin_app.main as main_module
-        return main_module.config_mgr.get( "prediction learner arm forecast ledger enabled", default=False, return_type="boolean" )
-    except Exception as config_error:
-        print( f"[PREDICTION] ⚠️ Arm forecast ledger switch unreadable, treated as off: {config_error}" )
-        return False
+        return main_module.config_mgr
+    return read_switch( process_manager, "prediction learner arm forecast ledger enabled", False,
+                        lambda config_error: f"[PREDICTION] ⚠️ Arm forecast ledger switch unreadable, treated as off: {config_error}" )
 
 
 def _persist_response_required_sync(
