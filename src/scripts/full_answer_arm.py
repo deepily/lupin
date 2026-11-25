@@ -20,6 +20,7 @@ import asyncio
 import collections
 import json
 import os
+import random
 import shutil
 import sys
 import uuid
@@ -43,6 +44,7 @@ OUT_NAME        = "full-answer-arm-per-ask.jsonl"
 COPY_NAME       = "archive-copy.sqlite"
 LEDGER_NAME     = "ledger.jsonl"
 REFUSALS_NAME   = "refusals.jsonl"
+SAMPLE_NAME     = "sample.json"
 
 
 def add_missing_columns( engine ):
@@ -128,6 +130,33 @@ class RefusalKeeper( context_baseline.ContextBaseline ):
         except full_answer.ReplyRefused as refusal:
             self.kept.append( { "title": episode[ "title" ], "reason": refusal.reason, "detail": str( refusal ), "reply": text } )
             raise
+
+
+def draw_sample( records, size, seed ):
+    """
+    Draw a fixed-seed random sample of cards, split by response type in the cohort's shares.
+
+    Requires:
+        - records are the cards of record, each with an id and a response_type; size is from 1 to the number of records; seed is an int
+
+    Ensures:
+        - each type gets its share of size by largest remainder, ties going to the type that sorts first, and the shares add to size
+        - returns { seed, size, counts, ids } with the ids in record order and counts the cards drawn per type
+        - the same records, size and seed always give the same ids
+
+    Raises:
+        - ValueError if size is not from 1 to the number of records
+    """
+    if not 1 <= size <= len( records ): raise ValueError( f"sample size {size} is not from 1 to {len( records )}" )
+    by_type = collections.defaultdict( list )
+    for record in records: by_type[ record[ "response_type" ] ].append( record[ "id" ] )
+    kinds   = sorted( by_type )
+    quota   = { kind: size * len( by_type[ kind ] ) / len( records ) for kind in kinds }
+    counts  = { kind: int( quota[ kind ] ) for kind in kinds }
+    for kind in sorted( kinds, key=lambda one: ( -( quota[ one ] - counts[ one ] ), one ) )[ :size - sum( counts.values() ) ]: counts[ kind ] += 1
+    rng     = random.Random( seed )
+    chosen  = { one for kind in kinds for one in rng.sample( by_type[ kind ], counts[ kind ] ) }
+    return { "seed": seed, "size": size, "counts": counts, "ids": [ record[ "id" ] for record in records if record[ "id" ] in chosen ] }
 
 
 def refused_ids( per_ask_path ):
@@ -272,10 +301,13 @@ def main( argv=None, query_fn=None, out=print ):
         - --limit N cuts the cards to the first N, for a probe in its own work folder
         - writes the per-ask file and the raw replies the parser refused (refusals.jsonl), prints the table; returns 0
         - --only-refused FILE runs only the cards that file left unanswered
+        - --sample N --seed S runs a fixed-seed random sample of the cards, split by type, and writes its ids and seed to sample.json before any call
+        - --model ID calls that model in place of the INI setting
         - the baseline is built with the full-answer reply forced on, so no INI switch changes
 
     Raises:
         - FileExistsError if the work folder holds a per-ask file already
+        - ValueError if only one of --sample and --seed is given, or the sample size is not from 1 to the card count
         - RuntimeError if the full-answer switch reads off, because the cards' option ids exist only with it on and nothing here edits the INI file
     """
     parser = argparse.ArgumentParser( description="Forecast the cards of record with the full-answer reply" )
@@ -285,21 +317,29 @@ def main( argv=None, query_fn=None, out=print ):
     parser.add_argument( "--workers", type=int, default=WORKERS )
     parser.add_argument( "--limit", type=int, default=None )
     parser.add_argument( "--only-refused", default=None, help="a per-ask file; re-run only its cards that got no answer" )
+    parser.add_argument( "--sample", type=int, default=None, help="draw this many cards at random, split by response type; needs --seed" )
+    parser.add_argument( "--seed", type=int, default=None, help="the seed of the random sample" )
+    parser.add_argument( "--model", default=None, help="the model id to call, in place of the INI setting" )
     args    = parser.parse_args( argv )
     if not full_answer.full_answer_enabled(): raise RuntimeError( f"{full_answer.SWITCH_KEY} reads off in this tree; the arm needs it on" )
     records = read_jsonl( args.records )[ :args.limit ]
+    if ( args.sample is None ) != ( args.seed is None ): raise ValueError( "--sample and --seed go together" )
     if args.only_refused is not None:
         wanted  = set( refused_ids( args.only_refused ) )
         records = [ record for record in records if record[ "id" ] in wanted ]
+    sample  = None if args.sample is None else draw_sample( records, args.sample, args.seed )
+    if sample is not None: records = [ record for record in records if record[ "id" ] in set( sample[ "ids" ] ) ]
     ids     = [ record[ "id" ] for record in records ]
     target  = os.path.join( args.work_dir, OUT_NAME )
     if os.path.exists( target ): raise FileExistsError( f"{target} exists; use a new work folder" )
     os.makedirs( args.work_dir, exist_ok=True )
+    if sample is not None:
+        with open( os.path.join( args.work_dir, SAMPLE_NAME ), "w", encoding="utf-8" ) as handle: json.dump( sample, handle )
     copy    = prepare_copy( args.archive, args.work_dir, ids )
     engine  = create_engine( f"sqlite:///{copy}", connect_args={ "check_same_thread": False }, poolclass=StaticPool )
     factory = locked_sessions( engine )
     ledger  = context_baseline.open_ledger( base_path=os.path.join( args.work_dir, LEDGER_NAME ), cli_path=model_transport.CLI_PATH )
-    c0      = RefusalKeeper( context_baseline.context_model(), context_baseline.context_timeout(), context_baseline.context_layers(), ledger, query_fn=query_fn, full=True )
+    c0      = RefusalKeeper( context_baseline.context_model() if args.model is None else args.model, context_baseline.context_timeout(), context_baseline.context_layers(), ledger, query_fn=query_fn, full=True )
     counts  = asyncio.run( forecast_all( factory, c0, ids, args.workers, progress=lambda done, total: out( f"[full-answer-arm] {done}/{total}" ) if progress_due( done, total ) else None ) )
     rows    = score_rows( factory, records )
     with open( target, "w", encoding="utf-8" ) as handle:
