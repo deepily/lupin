@@ -11,7 +11,7 @@ pins:
   - cosa.agents.prediction_engine.context_baseline.build_user_prompt@68b87c6e05
   - cosa.agents.prediction_engine.context_baseline.context_display_enabled@0649358da6
   - cosa.agents.prediction_engine.context_baseline.context_forecast_enabled@bd504c1f06
-  - cosa.agents.prediction_engine.context_baseline.context_gate@8c76035e8c
+  - cosa.agents.prediction_engine.context_baseline.context_gate@046a550ef0
   - cosa.agents.prediction_engine.context_baseline.context_layers@3ffe0d8638
   - cosa.agents.prediction_engine.context_baseline.context_model@688819adda
   - cosa.agents.prediction_engine.context_baseline.context_timeout@2bc4632002

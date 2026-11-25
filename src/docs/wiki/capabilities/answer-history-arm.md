@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.prediction_engine.answer_history_forecast.answer_history_enabled@9bc9af68c9
   - cosa.agents.prediction_engine.answer_history_forecast.approx_tokens@9a2d98df73
-  - cosa.agents.prediction_engine.answer_history_forecast.eligible_cases@291f580eee
+  - cosa.agents.prediction_engine.answer_history_forecast.eligible_cases@eb2fef1f79
   - cosa.agents.prediction_engine.answer_history_forecast.history_code_hash@fb301e9b84
   - cosa.agents.prediction_engine.answer_history_forecast.history_provider@93f31356b2
   - cosa.agents.prediction_engine.answer_history_forecast.render_answer@e6d6aa3853

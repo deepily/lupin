@@ -3,7 +3,7 @@ capability: preference-replay-archive-freeze
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.research.preference_replay.archive_replay.tree_state@afa6989ed8
-  - cosa.research.preference_replay.archive_replay.current_freeze@2e431f9161
+  - cosa.research.preference_replay.archive_replay.current_freeze@bebc3294ed
   - cosa.research.preference_replay.archive_replay.check_freeze@07bb6ab27a
   - cosa.research.preference_replay.archive_replay.FreezeMismatch@71f89f82e8
   - cosa.research.preference_replay.archive_replay.freeze_limits@cd5812bf65

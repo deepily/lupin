@@ -6,7 +6,7 @@ pins:
   - cosa.agents.prediction_engine.context_hint.read_payload@76376fbf63
   - cosa.agents.prediction_engine.context_hint.ready_payload@d8b37901fb
   - cosa.agents.prediction_engine.context_hint.run_and_publish@f96a3eebaa
-  - cosa.agents.prediction_engine.context_hint.settle_unfinished@33bd60ad72
+  - cosa.agents.prediction_engine.context_hint.settle_unfinished@910b5c07e7
   - cosa.agents.prediction_engine.context_hint.should_forecast@40bde81afe
 ---
 # Prediction context hint

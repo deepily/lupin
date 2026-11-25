@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.research.preference_replay.archive_replay.WorkFolder@6a5fba0068
   - cosa.research.preference_replay.archive_replay.load_state@2204be7068
-  - cosa.research.preference_replay.archive_replay.save_state@7af7f8bb02
+  - cosa.research.preference_replay.archive_replay.save_state@a290779123
   - cosa.research.preference_replay.archive_replay.append_lines@0cd8c0850a
   - cosa.research.preference_replay.archive_replay.extracted_in_db@7f0d2c8685
   - cosa.research.preference_replay.archive_replay.PeriodicFlush@5f087a051d
@@ -12,9 +12,9 @@ pins:
   - cosa.research.preference_replay.archive_replay.checkpoint_line@2724b71a61
   - cosa.research.preference_replay.archive_replay.principle_progress@bf3abb5db9
   - cosa.research.preference_replay.archive_replay.warning_text@e9a80093eb
-  - cosa.research.preference_replay.archive_replay.run_first_stage@c1a79fba47
+  - cosa.research.preference_replay.archive_replay.run_first_stage@19463edfac
   - cosa.research.preference_replay.archive_replay.run_twin_stage@91f0716db0
-  - cosa.research.preference_replay.archive_replay.main@347f00d711
+  - cosa.research.preference_replay.archive_replay.main@8f53b08fa5
 ---
 # Preference replay: archive stages and checkpoints
 

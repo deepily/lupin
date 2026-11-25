@@ -3,6 +3,7 @@ capability: prediction-history-recovery
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - cosa.agents.prediction_engine.ask_family.classify_asks@1bbd58d887
+  - cosa.agents.prediction_engine.history_derive.meaning_structure@05bb49ae54
   - cosa.agents.prediction_engine.ask_family.normalise_text@bb1ed05536
   - cosa.agents.prediction_engine.history_source_count.count_source_population@14269787bd
   - cosa.agents.prediction_engine.history_source_count.format_source_count@12b3d99c7a
@@ -25,13 +26,12 @@ pins:
   - cosa.agents.prediction_engine.history_funnel.yield_funnel@30182ba22d
 ---
 # Prediction history recovery
-
 Turns old notification rows into examples the prediction engine can learn from, in five steps plus a proof that one family imports ([[prediction-engine]]). It touches no database. No recovered example joins the frozen cohort.
 
 ## Steps
 - Count: `count_source_population( text )` reads the baseline inventory's psql tables (`parse_psql_tables`) and gives the first funnel stages with the reason each drops rows. `format_source_count` prints them.
 - Family: `classify_asks( asks )` gives each ask a family (response type, category, normalised title), a retry group, a project and `is_retry_copy`. `normalise_text` reduces a title or message to the words that name the kind of ask. The replay report, the family back-off and this track all call it.
-- Derive: `asks_of` shapes rows as ask dicts. `derive_answer` decodes the stored answer. `attribution_tier` names the actor: none, timeout_default, recipient, other_account or unknown_actor. `derive_dataset` makes one example per original row and counts the unreadable. `write_dataset` writes originals and derived set with manifests and checks both.
+- Derive: `asks_of` shapes rows as ask dicts. `derive_answer` decodes the stored answer. `attribution_tier` names the actor: none, timeout_default, recipient, other_account or unknown_actor. `derive_dataset` makes one example per original row and counts the unreadable. `write_dataset` writes originals and derived set with manifests and checks both. `meaning_structure( native_answer, conditions, field_key )` reads one field's option ids, write-in text and referred ids from a stored meaning record. It keeps the conditions that change the whole answer or one of this field's ids, each still linked to its option. It returns None when the record has no entry for the field.
 - Rebuild: `rebuild_context( target, notifications, session_window )` joins an ask to earlier notifications, strongest link first. The order is the one it answers, thread, job, full sender, then a time-bounded session match. Nothing later than the ask is read. `reconstructable_stage` counts the rebuilt.
 - Use: `assign_use` gives one example train_or_test, prompt_only, sensitivity or vocabulary_only, the first rule that applies. `assign_uses` does all and counts by use and reason.
 - Recover: `recover_example` reads an answer by response family. `offered_fields` reads the fields an ask offered. `recover_by_family` groups by response type then family.

@@ -9,7 +9,7 @@ pins:
   - cosa.agents.principle_learner.principles_call.get_gate@9f0330b1d0
   - cosa.agents.principle_learner.principles_call.provider_embedder@e5c8830bae
   - cosa.agents.principle_learner.principles_call.reset_gate@fb9c9c7b44
-  - cosa.agents.principle_learner.principles_call.retrieval_versions@d0633d4fdd
+  - cosa.agents.principle_learner.principles_call.retrieval_versions@d93e84d931
   - cosa.agents.principle_learner.principles_call.run_principles_forecast@e4aecd0a25
   - cosa.agents.principle_learner.principles_call.run_quietly@c7ef7588fe
 ---
