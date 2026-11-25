@@ -14,7 +14,6 @@ import json
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 from cosa.agents.agentic_job_base import AgenticJobBase
@@ -340,11 +339,10 @@ class PrincipleExtractorJob( AgenticJobBase ):
             - called while the job's loop is running, so the call runs on its own thread and loop
 
         Ensures:
-            - returns the reply text of model_transport.complete, with this job's query_fn and the given timeout
+            - returns the reply text of model_transport.complete_sync, with this job's query_fn and the given timeout
             - raises whatever model_transport.complete raises
         """
-        with ThreadPoolExecutor( max_workers=1 ) as pool:
-            return pool.submit( asyncio.run, model_transport.complete( model, system, user, query_fn=self.query_fn, timeout_seconds=timeout ) ).result()
+        return model_transport.complete_sync( model, system, user, query_fn=self.query_fn, timeout_seconds=timeout )
 
     def _summary( self, status, report=None, influenced=None, answer_read=None ):
         """

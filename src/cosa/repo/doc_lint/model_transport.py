@@ -13,6 +13,7 @@ prompt version, so a row made under another profile can never be replayed.
 
 import asyncio
 import atexit
+import concurrent.futures
 import contextlib
 import contextvars
 import datetime
@@ -918,3 +919,21 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
     if not text: raise ModelCallError( f"model call to {model} returned no text" )
     if scope is not None: scope.calls.append( ( stage, time.monotonic() - started ) )
     return text
+
+
+def complete_sync( model, system_prompt, user_prompt, **options ):
+    """
+    Send one prompt to a model from synchronous code that may sit inside a running event loop.
+
+    Requires:
+        - the arguments are those of complete: options holds query_fn, timeout_seconds or thinking, all optional
+
+    Ensures:
+        - the call runs on a worker thread with an event loop of its own, so it never meets the caller's loop
+        - returns the reply text of complete, never empty
+
+    Raises:
+        - whatever complete raises
+    """
+    with concurrent.futures.ThreadPoolExecutor( max_workers=1 ) as pool:
+        return pool.submit( lambda: asyncio.run( complete( model, system_prompt, user_prompt, **options ) ) ).result()

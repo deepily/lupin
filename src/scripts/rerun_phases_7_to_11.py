@@ -16,8 +16,6 @@ Run from a seat tree, pinning all three:
 import argparse
 import collections
 import functools
-import hashlib
-import json
 import os
 import pickle
 import subprocess
@@ -26,6 +24,7 @@ import sys
 sys.path.insert( 0, os.path.dirname( os.path.abspath( __file__ ) ) )
 
 import zero_model_proof as zmp
+from cosa.repo.labelling.rick_page import ids_sha256 as sha256_of_ids
 from cosa.research.preference_replay import replay_loop
 from cosa.research.preference_replay.before_after_columns import _scores
 from cosa.research.preference_replay.retune import TUNE_FRACTION, split_windows
@@ -46,11 +45,6 @@ SWITCHES          = ( "prediction engine full answer reply enabled", "prediction
                       "prediction engine complete action scoring enabled", "prediction engine lookup neither forecast enabled",
                       "prediction engine failure visibility enabled", "prediction engine calibration enabled",
                       "prediction engine three way enabled", "decision proxy neither means reframe enabled" )
-
-
-def sha256_of_ids( ids ):
-    """Return the sha256 of ids sorted and joined by a newline, with no trailing newline."""
-    return hashlib.sha256( "\n".join( sorted( ids ) ).encode( "utf-8" ) ).hexdigest()
 
 
 def columns_of( record_ids, second_ids, old_ids, replayable_ids ):

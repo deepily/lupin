@@ -28,7 +28,7 @@ from cosa.agents.prediction_engine import principles_forecast
 from cosa.agents.prediction_engine.episode_view import card_text, fields_of
 from cosa.agents.prediction_engine.exposure import observation_view
 from cosa.agents.prediction_engine.history_context_rebuild import answer_known_at_ask
-from cosa.agents.prediction_engine.three_way_stance import neighbours_of
+from cosa.agents.prediction_engine.three_way_stance import is_owners_human_answer, neighbours_of
 from cosa.repo.doc_lint import model_transport
 from cosa.rest.postgres_models import AnswerMeaning, Notification
 from cosa.utils.iso_timestamp import aware_moment
@@ -174,9 +174,7 @@ def eligible_cases( session, cases, owner_id, asked_at ):
         - the answer's own time is checked here by history_context_rebuild.answer_known_at_ask, the one as-of rule, as well as by the store
         - the cases keep their order
     """
-    kept = [ case for case in cases
-             if case[ "answer_source" ] == "human" and case[ "owner_user_id" ] == owner_id and ( case[ "ratification_state" ] or "" ).lower() != "rejected"
-             and answer_known_at_ask( case[ "responded_at" ], asked_at ) ]
+    kept = [ case for case in cases if is_owners_human_answer( case, owner_id ) and answer_known_at_ask( case[ "responded_at" ], asked_at ) ]
     if not kept: return []
     known = { str( row[ 0 ] ) for row in session.query( AnswerMeaning.notification_id )
               .filter( AnswerMeaning.notification_id.in_( [ uuid.UUID( case[ "id" ] ) for case in kept ] ), AnswerMeaning.annotated_at <= asked_at ).distinct() }

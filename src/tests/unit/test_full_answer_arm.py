@@ -229,3 +229,65 @@ def test_only_refused_runs_just_those_cards_in_a_new_folder( world ):
     rows  = [ json.loads( one ) for one in open( os.path.join( again[ "work" ], arm.OUT_NAME ) ) ]
     assert [ row[ "id" ] for row in rows ] == [ str( world[ "cards" ][ 3 ][ "id" ] ) ], "the three answered cards are not asked again"
     assert lines[ 0 ] == "[full-answer-arm] 1/1" and any( "refused replies kept: 1" in one for one in lines )
+
+
+def cards_of( yes_no, choice ):
+    """Return synthetic cards, y0.. for yes/no and m0.. for multiple choice, interleaved."""
+    rows = [ { "id": f"y{i}", "response_type": "yes_no" } for i in range( yes_no ) ] + [ { "id": f"m{i}", "response_type": "multiple_choice" } for i in range( choice ) ]
+    return sorted( rows, key=lambda row: row[ "id" ][ 1: ] + row[ "id" ][ 0 ] )
+
+
+def test_the_sample_splits_the_size_by_type_in_the_cohorts_shares_by_largest_remainder():
+    # The cohort of record: 769 yes/no and 1,157 multiple choice. 500 x 769 / 1,926 is 199.64 and 500 x 1,157 / 1,926 is 300.36.
+    drawn = arm.draw_sample( cards_of( 769, 1157 ), 500, 20261124 )
+    assert drawn[ "counts" ] == { "multiple_choice": 300, "yes_no": 200 } and len( drawn[ "ids" ] ) == 500 == len( set( drawn[ "ids" ] ) )
+    assert sum( 1 for one in drawn[ "ids" ] if one.startswith( "y" ) ) == 200
+
+
+def test_the_sample_is_the_same_for_the_same_seed_and_differs_for_another_and_keeps_record_order():
+    rows = cards_of( 10, 20 )
+    once = arm.draw_sample( rows, 6, 7 )
+    assert once == arm.draw_sample( rows, 6, 7 ) and once[ "ids" ] != arm.draw_sample( rows, 6, 8 )[ "ids" ]
+    assert once[ "ids" ] == [ row[ "id" ] for row in rows if row[ "id" ] in set( once[ "ids" ] ) ], "ids come back in record order"
+    assert once[ "ids" ] == [ "m10", "m13", "m19", "y1", "m2", "y8" ] and once[ "counts" ] == { "multiple_choice": 4, "yes_no": 2 }, "a literal pins the draw for seed 7"
+
+
+def test_a_tie_between_two_types_goes_to_the_type_that_sorts_first():
+    drawn = arm.draw_sample( cards_of( 3, 1 ), 2, 1 )
+    assert drawn[ "counts" ] == { "multiple_choice": 1, "yes_no": 1 }, "1.5 and 0.5 leave a remainder of 0.5 each; the spare place goes to multiple_choice"
+
+
+@pytest.mark.parametrize( "size", [ 0, -1, 5 ] )
+def test_a_sample_size_outside_the_cards_is_refused( size ):
+    with pytest.raises( ValueError, match="sample size" ): arm.draw_sample( cards_of( 2, 2 ), size, 1 )
+
+
+def test_a_sample_run_writes_its_ids_and_seed_first_and_forecasts_only_those_cards( world ):
+    lines = run( world, "--sample", "2", "--seed", "5" )
+    saved = json.load( open( os.path.join( world[ "work" ], arm.SAMPLE_NAME ) ) )
+    rows  = [ json.loads( one ) for one in open( os.path.join( world[ "work" ], arm.OUT_NAME ) ) ]
+    assert saved[ "seed" ] == 5 and saved[ "size" ] == 2 and saved[ "counts" ] == { "multiple_choice": 1, "yes_no": 1 }
+    assert [ row[ "id" ] for row in rows ] == saved[ "ids" ] and lines[ 0 ] == "[full-answer-arm] 2/2"
+    again = { **world, "work": world[ "work" ] + "-again" }
+    run( again, "--sample", "2", "--seed", "5" )
+    assert json.load( open( os.path.join( again[ "work" ], arm.SAMPLE_NAME ) ) ) == saved, "the same seed gives the same ids"
+
+
+@pytest.mark.parametrize( "flags", [ [ "--sample", "2" ], [ "--seed", "5" ] ] )
+def test_a_sample_and_a_seed_go_together( world, flags ):
+    with pytest.raises( ValueError, match="go together" ): run( world, *flags )
+    assert not os.path.exists( world[ "work" ] )
+
+
+def test_the_model_flag_names_the_model_the_run_calls_in_place_of_the_ini_setting( world ):
+    lines = run( world, "--model", "claude-sonnet-5-5" )
+    assert any( one.startswith( "model claude-sonnet-5-5," ) for one in lines )
+
+
+def test_the_sample_file_is_on_disk_before_the_first_model_call_arrives( world ):
+    seen = []
+    def watching( prompt, options ):
+        seen.append( os.path.exists( os.path.join( world[ "work" ], arm.SAMPLE_NAME ) ) )
+        return model( prompt, options )
+    arm.main( [ "--archive", world[ "archive" ], "--records", world[ "records" ], "--work-dir", world[ "work" ], "--sample", "2", "--seed", "5" ], query_fn=watching, out=lambda line: None )
+    assert seen and all( seen ), "the ids and seed are written down before any call, so a crashed run still leaves them"

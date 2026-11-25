@@ -132,6 +132,23 @@ def _question_vector( decision, ask_id: str, vectors: Optional[Dict[str, List[fl
     return list( decision.question_embedding ) if decision is not None and decision.question_embedding is not None else None
 
 
+def notification_ask_fields( notification: Any ) -> Dict[str, Any]:
+    """
+    Project the ask fields that a notification row gives the replay, whatever the cohort.
+
+    Requires:
+        - notification has title, message, sender_id, recipient_id, response_options and response_value, where response_value is a dict or None
+
+    Ensures:
+        - returns title, message, sender_id, recipient_id (as text), response_options and timeout_default
+        - timeout_default is True when history_derive.attribution_tier says the stored answer is the timeout default
+        - it names no answer source: each caller keeps its own rule for that, the recipient tier or the source ui
+    """
+    return { "title": notification.title, "message": notification.message, "sender_id": notification.sender_id, "recipient_id": str( notification.recipient_id ),
+             "response_options": notification.response_options,
+             "timeout_default": attribution_tier( { "recipient_id": str( notification.recipient_id ), "response_value": notification.response_value } ) == "timeout_default" }
+
+
 def cohort_asks( session, response_type: str, window: Optional[str] = None, *, vectors: Optional[Dict[str, List[float]]] ) -> List[Dict[str, Any]]:
     """
     Build the replay's ask dicts for one cohort.
@@ -179,16 +196,11 @@ def cohort_asks( session, response_type: str, window: Optional[str] = None, *, v
             "created_at"         : decision.created_at if decision is not None else row.predicted_at.isoformat(),
             "owner_user_id"      : decision.owner_user_id if decision is not None else str( notification.recipient_id ),
             "answer_source"      : decision.answer_source if decision is not None else answer_source_of( notification.response_value, notification.response_options ),
-            "timeout_default"    : attribution_tier( { "recipient_id": str( notification.recipient_id ), "response_value": notification.response_value } ) == "timeout_default",
             "responded_at"       : row.responded_at,
-            "title"              : notification.title,
-            "message"            : notification.message,
-            "sender_id"          : notification.sender_id,
             "asked_at"           : row.asked_at if row.asked_at is not None else notification.created_at,
-            "recipient_id"       : str( notification.recipient_id ),
-            "response_options"   : notification.response_options,
             "actual_value"       : row.actual_value,
             "logged_value"       : row.predicted_value,
             "logged_match"       : row.accuracy_match,
+            **notification_ask_fields( notification ),
         } )
     return asks
