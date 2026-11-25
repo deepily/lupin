@@ -15,6 +15,7 @@ Run from a seat tree, pinning all three:
 
 import argparse
 import collections
+import functools
 import hashlib
 import json
 import os
@@ -26,15 +27,18 @@ sys.path.insert( 0, os.path.dirname( os.path.abspath( __file__ ) ) )
 
 import zero_model_proof as zmp
 from cosa.research.preference_replay import replay_loop
-from cosa.research.preference_replay.retune import TUNE_FRACTION
+from cosa.research.preference_replay.before_after_columns import _scores
+from cosa.research.preference_replay.retune import TUNE_FRACTION, split_windows
 from cosa.research.preference_replay.retune_run import read_id_list
 from cosa.utils.atomic_json import write_json_atomic
 from cosa.utils.file_hash import file_sha256
+from scripts.check_bundle_freshness import current_sha
 
 # The names this script's callers and tests have always used, now the shared helpers themselves.
 sha256_of   = file_sha256
 read_ids    = read_id_list
 paired_wins = replay_loop.paired_wins
+code_sha    = functools.partial( current_sha, short=False )
 
 FROZEN            = { "threshold": 0.5, "top_k": 10, "metric": "cosine" }
 OLD_CONTROL       = { "final_all": 177, "final_yes_no": 163, "final_mc": 14, "final_mc_asks": 176, "final_yes_no_asks": 215, "tune": 911, "final": 391 }
@@ -74,7 +78,7 @@ def split_by_time( ordered_ids, fraction=TUNE_FRACTION ):
     Ensures:
         - tune is the first floor( fraction x count ) ids, final is the rest; the two share no id
     """
-    cut = int( len( ordered_ids ) * fraction )
+    cut, _ = split_windows( len( ordered_ids ), fraction )
     return ordered_ids[ :cut ], ordered_ids[ cut: ]
 
 
@@ -120,15 +124,12 @@ def window_counts( records ):
     Ensures:
         - returns tune and final sizes, and for the final window the asks and correct counts of all, yes/no and multiple choice
     """
-    from cosa.research.preference_replay.retune import split_windows
     tune, final = split_windows( len( records ) )
     tail        = records[ tune: ]
-    out         = { "tune": tune, "final": final, "final_all": sum( 1 for r in tail if r[ "meta" ][ "correct" ] ) }
-    for name, kind in ( ( "yes_no", "yes_no" ), ( "mc", "multiple_choice" ) ):
-        of_kind = [ r for r in tail if r[ "meta" ][ "response_type" ] == kind ]
-        out[ f"final_{name}_asks" ] = len( of_kind )
-        out[ f"final_{name}" ]      = sum( 1 for r in of_kind if r[ "meta" ][ "correct" ] )
-    return out
+    scores      = _scores( tail )
+    return { "tune": tune, "final": final, "final_all": sum( 1 for r in tail if r[ "meta" ][ "correct" ] ),
+             "final_yes_no_asks": scores[ "yes_no" ][ "asks" ], "final_yes_no": scores[ "yes_no" ][ "correct" ],
+             "final_mc_asks": scores[ "multiple_choice" ][ "asks" ], "final_mc": scores[ "multiple_choice" ][ "correct" ] }
 
 
 def control_mismatches( counts ):
@@ -189,12 +190,6 @@ def read_switches( ini_path ):
                 key, value = line.split( "=", 1 )
                 found[ key.strip() ] = value.strip()
     return { name: found.get( name ) for name in SWITCHES }
-
-
-def code_sha( root ):
-    """Return the tree's HEAD commit, or the word unknown when git cannot say."""
-    done = subprocess.run( [ "git", "-C", root, "rev-parse", "HEAD" ], capture_output=True, text=True )
-    return done.stdout.strip() if done.returncode == 0 else "unknown"
 
 
 OLD_DIFFERENCES = {
