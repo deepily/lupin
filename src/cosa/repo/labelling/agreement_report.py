@@ -48,18 +48,19 @@ def kappa_or_none( pairs ):
     return { "n": n, "kappa": kappa, "reason": None, "raw_agreement": agreed, "meets_bar": kappa >= KAPPA_BAR }
 
 
-def relations_by_item( lines, source, reader, only=None ):
+def relations_by_item( lines, source, reader, batch_suffix=None ):
     """
     Pick one labeller's latest relation for each item.
 
     Requires:
-        - lines is gold_store.read_gold's list; only is None or a set of item ids
+        - lines is gold_store.read_gold's list; batch_suffix is None or text
 
     Ensures:
-        - returns { item_id: relation } from the latest line of that source and reader, restricted to only when given
+        - returns { item_id: relation } from the latest line of that source and reader
+        - with a batch_suffix, only lines whose batch id ends with it are considered before the latest is taken, so a later line from another batch never overrides
     """
-    return { l[ "item_id" ]: l[ "relation" ] for l in gs.latest_lines( lines )
-             if l[ "source" ] == source and l[ "reader" ] == reader and ( only is None or l[ "item_id" ] in only ) }
+    kept = [ l for l in lines if batch_suffix is None or l[ "batch_id" ].endswith( batch_suffix ) ]
+    return { l[ "item_id" ]: l[ "relation" ] for l in gs.latest_lines( kept ) if l[ "source" ] == source and l[ "reader" ] == reader }
 
 
 def rick_blind_share( lines ):
@@ -70,11 +71,10 @@ def rick_blind_share( lines ):
         - lines is gold_store.read_gold's list
 
     Ensures:
-        - returns { item_id: relation } from his latest human line of each item whose batch id ends with the blind-share section name
+        - returns { item_id: relation } from his latest line inside the blind-share batches, whatever he said about the item in a later batch
         - a line from his reader-disagreement section is left out, since it is not a blind label
     """
-    blind = { l[ "item_id" ] for l in lines if l[ "source" ] == gs.SOURCE_HUMAN and l[ "reader" ] == rx.READER and l[ "batch_id" ].endswith( BLIND_SUFFIX ) }
-    return relations_by_item( lines, gs.SOURCE_HUMAN, rx.READER, blind )
+    return relations_by_item( lines, gs.SOURCE_HUMAN, rx.READER, BLIND_SUFFIX )
 
 
 def compare( first, second, types ):

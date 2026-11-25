@@ -21,9 +21,9 @@ def line( item, relation, source="ai_reader", reader="reader-1", batch="b", ts="
              "source": source, "reader": reader, "batch_id": batch, "ts": ts }
 
 
-def rick( item, relation, batch=BLIND ):
+def rick( item, relation, batch=BLIND, ts="2026-11-24T10:00:00+00:00" ):
     """Return one of Rick's lines."""
-    return line( item, relation, source="human", reader="rick", batch=batch )
+    return line( item, relation, source="human", reader="rick", batch=batch, ts=ts )
 
 
 def test_a_known_pair_list_gives_the_worked_kappa_and_the_bar_reading():
@@ -49,7 +49,7 @@ def test_an_error_other_than_undefined_kappa_is_not_swallowed():
 def test_the_latest_line_of_a_labeller_counts_and_other_labellers_are_left_out():
     lines = [ line( "a", "support" ), line( "a", "dissent" ), line( "b", "agrees" ), line( "a", "answers", reader="reader-2" ), rick( "a", "support" ) ]
     assert ar.relations_by_item( lines, gs.SOURCE_READER, "reader-1" ) == { "a": "dissent", "b": "agrees" }
-    assert ar.relations_by_item( lines, gs.SOURCE_READER, "reader-1", only={ "b" } ) == { "b": "agrees" }
+    assert ar.relations_by_item( lines, gs.SOURCE_READER, "reader-1", batch_suffix="-x" ) == {}
     assert ar.relations_by_item( lines, gs.SOURCE_READER, "reader-2" ) == { "a": "answers" }
 
 
@@ -57,6 +57,14 @@ def test_only_rick_blind_share_lines_count_and_his_dispute_section_lines_do_not(
     lines = [ rick( "a", "support" ), rick( "b", "dissent", batch=DISPUTES ), rick( "c", "agrees" ), rick( "c", "expands_recommendation" ) ]
     assert ar.rick_blind_share( lines ) == { "a": "support", "c": "expands_recommendation" }
     assert BLIND.endswith( ar.BLIND_SUFFIX ) and not DISPUTES.endswith( ar.BLIND_SUFFIX ) and ar.BLIND_SUFFIX == "blind-share"
+
+
+def test_a_later_line_from_the_dispute_batch_never_overrides_the_blind_share_label():
+    lines = [ rick( "a", "support", ts="2026-11-24T10:00:00+00:00" ), rick( "a", "dissent", batch=DISPUTES, ts="2026-11-24T11:00:00+00:00" ),
+              rick( "b", "agrees", ts="2026-11-24T10:00:00+00:00" ), rick( "b", "expands_recommendation", ts="2026-11-24T12:00:00+00:00" ) ]
+    assert ar.rick_blind_share( lines ) == { "a": "support", "b": "expands_recommendation" }
+    both = lines + [ line( "a", "support", reader="reader-1" ), line( "a", "support", reader="reader-2" ) ]
+    assert ar.report( both, { "a": "yes_no" } )[ "rick_against" ][ "reader-1" ][ "all" ][ "raw_agreement" ] == 1.0
 
 
 def test_compare_pairs_only_shared_items_and_splits_by_type_with_untyped_items_in_all_only():
