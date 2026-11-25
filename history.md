@@ -8,6 +8,25 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.24 - Session d03f615f (Cheech 🌿, build manager; crew John, Maya, Clayton, Tiberius, Rio, Chloé, all released) | Gold labels: readers done, Rick's offline page with restore, agreement report; reuse-review pairs merged; a test-order leak fixed
+
+- Gold labels (row 05ea77a8): both AI readers labelled all 856 items and agree on 829 (kappa 0.957). Rick's offline page (015f20beb) holds his 115-item blind share plus 21 disputes. Tonight's P0 (ab5e18c1f, row 585f62b8) adds restore from export, a card-type label and a compact layout, with the page id unchanged. The agreement report against the 0.7 bar is 7dee74059. The next step waits on Rick's export.
+- Reuse review pairs (row c33f699e): all 27 findings ruled and merged, the JS lane in 3f3557466 and the Python lane in da56f7301. Four duplicate-check batches (73c44963, f0e2cc51, 6798e5da, 8682cacf) were ruled and closed.
+- Fixes: the P3 unit-file helper (8bd275d58). A test-order leak of context_baseline's cached baseline is fixed with a guarded autouse reset; the culprit was test_online_prediction_engine_disabled. Also one `_fail`, and final_records calling split_by_time (15fcbf515).
+- Rows: María owns her crew-rules patch, 62ad71be (Rick: "Maria handles Maria's patches"). Last Call is row 6d18054e.
+- Files: src/cosa/repo/labelling/{rick_page.py, rick-page-template.html, rick_export.py, agreement_report.py}, src/scripts/build_item_card_types.py, src/conftest.py, src/tests/helpers/unit_files_reaching.py, the experiment plan's section 8.
+
+## 2026.11.24 - Session 3169ca30 (Mr. Radio 🦉, build manager; crew Sam, Rachel, Krishna, Tiffany) | Full-answer arm, parser fix, Stop-hook cohort, v2 label freeze, model comparison, stranded mobile build deleted
+
+All merged on the working branch, not pushed; each had a reviewer's pass plus unit and census green.
+- Stop-hook yes/no cards: all 1,041 predate 40c5491f4. A cohort without them (3,519 cards) sits beside the old one, per Rick's "new cohort, keep old" (76b269815, row 244f6766).
+- Full-answer arm, Haiku over the 1,926 cards of record: 1,211 right against 1,072 for the old baseline, and 1,248 after the parser fix. The parser now reads a field keyed by its question, and a list is a refusal, not a crash (2513249e9, ed489fd57, 0b388f68b; rows 1153d97b, 76e96ecd).
+- Meaning schema v2 frozen, plus the 576-card sample builder (e5a56dd8e, row 9ee8a6c2).
+- Model comparison on 500 cards drawn before any call (d510c2e11, 3a21a03cd): Haiku 65.6%, Sonnet 66.2%, Opus 66.6%. Undecided; Rick's choice is open (row 6f584f30, re-asked 25 Nov 10:30).
+- Cheech's four duplicate fixes in the re-run script, with the old tests unchanged (9eff24e4b, row 43231429). The reuse gate passes on the branch.
+- Evening P0 (row 7752958e): the stranded 24 MB src/lupin_app/static/lupin-mobile-test/ build was a copy of lupin-mobile's July 2025 build. It is deleted, and the mobile drift test now runs instead of skipping (8a0c1e487).
+- Post-games for 19 and 24 Nov written but not committed: doc-lint refused 75 lines (row 3c9c27de).
+
 ## 2026.11.23 - Session 32f46545 (Mr. Radio 🦉, build manager; crew Rio, Sam, Pocholo, Tiberius, Tiffany, Krishna, John, Maya, Rachel, Chloé, Clayton) | Answer-signal pipeline built behind switches, end-to-end answer audit, audit fixes
 
 **Resume here**: memento `.claude-memento-mr-radio-32f46545.md`. Every new switch is off.
