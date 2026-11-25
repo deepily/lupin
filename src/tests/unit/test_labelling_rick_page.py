@@ -31,6 +31,16 @@ def packet_of( cards=40, fields=2 ):
     return { "name": "dev-sample", "blind": blind, "disputes": [], "refs": refs }
 
 
+def types_of( packet, kind="yes_no" ):
+    """Return a card-types dict that gives every item of the packet the one kind."""
+    return { i[ "item_id" ]: kind for i in packet[ "blind" ] + packet[ "disputes" ] }
+
+
+def page_of( packet, ids ):
+    """Return the page items of one section of ids, every item typed yes_no."""
+    return rp.page_items( packet, { "s": ids }, types_of( packet ) )
+
+
 def code_of( fn, *args ):
     """Return the code of the LabellingError that fn raises."""
     with pytest.raises( er.LabellingError ) as e: fn( *args )
@@ -100,9 +110,9 @@ def test_the_sections_keep_their_order_and_an_id_an_earlier_section_holds_is_dro
 
 def test_the_page_items_follow_section_then_sorted_order_and_carry_their_relations_and_nothing_else():
     packet = packet_of( 6, 2 )
-    out    = rp.page_items( packet, { "blind share": [ "card-003:1", "card-001:0" ], "reader disagreements": [ "card-000:0" ] } )
+    out    = rp.page_items( packet, { "blind share": [ "card-003:1", "card-001:0" ], "reader disagreements": [ "card-000:0" ] }, types_of( packet ) )
     assert [ ( o[ "item_id" ], o[ "section" ] ) for o in out ] == [ ( "card-003:1", "blind share" ), ( "card-001:0", "blind share" ), ( "card-000:0", "reader disagreements" ) ]
-    assert set( out[ 0 ] ) == { "item_id", "section", "card_text", "options", "recommendation", "answer", "stance_class", "relations" }
+    assert set( out[ 0 ] ) == { "item_id", "section", "card_type", "card_text", "options", "recommendation", "answer", "stance_class", "relations" }
     assert [ r[ "label" ] for r in out[ 0 ][ "relations" ] ] == rp.relations_for( next( i for i in packet[ "blind" ] if i[ "item_id" ] == "card-003:1" ) ) and out[ 0 ][ "recommendation" ] == "A"
     assert out[ 1 ][ "relations" ][ 0 ] == { "label": "support", "meaning": rp.MEANINGS[ "support" ] }
 
@@ -110,12 +120,12 @@ def test_the_page_items_follow_section_then_sorted_order_and_carry_their_relatio
 def test_the_page_takes_disputed_items_too_and_refuses_unknown_or_no_ids_and_a_leak():
     packet = packet_of( 3, 1 )
     packet[ "disputes" ] = [ card_item( "card-900:0" ) ]
-    assert [ o[ "item_id" ] for o in rp.page_items( packet, { "s": [ "card-900:0" ] } ) ] == [ "card-900:0" ]
-    assert code_of( rp.page_items, packet, {} ) == er.BAD_ITEM
-    assert code_of( rp.page_items, packet, { "s": [] } ) == er.BAD_ITEM
-    assert code_of( rp.page_items, packet, { "s": [ "nope" ] } ) == er.BAD_ITEM
+    assert [ o[ "item_id" ] for o in rp.page_items( packet, { "s": [ "card-900:0" ] }, types_of( packet ) ) ] == [ "card-900:0" ]
+    assert code_of( rp.page_items, packet, {}, {} ) == er.BAD_ITEM
+    assert code_of( rp.page_items, packet, { "s": [] }, {} ) == er.BAD_ITEM
+    assert code_of( rp.page_items, packet, { "s": [ "nope" ] }, {} ) == er.BAD_ITEM
     packet[ "blind" ][ 0 ][ "payload" ][ "forecast" ] = "yes, 0.9"
-    assert code_of( rp.page_items, packet, { "s": [ "card-000:0" ] } ) == er.PACKET_LEAK
+    assert code_of( rp.page_items, packet, { "s": [ "card-000:0" ] }, types_of( packet ) ) == er.PACKET_LEAK
 
 
 def test_read_ids_takes_a_json_list_or_words_and_a_json_object_is_read_as_words(tmp_path):
@@ -134,7 +144,7 @@ def test_embedded_json_is_ascii_and_cannot_close_a_script_element():
 
 def test_the_rendered_page_holds_its_items_and_reaches_for_nothing_outside():
     packet = packet_of( 6, 2 )
-    items  = rp.page_items( packet, { "s": [ i[ "item_id" ] for i in packet[ "blind" ] ] } )
+    items  = rp.page_items( packet, { "s": [ i[ "item_id" ] for i in packet[ "blind" ] ] }, types_of( packet ) )
     html   = rp.render_page( items, "A <b>title</b> & more" )
     for token in ( "__TITLE__", "__PAGE_ID__", "__ITEMS_JSON__" ): assert token not in html
     assert "<title>A &lt;b&gt;title&lt;/b&gt; &amp; more</title>" in html
@@ -145,28 +155,34 @@ def test_the_rendered_page_holds_its_items_and_reaches_for_nothing_outside():
 
 
 def test_the_page_script_keeps_answers_in_local_storage_and_exports_the_five_fields():
-    html = rp.render_page( rp.page_items( packet_of( 3, 1 ), { "s": [ "card-000:0" ] } ), "t" )
+    html = rp.render_page( page_of( packet_of( 3, 1 ), [ "card-000:0" ] ), "t" )
     assert "localStorage" in html and "item_id: i.item_id, relation: e.relation, note: e.note, seconds: e.seconds, ts: e.ts" in html
 
 
 def test_a_blank_title_or_no_items_is_refused():
-    items = rp.page_items( packet_of( 3, 1 ), { "s": [ "card-000:0" ] } )
+    items = page_of( packet_of( 3, 1 ), [ "card-000:0" ] )
     assert code_of( rp.render_page, items, "  " ) == er.BAD_ITEM
     assert code_of( rp.render_page, [], "title" ) == er.BAD_ITEM
 
 
 def write_packet( tmp_path, packet ):
-    """Write the packet and return its path."""
+    """Write the packet and, beside it, its card types file, and return the packet's path."""
     path = tmp_path / "packet.json"
     path.write_text( json.dumps( packet ), encoding="utf-8" )
+    ( tmp_path / "types.json" ).write_text( json.dumps( types_of( packet ) ), encoding="utf-8" )
     return path
+
+
+def flags( tmp_path ):
+    """Return the --card-types flag pair for the file write_packet wrote."""
+    return [ "--card-types", str( tmp_path / "types.json" ) ]
 
 
 def test_main_draws_writes_the_page_the_ids_and_the_sections_and_prints_the_receipt( tmp_path, capsys ):
     packet = packet_of( 40, 3 )
     path   = write_packet( tmp_path, packet )
     out    = tmp_path / "page.html"
-    assert rp.main( [ "--packet", str( path ), "--draw", "seed-1", "--out", str( out ), "--title", "T" ] ) == 0
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( path ), "--draw", "seed-1", "--out", str( out ), "--title", "T" ] ) == 0
     receipt = json.loads( capsys.readouterr().out )
     ids     = out.with_name( "page.html.ids.txt" ).read_text( encoding="utf-8" ).split()
     drawn   = rp.draw_share( packet, "seed-1" )[ "item_ids" ]
@@ -184,7 +200,7 @@ def test_main_adds_the_disputes_after_the_draw_and_drops_the_ones_already_drawn(
     ids     = tmp_path / "disputes.json"
     ids.write_text( json.dumps( [ drawn[ 0 ], *spare ] ), encoding="utf-8" )
     out     = tmp_path / "page.html"
-    assert rp.main( [ "--packet", str( path ), "--draw", "seed-1", "--section", f"reader disagreements={ids}", "--out", str( out ) ] ) == 0
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( path ), "--draw", "seed-1", "--section", f"reader disagreements={ids}", "--out", str( out ) ] ) == 0
     receipt = json.loads( capsys.readouterr().out )
     assert receipt[ "items" ] == 11 and receipt[ "sections" ] == { "blind share": 8, "reader disagreements": 3 } and receipt[ "dropped_as_already_listed" ] == [ drawn[ 0 ] ]
     html = out.read_text( encoding="utf-8" )
@@ -195,11 +211,11 @@ def test_main_adds_the_disputes_after_the_draw_and_drops_the_ones_already_drawn(
 def test_main_never_overwrites_a_page_and_the_receipt_only_run_writes_nothing( tmp_path, capsys ):
     path = write_packet( tmp_path, packet_of( 40, 3 ) )
     out  = tmp_path / "page.html"
-    assert rp.main( [ "--packet", str( path ), "--draw", "s", "--out", str( out ), "--receipt-only" ] ) == 0
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( path ), "--draw", "s", "--out", str( out ), "--receipt-only" ] ) == 0
     assert not out.exists() and "page_sha256" not in json.loads( capsys.readouterr().out )
-    assert rp.main( [ "--packet", str( path ), "--draw", "s", "--out", str( out ) ] ) == 0
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( path ), "--draw", "s", "--out", str( out ) ] ) == 0
     before = out.read_text( encoding="utf-8" )
-    assert rp.main( [ "--packet", str( path ), "--draw", "other", "--out", str( out ) ] ) == 2
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( path ), "--draw", "other", "--out", str( out ) ] ) == 2
     assert "refused" in capsys.readouterr().err and out.read_text( encoding="utf-8" ) == before
 
 
@@ -208,7 +224,7 @@ def test_main_builds_a_page_from_sections_alone_such_as_a_later_dispute_list( tm
     ids  = tmp_path / "ids.txt"
     ids.write_text( "card-004:0\ncard-001:0\n", encoding="utf-8" )
     out  = tmp_path / "disputes.html"
-    assert rp.main( [ "--packet", str( path ), "--section", f"disputes={ids}", "--out", str( out ) ] ) == 0
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( path ), "--section", f"disputes={ids}", "--out", str( out ) ] ) == 0
     receipt = json.loads( capsys.readouterr().out )
     assert receipt[ "items" ] == 2 and "item_ids" not in receipt and out.with_name( "disputes.html.ids.txt" ).read_text( encoding="utf-8" ) == "card-001:0\ncard-004:0\n"
 
@@ -219,7 +235,51 @@ def test_main_refuses_bad_ids_and_an_unreadable_packet_and_writes_nothing( tmp_p
     ids  = tmp_path / "ids.txt"
     ids.write_text( ids_text, encoding="utf-8" )
     out  = tmp_path / "p.html"
-    assert rp.main( [ "--packet", str( path ), "--section", f"s={ids}", "--out", str( out ) ] ) == 2
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( path ), "--section", f"s={ids}", "--out", str( out ) ] ) == 2
     assert not out.exists() and "cannot build the page" in capsys.readouterr().err
-    assert rp.main( [ "--packet", str( tmp_path / "absent.json" ), "--draw", "s", "--out", str( out ) ] ) == 2
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( tmp_path / "absent.json" ), "--draw", "s", "--out", str( out ) ] ) == 2
     assert not out.exists()
+
+
+def test_every_item_carries_the_label_rick_reads_for_its_card_type():
+    packet = packet_of( 4, 1 )
+    types  = dict( zip( [ i[ "item_id" ] for i in packet[ "blind" ] ], rp.CARD_TYPE_LABELS ) )
+    out    = rp.page_items( packet, { "s": sorted( types ) }, types )
+    assert [ o[ "card_type" ] for o in out ] == [ "Yes / No / Neither", "Multiple choice", "Open-ended", "Batch (open-ended)" ]
+    assert list( rp.CARD_TYPE_LABELS.values() ) == [ "Yes / No / Neither", "Multiple choice", "Open-ended", "Batch (open-ended)" ]
+
+
+@pytest.mark.parametrize( "bad", [ None, "", "essay" ] )
+def test_an_item_with_no_card_type_or_an_unknown_one_fails_loudly_and_never_shows_blank( bad ):
+    packet = packet_of( 3, 1 )
+    types  = types_of( packet )
+    del types[ "card-001:0" ]
+    assert code_of( rp.page_items, packet, { "s": [ "card-000:0", "card-001:0" ] }, types ) == er.BAD_ITEM
+    types[ "card-001:0" ] = bad
+    assert code_of( rp.page_items, packet, { "s": [ "card-001:0" ] }, types ) == er.BAD_ITEM
+
+
+def test_the_page_id_depends_on_the_item_ids_only_so_a_card_type_never_moves_it():
+    packet = packet_of( 6, 1 )
+    ids    = [ i[ "item_id" ] for i in packet[ "blind" ] ]
+    ones   = rp.page_items( packet, { "s": ids }, types_of( packet, "yes_no" ) )
+    twos   = rp.page_items( packet, { "s": ids }, types_of( packet, "open_ended" ) )
+    assert re.search( r'PAGE_ID  = "(\w+)"', rp.render_page( ones, "t" ) ).group( 1 ) == re.search( r'PAGE_ID  = "(\w+)"', rp.render_page( twos, "t" ) ).group( 1 ) == rp.page_id( ids )
+
+
+def test_main_embeds_the_card_types_and_refuses_a_missing_or_short_or_odd_types_file( tmp_path, capsys ):
+    packet = packet_of( 6, 1 )
+    path   = write_packet( tmp_path, packet )
+    out    = tmp_path / "p.html"
+    ids    = tmp_path / "ids.txt"
+    ids.write_text( "card-001:0 card-002:0", encoding="utf-8" )
+    assert rp.main( flags( tmp_path ) + [ "--packet", str( path ), "--section", f"s={ids}", "--out", str( out ) ] ) == 0
+    assert out.read_text( encoding="utf-8" ).count( "Yes / No / Neither" ) >= 2
+    for body in ( None, "{}", "[]", "not json" ):
+        out2 = tmp_path / f"p{body}.html"
+        if body is None: bad = [ "--card-types", str( tmp_path / "absent.json" ) ]
+        else:
+            ( tmp_path / "bad.json" ).write_text( body, encoding="utf-8" )
+            bad = [ "--card-types", str( tmp_path / "bad.json" ) ]
+        assert rp.main( bad + [ "--packet", str( path ), "--section", f"s={ids}", "--out", str( out2 ) ] ) == 2
+        assert not out2.exists() and "cannot build the page" in capsys.readouterr().err

@@ -38,6 +38,12 @@ MEANINGS          = {   # one line each, from plan section 3 and 3b
     "answers"                      : "The text answers what was asked.",
     "declines_or_defers"           : "Refuses, or puts it off.",
 }
+CARD_TYPE_LABELS  = {   # the card types item-card-types.json holds, as Rick reads them
+    "yes_no"          : "Yes / No / Neither",
+    "multiple_choice" : "Multiple choice",
+    "open_ended"      : "Open-ended",
+    "open_ended_batch": "Batch (open-ended)",
+}
 RELATIONS = {
     KIND_STANCE : ( "support", "dissent", "re_frame", "no_comment" ),
     KIND_CHOICE : ( "agrees", "expands_recommendation", "expands_other_option", "chose_different_listed_option", "wrote_own_answer", "no_recommendation_on_card" ),
@@ -140,19 +146,20 @@ def merge_sections( sections ):
     return kept, sorted( dropped )
 
 
-def page_items( packet, sections ):
+def page_items( packet, sections, card_types ):
     """
     Turn the sections of item ids into what the page embeds.
 
     Requires:
         - packet is { blind, disputes, refs }; sections is merge_sections' kept dict, with at least one id in all, each id in blind or disputes
+        - card_types is a dict from item id to a key of CARD_TYPE_LABELS, as item-card-types.json holds it, with an entry for every id
 
     Ensures:
-        - returns one dict per id, the first section first and each section in sorted order: item_id, section, card_text, options, recommendation, answer, stance_class and relations ( label, meaning )
+        - returns one dict per id, the first section first and each section in sorted order: item_id, section, card_type (the label Rick reads), card_text, options, recommendation, answer, stance_class and relations ( label, meaning )
         - nothing else rides along: each item passes blind_form, which refuses a forecast, a label or any other field, and the refs are never read
 
     Raises:
-        - LabellingError BAD_ITEM for no ids or an id the packet does not hold
+        - LabellingError BAD_ITEM for no ids, an id the packet does not hold, or an id with no card type or one that is not a key of CARD_TYPE_LABELS
         - LabellingError PACKET_LEAK from blind_form
     """
     ids = [ i for group in sections.values() for i in group ]
@@ -160,11 +167,13 @@ def page_items( packet, sections ):
     known  = { i[ "item_id" ]: i for i in packet[ "blind" ] + packet[ "disputes" ] }
     absent = sorted( set( ids ) - set( known ) )
     if absent: raise er.LabellingError( er.BAD_ITEM, f"item ids the packet does not hold: {absent[ :5 ]}" )
+    untyped = sorted( i for i in ids if card_types.get( i ) not in CARD_TYPE_LABELS )
+    if untyped: raise er.LabellingError( er.BAD_ITEM, f"item ids with no known card type: {untyped[ :5 ]}" )
     out = []
     for name, group in sections.items():
         for item_id in group:
             item = pk.blind_form( known[ item_id ] )
-            out.append( { "item_id": item_id, "section": name, **item[ "payload" ], "relations": [ { "label": l, "meaning": MEANINGS[ l ] } for l in relations_for( item ) ] } )
+            out.append( { "item_id": item_id, "section": name, "card_type": CARD_TYPE_LABELS[ card_types[ item_id ] ], **item[ "payload" ], "relations": [ { "label": l, "meaning": MEANINGS[ l ] } for l in relations_for( item ) ] } )
     return out
 
 
@@ -220,18 +229,19 @@ def main( argv=None ):
     Build Rick's page from the draw and from lists of item ids.
 
     Requires:
-        - argv is --packet with a file, then --draw with a seed and/or --section name=file (one or more; the file holds a JSON list or ids separated by space), with optional --out, --title, --share, --receipt-only
+        - argv is --packet with a file, then --draw with a seed and/or --section name=file (one or more; the file holds a JSON list or ids separated by space), with optional --out, --title, --share, --card-types (a JSON dict from item id to card type; default io/gold-labels/item-card-types.json), --receipt-only
 
     Ensures:
         - the draw, when given, is the first section, named "blind share"; the sections follow in the order given, and an id already in an earlier section is dropped from a later one
         - prints the receipt as sorted-key json: the draw (seed, card ids, item ids, sha256), each section's count, the dropped ids, the page id and the item count
         - unless --receipt-only, writes the page to --out, all item ids to <out>.ids.txt and the sections to <out>.sections.json, and adds the page's sha256 to the receipt; returns 0
-        - returns 2, writing nothing, when the packet or an ids file cannot be read, the ids are not valid, or an output file exists
+        - returns 2, writing nothing, when the packet or an ids file cannot be read, the ids are not valid, the card types file cannot be read or lacks an id, or an output file exists
     """
     ap = argparse.ArgumentParser( description="Build Rick's offline labelling page." )
     ap.add_argument( "--packet", required=True )
     ap.add_argument( "--draw", metavar="SEED" )
     ap.add_argument( "--section", action="append", default=[], metavar="NAME=FILE" )
+    ap.add_argument( "--card-types", default=cu.get_project_root() + "/io/gold-labels/item-card-types.json" )
     ap.add_argument( "--share", type=float, default=cf.BLIND_SHARE )
     ap.add_argument( "--out", default=cu.get_project_root() + "/io/gold-labels/rick-blind-share.html" )
     ap.add_argument( "--title", default="Rick's gold labels" )
@@ -245,9 +255,10 @@ def main( argv=None ):
             name, _, path = spec.partition( "=" )
             sections[ name ] = read_ids( path )
         kept, dropped = merge_sections( sections )
-        items         = page_items( packet, kept )
+        card_types    = json.loads( pathlib.Path( args.card_types ).read_text( encoding="utf-8" ) )
+        items         = page_items( packet, kept, card_types )
         html          = render_page( items, args.title )
-    except ( OSError, ValueError, KeyError, TypeError, er.LabellingError ) as e:
+    except ( OSError, ValueError, KeyError, TypeError, AttributeError, er.LabellingError ) as e:
         return _fail( f"cannot build the page: {e!r}", 2 )
     ids = [ i[ "item_id" ] for i in items ]
     receipt.update( { "page_id": page_id( ids ), "items": len( items ), "sections": { n: len( g ) for n, g in kept.items() }, "dropped_as_already_listed": dropped } )
