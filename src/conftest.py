@@ -754,6 +754,25 @@ def _fail_on_protected_module_reimport():
 
 
 @pytest.fixture( autouse=True )
+def _reset_context_baseline_around_test():
+    """
+    Clear the process-wide context baseline before and after every test.
+
+    A yes/no ask sent through the notify route builds the baseline. The first test to do so
+    (test_online_prediction_engine_disabled in test_notifications_router_coverage.py) left it set.
+    Then test_context_baseline failed, but only when it ran after that test.
+
+    Ensures:
+        - context_baseline._BASELINE and _GATE are None when each test starts and when it ends
+        - a test run before the module is loaded does not import it
+    """
+    name = "cosa.agents.prediction_engine.context_baseline"
+    if name in sys.modules: sys.modules[ name ].reset_baseline()
+    yield
+    if name in sys.modules: sys.modules[ name ].reset_baseline()
+
+
+@pytest.fixture( autouse=True )
 def _evict_real_fastapi_main_after_test():
     """
     Cross-file test-isolation guard (2026-06-03 Gate-Zero finding).

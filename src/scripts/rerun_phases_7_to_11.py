@@ -246,9 +246,7 @@ def final_records( records ):
     Ensures:
         - returns the records after the first floor( 0.7 x count ), as retune and the old reports cut them
     """
-    from cosa.research.preference_replay.retune import split_windows
-    tune, _ = split_windows( len( records ) )
-    return records[ tune: ]
+    return split_by_time( records )[ 1 ]
 
 
 def phase7_column( control_run, new_run, ids ):

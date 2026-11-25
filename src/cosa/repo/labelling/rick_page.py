@@ -218,12 +218,6 @@ def render_page( items, title ):
     return template.replace( "__TITLE__", safe ).replace( "__PAGE_ID__", page_id( ids ) ).replace( "__ITEMS_JSON__", embed_json( items ) )
 
 
-def _fail( message, code ):
-    """Ensures: prints the message to stderr and returns the exit code."""
-    print( message, file=sys.stderr )
-    return code
-
-
 def main( argv=None ):
     """
     Build Rick's page from the draw and from lists of item ids.
@@ -259,12 +253,12 @@ def main( argv=None ):
         items         = page_items( packet, kept, card_types )
         html          = render_page( items, args.title )
     except ( OSError, ValueError, KeyError, TypeError, AttributeError, er.LabellingError ) as e:
-        return _fail( f"cannot build the page: {e!r}", 2 )
+        return er.fail( f"cannot build the page: {e!r}", 2 )
     ids = [ i[ "item_id" ] for i in items ]
     receipt.update( { "page_id": page_id( ids ), "items": len( items ), "sections": { n: len( g ) for n, g in kept.items() }, "dropped_as_already_listed": dropped } )
     out, ids_path, sec_path = pathlib.Path( args.out ), pathlib.Path( args.out + ".ids.txt" ), pathlib.Path( args.out + ".sections.json" )
     if not args.receipt_only:
-        if any( f.exists() for f in ( out, ids_path, sec_path ) ): return _fail( f"refused: {out} or a file beside it exists, and a page is never overwritten", 2 )
+        if any( f.exists() for f in ( out, ids_path, sec_path ) ): return er.fail( f"refused: {out} or a file beside it exists, and a page is never overwritten", 2 )
         out.write_text( html, encoding="utf-8" )
         ids_path.write_text( "".join( f"{i}\n" for i in sorted( ids ) ), encoding="utf-8" )
         sec_path.write_text( json.dumps( kept, indent=1 ) + "\n", encoding="utf-8" )

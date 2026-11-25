@@ -94,12 +94,6 @@ def gold_lines( lines, packet, sections ):
     return out
 
 
-def _fail( message, code ):
-    """Ensures: prints the message to stderr and returns the exit code."""
-    print( message, file=sys.stderr )
-    return code
-
-
 def main( argv=None ):
     """
     Record an exported answer file in the gold store.
@@ -128,13 +122,13 @@ def main( argv=None ):
         allowed = { i for ids in secs.values() for i in ids }
         lines   = gold_lines( read_export( text ), packet, secs )
     except ( OSError, ValueError, KeyError, TypeError, er.LabellingError ) as e:
-        return _fail( f"cannot read the export: {e!r}", 2 )
+        return er.fail( f"cannot read the export: {e!r}", 2 )
     path = pathlib.Path( args.store ) if args.store else gs.default_path()
     try:
         if lines: gs.append_gold( path, lines )
         counts = gs.human_card_counts( gs.read_gold( path ) )
     except er.LabellingError as e:
-        return _fail( f"the gold store refused the write: {e}", 3 )
+        return er.fail( f"the gold store refused the write: {e}", 3 )
     archive = pathlib.Path( args.archive_dir )
     archive.mkdir( parents=True, exist_ok=True )
     saved   = archive / f"rick-{hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()[ :12 ]}.json"

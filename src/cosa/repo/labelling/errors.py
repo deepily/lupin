@@ -1,5 +1,7 @@
 """The named errors of the labelling tools."""
 
+import sys
+
 BAD_ITEM         = "BAD_ITEM"
 PACKET_LEAK      = "PACKET_LEAK"
 BAD_LABEL        = "BAD_LABEL"
@@ -26,3 +28,18 @@ class LabellingError( Exception ):
         super().__init__( f"{code}: {detail}" if detail else code )
         self.code   = code
         self.detail = detail
+
+
+def fail( message, code ):
+    """
+    Report a command-line failure.
+
+    Requires:
+        - message is a string; code is an int exit code
+
+    Ensures:
+        - prints the message to stderr
+        - returns the exit code
+    """
+    print( message, file=sys.stderr )
+    return code
