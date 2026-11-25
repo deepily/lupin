@@ -197,12 +197,6 @@ def read_answers( batch, answers ):
     return { "labels": labels, "unlabelled": unlabelled, "unmatched": sorted( set( answers ) - set( batch[ "headers" ] ) ) }
 
 
-def _fail( message, code ):
-    """Ensures: prints the message to stderr and returns the exit code."""
-    print( message, file=sys.stderr )
-    return code
-
-
 def main( argv=None, clock=lambda: datetime.now( timezone.utc ) ):
     """
     Read a returned batch answer into the gold store.
@@ -233,14 +227,14 @@ def main( argv=None, clock=lambda: datetime.now( timezone.utc ) ):
         answers = json.loads( pathlib.Path( args.answers ).read_text( encoding="utf-8" ) )
         batches = voice_batches( packet, args.seed, "2026-01-01T00:00:00+00:00" )
     except ( OSError, ValueError, KeyError, TypeError, er.LabellingError ) as e:
-        return _fail( f"cannot read the packet or the answers: {e!r}", 2 )
+        return er.fail( f"cannot read the packet or the answers: {e!r}", 2 )
     batch = next( ( b for b in batches if b[ "batch_id" ] == args.batch ), None )
-    if batch is None: return _fail( f"unknown batch id {args.batch}", 2 )
+    if batch is None: return er.fail( f"unknown batch id {args.batch}", 2 )
     if isinstance( answers, dict ) and isinstance( answers.get( "answers" ), dict ): answers = answers[ "answers" ]
-    if not isinstance( answers, dict ): return _fail( "the answers file holds no dict of answers", 2 )
+    if not isinstance( answers, dict ): return er.fail( "the answers file holds no dict of answers", 2 )
     refs = packet.get( "refs", {} )
     absent = [ i for i in batch[ "item_ids" ] if not isinstance( refs.get( i ), dict ) or set( refs[ i ] ) != { "notification_id", "field_key" } ]
-    if absent: return _fail( f"the packet's refs lack notification_id and field_key for: {absent[ :5 ]}", 2 )
+    if absent: return er.fail( f"the packet's refs lack notification_id and field_key for: {absent[ :5 ]}", 2 )
     result = read_answers( batch, answers )
     cards  = { i[ "item_id" ]: i for i in packet[ "blind" ] + packet[ "disputes" ] }
     ts     = clock().isoformat()
@@ -252,7 +246,7 @@ def main( argv=None, clock=lambda: datetime.now( timezone.utc ) ):
         gs.append_gold( path, lines )
         counts = gs.human_card_counts( gs.read_gold( path ) )
     except er.LabellingError as e:
-        return _fail( f"the gold store refused the write: {e}", 3 )
+        return er.fail( f"the gold store refused the write: {e}", 3 )
     print( json.dumps( { "batch_id": batch[ "batch_id" ], "written": len( lines ), "unlabelled": result[ "unlabelled" ], "unmatched": result[ "unmatched" ], "human_labelled_by_stance": counts }, sort_keys=True ) )
     return 0
 
