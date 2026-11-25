@@ -25,6 +25,7 @@ import sys
 sys.path.insert( 0, os.path.dirname( os.path.abspath( __file__ ) ) )
 
 import zero_model_proof as zmp
+from cosa.repo.labelling.rick_page import ids_sha256 as sha256_of_ids
 from cosa.research.preference_replay.retune import TUNE_FRACTION
 
 FROZEN            = { "threshold": 0.5, "top_k": 10, "metric": "cosine" }
@@ -38,11 +39,6 @@ SWITCHES          = ( "prediction engine full answer reply enabled", "prediction
 def sha256_of( path ):
     """Return the sha256 hex digest of a file's bytes."""
     with open( path, "rb" ) as handle: return hashlib.sha256( handle.read() ).hexdigest()
-
-
-def sha256_of_ids( ids ):
-    """Return the sha256 of ids sorted and joined by a newline, with no trailing newline."""
-    return hashlib.sha256( "\n".join( sorted( ids ) ).encode( "utf-8" ) ).hexdigest()
 
 
 def read_ids( path ):
