@@ -6,51 +6,64 @@
 <title>__TITLE__</title>
 <style>
   body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #1d1d1b; }
-  header { position: sticky; top: 0; background: #1d1d1b; color: #fff; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
-  #section { background: #e8e8e2; padding: 6px 14px; font-size: 14px; font-weight: 600; }
-  main { max-width: 760px; margin: 0 auto; padding: 12px 14px 80px; }
-  .card { background: #fff; border: 1px solid #d8d8d2; border-radius: 8px; padding: 12px; margin-bottom: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #66665f; margin-bottom: 4px; }
-  .answer { background: #fff7d6; border-color: #e3c85c; font-size: 17px; }
+  header { position: sticky; top: 0; z-index: 2; background: #1d1d1b; color: #fff; padding: 5px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+  #section { background: #e8e8e2; padding: 3px 12px; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+  #cardtype { background: #1d6fd1; color: #fff; border-radius: 10px; padding: 0 8px; font-weight: 600; white-space: nowrap; }
+  main { max-width: 900px; margin: 0 auto; padding: 6px 12px 40px; }
+  .card { background: #fff; border: 1px solid #d8d8d2; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; }
+  #cardtext { height: 30vh; min-height: 80px; }
+  .small { max-height: 10vh; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #66665f; margin: 2px 0 2px; }
+  .answer { background: #fff7d6; border-color: #e3c85c; font-size: 15px; }
   .rec { color: #0a6b2f; font-weight: 600; }
-  button { font-size: 16px; padding: 12px 14px; border-radius: 8px; border: 1px solid #9a9a92; background: #fff; }
-  .rel { display: block; width: 100%; text-align: left; margin-bottom: 8px; }
-  .rel small { display: block; color: #55554f; font-size: 13px; }
+  button { font-size: 13px; padding: 5px 9px; border-radius: 6px; border: 1px solid #9a9a92; background: #fff; }
+  #relations { display: grid; grid-template-columns: 1fr; gap: 4px; }
+  .rel { text-align: left; }
+  .rel small { display: block; color: #55554f; font-size: 11px; line-height: 1.2; }
   .rel.chosen { background: #1d6fd1; color: #fff; border-color: #1d6fd1; }
   .rel.chosen small { color: #e6efff; }
-  .nav { display: flex; gap: 8px; margin: 12px 0; }
+  .nav { display: flex; gap: 6px; margin: 6px 0; }
   .nav button { flex: 1; }
-  textarea { width: 100%; box-sizing: border-box; font-size: 15px; padding: 8px; min-height: 70px; }
-  #export { margin-top: 28px; border-top: 2px solid #1d1d1b; padding-top: 12px; }
+  textarea { width: 100%; box-sizing: border-box; font-size: 14px; padding: 4px 6px; }
+  #note { height: 34px; }
+  #export { margin-top: 24px; border-top: 2px solid #1d1d1b; padding-top: 10px; }
   #exporttext { min-height: 140px; font-family: monospace; font-size: 12px; }
+  #restoretext { min-height: 70px; font-family: monospace; font-size: 12px; }
+  @media (min-width: 700px) { #relations { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 699px) { #cardtext { height: 24vh; } .small { max-height: 8vh; } .card { padding: 4px 6px; margin-bottom: 4px; font-size: 13px; } .rel { padding: 3px 8px; } .rel small { font-size: 10.5px; } .label { margin: 0; } #note { height: 28px; } }
 </style>
 </head>
 <body>
 <header><span id="pos"></span><span id="done"></span></header>
-<div id="section"></div>
+<div id="section"><span id="sectiontext"></span><span id="cardtype"></span></div>
 <main>
   <div class="label">Card</div>
   <div class="card" id="cardtext"></div>
-  <div id="optionsbox"><div class="label">Options</div><div class="card" id="options"></div></div>
+  <div id="optionsbox"><div class="label">Options</div><div class="card small" id="options"></div></div>
   <div class="label">Recommended</div>
-  <div class="card" id="recommendation"></div>
+  <div class="card small" id="recommendation"></div>
   <div class="label">Rick's answer</div>
-  <div class="card answer" id="answer"></div>
+  <div class="card answer small" id="answer"></div>
   <div class="label">How does the answer relate to the card?</div>
   <div id="relations"></div>
-  <div class="label">Note (optional)</div>
-  <textarea id="note"></textarea>
   <div class="nav">
     <button id="prev">Back</button>
     <button id="nextopen">Next unlabelled</button>
     <button id="next">Next</button>
   </div>
+  <div class="label">Note (optional)</div>
+  <textarea id="note"></textarea>
   <div id="export">
     <div class="label">Export</div>
     <button id="download">Download answers (JSON)</button>
     <button id="copy">Select text to copy</button>
     <p id="exportstatus"></p>
     <textarea id="exporttext" readonly></textarea>
+    <div class="label" style="margin-top:16px">Restore from an earlier export</div>
+    <input type="file" id="restorefile" accept=".json,application/json">
+    <textarea id="restoretext" placeholder="...or paste the export text here"></textarea>
+    <button id="restore">Restore pasted text</button>
+    <p id="restorestatus"></p>
   </div>
 </main>
 <script type="application/json" id="data">__ITEMS_JSON__</script>
@@ -87,7 +100,8 @@ function show() {
   var item = ITEMS[ position ], entry = store.answers[ item.item_id ];
   setText( "pos", "Item " + ( position + 1 ) + " of " + ITEMS.length );
   setText( "done", doneCount() + " of " + ITEMS.length + " done" );
-  setText( "section", item.section + " (" + sectionDone( item.section ) + " of " + sectionSize( item.section ) + " done)" );
+  setText( "sectiontext", item.section + " (" + sectionDone( item.section ) + " of " + sectionSize( item.section ) + " done)" );
+  setText( "cardtype", item.card_type );
   setText( "cardtext", item.card_text );
   document.getElementById( "optionsbox" ).style.display = item.options.length ? "block" : "none";
   setText( "options", item.options.join( "\n" ) );
@@ -155,6 +169,39 @@ function download() {
   document.body.removeChild( a );
   setText( "exportstatus", "Downloaded " + exportLines().length + " answers. If nothing arrived, copy the text below." );
 }
+function restoreText( text ) {
+  var parsed, byId = {}, best = {}, lines;
+  ITEMS.forEach( function ( i ) { byId[ i.item_id ] = i; } );
+  try { parsed = JSON.parse( text ); } catch ( e ) { return refuse( "this is not an export of this page: it is not valid JSON" ); }
+  if ( !Array.isArray( parsed ) ) return refuse( "this is not an export of this page: it is not a list of answers" );
+  lines = parsed;
+  for ( var n = 0; n < lines.length; n++ ) {
+    var l = lines[ n ], where = "line " + ( n + 1 ) + ": ";
+    if ( l === null || typeof l !== "object" || typeof l.item_id !== "string" || typeof l.relation !== "string" || typeof l.ts !== "string" || isNaN( Date.parse( l.ts ) ) ) return refuse( where + "this is not an export of this page: it lacks item_id, relation or ts" );
+    if ( !Object.prototype.hasOwnProperty.call( byId, l.item_id ) ) return refuse( where + "the item " + l.item_id + " is not on this page" );
+    if ( !byId[ l.item_id ].relations.some( function ( r ) { return r.label === l.relation; } ) ) return refuse( where + "the relation " + l.relation + " is not allowed for item " + l.item_id );
+    if ( !Object.prototype.hasOwnProperty.call( best, l.item_id ) || Date.parse( l.ts ) > Date.parse( best[ l.item_id ].ts ) ) best[ l.item_id ] = l;
+  }
+  var applied = 0;
+  Object.keys( best ).forEach( function ( id ) {
+    var l = best[ id ], old = store.answers[ id ];
+    if ( old && Date.parse( old.ts ) >= Date.parse( l.ts ) ) return;
+    store.answers[ id ] = { relation: l.relation, note: typeof l.note === "string" ? l.note : "", seconds: typeof l.seconds === "number" ? l.seconds : 0, ts: l.ts };
+    applied++;
+  } );
+  show();
+  setText( "restorestatus", "Restored " + applied + " answers (of " + Object.keys( best ).length + " in the file; a stored answer that is newer is kept)." );
+  return true;
+}
+function refuse( reason ) { setText( "restorestatus", "Nothing restored: " + reason + "." ); return false; }
+function restoreFromFile() {
+  var f = document.getElementById( "restorefile" ).files[ 0 ], reader;
+  if ( !f ) return;
+  reader = new FileReader();
+  reader.onload = function () { restoreText( String( reader.result ) ); };
+  reader.onerror = function () { refuse( "the file could not be read" ); };
+  reader.readAsText( f );
+}
 function copyText() {
   var t = document.getElementById( "exporttext" );
   refreshExport();
@@ -169,6 +216,8 @@ document.getElementById( "next" ).onclick     = function () { go( position + 1 )
 document.getElementById( "nextopen" ).onclick = nextOpen;
 document.getElementById( "download" ).onclick = download;
 document.getElementById( "copy" ).onclick     = copyText;
+document.getElementById( "restore" ).onclick  = function () { restoreText( document.getElementById( "restoretext" ).value ); };
+document.getElementById( "restorefile" ).onchange = restoreFromFile;
 document.getElementById( "note" ).oninput     = saveNote;
 load();
 show();
