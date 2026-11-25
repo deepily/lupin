@@ -37,6 +37,7 @@ from cosa.agents.principle_learner.extractor_prompt import active_prompt_version
 import cosa.utils.util as cu
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.repo.doc_lint import model_transport
+from cosa.utils.atomic_json import write_json_atomic
 from cosa.research.preference_replay.checkpoint_report import FIRST_NAME, checkpoint_name
 from cosa.research.preference_replay.extractor_replay import ExtractorReplay, asks_from_session, check_no_leakage, make_recorder
 from cosa.research.preference_replay.replay_loop import ENGINE_ARM, _score, replay, summarize
@@ -508,9 +509,7 @@ def save_state( path, state ):
     Ensures:
         - the file holds the whole state, or keeps the old one if the write is cut short
     """
-    temporary = f"{path}.tmp"
-    with open( temporary, "w", encoding="utf-8" ) as handle: json.dump( state, handle )
-    os.replace( temporary, path )
+    write_json_atomic( path, state )
 
 
 def append_lines( path, objects ):
