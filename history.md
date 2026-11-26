@@ -8,6 +8,16 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.25 - Session 5078edf7 (Cheech 🌿, build manager, skeleton crew, no seats) | Principle learner status report, wiki rollups merged, duplicate check ruled, Rick's two rows chased
+
+- Status report on the principle learner for Rick's broadcast 509a86e5, with a podcast: io/tmp/2026.11.25-principle-learner-status-cheech.md (not in git). Of 10 experiment phases, 3 are done, 1 is in progress and 6 wait, one behind the other, on Rick's gold-page export.
+- Ten wiki-librarian rollups merged as 556f15118 (from ca00b157a, done by a subagent in a worktree and reviewed by Cheech). 39 stale pins re-pinned, 62 orphans and 3 orphan packages covered, 9 new pages. Symindex lint gives 0 findings in the ten packages and 34 elsewhere. Unit 770 passed, census guards 2383 passed.
+- Duplicate check 82966288: both findings ruled distinct (`fail` has its own return contract; `final_records` already calls `split_by_time`).
+- Row c3b4c8a4 closed: both prediction_engine `__pycache__` folders are owned by rruiz.
+- Rick's two rows: the gold export (05ea77a8) and store bounding (83707ad2, where he asked for two hours at 10:59). The 13:02 card timed out, so both are chased at 10:30 Eastern on 26 Nov. At the end-of-shift orphan check, all eight of Cheech's blocked rows were given chase dates.
+- Memento sweep (209 found, 8 kept for live seats, 201 trashed; 46 from 24 Nov digested). Lessons kept: the gold readers' rulings for yes/no/neither cards. No comment gives no_comment, and a comment that adds a condition gives support. Neither with a comment gives re_frame unless it clearly leans. rick_page reads its template from $LUPIN_ROOT, so pin LUPIN_ROOT to the tree under review. Sam's three non-blocking notes on the labelling CLI were not built, on Mr. Radio's word.
+- Files: history.md, TODO.md, plus 41 wiki files under src/docs/wiki/ (in the merge).
+
 ## 2026.11.25 - Session 256a2409 (Mr. Radio 🦉, build manager, skeleton crew, no seats) | Post-games through doc-lint, three-way forecast shadow switch on, multiple-choice miss breakdown, Rick's blocker rulings
 
 All merged on the working branch, not pushed.

@@ -27,6 +27,14 @@ The evidence is the addendum "where the multiple-choice forecast goes wrong (row
 - 2026-11-25 — **The mobile row `cd94755a`** → **Hold until skeleton crew is off** (Rick, card, about 18:45).
 - 2026-11-25 — **Ticket for the raw-reply gap in the results write-up** → **None filed. That fix already exists and is closed** (Rick, voice, about 18:43). Bug row `76e96ecd` (closed), commits `29ea03af2` and `b8e0b151e`.
 
+## 📚 Decisions log 2026-11-25 (Cheech 🌿 `5078edf7`, principle learner, skeleton crew, no seats; times Eastern)
+
+- 2026-11-25 — **Store bounding (row `83707ad2`)** → **"Give me a couple hours before we return to this topic"** (Rick, card, about 10:59). He was coming to it cold and asked for the doc link. The 13:02 return card timed out, which is not a ruling. Chase 26 Nov 10:30. Recommended first build: the behaviour-preserving speed fix.
+- 2026-11-26 — **Archive history.md and TODO.md** → **"Next session" for both** (Rick, card, about 00:20). Mr. Radio was checkpointing into the same files. Projected history size 17.7k against the 17k warning line; TODO.md is 1,034 lines.
+- 2026-11-26 — **Session end** → **"Give me a push and a backup"** (Rick, broadcast `09b72212`, about 00:15).
+
+**Backlog, next session**: archive history.md (`/plan-history-management`) and archive TODO.md to its horizon (`/plan-todo archive`). Check first that Mr. Radio is not writing either file.
+
 ## 📚 Decisions log 2026-11-23 (Cheech 🌿 `64d0ef05`, lost answer signal and the principle learner; crew Pocholo, John, Rachel reaped, Tiberius live; times Eastern)
 
 The plans are [the pipeline plan](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.23-answer-signal-pipeline-plan.md) and [the experiment plan](src/rnd/v0.2.4/2026.11.17-principle-learner-research/2026.11.23-answer-signal-experiment-plan.md), both drafts for María's cascade. They rest on [the expert's response](src/rnd/v0.2.4/2026.11.17-principle-learner-research/2026.11.21-request-for-expertise-information-loss-in-answer-forecasting-response.md) and [the audit](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.23-discarded-answer-signal-audit.md).
