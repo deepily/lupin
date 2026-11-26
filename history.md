@@ -8,6 +8,16 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.25 - Session 256a2409 (Mr. Radio 🦉, build manager, skeleton crew, no seats) | Post-games through doc-lint, three-way forecast shadow switch on, multiple-choice miss breakdown, Rick's blocker rulings
+
+All merged on the working branch, not pushed.
+- Post-games for 19 and 24 Nov rewritten so they pass doc-lint (3c9f4ff49, row 3c9c27de).
+- Rick's skeleton-crew switch committed (660bc3097). The shadow-only three-way forecast switch is on, with tests pinned to it and a stale fake config fixed (ae7052030). Reviewer verdict: merge.
+- Multiple-choice miss breakdown (row 7972fcaf, read-only, no model call): 372 of the 1,154 answered cards carry only typed write-ins and cannot be scored. On the 782 scorable cards Haiku is right on 655 (83.8%), against 81.2% for always picking the recommended option. The addendum is in the full-answer arm's results write-up under io/, which is not in git.
+- Rick's rulings are in TODO.md under the 25 Nov decisions log. The two fix rows wait for his approval: the scoring report (3e733aa3) and the write-in outcome (9628b922).
+- The daily test-promotion job failed because this host's gcloud login has expired. Row e0ba5f8b is blocked on Rick running `gcloud auth login`.
+- Files: TODO.md, history.md, plus the session's earlier files (all committed): the two post-games, lupin-app.ini, and four test files.
+
 ## 2026.11.24 - Session d03f615f (Cheech 🌿, build manager; crew John, Maya, Clayton, Tiberius, Rio, Chloé, all released) | Gold labels: readers done, Rick's offline page with restore, agreement report; reuse-review pairs merged; a test-order leak fixed
 
 - Gold labels (row 05ea77a8): both AI readers labelled all 856 items and agree on 829 (kappa 0.957). Rick's offline page (015f20beb) holds his 115-item blind share plus 21 disputes. Tonight's P0 (ab5e18c1f, row 585f62b8) adds restore from export, a card-type label and a compact layout, with the page id unchanged. The agreement report against the 0.7 bar is 7dee74059. The next step waits on Rick's export.

@@ -16,6 +16,17 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-25 (Mr. Radio 🦉 `256a2409`, build manager for preference learning, skeleton crew, no seats; times Eastern)
+
+The evidence is the addendum "where the multiple-choice forecast goes wrong (row 7972fcaf)" in `io/write-ups/online-preference-learning/2026.11.24-full-answer-arm/RESULTS.md` (local, not in git).
+
+- 2026-11-25 — **The read-only breakdown of the multiple-choice misses** → **Approved** (Rick, voice, about 15:10; row `7972fcaf`, done). Finding: 372 of the 1,154 answered cards have only typed write-ins, so nothing can be scored, and the old figure counts them as misses. On the 782 scorable cards Haiku is right on 655 (83.8%).
+- 2026-11-25 — **The multiple-choice fix** → **"Both, scoring first"** (Rick, card, about 18:45). First the scoring report (row `3e733aa3`): accuracy over the scorable cards, shown beside the unscored count and the write-in rate. Then the forecast change (row `9628b922`): a per-field "Rick writes his own answer" outcome. It ships as a new predictor version behind an INI switch, off by default. Both rows wait for his approval.
+- 2026-11-25 — **The remediation step that needs gold labels (row `59862dcb`)** → **"Wait for gold labels"** (Rick, card, about 18:45). It is blocked on Cheech's row `05ea77a8`, which waits on Rick's export.
+- 2026-11-25 — **Push the branch** → **"Yes, push now"** (Rick, card, about 18:45). The auto-mode classifier refused my push, so Rick runs it, or Cheech does with his push and backup.
+- 2026-11-25 — **The mobile row `cd94755a`** → **Hold until skeleton crew is off** (Rick, card, about 18:45).
+- 2026-11-25 — **Ticket for the raw-reply gap in the results write-up** → **None filed. That fix already exists and is closed** (Rick, voice, about 18:43). Bug row `76e96ecd` (closed), commits `29ea03af2` and `b8e0b151e`.
+
 ## 📚 Decisions log 2026-11-23 (Cheech 🌿 `64d0ef05`, lost answer signal and the principle learner; crew Pocholo, John, Rachel reaped, Tiberius live; times Eastern)
 
 The plans are [the pipeline plan](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.23-answer-signal-pipeline-plan.md) and [the experiment plan](src/rnd/v0.2.4/2026.11.17-principle-learner-research/2026.11.23-answer-signal-experiment-plan.md), both drafts for María's cascade. They rest on [the expert's response](src/rnd/v0.2.4/2026.11.17-principle-learner-research/2026.11.21-request-for-expertise-information-loss-in-answer-forecasting-response.md) and [the audit](src/rnd/v0.2.4/2026.11.17-online-preference-learning-upgrades/2026.11.23-discarded-answer-signal-audit.md).
