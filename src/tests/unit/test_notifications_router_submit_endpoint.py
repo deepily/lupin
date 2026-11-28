@@ -70,6 +70,9 @@ def wired( harness, monkeypatch ):
         "ruling_raises"  : None,
         "enqueue_calls"  : [],
         "enqueue_raises" : None,
+        "meaning_calls"  : [],
+        "meaning_raises" : None,
+        "meaning_queued" : False,
     }
 
     # `answered_by` joined the worker's signature in row e20e249a (the door now stamps who
@@ -98,6 +101,13 @@ def wired( harness, monkeypatch ):
         if state[ "enqueue_raises" ] is not None: raise state[ "enqueue_raises" ]
         return { "queued": True, "reason": "queued", "job_id": "pe-test" }
     monkeypatch.setattr( notif, "_enqueue_extractor_sync", _enqueue )
+    import cosa.agents.answer_meaning.on_store as on_store
+
+    def _meaning( notification_id, session_scope ):
+        state[ "meaning_calls" ].append( notification_id )
+        if state[ "meaning_raises" ] is not None: raise state[ "meaning_raises" ]
+        return { "queued": state[ "meaning_queued" ] }
+    monkeypatch.setattr( on_store, "record_after_answer", _meaning )
     monkeypatch.setattr( notif, "get_formatted_time_display",  lambda: "TIME-DISPLAY-VALUE" )
     monkeypatch.setattr( notif, "get_formatted_date_display",  lambda: "DATE-DISPLAY-VALUE" )
     monkeypatch.setattr( notif, "pending_responses", {} )
@@ -525,3 +535,21 @@ class TestTheContextForecastSettlesAtAnswerTime:
         monkeypatch.setattr( ch, "settle_unfinished", boom )
         r = harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "ANSWER-VALUE" } )
         assert r.status_code == 200 and wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ]
+
+
+class TestTheMeaningLabellerHook:
+
+    def test_every_answer_is_offered_to_the_labeller_and_a_disabled_one_is_silent( self, harness, wired, capsys ):
+        assert harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "yes" } ).status_code == 200
+        assert wired[ "meaning_calls" ] == [ _NID ]
+        assert "[MEANING]" not in capsys.readouterr().out
+
+    def test_a_queued_labelling_is_named( self, harness, wired, capsys ):
+        wired[ "meaning_queued" ] = True
+        harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "yes" } )
+        assert f"[MEANING] {_NID}: queued" in capsys.readouterr().out
+
+    def test_a_labeller_error_does_not_lose_the_answer( self, harness, wired, capsys ):
+        wired[ "meaning_raises" ] = RuntimeError( "boom" )
+        assert harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "yes" } ).status_code == 200
+        assert "non-fatal): boom" in capsys.readouterr().out

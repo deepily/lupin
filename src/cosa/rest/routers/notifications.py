@@ -2125,6 +2125,14 @@ async def submit_notification_response(
         except Exception as enqueue_error:
             print( f"[PRINCIPLE-LEARNER] ⚠️ Extractor enqueue error (non-fatal): {enqueue_error}" )
 
+        # ---- Meaning labeller: label this answer on its own thread, silent while its switch is off ----
+        try:
+            from cosa.agents.answer_meaning.on_store import record_after_answer
+            if ( await asyncio.to_thread( record_after_answer, notification_id, get_db ) )[ "queued" ]:
+                print( f"[MEANING] {notification_id}: queued" )
+        except Exception as meaning_error:
+            print( f"[MEANING] ⚠️ Labelling enqueue error (non-fatal): {meaning_error}" )
+
         # Task 2: Signal waiting SSE stream (if it exists)
         if notification_id in pending_responses:
             pending_responses[notification_id]["response_data"] = response_value

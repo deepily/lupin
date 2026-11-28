@@ -6,6 +6,7 @@ Each fixture in real_archive_rows.json is a real answered notification, captured
 Two kinds had no archive row on the capture date: an explicit empty selection and an absent field.
 They are named in the no-archive-row list, which must match the fixture file exactly.
 So a kind cannot lose its row, or gain one, unnoticed.
+The v2 relations are guarded the same way, from the one relations constant, against their own fixture file.
 """
 import json
 import os
@@ -14,11 +15,13 @@ import uuid
 import pytest
 
 from cosa.research.preference_replay.scratch_db import scratch_session
-from cosa.rest.db.repositories.answer_meaning_repository import MEANING_KINDS, NATIVE_KINDS, UNKNOWN_KINDS, AnswerMeaningRepository, kinds_in
+from cosa.rest.db.repositories.answer_meaning_repository import ( MEANING_KINDS, NATIVE_KINDS, RELATIONS_V2, SCHEMA_VERSION_V2, UNKNOWN_KINDS,
+                                                                   AnswerMeaningRepository, kinds_in )
 from cosa.rest.postgres_models import AnswerMeaning
 
 FIXTURE                  = os.path.join( os.path.dirname( __file__ ), "fixtures", "answer_meaning", "real_archive_rows.json" )
 KINDS_WITH_NO_ARCHIVE_ROW = ( "empty_selection", "absent_field" )
+V2_FIXTURE               = os.path.join( os.path.dirname( __file__ ), "fixtures", "answer_meaning", "v2_relations.json" )
 
 
 def _fixtures():
@@ -72,3 +75,26 @@ def test_every_meaning_kind_round_trips( kind ):
         assert { "native_answer": stored.native_answer, "acts": stored.acts, "conditions": stored.conditions, "alignment": stored.alignment,
                  "unknowns": stored.unknowns, "uncertainty": stored.uncertainty } == meaning
         assert kind in kinds_in( { "native_answer": stored.native_answer, "unknowns": stored.unknowns } )
+
+
+def _v2_fixtures():
+    with open( V2_FIXTURE ) as handle: return { f[ "relation" ]: f for f in json.load( handle )[ "fixtures" ] }
+
+
+def test_every_v2_relation_has_a_fixture_and_the_fixtures_name_no_other():
+    assert RELATIONS_V2, "a guard over an empty list passes everything"
+    assert set( _v2_fixtures() ) == set( RELATIONS_V2 )
+
+
+@pytest.mark.parametrize( "relation", RELATIONS_V2 )
+def test_every_v2_relation_round_trips( relation ):
+    fixture      = _v2_fixtures()[ relation ]
+    native       = { "answer": { "kind": fixture[ "kind" ], "relation": relation } }
+    notification = str( uuid.uuid4() )
+    with scratch_session() as session:
+        AnswerMeaning.__table__.create( session.get_bind(), checkfirst=True )
+        repo = AnswerMeaningRepository( session )
+        repo.add( notification, "fixture-reader", "human", native, [], [], None, [], schema_version=SCHEMA_VERSION_V2 )
+        session.commit()
+        stored = repo.get( notification, SCHEMA_VERSION_V2, "fixture-reader" )
+        assert ( stored.native_answer, stored.alignment ) == ( native, fixture[ "alignment" ] )

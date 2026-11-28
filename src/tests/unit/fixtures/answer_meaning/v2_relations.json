@@ -1,0 +1,18 @@
+{
+  "note": "One fixture per v2 relation: the kind of field it sits on and the alignment plan section 3c gives it, written by hand.",
+  "fixtures": [
+    { "relation": "support",                       "kind": "yes_no_stance",    "alignment": "unknown" },
+    { "relation": "dissent",                       "kind": "yes_no_stance",    "alignment": "unknown" },
+    { "relation": "re_frame",                      "kind": "yes_no_stance",    "alignment": "unknown" },
+    { "relation": "no_comment",                    "kind": "yes_no_stance",    "alignment": "unknown" },
+    { "relation": "agrees",                        "kind": "selected_options", "alignment": "aligned" },
+    { "relation": "expands_recommendation",        "kind": "write_in_text",    "alignment": "partial" },
+    { "relation": "expands_other_option",          "kind": "write_in_text",    "alignment": "diverges" },
+    { "relation": "chose_different_listed_option", "kind": "selected_options", "alignment": "diverges" },
+    { "relation": "wrote_own_answer",              "kind": "write_in_text",    "alignment": "unknown" },
+    { "relation": "no_recommendation_on_card",     "kind": "selected_options", "alignment": "no_recommendation" },
+    { "relation": "no_answer",                     "kind": "open_ended_text",  "alignment": "unknown" },
+    { "relation": "answers",                       "kind": "open_ended_text",  "alignment": "unknown" },
+    { "relation": "declines_or_defers",            "kind": "batch_field_text", "alignment": "unknown" }
+  ]
+}
