@@ -15,10 +15,10 @@ plain maps a field key to a finished entry with no relation, which is an empty s
 import json
 
 from cosa.agents.prediction_engine.episode_view import fields_of
+from cosa.research.preference_replay.cohorts import answer_source_of
 from cosa.utils.notification_utils import extract_qualifier_comment, parse_field_selections
 
 SINGLE_KEY     = "answer"
-HUMAN_SOURCE   = "ui"
 TIMEOUT_SOURCE = "timeout_default"
 CANCELLED_TEXT = "[cancelled]"
 TEXT_TYPES     = ( "yes_no", "open_ended" )
@@ -183,6 +183,7 @@ def _batch( draft, value, card_fields, silent ):
 
     Ensures:
         - the headers are the card's questions, then any further header the answer holds
+        - a header holding a list is read as its items joined
         - a blank or missing header, and every header of a timed-out card, is no_answer
         - an unreadable answer adds unreadable_payload
     """
@@ -192,7 +193,8 @@ def _batch( draft, value, card_fields, silent ):
         return
     prompts = { f[ "key" ]: f[ "prompt" ] for f in card_fields }
     for key in list( prompts ) + [ k for k in answers if k not in prompts ]:
-        text = ( answers.get( key ) or {} ).get( "text" ) or ""
+        record = answers.get( key ) or { "text": "", "selected": [] }
+        text   = record[ "text" ] if record[ "text" ] is not None else "; ".join( str( item ) for item in record[ "selected" ] )
         draft[ "fields" ][ key ] = _text_field( "batch_field_text", text, prompts.get( key ), silent )
 
 
@@ -206,7 +208,7 @@ def draft_of( notification ):
 
     Ensures:
         - returns the draft the module docstring describes
-        - a response_value without text or with a source other than ui or timeout_default adds unreadable_payload and no field,
+        - a response_value without text, or neither a timeout default nor "human" by answer_source_of, adds unreadable_payload and no field,
           so an answer nobody can be shown to have given is never read as a stance
         - a timeout default or a cancelled card adds cancellation; a yes or no or multiple-choice card then has no field,
           and an open-ended or batch card has no_answer fields
@@ -220,7 +222,7 @@ def draft_of( notification ):
     stored = notification.response_value
     value  = stored.get( "value" ) if isinstance( stored, dict ) else None
     source = stored.get( "source" ) if isinstance( stored, dict ) else None
-    if not isinstance( value, str ) or source not in ( HUMAN_SOURCE, TIMEOUT_SOURCE ):
+    if not isinstance( value, str ) or ( source != TIMEOUT_SOURCE and answer_source_of( stored ) != "human" ):
         draft[ "unknowns" ].append( "unreadable_payload" )
         return draft
     silent = source == TIMEOUT_SOURCE or _is_cancelled( value )

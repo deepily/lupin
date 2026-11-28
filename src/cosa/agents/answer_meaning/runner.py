@@ -4,6 +4,8 @@ Write a v2 meaning row for stored answers, one per answer.
 The rules layer reads the answer, the model layer labels what plain code could not, and the repository appends the row.
 A second run adds nothing. No database session is held while the model is called.
 
+The report's stamp is written from the gold store, so a class that has lifted shows as certified.
+
     cd <tree> && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python -m cosa.agents.answer_meaning.runner [--ids-file F] [--limit N]
 """
 import argparse
@@ -15,7 +17,8 @@ import sys
 import uuid
 
 from cosa.agents.answer_meaning import rules
-from cosa.repo.labelling.gold_progress import stamp_line
+from cosa.repo.labelling import gold_store
+from cosa.repo.labelling.gold_progress import gold_progress, stamp_line
 from cosa.rest.db.repositories.answer_meaning_repository import SCHEMA_VERSION_V2, AnswerMeaningRepository, MeaningAlreadyRecorded
 from cosa.rest.postgres_models import Notification
 from cosa.utils.notification_utils import sender_session_suffix
@@ -129,16 +132,18 @@ def stored_answer_ids( session ):
     return [ str( key ) for key, value in rows if value is not None ]
 
 
-def run( session_scope, annotator, label, ids=None, limit=None, every=PROGRESS_EVERY ):
+def run( session_scope, annotator, label, ids=None, limit=None, every=PROGRESS_EVERY, gold_labels=(), slice_counts=None ):
     """
     Label stored answers one by one and report what was written.
 
     Requires:
         - session_scope, annotator and label are as record_one takes them
         - ids is None for every stored answer, or a list of notification ids; limit is None or a positive integer
+        - gold_labels is gold_store.read_gold's list; slice_counts is None or { class: cards of that class in the held-back slice }
 
     Ensures:
-        - returns annotator, answers, written, already, failed, relations and unknowns (counts over the rows written) and the stamp
+        - returns annotator, answers, written, already, failed, relations and unknowns (counts over the rows written), gold_progress and the stamp
+        - the stamp's first line names as certified each class gold_progress lifts; with no label or no slice count none is lifted
         - prints a progress line every `every` answers
         - a second run over the same answers writes only the ones that failed before
 
@@ -148,6 +153,7 @@ def run( session_scope, annotator, label, ids=None, limit=None, every=PROGRESS_E
     if ids is None:
         with session_scope() as session: ids = stored_answer_ids( session )
     ids       = ids[ :limit ]
+    progress  = gold_progress( list( gold_labels ), slice_counts )
     statuses  = collections.Counter()
     relations = collections.Counter()
     unknowns  = collections.Counter()
@@ -158,7 +164,8 @@ def run( session_scope, annotator, label, ids=None, limit=None, every=PROGRESS_E
         unknowns.update( report.get( "unknowns", [] ) )
         if number % every == 0: print( f"[meaning runner] {number}/{len( ids )}", file=sys.stdout, flush=True )
     return { "annotator": annotator, "answers": len( ids ), "written": statuses[ "written" ], "already": statuses[ "already" ], "failed": statuses[ "failed" ],
-             "relations": dict( relations ), "unknowns": dict( unknowns ), "stamp": list( STAMP ) }
+             "relations": dict( relations ), "unknowns": dict( unknowns ), "gold_progress": progress,
+             "stamp": [ stamp_line( progress[ "stamp_lifts_for" ] ), *STAMP[ 1: ] ] }
 
 
 def main( argv=None, session_scope=None ):
@@ -170,20 +177,25 @@ def main( argv=None, session_scope=None ):
 
     Ensures:
         - --ids-file names a file of one notification id per line; without it every stored answer is read
+        - --gold names the gold-label store, the default store without it; --slice-counts is a json object of slice cards per class
+        - the store is read before the first answer, so a damaged store stops the run with no model call
         - prints the report and returns 0
     """
     parser = argparse.ArgumentParser( description="Write a meaning row for stored answers." )
     parser.add_argument( "--ids-file" )
     parser.add_argument( "--limit", type=int )
     parser.add_argument( "--model" )
+    parser.add_argument( "--gold" )
+    parser.add_argument( "--slice-counts", type=json.loads )
     args = parser.parse_args( argv )
     if session_scope is None:
         from cosa.rest.db.database import get_db as session_scope
     ids = None
     if args.ids_file:
         with open( args.ids_file, encoding="utf-8" ) as handle: ids = [ line.strip() for line in handle if line.strip() ]
+    gold             = gold_store.read_gold( args.gold or gold_store.default_path() )
     annotator, label = bound_labeller( args.model )
-    report = run( session_scope, annotator, label, ids=ids, limit=args.limit, every=PROGRESS_EVERY )
+    report = run( session_scope, annotator, label, ids=ids, limit=args.limit, every=PROGRESS_EVERY, gold_labels=gold, slice_counts=args.slice_counts )
     print( json.dumps( report, indent=1, sort_keys=True ) )
     return 0
 

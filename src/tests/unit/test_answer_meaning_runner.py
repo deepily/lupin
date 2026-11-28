@@ -293,3 +293,35 @@ def test_an_empty_selection_is_written_though_it_has_no_relation( db, scope ):
     ask( db, 1, response_type="multiple_choice", value=json.dumps( { "answers": { "A": [] } } ), options=options )
     assert runner.record_one( scope, str( nid( 1 ) ), ANNOTATOR, failing )[ "status" ] == "written"
     assert db.query( AnswerMeaning ).one().native_answer[ "A" ][ "empty_selection" ] is True
+
+
+def own_labels( stance, count ):
+    return [ { "item_id": f"i{n}", "notification_id": f"n{n}", "field_key": "answer", "relation": "support", "card_stance": stance,
+               "source": "human", "reader": "rick", "batch_id": "b", "ts": "2026-11-27T00:00:00+00:00" } for n in range( count ) ]
+
+
+def test_the_reports_stamp_lifts_a_class_that_is_triggered_and_scorable( db, scope ):
+    report = runner.run( scope, ANNOTATOR, Model(), gold_labels=own_labels( "no", 20 ), slice_counts={ "no": 30 } )
+    assert report[ "stamp" ][ 0 ].startswith( "certified_classes: [yes, no]   uncertified: [neither, support-on-no, dissent, re_frame]" )
+    assert report[ "gold_progress" ][ "stamp_lifts_for" ] == [ "no" ] and len( report[ "stamp" ] ) == 3
+
+
+def test_a_triggered_class_the_slice_cannot_score_stays_stamped_in_the_report( db, scope ):
+    report = runner.run( scope, ANNOTATOR, Model(), gold_labels=own_labels( "no", 20 ), slice_counts={ "no": 29 } )
+    assert report[ "stamp" ][ 0 ] == STAMP and report[ "gold_progress" ][ "reached" ] == [ "no" ]
+
+
+def test_main_reads_the_gold_store_and_the_slice_counts( db, scope, labeller, tmp_path, capsys ):
+    store = tmp_path / "gold.jsonl"
+    store.write_text( "".join( json.dumps( line ) + "\n" for line in own_labels( "neither", 20 ) ) )
+    assert runner.main( [ "--gold", str( store ), "--slice-counts", '{"neither": 31}' ], session_scope=scope ) == 0
+    assert json.loads( capsys.readouterr().out )[ "stamp" ][ 0 ].startswith( "certified_classes: [yes, neither]" )
+
+
+def test_main_without_a_gold_option_reads_the_default_store( db, scope, labeller, monkeypatch, tmp_path, capsys ):
+    from cosa.repo.labelling import gold_store
+    store = tmp_path / "default.jsonl"
+    store.write_text( "".join( json.dumps( line ) + "\n" for line in own_labels( "no", 3 ) ) )
+    monkeypatch.setattr( gold_store, "default_path", lambda: store )
+    assert runner.main( [], session_scope=scope ) == 0
+    assert json.loads( capsys.readouterr().out )[ "gold_progress" ][ "rick" ][ "no" ] == 3

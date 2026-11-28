@@ -247,3 +247,18 @@ def test_an_option_label_with_stray_spaces_still_matches_its_pick():
 def test_a_multi_select_of_typed_items_only_is_a_write_in():
     field = rules.draft_of( card( "multiple_choice", picks( { "DB": [ "files", "memory" ] } ), OPTIONS ) )[ "fields" ][ "DB" ]
     assert ( field[ "kind" ], field[ "selected_ids" ], field[ "write_in_text" ] ) == ( "write_in_text", [], "files; memory" )
+
+
+def test_a_batch_header_holding_a_list_is_read_as_its_items():
+    draft = rules.draft_of( card( "open_ended_batch", picks( { "budget": [ "ten", "or less" ], "timeout": [] } ), BATCH ) )
+    field = draft[ "fields" ][ "budget" ]
+    assert ( field[ "answer" ], field[ "relation" ] ) == ( "ten; or less", None )
+    assert draft[ "fields" ][ "timeout" ][ "relation" ] == "no_answer"
+
+
+def test_who_answered_is_asked_of_answer_source_of( monkeypatch ):
+    asked = []
+    def other( stored ): asked.append( stored ); return "unknown"
+    monkeypatch.setattr( rules, "answer_source_of", other )
+    draft = rules.draft_of( card( "yes_no", "yes" ) )
+    assert asked == [ { "value": "yes", "source": "ui" } ] and draft[ "unknowns" ] == [ "unreadable_payload" ]
