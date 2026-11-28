@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #1d1d1b; }
+  header { position: sticky; top: 0; z-index: 2; background: #1d1d1b; color: #fff; padding: 5px 12px; display: flex; justify-content: space-between; font-size: 13px; }
+  #section { background: #e8e8e2; padding: 3px 12px; font-size: 12px; font-weight: 600; }
+  main { max-width: 900px; margin: 0 auto; padding: 6px 12px 40px; }
+  .card { background: #fff; border: 1px solid #d8d8d2; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; max-height: 22vh; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #66665f; margin: 2px 0; }
+  .answer { background: #fff7d6; border-color: #e3c85c; }
+  .forecast { background: #e6efff; border-color: #8fb0e8; }
+  button { font-size: 13px; padding: 5px 9px; border-radius: 6px; border: 1px solid #9a9a92; background: #fff; }
+  .picks, .nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+  .nav button { flex: 1; }
+  .chosen { background: #1d6fd1; color: #fff; border-color: #1d6fd1; }
+  textarea { width: 100%; box-sizing: border-box; font-size: 14px; padding: 4px 6px; }
+  #note { height: 34px; }
+  #export { margin-top: 24px; border-top: 2px solid #1d1d1b; padding-top: 10px; }
+  #exporttext { min-height: 140px; font-family: monospace; font-size: 12px; }
+  #restoretext { min-height: 70px; font-family: monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<header><span id="pos"></span><span id="done"></span></header>
+<div id="section"></div>
+<main>
+  <div class="label">Card</div>
+  <div class="card" id="cardtext"></div>
+  <div id="abstractbox"><div class="label">Abstract</div><div class="card" id="abstract"></div></div>
+  <div id="optionsbox"><div class="label">Options</div><div class="card" id="options"></div></div>
+  <div class="label">Question the forecast is about</div>
+  <div class="card" id="question"></div>
+  <div class="label">Rick's full answer</div>
+  <div class="card answer" id="answer"></div>
+  <div id="sharedbox"><div class="label">Already the same on both sides</div><div class="card" id="shared"></div></div>
+  <div class="label">What the answer says on this point</div>
+  <div class="card answer" id="actual"></div>
+  <div class="label">What the forecast says on this point</div>
+  <div class="card forecast" id="forecast"></div>
+  <div id="lockedbox"><div class="label">Locked</div><div class="card" id="locknote"></div></div>
+  <div id="readersbox"><div class="label">What the two readers said</div><div class="card" id="readers"></div></div>
+  <div class="label">Material error: would acting on the forecast do something the answer did not authorize, or skip what it required?</div>
+  <div class="picks" id="choices"></div>
+  <div class="label">Kind of error</div>
+  <div class="picks" id="kinds"></div>
+  <div class="label">Note (optional)</div>
+  <textarea id="note"></textarea>
+  <div class="nav">
+    <button id="prev">Back</button>
+    <button id="nextopen">Next unlabelled</button>
+    <button id="next">Next</button>
+  </div>
+  <div id="export">
+    <div class="label">Export</div>
+    <button id="download">Download answers (JSON)</button>
+    <button id="copy">Select text to copy</button>
+    <p id="exportstatus"></p>
+    <textarea id="exporttext" readonly></textarea>
+    <div class="label" style="margin-top:16px">Restore from an earlier export</div>
+    <input type="file" id="restorefile" accept=".json,application/json">
+    <textarea id="restoretext" placeholder="...or paste the export text here"></textarea>
+    <button id="restore">Restore pasted text</button>
+    <p id="restorestatus"></p>
+  </div>
+</main>
+<script type="application/json" id="data">__ITEMS_JSON__</script>
+<script>
+"use strict";
+var PAGE_ID  = "__PAGE_ID__";
+var ITEMS    = JSON.parse( document.getElementById( "data" ).textContent );
+var CHOICES  = __CHOICES_JSON__;
+var KINDS    = __KINDS_JSON__;
+var NAMES    = { yes: "Yes", no: "No", cant_tell: "Can't tell" };
+var TITLES   = { A: "Section A: blind", B: "Section B: the readers disagree" };
+var KEY      = "rick-pairs:" + PAGE_ID;
+var store    = { answers: {}, position: 0, seen: {} };
+var position = 0;
+
+function load() {
+  try { var raw = window.localStorage.getItem( KEY ); if ( raw ) store = JSON.parse( raw ); } catch ( e ) { /* private mode: answers live until the page closes */ }
+  store.seen = store.seen || {};
+  position = Math.min( store.position || 0, ITEMS.length - 1 );
+}
+function save() {
+  store.position = position;
+  try { window.localStorage.setItem( KEY, JSON.stringify( store ) ); } catch ( e ) { /* see load() */ }
+}
+function setText( id, text ) { document.getElementById( id ).textContent = text; }
+function boxed( box, id, text ) { document.getElementById( box ).style.display = text ? "block" : "none"; setText( id, text ); }
+function complete( key ) { var e = store.answers[ key ]; return !!( e && e.material_error && e.kind ); }
+function locked( item ) {   // a disputed pair that is also in the blind share is labelled blind first
+  return item.section === "B" && inBlind( item.pair_id ) && !complete( "A:" + item.pair_id );
+}
+function inBlind( pairId ) { return ITEMS.some( function ( i ) { return i.key === "A:" + pairId; } ); }
+function frozen( item ) { return item.section === "A" && !!store.seen[ item.pair_id ]; }   // the readers have been shown, so this answer is no longer blind
+function shut( item ) { return locked( item ) || frozen( item ); }
+function doneIn( section ) { return ITEMS.filter( function ( i ) { return ( !section || i.section === section ) && complete( i.key ); } ).length; }
+function sizeOf( section ) { return ITEMS.filter( function ( i ) { return i.section === section; } ).length; }
+function readerText( item ) {
+  return item.readers.map( function ( r ) {
+    return r.name + ": material error " + ( r.material_error ? "yes" : "no" ) + " · " + r.kind + "\n  atom: " + ( r.atom || "none" ) + "\n  note: " + ( r.note || "none" );
+  } ).join( "\n" );
+}
+function picks( id, values, field, item, entry ) {
+  var box = document.getElementById( id );
+  box.textContent = "";
+  values.forEach( function ( v ) {
+    var b = document.createElement( "button" );
+    b.className = entry && entry[ field ] === v ? "chosen" : "";
+    b.textContent = field === "material_error" ? NAMES[ v ] : v;
+    b.disabled = shut( item );
+    b.onclick = function () { choose( field, v ); };
+    box.appendChild( b );
+  } );
+}
+function show() {
+  var item = ITEMS[ position ], entry = store.answers[ item.key ], waiting = locked( item );
+  if ( item.section === "B" && !waiting && inBlind( item.pair_id ) ) store.seen[ item.pair_id ] = true;
+  setText( "pos", "Item " + ( position + 1 ) + " of " + ITEMS.length );
+  setText( "done", doneIn( "" ) + " of " + ITEMS.length + " done" );
+  setText( "section", TITLES[ item.section ] + " (" + doneIn( item.section ) + " of " + sizeOf( item.section ) + " done)" );
+  setText( "cardtext", item.card_text );
+  boxed( "abstractbox", "abstract", item.abstract );
+  boxed( "optionsbox", "options", item.options );
+  setText( "question", item.question || "(the whole answer: this card asks one question)" );
+  setText( "answer", item.answer );
+  boxed( "sharedbox", "shared", item.shared );
+  setText( "actual", item.actual || "no condition added" );
+  setText( "forecast", item.forecast || "no condition added" );
+  boxed( "readersbox", "readers", waiting ? "Label this pair in section A first. The readers' labels show after that." : readerText( item ) );
+  boxed( "lockedbox", "locknote", frozen( item ) ? "You have seen the readers' labels for this pair, so this blind answer can no longer change." : "" );
+  picks( "choices", CHOICES, "material_error", item, entry );
+  picks( "kinds", KINDS, "kind", item, entry );
+  var note = document.getElementById( "note" );
+  note.value = entry ? entry.note : "";
+  note.disabled = shut( item );
+  refreshExport();
+  save();
+}
+function entryFor( key ) {
+  if ( !store.answers[ key ] ) store.answers[ key ] = { material_error: "", kind: "", note: "" };
+  return store.answers[ key ];
+}
+function choose( field, value ) {
+  var item = ITEMS[ position ];
+  if ( shut( item ) ) return;
+  var entry = entryFor( item.key );
+  entry[ field ] = value;
+  entry.note = document.getElementById( "note" ).value;
+  entry.ts = new Date().toISOString();
+  show();
+}
+function saveNote() {
+  var item = ITEMS[ position ];
+  if ( shut( item ) ) return;
+  var entry = entryFor( item.key );
+  entry.note = document.getElementById( "note" ).value;
+  entry.ts = new Date().toISOString();
+  save();
+  refreshExport();
+}
+function go( to ) {
+  if ( to < 0 || to >= ITEMS.length ) return;
+  position = to;
+  show();
+  window.scrollTo( 0, 0 );
+}
+function nextOpen() {
+  for ( var n = 1; n <= ITEMS.length; n++ ) {
+    var at = ( position + n ) % ITEMS.length;
+    if ( !complete( ITEMS[ at ].key ) ) { go( at ); return; }
+  }
+  setText( "exportstatus", "Every item has an answer. Export below." );
+}
+function exportLines() {
+  return ITEMS.filter( function ( i ) { return complete( i.key ); } ).map( function ( i ) {
+    var e = store.answers[ i.key ];
+    var line = { pair_id: i.pair_id, section: i.section, material_error: e.material_error, kind: e.kind, note: e.note, ts: e.ts };
+    if ( frozen( i ) ) line.readers_seen = true;
+    return line;
+  } );
+}
+function refreshExport() { document.getElementById( "exporttext" ).value = JSON.stringify( exportLines(), null, 1 ); }
+function download() {
+  refreshExport();
+  var blob = new Blob( [ document.getElementById( "exporttext" ).value ], { type: "application/json" } );
+  var a = document.createElement( "a" );
+  a.href = URL.createObjectURL( blob );
+  a.download = "rick-pairs-" + PAGE_ID + "-" + new Date().toISOString().slice( 0, 10 ) + ".json";
+  document.body.appendChild( a );
+  a.click();
+  document.body.removeChild( a );
+  setText( "exportstatus", "Downloaded " + exportLines().length + " answers. If nothing arrived, copy the text below." );
+}
+function restoreText( text ) {
+  var lines, known = {}, best = {}, seen = {};
+  ITEMS.forEach( function ( i ) { known[ i.key ] = true; } );
+  try { lines = JSON.parse( text ); } catch ( e ) { return refuse( "this is not an export of this page: it is not valid JSON" ); }
+  if ( !Array.isArray( lines ) ) return refuse( "this is not an export of this page: it is not a list of answers" );
+  for ( var n = 0; n < lines.length; n++ ) {
+    var l = lines[ n ], where = "line " + ( n + 1 ) + ": ";
+    if ( l === null || typeof l !== "object" || typeof l.pair_id !== "string" || typeof l.section !== "string" || typeof l.ts !== "string" || isNaN( Date.parse( l.ts ) ) ) return refuse( where + "this is not an export of this page: it lacks pair_id, section or ts" );
+    var key = l.section + ":" + l.pair_id;
+    if ( !Object.prototype.hasOwnProperty.call( known, key ) ) return refuse( where + "the item " + key + " is not on this page" );
+    if ( CHOICES.indexOf( l.material_error ) < 0 || KINDS.indexOf( l.kind ) < 0 ) return refuse( where + "material_error or kind is not one the page offers" );
+    if ( l.section === "B" && inBlind( l.pair_id ) ) seen[ l.pair_id ] = true;
+    if ( l.section === "A" && l.readers_seen === true ) seen[ l.pair_id ] = true;
+    var held = Object.prototype.hasOwnProperty.call( best, key ) ? best[ key ] : null;
+    if ( !held || ( l.readers_seen === true && held.readers_seen !== true ) || ( ( l.readers_seen === true ) === ( held.readers_seen === true ) && Date.parse( l.ts ) > Date.parse( held.ts ) ) ) best[ key ] = l;
+  }
+  var applied = 0;
+  Object.keys( best ).forEach( function ( key ) {
+    var l = best[ key ], old = store.answers[ key ];
+    if ( l.section === "A" && store.seen[ l.pair_id ] ) return;   // a locked blind answer is never replaced
+    if ( l.readers_seen !== true && old && old.ts && Date.parse( old.ts ) >= Date.parse( l.ts ) ) return;   // a locked answer from the file beats an unlocked one here
+    store.answers[ key ] = { material_error: l.material_error, kind: l.kind, note: typeof l.note === "string" ? l.note : "", ts: l.ts };
+    applied++;
+  } );
+  Object.keys( seen ).forEach( function ( id ) { if ( complete( "A:" + id ) ) store.seen[ id ] = true; } );
+  show();
+  setText( "restorestatus", "Restored " + applied + " answers (of " + Object.keys( best ).length + " in the file; a stored answer that is newer is kept)." );
+  return true;
+}
+function refuse( reason ) { setText( "restorestatus", "Nothing restored: " + reason + "." ); return false; }
+function restoreFromFile() {
+  var f = document.getElementById( "restorefile" ).files[ 0 ], reader;
+  if ( !f ) return;
+  reader = new FileReader();
+  reader.onload = function () { restoreText( String( reader.result ) ); };
+  reader.onerror = function () { refuse( "the file could not be read" ); };
+  reader.readAsText( f );
+}
+function copyText() {
+  var t = document.getElementById( "exporttext" );
+  refreshExport();
+  t.focus();
+  t.select();
+  t.setSelectionRange( 0, t.value.length );
+  setText( "exportstatus", "Text selected. Use Copy in your browser's menu." );
+}
+
+document.getElementById( "prev" ).onclick     = function () { go( position - 1 ); };
+document.getElementById( "next" ).onclick     = function () { go( position + 1 ); };
+document.getElementById( "nextopen" ).onclick = nextOpen;
+document.getElementById( "download" ).onclick = download;
+document.getElementById( "copy" ).onclick     = copyText;
+document.getElementById( "restore" ).onclick  = function () { restoreText( document.getElementById( "restoretext" ).value ); };
+document.getElementById( "restorefile" ).onchange = restoreFromFile;
+document.getElementById( "note" ).oninput     = saveNote;
+load();
+show();
+</script>
+</body>
+</html>

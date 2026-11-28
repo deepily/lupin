@@ -9,6 +9,7 @@ import pytest
 import cosa.utils.util as cu
 from cosa.agents.prediction_engine.accuracy_comparators import _ask_judge
 from cosa.agents.prediction_engine.answer_judge import judge_model, make_judge
+from cosa.repo.doc_lint import model_transport
 from cosa.research.judge_validation import capture
 
 KINDS = ( "before_after", "staging_production", "must_may", "negated_permission", "scope_change", "time_change", "easy", "invented_condition" )
@@ -117,11 +118,13 @@ def test_main_returns_one_when_a_side_is_judged_against_its_expectation( tmp_pat
     assert "easy altered: expected pass=False judged pass=True" in capsys.readouterr().out
 
 
-def test_run_as_a_module_exits_with_mains_code( monkeypatch ):
-    monkeypatch.setattr( sys, "argv", [ "capture", "--help" ] )
+def test_run_as_a_module_exits_with_mains_code( tmp_path, monkeypatch ):
+    """The run reaches main itself, so the exit code is what main returned."""
+    monkeypatch.setattr( model_transport, "complete_sync", capture.replay_complete( _fixture( "easy" ) ) )
+    monkeypatch.setattr( sys, "argv", [ "capture", "--out", str( tmp_path ), "--kind", "easy" ] )
     monkeypatch.delitem( sys.modules, "cosa.research.judge_validation.capture" )
 
     with pytest.raises( SystemExit ) as stopped:
         runpy.run_module( "cosa.research.judge_validation.capture", run_name="__main__" )
 
-    assert stopped.value.code == 0
+    assert stopped.value.code == 0 and ( tmp_path / "easy.json" ).exists()

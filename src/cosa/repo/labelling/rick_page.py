@@ -236,6 +236,30 @@ def embed_json( value ):
     return json.dumps( value, ensure_ascii=True, sort_keys=True ).replace( "<", "\\u003c" ).replace( ">", "\\u003e" ).replace( "&", "\\u0026" )
 
 
+def fill_page( template_relative, items, title, ids, extra=None ):
+    """
+    Fill a one-file page template with a title, a page id and the embedded items.
+
+    Requires:
+        - template_relative is a path under the project root, starting /src/; title is non-empty text
+        - items is a non-empty list the template reads; ids names its entries; extra maps further placeholders to their text
+
+    Ensures:
+        - __TITLE__ holds the title as escaped text, and __PAGE_ID__ the id page_id gives for ids
+        - each placeholder of extra is filled, and __ITEMS_JSON__ last, so item text that quotes a placeholder reaches the page unchanged
+
+    Raises:
+        - LabellingError BAD_ITEM for no items or a blank title
+        - OSError when the template cannot be read
+    """
+    if not items or not title.strip(): raise er.LabellingError( er.BAD_ITEM, "a page needs items and a title" )
+    page = pathlib.Path( cu.get_project_root() + template_relative ).read_text( encoding="utf-8" )
+    safe = title.replace( "&", "&amp;" ).replace( "<", "&lt;" ).replace( ">", "&gt;" )
+    page = page.replace( "__TITLE__", safe ).replace( "__PAGE_ID__", page_id( ids ) )
+    for placeholder, text in ( extra or {} ).items(): page = page.replace( placeholder, text )
+    return page.replace( "__ITEMS_JSON__", embed_json( items ) )
+
+
 def render_page( items, title ):
     """
     Build the one-file page.
@@ -252,12 +276,7 @@ def render_page( items, title ):
     Raises:
         - LabellingError BAD_ITEM for no items or a blank title
     """
-    if not items or not title.strip(): raise er.LabellingError( er.BAD_ITEM, "a page needs items and a title" )
-    template = pathlib.Path( cu.get_project_root() + TEMPLATE_RELATIVE ).read_text( encoding="utf-8" )
-    safe     = title.replace( "&", "&amp;" ).replace( "<", "&lt;" ).replace( ">", "&gt;" )
-    ids      = [ i[ "item_id" ] for i in items ]
-    filled   = template.replace( "__TITLE__", safe ).replace( "__PAGE_ID__", page_id( ids ) ).replace( "__TYPE_ORDER_JSON__", embed_json( list( CARD_TYPE_LABELS.values() ) ) )
-    return filled.replace( "__ITEMS_JSON__", embed_json( items ) )   # items last: a card that quotes a placeholder is never filled in
+    return fill_page( TEMPLATE_RELATIVE, items, title, [ i[ "item_id" ] for i in items ], { "__TYPE_ORDER_JSON__": embed_json( list( CARD_TYPE_LABELS.values() ) ) } )
 
 
 def main( argv=None ):
