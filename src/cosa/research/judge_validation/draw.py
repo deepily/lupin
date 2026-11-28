@@ -8,7 +8,8 @@ drawn pair keeps its inclusion probability. No output carries an arm or model fi
 file's order is shuffled.
 
 The two readers who set the truth labels get two files. The first holds each card with its
-options and the answer, and no forecast. The second holds the forecasts, keyed by pair id.
+options and the answer, one row per pair, and no forecast. The second holds the forecasts.
+Both are keyed by pair id.
 The sample sizes are inputs: the manager records them before any card is drawn.
 """
 
@@ -137,20 +138,22 @@ def card_rows( cards_path, notification_ids ):
 
 def reader_files( sample, cards, seed ):
     """
-    Build the two files the truth readers get.
+    Build the two files the truth readers get, both keyed by pair id.
 
     Requires:
         - sample comes from draw_sample; cards is card_rows' answer for every card in it
 
     Ensures:
         - returns ( answers, forecasts ), each shuffled by seed
-        - answers holds one row per card: notification_id, the card and the answer, and no forecast
+        - answers holds one row per pair: pair_id, notification_id, field_key, actual_text, the card and
+          the answer, and no forecast
         - forecasts holds one row per pair: pair_id, notification_id, field_key and predicted_text
         - neither holds a stratum, an inclusion figure, an arm or a model
     """
-    answers   = [ dict( cards[ card ], notification_id=card ) for card in sorted( { row[ "notification_id" ] for row in sample } ) ]
-    forecasts = [ { field: row[ field ] for field in ( "pair_id", "notification_id", "field_key", "predicted_text" ) }
-                  for row in sorted( sample, key=lambda row: row[ "pair_id" ] ) ]
+    ordered   = sorted( sample, key=lambda row: row[ "pair_id" ] )
+    keys      = ( "pair_id", "notification_id", "field_key" )
+    answers   = [ dict( cards[ row[ "notification_id" ] ], **{ field: row[ field ] for field in keys + ( "actual_text", ) } ) for row in ordered ]
+    forecasts = [ { field: row[ field ] for field in keys + ( "predicted_text", ) } for row in ordered ]
     random.Random( f"{seed}:answers" ).shuffle( answers )
     random.Random( f"{seed}:forecasts" ).shuffle( forecasts )
     return answers, forecasts

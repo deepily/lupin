@@ -82,7 +82,8 @@ def test_the_files_are_written_once_with_their_hashes_and_readers_see_no_arm( tm
     answers   = [ json.loads( l ) for l in ( out / draw.ANSWERS_FILE ).read_text().splitlines() ]
     forecasts = [ json.loads( l ) for l in ( out / draw.FORECASTS_FILE ).read_text().splitlines() ]
     assert len( answers ) == 85 and len( forecasts ) == 85
-    assert set( answers[ 0 ] ) == { "notification_id", "response_type", "message", "abstract", "options", "answer" }
+    assert { r[ "pair_id" ] for r in answers } == { r[ "pair_id" ] for r in forecasts } and "predicted_text" not in json.dumps( answers )
+    assert set( answers[ 0 ] ) == { "pair_id", "notification_id", "field_key", "actual_text", "response_type", "message", "abstract", "options", "answer" }
     assert set( forecasts[ 0 ] ) == { "pair_id", "notification_id", "field_key", "predicted_text" }
     assert answers[ 0 ][ "answer" ] == "yes" and "private@example.com" not in json.dumps( answers )
     before = ( out / draw.SAMPLE_FILE ).read_bytes()
