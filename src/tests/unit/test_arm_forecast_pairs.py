@@ -170,6 +170,30 @@ def test_option_mismatch_reads_a_yes_no_stance_and_open_pairs_carry_none():
     assert "option_mismatch" not in pairs[ 0 ]
 
 
+@pytest.mark.parametrize( "kind, forecast, actual", [
+    ( "yes_no", { "value": "yes", "qualifier": "ONLY-IF" }, "yes" ),
+    ( "multiple_choice", { "answers": { "Plan": "Fast" }, "qualifier": "ONLY-IF" }, '{"answers":{"Plan":"Safe"}}' ),
+    ( "multiple_choice", { "fields": { "Plan": { "write_in": "typed" } }, "qualifier": "ONLY-IF" }, '{"answers":{"Plan":"Safe"}}' ),
+    ( "open_ended", { "gist": "ship it", "qualifier": "ONLY-IF" }, "hold" ),
+    ( "open_ended_batch", { "fields": { "len": { "gist": "short" }, "who": { "gist": "me" } }, "qualifier": "ONLY-IF" }, '{"answers":{"len":"long","who":"you"}}' ),
+] )
+def test_no_card_type_drops_the_forecasts_conditions( kind, forecast, actual ):
+    rows = afp.texts_of( kind, forecast, actual )
+    assert rows and all( "ONLY-IF" in predicted for _, predicted, _ in rows )
+
+
+def test_a_batch_field_with_no_gist_makes_no_row_even_with_conditions():
+    assert afp.texts_of( "open_ended_batch", { "fields": {}, "qualifier": "ONLY-IF" }, '{"answers":{"len":"long"}}' ) == []
+
+
+@pytest.mark.parametrize( "said, points_back", [
+    ( "yes, as in earlier answers", True ), ( "the same as their Previous pick", True ), ( "declines like last time", True ), ( "approves, as the owner did", True ),
+    ( "ship it before lunch", False ), ( None, False ),
+] )
+def test_refers_to_earlier( said, points_back ):
+    assert afp.refers_to_earlier( said ) is points_back
+
+
 def test_joined_writes_each_shape():
     assert [ afp._joined( None ), afp._joined( ( "a", "b" ) ), afp._joined( 3 ) ] == [ None, "a; b", "3" ]
 
@@ -183,7 +207,7 @@ def test_make_pairs_blinds_the_arm_and_flags_a_literal_mismatch():
     assert key[ one ] == { "arm": "C0", "model": "haiku" }
     by_id = { p[ "pair_id" ]: p for p in pairs }
     assert by_id[ one ] == { "pair_id": one, "notification_id": "c1", "response_type": "yes_no", "field_key": "", "predicted_text": None, "actual_text": "Wait", "literal_mismatch": True,
-                             "option_mismatch": False }
+                             "refers_to_earlier": False, "option_mismatch": False }
     assert [ by_id[ afp.pair_id_of( c, "", a ) ][ "literal_mismatch" ] for c, a in ( ( "c1", "B1" ), ( "c2", "C0" ) ) ] == [ False, False ]
     assert not { "arm", "model" } & set( by_id[ one ] )
 
@@ -211,8 +235,8 @@ def test_stored_forecasts_prefers_the_copy_and_count_table_counts( tmp_path ):
     models = afp.arm_models( "h", "o" )
     pairs, key = afp.make_pairs( cards, [ ( c, a, f ) for ( c, a ), f in { **found, ( "gone", "A0" ): None }.items() ], models )
     table = afp.count_table( pairs, key, { **found, ( "gone", "A0" ): None }, cards )
-    assert table[ "A0" ][ "yes_no" ] == { "cards": 1, "abstained": 0, "pairs": 1, "literal_mismatch": 1, "option_mismatch": 0 }
-    assert table[ "C0-opus" ][ "yes_no" ] == { "cards": 1, "abstained": 1, "pairs": 0, "literal_mismatch": 0, "option_mismatch": 0 }
+    assert table[ "A0" ][ "yes_no" ] == { "cards": 1, "abstained": 0, "pairs": 1, "literal_mismatch": 1, "option_mismatch": 0, "refers_to_earlier": 0 }
+    assert table[ "C0-opus" ][ "yes_no" ] == { "cards": 1, "abstained": 1, "pairs": 0, "literal_mismatch": 0, "option_mismatch": 0, "refers_to_earlier": 0 }
     assert [ models[ a ] for a in ( "C0", "answer_history", "B1-opus", "engine" ) ] == [ "h", "h", "o", "none" ]
 
 

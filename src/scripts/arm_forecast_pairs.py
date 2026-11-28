@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 import sys
 import uuid
@@ -278,6 +279,36 @@ def _joined( value ):
     return str( value )
 
 
+# A forecast that points at what the person answered before tells a reader that its arm saw history.
+EARLIER_ANSWER = re.compile( r"\b(earlier|previous|previously|prior)\b|\b(as|like) (before|last time|usual)\b|\bas (they|the owner) did\b", re.IGNORECASE )
+
+
+def refers_to_earlier( predicted ):
+    """
+    Say whether a forecast text points at earlier answers.
+
+    Requires:
+        - predicted is a string or None
+
+    Ensures:
+        - returns True when the text holds one of EARLIER_ANSWER's phrases; it is a word match, so it can also catch an "earlier" about something else
+    """
+    return bool( predicted and EARLIER_ANSWER.search( predicted ) )
+
+
+def _with_conditions( said, forecast ):
+    """
+    Put a full record's conditions after what it forecast.
+
+    Requires:
+        - said is a non-empty string; forecast is a forecast dict
+
+    Ensures:
+        - returns said, then "; " and the record's qualifier when it has one
+    """
+    return "; ".join( part for part in ( said, forecast.get( "qualifier" ) ) if part )
+
+
 def _choice_predicted( forecast, header ):
     """
     Read what a forecast says for one multiple-choice field.
@@ -294,7 +325,7 @@ def _choice_predicted( forecast, header ):
         field = ( forecast.get( "fields" ) or {} ).get( header ) or {}
         given = field.get( "write_in" ) or field.get( "reframe" )
     if given is None: return None
-    return "; ".join( part for part in ( _joined( given ), forecast.get( "qualifier" ) ) if part )
+    return _with_conditions( _joined( given ), forecast )
 
 
 def texts_of( response_type, forecast, actual_value ):
@@ -309,8 +340,9 @@ def texts_of( response_type, forecast, actual_value ):
         - an abstention makes no row
         - yes/no: one row with field key "" when the forecast's stance is the answer's; the texts are the two conditions as the complete-action comparator reads them, None for none
         - multiple choice: one row per answered field the forecast speaks to, field key the header
-        - open-ended: one row, the predicted text the forecast's gist
-        - batch: one row per answered field the forecast gives a gist for, field key the header
+        - open-ended: one row, the predicted text the forecast's gist with its conditions after it
+        - batch: one row per answered field the forecast gives a gist for, field key the header; the card's conditions follow each field's gist
+        - no forecast text drops a condition the record holds
     """
     if not forecast: return []
     if response_type == "yes_no":
@@ -318,13 +350,15 @@ def texts_of( response_type, forecast, actual_value ):
         return [ ( "", detail.get( "predicted_qualifier" ), detail.get( "actual_qualifier" ) ) ] if match else []
     if response_type == "open_ended":
         predicted = forecast.get( "gist" )
-        return [ ( "", predicted, actual_value ) ] if predicted else []
+        return [ ( "", _with_conditions( predicted, forecast ), actual_value ) ] if predicted else []
     fields = parse_field_selections( actual_value ) or {}
     rows   = []
     for header, record in fields.items():
         answered  = record[ "text" ] if record[ "text" ] is not None else _joined( record[ "selected" ] )
         if response_type == "multiple_choice": predicted = _choice_predicted( forecast, header )
-        else: predicted = ( ( forecast.get( "fields" ) or {} ).get( header ) or {} ).get( "gist" )
+        else:
+            gist      = ( ( forecast.get( "fields" ) or {} ).get( header ) or {} ).get( "gist" )
+            predicted = _with_conditions( gist, forecast ) if gist else None
         if predicted is not None and answered: rows.append( ( header, predicted, answered ) )
     return rows
 
@@ -376,6 +410,7 @@ def make_pairs( cards, forecasts, models ):
     Ensures:
         - returns ( pairs, key ); pairs are sorted by pair id and never name an arm or a model
         - literal_mismatch is True when the two texts differ after stripping and lower-casing, None counting as empty
+        - refers_to_earlier is refers_to_earlier of the predicted text, so such a pair can be left out of a blinded draw
         - a yes/no or multiple-choice pair also carries option_mismatch; the other types have no options and no such key
         - key maps each pair id to { arm, model }
         - a forecast of a card not in cards makes nothing
@@ -388,7 +423,8 @@ def make_pairs( cards, forecasts, models ):
             pair_id          = pair_id_of( card_id, field_key, arm )
             pairs[ pair_id ] = { "pair_id": pair_id, "notification_id": card_id, "response_type": card[ "response_type" ], "field_key": field_key,
                                  "predicted_text": predicted, "actual_text": actual,
-                                 "literal_mismatch": ( predicted or "" ).strip().lower() != ( actual or "" ).strip().lower() }
+                                 "literal_mismatch": ( predicted or "" ).strip().lower() != ( actual or "" ).strip().lower(),
+                                 "refers_to_earlier": refers_to_earlier( predicted ) }
             if card[ "response_type" ] in CHOICE_TYPES: pairs[ pair_id ][ "option_mismatch" ] = option_mismatch( card, field_key, forecast )
             key[ pair_id ]   = { "arm": arm, "model": models[ arm ] }
     return [ pairs[ one ] for one in sorted( pairs ) ], key
@@ -438,12 +474,12 @@ def count_table( pairs, key, forecasts, cards ):
         - pairs and key are make_pairs's; forecasts is stored_forecasts's; cards is human_cards's
 
     Ensures:
-        - returns { arm: { card type: { cards, abstained, pairs, literal_mismatch, option_mismatch } } }; a type without options counts 0
+        - returns { arm: { card type: { cards, abstained, pairs, literal_mismatch, option_mismatch, refers_to_earlier } } }; a type without options counts 0
     """
     table = {}
     def cell( arm, kind ):
         """Give the counts of one arm and card type."""
-        return table.setdefault( arm, {} ).setdefault( kind, { "cards": 0, "abstained": 0, "pairs": 0, "literal_mismatch": 0, "option_mismatch": 0 } )
+        return table.setdefault( arm, {} ).setdefault( kind, { "cards": 0, "abstained": 0, "pairs": 0, "literal_mismatch": 0, "option_mismatch": 0, "refers_to_earlier": 0 } )
     for ( card_id, arm ), forecast in forecasts.items():
         if card_id not in cards: continue
         counts = cell( arm, cards[ card_id ][ "response_type" ] )
@@ -454,6 +490,7 @@ def count_table( pairs, key, forecasts, cards ):
         counts[ "pairs" ]            += 1
         counts[ "literal_mismatch" ] += pair[ "literal_mismatch" ]
         counts[ "option_mismatch" ]  += pair.get( "option_mismatch", False )
+        counts[ "refers_to_earlier" ] += pair[ "refers_to_earlier" ]
     return table
 
 
