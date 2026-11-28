@@ -49,15 +49,15 @@ REFUSALS_NAME   = "refusals.jsonl"
 SAMPLE_NAME     = "sample.json"
 
 
-def add_missing_columns( engine ):
+def add_missing_columns( engine, models=( Notification, PredictionLog, PredictionArmForecast ) ):
     """
     Add to a copied archive the nullable columns its tables gained after the archive was made.
 
     Requires:
-        - engine is an engine over the copy
+        - engine is an engine over the copy; models are the mapped classes whose tables to bring up to date
 
     Ensures:
-        - the gaps are found by schema_drift.find_missing_columns over the three tables the job reads or writes
+        - the gaps are found by schema_drift.find_missing_columns over the models' tables, by default the three the job reads or writes
         - each column the models hold and the table lacks is added as a nullable column of its SQLite type
         - returns the list of "table.column" names added; a copy that is up to date adds none
 
@@ -65,7 +65,7 @@ def add_missing_columns( engine ):
         - RuntimeError if a missing column is not nullable or a whole table is missing, because the copy would be unreadable by the job
     """
     scope = MetaData()
-    for model in ( Notification, PredictionLog, PredictionArmForecast ): model.__table__.to_metadata( scope )
+    for model in models: model.__table__.to_metadata( scope )
     added = []
     for gap in schema_drift.find_missing_columns( engine, scope ):
         if gap[ "kind" ] == schema_drift.KIND_MISSING_TABLE: raise RuntimeError( f"table {gap[ 'table' ]} is missing from the archive" )
