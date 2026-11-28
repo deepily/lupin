@@ -8,6 +8,7 @@ pins: [
   cosa.research.judge_validation.flips.read_pairs@ebe81789d3, cosa.research.judge_validation.flips.run_pair@677c3d7452, cosa.research.judge_validation.flips.result_path@b23d8f2d19, cosa.research.judge_validation.flips.run_set@ed6ad75b13, cosa.research.judge_validation.flips.main@35135918b0,
   cosa.research.judge_validation.labels.read_reader_labels@1e1a942364, cosa.research.judge_validation.labels.read_export@73143cb4cb, cosa.research.judge_validation.labels.settle@fb5f69b794, cosa.research.judge_validation.labels.main@c63aafe5c1,
   cosa.research.judge_validation.scoring.record_identity@bc88698227, cosa.research.judge_validation.scoring.read_identity@f7766c6813, cosa.research.judge_validation.scoring.says_material@c8de0bcf34, cosa.research.judge_validation.scoring.judge_row@c0c8df12ee, cosa.research.judge_validation.scoring.run_judge@483fca3119, cosa.research.judge_validation.scoring.proportion@31bcd2710f, cosa.research.judge_validation.scoring.weighted_rate@f077f02e61, cosa.research.judge_validation.scoring.agreement@2db518805c, cosa.research.judge_validation.scoring.arm_bias@dc375c89a2, cosa.research.judge_validation.scoring.check_labels@a1248bfbaf, cosa.research.judge_validation.scoring.pass_line@34d2b238e2, cosa.research.judge_validation.scoring.reader_agreement@9fa2b00def, cosa.research.judge_validation.scoring.build_report@8ee2b4585f, cosa.research.judge_validation.scoring.main@d3c8441295,
+  cosa.research.judge_validation.pair_page.read_pairs@c808bc7f5b, cosa.research.judge_validation.pair_page.read_reader@2d6c663b4a, cosa.research.judge_validation.pair_page.draw_blind@fac95e269b, cosa.research.judge_validation.pair_page.disputed_ids@53b51e1b00, cosa.research.judge_validation.pair_page.options_text@96528afff2, cosa.research.judge_validation.pair_page.answer_text@18834c89e8, cosa.research.judge_validation.pair_page.page_items@a94c669aba, cosa.research.judge_validation.pair_page.render_page@8daacb5216, cosa.research.judge_validation.pair_page.main@bea8e9148f,
 ]
 ---
 # The answer judge and its validation
@@ -26,6 +27,13 @@ The answer judge says whether a forecast keeps every restriction of the real ans
 - `scoring run` judges the sample and resumes if interrupted. `scoring report` needs sensitivity and specificity of at least 0.90, with their lower bounds.
 - A card type needs 30 cards in both its error and correct cells, or it reads "judge not validated".
 - `flips` runs 24 minimal pairs, once per judge identity and set. Keep those pairs for that run alone.
+
+## Rick's page (`pair_page`)
+- `main` builds one offline HTML page from `draw`'s two reader files and the two readers' labels. It writes a receipt beside it and never overwrites a page.
+- `read_pairs` joins the two reader files by pair id and carries no arm or model. `read_reader` refuses labels that do not cover every pair once.
+- Section A is `draw_blind`'s seeded 20%, shown with no reader label. Section B is `disputed_ids`, every pair where the readers differ on `material_error`.
+- A pair in both sections shows its reader labels only after the blind answer. Showing them locks that answer, across reload and restore. Use one tab: a second tab opened earlier could overwrite the lock.
+- `page_items` also says what both sides already agree on. `options_text` and `answer_text` write the stored options and answer as lines, and `render_page` fills the template with `rick_page.fill_page` ([[labelling-rick-page]]).
 
 ## The test fixtures (`capture`)
 - `capture.py` runs fixture cases, kept apart from the 24 pairs, on the real model. It commits the prompts and replies under `src/tests/fixtures/answer_judge/`.
