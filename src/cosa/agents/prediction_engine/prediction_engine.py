@@ -66,6 +66,8 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED,
     DEFAULT_CANDIDATE_TEMPLATE_CAP,
     CANDIDATE_OVERFETCH_FACTOR,
+    DEFAULT_CATEGORY_AS_RANKING,
+    DEFAULT_CATEGORY_RANK_BOOST,
     RESPONSE_TYPE_YES_NO,
     RESPONSE_TYPE_MULTIPLE_CHOICE,
     RESPONSE_TYPE_OPEN_ENDED,
@@ -75,7 +77,7 @@ from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.agents.prediction_engine import evidence_recorder
 from cosa.agents.prediction_engine import failure_visibility
-from cosa.agents.prediction_engine.candidate_filter import thin_candidates
+from cosa.agents.prediction_engine.candidate_filter import rank_with_category, thin_candidates
 from cosa.rest.code_identity import get_code_identity
 from cosa.rest.db.vector_errors import QueryVectorRefused
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
@@ -153,6 +155,8 @@ class PredictionEngine:
             self.candidate_retry_dedupe_enabled = config_mgr.get( "prediction engine candidate retry dedupe enabled", default=str( DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED ), return_type="boolean" )
             self.candidate_template_cap_enabled = config_mgr.get( "prediction engine candidate template cap enabled", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED ), return_type="boolean" )
             self.candidate_template_cap         = int( config_mgr.get( "prediction engine candidate template cap", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP ), return_type="int" ) )
+            self.category_as_ranking = config_mgr.get( "prediction engine category as ranking", default=str( DEFAULT_CATEGORY_AS_RANKING ), return_type="boolean" )
+            self.category_rank_boost = config_mgr.get( "prediction engine category rank boost", default=str( DEFAULT_CATEGORY_RANK_BOOST ), return_type="float" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -185,6 +189,8 @@ class PredictionEngine:
             self.candidate_retry_dedupe_enabled = DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED
             self.candidate_template_cap_enabled = DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED
             self.candidate_template_cap         = DEFAULT_CANDIDATE_TEMPLATE_CAP
+            self.category_as_ranking = DEFAULT_CATEGORY_AS_RANKING
+            self.category_rank_boost = DEFAULT_CATEGORY_RANK_BOOST
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -373,23 +379,29 @@ class PredictionEngine:
 
     def _find_candidates( self, store, limit: int, **query ) -> list:
         """
-        Fetch the neighbours that may vote, thinned when a candidate switch is on.
+        Fetch the neighbours that may vote, under whichever candidate switches are on.
 
         Requires:
-            - store has find_similar; limit is a positive int; query holds its other arguments
+            - store has find_similar; limit is a positive int; query holds its other arguments, category among them
 
         Ensures:
-            - with both candidate switches off, returns store.find_similar( limit=limit, **query ) untouched
-            - with either on, fetches CANDIDATE_OVERFETCH_FACTOR times the limit and returns at most limit pairs after
-              thin_candidates, so a place a thinned copy held goes to the next nearest case
+            - with every candidate switch off, returns store.find_similar( limit=limit, **query ) untouched
+            - with category as ranking on, the category filters nothing; rank_with_category orders the neighbours
+            - with either thinning switch on, fetches CANDIDATE_OVERFETCH_FACTOR times the limit and returns at most limit
+              pairs after thin_candidates, so a place a thinned copy held goes to the next nearest case
 
         Raises:
             - whatever find_similar raises
         """
-        if not ( self.candidate_retry_dedupe_enabled or self.candidate_template_cap_enabled ):
-            return store.find_similar( limit=limit, **query )
+        thinning = self.candidate_retry_dedupe_enabled or self.candidate_template_cap_enabled
+        fetch    = limit * CANDIDATE_OVERFETCH_FACTOR if thinning else limit
+        found    = store.find_similar( limit=fetch, **query )
+        if self.category_as_ranking:
+            every = store.find_similar( limit=fetch, **{ **query, "category": None } )
+            found = rank_with_category( found, every, query[ "category" ], self.category_rank_boost, fetch )
+        if not thinning: return found
         return thin_candidates(
-            store.find_similar( limit=limit * CANDIDATE_OVERFETCH_FACTOR, **query ), limit,
+            found, limit,
             dedupe       = self.candidate_retry_dedupe_enabled,
             template_cap = self.candidate_template_cap if self.candidate_template_cap_enabled else None )
 
@@ -447,7 +459,7 @@ class PredictionEngine:
         Ratification-aware case selection for the open-ended retrieval tiers.
 
         Requires:
-            - similar_cases: list of ( similarity_pct, record ), descending similarity
+            - similar_cases: list of ( similarity_pct, record ), in the retrieval's rank order
             - message: the current question text
 
         Ensures:
@@ -1413,7 +1425,7 @@ class PredictionEngine:
                 metadata           = { "reason": "all_cases_rejected" }
             )
 
-        max_similarity = candidate_cases[ 0 ][ 0 ] / 100.0
+        max_similarity = max( similarity for similarity, _ in candidate_cases ) / 100.0   # the first need not be the nearest under category ranking
         top_case       = candidate_cases[ 0 ][ 1 ]
         top_question   = top_case.get( "question", "" )
 
@@ -1746,8 +1758,8 @@ class PredictionEngine:
 
         Ensures:
             - returns the first 12 hex characters of a sha256 over the retrieval, display, retrieval-metric and calibration settings,
-              and over the per-field multiple-choice, lookup-neither, complete-action and two candidate switches, each only
-              when it is on; the template cap's number counts only with its switch on
+              and over the per-field multiple-choice, lookup-neither, complete-action, two candidate and category-ranking
+              switches, each only when it is on; the cap's number and the boost count only with their switch on
             - the same settings give the same string, and a changed setting gives a different one
         """
         settings = { "cbr_top_k": self.cbr_top_k, "similarity_threshold": self.similarity_threshold,
@@ -1760,6 +1772,7 @@ class PredictionEngine:
         if self.complete_action_scoring_enabled: settings[ "complete_action_scoring_enabled" ] = True
         if self.candidate_retry_dedupe_enabled: settings[ "candidate_retry_dedupe_enabled" ] = True
         if self.candidate_template_cap_enabled: settings[ "candidate_template_cap" ] = self.candidate_template_cap
+        if self.category_as_ranking: settings[ "category_rank_boost" ] = self.category_rank_boost
         return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
 
     def three_way_forecast( self, ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> Optional[Dict[str, Any]]:

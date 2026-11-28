@@ -44,6 +44,27 @@ def thin_candidates( similar_cases, limit, dedupe=False, template_cap=None ):
     return kept[ :limit ]
 
 
+def rank_with_category( same_category, any_category, category, boost, limit ):
+    """
+    Order two retrievals as one, a case of the asked category ranked as if it were nearer.
+
+    Requires:
+        - same_category and any_category are find_similar results, the first filtered to category and the second not
+        - boost is a fraction of similarity; limit is a positive int
+
+    Ensures:
+        - returns at most limit pairs, one per record id, ordered by similarity plus the boost for the asked category
+        - every similarity returned is the one find_similar gave: the boost orders and is never reported
+        - a tie keeps the same-category retrieval first
+        - the result is the top limit of all matching cases, because each retrieval was itself cut to the same limit
+    """
+    merged = {}
+    for pair in list( same_category ) + list( any_category ):
+        merged.setdefault( pair[ 1 ][ "id" ], pair )
+    ordered = sorted( merged.values(), key=lambda pair: -( pair[ 0 ] + ( boost * 100.0 if pair[ 1 ].get( "category" ) == category else 0.0 ) ) )
+    return ordered[ :limit ]
+
+
 def _without_retry_copies( similar_cases ):
     """
     Keep one pair of each retry group.
