@@ -115,7 +115,7 @@ def test_the_report_counts_all_each_type_and_the_stop_hook_cards_on_their_own_li
 
 
 def test_the_summary_always_has_a_stop_hook_line_even_with_no_such_card():
-    rows  = [ { "response_type": "yes_no", "title": "Ship it?", "forecast": None, "reason": "no_row", "correct": False, "old_correct": True } ]
+    rows  = [ { "response_type": "yes_no", "title": "Ship it?", "forecast": None, "reason": "no_row", "correct": False, "old_correct": True, "write_in_fields": [] } ]
     lines = arm.summarize( rows )
     assert [ one[ "label" ] for one in lines ] == [ "all", "yes_no", "stop-hook cards" ]
     assert lines[ 2 ][ "asks" ] == 0 and lines[ 0 ][ "abstained" ] == { "no_row": 1 }
@@ -302,12 +302,12 @@ def test_each_scored_row_carries_the_answer_split_read_from_its_card( world ):
 def _mc_row( correct, scorable, write_in ):
     """One scored multiple-choice row of the shape score_rows writes."""
     return { "response_type": "multiple_choice", "title": "Pick", "forecast": { "answers": {} }, "reason": None, "correct": correct, "old_correct": False,
-             "scorable": scorable, "write_in": write_in }
+             "scorable": scorable, "write_in": write_in, "write_in_fields": [] }
 
 
 def test_a_line_gives_multiple_choice_right_over_scorable_and_the_table_prints_it_under_the_all_cards_figure():
     rows  = [ _mc_row( True, True, False ), _mc_row( False, True, True ), _mc_row( False, False, True ),
-              { "response_type": "yes_no", "title": "Ship it?", "forecast": { "value": "yes" }, "reason": None, "correct": True, "old_correct": True, "scorable": True, "write_in": False } ]
+              { "response_type": "yes_no", "title": "Ship it?", "forecast": { "value": "yes" }, "reason": None, "correct": True, "old_correct": True, "scorable": True, "write_in": False, "write_in_fields": [] } ]
     lines = arm.summarize( rows )
     assert lines[ 0 ][ "correct" ] == 2 and lines[ 0 ][ "multiple_choice" ] == { "cards": 3, "scorable": 2, "unscored": 1, "right": 1, "unscored_right": 0,
                                                                                 "correct_all_cards": 1, "accuracy_scorable": 0.5, "accuracy_all_cards": 1 / 3,
@@ -332,3 +332,61 @@ def test_a_card_with_a_typed_write_in_is_marked_and_one_with_every_option_field_
     run( world )
     rows = [ json.loads( one ) for one in open( os.path.join( world[ "work" ], arm.OUT_NAME ) ) ]
     assert ( rows[ 2 ][ "scorable" ], rows[ 2 ][ "write_in" ] ) == split and rows[ 2 ][ "correct" ] is False
+
+
+MC_OUTCOME_REPLY = json.dumps( { "fields": { "Plan": { "option_ids": [ PLAN_B ], "write_in_probability": 0.8 }, "Extras": { "option_ids": [ DOCS, TESTS ], "write_in_probability": 0.1 } }, **TAIL } )
+
+
+def outcome_model( prompt, options ):
+    """Stand in for the model under --write-in, replying with the outcome."""
+    async def stream():
+        assert "write_in_probability" in prompt, "the run asked for the outcome"
+        yield AssistantMessage( content=[ TextBlock( MC_OUTCOME_REPLY ) ], model=options.model )
+    return stream()
+
+
+def test_the_write_in_flag_keeps_only_the_multiple_choice_cards_and_scores_each_fields_outcome( world ):
+    lines = []
+    code  = arm.main( [ "--archive", world[ "archive" ], "--records", world[ "records" ], "--work-dir", world[ "work" ], "--write-in" ], query_fn=outcome_model, out=lines.append )
+    rows  = [ json.loads( one ) for one in open( os.path.join( world[ "work" ], arm.OUT_NAME ) ) ]
+    assert code == 0 and [ row[ "id" ] for row in rows ] == [ str( world[ "cards" ][ 2 ][ "id" ] ) ]
+    assert rows[ 0 ][ "write_in_fields" ] == [ { "header": "Plan", "probability": 0.8, "predicted": True, "actual": False },
+                                               { "header": "Extras", "probability": 0.1, "predicted": False, "actual": False } ]
+    assert any( "write-in outcome True" in one for one in lines )
+    table = "\n".join( lines )
+    assert "write-in forecast: 2 fields, 0 typed, 1 forecast typed, 0 both; precision 0.000, recall -, Brier 0.325" in table
+
+
+def test_without_the_flag_no_card_has_an_outcome_and_no_write_in_line_is_printed( world ):
+    lines = run( world )
+    rows  = [ json.loads( one ) for one in open( os.path.join( world[ "work" ], arm.OUT_NAME ) ) ]
+    assert all( row[ "write_in_fields" ] == [] for row in rows ) and not any( "write-in forecast" in one for one in lines )
+    assert any( "write-in outcome False" in one for one in lines )
+
+
+def _paired_row( ask_id, correct, scorable=True, kind="multiple_choice" ):
+    """One scored row for pair_with."""
+    return { "id": ask_id, "response_type": kind, "correct": correct, "scorable": scorable, "write_in": not scorable }
+
+
+def test_pair_with_scores_both_runs_on_the_shared_multiple_choice_cards_with_this_runs_flags():
+    rows = [ _paired_row( "a", True ), _paired_row( "b", False ), _paired_row( "c", False, scorable=False ), _paired_row( "d", True ), _paired_row( "y", True, kind="yes_no" ) ]
+    old  = [ { "id": "a", "correct": False }, { "id": "b", "correct": True }, { "id": "c", "correct": False }, { "id": "y", "correct": False } ]
+    pair = arm.pair_with( rows, old )
+    assert pair[ "cards" ] == 3, "d is not in the earlier run and y is not multiple choice"
+    assert ( pair[ "new" ][ "right" ], pair[ "new" ][ "scorable" ], pair[ "old" ][ "right" ], pair[ "old" ][ "scorable" ] ) == ( 1, 2, 1, 2 )
+    assert ( pair[ "new_only_right" ], pair[ "old_only_right" ] ) == ( 1, 1 )
+    assert arm.render_pair( pair ) == ( "paired with the earlier run on 3 multiple-choice cards: this run right 1 of 2 scorable (1 of 3 all cards), "
+                                        "earlier run right 1 of 2 scorable (1 of 3 all cards)\nonly this run right 1, only the earlier run right 1" )
+
+
+def test_the_pair_with_flag_prints_the_comparison_after_the_table( world, tmp_path ):
+    earlier = tmp_path / "earlier.jsonl"
+    earlier.write_text( json.dumps( { "id": str( world[ "cards" ][ 2 ][ "id" ] ), "correct": False } ) + "\n" )
+    lines   = run( world, "--pair-with", str( earlier ) )
+    first, second = lines[ -1 ].splitlines()
+    assert first.startswith( "paired with the earlier run on 1 multiple-choice cards: this run right 1 of 1 scorable" ) and second == "only this run right 1, only the earlier run right 0"
+
+
+def test_the_ratio_shows_a_dash_for_none():
+    assert arm._ratio( None ) == "-" and arm._ratio( 0.5 ) == "0.500"

@@ -29,13 +29,14 @@ from sqlalchemy import MetaData, create_engine
 from sqlalchemy.pool import StaticPool
 
 import cosa.research.preference_replay.scratch_db  # noqa: F401  registers the SQLite hooks for JSONB and Vector
-from cosa.agents.prediction_engine import context_baseline, full_answer
+from cosa.agents.prediction_engine import context_baseline, full_answer, write_in_outcome
+from cosa.agents.prediction_engine.accuracy_comparators import compare_multiple_choice
 from cosa.agents.prediction_engine.config import RESPONSE_TYPE_MULTIPLE_CHOICE
 from cosa.agents.prediction_engine.principles_forecast import CapGate
 from cosa.repo.doc_lint import model_transport
 from cosa.rest.db import schema_drift
 from cosa.research.preference_replay.archive_replay import locked_sessions, read_jsonl
-from cosa.research.preference_replay.replay_loop import _score, answer_split, multiple_choice_split
+from cosa.research.preference_replay.replay_loop import _actual_dict, _score, answer_split, multiple_choice_split, paired_wins
 from cosa.rest.postgres_models import Notification, PredictionArmForecast, PredictionLog
 
 WORKERS         = 2
@@ -209,10 +210,13 @@ def score_rows( factory, records ):
         - records are run 2's per-ask lines, each with id, response_type and the baseline arm's correct flag
 
     Ensures:
-        - returns one dict per record, in order: id, response_type, title, forecast, reason, correct, old_correct, scorable, write_in
+        - returns one dict per record, in order: id, response_type, title, forecast, reason, correct, old_correct, scorable, write_in,
+          write_in_fields
         - correct is replay_loop._score with per_field True, so an abstention or a missing row reads False
         - scorable and write_in are replay_loop.answer_split's, on the same per-field basis, read from the answer alone
         - old_correct is run 2's own flag for the baseline arm, read from the record
+        - write_in_fields is write_in_outcome.field_outcomes over the per-field scoring of a multiple-choice card: one pair per
+          answered field the forecast gave a write-in probability, and an empty list for any other card or a forecast without one
     """
     rows = []
     with factory() as session:
@@ -224,8 +228,12 @@ def score_rows( factory, records ):
             reason = "no_row" if arm is None else arm.abstention_reason
             right  = _score( card.response_type, fore, card.response_value[ "value" ], card.response_options, per_field=True )
             split  = answer_split( card.response_type, card.response_value[ "value" ], card.response_options, True )
+            pairs  = []
+            if card.response_type == RESPONSE_TYPE_MULTIPLE_CHOICE:
+                _, detail = compare_multiple_choice( fore, _actual_dict( card.response_value[ "value" ], card.response_type ), card.response_options, per_field=True )
+                pairs     = write_in_outcome.field_outcomes( fore, detail[ "fields" ] if "fields" in detail else [] )   # an empty answer's detail names only its reason
             rows.append( { "id": record[ "id" ], "response_type": card.response_type, "title": card.title, "forecast": fore, "reason": reason,
-                           "correct": right, "old_correct": record[ "arms" ][ context_baseline.ARM ][ "correct" ], **split } )
+                           "correct": right, "old_correct": record[ "arms" ][ context_baseline.ARM ][ "correct" ], **split, "write_in_fields": pairs } )
     return rows
 
 
@@ -242,12 +250,14 @@ def line_of( label, rows ):
         - correct and old_correct count over all asks, an abstention being a miss, as run 2 charged it
         - multiple_choice is replay_loop.multiple_choice_split over the group's multiple-choice rows: right over scorable cards,
           the unscored count and the write-in rate, beside the all-cards figure
+        - write_in_forecast is write_in_outcome.precision_recall over every write_in_fields pair of the group
     """
     answered = [ row for row in rows if row[ "forecast" ] is not None ]
     reasons  = collections.Counter( row[ "reason" ] for row in rows if row[ "forecast" ] is None )
     return { "label": label, "asks": len( rows ), "answered": len( answered ), "correct": sum( 1 for row in rows if row[ "correct" ] ),
              "correct_on_answered": sum( 1 for row in answered if row[ "correct" ] ), "old_correct": sum( 1 for row in rows if row[ "old_correct" ] ),
-             "abstained": dict( reasons ), "multiple_choice": multiple_choice_split( [ row for row in rows if row[ "response_type" ] == RESPONSE_TYPE_MULTIPLE_CHOICE ] ) }
+             "abstained": dict( reasons ), "multiple_choice": multiple_choice_split( [ row for row in rows if row[ "response_type" ] == RESPONSE_TYPE_MULTIPLE_CHOICE ] ),
+             "write_in_forecast": write_in_outcome.precision_recall( [ pair for row in rows for pair in row[ "write_in_fields" ] ] ) }
 
 
 def summarize( rows ):
@@ -277,7 +287,7 @@ def render( lines ):
     Ensures:
         - returns the text; every count is printed beside its denominator
         - a group with multiple-choice cards also prints them as right of scorable, unscored and write-in cards, each of all its multiple-choice cards,
-          and the unscored cards a forecast still matched;
+          and the unscored cards a forecast still matched; a group with write-in forecasts prints their precision, recall and Brier score;
           the correct column stays the all-cards figure, an unscored card read as a miss, so earlier numbers stay comparable
     """
     out = [ f"{'group':<18}{'asks':>6}{'answered':>10}{'correct':>9}{'old C0':>8}  abstained" ]
@@ -287,7 +297,60 @@ def render( lines ):
         if split[ "cards" ]:
             out.append( f"{'':<18}multiple choice: right {split[ 'right' ]} of {split[ 'scorable' ]} scorable, unscored {split[ 'unscored' ]} of {split[ 'cards' ]}, "
                         f"write-in cards {split[ 'write_in_cards' ]} of {split[ 'cards' ]}, unscored right {split[ 'unscored_right' ]}" )
+        scores = line[ "write_in_forecast" ]
+        if scores[ "fields" ]:
+            out.append( f"{'':<18}write-in forecast: {scores[ 'fields' ]} fields, {scores[ 'actual' ]} typed, {scores[ 'predicted' ]} forecast typed, "
+                        f"{scores[ 'true_positive' ]} both; precision {_ratio( scores[ 'precision' ] )}, recall {_ratio( scores[ 'recall' ] )}, Brier {_ratio( scores[ 'brier' ] )}" )
     return "\n".join( out )
+
+
+def _ratio( value ):
+    """
+    Show a ratio with three decimals, or a dash when there is none.
+
+    Ensures:
+        - returns "-" for None, else the value to three decimals
+    """
+    return "-" if value is None else f"{value:.3f}"
+
+
+def pair_with( rows, old_rows ):
+    """
+    Compare this run's multiple-choice cards with an earlier run's, on the cards both scored.
+
+    Requires:
+        - rows are score_rows' dicts; old_rows are an earlier per-ask file's rows, each with id and correct
+
+    Ensures:
+        - returns { cards, new, old, new_only_right, old_only_right } over the multiple-choice cards both runs hold, in this run's order
+        - new and old are replay_loop.multiple_choice_split for each run, both read with this run's scorable and write_in flags,
+          because those are facts of the answer and an older file may not carry them
+        - new_only_right and old_only_right are replay_loop.paired_wins over the same cards
+    """
+    old    = { row[ "id" ]: row for row in old_rows }
+    shared = [ row for row in rows if row[ "response_type" ] == RESPONSE_TYPE_MULTIPLE_CHOICE and row[ "id" ] in old ]
+    flags  = lambda row, correct: { "correct": correct, "scorable": row[ "scorable" ], "write_in": row[ "write_in" ] }
+    new    = [ flags( row, row[ "correct" ] ) for row in shared ]
+    before = [ flags( row, old[ row[ "id" ] ][ "correct" ] ) for row in shared ]
+    wins   = paired_wins( { "records": { "new": [ { "meta": one } for one in new ], "old": [ { "meta": one } for one in before ] } }, "new", "old" )
+    return { "cards": len( shared ), "new": multiple_choice_split( new ), "old": multiple_choice_split( before ), "new_only_right": wins[ 0 ], "old_only_right": wins[ 1 ] }
+
+
+def render_pair( pair ):
+    """
+    Write pair_with's comparison as two lines.
+
+    Requires:
+        - pair is pair_with's result
+
+    Ensures:
+        - returns the text: the shared card count, each run's right over scorable and all-cards figure, and the cards only one got right
+    """
+    new, old = pair[ "new" ], pair[ "old" ]
+    return ( f"paired with the earlier run on {pair[ 'cards' ]} multiple-choice cards: this run right {new[ 'right' ]} of {new[ 'scorable' ]} scorable "
+             f"({new[ 'correct_all_cards' ]} of {new[ 'cards' ]} all cards), earlier run right {old[ 'right' ]} of {old[ 'scorable' ]} scorable "
+             f"({old[ 'correct_all_cards' ]} of {old[ 'cards' ]} all cards)\n"
+             f"only this run right {pair[ 'new_only_right' ]}, only the earlier run right {pair[ 'old_only_right' ]}" )
 
 
 def progress_due( done, total ):
@@ -317,6 +380,9 @@ def main( argv=None, query_fn=None, out=print ):
         - --only-refused FILE runs only the cards that file left unanswered
         - --sample N --seed S runs a fixed-seed random sample of the cards, split by type, and writes its ids and seed to sample.json before any call
         - --model ID calls that model in place of the INI setting
+        - --write-in turns the write-in outcome on for this run only and keeps only the multiple-choice cards, the only ones it changes;
+          the INI switch is not read or written
+        - --pair-with FILE reads an earlier per-ask file and prints pair_with's comparison after the table
         - the baseline is built with the full-answer reply forced on, so no INI switch changes
 
     Raises:
@@ -334,6 +400,8 @@ def main( argv=None, query_fn=None, out=print ):
     parser.add_argument( "--sample", type=int, default=None, help="draw this many cards at random, split by response type; needs --seed" )
     parser.add_argument( "--seed", type=int, default=None, help="the seed of the random sample" )
     parser.add_argument( "--model", default=None, help="the model id to call, in place of the INI setting" )
+    parser.add_argument( "--write-in", action="store_true", help="ask for the per-field write-in outcome; keeps only the multiple-choice cards" )
+    parser.add_argument( "--pair-with", default=None, help="an earlier per-ask file to compare this run's multiple-choice cards with" )
     args    = parser.parse_args( argv )
     if not full_answer.full_answer_enabled(): raise RuntimeError( f"{full_answer.SWITCH_KEY} reads off in this tree; the arm needs it on" )
     records = read_jsonl( args.records )[ :args.limit ]
@@ -343,6 +411,7 @@ def main( argv=None, query_fn=None, out=print ):
         records = [ record for record in records if record[ "id" ] in wanted ]
     sample  = None if args.sample is None else draw_sample( records, args.sample, args.seed )
     if sample is not None: records = [ record for record in records if record[ "id" ] in set( sample[ "ids" ] ) ]
+    if args.write_in: records = [ record for record in records if record[ "response_type" ] == RESPONSE_TYPE_MULTIPLE_CHOICE ]
     ids     = [ record[ "id" ] for record in records ]
     target  = os.path.join( args.work_dir, OUT_NAME )
     if os.path.exists( target ): raise FileExistsError( f"{target} exists; use a new work folder" )
@@ -353,7 +422,8 @@ def main( argv=None, query_fn=None, out=print ):
     engine  = create_engine( f"sqlite:///{copy}", connect_args={ "check_same_thread": False }, poolclass=StaticPool )
     factory = locked_sessions( engine )
     ledger  = context_baseline.open_ledger( base_path=os.path.join( args.work_dir, LEDGER_NAME ), cli_path=model_transport.CLI_PATH )
-    c0      = RefusalKeeper( context_baseline.context_model() if args.model is None else args.model, context_baseline.context_timeout(), context_baseline.context_layers(), ledger, query_fn=query_fn, full=True )
+    c0      = RefusalKeeper( context_baseline.context_model() if args.model is None else args.model, context_baseline.context_timeout(), context_baseline.context_layers(), ledger, query_fn=query_fn, full=True,
+                             write_in=args.write_in )
     counts  = asyncio.run( forecast_all( factory, c0, ids, args.workers, progress=lambda done, total: out( f"[full-answer-arm] {done}/{total}" ) if progress_due( done, total ) else None ) )
     rows    = score_rows( factory, records )
     with open( target, "w", encoding="utf-8" ) as handle:
@@ -361,8 +431,9 @@ def main( argv=None, query_fn=None, out=print ):
     with open( os.path.join( args.work_dir, REFUSALS_NAME ), "w", encoding="utf-8" ) as handle:
         for kept in c0.kept: handle.write( json.dumps( kept ) + "\n" )
     out( f"refused replies kept: {len( c0.kept )}" )
-    out( f"model {c0.model}, full answer {c0.full}, per-field scoring on, jobs {dict( counts )}" )
+    out( f"model {c0.model}, full answer {c0.full}, write-in outcome {c0.write_in}, per-field scoring on, jobs {dict( counts )}" )
     out( render( summarize( rows ) ) )
+    if args.pair_with is not None: out( render_pair( pair_with( rows, read_jsonl( args.pair_with ) ) ) )
     engine.dispose()
     return 0
 

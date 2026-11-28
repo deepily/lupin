@@ -24,7 +24,7 @@ import re
 import threading
 
 import cosa.utils.util as cu
-from cosa.agents.prediction_engine import full_answer
+from cosa.agents.prediction_engine import full_answer, write_in_outcome
 from cosa.agents.io_models.utils.json_object_recovery import recover_json_object
 from cosa.agents.prediction_engine.principles_forecast import REASON_SWITCH, STATUS_NOT_RUN, cap_gate, run_arm, switch_enabled
 from cosa.config.configuration_manager import ConfigurationManager
@@ -349,20 +349,24 @@ def parse_full( text, episode ):
     return full_answer.parse_full_reply( text, episode )
 
 
-def predictor_version( layers=ALL_LAYERS, full=False ):
+def predictor_version( layers=ALL_LAYERS, full=False, write_in=False ):
     """
     Name the prompt and parser the baseline runs, so a change to either is a new version.
 
     Requires:
         - layers is a subset of ALL_LAYERS; full is True when the full-answer reply is on
+        - write_in is True only when full is True and the write-in outcome is on
 
     Ensures:
         - returns model_transport.prompt_version over the system prompt, the layers, and the source of the prompt builder and the parser
         - with full, the source of the whole full_answer module and of the two full-answer entry points is added, so a change to its formats or to any helper the parser calls is a new version
-        - without full the value is the one this function gave before the full-answer reply existed
+        - with write_in, the source of the whole write_in_outcome module is added as well, so the outcome is its own version
+        - without full the value is the one this function gave before the full-answer reply existed, and without write_in the one
+          it gave before the write-in outcome existed
     """
     parts = [ "context-baseline", SYSTEM_PROMPT, ",".join( layers ), inspect.getsource( build_user_prompt ), inspect.getsource( parse_reply ), inspect.getsource( _choice_of ) ]
     if full: parts += [ "full-answer", inspect.getsource( full_answer ), inspect.getsource( build_full_user_prompt ), inspect.getsource( parse_full ) ]
+    if write_in: parts += [ "write-in-outcome", inspect.getsource( write_in_outcome ) ]
     return model_transport.prompt_version( *parts )
 
 
@@ -393,7 +397,7 @@ class ContextBaseline:
     It holds the model, the timeout, the error classes, the prompts, the parser, the version and a cached call.
     """
 
-    def __init__( self, model, timeout_seconds, layers, ledger, query_fn=None, full=None ):
+    def __init__( self, model, timeout_seconds, layers, ledger, query_fn=None, full=None, write_in=None ):
         """
         Build the baseline.
 
@@ -402,9 +406,11 @@ class ContextBaseline:
             - ledger has get( key ) and put( key, value )
             - query_fn is None, or a stand-in for the SDK with sdk_query's signature, for tests
             - full is None (read the full-answer switch once, now) or a bool
+            - write_in is None (read the write-in outcome switch once, now) or a bool; it is used only when full is on
 
         Ensures:
-            - the switch is read once here, so the prompt, the parser and the version of this baseline always agree
+            - the switches are read once here, so the prompt, the parser and the version of this baseline always agree
+            - with full off, write_in is False whatever was passed and its switch is never read
             - the members principles_forecast.check_baseline reads are all present
             - errors holds the model errors and the call-budget refusal, so a refused or failed call stores a not-ready row
         """
@@ -415,7 +421,8 @@ class ContextBaseline:
         self.query_fn          = query_fn
         self.errors            = ( model_transport.ModelCallError, model_transport.CallBudgetExceeded )
         self.full              = full_answer.full_answer_enabled() if full is None else full
-        self.predictor_version = predictor_version( self.layers, self.full )
+        self.write_in          = self.full and ( write_in_outcome.write_in_outcome_enabled() if write_in is None else write_in )
+        self.predictor_version = predictor_version( self.layers, self.full, self.write_in )
 
     def build_prompts( self, episode ):
         """
@@ -427,7 +434,9 @@ class ContextBaseline:
         Raises:
             - UnsupportedAsk as build_user_prompt does
         """
-        return SYSTEM_PROMPT, build_full_user_prompt( episode, self.layers ) if self.full else build_user_prompt( episode, self.layers )
+        if not self.full: return SYSTEM_PROMPT, build_user_prompt( episode, self.layers )
+        prompt = build_full_user_prompt( episode, self.layers )
+        return SYSTEM_PROMPT, write_in_outcome.with_note( prompt, episode ) if self.write_in else prompt
 
     def parse( self, text, episode ):
         """
@@ -435,8 +444,16 @@ class ContextBaseline:
 
         Requires:
             - text is the reply; episode is episode_view's result
+
+        Ensures:
+            - with write_in on, a multiple-choice forecast also carries write_in_outcome.attach's per-field probabilities
+
+        Raises:
+            - full_answer.ReplyRefused as parse_full and write_in_outcome.attach do
         """
-        return parse_full( text, episode ) if self.full else parse_reply( text, episode )
+        if not self.full: return parse_reply( text, episode )
+        record = parse_full( text, episode )
+        return write_in_outcome.attach( text, episode, record ) if self.write_in else record
 
     async def complete( self, model, system, user, timeout_seconds=None ):
         """

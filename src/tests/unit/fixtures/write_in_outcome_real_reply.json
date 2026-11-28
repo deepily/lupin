@@ -1,0 +1,73 @@
+{
+ "source": "real Haiku reply (claude-haiku-5-5, bounded Claude Code), probe run of 27 Nov 2026 for row 9628b922, predictor version context-baseline-444f7bfb33; card copied from run 2's archive",
+ "card": {
+  "title": "New Ticket card — three defaults",
+  "message": "Question 1 of 3: Default priority on your New Ticket card? Question 2 of 3: Where should a new ticket go by default? Question 3 of 3: Should your own tickets skip the ratio gate?",
+  "response_type": "multiple_choice",
+  "response_options": {
+   "questions": [
+    {
+     "header": "Priority",
+     "options": [
+      {
+       "label": "P2 (Recommended)",
+       "description": "Pro: a routine ticket lands mid-board and P0 stays deliberate. Con: an urgent ticket needs one extra click."
+      },
+      {
+       "label": "P0",
+       "description": "Pro: fastest when filing something urgent. Con: every quick note lands above all live work unless you lower it."
+      },
+      {
+       "label": "P5",
+       "description": "Pro: matches the store's default. Con: your tickets start at the bottom of the board."
+      }
+     ],
+     "question": "Default priority on your New Ticket card?",
+     "multi_select": false
+    },
+    {
+     "header": "Destination",
+     "options": [
+      {
+       "label": "Live board (Recommended)",
+       "description": "Pro: no approval wait, which is the point of the card. Con: a half-formed idea is on the board right away."
+      },
+      {
+       "label": "Holding area",
+       "description": "Pro: park ideas and admit them later. Con: brings back the wait, unless you switch it each time."
+      }
+     ],
+     "question": "Where should a new ticket go by default?",
+     "multi_select": false
+    },
+    {
+     "header": "Ratio gate",
+     "options": [
+      {
+       "label": "Yes, logged (Recommended)",
+       "description": "Pro: your P1 to P5 tickets can't be refused for throughput; every use is logged like the P0 exemption. Con: the board can grow faster than work closes."
+      },
+      {
+       "label": "No",
+       "description": "Pro: one throughput rule for everyone. Con: while the gate enforces, your P1 to P5 tickets can come back refused."
+      }
+     ],
+     "question": "Should your own tickets skip the ratio gate?",
+     "multi_select": false
+    }
+   ]
+  },
+  "response_default": null
+ },
+ "reply": "{\"fields\": {\"Priority\": {\"option_ids\": [\"o1-b9398b\"], \"write_in_probability\": 0.05}, \"Destination\": {\"option_ids\": [\"o1-48bb1d\"], \"write_in_probability\": 0.05}, \"Ratio gate\": {\"option_ids\": [\"o1-ec3e0a\"], \"write_in_probability\": 0.05}}, \"acts\": {\"approve\": 0.6, \"decline\": 0.1, \"challenge_premise\": 0.1, \"request_information\": 0.1, \"defer\": 0.1, \"propose_alternative\": 0.1}, \"qualification\": {\"probability\": 0.6, \"conditions\": [{\"text\": \"The user accepts the recommended defaults for all three fields without changing them.\", \"modifies_option_id\": null}, {\"text\": \"The user prefers P2 over P0 as the default priority, since a quick note would otherwise land above live work.\", \"modifies_option_id\": \"o1-b9398b\"}]}, \"gist\": \"Expects the user to accept all three recommended defaults: P2 priority, the live board as destination, and the logged ratio-gate exemption for their own tickets.\", \"whole_card_probability\": 0.55}",
+ "expected_outcomes": {
+  "Priority": 0.05,
+  "Destination": 0.05,
+  "Ratio gate": 0.05
+ },
+ "expected_answers": {
+  "Priority": "P2 (Recommended)",
+  "Destination": "Live board (Recommended)",
+  "Ratio gate": "Yes, logged (Recommended)"
+ }
+}
