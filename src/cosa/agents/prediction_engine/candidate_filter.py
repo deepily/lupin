@@ -6,6 +6,7 @@ may take more than a set number of places. The retry rule is ask_family.classify
 """
 
 from cosa.agents.prediction_engine.ask_family import classify_asks, normalise_text
+from cosa.repo.symindex.candidates.bm25 import build_bm25, rank
 from cosa.utils.iso_timestamp import parse_iso
 
 # Ratification states that carry a thumbs vote, which a dropped retry copy must not take with it.
@@ -63,6 +64,24 @@ def rank_with_category( same_category, any_category, category, boost, limit ):
         merged.setdefault( pair[ 1 ][ "id" ], pair )
     ordered = sorted( merged.values(), key=lambda pair: -( pair[ 0 ] + ( boost * 100.0 if pair[ 1 ].get( "category" ) == category else 0.0 ) ) )
     return ordered[ :limit ]
+
+
+def lexical_candidates( pool, question, limit ):
+    """
+    Rank cases by the words their question shares with the ask.
+
+    Requires:
+        - pool is a list of ( similarity_pct, record ) pairs, each record with a unique id; limit is a positive int
+        - question is a string
+
+    Ensures:
+        - returns at most limit pairs of the pool, best BM25 score first, each with the similarity it came in with
+        - a case sharing no word with the ask, or with no question, is left out
+        - an equal score orders by id
+    """
+    by_id = { pair[ 1 ][ "id" ]: pair for pair in pool }
+    index = build_bm25( [ { "id": case_id, "question": pair[ 1 ].get( "question" ) } for case_id, pair in by_id.items() ], ( "question", ) )
+    return [ by_id[ case_id ] for case_id in rank( index, question )[ :limit ] ]
 
 
 def _without_retry_copies( similar_cases ):

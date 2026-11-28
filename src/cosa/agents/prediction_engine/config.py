@@ -62,6 +62,15 @@ CANDIDATE_OVERFETCH_FACTOR             = 5
 DEFAULT_CATEGORY_AS_RANKING            = False
 DEFAULT_CATEGORY_RANK_BOOST            = 0.05
 
+# Whether cases sharing words with the ask (BM25 over the stored question) are candidates beside the cosine
+# neighbours. "fused" merges the two rankings, "lexical" uses the word ranking alone, to compare the two.
+DEFAULT_LEXICAL_CANDIDATES_ENABLED     = False
+DEFAULT_LEXICAL_CANDIDATES_MODE        = "fused"
+VALID_LEXICAL_CANDIDATES_MODES         = ( "fused", "lexical" )
+
+# The most stored cases the word ranking reads for one ask, above any one account's case count.
+LEXICAL_POOL_LIMIT                     = 100000
+
 # Whether a forecast is scored by the complete-action measure (the whole action, not only its stance). False
 # keeps the stance-only comparators exactly as they were.
 DEFAULT_COMPLETE_ACTION_SCORING_ENABLED = False

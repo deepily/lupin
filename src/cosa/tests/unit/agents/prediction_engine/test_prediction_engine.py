@@ -169,6 +169,8 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine candidate template cap"            : 4,
                 "prediction engine category as ranking"               : True,
                 "prediction engine category rank boost"               : 0.1,
+                "prediction engine lexical candidates enabled"        : True,
+                "prediction engine lexical candidates mode"           : "lexical",
                 "prediction engine lancedb table"                 : "tbl_x",
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
@@ -201,6 +203,7 @@ def test_init_with_config_mgr_reads_keys():
     assert eng.yes_no_no_margin == 2.5
     assert ( eng.candidate_retry_dedupe_enabled, eng.candidate_template_cap_enabled, eng.candidate_template_cap ) == ( True, True, 4 )
     assert ( eng.category_as_ranking, eng.category_rank_boost ) == ( True, 0.1 )
+    assert ( eng.lexical_candidates_enabled, eng.lexical_candidates_mode ) == ( True, "lexical" )
     assert eng.retrieval_metric == "cosine"
     assert eng.failure_visibility_enabled is True
     assert eng.three_way_enabled is True
