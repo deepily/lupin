@@ -262,3 +262,8 @@ def test_who_answered_is_asked_of_answer_source_of( monkeypatch ):
     monkeypatch.setattr( rules, "answer_source_of", other )
     draft = rules.draft_of( card( "yes_no", "yes" ) )
     assert asked == [ { "value": "yes", "source": "ui" } ] and draft[ "unknowns" ] == [ "unreadable_payload" ]
+
+
+def test_a_non_string_item_in_a_batch_list_is_read_as_its_text():
+    field = rules.draft_of( card( "open_ended_batch", picks( { "budget": [ 10, "dollars" ] } ), BATCH ) )[ "fields" ][ "budget" ]
+    assert field[ "answer" ] == "10; dollars"
