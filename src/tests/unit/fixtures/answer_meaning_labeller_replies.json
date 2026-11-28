@@ -1,0 +1,88 @@
+{
+ "replies": {
+  "yes_support": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"support\", \"stance\": \"yes\", \"acts\": [], \"conditions\": [{\"text\": \"tag the commit so we can find it later\", \"modifies_option_id\": null}], \"spans\": [\"and tag the commit so we can find it later\"], \"uncertainty\": 0.08, \"unsure\": false}]}"
+  },
+  "yes_dissent": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"dissent\", \"stance\": \"yes\", \"acts\": [], \"conditions\": [{\"text\": \"the schema change only, do not run the backfill tonight\", \"modifies_option_id\": null}], \"spans\": [\"do not run the backfill tonight\"], \"uncertainty\": 0.1, \"unsure\": false}]}"
+  },
+  "neither_re_frame": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"re_frame\", \"stance\": \"neither\", \"acts\": [], \"conditions\": [], \"spans\": [\"why is the disk filling up in the first place?\"], \"uncertainty\": 0.1, \"unsure\": false}]}"
+  },
+  "neither_leans": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"support\", \"stance\": null, \"acts\": [], \"conditions\": [{\"text\": \"once you have checked the cost\", \"modifies_option_id\": null}], \"spans\": [\"I mostly like it, go ahead with the faster runner\"], \"uncertainty\": 0.15, \"unsure\": false}]}"
+  },
+  "expands_recommendation": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"Delivery\", \"relation\": \"expands_recommendation\", \"stance\": null, \"acts\": [], \"conditions\": [{\"text\": \"only on Mondays\", \"modifies_option_id\": \"o1\"}], \"spans\": [\"By email, but only on Mondays\"], \"uncertainty\": 0.05, \"unsure\": false}]}"
+  },
+  "expands_other_option": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"Delivery\", \"relation\": \"expands_other_option\", \"stance\": null, \"acts\": [], \"conditions\": [{\"text\": \"as long as it also shows last week for comparison\", \"modifies_option_id\": \"o2\"}], \"spans\": [\"The dashboard, as long as it also shows last week for comparison\"], \"uncertainty\": 0.05, \"unsure\": false}]}"
+  },
+  "wrote_own_answer": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"Delivery\", \"relation\": \"wrote_own_answer\", \"stance\": null, \"acts\": [], \"conditions\": [], \"spans\": [\"Read it to me as a podcast\"], \"uncertainty\": 0.1, \"unsure\": false}]}"
+  },
+  "no_recommendation_on_card": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"Day\", \"relation\": \"no_recommendation_on_card\", \"stance\": null, \"acts\": [], \"conditions\": [{\"text\": \"but after lunch\", \"modifies_option_id\": \"o2\"}], \"spans\": [\"Friday, but after lunch\"], \"uncertainty\": 0.1, \"unsure\": false}]}"
+  },
+  "open_answers": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"answers\", \"stance\": null, \"acts\": [\"approve\"], \"conditions\": [], \"spans\": [\"Call it the ledger service\"], \"uncertainty\": 0.05, \"unsure\": false}]}"
+  },
+  "open_declines_or_defers": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"declines_or_defers\", \"stance\": null, \"acts\": [\"defer\"], \"conditions\": [], \"spans\": [\"Not today, ask me again after the planning meeting\"], \"uncertainty\": 0.03, \"unsure\": false}]}"
+  },
+  "open_re_frame": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"re_frame\", \"stance\": null, \"acts\": [\"challenge_premise\", \"request_information\"], \"conditions\": [], \"spans\": [\"We should not have an error banner at all\", \"why is this failing silently somewhere else?\"], \"uncertainty\": 0.08, \"unsure\": false}]}"
+  },
+  "two_header_batch": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"Notes\", \"relation\": \"answers\", \"stance\": null, \"acts\": [\"propose_alternative\"], \"conditions\": [{\"text\": \"nothing else\", \"modifies_option_id\": null}], \"spans\": [\"List the three fixes and nothing else\"], \"uncertainty\": 0.1, \"unsure\": false}, {\"field_key\": \"Date\", \"relation\": \"declines_or_defers\", \"stance\": null, \"acts\": [\"defer\"], \"conditions\": [], \"spans\": [\"I will decide that later\"], \"uncertainty\": 0.05, \"unsure\": false}]}"
+  },
+  "stance_less": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"support\", \"stance\": \"yes\", \"acts\": [], \"conditions\": [{\"text\": \"provided that nothing is running on it\", \"modifies_option_id\": null}], \"spans\": [\"Yeah\", \"provided that nothing is running on it\"], \"uncertainty\": 0.1, \"unsure\": false}]}"
+  },
+  "unsure": {
+   "model": "claude-sonnet-5-5",
+   "captured": "2026-11-27",
+   "annotator": "claude-sonnet-5-5:meaning-labeller-b29a05d637+answer-meaning-v2",
+   "reply": "{\"fields\": [{\"field_key\": \"answer\", \"relation\": \"re_frame\", \"stance\": \"yes\", \"acts\": [], \"conditions\": [], \"spans\": [\"maybe that is not really what I mean\"], \"uncertainty\": 0.4, \"unsure\": true}]}"
+  }
+ }
+}
