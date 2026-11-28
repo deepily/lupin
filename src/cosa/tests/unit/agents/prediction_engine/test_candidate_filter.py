@@ -169,3 +169,16 @@ def test_the_switches_are_read_from_the_ini():
     eng = PredictionEngine( config_mgr=Cfg() )
     assert ( eng.candidate_retry_dedupe_enabled, eng.candidate_template_cap_enabled, eng.candidate_template_cap ) == ( True, True, 7 )
     PredictionEngine.reset()
+
+
+@pytest.mark.parametrize( "cap", [ 0, -1 ] )
+def test_a_cap_below_one_is_refused_when_the_engine_starts( cap ):
+    class Cfg:
+        def get( self, key, default=None, return_type=None ):
+            table = { "prediction engine candidate template cap": cap, "prediction engine retrieval metric": "cosine" }
+            return table.get( key, { "boolean": False, "int": 5, "float": 0.5 }.get( return_type, default ) )
+
+    PredictionEngine.reset()
+    with pytest.raises( ValueError, match="candidate template cap" ):
+        PredictionEngine( config_mgr=Cfg() )
+    PredictionEngine.reset()

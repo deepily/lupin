@@ -152,7 +152,7 @@ class PredictionEngine:
             self.complete_action_scoring_enabled = config_mgr.get( "prediction engine complete action scoring enabled", default=str( DEFAULT_COMPLETE_ACTION_SCORING_ENABLED ), return_type="boolean" )
             self.candidate_retry_dedupe_enabled = config_mgr.get( "prediction engine candidate retry dedupe enabled", default=str( DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED ), return_type="boolean" )
             self.candidate_template_cap_enabled = config_mgr.get( "prediction engine candidate template cap enabled", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED ), return_type="boolean" )
-            self.candidate_template_cap         = config_mgr.get( "prediction engine candidate template cap", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP ), return_type="int" )
+            self.candidate_template_cap         = int( config_mgr.get( "prediction engine candidate template cap", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP ), return_type="int" ) )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -200,6 +200,10 @@ class PredictionEngine:
 
         if self.retrieval_metric not in VALID_RETRIEVAL_METRICS:
             raise ValueError( f"prediction engine retrieval metric must be one of {VALID_RETRIEVAL_METRICS}, got {self.retrieval_metric!r}" )
+
+        # Checked here because a predictor catches the error thin_candidates would raise, and every ask would abstain.
+        if self.candidate_template_cap < 1:
+            raise ValueError( f"prediction engine candidate template cap must be at least 1, got {self.candidate_template_cap!r}" )
 
         # Retained for _get_embedding_store. None is legitimate — the store then
         # resolves its own configuration.
