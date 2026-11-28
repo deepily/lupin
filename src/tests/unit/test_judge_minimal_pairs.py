@@ -43,15 +43,25 @@ def test_the_two_forecasts_of_a_pair_share_most_of_their_words( document ):
 
 def test_each_pair_names_a_card_of_the_run_2_archive( document ):
     assert document[ "pairs" ]
-    for case in document[ "pairs" ] + document[ "extra_cases" ]:
+    for case in document[ "pairs" ] + document[ "fixture_cases" ]:
         assert len( case[ "source_card" ][ "notification_id" ] ) == 36, case[ "id" ]
         assert case[ "source_card" ][ "question" ], case[ "id" ]
 
 
-def test_the_extra_cases_are_an_easy_pass_and_an_invented_condition_on_a_plain_answer( document ):
-    cases = { case[ "kind" ]: case for case in document[ "extra_cases" ] }
+def test_there_is_one_fixture_case_for_each_kind_plus_the_easy_and_invented_ones( document ):
+    cases = { case[ "kind" ]: case for case in document[ "fixture_cases" ] }
 
-    assert set( cases ) == { "easy", "invented_condition" }
+    assert set( cases ) == set( KINDS ) | { "easy", "invented_condition" }
+    assert len( document[ "fixture_cases" ] ) == 8
     assert "altered_text" not in cases[ "easy" ] and cases[ "easy" ][ "matching_text" ]
     assert cases[ "invented_condition" ][ "actual_text" ] is None
     assert "matching_text" not in cases[ "invented_condition" ] and cases[ "invented_condition" ][ "altered_text" ]
+
+
+def test_no_fixture_case_shares_a_text_with_the_24_pairs( document ):
+    """The pairs must reach the validation run unseen by the judge."""
+    keys     = ( "actual_text", "matching_text", "altered_text" )
+    pairs    = { pair[ key ] for pair in document[ "pairs" ] for key in keys }
+    fixtures = { case[ key ] for case in document[ "fixture_cases" ] for key in keys if case.get( key ) }
+
+    assert fixtures and pairs and not fixtures & pairs
