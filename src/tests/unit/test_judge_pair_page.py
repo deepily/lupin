@@ -228,7 +228,8 @@ def test_a_blind_answer_cannot_change_once_its_readers_have_been_shown( tmp_path
 
 
 def test_the_lock_holds_across_a_reload( tmp_path ):
-    saved = drive( tmp_path, label( 1 ) + [ [ "go", 2 ] ] )[ "saved" ]
+    saved = drive( tmp_path, label( 1 ) + [ [ "go", 2 ], [ "go", 0 ] ] )[ "saved" ]   # left on A:p00, so a reload shows no reader
+    assert saved[ "position" ] == 0
 
     out = drive( tmp_path, [ [ "go", 1 ], [ "choose", "material_error", "no" ], [ "view" ] ], saved=saved )
 
