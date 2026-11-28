@@ -105,14 +105,14 @@ def estimate( total_rows, total_flagged, by_definition, z=Z_95, weights=None, st
         - returns { rate, gap, low, high, definitions, pairs, interim_rate, reference_rate, sample_interim_rate }
         - interim_rate is total_flagged / total_rows
         - gap is the weighted sum of ( reference - interim ) over the matched pairs, divided by the weighted count of those pairs; a unit's weight is 1 without weights
-        - sample_interim_rate and reference_rate are weighted the same way; definitions and pairs are plain counts
+        - sample_interim_rate and reference_rate are weighted the same way; definitions and pairs are plain counts of the units that have a matched pair and of their pairs
         - rate is interim_rate + gap, and low and high are rate -/+ z standard errors, kept inside 0 to 1, or inside -1 to 1 with total_squares
         - the variance is that of the interim values over total_rows plus the cluster-ratio variance of the gap, which treats each definition as one unit and, with strata, measures the spread inside each stratum
         - with a stratum holding fewer than 2 definitions that have a matched pair, gap-variance cannot be estimated, so low and high are None
         - with no matched pair at all, rate and gap are None as well
 
     Raises:
-        - ValueError when total_rows is not above 0, when weights or strata leave out a definition, when a weight is not above 0, or when total_squares is too small for total_flagged
+        - ValueError when total_rows is not above 0, when weights or strata leave out a definition, when a weight is not above 0, or when total_squares is not a number or too small for total_flagged
     """
     if total_rows <= 0: raise ValueError( "the interim model made no pair verdict in the runs with pair counts" )
     for name, given in ( ( "weights", weights ), ( "strata", strata ) ):
@@ -122,9 +122,9 @@ def estimate( total_rows, total_flagged, by_definition, z=Z_95, weights=None, st
     if total_squares is None: spread, floor = interim * ( 1 - interim ), 0.0
     else:
         spread, floor = total_squares / total_rows - interim * interim, -1.0
-        if spread < -1e-12: raise ValueError( "total_squares is too small for total_flagged" )
+        if not spread >= -1e-12: raise ValueError( "total_squares is too small for total_flagged" )
         spread = max( 0.0, spread )
-    units = [ ( 1 if weights is None else weights[ i ], None if strata is None else strata[ i ], p ) for i, p in by_definition.items() ]
+    units = [ ( 1 if weights is None else weights[ i ], None if strata is None else strata[ i ], p ) for i, p in by_definition.items() if p ]
     out   = { "definitions": len( units ), "pairs": sum( len( p ) for _, _, p in units ), "interim_rate": interim, "rate": None, "gap": None, "low": None, "high": None, "reference_rate": None, "sample_interim_rate": None }
     if out[ "pairs" ] == 0: return out
     size  = sum( w * len( p ) for w, _, p in units )

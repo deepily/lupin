@@ -151,6 +151,17 @@ def test_total_squares_equal_to_the_count_matches_the_yes_or_no_form_inside_the_
     assert flat[ "low" ] == pytest.approx( 0.1 ) and flat[ "high" ] == pytest.approx( 0.1 )
 
 
+def test_equal_differences_whose_rounding_makes_the_variance_negative_have_zero_spread():
+    # three differences of 0.1: in floating point the mean of the squares is a hair below the square of the mean
+    got = sr.estimate( 3, 0.1 + 0.1 + 0.1, { "a": [ ( 0, 0 ) ], "b": [ ( 0, 0 ) ] }, total_squares=sum( [ 0.1 * 0.1 ] * 3 ) )
+    assert got[ "low" ] == got[ "high" ] == pytest.approx( 0.1 )
+
+
+def test_a_unit_with_no_matched_pair_counts_toward_neither_the_units_nor_a_stratum():
+    got = sr.estimate( 1000, 100, { **TWO_STRATA, "c1": [ ( 0, 1 ) ], "c2": [] }, strata={ **STRATA, "c1": "C", "c2": "C" } )
+    assert ( got[ "definitions" ], got[ "pairs" ] ) == ( 5, 9 ) and got[ "low" ] is None and got[ "high" ] is None
+
+
 def test_a_stratum_with_one_unit_gives_a_point_and_no_interval():
     got = sr.estimate( 1000, 100, TWO_STRATA, weights=WEIGHTS, strata={ **STRATA, "b2": "C" } )
     assert got[ "rate" ] == pytest.approx( 0.1 + 1 / 14 ) and got[ "low" ] is None and got[ "high" ] is None
@@ -162,6 +173,7 @@ def test_a_stratum_with_one_unit_gives_a_point_and_no_interval():
     ( { "weights": { **WEIGHTS, "b2": 0 } },         "above 0" ),
     ( { "weights": { **WEIGHTS, "b2": float( "nan" ) } }, "above 0" ),
     ( { "total_squares": 5 },                        "too small" ),
+    ( { "total_squares": float( "nan" ) },           "too small" ),
 ] )
 def test_the_estimator_refuses_a_design_that_does_not_fit_the_sample( kwargs, reason ):
     with pytest.raises( ValueError, match=reason ): sr.estimate( 1000, 100, TWO_STRATA, **kwargs )
