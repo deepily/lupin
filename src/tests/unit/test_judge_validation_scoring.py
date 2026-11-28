@@ -41,8 +41,8 @@ def planted( caught=29, missed=1, passed=28, false_alarm=2 ):
     return sample, verdicts, labels, key
 
 
-def report_of( parts, recorded=IDENTITY, current=IDENTITY ):
-    return scoring.build_report( *parts, recorded, current )
+def report_of( parts, current=None ):
+    return scoring.build_report( *parts, IDENTITY, current or IDENTITY )
 
 
 @pytest.mark.parametrize( "keeps, invents_nothing, material", [ ( True, True, False ), ( True, False, True ), ( False, True, True ), ( False, False, True ) ] )
