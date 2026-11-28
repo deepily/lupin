@@ -28,7 +28,6 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import bcrypt
 import pytest
@@ -38,13 +37,14 @@ from sqlalchemy import text
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import ApiKeyRepository, UserRepository
 from cosa.rest.user_service import get_user_by_email
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.notifications.notification_models import resolve_target_user
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 ENDPOINT = f"{BASE_URL}/api/tasks"
 
 # The directory the server's manager check reads, the same one the fixture writes.
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+SESSION_DIR = sessions_dir()
 
 REQUEST_TIMEOUT = 30
 

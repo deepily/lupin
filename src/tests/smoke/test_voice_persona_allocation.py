@@ -31,6 +31,12 @@ from pathlib import Path
 
 import pytest
 import requests
+from unittest.mock import Mock
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from cosa.rest.routers import voice_persona
+from lupin_cli.claude_code.hooks.lib import session_bridge
 
 
 BASE_URL    = os.environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
@@ -71,6 +77,41 @@ def _resolve_session_dir() -> Path:
 
 
 SESSION_DIR = _resolve_session_dir()
+
+
+@pytest.fixture
+def isolated_server( tmp_path, monkeypatch ):
+    """
+    Serve the voice persona routes in this process, over an empty bridge folder.
+
+    Ensures:
+        - returns ( client, folder ): a TestClient on the real router and the folder its bridges are read from
+        - no live seat is seen, so every pool voice and the overflow persona start free
+        - nothing reaches the running server, the real bridge folder or a notification queue
+    """
+    app = FastAPI()
+    app.include_router( voice_persona.router )
+    app.dependency_overrides[ voice_persona.require_api_key_or_jwt ] = lambda: "smoke-user"
+    app.dependency_overrides[ voice_persona.get_notification_queue ] = lambda: Mock()
+    monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )
+    monkeypatch.setattr( session_bridge, "SESSION_DIR", tmp_path )
+    # The container cannot trust host process ids; the fake bridges rely on that, as they do against it.
+    monkeypatch.setattr( session_bridge, "_can_trust_host_pids", lambda: False )
+    return TestClient( app ), tmp_path
+
+
+def _write_bridges( folder, count ) -> list:
+    """
+    Write count fake session bridges into folder.
+
+    Ensures:
+        - returns the session ids, in the order written
+    """
+    sids = [ str( uuid.uuid4() ) for _ in range( count ) ]
+    for i, sid in enumerate( sids ):
+        bridge = { "session_id": sid, "stable_session_id": sid, "session_ids": [ sid ], "cwd": "/tmp", "cc_pid": os.getpid(), "hook_ppid": 1 }
+        ( folder / f"cc-{os.getpid() + 91000 + i}.json" ).write_text( json.dumps( bridge ) )
+    return sids
 
 
 # ── configured-pool readers (added 2026-08-26) ──────────────────────────────
@@ -299,15 +340,12 @@ class TestVoicePersonaPool:
 
 class TestVoicePersonaAllocateAndRelease:
 
-    def test_allocate_returns_persona_not_sam( self, auth_token, synthetic_bridge ):
-        """POST /allocate should return a persona from the pool (never Sam)."""
-        session_id, bridge_path = synthetic_bridge
+    def test_allocate_returns_persona_not_sam( self, isolated_server ):
+        """POST /allocate on a free pool returns a persona from the pool."""
+        client, folder = isolated_server
+        session_id     = _write_bridges( folder, 1 )[ 0 ]
 
-        resp = requests.post(
-            f"{BASE_URL}/api/cosa-voice/voice-persona/{session_id}/allocate",
-            headers = { "Authorization": f"Bearer {auth_token}" },
-            timeout = 5
-        )
+        resp = client.post( f"/api/cosa-voice/voice-persona/{session_id}/allocate" )
         assert resp.status_code == 200, f"/allocate failed: {resp.status_code} {resp.text}"
         body = resp.json()
         assert body[ "newly_allocated" ] is True
@@ -325,8 +363,7 @@ class TestVoicePersonaAllocateAndRelease:
         assert "assigned_at" in persona
 
         # Verify the bridge file was actually written
-        with open( bridge_path ) as f:
-            data = json.load( f )
+        data = json.loads( next( folder.glob( "cc-*.json" ) ).read_text() )
         assert data.get( "voice_persona" ) is not None
         assert data[ "voice_persona" ][ "voice_id" ] == persona[ "voice_id" ]
 
@@ -412,140 +449,40 @@ class TestVoicePersonaAllocateAndRelease:
 
 class TestVoicePersonaUniqueness:
 
-    def test_pool_exhaustion_returns_the_overflow_persona( self, auth_token, server_sees_session_dir ):
+    def test_pool_exhaustion_returns_the_overflow_persona( self, isolated_server ):
         """
-        Saturate the pool with synthetic bridges; the spill must land on the
-        configured overflow persona, not on a hash-borrowed pool member.
+        Fill the pool; the spill lands on the configured overflow persona, unborrowed.
 
-        Refreshed 2026-08-26. This asserted the spill lands on SAM and that
-        every Sam allocation carries `overflow: True`. Both statements were
-        true when written and are false now: on 2026-05-19 (merged in 26898e1e)
-        Sam was promoted into the regular pool and ARNOLD took the overflow
-        slot, which is why the old version died on `KeyError: 'overflow'` — it
-        was reading that key off an ordinary pool allocation. The overflow
-        persona is now a config pointer
-        (`cc session voice persona overflow name`), so this reads it rather
-        than naming anyone.
-
-        The bridge count is also derived now: the pool grew 6 -> 14, so a fixed
-        8 bridges no longer exhausts it. We allocate len(pool) + 2.
-
-        See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+        Ensures:
+            - the pool size and the overflow name are read from the config, not named here
         """
-        SESSION_DIR.mkdir( parents=True, exist_ok=True )
-        test_pid = os.getpid()
+        client, folder = isolated_server
+        overflow_name  = _configured_overflow_name()
+        sids           = _write_bridges( folder, len( _configured_pool_names() ) + 2 )
 
-        # len(pool) + 2 synthetic bridges — exhausts the CONFIGURED pool with two
-        # to spare even if a couple of personas are already held by live sessions.
-        overflow_name = _configured_overflow_name()
-        n_bridges     = len( _configured_pool_names() ) + 2
-        sids    = [ str( uuid.uuid4() ) for _ in range( n_bridges ) ]
-        bridges = [ SESSION_DIR / f"cc-{test_pid + 93000 + i}.json" for i in range( n_bridges ) ]
-        try:
-            for sid, path in zip( sids, bridges ):
-                with open( path, "w" ) as f:
-                    json.dump(
-                        {
-                            "session_id"        : sid,
-                            "stable_session_id" : sid,
-                            "session_ids"       : [ sid ],
-                            "cwd"               : "/tmp",
-                            "cc_pid"            : test_pid,  # alive
-                            "hook_ppid"         : 1
-                        },
-                        f
-                    )
+        personas = []
+        for sid in sids:
+            resp = client.post( f"/api/cosa-voice/voice-persona/{sid}/allocate" )
+            assert resp.status_code == 200, f"/allocate failed: {resp.status_code} {resp.text}"
+            personas.append( resp.json()[ "voice_persona" ] )
 
-            personas = []
-            for sid in sids:
-                resp = requests.post(
-                    f"{BASE_URL}/api/cosa-voice/voice-persona/{sid}/allocate",
-                    headers = { "Authorization": f"Bearer {auth_token}" },
-                    timeout = 5
-                )
-                assert resp.status_code == 200, f"/allocate failed: {resp.status_code} {resp.text}"
-                personas.append( resp.json()[ "voice_persona" ] )
+        # Every pool voice goes out once before anything spills.
+        pool_size = len( _configured_pool_names() )
+        assert sorted( p[ "name" ] for p in personas[ :pool_size ] ) == sorted( _configured_pool_names() )
+        spill = personas[ pool_size ]
+        assert spill[ "name" ].lower() == overflow_name, (
+            f"first allocation past the {pool_size}-voice pool should be {overflow_name!r}; got {spill[ 'name' ]!r}"
+        )
+        assert spill.get( "borrowed", False ) is False, f"overflow allocations should have borrowed=False; got: {spill}"
 
-            # Spilling past the pool must land on the configured overflow persona.
-            overflow_allocations = [ p for p in personas
-                                     if ( p.get( "name" ) or "" ).lower() == overflow_name ]
-            assert overflow_allocations, (
-                f"Expected at least one {overflow_name!r} overflow allocation when saturating "
-                f"the {len( _configured_pool_names() )}-voice pool with {n_bridges} synthetic "
-                f"bridges; got: {[ p.get( 'name' ) for p in personas ]}"
-            )
-            # Overflow supplants hash-borrowing — an overflow allocation is never borrowed.
-            assert all( p.get( "borrowed", False ) is False for p in overflow_allocations ), (
-                f"overflow allocations should have borrowed=False; got: {overflow_allocations}"
-            )
+    def test_two_concurrent_sessions_get_distinct_voices( self, isolated_server ):
+        """Two sessions on a free pool get different voices."""
+        client, folder = isolated_server
 
-        finally:
-            # Best-effort: release + delete bridges
-            for sid, path in zip( sids, bridges ):
-                try:
-                    requests.post(
-                        f"{BASE_URL}/api/cosa-voice/voice-persona/{sid}/release",
-                        headers = { "Authorization": f"Bearer {auth_token}" },
-                        timeout = 2
-                    )
-                except Exception:
-                    pass
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
+        voices = []
+        for sid in _write_bridges( folder, 2 ):
+            resp = client.post( f"/api/cosa-voice/voice-persona/{sid}/allocate" )
+            assert resp.status_code == 200, f"/allocate failed: {resp.status_code} {resp.text}"
+            voices.append( resp.json()[ "voice_persona" ][ "voice_id" ] )
 
-    def test_two_concurrent_sessions_get_distinct_voices( self, auth_token, server_sees_session_dir ):
-        """
-        Allocate personas for TWO synthetic bridges. They must be distinct.
-        This is the core anti-collision guarantee.
-        """
-        SESSION_DIR.mkdir( parents=True, exist_ok=True )
-        test_pid = os.getpid()
-
-        sids        = [ str( uuid.uuid4() ) for _ in range( 2 ) ]
-        bridges     = [ SESSION_DIR / f"cc-{test_pid + 91000 + i}.json" for i in range( 2 ) ]
-        try:
-            for sid, path in zip( sids, bridges ):
-                with open( path, "w" ) as f:
-                    json.dump(
-                        {
-                            "session_id"        : sid,
-                            "stable_session_id" : sid,
-                            "session_ids"       : [ sid ],
-                            "cwd"               : "/tmp",
-                            "cc_pid"            : test_pid,  # alive
-                            "hook_ppid"         : 1
-                        },
-                        f
-                    )
-
-            allocated_voice_ids = []
-            for sid in sids:
-                resp = requests.post(
-                    f"{BASE_URL}/api/cosa-voice/voice-persona/{sid}/allocate",
-                    headers = { "Authorization": f"Bearer {auth_token}" },
-                    timeout = 5
-                )
-                assert resp.status_code == 200
-                allocated_voice_ids.append( resp.json()[ "voice_persona" ][ "voice_id" ] )
-
-            assert allocated_voice_ids[ 0 ] != allocated_voice_ids[ 1 ], (
-                f"Two sessions got the same voice: {allocated_voice_ids}"
-            )
-
-        finally:
-            # Best-effort: release + delete bridges
-            for sid, path in zip( sids, bridges ):
-                try:
-                    requests.post(
-                        f"{BASE_URL}/api/cosa-voice/voice-persona/{sid}/release",
-                        headers = { "Authorization": f"Bearer {auth_token}" },
-                        timeout = 2
-                    )
-                except Exception:
-                    pass
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
+        assert voices[ 0 ] != voices[ 1 ], f"Two sessions got the same voice: {voices}"
