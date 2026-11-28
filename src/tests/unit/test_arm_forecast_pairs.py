@@ -133,7 +133,9 @@ def test_the_id_lists_read_the_sample_and_the_records( tmp_path ):
     ( "yes_no", { "value": "yes", "qualifier": "only after tests" }, "yes [comment: after lunch]", [ ( "", "only after tests", "after lunch" ) ] ),
     ( "open_ended", { "gist": "ship it" }, "hold it", [ ( "", "ship it", "hold it" ) ] ),
     ( "open_ended", { "acts": {} }, "hold it", [] ),
-    ( "open_ended_batch", { "fields": { "len": { "gist": "short" } } }, '{"answers":{"len":"long","other":"x"}}', [ ( "len", "short", "long" ) ] ),
+    ( "open_ended_batch", { "fields": { "len": { "gist": "short" } } }, '{"answers":{"len":"long","other":"x"}}', [ ( "", "len: short", "len: long\nother: x" ) ] ),
+    ( "open_ended_batch", { "fields": { "who": { "gist": "me" }, "len": { "gist": "short" } }, "qualifier": "today" }, '{"answers":{"len":"long","who":"you","blank":""}}',
+      [ ( "", "len: short\nwho: me; today", "len: long\nwho: you" ) ] ),
     ( "open_ended_batch", { "gist": "no fields" }, '{"answers":{"len":"long"}}', [] ),
     ( "multiple_choice", { "answers": { "Plan": "Fast" } }, '{"answers":{"Plan":"Safe"}}', [ ( "Plan", "Fast", "Safe" ) ] ),
     ( "multiple_choice", { "answers": { "Plan": [ "Fast", "Safe" ] }, "qualifier": "today" }, '{"answers":{"Plan":["Safe"]}}', [ ( "Plan", "Fast; Safe; today", "Safe" ) ] ),
@@ -195,6 +197,21 @@ def test_refers_to_earlier( said, points_back ):
     assert afp.refers_to_earlier( said ) is points_back
 
 
+def test_a_forecast_pointing_back_is_marked_on_its_pair_and_counted():
+    cards      = { "c": { "response_type": "yes_no", "actual_value": "no", "options": None } }
+    forecasts  = { ( "c", "C0" ): { "value": "no", "qualifier": "as they previously chose" } }
+    pairs, key = afp.make_pairs( cards, [ ( c, a, f ) for ( c, a ), f in forecasts.items() ], { "C0": "h" } )
+    assert pairs[ 0 ][ "refers_to_earlier" ] is True and pairs[ 0 ][ "stance" ] == "no"
+    assert afp.count_table( pairs, key, forecasts, cards )[ "C0" ][ "yes_no" ][ "refers_to_earlier" ] == 1
+
+
+def test_a_batch_card_is_one_pair_with_an_empty_field_key():
+    cards    = { "c": { "response_type": "open_ended_batch", "actual_value": '{"answers":{"len":"long","who":"you"}}', "options": None } }
+    pairs, _ = afp.make_pairs( cards, [ ( "c", "C0", { "fields": { "len": { "gist": "short" }, "who": { "gist": "me" } } } ) ], { "C0": "h" } )
+    assert [ ( p[ "pair_id" ], p[ "field_key" ] ) for p in pairs ] == [ ( afp.pair_id_of( "c", "", "C0" ), "" ) ]
+    assert "stance" not in pairs[ 0 ]
+
+
 def test_joined_writes_each_shape():
     assert [ afp._joined( None ), afp._joined( ( "a", "b" ) ), afp._joined( 3 ) ] == [ None, "a; b", "3" ]
 
@@ -208,7 +225,7 @@ def test_make_pairs_blinds_the_arm_and_flags_a_literal_mismatch():
     assert key[ one ] == { "arm": "C0", "model": "haiku" }
     by_id = { p[ "pair_id" ]: p for p in pairs }
     assert by_id[ one ] == { "pair_id": one, "notification_id": "c1", "response_type": "yes_no", "field_key": "", "predicted_text": None, "actual_text": "Wait", "literal_mismatch": True,
-                             "refers_to_earlier": False, "option_mismatch": False }
+                             "refers_to_earlier": False, "option_mismatch": False, "stance": "yes" }
     assert [ by_id[ afp.pair_id_of( c, "", a ) ][ "literal_mismatch" ] for c, a in ( ( "c1", "B1" ), ( "c2", "C0" ) ) ] == [ False, False ]
     assert not { "arm", "model" } & set( by_id[ one ] )
 

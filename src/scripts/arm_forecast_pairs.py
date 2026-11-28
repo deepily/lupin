@@ -342,7 +342,8 @@ def texts_of( response_type, forecast, actual_value ):
         - yes/no: one row with field key "" when the forecast's stance is the answer's; the texts are the two conditions as the complete-action comparator reads them, None for none
         - multiple choice: one row per answered field the forecast speaks to, field key the header
         - open-ended: one row, the predicted text the forecast's gist with its conditions after it
-        - batch: one row per answered field the forecast gives a gist for, field key the header; the card's conditions follow each field's gist
+        - batch: one row for the whole card, field key ""; each text is one "header: text" line per field, in the answer's order, and the card's conditions follow the forecast's lines
+        - a batch forecast with a gist for no answered field makes no row
         - no forecast text drops a condition the record holds
     """
     if not forecast: return []
@@ -352,16 +353,14 @@ def texts_of( response_type, forecast, actual_value ):
     if response_type == "open_ended":
         predicted = forecast.get( "gist" )
         return [ ( "", _with_conditions( predicted, forecast ), actual_value ) ] if predicted else []
-    fields = parse_field_selections( actual_value ) or {}
-    rows   = []
-    for header, record in fields.items():
-        answered  = record[ "text" ] if record[ "text" ] is not None else _joined( record[ "selected" ] )
-        if response_type == "multiple_choice": predicted = _choice_predicted( forecast, header )
-        else:
-            gist      = ( ( forecast.get( "fields" ) or {} ).get( header ) or {} ).get( "gist" )
-            predicted = _with_conditions( gist, forecast ) if gist else None
-        if predicted is not None and answered: rows.append( ( header, predicted, answered ) )
-    return rows
+    answered = { header: record[ "text" ] if record[ "text" ] is not None else _joined( record[ "selected" ] ) for header, record in ( parse_field_selections( actual_value ) or {} ).items() }
+    answered = { header: said for header, said in answered.items() if said }
+    if response_type == "multiple_choice":
+        forecast_of = { header: _choice_predicted( forecast, header ) for header in answered }
+        return [ ( header, forecast_of[ header ], said ) for header, said in answered.items() if forecast_of[ header ] is not None ]
+    gists = { header: ( ( forecast.get( "fields" ) or {} ).get( header ) or {} ).get( "gist" ) for header in answered }
+    said  = "\n".join( f"{header}: {gist}" for header, gist in gists.items() if gist )
+    return [ ( "", _with_conditions( said, forecast ), "\n".join( f"{header}: {text}" for header, text in answered.items() ) ) ] if said else []
 
 
 def option_mismatch( card, field_key, forecast ):
@@ -412,6 +411,7 @@ def make_pairs( cards, forecasts, models ):
         - returns ( pairs, key ); pairs are sorted by pair id and never name an arm or a model
         - literal_mismatch is True when the two texts differ after stripping and lower-casing, None counting as empty
         - refers_to_earlier is refers_to_earlier of the predicted text, reported and never used to exclude a pair
+        - a yes/no pair carries stance, the yes, no or neither both sides share, since its texts are only the conditions
         - a yes/no or multiple-choice pair also carries option_mismatch; the other types have no options and no such key
         - key maps each pair id to { arm, model }
         - a forecast of a card not in cards makes nothing
@@ -426,6 +426,7 @@ def make_pairs( cards, forecasts, models ):
                                  "predicted_text": predicted, "actual_text": actual,
                                  "literal_mismatch": ( predicted or "" ).strip().lower() != ( actual or "" ).strip().lower(),
                                  "refers_to_earlier": refers_to_earlier( predicted ) }
+            if card[ "response_type" ] == "yes_no": pairs[ pair_id ][ "stance" ] = compare_yes_no( forecast, _actual_dict( card[ "actual_value" ], "yes_no" ) )[ 1 ][ "actual_binary" ]
             if card[ "response_type" ] in CHOICE_TYPES: pairs[ pair_id ][ "option_mismatch" ] = option_mismatch( card, field_key, forecast )
             key[ pair_id ]   = { "arm": arm, "model": models[ arm ] }
     return [ pairs[ one ] for one in sorted( pairs ) ], key
