@@ -5,7 +5,7 @@ pins:
   - cosa.repo.doc_lint.judge_comparison.key_rows@b7dc257f87
   - cosa.repo.doc_lint.judge_comparison.groups_of@196219685c
   - cosa.repo.doc_lint.judge_comparison.wrong_on@4d151e9f2a
-  - cosa.repo.doc_lint.judge_comparison.group_rows@c5fce5edde
+  - cosa.repo.doc_lint.judge_comparison.group_rows@1acaec12fc
   - cosa.repo.doc_lint.judge_comparison.build_comparison@2054c47ee5
   - cosa.repo.doc_lint.judge_comparison.pct@04cfbb09dd
   - cosa.repo.doc_lint.judge_comparison.axis_top@c824d64519
@@ -21,7 +21,7 @@ Per-judge, per-pair-type figures from a finished ledger, as JSON and markdown. T
 ## Grouping pairs
 - `key_rows` reads the keys file into `kind`, `seeded_positive` and `injection` per id, and raises `ValueError` for a missing field or unknown kind.
 - `groups_of` names the rows a pair belongs to: its kind, plus one injection row when the flag is set. `wrong_on` says whether an extractor list judged a pair wrongly. A seeded pair is a false pass, an unseeded one a false alarm.
-- `group_rows` counts wrong verdicts per group on the worse list, with a rate and a 95% bound. A group that mixes seeded and unseeded pairs raises `ValueError`.
+- `group_rows` counts wrong verdicts per group on the worse list, with a rate and a 95% bound. A caller may pass its own group names, as the answer judge's arm table does. A group that mixes seeded and unseeded pairs raises `ValueError`.
 
 ## Comparison
 - `build_comparison` returns `split`, `pairs`, `config`, `judges` and `calls`. A judge whose ledger is incomplete, or holds more or fewer calls than its configuration makes, is `incomplete` and never a partial figure set.

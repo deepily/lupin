@@ -28,7 +28,7 @@ def judge_by_text( predicted, actual ):
 
 def sample_row( n, kind="yes_no", card=None, inclusion=0.5, predicted="a", actual="b" ):
     return { "pair_id": f"p{n}", "notification_id": card or f"card{n}", "response_type": kind, "pattern": "differ", "inclusion": inclusion,
-             "predicted_text": predicted, "actual_text": actual }
+             "predicted_text": predicted, "actual_text": actual, "refers_to_earlier": False }
 
 
 def planted( caught=29, missed=1, passed=28, false_alarm=2 ):
@@ -253,3 +253,26 @@ def test_the_command_refuses_and_writes_no_report( tmp_path, capsys ):
     ( folder / "verdicts.jsonl" ).write_text( "" )
     assert scoring.main( [ "report" ] + args ) == scoring.EXIT_REFUSED
     assert "refusing to score" in capsys.readouterr().err and not ( folder / "report.json" ).exists()
+
+
+def test_agreement_on_self_referring_forecasts_is_split_by_arm_and_card_type():
+    sample, verdicts, labels, key = planted( caught=4, missed=0, passed=0, false_alarm=0 )
+    for n in ( 0, 1, 2 ): sample[ n ][ "refers_to_earlier" ] = True
+    for n in range( 4 ): key[ f"p{n}" ] = { "arm": "B1", "model": "haiku" }
+    verdicts[ 0 ][ "material" ] = False        # flagged, judge disagrees
+    verdicts[ 1 ][ "material" ] = None         # flagged, unreadable
+    labels[ 2 ][ "material_error" ] = None     # flagged, unresolved
+    sample.append( sample_row( 4, kind="open_ended" ) )
+    labels.append( { "pair_id": "p4", "material_error": False } )
+    verdicts.append( { "pair_id": "p4", "material": False, "identity": IDENTITY } )
+    key[ "p4" ] = { "arm": "C0", "model": "opus" }
+    rows = report_of( ( sample, verdicts, labels, key ) )[ "self_reference" ]
+    assert [ ( r[ "arm" ], r[ "response_type" ], r[ "pairs" ], r[ "share_flagged" ] ) for r in rows ] == [
+        ( "B1 (haiku)", "yes_no", 4, 0.75 ), ( "C0 (opus)", "open_ended", 1, 0.0 ) ]
+    assert [ ( rows[ 0 ][ side ][ "successes" ], rows[ 0 ][ side ][ "trials" ] ) for side in ( "flagged", "unflagged" ) ] == [ ( 0, 2 ), ( 1, 1 ) ]
+    assert rows[ 1 ][ "flagged" ][ "rate" ] is None and rows[ 1 ][ "unflagged" ][ "successes" ] == 1
+
+
+def test_a_sampled_pair_without_a_key_stops_the_self_reference_split():
+    with pytest.raises( ValueError, match="p1 has no key" ):
+        scoring.self_reference( [ sample_row( 1 ) ], [], {} )
