@@ -3,18 +3,20 @@ capability: web-client-render-action-required-interactive
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.renderActionRequiredInteractive@014a28433b
-  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildYesNo@8dd837f237
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildYesNo@174e6245c7
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.withComment@eb355a18bb
-  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.appendYesNoComment@60441dcc3f
-  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildMultipleChoice@482cdda7b0
-  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildOpenEnded@5d390bceba
-  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildOpenEndedBatch@0b98fc36b7
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.appendYesNoComment@f69c2586fa
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildMultipleChoice@7e77b83e5a
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildOpenEnded@99f2f916d8
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.buildOpenEndedBatch@d5a4d73c3c
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.appendNoQuestions@e1d1efa348
   - src.lupin_app.static.js.multiplexer.render.actionRequiredMic.createActionRequiredMic@d56bbb1e17
   - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.checkedChoices@03585cc962
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.markVoice@9d080bb778
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.clearVoice@4cda69d3b2
+  - src.lupin_app.static.js.multiplexer.render.templates.actionRequiredInteractive.commentRoute@320d187b05
 ---
 # Action-required interactive forms
-
 The answer forms of an action-required card, one per response type, and the microphone handler they share.
 
 ## What it does
@@ -30,6 +32,9 @@ The answer forms of an action-required card, one per response type, and the micr
 - `createActionRequiredMic( recorder, getAuthToken )` returns the click handler a card 🎤 calls. The click logic is the shared `toggleDictation` in `dictationToggle.ts`.
 - A click while this context records stops it and shows `processing`. A click while `processing` does nothing. A click while another context records stops that one and starts nothing.
 - Otherwise it starts recording. A transcription goes in at the caret, an `input` event fires, and the button resets on completion, error or cancel.
+- `markVoice( input )` flags a field when its mic is clicked, and `clearVoice( input )` drops the flag on a key press. `commentRoute( input, typedRoute )` gives `voice` while the flag is set and `typedRoute`, `comment` by default, otherwise.
+- Routes: a yes/no answer with a blank comment is `click`, else `comment` or `voice`. An open-ended answer is `typed` or `voice`, and every batch answer is `typed`. A stepped answer is `click` unless it was saved with Other ticked and filled. It is then `typed`, or `voice` after the Other mic with no key press since.
+- The Other flags live in the widget, not in the saved step. A question answered through Other before a repaint, and not saved again, is sent as `click`.
 
 ## How the parts work together
-`onSubmit` receives a string for yes/no and open-ended answers and `{ answers }` for the stepped and batch forms. Without `onMic` a mic button renders and does nothing.
+`onSubmit` receives a string for yes/no and open-ended answers and `{ answers }` for the stepped and batch forms. Its second argument is the route, how the answer was given: `click`, `typed`, `comment` or `voice`. The stepped and batch forms give one route per question header. Without `onMic` a mic button renders and does nothing.

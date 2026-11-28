@@ -9,12 +9,12 @@ pins:
   - cosa.agents.prediction_engine.accuracy_comparators.get_comparator@a124c310bf
   - cosa.agents.prediction_engine.accuracy_comparators.compare_open_ended@dfa4cf30bb
   - cosa.agents.prediction_engine.accuracy_comparators.compare_open_ended_batch@62714ea9e6
-  - scripts.rescore_empty_answers_mc.classify@773b0c2bde
+  - scripts.rescore_empty_answers_mc.classify@35ecc393c3
   - scripts.rescore_empty_answers_mc.select_rows@3a649df5c9
   - scripts.rescore_empty_answers_mc.default_dump_path@f848818d66
   - scripts.rescore_empty_answers_mc.dump_old_values@f1de852e32
-  - scripts.rescore_empty_answers_mc.rescore@72598b798c
-  - scripts.rescore_empty_answers_mc.main@8a17febbaa
+  - scripts.rescore_empty_answers_mc.rescore@f5b60dd0c9
+  - scripts.rescore_empty_answers_mc.main@d01a8a118d
   - cosa.agents.prediction_engine.accuracy_comparators.offered_labels@d54e9908aa
 ---
 # Prediction accuracy comparators
@@ -32,7 +32,7 @@ One comparator exists for each question type the prediction engine ([[prediction
 
 ## One-off rescore of old multiple-choice rows
 - `src/scripts/rescore_empty_answers_mc.py` rescores the old `multiple_choice` rows left unscored with reason `empty_answers`. They were stored before the router kept the answer as a mapping.
-- `select_rows` picks those rows; `open_ended_batch` rows are never selected. `classify` decodes each stored answer the way `record_outcome` does and reruns `get_comparator` with no stored schema.
+- `select_rows` picks those rows; `open_ended_batch` rows are never selected. `classify` decodes each stored answer the way `record_outcome` does and reruns `get_comparator` with the notification's stored schema and the per-field switch. `main` reads that switch from the live setting.
 - A row is skipped, and counted under its reason, when it holds no answers mapping or no prediction. It is also skipped when the comparator still cannot score it.
 - It is report-only by default. `--write` first dumps every row it will change to a JSON-lines file (`dump_old_values`, `default_dump_path`), and writes nothing if the dump fails. Then it stores the decoded answer and the new score. It never changes `responded_at`. `main` returns 0 after a run. A required import that fails stops the script with exit 3 before `main` runs.
 

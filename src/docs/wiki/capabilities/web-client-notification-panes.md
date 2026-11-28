@@ -3,8 +3,8 @@ capability: web-client-notification-panes
 pin_algorithm: py3.13.xaad549/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.NotificationsListRendererImpl@539aa8f6a5
-  - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@d2a3549262
-  - src.lupin_app.static.js.multiplexer.stores.ActionRequiredStore.ActionRequiredStoreImpl.respondAndAwait@5bf13c5c25
+  - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@20762b5f8e
+  - src.lupin_app.static.js.multiplexer.stores.ActionRequiredStore.ActionRequiredStoreImpl.respondAndAwait@3b2d07538e
   - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@a9b4064b3a
   - src.lupin_app.static.js.multiplexer.render.BroadcastAckTallyRenderer.BroadcastAckTallyRendererImpl@c827b16ffb
   - src.lupin_app.static.js.multiplexer.render.CommonsActivityRenderer.CommonsActivityRendererImpl@3c39de597e
@@ -21,7 +21,7 @@ Each pane renderer owns one mount node and repaints from store events on the bus
 - `SenderCardRecorderRenderer` wires mic (through the shared `startDictation`), send (POST `/api/notify`) and conversation mode (POST `/api/cosa-voice/speakerphone/<hash>`). `SenderCardConsoleButtons` adds a console button to a card only when a seat resolves.
 - `NotificationsHeaderRenderer` counts `list()`. Clear All sends one `DELETE /api/notifications/<id>` per visible entry. The Mine / Not Mine / All Users switch is hidden unless `isAdmin()`.
 - `ActionRequiredRendererImpl` paints the store's first item as the full card and the rest as queue rows, unless the first awaits activation. A change to a queued item repaints only the rows. Given `predictionVoteStore` and no `predictionVote`, it builds the vote bridge itself; a refused or thrown vote repaints the card. A card that paints a forecast reports it rendered once. A fold the reader opens is reported and stays open on a repaint. The report carries the answer the card's controls hold at that moment (`draftAtReveal`, [[web-client-render-action-required-draft]]). A failure reading the controls sends none and never holds the report back. Given `contextForecastFetch`, opening the fold also refreshes a Haiku forecast that still reads forecasting. A harness that omits it opens the fold with the forecast it has.
-- Submit and ✕ call `respondAndAwait`, which POSTs `/api/notify/response`. P and Esc click the first card's own controls, and Y, N, C do on a yes/no card, unless focus is in an input. Esc does nothing while a card microphone is recording, so it stops the recording and not the card.
+- Submit and ✕ call `respondAndAwait`, which POSTs `/api/notify/response`. A widget's submit also passes how the answer was given, sent as `input_route` ([[web-client-render-action-required-interactive]]); with none the field is left out. P and Esc click the first card's own controls, and Y, N, C do on a yes/no card, unless focus is in an input. Esc does nothing while a card microphone is recording, so it stops the recording and not the card.
 - `BroadcastCardRendererImpl` records its message mic through `startDictation` and loads `/api/commons/active-sessions`. After a confirm modal it POSTs `/api/commons/broadcast-to-cc-sessions` and hands the returned id to the tally.
 - `CommonsActivityRendererImpl` inserts a `prepended` row alone when it matches the filter. `hydrated` and `filter-changed` redraw all rows.
 - `FleetStatusRendererImpl` repaints on `store_fleet_status_changed` and stamps its updated label with `stampFreshRead`. It paints a skeleton crew switch beside the size dial. The switch is hidden when the payload has no `skeleton_crew` field, and disabled while its write is in flight. The store polls `/api/arbiter/fleet-state` every 60000 ms once boot calls `startPolling`.
