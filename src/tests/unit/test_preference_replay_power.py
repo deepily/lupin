@@ -61,6 +61,8 @@ def test_a_negative_root_term_gives_no_gain():
     ( lambda: pw.power( 0.0, 1.5, 10 ),                         "disagreement rate" ),
     ( lambda: pw.power( 0.0, 0.2, 0 ),                          "at least 1 card" ),
     ( lambda: pw.power( 0.0, 0.2, 10, alpha=0 ),                "alpha" ),
+    ( lambda: pw.power( 0.0, 0.2, 10, alpha=1 ),                "alpha" ),
+    ( lambda: pw.power( 0.0, 0.2, 0.5 ),                        "at least 1 card" ),
     ( lambda: pw.power( -0.01, 0.2, 10 ),                       "the gain must be" ),
     ( lambda: pw.power( 0.3, 0.2, 10 ),                         "the gain must be" ),
     ( lambda: pw.minimum_detectable_gain( 0.2, 10, target=0.4 ), "target power" ),

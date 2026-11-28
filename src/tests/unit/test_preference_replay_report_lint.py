@@ -50,6 +50,9 @@ def test_the_planted_bad_table_is_refused_with_every_fault_named():
     ( { "paired_differences": [ { "name": "d", "difference": 0.5, "interval": [ 0.6, 0.9 ] } ] },       "no interval around it" ),
     ( { "paired_differences": [ { "name": "d", "difference": 0.5, "interval": [ None, 0.9 ] } ] },      "no interval around it" ),
     ( { "paired_differences": [ { "name": "d", "difference": float( "nan" ), "interval": [ 0, 1 ] } ] }, "with no number" ),
+    ( { "paired_differences": [ { "name": "d", "difference": 0.5, "interval": [ 0.1, 0.4 ] } ] },       "no interval around it" ),
+    ( { "paired_differences": [ { "name": "d", "difference": 0.5, "interval": [ 0, 1, 2 ] } ] },        "no interval around it" ),
+    ( { "paired_differences": [ { "name": "a", "difference": 0.5, "interval": [ 0, 1 ] }, { "name": "d", "difference": 0.5 } ] }, "'d' with no interval" ),
 ] )
 def test_each_fault_on_its_own_is_found( changed, fault ):
     found = rl.table_findings( good( **changed ) )
@@ -58,6 +61,11 @@ def test_each_fault_on_its_own_is_found( changed, fault ):
 
 def test_a_table_with_no_unit_reports_only_that_and_not_a_mismatch():
     assert rl.table_findings( good( unit=None ) ) == [ "table 'accuracy by arm' has no unit" ]
+
+
+def test_a_difference_on_either_bound_of_its_interval_passes():
+    on_bounds = [ { "name": "low", "difference": 0.1, "interval": [ 0.1, 0.4 ] }, { "name": "high", "difference": 0.4, "interval": [ 0.1, 0.4 ] } ]
+    assert rl.table_findings( good( paired_differences=on_bounds ) ) == []
 
 
 def test_a_report_with_no_table_is_refused():
