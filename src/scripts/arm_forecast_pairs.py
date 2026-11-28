@@ -36,9 +36,10 @@ from sqlalchemy import inspect as sql_inspect
 from sqlalchemy import text
 
 import cosa.utils.util as cu
+import build_answer_card_sample
 import full_answer_arm
 from cosa.agents.prediction_engine import answer_history_forecast, context_baseline, principle_retrieval, principles_forecast
-from cosa.agents.prediction_engine.accuracy_comparators import compare_yes_no
+from cosa.agents.prediction_engine.accuracy_comparators import compare_yes_no, predicted_answers_of
 from cosa.agents.prediction_engine.episode_view import fields_of
 from cosa.agents.prediction_engine.history_context_rebuild import answer_known_at_ask
 from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
@@ -221,8 +222,8 @@ def full_sample( records_path, per_type ):
     """
     lines, drawn = read_jsonl( records_path ), []
     for kind in CHOICE_TYPES:
-        ids    = sorted( line[ "id" ] for line in lines if line[ "response_type" ] == kind )
-        drawn += sorted( random.Random( f"{FULL_SAMPLE_SEED}|{kind}" ).sample( ids, min( per_type, len( ids ) ) ) )
+        ids    = [ line[ "id" ] for line in lines if line[ "response_type" ] == kind ]
+        drawn += build_answer_card_sample.draw( ids, min( per_type, len( ids ) ), FULL_SAMPLE_SEED, kind )
     return drawn
 
 
@@ -321,10 +322,7 @@ def _choice_predicted( forecast, header ):
         - returns the picked label or labels, else the full record's write-in or re-frame text, else None
         - a full record's conditions are added after the pick
     """
-    given = ( forecast.get( "answers" ) or {} ).get( header )
-    if given is None:
-        field = ( forecast.get( "fields" ) or {} ).get( header ) or {}
-        given = field.get( "write_in" ) or field.get( "reframe" )
+    given = predicted_answers_of( forecast ).get( header )
     if given is None: return None
     return _with_conditions( _joined( given ), forecast )
 
