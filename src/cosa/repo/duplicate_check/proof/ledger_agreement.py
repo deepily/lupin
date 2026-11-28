@@ -148,32 +148,71 @@ def statistics( first, second, pairs ):
              "flag_rate_first": ( table[ 0 ] + table[ 1 ] ) / len( pairs ), "flag_rate_second": ( table[ 0 ] + table[ 2 ] ) / len( pairs ) }
 
 
-def bootstrap( first, second, pairs, draws=2000, seed=0 ):
+def bootstrap( first, second, pairs, draws=2000, seed=0, group_of=None, statistic=None ):
     """
-    Bootstrap every agreement figure, resampling whole definitions.
+    Bootstrap figures over the pairs, resampling whole groups.
 
     Requires:
-        - pairs is non-empty; each pair is ( definition key, candidate ); draws >= 1
+        - pairs is non-empty; draws >= 1
+        - without group_of, each pair is ( definition key, candidate ) and the group is the definition key
+        - group_of, when given, maps every pair to a sortable group key, such as its session or its time block
+        - statistic, when given, is called as statistic( first, second, sample ) and returns { figure: number or None }; the default is statistics
 
     Ensures:
         - returns { figure: [ low, high ] }, the 2.5% and 97.5% points of the draws; a draw where a figure is undefined is left out of that figure
+        - a draw takes as many groups as there are, with replacement, and every pair of each group it takes
         - a figure undefined in every draw reports None
         - the same seed gives the same intervals
+
+    Raises:
+        - KeyError when group_of leaves out a pair
     """
-    groups = {}
-    for p in pairs: groups.setdefault( p[ 0 ], [] ).append( p )
+    figures = statistics if statistic is None else statistic
+    groups  = {}
+    for p in pairs: groups.setdefault( p[ 0 ] if group_of is None else group_of[ p ], [] ).append( p )
     names  = sorted( groups )
     rng    = random.Random( seed )
     draws_by = {}
     for _ in range( draws ):
         sample = [ p for name in ( rng.choice( names ) for _ in names ) for p in groups[ name ] ]
-        for k, v in statistics( first, second, sample ).items():
+        for k, v in figures( first, second, sample ).items():
             if v is not None: draws_by.setdefault( k, [] ).append( v )
     out = {}
-    for k in statistics( first, second, pairs ):
+    for k in figures( first, second, pairs ):
         vals   = sorted( draws_by.get( k, [] ) )
         out[ k ] = [ percentile( vals, 0.025 ), percentile( vals, 0.975 ) ] if vals else None
     return out
+
+
+def paired_difference( first, second, pairs ):
+    """
+    Return the share right of the first arm minus that of the second, over the same pairs.
+
+    Requires:
+        - pairs is non-empty; first and second map every pair to 1 or True when that arm was right, else 0 or False
+
+    Ensures:
+        - returns { "difference": value }, the shape bootstrap's statistic takes
+    """
+    return { "difference": ( sum( map( first.__getitem__, pairs ) ) - sum( map( second.__getitem__, pairs ) ) ) / len( pairs ) }
+
+
+def contiguous_blocks( pairs, size ):
+    """
+    Number pairs into blocks of neighbours, to resample blocks of time.
+
+    Requires:
+        - pairs is in time order; size is a whole number of 1 or more
+
+    Ensures:
+        - returns { pair: block number }, the group_of that bootstrap takes
+        - each block holds size neighbouring pairs, except the last, which holds the rest
+
+    Raises:
+        - ValueError when size is below 1
+    """
+    if size < 1: raise ValueError( f"a block needs at least 1 pair, not {size}" )
+    return { p: i // size for i, p in enumerate( pairs ) }
 
 
 def against_labels( first, second, pair_map, labels, strata, exclude=() ):
