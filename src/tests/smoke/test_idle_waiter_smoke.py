@@ -37,15 +37,15 @@ BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:1" ).rstrip( "/" )
 @pytest.fixture
 def isolated_bridge( tmp_path, monkeypatch ):
     """
-    Stand up an isolated ~/.claude/sessions directory under tmp_path so we
+    Stand up an isolated session-bridge directory under tmp_path so we
     can drop a fake bridge file without polluting real session bridges.
 
     The waiter's session_bridge.find_session_path_by_id resolves bridges
-    by scanning ~/.claude/sessions/ — we override HOME so the scan finds
-    only our test file.
+    by scanning the bridge directory. The fixture points the
+    home and the bridge directory at its own, so the scan finds one file.
     """
     fake_home = tmp_path / "fake-home"
-    sessions  = fake_home / ".claude" / "sessions"
+    sessions  = fake_home / ".claude" / "lupin-sessions"
     sessions.mkdir( parents=True )
 
     # File MUST be named after a live PID — session_bridge's PID-alive
@@ -65,6 +65,8 @@ def isolated_bridge( tmp_path, monkeypatch ):
     }, indent=2 ) )
 
     monkeypatch.setenv( "HOME", str( fake_home ) )
+    # The waiter reads this before HOME, and a seat's shell sets it to the real bridge directory.
+    monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( sessions ) )
     return bridge_path
 
 

@@ -223,7 +223,10 @@ class TestExternalScopes:
         assert status == 200, f"claude-plans root listing failed: {status} body={body[:200]!r}"
         listing = json.loads( body )
         assert listing[ "scope" ] == "claude-plans"
-        # claude-plans has many .md plans; ≥1 entry confirms reach
+        # claude-plans has many .md plans; ≥1 entry confirms reach. An empty source directory proves nothing either way.
+        host_plans = os.path.expanduser( "~/.claude/plans" )
+        if os.path.isdir( host_plans ) and not os.listdir( host_plans ):
+            pytest.skip( f"{host_plans} holds no files, so there is no entry to reach" )
         assert len( listing[ "entries" ] ) >= 1
 
 

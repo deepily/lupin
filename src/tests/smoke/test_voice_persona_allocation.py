@@ -73,6 +73,18 @@ def _resolve_session_dir() -> Path:
 SESSION_DIR = _resolve_session_dir()
 
 
+def _live_pool( auth_token ) -> dict:
+    """
+    Read which pool voices live sessions hold right now.
+
+    Ensures:
+        - returns the pool route's body, with "free_names" and "occupied_names"
+    """
+    resp = requests.get( f"{BASE_URL}/api/cosa-voice/voice-persona/pool", headers={ "Authorization": f"Bearer {auth_token}" }, timeout=5 )
+    assert resp.status_code == 200, f"GET /pool failed: {resp.status_code} {resp.text}"
+    return resp.json()
+
+
 # ── configured-pool readers (added 2026-08-26) ──────────────────────────────
 # The pool roster used to be hardcoded in three places in this file. It has
 # changed at least twice (6 names -> 14, and the overflow persona moved from
@@ -302,6 +314,7 @@ class TestVoicePersonaAllocateAndRelease:
     def test_allocate_returns_persona_not_sam( self, auth_token, synthetic_bridge ):
         """POST /allocate should return a persona from the pool (never Sam)."""
         session_id, bridge_path = synthetic_bridge
+        if not _live_pool( auth_token )[ "free_names" ]: pytest.skip( "live sessions hold every pool voice" )
 
         resp = requests.post(
             f"{BASE_URL}/api/cosa-voice/voice-persona/{session_id}/allocate",
@@ -438,6 +451,8 @@ class TestVoicePersonaUniqueness:
         # len(pool) + 2 synthetic bridges — exhausts the CONFIGURED pool with two
         # to spare even if a couple of personas are already held by live sessions.
         overflow_name = _configured_overflow_name()
+        if overflow_name in { n.lower() for n in _live_pool( auth_token )[ "occupied_names" ] }:
+            pytest.skip( f"a live session already holds the overflow persona {overflow_name!r}" )
         n_bridges     = len( _configured_pool_names() ) + 2
         sids    = [ str( uuid.uuid4() ) for _ in range( n_bridges ) ]
         bridges = [ SESSION_DIR / f"cc-{test_pid + 93000 + i}.json" for i in range( n_bridges ) ]
@@ -500,6 +515,7 @@ class TestVoicePersonaUniqueness:
         Allocate personas for TWO synthetic bridges. They must be distinct.
         This is the core anti-collision guarantee.
         """
+        if len( _live_pool( auth_token )[ "free_names" ] ) < 2: pytest.skip( "fewer than two pool voices are free of live sessions" )
         SESSION_DIR.mkdir( parents=True, exist_ok=True )
         test_pid = os.getpid()
 
