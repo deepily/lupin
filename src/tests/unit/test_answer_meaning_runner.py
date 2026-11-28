@@ -325,3 +325,12 @@ def test_main_without_a_gold_option_reads_the_default_store( db, scope, labeller
     monkeypatch.setattr( gold_store, "default_path", lambda: store )
     assert runner.main( [], session_scope=scope ) == 0
     assert json.loads( capsys.readouterr().out )[ "gold_progress" ][ "rick" ][ "no" ] == 3
+
+
+def test_main_stops_on_a_damaged_gold_store_before_any_model_call( db, scope, labeller, tmp_path ):
+    from cosa.repo.labelling import errors
+    ask( db, 1, value="yes [comment: later]" )
+    store = tmp_path / "torn.jsonl"
+    store.write_text( '{"item_id": "torn' )
+    with pytest.raises( errors.LabellingError, match="torn" ): runner.main( [ "--gold", str( store ) ], session_scope=scope )
+    assert labeller.calls == [] and db.query( AnswerMeaning ).count() == 0
