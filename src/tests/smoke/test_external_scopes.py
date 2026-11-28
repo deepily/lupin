@@ -24,6 +24,7 @@ Covered:
 
 import json
 import os
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -215,19 +216,22 @@ class TestExternalScopes:
     def test_claude_plans_scope_lists_root( self, access_token, registered_scopes ):
         if "claude-plans" not in registered_scopes:
             pytest.skip( "claude-plans scope not registered" )
-        status, ct, body = _fetch(
-            "/api/docs/file",
-            token = access_token,
-            query = { "path": "claude-plans/" },
-        )
+        # The test makes its own folder in the mounted source, so the listing has a known entry however empty the source is.
+        plans = os.path.expanduser( "~/.claude/plans" )
+        os.makedirs( plans, exist_ok=True )
+        with tempfile.TemporaryDirectory( prefix="smoke-scope-probe-", dir=plans ) as probe:
+            os.chmod( probe, 0o755 )
+            with open( os.path.join( probe, "probe.md" ), "w", encoding="utf-8" ) as handle: handle.write( "# probe\n" )
+            status, ct, body = _fetch(
+                "/api/docs/file",
+                token = access_token,
+                query = { "path": "claude-plans/" },
+            )
         assert status == 200, f"claude-plans root listing failed: {status} body={body[:200]!r}"
         listing = json.loads( body )
         assert listing[ "scope" ] == "claude-plans"
-        # claude-plans has many .md plans; ≥1 entry confirms reach. An empty source directory proves nothing either way.
-        host_plans = os.path.expanduser( "~/.claude/plans" )
-        if os.path.isdir( host_plans ) and not os.listdir( host_plans ):
-            pytest.skip( f"{host_plans} holds no files, so there is no entry to reach" )
-        assert len( listing[ "entries" ] ) >= 1
+        names = [ entry[ "name" ] for entry in listing[ "entries" ] ]
+        assert os.path.basename( probe ) in names, f"the probe folder is not in the listing: {names}"
 
 
 # ---------------------------------------------------------------------------
