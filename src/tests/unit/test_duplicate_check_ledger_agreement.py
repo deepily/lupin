@@ -2,6 +2,8 @@
 import json
 import math
 
+import random
+
 import pytest
 
 from cosa.repo.duplicate_check.proof import ledger_agreement as la
@@ -126,6 +128,56 @@ def test_bootstrap_all_undefined_reports_none():
     pairs  = sorted( first )
     out    = la.bootstrap( first, first, pairs, draws=5 )
     assert out[ "kappa" ] is None and out[ "weighted_kappa" ] is None and out[ "exact" ] == [ 1.0, 1.0 ]
+
+
+def _planted_sessions( seed ):
+    """
+    Build 100 sessions of 4 asks, with arm A right more often than arm B.
+
+    A is right at 0.6, shifted by 0.35 up or down for a whole session. B is right at 0.5.
+    """
+    rng   = random.Random( seed )
+    first, second, session = {}, {}, {}
+    for s in range( 100 ):
+        shift = rng.choice( ( -0.35, 0.35 ) )
+        for i in range( 4 ):
+            p            = ( s, i )
+            first[ p ]  = rng.random() < 0.6 + shift
+            second[ p ] = rng.random() < 0.5
+            session[ p ] = s
+    return first, second, session
+
+
+def test_the_session_bootstrap_covers_the_planted_gain_in_930_to_970_of_1000_runs():
+    # the planted difference is 0.6 - 0.5 = 0.10, because the session shifts average out
+    covered = 0
+    for run in range( 1000 ):
+        first, second, session = _planted_sessions( run )
+        low, high = la.bootstrap( first, second, list( first ), draws=200, seed=run, group_of=session, statistic=la.paired_difference )[ "difference" ]
+        covered += low <= 0.10 <= high
+    assert 930 <= covered <= 970
+
+
+def test_grouping_by_session_widens_the_interval_that_single_asks_would_give():
+    first, second, session = _planted_sessions( 1 )
+    pairs   = list( first )
+    by_ask  = la.bootstrap( first, second, pairs, draws=400, group_of={ p: p for p in pairs }, statistic=la.paired_difference )[ "difference" ]
+    grouped = la.bootstrap( first, second, pairs, draws=400, group_of=session, statistic=la.paired_difference )[ "difference" ]
+    assert grouped[ 1 ] - grouped[ 0 ] > 1.3 * ( by_ask[ 1 ] - by_ask[ 0 ] )
+
+
+def test_one_group_gives_every_draw_the_whole_sample():
+    first, second = { 1: 1, 2: 1, 3: 0, 4: 1 }, { 1: 0, 2: 1, 3: 1, 4: 0 }
+    assert la.paired_difference( first, second, [ 1, 2, 3, 4 ] ) == { "difference": 0.25 }
+    got = la.bootstrap( first, second, [ 1, 2, 3, 4 ], draws=20, group_of={ k: "all" for k in first }, statistic=la.paired_difference )
+    assert got == { "difference": [ 0.25, 0.25 ] }
+    with pytest.raises( KeyError ): la.bootstrap( first, second, [ 1, 2 ], group_of={ 1: "a" }, statistic=la.paired_difference )
+
+
+def test_contiguous_blocks_number_neighbours_and_refuse_an_empty_block():
+    assert la.contiguous_blocks( [ "a", "b", "c", "d", "e" ], 2 ) == { "a": 0, "b": 0, "c": 1, "d": 1, "e": 2 }
+    assert la.contiguous_blocks( [ "a", "b" ], 1 ) == { "a": 0, "b": 1 }
+    with pytest.raises( ValueError, match="at least 1" ): la.contiguous_blocks( [ "a" ], 0 )
 
 
 def test_against_labels_proof_rules():
