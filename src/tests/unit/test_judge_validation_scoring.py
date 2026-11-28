@@ -45,6 +45,11 @@ def report_of( parts, recorded=IDENTITY, current=IDENTITY ):
     return scoring.build_report( *parts, recorded, current )
 
 
+@pytest.mark.parametrize( "keeps, invents_nothing, material", [ ( True, True, False ), ( True, False, True ), ( False, True, True ), ( False, False, True ) ] )
+def test_a_pair_is_material_unless_both_booleans_hold( keeps, invents_nothing, material ):
+    assert scoring.says_material( { "keeps_every_restriction": keeps, "invents_nothing": invents_nothing } ) is material
+
+
 def test_the_identity_is_recorded_once_and_another_is_refused( tmp_path ):
     assert scoring.record_identity( tmp_path / "v", IDENTITY ) == IDENTITY
     assert scoring.record_identity( tmp_path / "v", IDENTITY ) == IDENTITY
