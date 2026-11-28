@@ -81,6 +81,7 @@ def record_one( session_scope, notification_id, annotator, label ):
     Ensures:
         - with a row already under this annotator, returns { "status": "already" } and calls no model
         - otherwise appends one v2 row and returns { "status": "written", "relations": [..], "unknowns": [..] }
+        - a field the model was asked about and left without a relation gives { "status": "failed" } and no row, so a rerun retries it
         - a row that appears between the check and the add gives { "status": "already" }
         - no session is open during the model call
 
@@ -100,6 +101,7 @@ def record_one( session_scope, notification_id, annotator, label ):
     if not found: raise LookupError( f"no notification {key}" )
     if draft is None: return { "status": "already" }
     meaning = meaning_of( draft, label )
+    if any( "relation" not in meaning[ "native_answer" ][ field ] for field in rules.pending_keys( draft ) ): return { "status": "failed" }
     try:
         with session_scope() as session:
             AnswerMeaningRepository( session ).add(
@@ -136,9 +138,9 @@ def run( session_scope, annotator, label, ids=None, limit=None, every=PROGRESS_E
         - ids is None for every stored answer, or a list of notification ids; limit is None or a positive integer
 
     Ensures:
-        - returns annotator, answers, written, already, relations and unknowns (counts over the rows written) and the stamp
+        - returns annotator, answers, written, already, failed, relations and unknowns (counts over the rows written) and the stamp
         - prints a progress line every `every` answers
-        - a second run over the same answers writes nothing
+        - a second run over the same answers writes only the ones that failed before
 
     Raises:
         - whatever record_one raises; the rows written before it stay, and a rerun skips them
@@ -155,7 +157,7 @@ def run( session_scope, annotator, label, ids=None, limit=None, every=PROGRESS_E
         relations.update( report.get( "relations", [] ) )
         unknowns.update( report.get( "unknowns", [] ) )
         if number % every == 0: print( f"[meaning runner] {number}/{len( ids )}", file=sys.stdout, flush=True )
-    return { "annotator": annotator, "answers": len( ids ), "written": statuses[ "written" ], "already": statuses[ "already" ],
+    return { "annotator": annotator, "answers": len( ids ), "written": statuses[ "written" ], "already": statuses[ "already" ], "failed": statuses[ "failed" ],
              "relations": dict( relations ), "unknowns": dict( unknowns ), "stamp": list( STAMP ) }
 
 
