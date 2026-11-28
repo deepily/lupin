@@ -127,14 +127,16 @@ def options_text( options ):
 
     Ensures:
         - returns "" for None
-        - returns each question as "header: question" and each of its options as "- label: description"
+        - returns each question as "header: question", or the header alone when no question text is stored
+        - each of its options follows as "- label: description"
         - any other shape is returned as indented JSON, so nothing on the card is hidden
     """
     if options is None: return ""
     try:
         lines = []
         for question in options[ "questions" ]:
-            lines.append( f"{question[ 'header' ]}: {question[ 'question' ]}" )
+            asked = question.get( "question" )
+            lines.append( question[ "header" ] + ( f": {asked}" if asked else "" ) )
             for option in question.get( "options" ) or []:
                 detail = option.get( "description" )
                 lines.append( f"- {option[ 'label' ]}" + ( f": {detail}" if detail else "" ) )

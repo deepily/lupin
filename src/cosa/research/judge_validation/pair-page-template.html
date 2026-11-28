@@ -118,7 +118,7 @@ function show() {
   setText( "cardtext", item.card_text );
   boxed( "abstractbox", "abstract", item.abstract );
   boxed( "optionsbox", "options", item.options );
-  setText( "question", item.question );
+  setText( "question", item.question || "(the whole answer: this card asks one question)" );
   setText( "answer", item.answer );
   setText( "forecast", item.forecast || "(the forecast wrote nothing)" );
   boxed( "readersbox", "readers", shut ? "Label this pair in section A first. The readers' labels show after that." : readerText( item ) );

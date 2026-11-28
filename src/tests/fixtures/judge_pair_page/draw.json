@@ -1,0 +1,35 @@
+{
+  "cards_sha256": "9771eeb7795f11519c0916b053408c53ef5a00106583e0e8f2665f5637ed577c",
+  "drawn": 6,
+  "files": {
+    "reader-answers.jsonl": "9df9fba74f0576fa49fd90aa057700af61d3bcf95eda82e474b525e4b8cfe334",
+    "reader-forecasts.jsonl": "0fe4f44ba317a0241def80c1e8ffcdf2a75a32bb43f535e5c26318c6b877e178",
+    "sample.jsonl": "624e53ac1d09debc453e49d397bc45131dfa60a608ccd1acf846f089e45680ab"
+  },
+  "mismatch_share": 0.5,
+  "pairs_sha256": "64c0e2b0a54383c0532f3b2f207ad89f39b051185004c663d51f10c97282c6ae",
+  "per_type": 6,
+  "seed": 7,
+  "strata": {
+    "multiple_choice/match": {
+      "drawn": 2,
+      "inclusion": 1.0,
+      "population": 2
+    },
+    "multiple_choice/mismatch": {
+      "drawn": 1,
+      "inclusion": 1.0,
+      "population": 1
+    },
+    "yes_no/match": {
+      "drawn": 2,
+      "inclusion": 1.0,
+      "population": 2
+    },
+    "yes_no/mismatch": {
+      "drawn": 1,
+      "inclusion": 1.0,
+      "population": 1
+    }
+  }
+}

@@ -13,6 +13,7 @@ import cosa.utils.util as cu
 from cosa.repo.labelling import errors as er
 from cosa.repo.labelling import rick_page as rp
 from cosa.research.judge_validation import pair_page as pp
+from cosa.utils.file_hash import file_sha256
 
 SCHEMA = { "questions": [ { "header": "Where", "question": "Where to run it?",
                             "options": [ { "label": "Test", "description": "the test server" }, { "label": "Dev" } ] } ] }
@@ -109,6 +110,28 @@ def test_only_a_difference_in_material_error_is_a_dispute( tmp_path ):
 
     assert readers[ "one" ][ "p03" ][ "kind" ] != readers[ "two" ][ "p03" ][ "kind" ]
     assert pp.disputed_ids( readers[ "one" ], readers[ "two" ] ) == [ "p01", "p02" ]
+
+
+def test_the_reader_reads_the_files_the_draw_itself_wrote( tmp_path ):
+    """The fixtures are draw.write_sample's own output on made-up pairs, unedited."""
+    folder = cu.get_project_root() + "/src/tests/fixtures/judge_pair_page/"
+    with open( folder + "draw.json", encoding="utf-8" ) as handle:
+        receipt = json.load( handle )
+    for name in ( "reader-answers.jsonl", "reader-forecasts.jsonl" ):
+        assert file_sha256( folder + name ) == receipt[ "files" ][ name ], name
+
+    pairs = pp.read_pairs( folder + "reader-answers.jsonl", folder + "reader-forecasts.jsonl" )
+    items = pp.page_items( pairs, sorted( pairs ), [], {} )
+    shown = { item[ "card_text" ]: item for item in items }
+
+    assert len( pairs ) == receipt[ "drawn" ] == 6
+    picked = shown[ "Made-up multiple_choice question 0?" ]
+    assert ( picked[ "question" ], picked[ "answer" ], picked[ "forecast" ] ) == ( "Colour", "Colour: Green", "" )
+    assert picked[ "options" ] == "Colour\n- Green: made up\n- Blue: made up"
+    plain = shown[ "Made-up yes_no question 2?" ]
+    assert ( plain[ "question" ], plain[ "answer" ], plain[ "forecast" ], plain[ "options" ] ) == ( "", "yes [comment: paint it green]", "paint it green", "" )
+    view = drive( tmp_path, [ [ "view" ] ], items=[ plain ] )[ "views" ][ 0 ]
+    assert view[ "answer" ] == "yes [comment: paint it green]" and view[ "options" ] == "none" and view[ "forecast" ] == "paint it green"
 
 
 def test_section_a_holds_no_reader_label_and_section_b_holds_both( tmp_path ):
