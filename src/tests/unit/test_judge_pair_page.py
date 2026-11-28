@@ -292,11 +292,21 @@ def test_main_never_overwrites_a_page( tmp_path, capsys ):
     assert out.read_text( encoding="utf-8" ) == "mine" and "never overwritten" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize( "extra", [ [ "--labels", "three=nowhere" ], [ "--share", "0.5", "--answers", "nowhere" ] ] )
-def test_main_refuses_three_readers_or_an_unreadable_file_and_writes_nothing( tmp_path, capsys, extra ):
+@pytest.mark.parametrize( "names", [ ( "one", ), ( "one", "two", "three" ), ( "one", "one" ), ( "one", "two", "two" ) ] )
+def test_main_takes_two_differently_named_readers_and_writes_nothing_otherwise( tmp_path, capsys, names ):
+    """Every labels file here is readable, so only the count of readers can refuse."""
+    paths  = inputs( tmp_path )
+    labels = [ part for name in names for part in ( "--labels", f"{name}={paths[ 'one' ]}" ) ]
+    argv   = [ "--answers", paths[ "answers" ], "--forecasts", paths[ "forecasts" ], *labels, "--seed", "s1", "--out", str( tmp_path / "page.html" ) ]
+
+    assert pp.main( argv ) == 2
+    assert not ( tmp_path / "page.html" ).exists() and "two different readers" in capsys.readouterr().err
+
+
+def test_main_refuses_an_unreadable_file_and_writes_nothing( tmp_path, capsys ):
     out = tmp_path / "page.html"
 
-    assert pp.main( argv_for( inputs( tmp_path ), out ) + extra ) == 2
+    assert pp.main( argv_for( inputs( tmp_path ), out ) + [ "--answers", "nowhere" ] ) == 2
     assert not out.exists() and "cannot build the page" in capsys.readouterr().err
 
 
