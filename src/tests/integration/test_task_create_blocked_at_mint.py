@@ -80,6 +80,7 @@ from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import UserRepository, ApiKeyRepository
 
 from lupin_mcp.task_store_tools import task_create_impl, task_query_impl
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
@@ -87,7 +88,7 @@ ENDPOINT = f"{BASE_URL}/api/tasks"
 
 # The bridge directory the server-side predicate reads (session_bridge.SESSION_DIR).
 # Constructed identically here so writer and reader agree by construction.
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+SESSION_DIR = sessions_dir()
 
 # The two mintable statuses (AC1 allow-list) and everything the allow-list
 # must REJECT at create time.

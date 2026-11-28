@@ -18,7 +18,7 @@ Specifically asserts:
        legacy ad-hoc channel must be silent.
 
 Venue: :7999 (AI-discretionary). Test creates a synthetic bridge file inside
-the real ~/.claude/sessions/ directory under a unique PID alias and tears down
+the real session-bridge directory under a unique PID alias and tears down
 at end. WS captures are non-destructive (read-only on the user's notification
 channel).
 
@@ -29,17 +29,19 @@ import asyncio
 import json
 import os
 import uuid
-from pathlib import Path
 from urllib.parse import quote
 
 import pytest
 import requests
 import websockets
 
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+
 
 BASE_URL    = os.environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
 WS_BASE     = BASE_URL.replace( "http://", "ws://" ).replace( "https://", "wss://" )
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+# The same directory the server reads, through the one resolver, so a move of the bridges moves this too.
+SESSION_DIR = sessions_dir()
 
 # Custom notification types introduced by the 2026-04-29 migration.
 # `conversation_mode_changed` -> `speakerphone_changed` in 53fef419 (2026-06-19)
@@ -80,7 +82,7 @@ def auth_token():
 def synthetic_bridge():
     """
     Create a synthetic CC bridge file with a unique session_id under the real
-    ~/.claude/sessions/ directory. PID alias is the test-process PID + 92000
+    session-bridge directory. PID alias is the test-process PID + 92000
     so the dead-PID filter does not skip it.
 
     Yields ( cosa_session_id, bridge_path ). Tears down on exit.

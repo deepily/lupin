@@ -62,6 +62,16 @@ from cosa.agents.prediction_engine.config import (
     PREDICTOR_VERSION,
     DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED,
     DEFAULT_COMPLETE_ACTION_SCORING_ENABLED,
+    DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED,
+    DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED,
+    DEFAULT_CANDIDATE_TEMPLATE_CAP,
+    CANDIDATE_OVERFETCH_FACTOR,
+    DEFAULT_CATEGORY_AS_RANKING,
+    DEFAULT_CATEGORY_RANK_BOOST,
+    DEFAULT_LEXICAL_CANDIDATES_ENABLED,
+    DEFAULT_LEXICAL_CANDIDATES_MODE,
+    VALID_LEXICAL_CANDIDATES_MODES,
+    LEXICAL_POOL_LIMIT,
     RESPONSE_TYPE_YES_NO,
     RESPONSE_TYPE_MULTIPLE_CHOICE,
     RESPONSE_TYPE_OPEN_ENDED,
@@ -71,8 +81,10 @@ from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.agents.prediction_engine import evidence_recorder
 from cosa.agents.prediction_engine import failure_visibility
+from cosa.agents.prediction_engine.candidate_filter import lexical_candidates, rank_with_category, thin_candidates
 from cosa.rest.code_identity import get_code_identity
 from cosa.rest.db.vector_errors import QueryVectorRefused
+from cosa.repo.symindex.candidates.rank_fusion import fuse
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
 from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
 from cosa.utils.notification_utils import extract_qualifier_comment
@@ -145,6 +157,13 @@ class PredictionEngine:
             self.timeout_defaults_excluded_enabled = config_mgr.get( "prediction engine timeout defaults excluded enabled", default=str( DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED ), return_type="boolean" )
             self.lookup_neither_forecast_enabled = config_mgr.get( "prediction engine lookup neither forecast enabled", default=str( DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED ), return_type="boolean" )
             self.complete_action_scoring_enabled = config_mgr.get( "prediction engine complete action scoring enabled", default=str( DEFAULT_COMPLETE_ACTION_SCORING_ENABLED ), return_type="boolean" )
+            self.candidate_retry_dedupe_enabled = config_mgr.get( "prediction engine candidate retry dedupe enabled", default=str( DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED ), return_type="boolean" )
+            self.candidate_template_cap_enabled = config_mgr.get( "prediction engine candidate template cap enabled", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED ), return_type="boolean" )
+            self.candidate_template_cap         = int( config_mgr.get( "prediction engine candidate template cap", default=str( DEFAULT_CANDIDATE_TEMPLATE_CAP ), return_type="int" ) )
+            self.category_as_ranking = config_mgr.get( "prediction engine category as ranking", default=str( DEFAULT_CATEGORY_AS_RANKING ), return_type="boolean" )
+            self.category_rank_boost = config_mgr.get( "prediction engine category rank boost", default=str( DEFAULT_CATEGORY_RANK_BOOST ), return_type="float" )
+            self.lexical_candidates_enabled = config_mgr.get( "prediction engine lexical candidates enabled", default=str( DEFAULT_LEXICAL_CANDIDATES_ENABLED ), return_type="boolean" )
+            self.lexical_candidates_mode    = config_mgr.get( "prediction engine lexical candidates mode", default=DEFAULT_LEXICAL_CANDIDATES_MODE )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -174,6 +193,13 @@ class PredictionEngine:
             self.timeout_defaults_excluded_enabled = DEFAULT_TIMEOUT_DEFAULTS_EXCLUDED_ENABLED
             self.lookup_neither_forecast_enabled = DEFAULT_LOOKUP_NEITHER_FORECAST_ENABLED
             self.complete_action_scoring_enabled = DEFAULT_COMPLETE_ACTION_SCORING_ENABLED
+            self.candidate_retry_dedupe_enabled = DEFAULT_CANDIDATE_RETRY_DEDUPE_ENABLED
+            self.candidate_template_cap_enabled = DEFAULT_CANDIDATE_TEMPLATE_CAP_ENABLED
+            self.candidate_template_cap         = DEFAULT_CANDIDATE_TEMPLATE_CAP
+            self.category_as_ranking = DEFAULT_CATEGORY_AS_RANKING
+            self.category_rank_boost = DEFAULT_CATEGORY_RANK_BOOST
+            self.lexical_candidates_enabled = DEFAULT_LEXICAL_CANDIDATES_ENABLED
+            self.lexical_candidates_mode    = DEFAULT_LEXICAL_CANDIDATES_MODE
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -189,6 +215,16 @@ class PredictionEngine:
 
         if self.retrieval_metric not in VALID_RETRIEVAL_METRICS:
             raise ValueError( f"prediction engine retrieval metric must be one of {VALID_RETRIEVAL_METRICS}, got {self.retrieval_metric!r}" )
+
+        # Checked here because a predictor catches the error thin_candidates would raise, and every ask would abstain.
+        if self.candidate_template_cap < 1:
+            raise ValueError( f"prediction engine candidate template cap must be at least 1, got {self.candidate_template_cap!r}" )
+
+        if self.lexical_candidates_mode not in VALID_LEXICAL_CANDIDATES_MODES:
+            raise ValueError( f"prediction engine lexical candidates mode must be one of {VALID_LEXICAL_CANDIDATES_MODES}, got {self.lexical_candidates_mode!r}" )
+        # The word ranking reads every case through find_similar; only the cosine query scans them all (the index is dot-only).
+        if self.lexical_candidates_enabled is True and self.retrieval_metric != "cosine":   # a real bool, as ConfigurationManager types it
+            raise ValueError( f"prediction engine lexical candidates need the cosine retrieval metric, got {self.retrieval_metric!r}" )
 
         # Retained for _get_embedding_store. None is legitimate — the store then
         # resolves its own configuration.
@@ -356,6 +392,46 @@ class PredictionEngine:
         """
         return { "answer_source": "human", "owner_user_id": "" if owner_user_id is None else str( owner_user_id ) }
 
+    def _find_candidates( self, store, question: str, limit: int, **query ) -> list:
+        """
+        Fetch the neighbours that may vote, under whichever candidate switches are on.
+
+        Requires:
+            - store has find_similar; question is the ask's text; limit is a positive int
+            - query holds find_similar's other arguments, category and threshold among them
+
+        Ensures:
+            - with every candidate switch off, returns store.find_similar( limit=limit, **query ) untouched
+            - with category as ranking on, the category filters nothing; rank_with_category orders the neighbours
+            - with lexical candidates on, cases sharing words with question are ranked from every case the filters allow,
+              below the cosine threshold too; "fused" merges that ranking with the cosine one, "lexical" replaces it
+            - with either thinning switch on, fetches CANDIDATE_OVERFETCH_FACTOR times the limit and returns at most limit
+              pairs after thin_candidates, so a place a thinned copy held goes to the next nearest case
+
+        Raises:
+            - whatever find_similar raises
+        """
+        thinning = self.candidate_retry_dedupe_enabled or self.candidate_template_cap_enabled
+        fetch    = limit * CANDIDATE_OVERFETCH_FACTOR if thinning else limit
+        found    = store.find_similar( limit=fetch, **query )
+        if self.category_as_ranking:
+            every = store.find_similar( limit=fetch, **{ **query, "category": None } )
+            found = rank_with_category( found, every, query[ "category" ], self.category_rank_boost, fetch )
+        if self.lexical_candidates_enabled:
+            category = None if self.category_as_ranking else query[ "category" ]
+            pool     = store.find_similar( limit=LEXICAL_POOL_LIMIT, **{ **query, "category": category, "threshold": 0.0 } )
+            words    = lexical_candidates( pool, question, fetch )
+            if self.lexical_candidates_mode == "lexical":
+                found = words
+            else:
+                by_id = { pair[ 1 ][ "id" ]: pair for pair in words + found }
+                found = [ by_id[ i ] for i in fuse( [ [ r[ "id" ] for _, r in found ], [ r[ "id" ] for _, r in words ] ] )[ :fetch ] ]
+        if not thinning: return found
+        return thin_candidates(
+            found, limit,
+            dedupe       = self.candidate_retry_dedupe_enabled,
+            template_cap = self.candidate_template_cap if self.candidate_template_cap_enabled else None )
+
     def _ratified_weight( self, record ) -> float:
         """
         Vote weight a retrieved CBR case adds to its decision_value, by thumbs up/down state.
@@ -410,7 +486,7 @@ class PredictionEngine:
         Ratification-aware case selection for the open-ended retrieval tiers.
 
         Requires:
-            - similar_cases: list of ( similarity_pct, record ), descending similarity
+            - similar_cases: list of ( similarity_pct, record ), in the retrieval's rank order
             - message: the current question text
 
         Ensures:
@@ -520,7 +596,9 @@ class PredictionEngine:
         # Find similar past notifications (filtered by response_type)
         store_error = None
         try:
-            similar_cases = store.find_similar(
+            similar_cases = self._find_candidates(
+                store,
+                message,
                 query_embedding = embedding,
                 category        = category,
                 limit           = self.cbr_top_k,
@@ -1006,7 +1084,9 @@ class PredictionEngine:
         # Find similar past notifications (filtered by response_type)
         store_error = None
         try:
-            similar_cases = store.find_similar(
+            similar_cases = self._find_candidates(
+                store,
+                message,
                 query_embedding = embedding,
                 category        = category,
                 limit           = self.cbr_top_k,
@@ -1328,7 +1408,9 @@ class PredictionEngine:
         # Retrieve top K similar cases using open-ended-specific thresholds (filtered by response_type)
         store_error = None
         try:
-            similar_cases = store.find_similar(
+            similar_cases = self._find_candidates(
+                store,
+                message,
                 query_embedding = embedding,
                 category        = category,
                 limit           = self.open_ended_cbr_top_k,
@@ -1373,7 +1455,7 @@ class PredictionEngine:
                 metadata           = { "reason": "all_cases_rejected" }
             )
 
-        max_similarity = candidate_cases[ 0 ][ 0 ] / 100.0
+        max_similarity = max( similarity for similarity, _ in candidate_cases ) / 100.0   # the first need not be the nearest under category ranking
         top_case       = candidate_cases[ 0 ][ 1 ]
         top_question   = top_case.get( "question", "" )
 
@@ -1444,7 +1526,7 @@ class PredictionEngine:
                 category           = category,
                 strategy           = STRATEGY_CBR_RETRIEVAL,
                 predicted_value    = convert( top_case.get( "decision_value", "" ) ),
-                confidence         = max_similarity,
+                confidence         = candidate_cases[ 0 ][ 0 ] / 100.0,   # the answering case's own figure
                 similar_case_count = len( similar_cases ),
                 metadata           = {
                     "max_similarity"    : round( max_similarity, 3 ),
@@ -1706,7 +1788,8 @@ class PredictionEngine:
 
         Ensures:
             - returns the first 12 hex characters of a sha256 over the retrieval, display, retrieval-metric and calibration settings,
-              and over the per-field multiple-choice, lookup-neither and complete-action switches, each only when it is on
+              and over the per-field multiple-choice, lookup-neither, complete-action, two candidate, category-ranking and
+              lexical switches, each only when it is on; a switch's number or mode counts only with it on
             - the same settings give the same string, and a changed setting gives a different one
         """
         settings = { "cbr_top_k": self.cbr_top_k, "similarity_threshold": self.similarity_threshold,
@@ -1717,6 +1800,10 @@ class PredictionEngine:
         if self.per_field_mc_enabled: settings[ "per_field_mc_enabled" ] = True   # absent when off, so every earlier version string is unchanged
         if self.lookup_neither_forecast_enabled: settings[ "lookup_neither_forecast_enabled" ] = True
         if self.complete_action_scoring_enabled: settings[ "complete_action_scoring_enabled" ] = True
+        if self.candidate_retry_dedupe_enabled: settings[ "candidate_retry_dedupe_enabled" ] = True
+        if self.candidate_template_cap_enabled: settings[ "candidate_template_cap" ] = self.candidate_template_cap
+        if self.category_as_ranking: settings[ "category_rank_boost" ] = self.category_rank_boost
+        if self.lexical_candidates_enabled: settings[ "lexical_candidates_mode" ] = self.lexical_candidates_mode
         return hashlib.sha256( json.dumps( settings, sort_keys=True ).encode( "utf-8" ) ).hexdigest()[ :12 ]
 
     def three_way_forecast( self, ask: Dict[str, Any], cases: List[Dict[str, Any]] ) -> Optional[Dict[str, Any]]:

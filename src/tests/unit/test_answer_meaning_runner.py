@@ -238,3 +238,51 @@ def test_a_failed_recording_is_printed_and_not_raised( db, scope, labeller, monk
     on_store.record_after_answer( str( nid( 5 ) ), scope, start=threads.append )
     threads[ 0 ].run()
     assert "non-fatal" in capsys.readouterr().out
+
+
+def failing( draft ):
+    """The model layer's shape after a failed call: no relation on any pending field."""
+    native = { key: { "kind": field[ "kind" ], **( { "relation": field[ "relation" ] } if field[ "relation" ] else {} ) } for key, field in draft[ "fields" ].items() }
+    return { "native_answer": native, "acts": [], "conditions": [], "supporting_spans": None, "uncertainty": None,
+             "unknowns": list( draft[ "unknowns" ] ) + [ "unreadable_payload" ] }
+
+
+def test_a_failed_model_call_leaves_no_row_and_the_rerun_writes_it( db, scope ):
+    ask( db, 1, value="yes [comment: later]" )
+    assert runner.record_one( scope, str( nid( 1 ) ), ANNOTATOR, failing ) == { "status": "failed" }
+    assert db.query( AnswerMeaning ).count() == 0
+    assert runner.record_one( scope, str( nid( 1 ) ), ANNOTATOR, Model() )[ "status" ] == "written"
+
+
+def test_run_counts_a_failed_answer_apart( db, scope ):
+    ask( db, 1, value="yes [comment: later]" )
+    ask( db, 2, value="yes" )
+    report = runner.run( scope, ANNOTATOR, failing )
+    assert ( report[ "written" ], report[ "failed" ], report[ "already" ] ) == ( 1, 1, 0 )
+
+
+def test_a_stored_payload_nobody_can_read_is_still_written_since_no_call_was_made( db, scope ):
+    ask( db, 1, source="robot" )
+    assert runner.record_one( scope, str( nid( 1 ) ), ANNOTATOR, failing )[ "status" ] == "written"
+
+
+def test_acts_conditions_and_spans_reach_the_row( db, scope ):
+    ask( db, 1, response_type="open_ended", value="not now" )
+    def rich( draft ):
+        return { "native_answer": { "answer": { "kind": "open_ended_text", "relation": "declines_or_defers" } },
+                 "acts": [ { "act": "defer", "field_key": "answer" } ], "conditions": [ { "text": "not now", "modifies_option_id": None } ],
+                 "supporting_spans": [ { "field_key": "answer", "text": "not now" } ], "uncertainty": None, "unknowns": [] }
+    runner.record_one( scope, str( nid( 1 ) ), ANNOTATOR, rich )
+    row = db.query( AnswerMeaning ).one()
+    assert row.acts == [ { "act": "defer", "field_key": "answer" } ]
+    assert row.conditions == [ { "text": "not now", "modifies_option_id": None } ]
+    assert row.supporting_spans == [ { "field_key": "answer", "text": "not now" } ]
+
+
+def test_stored_answer_ids_cover_all_four_card_types_in_the_order_they_were_asked( db ):
+    asked = [ ( 4, "multiple_choice" ), ( 3, "open_ended_batch" ), ( 2, "open_ended" ), ( 1, "yes_no" ) ]
+    for second, ( n, response_type ) in enumerate( asked ):
+        ask( db, n, response_type=response_type, value="x" )
+        db.get( Notification, nid( n ) ).created_at = datetime( 2026, 11, 21, 0, 0, second, tzinfo=timezone.utc )
+    db.commit()
+    assert runner.stored_answer_ids( db ) == [ str( nid( n ) ) for n, _ in asked ]
