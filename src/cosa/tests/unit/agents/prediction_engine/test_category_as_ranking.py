@@ -89,15 +89,16 @@ def test_a_same_category_case_beyond_the_unfiltered_neighbours_is_still_found( e
     assert result.metadata[ "votes" ] == { "no": 1.0, "yes": engine.cbr_top_k - 1.0 }
 
 
-def test_confidence_reads_the_nearest_case_when_the_bonus_ranks_it_second( engine ):
+def test_the_fallback_reports_the_similarity_of_the_case_it_answers_with( engine ):
     cases = [ _case( "mine", "workflow", "answer one", cosine=0.90, response_type="open_ended" ),
               _case( "near", "deployment", "answer two", cosine=0.93, response_type="open_ended" ) ]
     _wire( engine, cases )
     engine.category_as_ranking = True
     engine._get_llm_client = lambda: None
     result = engine._predict_open_ended( "Which one?", "workflow", _vector( 1.0 ), owner_user_id=OWNER )
-    assert result.confidence == pytest.approx( 0.93 )
     assert result.predicted_value == "answer one"
+    assert result.confidence == pytest.approx( 0.90 )
+    assert result.metadata[ "max_similarity" ] == pytest.approx( 0.93 )
 
 
 def test_it_works_with_the_template_cap( engine ):

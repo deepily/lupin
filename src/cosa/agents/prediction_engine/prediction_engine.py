@@ -1496,7 +1496,7 @@ class PredictionEngine:
                 category           = category,
                 strategy           = STRATEGY_CBR_RETRIEVAL,
                 predicted_value    = convert( top_case.get( "decision_value", "" ) ),
-                confidence         = max_similarity,
+                confidence         = candidate_cases[ 0 ][ 0 ] / 100.0,   # the answering case's own figure
                 similar_case_count = len( similar_cases ),
                 metadata           = {
                     "max_similarity"    : round( max_similarity, 3 ),
