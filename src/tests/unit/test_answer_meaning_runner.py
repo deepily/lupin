@@ -286,3 +286,10 @@ def test_stored_answer_ids_cover_all_four_card_types_in_the_order_they_were_aske
         db.get( Notification, nid( n ) ).created_at = datetime( 2026, 11, 21, 0, 0, second, tzinfo=timezone.utc )
     db.commit()
     assert runner.stored_answer_ids( db ) == [ str( nid( n ) ) for n, _ in asked ]
+
+
+def test_an_empty_selection_is_written_though_it_has_no_relation( db, scope ):
+    options = { "questions": [ { "header": "A", "options": [ { "label": "x" } ] } ] }
+    ask( db, 1, response_type="multiple_choice", value=json.dumps( { "answers": { "A": [] } } ), options=options )
+    assert runner.record_one( scope, str( nid( 1 ) ), ANNOTATOR, failing )[ "status" ] == "written"
+    assert db.query( AnswerMeaning ).one().native_answer[ "A" ][ "empty_selection" ] is True
