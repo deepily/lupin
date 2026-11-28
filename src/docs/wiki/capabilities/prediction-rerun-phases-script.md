@@ -32,7 +32,7 @@ pins:
 - `split_by_time` and `final_records` cut by position into the tune and final windows. `column_run` and `of_type` narrow a run to one column and one response type.
 - `phase7_column` compares per-field multiple choice with the control. `phase8_column` compares three-way with always-yes and the margin rule on yes/no. `phase9_column` fits calibration on the tune window and scores the final one. `phase11_column` counts abstention reasons with failure visibility off and on.
 - `sign_of` and `reversal` say whether a paired difference reversed sign; a zero on either side is "no sign".
-- `per_ask_document`, with `with_reasons` for the engine arm, builds each arm's file, and `write_json` writes it and returns its sha256. `read_switches` records what the INI file states; the replay does not read it.
+- `per_ask_document` builds each arm's file, and `write_json` writes it and returns its sha256. `main` applies `with_reasons` only to the two failure-visibility files, so the other engine files carry a null reason. `read_switches` records what the INI file states; the replay does not read it.
 - The report lists the tenth phase as not run. `main` returns 1, after writing, if a model call was attempted or the positive control did not fire.
 
 ## Don't
