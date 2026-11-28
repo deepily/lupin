@@ -63,6 +63,8 @@ def test_two_empty_arms_pair_to_nothing():
     ( records( a=1 ) + records( a=0 ),         records( a=1 ),                           "twice" ),
     ( records( a=1 ),                          records( a=1 ) + records( a=0 ),          "twice" ),
     ( records( a=1, b=1 ),                     records( a=1, c=1 ),                      "different asks" ),
+    ( records( a=1 ),                          records( a=1, c=1 ),                      "different asks" ),
+    ( records( a=1, c=1 ),                     records( a=1 ),                           "different asks" ),
 ] )
 def test_arms_that_cannot_be_paired_are_refused( a, b, reason ):
     with pytest.raises( ValueError, match=reason ): pairing.pair_by_ask( a, b )
