@@ -678,13 +678,20 @@ def test_too_few_usable_principles_walks_every_candidate( db, monkeypatch ):
 
 
 def test_a_ruling_on_a_principle_outside_the_walk_still_reaches_the_one_inside( db ):
-    """A continued principle outside this scope still passes its retracting ruling on."""
-    earlier = add_principle( db, 1, scope="project:other" )
-    later   = add_principle( db, 2 )
-    later.continues_principle_id = earlier.id
+    """
+    A ruling two continuations back reaches a candidate through non-candidates.
+
+    One step back would be found from the candidate's own link; two steps need the owner's whole list.
+    """
+    first  = add_principle( db, 1, scope="project:other" )
+    middle = add_principle( db, 2, scope="project:other" )
+    later  = add_principle( db, 3 )
+    middle.continues_principle_id = first.id
+    later.continues_principle_id  = middle.id
     db.commit()
     add_evidence( db, later, 2, session_key="s2" )
-    add_evidence( db, earlier, 1, relation="contradicts", source="review_card", session_key="s1" )
+    assert statements( retrieve( db ) ) == [ "statement 3" ]
+    add_evidence( db, first, 1, relation="contradicts", source="review_card", session_key="s1" )
     assert retrieve( db )[ "principles" ] == []
 
 
