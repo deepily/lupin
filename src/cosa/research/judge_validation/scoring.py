@@ -226,6 +226,58 @@ def check_labels( labels ):
                 raise ValueError( f"pair {row[ 'pair_id' ]}: a label must be true, false or null, not {value!r}" )
 
 
+def pass_line( rows, planned ):
+    """
+    Work out the strata and the two pooled rates over one set of labelled rows.
+
+    Requires:
+        - rows hold response_type, notification_id, inclusion, human (bool) and judge (bool or None)
+        - planned lists every stratum, "<card type>/error" and "<card type>/correct"
+
+    Ensures:
+        - returns { strata, scored, material, fine, sensitivity, specificity, passes }
+        - a stratum with fewer than MIN_CARDS distinct cards is not scored and its rows are not pooled
+        - passes is True only when both classes have a scored row and both rates are at least PASS_FLOOR
+    """
+    named  = [ ( f"{row[ 'response_type' ]}/{'error' if row[ 'human' ] else 'correct'}", row ) for row in rows ]
+    strata = {}
+    for name in planned:
+        held  = [ row for own, row in named if own == name ]
+        cards = len( { row[ "notification_id" ] for row in held } )
+        right = proportion( sum( 1 for row in held if row[ "judge" ] is row[ "human" ] ), len( held ) )
+        strata[ name ] = dict( right, cards=cards, scored=cards >= MIN_CARDS )
+    scored      = [ row for own, row in named if strata[ own ][ "scored" ] ]
+    material    = [ row for row in scored if row[ "human" ] ]
+    fine        = [ row for row in scored if not row[ "human" ] ]
+    sensitivity = proportion( sum( 1 for row in material if row[ "judge" ] is True ), len( material ) )
+    specificity = proportion( sum( 1 for row in fine if row[ "judge" ] is False ), len( fine ) )
+    sensitivity[ "weighted_rate" ] = weighted_rate( material, lambda row: row[ "judge" ] is True )
+    specificity[ "weighted_rate" ] = weighted_rate( fine, lambda row: row[ "judge" ] is False )
+    passes      = bool( material and fine ) and sensitivity[ "rate" ] >= PASS_FLOOR and specificity[ "rate" ] >= PASS_FLOOR
+    return { "strata": strata, "scored": scored, "material": material, "fine": fine,
+             "sensitivity": sensitivity, "specificity": specificity, "passes": passes }
+
+
+def reader_agreement( pair_ids, labelled ):
+    """
+    Measure each pair of readers against each other over every sampled pair both labelled.
+
+    Requires:
+        - labelled is { pair_id: label row }; a row may hold readers, a { name: True, False or None } map
+
+    Ensures:
+        - returns { "<first> / <second>": agreement }, the names in order, unresolved pairs included
+    """
+    maps  = [ { name: value for name, value in labelled[ pair_id ].get( "readers", {} ).items() if value is not None } for pair_id in pair_ids ]
+    names = sorted( { name for held in maps for name in held } )
+    out   = {}
+    for i, first in enumerate( names ):
+        for second in names[ i + 1: ]:
+            both = [ held for held in maps if first in held and second in held ]
+            out[ f"{first} / {second}" ] = agreement( [ held[ first ] for held in both ], [ held[ second ] for held in both ] )
+    return out
+
+
 def build_report( sample, verdicts, labels, key, recorded, current ):
     """
     Report the judge against the human labels and the pass line.
@@ -237,7 +289,8 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
         - key is { pair_id: { arm, model } }; recorded and current are judge identities
 
     Ensures:
-        - an unresolved pair is left out of every figure and counted
+        - an unresolved pair is left out of the pass line and counted; unresolved_bounds gives the line again with
+          every unresolved pair counted as an error, then as correct
         - strata are card type by true class; each gives the judge's agreement with the label and its interval
         - a stratum with fewer than MIN_CARDS distinct cards is named in unscored_strata and not scored
         - card_types says "validated" for a type only when the line passes and both its strata are scored
@@ -245,7 +298,8 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
         - sensitivity and specificity pool the scored strata; each carries its Clopper-Pearson interval and an
           inverse-inclusion weighted rate
         - passes is True only when both classes have a scored stratum and both rates are at least PASS_FLOOR
-        - judge_against_human covers the same pairs; human_against_human covers each pair of readers on them
+        - judge_against_human covers the scored pairs; human_against_human covers each pair of readers on every
+          sampled pair both labelled
 
     Raises:
         - answer_judge.JudgeHashMismatch when the current judge or any verdict row differs from the recorded one
@@ -256,31 +310,18 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
     check_labels( labels )
     judged   = { row[ "pair_id" ]: row for row in verdicts }
     labelled = { row[ "pair_id" ]: row for row in labels }
-    rows, unresolved = [], 0
+    rows, open_rows = [], []
     for pair in sample:
         pair_id = pair[ "pair_id" ]
         if pair_id not in judged:   raise ValueError( f"pair {pair_id} has no verdict" )
         if pair_id not in labelled: raise ValueError( f"pair {pair_id} has no label" )
         human = labelled[ pair_id ][ "material_error" ]
-        if human is None:
-            unresolved += 1
-            continue
-        call = judged[ pair_id ][ "material" ]
-        named = { name: value for name, value in labelled[ pair_id ].get( "readers", {} ).items() if value is not None }
-        rows.append( dict( pair, human=human, judge=call, readers=named ) )
+        row   = dict( pair, human=human, judge=judged[ pair_id ][ "material" ] )
+        ( open_rows if human is None else rows ).append( row )
 
-    strata = {}
-    for row in rows: row[ "truth_stratum" ] = f"{row[ 'response_type' ]}/{'error' if row[ 'human' ] else 'correct'}"
-    planned = sorted( { f"{pair[ 'response_type' ]}/{truth}" for pair in sample for truth in ( "error", "correct" ) } )
-    for name in planned:
-        held  = [ row for row in rows if row[ "truth_stratum" ] == name ]
-        cards = len( { row[ "notification_id" ] for row in held } )
-        right = proportion( sum( 1 for row in held if row[ "judge" ] is row[ "human" ] ), len( held ) )
-        strata[ name ] = dict( right, cards=cards, scored=cards >= MIN_CARDS )
-
-    scored   = [ row for row in rows if strata[ row[ "truth_stratum" ] ][ "scored" ] ]
-    material = [ row for row in scored if row[ "human" ] ]
-    fine     = [ row for row in scored if not row[ "human" ] ]
+    planned     = sorted( { f"{pair[ 'response_type' ]}/{truth}" for pair in sample for truth in ( "error", "correct" ) } )
+    line        = pass_line( rows, planned )
+    strata, scored, material, fine = line[ "strata" ], line[ "scored" ], line[ "material" ], line[ "fine" ]
     patterns = {}
     for name in sorted( { row[ "pattern" ] for row in rows } ):
         held = [ row for row in rows if row[ "pattern" ] == name ]
@@ -291,22 +332,21 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
     specificity[ "weighted_rate" ] = weighted_rate( fine, lambda row: row[ "judge" ] is False )
 
     answered = [ row for row in scored if row[ "judge" ] is not None ]
-    readers  = sorted( { name for row in scored for name in row[ "readers" ] } )
-    between  = {}
-    for i, first in enumerate( readers ):
-        for second in readers[ i + 1: ]:
-            both = [ row for row in scored if first in row[ "readers" ] and second in row[ "readers" ] ]
-            between[ f"{first} / {second}" ] = agreement( [ row[ "readers" ][ first ] for row in both ], [ row[ "readers" ][ second ] for row in both ] )
+    bounds   = {}
+    for name, value in ( ( "unresolved_as_error", True ), ( "unresolved_as_correct", False ) ):
+        filled = pass_line( rows + [ dict( row, human=value ) for row in open_rows ], planned )
+        bounds[ name ] = { field: filled[ field ] for field in ( "sensitivity", "specificity", "passes" ) }
 
     settings = { json.dumps( row[ "request_settings" ], sort_keys=True ) for row in verdicts if row.get( "request_settings" ) is not None }
-    passes   = bool( material and fine ) and sensitivity[ "rate" ] >= PASS_FLOOR and specificity[ "rate" ] >= PASS_FLOOR
+    sensitivity, specificity, passes = line[ "sensitivity" ], line[ "specificity" ], line[ "passes" ]
     return {
         "identity"            : recorded,
         "request_settings"    : [ json.loads( text ) for text in sorted( settings ) ],
         "pass_floor"          : PASS_FLOOR,
         "min_cards"           : MIN_CARDS,
         "pairs"               : len( sample ),
-        "unresolved"          : unresolved,
+        "unresolved"          : len( open_rows ),
+        "unresolved_bounds"   : bounds,
         "unreadable"          : sum( 1 for row in rows if row[ "judge" ] is None ),
         "strata"              : strata,
         "unscored_strata"     : [ name for name in planned if not strata[ name ][ "scored" ] ],
@@ -317,7 +357,7 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
         "sensitivity"         : sensitivity,
         "specificity"         : specificity,
         "judge_against_human" : agreement( [ row[ "judge" ] for row in answered ], [ row[ "human" ] for row in answered ] ),
-        "human_against_human" : between,
+        "human_against_human" : reader_agreement( [ pair[ "pair_id" ] for pair in sample ], labelled ),
         "arm_bias"            : arm_bias( scored, key ),
         "passes"              : passes,
     }

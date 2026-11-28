@@ -1,16 +1,15 @@
 """
-Draw the judge's validation sample: stratified, seeded and blind to the arm.
+Draw the judge's validation sample: uniform per card type, seeded and blind to the arm.
 
-The recorded design draws a set number of pairs per card type. The true class of a pair (the
-forecast is wrong or right) is known only after labelling. So each type's draw is oversampled on
-a proxy: half comes from pairs whose two texts differ, half from pairs whose texts match. Each
-drawn pair keeps its inclusion probability. No output carries an arm or model field, and every
-file's order is shuffled.
+The population is only the pairs a comparator would send to the judge. The stance or the
+picked options already match, and the two texts differ. Only the arms the manager ruled
+eligible for that card type count. Cancelled or empty answers are left out. Each card type gets a set
+number of pairs, drawn without replacement with equal probability. No output carries an arm or a
+model field, and every file's order is shuffled.
 
-The two readers who set the truth labels get two files. The first holds each card with its
-options and the answer, one row per pair, and no forecast. The second holds the forecasts.
-Both are keyed by pair id.
-The sample sizes are inputs: the manager records them before any card is drawn.
+The two readers who set the truth labels get two files, both keyed by pair id. The first holds
+the card, its options and the answer, and no forecast. The second holds the forecasts. The
+sample sizes are inputs: the manager records them before any card is drawn.
 """
 
 import argparse
@@ -25,7 +24,10 @@ from cosa.utils.file_hash import file_sha256
 from lupin_mcp.duplicate_check_self_consistency import draw as seeded_ids
 
 PER_TYPE        = 80
-MISMATCH_SHARE  = 0.5
+CHOICE_TYPES    = ( "yes_no", "multiple_choice" )
+OPEN_TYPES      = ( "open_ended", "open_ended_batch" )
+ELIGIBLE_ARMS   = { "answer_history": CHOICE_TYPES + OPEN_TYPES, "B1-full": CHOICE_TYPES, "C0-full": CHOICE_TYPES, "B1": OPEN_TYPES, "C0": OPEN_TYPES }
+CANCELLED       = "[cancelled]"
 SAMPLE_FILE     = "sample.jsonl"
 DRAW_FILE       = "draw.json"
 ANSWERS_FILE    = "reader-answers.jsonl"
@@ -55,38 +57,72 @@ def pattern_of( pair ):
     return "differ"
 
 
-def split( mismatched, matched, size, mismatch_share=MISMATCH_SHARE ):
+def exclusion_of( pair, arm, answer ):
     """
-    Share one card type's sample between the mismatched pairs and the matched ones.
+    Say why a pair is outside the population, or that it is inside.
 
     Requires:
-        - mismatched and matched are population counts; size is a positive integer; mismatch_share is in [0, 1]
+        - pair has response_type, actual_text and literal_mismatch, and option_mismatch when multiple choice
+        - arm is the name of the arm that made the forecast; answer is the card's stored answer
 
     Ensures:
-        - returns ( from mismatched, from matched ), neither above its population
-        - the mismatched side aims at round( size * mismatch_share ), and either side takes up what the
-          other cannot fill, so the two add to min( size, mismatched + matched )
+        - returns None for a pair the judge would be asked about, otherwise one of:
+        - "arm" when the arm is not eligible for the card type
+        - "cancelled_or_empty" when the card's answer is cancelled or blank, the actual text is cancelled,
+          or the actual text is blank on a card type other than yes/no
+        - "not_judged" when the two texts are the same, or the picked options differ
+
+    Raises:
+        - KeyError when a multiple-choice pair has no option_mismatch
     """
-    first  = min( mismatched, round( size * mismatch_share ) )
-    second = min( matched, size - first )
-    first  = min( mismatched, size - second )
-    return first, second
+    kind = pair[ "response_type" ]
+    if kind not in ELIGIBLE_ARMS.get( arm, () ): return "arm"
+    actual = ( pair[ "actual_text" ] or "" ).strip()
+    if answer.strip() in ( "", CANCELLED ) or actual == CANCELLED or ( kind != "yes_no" and not actual ): return "cancelled_or_empty"
+    if not pair[ "literal_mismatch" ] or ( kind == "multiple_choice" and pair[ "option_mismatch" ] ): return "not_judged"
+    return None
 
 
-def draw_sample( pairs, seed, per_type=PER_TYPE, mismatch_share=MISMATCH_SHARE ):
+def eligible( pairs, key, cards ):
     """
-    Draw the validation sample from every forecast-and-answer pair.
+    Keep the population the sample is drawn from.
 
     Requires:
-        - pairs is a list of dicts holding BLIND_FIELDS and literal_mismatch (bool), with pair_id unique
-        - seed is an integer; per_type and mismatch_share are as split takes them
+        - key is { pair_id: { arm } }; cards is card_rows' answer for every card of the pairs
+
+    Ensures:
+        - returns ( kept, dropped ); dropped counts the pairs left out under each of exclusion_of's reasons
+        - no field of the key is added to a kept pair
+
+    Raises:
+        - ValueError when a pair has no key, or a multiple-choice pair has no option_mismatch
+    """
+    kept, dropped = [], { "arm": 0, "cancelled_or_empty": 0, "not_judged": 0 }
+    for pair in pairs:
+        if pair[ "pair_id" ] not in key: raise ValueError( f"pair {pair[ 'pair_id' ]} has no key" )
+        try:
+            reason = exclusion_of( pair, key[ pair[ "pair_id" ] ][ "arm" ], cards[ pair[ "notification_id" ] ][ "answer" ] )
+        except KeyError as error:
+            raise ValueError( f"pair {pair[ 'pair_id' ]} lacks the field {error}" ) from error
+        if reason is None: kept.append( pair )
+        else: dropped[ reason ] += 1
+    return kept, dropped
+
+
+def draw_sample( pairs, seed, per_type=PER_TYPE ):
+    """
+    Draw the validation sample from the eligible pairs, uniformly within each card type.
+
+    Requires:
+        - pairs is a list of dicts holding BLIND_FIELDS, with pair_id unique; seed is an integer
+        - per_type is a positive integer
 
     Ensures:
         - returns ( sample, receipt )
         - sample rows hold BLIND_FIELDS, stratum, pattern and inclusion, and nothing else, in a seeded order
-        - stratum is "<response_type>/mismatch" or "<response_type>/match", by literal_mismatch
-        - within a stratum the pairs are drawn without replacement, each with probability inclusion
-        - receipt holds seed, per_type, mismatch_share, drawn and, per stratum, population, drawn and inclusion
+        - stratum is the card type; min( per_type, its pairs ) are drawn without replacement, so every pair of
+          a type has the same chance, which is inclusion
+        - receipt holds seed, per_type, drawn and, per stratum, population, drawn and inclusion
         - the same pairs, in any order, with the same arguments give the same sample
 
     Raises:
@@ -96,24 +132,18 @@ def draw_sample( pairs, seed, per_type=PER_TYPE, mismatch_share=MISMATCH_SHARE )
     by_id = { pair[ "pair_id" ]: pair for pair in pairs }
     if len( by_id ) != len( pairs ): raise ValueError( "a pair_id appears more than once" )
     members = {}
-    for pair_id, pair in by_id.items():
-        sides = members.setdefault( pair[ "response_type" ], ( [], [] ) )
-        sides[ 0 if pair[ "literal_mismatch" ] else 1 ].append( pair_id )
+    for pair_id, pair in by_id.items(): members.setdefault( pair[ "response_type" ], [] ).append( pair_id )
     sample, strata = [], {}
-    for kind in sorted( members ):
-        counts = split( len( members[ kind ][ 0 ] ), len( members[ kind ][ 1 ] ), per_type, mismatch_share )
-        for side, ids, count in zip( ( "mismatch", "match" ), members[ kind ], counts ):
-            if not ids: continue
-            name      = f"{kind}/{side}"
-            chosen    = seeded_ids( ids, count, f"{seed}:{name}" ) if count else []
-            inclusion = len( chosen ) / len( ids )
-            strata[ name ] = { "population": len( ids ), "drawn": len( chosen ), "inclusion": inclusion }
-            for pair_id in chosen:
-                row = { field: by_id[ pair_id ][ field ] for field in BLIND_FIELDS }
-                row.update( stratum=name, pattern=pattern_of( by_id[ pair_id ] ), inclusion=inclusion )
-                sample.append( row )
+    for name in sorted( members ):
+        chosen    = seeded_ids( members[ name ], per_type, f"{seed}:{name}" )
+        inclusion = len( chosen ) / len( members[ name ] )
+        strata[ name ] = { "population": len( members[ name ] ), "drawn": len( chosen ), "inclusion": inclusion }
+        for pair_id in chosen:
+            row = { field: by_id[ pair_id ][ field ] for field in BLIND_FIELDS }
+            row.update( stratum=name, pattern=pattern_of( by_id[ pair_id ] ), inclusion=inclusion )
+            sample.append( row )
     random.Random( seed ).shuffle( sample )
-    return sample, { "seed": seed, "per_type": per_type, "mismatch_share": mismatch_share, "drawn": len( sample ), "strata": strata }
+    return sample, { "seed": seed, "per_type": per_type, "drawn": len( sample ), "strata": strata }
 
 
 def card_rows( cards_path, notification_ids ):
@@ -159,34 +189,36 @@ def reader_files( sample, cards, seed ):
     return answers, forecasts
 
 
-def write_sample( pairs_path, cards_path, out_dir, seed, per_type=PER_TYPE, mismatch_share=MISMATCH_SHARE ):
+def write_sample( pairs_path, key_path, cards_path, out_dir, seed, per_type=PER_TYPE ):
     """
     Draw from a pairs file and write the sample, the two reader files and the receipt, once.
 
     Requires:
-        - pairs_path and cards_path name JSON Lines files of pairs and of cards; out_dir is a folder path
+        - pairs_path and cards_path name JSON Lines files of pairs and of cards; key_path the sealed key; out_dir a folder
 
     Ensures:
         - writes SAMPLE_FILE, ANSWERS_FILE, FORECASTS_FILE and DRAW_FILE under out_dir, making the folder
-        - DRAW_FILE also records the sha256 of the pairs file, the cards file and the three files written
+        - DRAW_FILE also records what was left out and the sha256 of the pairs, key, cards and the three files written
         - returns the receipt
 
     Raises:
         - FileExistsError when any of the four is already there, and writes nothing
-        - ValueError as draw_sample and card_rows raise it, and writes nothing
+        - ValueError as eligible, draw_sample and card_rows raise it, and writes nothing
     """
     out   = pathlib.Path( out_dir )
     names = ( SAMPLE_FILE, ANSWERS_FILE, FORECASTS_FILE )
     for name in names + ( DRAW_FILE, ):
         if ( out / name ).exists(): raise FileExistsError( f"{out / name} exists: a sample is drawn once" )
-    sample, receipt    = draw_sample( jsonl_file.read_jsonl( pathlib.Path( pairs_path ) ), seed, per_type, mismatch_share )
-    cards              = card_rows( cards_path, sorted( { row[ "notification_id" ] for row in sample } ) )
+    pairs              = jsonl_file.read_jsonl( pathlib.Path( pairs_path ) )
+    cards              = card_rows( cards_path, sorted( { pair[ "notification_id" ] for pair in pairs } ) )
+    kept, dropped      = eligible( pairs, json.loads( pathlib.Path( key_path ).read_text( encoding="utf-8" ) ), cards )
+    sample, receipt    = draw_sample( kept, seed, per_type )
     answers, forecasts = reader_files( sample, cards, seed )
     out.mkdir( parents=True, exist_ok=True )
     for name, rows in zip( names, ( sample, answers, forecasts ) ):
         with open( out / name, "x", encoding="utf-8" ) as handle:
             handle.writelines( json.dumps( row, sort_keys=True ) + "\n" for row in rows )
-    receipt.update( pairs_sha256=file_sha256( str( pairs_path ) ), cards_sha256=file_sha256( str( cards_path ) ), files={ name: file_sha256( str( out / name ) ) for name in names } )
+    receipt.update( dropped=dropped, pairs_sha256=file_sha256( str( pairs_path ) ), key_sha256=file_sha256( str( key_path ) ), cards_sha256=file_sha256( str( cards_path ) ), files={ name: file_sha256( str( out / name ) ) for name in names } )
     write_json_atomic( str( out / DRAW_FILE ), receipt, indent=2, trailing_newline=True, sort_keys=True )
     return receipt
 
@@ -200,14 +232,14 @@ def main( argv=None ):
     """
     parser = argparse.ArgumentParser( description="Draw the judge validation sample." )
     parser.add_argument( "--pairs", required=True )
+    parser.add_argument( "--key", required=True, help="the sealed key, read for the arm filter only" )
     parser.add_argument( "--cards", required=True, help="one row per card, written beside the pairs" )
     parser.add_argument( "--out-dir", required=True )
     parser.add_argument( "--seed", type=int, required=True )
     parser.add_argument( "--per-type", type=int, default=PER_TYPE, help="the size recorded on the row" )
-    parser.add_argument( "--mismatch-share", type=float, default=MISMATCH_SHARE )
     args = parser.parse_args( argv )
     try:
-        receipt = write_sample( args.pairs, args.cards, args.out_dir, args.seed, args.per_type, args.mismatch_share )
+        receipt = write_sample( args.pairs, args.key, args.cards, args.out_dir, args.seed, args.per_type )
     except ( ValueError, FileExistsError ) as error:
         print( error, file=sys.stderr )
         return EXIT_REFUSED

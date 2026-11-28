@@ -166,6 +166,19 @@ def test_a_missed_line_validates_no_card_type():
     assert report[ "unscored_strata" ] == [] and report[ "card_types" ] == { "yes_no": "judge not validated" }
 
 
+def test_unresolved_pairs_are_bounded_both_ways_and_readers_are_compared_on_every_pair():
+    sample, verdicts, labels, key = planted( caught=30, missed=0, passed=30, false_alarm=0 )
+    for n in ( 0, 1, 2, 3, 4 ):
+        labels[ n ] = { "pair_id": f"p{n}", "material_error": None, "readers": { "one": True, "two": False } }
+    report = report_of( ( sample + [ sample_row( 60 ) ], verdicts + [ dict( verdicts[ 59 ], pair_id="p60" ) ],
+                          labels + [ { "pair_id": "p60", "material_error": False } ], dict( key, p60={ "arm": "B1", "model": "haiku" } ) ) )
+    assert report[ "unresolved" ] == 5 and report[ "human_against_human" ][ "one / two" ][ "n" ] == 60
+    bounds = report[ "unresolved_bounds" ]
+    assert ( bounds[ "unresolved_as_error" ][ "sensitivity" ][ "successes" ], bounds[ "unresolved_as_error" ][ "sensitivity" ][ "trials" ] ) == ( 30, 30 )
+    assert ( bounds[ "unresolved_as_correct" ][ "specificity" ][ "successes" ], bounds[ "unresolved_as_correct" ][ "specificity" ][ "trials" ] ) == ( 31, 36 )
+    assert bounds[ "unresolved_as_correct" ][ "passes" ] is False
+
+
 def test_agreement_says_why_kappa_is_undefined():
     assert scoring.agreement( [ True, True ], [ True, True ] ) == { "n": 2, "kappa": None, "positive": 1.0, "negative": None, "reason": "both used one category" }
 
