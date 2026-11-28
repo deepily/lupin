@@ -37,13 +37,13 @@ def bound_labeller( model=None ):
 
     Requires:
         - the model layer module is importable
-        - model is a model id, or None for the model layer's default
+        - model is a model id, or None for the model the model layer reads from the INI
 
     Ensures:
         - returns ( annotator, label ), label taking a draft alone
     """
     labeller = importlib.import_module( LABELLER_MODULE )
-    chosen   = model or labeller.DEFAULT_MODEL
+    chosen   = model or labeller.model_id()
     return labeller.annotator_of( chosen ), functools.partial( labeller.label, model=chosen )
 
 

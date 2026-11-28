@@ -149,8 +149,9 @@ def test_run_takes_named_ids_and_a_limit_and_prints_progress( db, scope, capsys 
 class FakeLabeller( types.ModuleType ):
     def __init__( self ):
         super().__init__( "cosa.agents.answer_meaning.labeller" )
-        self.DEFAULT_MODEL = "default-model"
-        self.calls         = []
+        self.calls = []
+
+    def model_id( self ): return "ini-model"
 
     def annotator_of( self, model ): return f"{model}:v+{SCHEMA_VERSION_V2}"
 
@@ -168,9 +169,9 @@ def labeller( monkeypatch ):
 
 def test_bound_labeller_names_its_annotator_and_sends_its_model( labeller ):
     annotator, label = runner.bound_labeller()
-    assert annotator == f"default-model:v+{SCHEMA_VERSION_V2}"
+    assert annotator == f"ini-model:v+{SCHEMA_VERSION_V2}"
     label( { "fields": {}, "unknowns": [] } )
-    assert labeller.calls == [ "default-model" ]
+    assert labeller.calls == [ "ini-model" ]
     assert runner.bound_labeller( "other" )[ 0 ].startswith( "other:" )
 
 

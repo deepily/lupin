@@ -29,7 +29,7 @@ def _record( notification_id, session_scope ):
     Label one answer and print what happened.
 
     Ensures:
-        - writes the meaning row through runner.record_one with the default model
+        - writes the meaning row through runner.record_one with the configured model
         - any failure is printed and swallowed, since the answer is already stored
     """
     try:
