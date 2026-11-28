@@ -14,6 +14,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from cosa.repo.labelling import errors as er
+from cosa.repo.labelling import gold_progress as gp
 from cosa.repo.labelling import gold_store as gs
 from cosa.repo.labelling import items as it
 from cosa.repo.labelling import packets as pk
@@ -207,7 +208,7 @@ def main( argv=None, clock=lambda: datetime.now( timezone.utc ) ):
         - the answers file holds the dict ask_open_ended_batch returned, or just its "answers" dict
 
     Ensures:
-        - returns 0 after writing one gold line per labelled card and printing a JSON summary of the labelled, unlabelled and unmatched cards and Rick's labelled cards by stance class
+        - returns 0 after writing one gold line per labelled card and printing a JSON summary of the labelled, unlabelled and unmatched cards, Rick's labelled cards by stance class and gold_progress
         - returns 2, writing nothing, for an unknown batch id, a missing ref, or a file that cannot be read
         - returns 3, writing nothing, when the store is locked or damaged
     """
@@ -244,10 +245,11 @@ def main( argv=None, clock=lambda: datetime.now( timezone.utc ) ):
     path = pathlib.Path( args.store ) if args.store else gs.default_path()
     try:
         gs.append_gold( path, lines )
-        counts = gs.human_card_counts( gs.read_gold( path ) )
+        stored = gs.read_gold( path )
+        counts = gs.human_card_counts( stored )
     except er.LabellingError as e:
         return er.fail( f"the gold store refused the write: {e}", 3 )
-    print( json.dumps( { "batch_id": batch[ "batch_id" ], "written": len( lines ), "unlabelled": result[ "unlabelled" ], "unmatched": result[ "unmatched" ], "human_labelled_by_stance": counts }, sort_keys=True ) )
+    print( json.dumps( { "batch_id": batch[ "batch_id" ], "written": len( lines ), "unlabelled": result[ "unlabelled" ], "unmatched": result[ "unmatched" ], "human_labelled_by_stance": counts, "gold_progress": gp.gold_progress( stored ) }, sort_keys=True ) )
     return 0
 
 

@@ -15,6 +15,7 @@ import sys
 import uuid
 
 from cosa.agents.answer_meaning import rules
+from cosa.repo.labelling.gold_progress import stamp_line
 from cosa.rest.db.repositories.answer_meaning_repository import SCHEMA_VERSION_V2, AnswerMeaningRepository, MeaningAlreadyRecorded
 from cosa.rest.postgres_models import Notification
 from cosa.utils.notification_utils import sender_session_suffix
@@ -23,9 +24,9 @@ LABELLER_MODULE = "cosa.agents.answer_meaning.labeller"
 LABEL_KEYS      = ( "relation", "stance", "stance_source" )
 PROGRESS_EVERY  = 100
 
-# What the labeller's report may claim (plan section 6). The first line is the plan's text, unchanged.
+# What the labeller's report may claim (plan section 6). With no class lifted, the first line is the plan's text, unchanged.
 STAMP = (
-    "certified_classes: [yes]   uncertified: [no, neither, support-on-no, dissent, re_frame]   basis: fewer than 20 of Rick's own labelled cards in the class, or fewer than 30 slice cards",
+    stamp_line(),
     "no certificate: multiple-choice, open-ended and batch relations",
     "pass line for yes: not yet run (plan step 9)",
 )
