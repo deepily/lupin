@@ -128,7 +128,7 @@ def main( argv=None, make_judge=answer_judge.make_judge ):
     parser = argparse.ArgumentParser( description="Run the judge's minimal pairs." )
     parser.add_argument( "--pairs", required=True )
     parser.add_argument( "--folder", required=True )
-    parser.add_argument( "--model", default=answer_judge.DEFAULT_MODEL )
+    parser.add_argument( "--model", help="default: the configured judge model" )
     args = parser.parse_args( argv )
     try:
         identity = scoring.record_identity( args.folder, answer_judge.judge_identity( args.model ) )

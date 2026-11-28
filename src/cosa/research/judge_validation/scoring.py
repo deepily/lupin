@@ -315,7 +315,7 @@ def main( argv=None, make_judge=answer_judge.make_judge ):
     parser = argparse.ArgumentParser( description="Validate the answer judge." )
     parser.add_argument( "step", choices=( "run", "report" ) )
     parser.add_argument( "--folder", required=True, help="holds sample.jsonl, the identity, the verdicts and the report" )
-    parser.add_argument( "--model", default=answer_judge.DEFAULT_MODEL )
+    parser.add_argument( "--model", help="default: the configured judge model" )
     parser.add_argument( "--workers", type=int, default=WORKERS )
     parser.add_argument( "--labels" )
     parser.add_argument( "--key" )

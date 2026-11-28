@@ -93,6 +93,10 @@ def test_request_settings_reads_a_temperature_the_options_class_has():
     assert aj.request_settings( options )[ "sampling" ] == { "temperature": 0 }
 
 
+def test_the_model_is_read_from_the_ini_file():
+    assert aj.judge_identity()[ "model" ] == aj.judge_model() == "claude-opus-5-5"
+
+
 def test_two_empty_texts_pass_without_a_model_call():
     def never( *args, **kwargs ): raise AssertionError( "called" )
     verdict = aj.make_judge( complete=never )( None, "  " )
