@@ -53,6 +53,7 @@ def test_a_two_card_answer_file_stores_two_lines_and_prints_the_counts( setup, c
     out = json.loads( capsys.readouterr().out )
     assert out[ "written" ] == 2 and [ u[ "header" ] for u in out[ "unlabelled" ] ] == [ h[ 2 ] ] and out[ "unmatched" ] == []
     assert sum( out[ "human_labelled_by_stance" ].values() ) == 2 and out[ "human_labelled_by_stance" ][ "none" ] == 0 and out[ "human_labelled_by_stance" ][ "neither" ] == 0
+    assert out[ "gold_progress" ][ "target" ] == 20 and out[ "gold_progress" ][ "reached" ] == [] and set( out[ "gold_progress" ][ "rick" ] ) == { "no", "neither" }
 
 
 def test_a_bare_answers_dict_is_read_and_a_reader_source_and_name_are_recorded( setup ):
