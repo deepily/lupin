@@ -14,6 +14,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[util-agreement-stats]] — the exact two-sided McNemar p and the interpolated percentile, shared by the duplicate check proof and the reuse tools. `cosa.utils` (agreement_stats)
 - [[agents-xml-models-field-validators]] — the two shared checks of the xml_models files: None to empty string, and refuse an empty field. `cosa.agents.io_models` (field_validators)
 - [[bounded-claude-code-jobs]] — running a Claude Code task as a bounded or interactive CJ Flow job, and dispatching it. `cosa.agents.claude_code`, `cosa.orchestration.claude_code`
+- [[judge-validation]] — the answer judge and the harness that validates it: the blind sample draw, truth labels, the pass-line report and the minimal pairs. `cosa.agents.prediction_engine`, `cosa.research.judge_validation`
 - [[xml-io-models]] — the XML request and response models agents parse and emit. `cosa.agents.io_models`, `cosa.agents.dm_compression`, `cosa.agents.dm_tutor`, `cosa.crud_for_dataframes` (xml_models)
 - [[json-fenced-response-helpers]] — strip a code fence, parse a fenced JSON reply and pull a few keys with defaults. `cosa.agents.io_models.utils` (json_object_recovery)
 - [[xml-model-mixins]] — the code-lines, comma-list and CDATA mixins of the XML models, and the tag extractor the dispatchers share. `cosa.agents.io_models` (xml_models, utils.util_xml_pydantic)

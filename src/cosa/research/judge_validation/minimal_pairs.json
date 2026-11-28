@@ -1,0 +1,390 @@
+{
+  "schema": 1,
+  "reading": "A judge call is judge( predicted_text, actual_text ). It passes when keeps_every_restriction and invents_nothing are both true. Every pair must flip: matching_text passes against actual_text and altered_text fails. fixture_cases are for the committed fixtures only and share no text with the 24 pairs. The texts are modelled on the source card in the run 2 archive (its question and the comment on its answer); the wording is not a quotation.",
+  "pairs": [
+    {
+      "id": "before_after-2",
+      "kind": "before_after",
+      "actual_text": "Before you implement it, think through what the side effects are.",
+      "matching_text": "Work out the side effects ahead of the implementation.",
+      "altered_text": "Work out the side effects once the implementation is in.",
+      "source_card": {
+        "notification_id": "04068f0f-de6b-4f57-b198-07a09a44012e",
+        "response_type": "yes_no",
+        "question": "Heard you, and you're absolutely right — you want to SEE my state directly, whatever it is, and never infer it. That changes the fix: instead of a sticky beacon"
+      }
+    },
+    {
+      "id": "before_after-3",
+      "kind": "before_after",
+      "actual_text": "You may run it, but you must wait until I refresh the credentials.",
+      "matching_text": "You can run it, but only once I have renewed the credentials.",
+      "altered_text": "You can run it before I have renewed the credentials.",
+      "source_card": {
+        "notification_id": "642f0aa9-75fe-4415-b058-c59238142e03",
+        "response_type": "yes_no",
+        "question": "Do I have your GO to run the full pipeline live on real harvey-labs NDAs today? It spends real money on the live judges, which is why I'm asking rather than jus"
+      }
+    },
+    {
+      "id": "before_after-4",
+      "kind": "before_after",
+      "actual_text": "Re-spin yourself, but only after you move the two tasks off my list.",
+      "matching_text": "Take those two tasks off my list first, then do the re-spin.",
+      "altered_text": "Do the re-spin first, then take those two tasks off my list.",
+      "source_card": {
+        "notification_id": "48e6ea93-46b6-41e5-b444-0b3012ad14d9",
+        "response_type": "yes_no",
+        "question": "mr radio is at their context ceiling. Re-spin mr radio now?"
+      }
+    },
+    {
+      "id": "staging_production-2",
+      "kind": "staging_production",
+      "actual_text": "Prove the two fixes on the test VM.",
+      "matching_text": "Demonstrate both fixes on the testing virtual machine.",
+      "altered_text": "Demonstrate both fixes on the production virtual machine.",
+      "source_card": {
+        "notification_id": "9a47f4cd-0192-46b8-923a-2ba4faf5d970",
+        "response_type": "yes_no",
+        "question": "Can you start the test VM and log in to gcloud now, so I can prove the two VM fixes tonight?"
+      }
+    },
+    {
+      "id": "staging_production-3",
+      "kind": "staging_production",
+      "actual_text": "Run the migration on the development server only; with no bounce.",
+      "matching_text": "Apply the migration just to the dev server, with no restart.",
+      "altered_text": "Apply the migration just to the production server, with no restart.",
+      "source_card": {
+        "notification_id": "78366a77-cc59-48a1-b2cb-88f0ae2e41d2",
+        "response_type": "yes_no",
+        "question": "Mr. Rick — Rio's commons_store fix has 546/546 tests green + 100% coverage. Ready to fire production verification. Need your GO on the live migration step that "
+      }
+    },
+    {
+      "id": "staging_production-4",
+      "kind": "staging_production",
+      "actual_text": "Redeploy to staging only, and leave production alone.",
+      "matching_text": "Ship it to the staging service and do not touch production.",
+      "altered_text": "Ship it to the production service and do not touch staging.",
+      "source_card": {
+        "notification_id": "5498c2b0-f941-4bba-8c7a-dba7897fee1b",
+        "response_type": "yes_no",
+        "question": "Gemini Enterprise only renders progress lines, never answers. Want me to fix and redeploy now?"
+      }
+    },
+    {
+      "id": "must_may-2",
+      "kind": "must_may",
+      "actual_text": "Splitting it in two is fine, but we still have to implement the deferred half.",
+      "matching_text": "Two halves are fine, and the postponed half is required.",
+      "altered_text": "Two halves are fine, and the postponed half is optional.",
+      "source_card": {
+        "notification_id": "d552f098-0763-423f-b96c-55f1d1079bec",
+        "response_type": "yes_no",
+        "question": "Decision one of four: do you approve the M1 scaffold's core line — build the decision-independent half now, defer the whole panel half?"
+      }
+    },
+    {
+      "id": "must_may-3",
+      "kind": "must_may",
+      "actual_text": "The refresh lever has to be right under my fingertips in the notifications client.",
+      "matching_text": "It is required that the refresh control be within easy reach in the notifications client.",
+      "altered_text": "It is acceptable, but not required, that the refresh control be within easy reach in the notifications client.",
+      "source_card": {
+        "notification_id": "3c984364-4099-4286-98ae-9e0e54a78fa1",
+        "response_type": "yes_no",
+        "question": "Short version: yes, turning off auto-reload is the biggest single win, but it doesn't fix two real code bugs underneath. Want me to build all three fixes?"
+      }
+    },
+    {
+      "id": "must_may-4",
+      "kind": "must_may",
+      "actual_text": "Standardize the light review, but keep it optional.",
+      "matching_text": "Adopt light review as a standard that people are free to skip.",
+      "altered_text": "Adopt light review as a standard that people are obliged to run.",
+      "source_card": {
+        "notification_id": "7c761167-dea1-4d5e-8672-d17f6ad02a0b",
+        "response_type": "yes_no",
+        "question": "Item four of seven: implementation light-review ROI. Five mid-stream reviews caught four real defects — two race conditions, a doc drift, a typed-contract gap —"
+      }
+    },
+    {
+      "id": "negated_permission-2",
+      "kind": "negated_permission",
+      "actual_text": "Spin up a team to help; you manage and delegate, you do not implement.",
+      "matching_text": "Staff a crew to help; you manage and delegate, and writing the code is not allowed for you.",
+      "altered_text": "Staff a crew to help; you manage and delegate, and writing the code is also allowed for you.",
+      "source_card": {
+        "notification_id": "b5eae5c9-402c-4c13-8937-874d91851974",
+        "response_type": "yes_no",
+        "question": "Want me to pick up the pytest internal-error fix now while the push stays with you?"
+      }
+    },
+    {
+      "id": "negated_permission-3",
+      "kind": "negated_permission",
+      "actual_text": "Do not start building until I have checked a plan.",
+      "matching_text": "You are not permitted to build before I review the plan.",
+      "altered_text": "You are permitted to build before I review the plan.",
+      "source_card": {
+        "notification_id": "6e5e52b9-19f6-4795-b118-a8641915cd7b",
+        "response_type": "yes_no",
+        "question": "With your three changes in, shall I start building the Drive upload, switched off by default?"
+      }
+    },
+    {
+      "id": "negated_permission-4",
+      "kind": "negated_permission",
+      "actual_text": "Not yet: do not proceed until Tiberius sends another update.",
+      "matching_text": "Proceeding is not allowed while the next update from Tiberius is still outstanding.",
+      "altered_text": "Proceeding is allowed while the next update from Tiberius is still outstanding.",
+      "source_card": {
+        "notification_id": "c7136f28-a8d4-4642-aeb4-a4e760a469fd",
+        "response_type": "yes_no",
+        "question": "Proceed with the four-step drafting plan now — create the canonical doc-viewer-links workflow file, bounce the three side-mentions to point at it, file the glob"
+      }
+    },
+    {
+      "id": "scope_change-2",
+      "kind": "scope_change",
+      "actual_text": "Sessions are read only, and only for a signed-in human operator with admin rights.",
+      "matching_text": "Only a logged-in human admin operator gets the sessions, and only to view them.",
+      "altered_text": "Any logged-in human gets the sessions, and only to view them.",
+      "source_card": {
+        "notification_id": "59da3442-848d-4f65-983e-d84f3749697e",
+        "response_type": "multiple_choice",
+        "question": "Question 1 of 4: Two tests check the wording of code comments. What do I do with them? Question 2 of 4: The old voice feature folder does not compile and looks "
+      }
+    },
+    {
+      "id": "scope_change-3",
+      "kind": "scope_change",
+      "actual_text": "The dev server may read the Claude transcripts folder only.",
+      "matching_text": "The development server can have read access to the Claude transcript directory alone.",
+      "altered_text": "The development server can have read access to my entire home directory.",
+      "source_card": {
+        "notification_id": "8a104984-9b43-4bcc-8bb4-a31f77c6b9c8",
+        "response_type": "yes_no",
+        "question": "May the dev server get read-only access to your Claude transcripts folder, so the live console can work?"
+      }
+    },
+    {
+      "id": "scope_change-4",
+      "kind": "scope_change",
+      "actual_text": "Pursue all of the fixes, in the order proposed.",
+      "matching_text": "Build every one of the fixes, following your listed order.",
+      "altered_text": "Build only the first of the fixes, following your listed order.",
+      "source_card": {
+        "notification_id": "3c984364-4099-4286-98ae-9e0e54a78fa1",
+        "response_type": "yes_no",
+        "question": "Short version: yes, turning off auto-reload is the biggest single win, but it doesn't fix two real code bugs underneath. Want me to build all three fixes?"
+      }
+    },
+    {
+      "id": "time_change-2",
+      "kind": "time_change",
+      "actual_text": "I will give you two seats tonight, and in the morning we can raise it.",
+      "matching_text": "Two seats for this evening, with more possible tomorrow morning.",
+      "altered_text": "Two seats for this evening, with more possible next week.",
+      "source_card": {
+        "notification_id": "6a443363-02e7-4623-afb2-6706c15aa603",
+        "response_type": "yes_no",
+        "question": "The fleet cap of two refused both spawns. Will you raise the cap to ten so I can staff the sweep?"
+      }
+    },
+    {
+      "id": "time_change-3",
+      "kind": "time_change",
+      "actual_text": "Write this up as a bug to be fixed tomorrow.",
+      "matching_text": "File a ticket so the repair happens the next day.",
+      "altered_text": "File a ticket so the repair happens today.",
+      "source_card": {
+        "notification_id": "d712d657-989e-45c5-b7be-020eea543723",
+        "response_type": "yes_no",
+        "question": "Change the podcast start card to default to yes and start on its own after a minute?"
+      }
+    },
+    {
+      "id": "time_change-4",
+      "kind": "time_change",
+      "actual_text": "We will pick up the backlog drain tomorrow morning.",
+      "matching_text": "Drain the backlog the next morning.",
+      "altered_text": "Drain the backlog this evening.",
+      "source_card": {
+        "notification_id": "766ea758-f888-466f-a0a4-1034b8cc87c0",
+        "response_type": "yes_no",
+        "question": "I assumed the usual 23:00 power-off. Is the host staying on overnight, so the crew can work now?"
+      }
+    },
+    {
+      "id": "before_after-5",
+      "kind": "before_after",
+      "actual_text": "Write a mini plan, and spin up the workers only after I approve it.",
+      "matching_text": "Draft a mini plan; get the workers started only once I have approved it.",
+      "altered_text": "Draft a mini plan; get the workers started before I have approved it.",
+      "source_card": {
+        "notification_id": "5d72435a-b985-49b8-8819-7aac1df06a00",
+        "response_type": "yes_no",
+        "question": "Want me to make the file list appear on the first turn, so two matches shows you a numbered menu instead of an open question?"
+      }
+    },
+    {
+      "id": "staging_production-5",
+      "kind": "staging_production",
+      "actual_text": "Turn auto-reload off on the development server.",
+      "matching_text": "Disable automatic reloading on the dev server.",
+      "altered_text": "Disable automatic reloading on the production server.",
+      "source_card": {
+        "notification_id": "3deb4e12-47aa-49eb-9659-f6d5c8c69840",
+        "response_type": "yes_no",
+        "question": "Turn auto-reload off on the seventy-nine-ninety-nine server right now? Yes or no."
+      }
+    },
+    {
+      "id": "must_may-5",
+      "kind": "must_may",
+      "actual_text": "With no session, it must say that we have not discussed that.",
+      "matching_text": "When no session exists, it is required to reply that we have not discussed that.",
+      "altered_text": "When no session exists, it is permitted to reply that we have not discussed that.",
+      "source_card": {
+        "notification_id": "c9a03993-eb26-40a7-8cdf-834ed951df49",
+        "response_type": "yes_no",
+        "question": "Should a follow-up phrase with no session say so, instead of silently starting a new run?"
+      }
+    },
+    {
+      "id": "negated_permission-5",
+      "kind": "negated_permission",
+      "actual_text": "Do not run the demo chain yet.",
+      "matching_text": "You may not run the demo chain at this point.",
+      "altered_text": "You may run the demo chain at this point.",
+      "source_card": {
+        "notification_id": "e5f93a93-ad78-4fe3-bab8-e194b891cc4c",
+        "response_type": "yes_no",
+        "question": "Your browser is connected right now. Want me to run the demo chain at it and finish the untested stages?"
+      }
+    },
+    {
+      "id": "scope_change-5",
+      "kind": "scope_change",
+      "actual_text": "Make it work for states, vendors and topics alike.",
+      "matching_text": "It has to handle states, vendors and topics equally.",
+      "altered_text": "It has to handle states.",
+      "source_card": {
+        "notification_id": "c9a03993-eb26-40a7-8cdf-834ed951df49",
+        "response_type": "yes_no",
+        "question": "Should a follow-up phrase with no session say so, instead of silently starting a new run?"
+      }
+    },
+    {
+      "id": "time_change-5",
+      "kind": "time_change",
+      "actual_text": "Do the embeddings walkthrough tomorrow morning.",
+      "matching_text": "Hold the embeddings walkthrough the next morning.",
+      "altered_text": "Hold the embeddings walkthrough this evening.",
+      "source_card": {
+        "notification_id": "6d03f47f-111e-443d-b678-f1675b71c46c",
+        "response_type": "yes_no",
+        "question": "You're at the screen — do the embeddings walkthrough now while you're here?"
+      }
+    }
+  ],
+  "fixture_cases": [
+    {
+      "id": "fixture-before_after",
+      "kind": "before_after",
+      "actual_text": "Before I sign off, rebuild a new version of the multiplexer.",
+      "matching_text": "Have the multiplexer rebuilt ahead of my sign-off.",
+      "altered_text": "Have the multiplexer rebuilt following my sign-off.",
+      "source_card": {
+        "notification_id": "121cb446-5bfc-4cb3-a2b5-950b8a54d0af",
+        "response_type": "yes_no",
+        "question": "Ready to do the five-minute mux-versus-legacy visual sign-off now?"
+      }
+    },
+    {
+      "id": "fixture-staging_production",
+      "kind": "staging_production",
+      "actual_text": "Run the end to end tests on the test server, and bounce it so it picks up your changes.",
+      "matching_text": "Restart the test server so it has the new code, and run the end to end tests there.",
+      "altered_text": "Restart the production server so it has the new code, and run the end to end tests there.",
+      "source_card": {
+        "notification_id": "6882a831-a514-41b1-a9f7-32d253c7e6f2",
+        "response_type": "yes_no",
+        "question": "PNG support shipped and verified end-to-end. Backend serves images at two hundred, content-type image-png, valid PNG bytes confirmed. Twenty-two of twenty-two s"
+      }
+    },
+    {
+      "id": "fixture-must_may",
+      "kind": "must_may",
+      "actual_text": "We must make sure the two copies of the global config are in sync.",
+      "matching_text": "The two copies of the global config have to be kept identical.",
+      "altered_text": "The two copies of the global config can be kept identical if convenient.",
+      "source_card": {
+        "notification_id": "375778fc-05b0-42ed-a017-6b84d83bc8eb",
+        "response_type": "yes_no",
+        "question": "May María fix the one false sentence in your live global config, the one that told me managers cannot re-spin themselves?"
+      }
+    },
+    {
+      "id": "fixture-negated_permission",
+      "kind": "negated_permission",
+      "actual_text": "Just commit; do not push right now.",
+      "matching_text": "Make the commit and hold off on pushing.",
+      "altered_text": "Make the commit and go ahead with pushing.",
+      "source_card": {
+        "notification_id": "f4ea48c6-9d30-4b5b-b90e-d51073ede0f4",
+        "response_type": "yes_no",
+        "question": "Audit done Rick. Found two modified files, seven untracked, and twelve coverage artifacts to gitignore. Recommendation: I prep two commits — one for Rio's trunc"
+      }
+    },
+    {
+      "id": "fixture-scope_change",
+      "kind": "scope_change",
+      "actual_text": "After Tiffany finishes her commit, commit only what is still outstanding.",
+      "matching_text": "Once Tiffany is done, commit just the leftover changes.",
+      "altered_text": "Once Tiffany is done, commit every change in the tree, hers included.",
+      "source_card": {
+        "notification_id": "114debb4-3e7f-4058-994b-360395f12e32",
+        "response_type": "yes_no",
+        "question": "Krishna approved Tiffany's fix — gate's green, I backstop-concur. One snag before I commit: the heartbeat Stop-hook strip still has parked, failing tests that'd"
+      }
+    },
+    {
+      "id": "fixture-time_change",
+      "kind": "time_change",
+      "actual_text": "Do the migration swap first thing tomorrow morning.",
+      "matching_text": "Run the migration swap first thing tomorrow morning.",
+      "altered_text": "Run the migration swap tonight.",
+      "source_card": {
+        "notification_id": "d771855a-a2ec-4be2-81d2-c2a43e01fa39",
+        "response_type": "yes_no",
+        "question": "As promised at wind-down: run the pgvector migration swap-chain now, before I do the session-end ritual with push and backup?"
+      }
+    },
+    {
+      "id": "easy",
+      "kind": "easy",
+      "actual_text": "Do it first thing tomorrow morning.",
+      "matching_text": "Do it tomorrow morning, before anything else.",
+      "source_card": {
+        "notification_id": "d771855a-a2ec-4be2-81d2-c2a43e01fa39",
+        "response_type": "yes_no",
+        "question": "As promised at wind-down: run the pgvector migration swap-chain now, before I do the session-end ritual with push and backup?"
+      }
+    },
+    {
+      "id": "invented_condition",
+      "kind": "invented_condition",
+      "actual_text": null,
+      "altered_text": "Go ahead, but only after you have shown me the plan.",
+      "source_card": {
+        "notification_id": "27584db0-1813-4b83-84b1-47abd0047813",
+        "response_type": "yes_no",
+        "question": "Mini plan is ready — one new helper, the same choice card as the routing confirm. Approve it so I can spin up the crew?"
+      }
+    }
+  ]
+}
