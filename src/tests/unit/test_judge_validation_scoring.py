@@ -179,6 +179,23 @@ def test_unresolved_pairs_are_bounded_both_ways_and_readers_are_compared_on_ever
     assert bounds[ "unresolved_as_correct" ][ "passes" ] is False
 
 
+def test_the_worst_case_labels_each_unresolved_pair_against_the_judge():
+    sample, verdicts, labels, key = planted( caught=50, missed=0, passed=50, false_alarm=0 )
+    for n in range( 100, 112 ):
+        call = n % 2 == 0
+        sample.append( sample_row( n ) )
+        verdicts.append( { "pair_id": f"p{n}", "material": call, "identity": IDENTITY } )
+        labels.append( { "pair_id": f"p{n}", "material_error": None } )
+        key[ f"p{n}" ] = { "arm": "B1", "model": "haiku" }
+    bounds = report_of( ( sample, verdicts, labels, key ) )[ "unresolved_bounds" ]
+    assert bounds[ "unresolved_as_error" ][ "passes" ] and bounds[ "unresolved_as_correct" ][ "passes" ]
+    assert bounds[ "worst" ][ "passes" ] is False and bounds[ "worst" ][ "sensitivity" ][ "rate" ] == pytest.approx( 50 / 56 )
+    assert bounds[ "best" ][ "passes" ] is True and bounds[ "best" ][ "sensitivity" ][ "rate" ] == 1.0
+    verdicts[ -1 ][ "material" ] = None
+    again = report_of( ( sample, verdicts, labels, key ) )[ "unresolved_bounds" ]
+    assert again[ "worst" ][ "sensitivity" ][ "successes" ] == 50
+
+
 def test_agreement_says_why_kappa_is_undefined():
     assert scoring.agreement( [ True, True ], [ True, True ] ) == { "n": 2, "kappa": None, "positive": 1.0, "negative": None, "reason": "both used one category" }
 

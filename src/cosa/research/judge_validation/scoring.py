@@ -290,7 +290,8 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
 
     Ensures:
         - an unresolved pair is left out of the pass line and counted; unresolved_bounds gives the line again with
-          every unresolved pair counted as an error, then as correct
+          every unresolved pair counted as an error, as correct, as the opposite of the judge's call (worst) and
+          as the judge's call (best). An unreadable reply counts against the judge in the worst case.
         - strata are card type by true class; each gives the judge's agreement with the label and its interval
         - a stratum with fewer than MIN_CARDS distinct cards is named in unscored_strata and not scored
         - card_types says "validated" for a type only when the line passes and both its strata are scored
@@ -326,15 +327,13 @@ def build_report( sample, verdicts, labels, key, recorded, current ):
     for name in sorted( { row[ "pattern" ] for row in rows } ):
         held = [ row for row in rows if row[ "pattern" ] == name ]
         patterns[ name ] = proportion( sum( 1 for row in held if row[ "judge" ] is row[ "human" ] ), len( held ) )
-    sensitivity = proportion( sum( 1 for row in material if row[ "judge" ] is True ), len( material ) )
-    specificity = proportion( sum( 1 for row in fine if row[ "judge" ] is False ), len( fine ) )
-    sensitivity[ "weighted_rate" ] = weighted_rate( material, lambda row: row[ "judge" ] is True )
-    specificity[ "weighted_rate" ] = weighted_rate( fine, lambda row: row[ "judge" ] is False )
 
     answered = [ row for row in scored if row[ "judge" ] is not None ]
     bounds   = {}
-    for name, value in ( ( "unresolved_as_error", True ), ( "unresolved_as_correct", False ) ):
-        filled = pass_line( rows + [ dict( row, human=value ) for row in open_rows ], planned )
+    fills    = ( ( "unresolved_as_error", lambda call: True ), ( "unresolved_as_correct", lambda call: False ),
+                 ( "worst", lambda call: call is not True ), ( "best", lambda call: call is True ) )
+    for name, fill in fills:
+        filled = pass_line( rows + [ dict( row, human=fill( row[ "judge" ] ) ) for row in open_rows ], planned )
         bounds[ name ] = { field: filled[ field ] for field in ( "sensitivity", "specificity", "passes" ) }
 
     settings = { json.dumps( row[ "request_settings" ], sort_keys=True ) for row in verdicts if row.get( "request_settings" ) is not None }
