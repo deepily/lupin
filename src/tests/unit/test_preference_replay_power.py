@@ -44,7 +44,8 @@ def test_power_at_the_edges():
     assert pw.power( 1.0, 1.0, 100 ) == 1.0 and pw.power( 1.0, 1.0, 1 ) == 0.0
 
 
-@pytest.mark.parametrize( "disagreement, cards", [ ( 0.01, 2 ), ( 0.5, 3 ) ] )
+# at ( 0.5, 10 ) the equation has a root, 0.555, above the disagreement rate; at the other two it has none
+@pytest.mark.parametrize( "disagreement, cards", [ ( 0.01, 2 ), ( 0.5, 3 ), ( 0.5, 10 ) ] )
 def test_too_few_cards_give_no_gain_and_say_why( disagreement, cards ):
     got = pw.minimum_detectable_gain( disagreement, cards )
     assert got[ "gain" ] is None and got[ "reason" ] == pw.NO_GAIN_LARGE_ENOUGH
