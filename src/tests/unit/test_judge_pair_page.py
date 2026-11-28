@@ -59,7 +59,7 @@ def test_the_join_keeps_only_the_shown_fields_so_no_arm_or_model_reaches_a_page(
     pairs, readers = loaded( tmp_path )
     html           = pp.render_page( pp.page_items( pairs, sorted( pairs ), [ "p01" ], readers ), "t" )
 
-    assert set( pairs[ "p00" ] ) == { "pair_id", "field_key", "predicted_text", "response_type", "message", "abstract", "options", "answer" }
+    assert set( pairs[ "p00" ] ) == { "pair_id", "field_key", "predicted_text", "response_type", "message", "abstract", "options", "answer", "actual_text" }
     assert "SECRET" not in html
 
 
@@ -131,7 +131,7 @@ def test_the_reader_reads_the_files_the_draw_itself_wrote( tmp_path ):
     plain = shown[ "Made-up yes_no question 2?" ]
     assert ( plain[ "question" ], plain[ "answer" ], plain[ "forecast" ], plain[ "options" ] ) == ( "", "yes [comment: paint it green]", "paint it green", "" )
     view = drive( tmp_path, [ [ "view" ] ], items=[ plain ] )[ "views" ][ 0 ]
-    assert view[ "answer" ] == "yes [comment: paint it green]" and view[ "options" ] == "none" and view[ "forecast" ] == "paint it green"
+    assert view[ "answer" ] == "yes [comment: paint it green]" and view[ "options" ] == "none" and view[ "forecast" ] == "paint it green" and view[ "actual" ] == "paint it green"
 
 
 def test_section_a_holds_no_reader_label_and_section_b_holds_both( tmp_path ):
@@ -207,6 +207,67 @@ def test_a_disputed_pair_of_the_blind_share_shows_no_reader_until_it_is_labelled
     assert "section A first" in half[ "readers" ]
     assert "material error yes" in opened[ "readers" ] and not any( b[ "disabled" ] for b in opened[ "choices" ] )
     assert "B:p01" not in out[ "saved" ][ "answers" ]
+
+
+def label( index, error="yes", kind="none" ):
+    """Return the steps that give one item both choices."""
+    return [ [ "go", index ], [ "choose", "material_error", error ], [ "choose", "kind", kind ] ]
+
+
+def test_a_blind_answer_cannot_change_once_its_readers_have_been_shown( tmp_path ):
+    """A:p01 is answered, B:p01 is viewed, then every way of editing A:p01 is tried."""
+    out = drive( tmp_path, label( 1 ) + [ [ "view" ], [ "go", 2 ], [ "go", 1 ], [ "choose", "material_error", "no" ],
+                                          [ "choose", "kind", "different action" ], [ "note", "after peeking" ], [ "view" ], [ "go", 0 ], [ "view" ] ] )
+    before, after, other = out[ "views" ]
+
+    assert before[ "lockedbox" ] == "none" and not any( b[ "disabled" ] for b in before[ "choices" ] )
+    assert after[ "lockedbox" ] == "block" and after[ "note_disabled" ] is True
+    assert all( b[ "disabled" ] for b in after[ "choices" ] + after[ "kinds" ] )
+    assert [ ( l[ "material_error" ], l[ "kind" ], l[ "note" ], l[ "readers_seen" ] ) for l in out[ "export" ] ] == [ ( "yes", "none", "", True ) ]
+    assert other[ "lockedbox" ] == "none" and out[ "saved" ][ "seen" ] == { "p01": True }
+
+
+def test_the_lock_holds_across_a_reload( tmp_path ):
+    saved = drive( tmp_path, label( 1 ) + [ [ "go", 2 ] ] )[ "saved" ]
+
+    out = drive( tmp_path, [ [ "go", 1 ], [ "choose", "material_error", "no" ], [ "view" ] ], saved=saved )
+
+    assert out[ "views" ][ 0 ][ "lockedbox" ] == "block"
+    assert out[ "export" ][ 0 ][ "material_error" ] == "yes"
+
+
+def test_a_restore_neither_replaces_a_locked_answer_nor_loses_the_lock( tmp_path ):
+    blind  = { "pair_id": "p01", "section": "A", "material_error": "yes", "kind": "none", "note": "", "ts": "2026-11-29T10:00:00Z" }
+    later  = dict( blind, material_error="no", ts="2026-11-29T12:00:00Z" )
+    locked = dict( blind, readers_seen=True )
+    seen_b = dict( blind, section="B", ts="2026-11-29T11:00:00Z" )
+    edit   = [ [ "go", 1 ], [ "choose", "material_error", "cant_tell" ] ]
+    here   = drive( tmp_path, label( 1, "yes" ) + [ [ "go", 2 ], [ "restore", json.dumps( [ dict( later, ts="2099-01-01T00:00:00Z" ) ] ) ] ] )
+    fresh  = drive( tmp_path, [ [ "restore", json.dumps( [ locked ] ) ] ] + edit )
+    by_b   = drive( tmp_path, [ [ "restore", json.dumps( [ blind, seen_b ] ) ] ] + edit )
+    over   = drive( tmp_path, label( 1, "no" ) + [ [ "restore", json.dumps( [ later, locked ] ) ] ] + edit )
+
+    assert [ here[ "export" ][ 0 ][ "material_error" ], fresh[ "export" ][ 0 ][ "material_error" ] ] == [ "yes", "yes" ]
+    assert by_b[ "export" ][ 0 ][ "material_error" ] == "yes" and by_b[ "export" ][ 0 ][ "readers_seen" ] is True
+    assert over[ "export" ][ 0 ][ "material_error" ] == "yes" and over[ "saved" ][ "seen" ] == { "p01": True }
+
+
+@pytest.mark.parametrize( "kind,answer,shared", [
+    ( "yes_no", "no [comment: not today]", "Both answered no." ),
+    ( "yes_no", "hmm", "" ),
+    ( "multiple_choice", '{"answers": {"Where": "Test"}}', pp.SAME_CHOICE ),
+    ( "open_ended", "do it later", "" ),
+] )
+def test_the_page_says_what_the_two_sides_already_agree_on( tmp_path, kind, answer, shared ):
+    pairs, readers = loaded( tmp_path )
+    pairs[ "p00" ].update( response_type=kind, answer=answer, actual_text=None, predicted_text=None )
+
+    items = pp.page_items( pairs, [ "p00" ], [], readers )
+    view  = drive( tmp_path, [ [ "view" ] ], items=items )[ "views" ][ 0 ]
+
+    assert items[ 0 ][ "shared" ] == shared
+    assert view[ "sharedbox" ] == ( "block" if shared else "none" ) and view[ "shared" ] == shared
+    assert view[ "actual" ] == view[ "forecast" ] == "no condition added"
 
 
 def test_a_label_is_saved_and_exported_only_once_it_has_both_choices( tmp_path ):

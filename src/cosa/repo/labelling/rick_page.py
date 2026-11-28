@@ -276,7 +276,7 @@ def render_page( items, title ):
     Raises:
         - LabellingError BAD_ITEM for no items or a blank title
     """
-    return fill_page( TEMPLATE_RELATIVE, items, title, [ i.get( "item_id" ) for i in items ], { "__TYPE_ORDER_JSON__": embed_json( list( CARD_TYPE_LABELS.values() ) ) } )
+    return fill_page( TEMPLATE_RELATIVE, items, title, [ i[ "item_id" ] for i in items ], { "__TYPE_ORDER_JSON__": embed_json( list( CARD_TYPE_LABELS.values() ) ) } )
 
 
 def main( argv=None ):

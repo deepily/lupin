@@ -4,7 +4,8 @@ Rick's offline page for the forecast-pair truth labels of the judge validation.
 Section A is a seeded blind share of the pairs. It shows the card, its options, the full answer
 and the forecast, and no reader's label. Section B holds every pair on which the two readers
 differ about material_error, with both readers' labels beside it. A pair in both sections shows
-its reader labels only after it has been labelled in section A. The page needs no network.
+its reader labels only after it has been labelled in section A. Once they have been shown, the
+section A answer is locked. The page needs no network.
 
 Its inputs are the two files draw.py writes for the readers and each reader's labels file. Run:
 
@@ -24,6 +25,7 @@ from cosa.repo.labelling import errors as er
 from cosa.repo.labelling import rick_page as rp
 from cosa.utils import jsonl_file
 from cosa.utils.file_hash import file_sha256
+from cosa.utils.notification_utils import extract_qualifier_comment
 
 TEMPLATE_RELATIVE = "/src/cosa/research/judge_validation/pair-page-template.html"
 SECTION_BLIND     = "A"
@@ -32,6 +34,7 @@ SHARE             = 0.2
 CHOICES           = ( "yes", "no", "cant_tell" )
 KINDS             = ( "false permission", "missed prerequisite", "unwarranted refusal", "different action", "invented condition", "none" )
 READER_FIELDS     = ( "material_error", "kind", "atom", "note" )
+SAME_CHOICE       = "Both sides chose the same listed option, or both typed their own. Judge what differs in the two texts."
 
 
 def read_pairs( answers_path, forecasts_path ):
@@ -41,6 +44,7 @@ def read_pairs( answers_path, forecasts_path ):
     Requires:
         - answers_path has one JSON line per pair: pair_id, response_type, message, abstract, options, answer
         - forecasts_path has one JSON line per pair: pair_id, field_key, predicted_text
+        - answers_path rows also hold actual_text, what the answer says on the point the forecast is about
 
     Ensures:
         - returns { pair_id: row } where a row holds both files' fields
@@ -61,7 +65,7 @@ def read_pairs( answers_path, forecasts_path ):
     odd = sorted( set( cards ) ^ set( forecasts ) )
     if odd: raise er.LabellingError( er.BAD_ITEM, f"pairs held by only one file: {len( odd )}, for example {odd[ :3 ]}" )
     return { pair_id: { "pair_id": pair_id, "field_key": row[ "field_key" ], "predicted_text": row[ "predicted_text" ],
-                        **{ key: cards[ pair_id ][ key ] for key in ( "response_type", "message", "abstract", "options", "answer" ) } }
+                        **{ key: cards[ pair_id ][ key ] for key in ( "response_type", "message", "abstract", "options", "answer", "actual_text" ) } }
              for pair_id, row in forecasts.items() }
 
 
@@ -173,7 +177,8 @@ def page_items( pairs, blind_ids, dispute_ids, readers ):
         - readers maps each reader's name to its read_reader result
 
     Ensures:
-        - returns one dict per section entry, in id order within a section: key, pair_id, section, card_type, card_text, abstract, options, question, answer, forecast, readers
+        - returns one dict per section entry, in id order within a section: key, pair_id, section, card_type, card_text, abstract, options, question, answer, shared, actual, forecast, readers
+        - shared says what the two sides already agree on, which draw.py guarantees for the pairs it draws: "Both answered <stance>." for yes/no, SAME_CHOICE for multiple choice, "" otherwise
         - key is "<section>:<pair_id>", unique even for a pair that is in both sections
         - a section A entry has an empty readers list, whatever the readers said
         - a section B entry lists each reader's name, material_error, kind, atom and note
@@ -183,9 +188,14 @@ def page_items( pairs, blind_ids, dispute_ids, readers ):
         for pair_id in sorted( ids ):
             pair  = pairs[ pair_id ]
             shown = [] if section == SECTION_BLIND else [ dict( labels[ pair_id ], name=name ) for name, labels in readers.items() ]
+            same  = SAME_CHOICE if pair[ "response_type" ] == "multiple_choice" else ""
+            if pair[ "response_type" ] == "yes_no":
+                stance = extract_qualifier_comment( pair[ "answer" ] or "" )[ 0 ]
+                same   = f"Both answered {stance}." if stance else ""
             out.append( { "key": f"{section}:{pair_id}", "pair_id": pair_id, "section": section, "card_type": pair[ "response_type" ],
                           "card_text": pair[ "message" ], "abstract": pair[ "abstract" ] or "", "options": options_text( pair[ "options" ] ),
-                          "question": pair[ "field_key" ], "answer": answer_text( pair[ "answer" ] ), "forecast": pair[ "predicted_text" ] or "",
+                          "question": pair[ "field_key" ], "answer": answer_text( pair[ "answer" ] ), "shared": same,
+                          "actual": pair[ "actual_text" ] or "", "forecast": pair[ "predicted_text" ] or "",
                           "readers": shown } )
     return out
 

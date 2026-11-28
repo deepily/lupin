@@ -12,7 +12,7 @@ pins:
   - cosa.repo.labelling.rick_page.questions_of@f2a6591791
   - cosa.repo.labelling.rick_page.read_ids@02dffcbf84
   - cosa.repo.labelling.rick_page.embed_json@5c08e858ab
-  - cosa.repo.labelling.rick_page.render_page@d6c9fdc4b2
+  - cosa.repo.labelling.rick_page.render_page@2da4005d98
   - cosa.repo.labelling.rick_page.fill_page@deb42c59fe
   - cosa.repo.labelling.rick_page.main@cf3230c218
   - cosa.repo.labelling.rick_export.read_export@65741323a0

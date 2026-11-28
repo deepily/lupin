@@ -29,7 +29,8 @@ const buttons = id => el( id ).children.map( b => ( { text: b.textContent, chose
 function view() {
   const shown = id => el( id ).textContent;
   views.push( { pos: shown( "pos" ), done: shown( "done" ), section: shown( "section" ), card: shown( "cardtext" ), answer: shown( "answer" ), forecast: shown( "forecast" ),
-                options: el( "optionsbox" ).style.display, readersbox: el( "readersbox" ).style.display, readers: shown( "readers" ),
+                options: el( "optionsbox" ).style.display, shared: shown( "shared" ), sharedbox: el( "sharedbox" ).style.display, actual: shown( "actual" ),
+                lockedbox: el( "lockedbox" ).style.display, readersbox: el( "readersbox" ).style.display, readers: shown( "readers" ),
                 choices: buttons( "choices" ), kinds: buttons( "kinds" ), note: el( "note" ).value, note_disabled: el( "note" ).disabled,
                 restorestatus: shown( "restorestatus" ), exportstatus: shown( "exportstatus" ) } );
 }

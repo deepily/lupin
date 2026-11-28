@@ -160,6 +160,11 @@ def test_the_page_script_keeps_answers_in_local_storage_and_exports_the_five_fie
     assert "localStorage" in html and "item_id: i.item_id, relation: e.relation, note: e.note, seconds: e.seconds, ts: e.ts" in html
 
 
+def test_an_item_with_no_id_fails_loudly_instead_of_naming_a_page():
+    with pytest.raises( KeyError ):
+        rp.render_page( [ { "card_type": "Yes / No / Neither" } ], "t" )
+
+
 def test_a_blank_title_or_no_items_is_refused():
     items = page_of( packet_of( 3, 1 ), [ "card-000:0" ] )
     assert code_of( rp.render_page, items, "  " ) == er.BAD_ITEM
